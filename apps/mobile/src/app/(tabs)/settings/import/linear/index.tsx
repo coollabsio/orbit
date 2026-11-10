@@ -6,7 +6,7 @@ import { ScrollView, View } from 'react-native'
 import { type FlowSource, ImportFlow, NoteLine, ResultStep } from '../../../../../components/import/Flow'
 import { ChoiceRow, ChooserFooter, ChooserToolbar, ConnectError, ConnectSection, ExternalLink, ImportBody, ImportedProjects, ImportScreen, Paragraph, RecentImports, WarningLine, WarningStrip } from '../../../../../components/import/Parts'
 import { Badge } from '../../../../../components/settings/Shell'
-import { createLinear, importErrorMessage, importNotes, isImportInProgress, LINEAR_IMPORT_MAX_ISSUES, linearImportProgress, linearRateLimitNotice, plural } from '../../../../../data/import-api'
+import { createLinear, importErrorMessage, importNotes, isImportInProgress, linearImportProgress, linearRateLimitNotice, plural } from '../../../../../data/import-api'
 import { useConnectImport, useStartImport } from '../../../../../hooks/imports'
 import { useOrbit } from '../../../../../orbit-context'
 import { useProjects } from '../../../../../queries'
@@ -88,7 +88,6 @@ function Chooser({ item, tree }: { item: LinearImport; tree: LinearImportTree })
   const teams = useMemo(() => (needle ? tree.teams.filter((team) => `${team.name} ${team.key}`.toLowerCase().includes(needle)) : tree.teams), [tree.teams, needle])
   const visible = teams.map((team) => team.id)
   const count = selected.size
-  const issues = tree.teams.filter((team) => selected.has(team.id)).reduce((sum, team) => sum + team.issue_count, 0)
   const toggle = (ids: string[], on: boolean) =>
     setSelected((current) => {
       const next = new Set(current)
@@ -130,13 +129,7 @@ function Chooser({ item, tree }: { item: LinearImport; tree: LinearImportTree })
         )}
       </ScrollView>
       <ChooserFooter
-        error={
-          start.isError
-            ? importErrorMessage('linear', start.error)
-            : issues > LINEAR_IMPORT_MAX_ISSUES
-              ? `These teams have ${issues.toLocaleString('en-US')} issues. One import takes at most ${LINEAR_IMPORT_MAX_ISSUES.toLocaleString('en-US')}: import fewer teams at a time.`
-              : null
-        }
+        error={start.isError ? importErrorMessage('linear', start.error) : null}
         label={`Import ${plural(count, 'team', 'teams')}`}
         disabled={count === 0 || start.isPending}
         onImport={() => start.mutate({ importId: item.id, body: { team_ids: [...selected] } })}

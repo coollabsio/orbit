@@ -45,6 +45,11 @@ struct Fake {
     rate_limit_states: AtomicBool,
     /// Answer every `issues` query with a RATELIMITED error that asks for an hour's wait.
     rate_limit_issues: AtomicBool,
+    /// Serve the Engineering issues in two pages, a sub-issue on the first and its parent on
+    /// the second.
+    paged: AtomicBool,
+    /// Answer the second page of issues with a RATELIMITED error that asks for an hour's wait.
+    rate_limit_page_two: AtomicBool,
     hits: Mutex<HashMap<String, usize>>,
     /// Cancelled when `/uploads/diagram` is requested (simulates a shutdown mid-import).
     interrupt: Mutex<Option<CancellationToken>>,
@@ -67,6 +72,10 @@ impl Fake {
 
 fn page(nodes: Vec<Value>) -> Value {
     json!({"nodes": nodes, "pageInfo": {"hasNextPage": false, "endCursor": null}})
+}
+
+fn page_before(nodes: Vec<Value>, next: &str) -> Value {
+    json!({"nodes": nodes, "pageInfo": {"hasNextPage": true, "endCursor": next}})
 }
 
 fn issue(id: &str, identifier: &str, title: &str, state: &str) -> Value {
@@ -248,6 +257,30 @@ async fn handle(
                 .headers_mut()
                 .insert(header::RETRY_AFTER, "3600".parse().unwrap());
             return response;
+        }
+        let after = body["variables"]["after"].as_str();
+        fake.hit(&format!("issues {id} after {}", after.unwrap_or("start")));
+        if id == "t-eng" && fake.paged.load(Ordering::SeqCst) {
+            // i3 (a sub-issue of i1) and i2, i4 first; i1, i5 and the trashed i6 after
+            let mut issues = eng_issues(&fake.base);
+            let second: Vec<Value> = [0, 4, 5].map(|index| issues[index].clone()).to_vec();
+            let first = vec![issues.remove(2), issues.remove(1), issues.remove(1)];
+            let issues = match after {
+                None => page_before(first, "p2"),
+                Some(_) if fake.rate_limit_page_two.load(Ordering::SeqCst) => {
+                    let mut response = graphql_error(
+                        StatusCode::BAD_REQUEST,
+                        "RATELIMITED",
+                        "Rate limit exceeded",
+                    );
+                    response
+                        .headers_mut()
+                        .insert(header::RETRY_AFTER, "3600".parse().unwrap());
+                    return response;
+                }
+                Some(_) => page(second),
+            };
+            return Json(json!({"data": {"team": {"issues": issues}}})).into_response();
         }
         let issues = match id {
             "t-eng" => eng_issues(&fake.base),
@@ -1088,6 +1121,39 @@ async fn a_long_rate_limit_queues_the_next_run_after_it_without_failing() {
         import["progress"]["done"], import["progress"]["total"],
         "{import}"
     );
+}
+
+#[tokio::test]
+async fn reads_issues_page_by_page_and_goes_on_from_the_stored_page_after_a_long_rate_limit() {
+    let h = Harness::new().await;
+    h.fake.paged.store(true, Ordering::SeqCst);
+    h.fake.rate_limit_page_two.store(true, Ordering::SeqCst);
+    let id = h.started(&["t-eng"]).await;
+    h.run(&id, &JobRun::default()).await;
+
+    let import = h.view(&id).await;
+    assert_eq!(import["status"], "importing", "{import}");
+    assert_eq!(import["progress"]["total"], 3, "the first page is stored: {import}");
+    assert_eq!(
+        import["progress"]["done"], 2,
+        "its tasks are imported at once, and ENG-3 waits for its parent: {import}"
+    );
+    assert!(import["waiting_until"].is_string(), "{import}");
+
+    h.fake.rate_limit_page_two.store(false, Ordering::SeqCst);
+    h.run(&id, &JobRun::default()).await;
+    let import = h.view(&id).await;
+    assert_eq!(import["status"], "completed", "{import}");
+    assert_eq!(import["progress"]["total"], 5, "{import}");
+    assert_eq!(import["progress"]["done"], 5, "{import}");
+    assert_eq!(
+        h.fake.hits("issues t-eng after start"),
+        1,
+        "the second run reads on from the stored cursor"
+    );
+    let parent = h.orbit_id(&id, "issue", "i1").await;
+    let sub = h.task(&h.orbit_id(&id, "issue", "i3").await).await;
+    assert_eq!(sub["parent"], parent, "ENG-3 is under ENG-1: {sub}");
 }
 
 #[tokio::test]

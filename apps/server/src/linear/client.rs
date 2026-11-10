@@ -17,7 +17,6 @@
 
 use std::collections::HashSet;
 use std::fmt;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -303,7 +302,6 @@ impl LinearClient {
             json!({}),
             "/teams",
             max,
-            None,
         )
         .await
     }
@@ -318,38 +316,44 @@ impl LinearClient {
             json!({"id": team_id}),
             "/team/states",
             usize::MAX,
-            None,
         )
         .await
     }
 
-    /// Every issue of the team, archived ones too, oldest first, stopping after `max`. Each
-    /// issue's labels, relations, attachments and comments are complete.
-    /// `read` follows the number of issues received so far, page by page.
-    pub async fn team_issues(
+    /// One page of the team's issues, archived ones too, oldest first, after the cursor `after`
+    /// (`None` for the first page). Each issue's labels, relations, attachments and comments
+    /// are complete. Returns the page and the cursor of the next one (`None` after the last).
+    pub async fn issue_page(
         &self,
         team_id: &str,
-        max: usize,
-        read: &AtomicU64,
-    ) -> Result<Vec<LinearIssue>, LinearError> {
-        let mut issues: Vec<LinearIssue> = self
-            .paginate(
+        after: Option<&str>,
+    ) -> Result<(Vec<LinearIssue>, Option<String>), LinearError> {
+        let data: Value = self
+            .query(
                 &format!(
                     "query($id: String!, $after: String) {{ team(id: $id) {{ issues(first: {ISSUE_PAGE}, \
                      after: $after, includeArchived: true, orderBy: createdAt) {{ nodes {{ {} }} \
                      pageInfo {{ hasNextPage endCursor }} }} }} }}",
                     issue_fields()
                 ),
-                json!({"id": team_id}),
-                "/team/issues",
-                max,
-                Some(read),
+                json!({"id": team_id, "after": after}),
             )
             .await?;
+        let connection = data
+            .pointer("/team/issues")
+            .cloned()
+            .ok_or_else(|| LinearError::Decode("missing /team/issues".to_owned()))?;
+        let page: Connection<LinearIssue> = serde_json::from_value(connection)
+            .map_err(|error| LinearError::Decode(error.to_string()))?;
+        let mut issues = page.nodes;
         for issue in &mut issues {
             self.complete(issue).await?;
         }
-        Ok(issues)
+        let next = page
+            .page_info
+            .end_cursor
+            .filter(|cursor| page.page_info.has_next_page && Some(cursor.as_str()) != after);
+        Ok((issues, next))
     }
 
     /// Fetches the rest of each nested connection the issue page cut off.
@@ -397,7 +401,6 @@ impl LinearClient {
                 json!({"id": issue_id, "after": after}),
                 &format!("/issue/{name}"),
                 usize::MAX,
-                None,
             )
             .await?;
         connection.nodes.extend(more);
@@ -508,7 +511,6 @@ impl LinearClient {
         mut variables: Value,
         pointer: &str,
         max: usize,
-        read: Option<&AtomicU64>,
     ) -> Result<Vec<T>, LinearError> {
         let mut nodes = Vec::new();
         let mut seen = HashSet::new();
@@ -521,9 +523,6 @@ impl LinearClient {
             let page: Connection<T> = serde_json::from_value(connection)
                 .map_err(|error| LinearError::Decode(error.to_string()))?;
             nodes.extend(page.nodes);
-            if let Some(read) = read {
-                read.store(nodes.len() as u64, Ordering::Relaxed);
-            }
             if nodes.len() >= max {
                 nodes.truncate(max);
                 break;

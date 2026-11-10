@@ -227,11 +227,10 @@ async fn pages_teams_and_waits_out_a_rate_limit() {
 #[tokio::test]
 async fn completes_nested_connections_of_each_issue() {
     let (port, _, _) = serve().await;
-    let issues = client(port, KEY)
-        .team_issues("a", usize::MAX, &std::sync::atomic::AtomicU64::new(0))
-        .await
-        .unwrap();
-    assert_eq!(issues.len(), 2);
+    let linear = client(port, KEY);
+    let (issues, next) = linear.issue_page("a", None).await.unwrap();
+    assert_eq!(issues.len(), 1);
+    assert_eq!(next.as_deref(), Some("p2"));
     let comments: Vec<_> = issues[0]
         .comments
         .nodes
@@ -242,11 +241,9 @@ async fn completes_nested_connections_of_each_issue() {
     assert!(!issues[0].comments.page_info.has_next_page);
     assert_eq!(issues[0].labels.nodes[0].name.as_deref(), Some("Bug"));
     assert_eq!(issues[0].priority, 2.0);
-    let limited = client(port, KEY)
-        .team_issues("a", 1, &std::sync::atomic::AtomicU64::new(0))
-        .await
-        .unwrap();
-    assert_eq!(limited.len(), 1, "stops at max");
+    let (last, next) = linear.issue_page("a", Some("p2")).await.unwrap();
+    assert_eq!(last[0].id, "i2");
+    assert_eq!(next, None, "the last page has no next cursor");
 }
 
 #[tokio::test]

@@ -11,6 +11,7 @@ const importing = (progress: Partial<LinearImport['progress']>, status: LinearIm
 test('Linear progress names each stage with its own count', () => {
   expect(linearImportProgress(importing({}, 'queued'))).toEqual({ label: 'Waiting for the import to start…', step: null, done: 0, total: 0, detail: '' })
   expect(linearImportProgress(importing({ stage: 'reading', total: 605, read: 1_230 }))).toEqual({ label: 'Reading issues from Linear…', step: 1, done: 1_230, total: 8_005, detail: '1,230 of about 8,005 issues read' })
+  expect(linearImportProgress(importing({ stage: 'reading', total: 605, read: 1_230, done: 300 })).detail).toBe('1,230 of about 8,005 issues read, 300 imported')
   expect(linearImportProgress(importing({ stage: 'creating', created: 2_500 }))).toEqual({ label: 'Creating tasks…', step: 2, done: 2_500, total: 8_000, detail: '2,500 of 8,000 tasks created' })
   expect(linearImportProgress(importing({ stage: 'details', done: 40, failed: 2 }))).toEqual({ label: 'Adding files and comments…', step: 3, done: 42, total: 8_000, detail: '40 of 8,000 issues imported' })
   expect(linearImportProgress(importing({ stage: 'linking' })).step).toBe(4)

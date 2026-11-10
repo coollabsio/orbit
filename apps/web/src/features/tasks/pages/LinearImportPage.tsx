@@ -25,7 +25,6 @@ import { ImportBody, ImportHeader, ImportProgressBar, ImportStat } from '@/featu
 import {
   createLinearImportRequest,
   isLinearImportInProgress,
-  LINEAR_IMPORT_MAX_ISSUES,
   linearImportErrorMessage,
   linearImportProgress,
   linearRateLimitNotice,
@@ -284,12 +283,6 @@ function TeamChooser({ workspaceId, item, tree }: { workspaceId: string; item: L
           notified.
         </p>
         <div className="flex flex-col items-end gap-1.5">
-          {issues > LINEAR_IMPORT_MAX_ISSUES ? (
-            <p role="alert" className="max-w-96 text-right text-xs text-destructive">
-              These teams have {issues.toLocaleString('en-US')} issues. One import takes at most {LINEAR_IMPORT_MAX_ISSUES.toLocaleString('en-US')}:
-              import fewer teams at a time.
-            </p>
-          ) : null}
           {start.isError ? (
             <p role="alert" className="max-w-96 text-right text-xs text-destructive">
               {linearImportErrorMessage(start.error)}

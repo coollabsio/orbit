@@ -566,8 +566,6 @@ export function visibleRows<T extends TreeNode>(tree: SelectionTree<T>, expanded
   return rows
 }
 
-/** The most issues one Linear import takes (`MAX_TASKS` on the server). */
-export const LINEAR_IMPORT_MAX_ISSUES = 10_000
 
 /** What the progress step of a running import shows. */
 export interface ImportProgressView {
@@ -588,7 +586,7 @@ export function linearImportProgress(item: LinearImport): ImportProgressView {
   if (item.status === 'queued') return { label: 'Waiting for the import to start…', step: null, done: 0, total: 0, detail: '' }
   switch (stage) {
     case 'reading':
-      return { label: 'Reading issues from Linear…', step: 1, done: read, total: Math.max(expected, read), detail: `${count(read)} of about ${count(expected)} issues read` }
+      return { label: 'Reading issues from Linear…', step: 1, done: read, total: Math.max(expected, read), detail: `${count(read)} of about ${count(expected)} issues read${done > 0 ? `, ${count(done)} imported` : ''}` }
     case 'creating':
       return { label: 'Creating tasks…', step: 2, done: created, total, detail: `${count(created)} of ${count(total)} tasks created` }
     case 'details':
