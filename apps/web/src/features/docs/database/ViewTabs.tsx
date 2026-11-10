@@ -1,4 +1,4 @@
-import { useRef, useState, type KeyboardEvent } from 'react'
+import { useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { Add, Copy, Edit2, MoreH, Trash } from 'reicon-react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
@@ -24,6 +24,16 @@ export function ViewTabs({ views, activeId, onSelect }: { views: DatabaseView[];
   const [menuFor, setMenuFor] = useState<string | null>(null)
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null)
   const [picking, setPicking] = useState(false)
+  const strip = useRef<HTMLDivElement>(null)
+  // A narrow toolbar (a phone) scrolls the tabs: keep the active one in sight.
+  useLayoutEffect(() => {
+    const tab = strip.current?.querySelector('[role=tab][data-active]')
+    if (!strip.current || !tab) return
+    const box = strip.current.getBoundingClientRect()
+    const rect = tab.getBoundingClientRect()
+    if (rect.left < box.left) strip.current.scrollLeft += rect.left - box.left
+    else if (rect.right > box.right) strip.current.scrollLeft += rect.right - box.right
+  }, [activeId])
 
   const finishRename = () => {
     if (!renaming) return
@@ -50,7 +60,7 @@ export function ViewTabs({ views, activeId, onSelect }: { views: DatabaseView[];
 
   return (
     // The first tab's icon starts at the text edge: the tabs hang their padding and border (11 px) into the margin.
-    <div role="tablist" aria-label="Views" className="-ml-[11px] flex min-w-0 items-center gap-0.5 overflow-x-auto overflow-y-hidden -mb-[5px] pb-[5px]">
+    <div ref={strip} role="tablist" aria-label="Views" className="-ml-[11px] flex min-w-0 items-center gap-0.5 overflow-x-auto overflow-y-hidden -mb-[5px] pb-[5px]">
       {views.map((view) => {
         const selected = view.id === activeId
         const Icon = viewIcon(view.type)
