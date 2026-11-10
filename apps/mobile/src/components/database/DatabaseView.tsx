@@ -11,7 +11,7 @@ import { newRowValues } from '@orbit/database/newRow'
 import { defaultTemplate, templateFill, templatesOf } from '@orbit/database/templates'
 import type { Database, DatabaseView as View_, GroupProperty, LaneProperty, Property, Row, ViewConfig, ViewContext } from '@orbit/database/types'
 import { filledProperties } from '@orbit/database/values'
-import { applyView, groupable, laneable, repairConfig } from '@orbit/database/view'
+import { applyView, groupable, laneable, repairConfig, withGroupBy } from '@orbit/database/view'
 import { withRelatedPages } from '@orbit/database/relations'
 import { router } from 'expo-router'
 import { type ReactElement, useEffect, useState } from 'react'
@@ -179,7 +179,12 @@ export function DatabaseView({ databaseId, linkId = '', initialView = null, head
           ) : (
             <View className="items-center gap-1 py-10 px-6">
               <Text className="text-[14px] text-muted-foreground">Choose a property to group by</Text>
-              <Text className="text-[12px] text-muted-foreground text-center">A board groups its cards by a Status, Select, Multi-select or Person property. Edit on the web.</Text>
+              <Text className="text-[12px] text-muted-foreground text-center">A board groups its cards by a Status, Select, Multi-select or Person property.</Text>
+              <View className="mt-2 flex-row flex-wrap justify-center gap-1.5">
+                {database.properties.filter(groupable).map((choice) => (
+                  <Button key={choice.id} label={choice.name} icon={PROPERTY_ICONS[choice.type]} variant="outline" size="sm" onPress={() => onConfig(withGroupBy(config, choice.id))} />
+                ))}
+              </View>
             </View>
           )}
           {rows.length === 0 && filtered ? empty : null}

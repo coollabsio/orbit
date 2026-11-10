@@ -21,7 +21,7 @@ import { Popover, PopoverContent } from '@/components/ui/popover'
 import { Tip } from '@/components/common/Tip'
 import type { DatabaseView, Property, ViewConfig } from '@orbit/database/types'
 import { filterable, sortable } from '@orbit/database/meta'
-import { groupable, laneable, showsCards } from '@orbit/database/view'
+import { groupable, laneable, showsCards, withGroupBy } from '@orbit/database/view'
 import { datable, weekdayName, type Weekday } from '@orbit/database/calendar'
 import { addDays } from '@orbit/database/dates'
 import type { Template } from '@orbit/database/templates'
@@ -307,7 +307,7 @@ function GroupMenus({ properties, config, onConfig }: { properties: Property[]; 
         icon={<Kanban />}
         choices={properties.filter(groupable)}
         value={config.group_by}
-        onChange={(id) => onConfig({ ...config, group_by: id, group_order: [], hidden_groups: [], ...(id === config.sub_group_by ? NO_LANES : {}) })}
+        onChange={(id) => onConfig(withGroupBy(config, id))}
       />
       <GroupMenu
         label="Sub-group"

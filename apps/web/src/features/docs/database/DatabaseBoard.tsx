@@ -10,10 +10,11 @@ import { indexAt } from '@/features/views/useGroupDrop'
 import { cardAfter, groupName, groupRows, groupValues, laneRows, moveValues, type BoardGroup } from '@orbit/database/board'
 import type { Database, LaneProperty, Property, Row, ViewConfig } from '@orbit/database/types'
 import { filledProperties } from '@orbit/database/values'
-import { groupable, laneable } from '@orbit/database/view'
+import { groupable, laneable, withGroupBy } from '@orbit/database/view'
 import { useCreateProperty, useMoveRow, useUpdateRowTitle, useUpdateValues } from './api'
 import { CellView, OptionPill } from './cells/CellView'
 import { useDatabaseEnv } from './context'
+import { PROPERTY_TYPES } from './propertyMeta'
 
 const COLUMN_WIDTH = 260
 /** Cards each column renders before "Show more"; a column can hold all 5,000 rows. */
@@ -75,16 +76,28 @@ export function DatabaseBoard(props: DatabaseBoardProps) {
 
   const property = database.properties.find((candidate) => candidate.id === config.group_by)
   if (!groupable(property)) {
+    const choices = database.properties.filter(groupable)
     return (
-      <div className="flex h-40 flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
+      <div className="flex min-h-40 flex-col items-center justify-center gap-2 py-6 text-sm text-muted-foreground">
         Choose a property to group by
         <span className="text-xs">A board groups its cards by a Status, Select, Multi-select or Person property.</span>
-        {canEditSchema ? (
-          <Button type="button" variant="outline" size="sm" disabled={createProperty.isPending} onClick={() => createProperty.mutate({ name: 'Status', type: 'status' })}>
-            <Add />
-            Add a Status property
-          </Button>
-        ) : null}
+        <div className="flex max-w-xl flex-wrap justify-center gap-1.5">
+          {choices.map((choice) => {
+            const Icon = PROPERTY_TYPES[choice.type].icon
+            return (
+              <Button key={choice.id} type="button" variant="outline" size="sm" onClick={() => onConfig(withGroupBy(config, choice.id))}>
+                <Icon />
+                <span className="max-w-40 truncate">{choice.name}</span>
+              </Button>
+            )
+          })}
+          {canEditSchema ? (
+            <Button type="button" variant="outline" size="sm" disabled={createProperty.isPending} onClick={() => createProperty.mutate({ name: 'Status', type: 'status' })}>
+              <Add />
+              Add a Status property
+            </Button>
+          ) : null}
+        </div>
       </div>
     )
   }

@@ -99,6 +99,12 @@ export function groupable(property: Property | undefined): property is GroupProp
   return property?.type === 'select' || property?.type === 'status' || property?.type === 'multi_select' || property?.type === 'person'
 }
 
+/** A board's config grouped by `propertyId`: the column order and hidden columns reset, and lanes by the same property go. */
+export function withGroupBy(config: ViewConfig, propertyId: string | null): ViewConfig {
+  const lanes = propertyId === config.sub_group_by ? { sub_group_by: null, sub_group_order: [], hidden_sub_groups: [] } : {}
+  return { ...config, group_by: propertyId, group_order: [], hidden_groups: [], ...lanes }
+}
+
 /** A board's lanes can group by a column property or a `checkbox`. */
 export function laneable(property: Property | undefined): property is LaneProperty {
   return groupable(property) || property?.type === 'checkbox'

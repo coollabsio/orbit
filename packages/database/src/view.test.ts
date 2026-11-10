@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { ctx, database } from './testing'
 import type { DatabaseView, DatabaseViewConfig } from './types'
-import { applyView, repairConfig } from './view'
+import { applyView, repairConfig, withGroupBy } from './view'
 
 function view(config: DatabaseViewConfig): DatabaseView {
   return { id: 'v', name: 'Table', type: 'table', config, position: 0 }
@@ -161,4 +161,11 @@ describe('applyView', () => {
       ),
     ).toEqual(['r1', 'r4', 'r2'])
   })
+})
+
+test('withGroupBy resets the columns and drops lanes by the new group property', () => {
+  const board = repairConfig({ id: 'v', name: 'Board', type: 'board', position: 0, config: {} } as unknown as DatabaseView, [])
+  const config = { ...board, group_by: 'a', group_order: ['x'], hidden_groups: ['y'], sub_group_by: 'b', sub_group_order: ['z'], hidden_sub_groups: ['w'] }
+  expect(withGroupBy(config, 'c')).toEqual({ ...config, group_by: 'c', group_order: [], hidden_groups: [] })
+  expect(withGroupBy(config, 'b')).toEqual({ ...config, group_by: 'b', group_order: [], hidden_groups: [], sub_group_by: null, sub_group_order: [], hidden_sub_groups: [] })
 })
