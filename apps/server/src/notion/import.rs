@@ -1236,6 +1236,35 @@ impl NotionImportService {
             }
         }
 
+        // Relations whose target came with the import stay relations (spec P3 11.9).
+        let mut created: HashMap<String, Id> = items
+            .iter()
+            .filter(|item| matches!(item.status.as_str(), "created" | "done"))
+            .filter_map(|item| Some((normalize_id(&item.notion_id)?, item.page_id?)))
+            .collect();
+        for (database_id, item_id) in &databases.aliases {
+            if let Some(page) = normalize_id(item_id).and_then(|id| created.get(&id).copied()) {
+                created.entry(database_id.clone()).or_insert(page);
+            }
+        }
+        if let Err(error) = databases
+            .relations
+            .apply(
+                &self.inner.databases,
+                workspace_id,
+                user_id,
+                &created,
+                &titles,
+                &format!("notion-import-{import_id}"),
+            )
+            .await
+        {
+            match row_failure(error) {
+                Failure::Page(_) => {}
+                other => return Err(other),
+            }
+        }
+
         // Pass 2: fill each page.
         let mut resolver = MapResolver {
             members,
@@ -1377,6 +1406,7 @@ impl NotionImportService {
                             Failure::Page(format!("The database could not be converted: {error}."))
                         })?;
                     let title = fetched.title.clone();
+                    databases.relations.add_schema(page_id, &fetched.source);
                     databases.add(&item.notion_id, fetched);
                     self.create_page(
                         context,
@@ -1540,6 +1570,7 @@ impl NotionImportService {
             .get(&database)
             .map_or(&[][..], Vec::as_slice);
         let plan = database::plan_row(database, &row, properties, context.members, context.titles);
+        databases.relations.add_row(database, page_id, &row);
         let input = NewRow {
             title: clamp(&plan.title, MAX_TITLE_CHARS, MAX_TITLE_BYTES),
             icon: plan
@@ -2214,6 +2245,8 @@ struct DatabaseCache {
     aliases: HashMap<String, String>,
     /// Notion's `is_inline` by Notion database id.
     inline: HashMap<String, bool>,
+    /// Relations and rollups to make live after pass 1.
+    relations: super::relations::RelationPlan,
 }
 
 impl DatabaseCache {

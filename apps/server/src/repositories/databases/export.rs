@@ -6,11 +6,13 @@ use std::collections::{HashMap, HashSet};
 use orbit_platform::{Id, TimestampMillis};
 use serde_json::Value;
 
+use super::computed::{self, ComputeScope, Computed};
 use super::{
     CellValue, DatabaseError, DatabaseRepository, DatabaseView, Property, PropertyKind,
     StatusGroup, ViewType, Views, display_text, parse_value, properties_in_tx, rows_in_tx,
     views_in_tx,
 };
+use super::{relations, rollups};
 
 /// A database to export.
 #[derive(Clone, Debug)]
@@ -33,6 +35,8 @@ pub struct ExportRow {
     pub updated_at: TimestampMillis,
     pub updated_by: Id,
     pub values: HashMap<Id, CellValue>,
+    /// Display text of computed cells (relations: titles the actor can read; rollups).
+    pub computed: HashMap<Id, String>,
 }
 
 impl ExportDatabase {
@@ -99,6 +103,9 @@ pub fn cell_text(property: &Property, row: &ExportRow, members: &HashMap<Id, Str
     };
     match &property.kind {
         PropertyKind::Title => return row.title.clone(),
+        PropertyKind::Relation(_) | PropertyKind::Rollup(_) => {
+            return row.computed.get(&property.id).cloned().unwrap_or_default();
+        }
         PropertyKind::CreatedTime => return row.created_at.to_string(),
         PropertyKind::LastEditedTime => return row.updated_at.to_string(),
         PropertyKind::CreatedBy => return names(&[row.created_by]),
@@ -137,6 +144,7 @@ impl DatabaseRepository {
     pub async fn export_data(
         &self,
         wanted: &HashMap<Id, HashSet<Id>>,
+        scope: &ComputeScope,
     ) -> Result<HashMap<Id, ExportDatabase>, DatabaseError> {
         let mut tx = self.database.transaction().await?;
         let mut databases = HashMap::with_capacity(wanted.len());
@@ -162,11 +170,14 @@ impl DatabaseRepository {
                     link_views.insert(*link, view);
                 }
             }
-            let rows = rows_in_tx(&mut tx, *database_id, None)
-                .await?
+            let mut rows = rows_in_tx(&mut tx, *database_id, None).await?;
+            let computed =
+                computed::fill(&mut tx, scope, *database_id, &properties, &mut rows).await?;
+            let rows = rows
                 .into_iter()
                 .map(|row| ExportRow {
                     values: stored(&properties, &row.values),
+                    computed: computed_text(&properties, &row.values, &computed),
                     id: row.id,
                     title: row.title,
                     created_at: row.created_at,
@@ -188,6 +199,26 @@ impl DatabaseRepository {
         tx.rollback().await?;
         Ok(databases)
     }
+}
+
+/// The export text of the relation and rollup cells of a row.
+fn computed_text(
+    properties: &[Property],
+    values: &std::collections::BTreeMap<String, Value>,
+    computed: &Computed,
+) -> HashMap<Id, String> {
+    properties
+        .iter()
+        .filter_map(|property| {
+            let value = values.get(&property.id.to_string());
+            let text = match &property.kind {
+                PropertyKind::Relation(_) => relations::titles(value, &computed.related_pages),
+                PropertyKind::Rollup(config) => rollups::text(config, value?),
+                _ => return None,
+            };
+            Some((property.id, text))
+        })
+        .collect()
 }
 
 /// Stored values parsed under their properties; values that no longer fit are left out.

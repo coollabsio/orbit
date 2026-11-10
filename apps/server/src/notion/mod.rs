@@ -14,6 +14,7 @@ pub mod database;
 pub mod files;
 pub mod import;
 pub mod model;
+pub mod relations;
 pub mod scan;
 
 pub use client::{DownloadedFile, NotionClient, NotionClientConfig, NotionError};

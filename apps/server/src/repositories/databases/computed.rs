@@ -33,12 +33,12 @@ use serde::Serialize;
 use sqlx::{Any, Transaction};
 use utoipa::ToSchema;
 
-use super::{DatabaseError, DatabaseRow, Property, PropertyKind};
+use super::{DatabaseError, DatabaseRow, Property, PropertyKind, relations};
 
-/// How deep a read follows computed values into other databases: the read's own database (0)
-/// and the target rows of its rollups (1). A rollup at depth 1 reads stored and relation values
-/// of its targets only, which is the "one level deep" rule of rollups (spec 11.5).
-const MAX_DEPTH: u8 = 2;
+/// How deep a read follows rollups into other databases: rollups of the read's own rows (depth
+/// 0) and of their target rows (1) are computed; at depth 2 only relations and formulas are.
+/// Saving a rollup refuses a deeper chain (the "one level deep" rule of spec 11.5).
+const MAX_ROLLUP_DEPTH: u8 = 2;
 
 const MAX_TZ_CHARS: usize = 64;
 
@@ -108,9 +108,7 @@ impl Computed {
 /// Kinds that have no stored value: computed on read, or (relation) stored in their own table.
 #[must_use]
 pub fn is_computed(kind: &PropertyKind) -> bool {
-    // Item 9 adds `Relation` and `Rollup`, item 13 `Formula`.
-    let _ = kind;
-    false
+    matches!(kind, PropertyKind::Relation(_) | PropertyKind::Rollup(_))
 }
 
 /// Puts the computed values of `rows` (rows of `database_id`) into their `values`.
@@ -122,6 +120,20 @@ pub(super) async fn fill(
     rows: &mut [DatabaseRow],
 ) -> Result<Computed, DatabaseError> {
     fill_at(tx, scope, database_id, properties, rows, 0).await
+}
+
+/// [`fill`] for rows of another database that a computed value of the read reads (the targets of
+/// a rollup), one level deeper. Its related pages are not part of the response; rollups read
+/// their titles.
+pub(super) async fn fill_nested(
+    tx: &mut Transaction<'_, Any>,
+    scope: &ComputeScope,
+    database_id: Id,
+    properties: &[Property],
+    rows: &mut [DatabaseRow],
+    depth: u8,
+) -> Result<Computed, DatabaseError> {
+    Box::pin(fill_at(tx, scope, database_id, properties, rows, depth + 1)).await
 }
 
 async fn fill_at(
@@ -140,10 +152,11 @@ async fn fill_at(
     {
         return Ok(computed);
     }
-    // 1. Relations (item 9): `relations::fill(tx, scope, database_id, properties, rows)`.
-    // 2. Rollups (item 9), only while `depth + 1 < MAX_DEPTH`.
+    let _ = database_id;
+    computed.merge(relations::fill(tx, scope, properties, rows).await?);
+    if depth < MAX_ROLLUP_DEPTH {
+        relations::fill_rollups(tx, scope, properties, rows, depth).await?;
+    }
     // 3. Formulas (item 13) go here: a pure pass over each row's `values`.
-    let _ = (tx, scope, database_id, depth, MAX_DEPTH);
-    computed.merge(Computed::default());
     Ok(computed)
 }

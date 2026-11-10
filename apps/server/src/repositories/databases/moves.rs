@@ -87,6 +87,8 @@ async fn move_values(
         .bind(page_id.to_string())
         .execute(&mut **tx)
         .await?;
+    // Links belong to the database's relation properties (spec 11.3): they go on both sides.
+    super::relations::drop_row_links(tx, page_id).await?;
     let row = page_id.to_string();
     for (property_id, value) in &kept {
         upsert_value(tx, workspace_id, &row, *property_id, value, actor_id, now).await?;

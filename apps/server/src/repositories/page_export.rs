@@ -10,7 +10,7 @@ use serde_json::Value;
 use thiserror::Error;
 
 use super::databases::NOT_TEMPLATE;
-use super::databases::{DatabaseError, DatabaseRepository, ExportDatabase};
+use super::databases::{ComputeScope, DatabaseError, DatabaseRepository, ExportDatabase};
 use super::pages::{json_text_array, parse_id, visible};
 use super::tasks::{TaskError, require_access};
 use crate::collab::CollabHub;
@@ -234,7 +234,8 @@ impl PageExportRepository {
 
         let files = self.load_files(workspace_id, &pages).await?;
         let members = self.load_members(workspace_id).await?;
-        let databases = self.load_databases(&pages, &titles).await?;
+        let scope = ComputeScope::utc(workspace_id, actor_id);
+        let databases = self.load_databases(&pages, &titles, &scope).await?;
         Ok(ExportSource {
             pages,
             titles,
@@ -368,7 +369,8 @@ impl PageExportRepository {
             .collect();
         let files = self.load_files(workspace_id, &pages).await?;
         let members = self.load_members(workspace_id).await?;
-        let databases = self.load_databases(&pages, &titles).await?;
+        let scope = ComputeScope::utc(workspace_id, actor_id);
+        let databases = self.load_databases(&pages, &titles, &scope).await?;
         Ok(ExportSource {
             pages,
             titles,
@@ -423,6 +425,7 @@ impl PageExportRepository {
         &self,
         pages: &[ExportPage],
         titles: &HashMap<Id, String>,
+        scope: &ComputeScope,
     ) -> Result<HashMap<Id, ExportDatabase>, PageExportError> {
         let mut wanted: HashMap<Id, HashSet<Id>> = HashMap::new();
         let exported: Vec<String> = pages.iter().map(|page| page.id.to_string()).collect();
@@ -451,7 +454,7 @@ impl PageExportRepository {
             return Ok(HashMap::new());
         }
         DatabaseRepository::new(self.database.clone())
-            .export_data(&wanted)
+            .export_data(&wanted, scope)
             .await
             .map_err(|error| match error {
                 DatabaseError::Unavailable(error) => PageExportError::Unavailable(error),

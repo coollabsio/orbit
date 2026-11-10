@@ -371,6 +371,8 @@ fn convert_cell(
             }
             (!ids.is_empty()).then_some(CellValue::People(ids))
         }
+        // A CSV cell holds titles, not page ids: relations import from Notion only.
+        PropertyKind::Relation(_) | PropertyKind::Rollup(_) => None,
         PropertyKind::Title
         | PropertyKind::CreatedTime
         | PropertyKind::CreatedBy

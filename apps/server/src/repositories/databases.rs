@@ -37,6 +37,9 @@ mod gallery;
 mod import;
 mod links;
 mod moves;
+mod relation_import;
+mod relations;
+mod rollups;
 mod query;
 mod search;
 mod templates;
@@ -58,6 +61,9 @@ pub use import::{
 pub use links::{DatabaseLink, LinkedViews, MAX_LINK_VIEWS};
 pub(super) use links::{LinkCopy, block_links, copy_links, linked_databases};
 pub(super) use moves::carry_row_values;
+pub use relation_import::{ImportedRelation, ImportedRollup, ImportedSide};
+pub use relations::{MAX_LINKS, RelationConfig, RelationLimit};
+pub use rollups::{RollupConfig, RollupFunction};
 pub use search::row_search_lines;
 use search::{SearchRows, refresh_search_text};
 use templates::Children;
@@ -112,6 +118,8 @@ pub enum PropertyType {
     Phone,
     Files,
     UniqueId,
+    Relation,
+    Rollup,
     CreatedTime,
     CreatedBy,
     LastEditedTime,
@@ -136,6 +144,8 @@ impl PropertyType {
             Self::Phone => "phone",
             Self::Files => "files",
             Self::UniqueId => "unique_id",
+            Self::Relation => "relation",
+            Self::Rollup => "rollup",
             Self::CreatedTime => "created_time",
             Self::CreatedBy => "created_by",
             Self::LastEditedTime => "last_edited_time",
@@ -154,6 +164,7 @@ impl PropertyType {
         matches!(
             self,
             Self::Title
+                | Self::Rollup
                 | Self::CreatedTime
                 | Self::CreatedBy
                 | Self::LastEditedTime
@@ -269,6 +280,10 @@ pub enum PropertyKind {
     Phone,
     Files,
     UniqueId(UniqueIdConfig),
+    /// Links to rows of a database (spec P3 item 9), stored in `page_relations`.
+    Relation(RelationConfig),
+    /// Computed on read from the pages of a relation (spec P3 11.5).
+    Rollup(RollupConfig),
     CreatedTime,
     CreatedBy,
     LastEditedTime,
@@ -317,6 +332,8 @@ impl PropertyKind {
             Self::Phone => PropertyType::Phone,
             Self::Files => PropertyType::Files,
             Self::UniqueId(_) => PropertyType::UniqueId,
+            Self::Relation(_) => PropertyType::Relation,
+            Self::Rollup(_) => PropertyType::Rollup,
             Self::CreatedTime => PropertyType::CreatedTime,
             Self::CreatedBy => PropertyType::CreatedBy,
             Self::LastEditedTime => PropertyType::LastEditedTime,
@@ -343,6 +360,9 @@ impl PropertyKind {
             PropertyType::Phone => Self::Phone,
             PropertyType::Files => Self::Files,
             PropertyType::UniqueId => Self::UniqueId(UniqueIdConfig::default()),
+            // Never reached: both need a config (`parse` refuses none, and a type change to
+            // them is refused), so this only keeps the match whole.
+            PropertyType::Relation | PropertyType::Rollup => Self::Text,
             PropertyType::CreatedTime => Self::CreatedTime,
             PropertyType::CreatedBy => Self::CreatedBy,
             PropertyType::LastEditedTime => Self::LastEditedTime,
@@ -353,6 +373,9 @@ impl PropertyKind {
 
     /// Parses `config` for `property_type`; `None` gives the default. Errors name the field path.
     pub fn parse(property_type: PropertyType, config: Option<&Value>) -> Result<Self, String> {
+        if let Some(kind) = relation_kind(property_type, config) {
+            return kind;
+        }
         let Some(config) = config else {
             return Ok(Self::default_for(property_type));
         };
@@ -406,6 +429,8 @@ impl PropertyKind {
             Self::Date(config) => json!(config),
             Self::Select(list) | Self::MultiSelect(list) => options(list),
             Self::Status(list) => json!({ "options": list }),
+            Self::Relation(config) => json!(config),
+            Self::Rollup(config) => json!(config),
             Self::Button(config) => json!(config),
             Self::UniqueId(config) => json!(config),
             _ => json!({}),
@@ -458,6 +483,23 @@ impl PropertyKind {
         };
         (kind, ids)
     }
+}
+
+/// The kind of a relation or rollup from its config (both need one); `None` for other types.
+fn relation_kind(
+    property_type: PropertyType,
+    config: Option<&Value>,
+) -> Option<Result<PropertyKind, String>> {
+    fn from<T: serde::de::DeserializeOwned>(config: Option<&Value>) -> Result<T, String> {
+        config
+            .and_then(|config| serde_json::from_value(config.clone()).ok())
+            .ok_or_else(|| "config".to_owned())
+    }
+    Some(match property_type {
+        PropertyType::Relation => from(config).map(PropertyKind::Relation),
+        PropertyType::Rollup => from(config).map(PropertyKind::Rollup),
+        _ => return None,
+    })
 }
 
 /// "<name> (copy)", within the name limit.
@@ -654,6 +696,8 @@ struct DateInput {
 /// A stored (non-empty) value. Which variant a property holds follows from its kind.
 #[derive(Clone, Debug, PartialEq)]
 pub enum CellValue {
+    /// Related page ids of a relation cell (stored in `page_relations`, never as a value).
+    Pages(Vec<Id>),
     Text(String),
     Number(f64),
     /// A `select` or `status` option id.
@@ -676,6 +720,7 @@ impl CellValue {
     #[must_use]
     pub fn to_json(&self) -> Value {
         match self {
+            Self::Pages(ids) => json!(ids),
             Self::Text(text) | Self::Choice(text) | Self::Url(text) => json!(text),
             Self::Number(number) => json!(number),
             Self::Choices(ids) => json!(ids),
@@ -781,6 +826,8 @@ fn parse_value(kind: &PropertyKind, raw: &Value) -> Result<Option<CellValue>, ()
         PropertyKind::UniqueId(_) => Some(CellValue::UniqueId(
             raw.as_i64().filter(|number| *number > 0).ok_or(())?,
         )),
+        PropertyKind::Relation(config) => relations::parse_ids(config, raw)?.map(CellValue::Pages),
+        PropertyKind::Rollup(_) => return Err(()),
         PropertyKind::Title
         | PropertyKind::CreatedTime
         | PropertyKind::CreatedBy
@@ -826,6 +873,8 @@ fn display_text(kind: &PropertyKind, value: &CellValue) -> String {
             .collect::<Vec<_>>()
             .join(", "),
         CellValue::Checked => "true".to_owned(),
+        // Titles need the reader's access: exports use `relations::titles`.
+        CellValue::Pages(_) => String::new(),
         CellValue::Files(files) => files
             .iter()
             .map(|file| file.name.as_str())
@@ -1153,6 +1202,19 @@ fn rule_value(property_type: PropertyType, operator: FilterOperator) -> Option<R
             _ if empty => RuleValue::Nothing,
             _ => return None,
         },
+        Type::Relation => match operator {
+            Op::Contains | Op::NotContains => RuleValue::Text,
+            _ if empty => RuleValue::Nothing,
+            _ => return None,
+        },
+        // By its result: a number, a date or a list of texts.
+        Type::Rollup => match operator {
+            Op::Contains | Op::NotContains => RuleValue::Text,
+            Op::Eq | Op::Ne | Op::Gt | Op::Lt | Op::Ge | Op::Le => RuleValue::Number,
+            Op::Is | Op::Before | Op::After | Op::OnOrBefore | Op::OnOrAfter => RuleValue::Date,
+            _ if empty => RuleValue::Nothing,
+            _ => return None,
+        },
         Type::Checkbox => match operator {
             Op::Is => RuleValue::Bool,
             _ => return None,
@@ -1244,11 +1306,11 @@ impl Calculation {
             | C::PercentEmpty
             | C::PercentNotEmpty => !matches!(property_type, Type::Checkbox),
             C::Sum | C::Average | C::Median | C::Min | C::Max | C::Range => {
-                matches!(property_type, Type::Number)
+                matches!(property_type, Type::Number | Type::Rollup)
             }
             C::EarliestDate | C::LatestDate | C::DateRange => matches!(
                 property_type,
-                Type::Date | Type::CreatedTime | Type::LastEditedTime
+                Type::Date | Type::CreatedTime | Type::LastEditedTime | Type::Rollup
             ),
             C::Checked | C::Unchecked | C::PercentChecked | C::PercentUnchecked => {
                 matches!(property_type, Type::Checkbox)
@@ -2084,6 +2146,9 @@ impl DatabaseRepository {
                     kind,
                     position: 0,
                 };
+                let mut property = property;
+                let scope = ComputeScope::utc(workspace_id, actor_id);
+                relations::check(&mut tx, &scope, database_id, &properties, &mut property).await?;
                 (property, insert_index(position, properties.len()), None)
             }
             NewProperty::Duplicate { source, name } => {
@@ -2096,6 +2161,8 @@ impl DatabaseRepository {
                     return Err(DatabaseError::invalid("duplicate_of"));
                 }
                 let (kind, option_ids) = original.kind.with_new_option_ids();
+                // A copied relation is one-way and starts without links.
+                let kind = relations::copied_kind(&kind, &HashMap::new());
                 let property = Property {
                     id: Id::new_v7(),
                     name: name.unwrap_or_else(|| copy_name(&original.name)),
@@ -2152,6 +2219,18 @@ impl DatabaseRepository {
             SearchRows::All,
         )
         .await?;
+        let scope = ComputeScope::utc(workspace_id, actor_id);
+        properties[index].kind = relations::sync_pair(
+            &mut tx,
+            &scope,
+            database_id,
+            &page.title,
+            &properties[index],
+            None,
+            request_id,
+            now,
+        )
+        .await?;
         record(
             &mut tx,
             workspace_id,
@@ -2197,6 +2276,10 @@ impl DatabaseRepository {
             (Some(_), _) if current.kind == PropertyKind::Title => {
                 return Err(DatabaseError::TitleProperty);
             }
+            // Both need a config: create such a property instead.
+            (Some(PropertyType::Relation | PropertyType::Rollup), _) => {
+                return Err(DatabaseError::invalid("type"));
+            }
             (Some(PropertyType::Title), _) => return Err(DatabaseError::invalid("type")),
             (Some(PropertyType::UniqueId), _)
                 if properties
@@ -2208,6 +2291,7 @@ impl DatabaseRepository {
             // A type change derives the new config; set it in a second request.
             (Some(_), Some(_)) => return Err(DatabaseError::invalid("config")),
             (Some(new_type), None) => {
+                relations::detach(&mut tx, &current, false).await?;
                 let values = stored_values(&mut tx, &current).await?;
                 let conversion = convert(&current.kind, new_type, values);
                 for (row, value) in &conversion.values {
@@ -2228,6 +2312,13 @@ impl DatabaseRepository {
                 let kind = PropertyKind::parse(current.kind.property_type(), Some(config))
                     .map_err(DatabaseError::invalid)?;
                 let kind = unique_id::keep_next(&current.kind, kind);
+                let mut changed = Property {
+                    kind,
+                    ..current.clone()
+                };
+                let scope = ComputeScope::utc(workspace_id, actor_id);
+                relations::check(&mut tx, &scope, database_id, &properties, &mut changed).await?;
+                let kind = changed.kind;
                 cleared = remove_missing_options(&mut tx, &current, &kind).await?;
                 kind
             }
@@ -2248,6 +2339,23 @@ impl DatabaseRepository {
         .bind(property_id.to_string())
         .execute(&mut *tx)
         .await?;
+        let property = match (&current.kind, type_change) {
+            (PropertyKind::Relation(previous), None) if changes.config.is_some() => Property {
+                kind: relations::sync_pair(
+                    &mut tx,
+                    &ComputeScope::utc(workspace_id, actor_id),
+                    database_id,
+                    &page.title,
+                    &property,
+                    Some(previous),
+                    request_id,
+                    now,
+                )
+                .await?,
+                ..property
+            },
+            _ => property,
+        };
         properties.remove(index);
         let index = insert_index(changes.position.or(Some(index as i64)), properties.len());
         properties.insert(index, property.clone());
@@ -2314,6 +2422,7 @@ impl DatabaseRepository {
         if properties[index].kind == PropertyKind::Title {
             return Err(DatabaseError::TitleProperty);
         }
+        relations::detach(&mut tx, &properties[index], true).await?;
         // Its values go by cascade.
         sqlx::query("DELETE FROM database_properties WHERE id = $1")
             .bind(property_id.to_string())
@@ -2696,6 +2805,11 @@ impl DatabaseRepository {
         files::check_page_files(tx, workspace_id, row_id, &mut values).await?;
         let row = row_id.to_string();
         for (property_id, value) in &values {
+            if let Some(CellValue::Pages(ids)) = value {
+                relations::write_cell(tx, workspace_id, actor_id, row_id, *property_id, ids, now)
+                    .await?;
+                continue;
+            }
             if let Some(value) = value {
                 upsert_value(
                     tx,
@@ -2763,6 +2877,15 @@ impl DatabaseRepository {
         files::check_page_files(&mut tx, workspace_id, row_id, &mut values).await?;
         write_values(&mut tx, workspace_id, row_id, &values, actor_id, now).await?;
         templates::write_placeholders(&mut tx, row_id, placeholders, now).await?;
+        relations::notify_dependents(
+            &mut tx,
+            workspace_id,
+            actor_id,
+            database_id,
+            request_id,
+            now,
+        )
+        .await?;
         refresh_search_text(
             &mut tx,
             workspace_id,
@@ -3043,6 +3166,11 @@ async fn parse_values(
             return Err(path());
         }
         let value = parse_value(&property.kind, raw).map_err(|()| path())?;
+        // An empty relation cell still replaces its visible links.
+        let value = match (&property.kind, value) {
+            (PropertyKind::Relation(_), None) => Some(CellValue::Pages(Vec::new())),
+            (_, value) => value,
+        };
         if let Some(CellValue::People(people)) = &value {
             if members.is_none() {
                 members = Some(
@@ -3078,6 +3206,10 @@ async fn write_values(
     let row = row_id.to_string();
     for (property_id, value) in values {
         match value {
+            Some(CellValue::Pages(ids)) => {
+                relations::write_cell(tx, workspace_id, actor_id, row_id, *property_id, ids, now)
+                    .await?;
+            }
             Some(value) => {
                 upsert_value(tx, workspace_id, &row, *property_id, value, actor_id, now).await?;
             }
@@ -3765,19 +3897,29 @@ pub(super) async fn write_database_data(
     actor_id: Id,
     now: TimestampMillis,
 ) -> Result<HashMap<Id, Id>, PageError> {
-    let mut property_ids: HashMap<Id, Id> = HashMap::new();
-    for (database_id, property) in data.properties {
-        let id = Id::new_v7();
-        property_ids.insert(property.id, id);
-        insert_property(
-            tx,
-            workspace_id,
-            pages[&database_id],
-            &Property { id, ..property },
-            now,
-        )
-        .await?;
+    let property_ids: HashMap<Id, Id> = data
+        .properties
+        .iter()
+        .map(|(_, property)| (property.id, Id::new_v7()))
+        .collect();
+    for (database_id, property) in &data.properties {
+        let copy = Property {
+            id: property_ids[&property.id],
+            kind: relations::copied_kind(&property.kind, &property_ids),
+            ..property.clone()
+        };
+        insert_property(tx, workspace_id, pages[database_id], &copy, now).await?;
     }
+    relations::copy_links(
+        tx,
+        workspace_id,
+        &data.properties,
+        &property_ids,
+        pages,
+        now,
+    )
+    .await
+    .map_err(page_error)?;
     templates::write_copies(tx, workspace_id, &data.templates, pages, &property_ids, now)
         .await
         .map_err(page_error)?;
