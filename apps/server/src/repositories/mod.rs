@@ -14,6 +14,8 @@ pub mod page_files;
 pub mod page_mentions;
 pub mod page_versions;
 pub mod pages;
+pub(crate) mod project_access;
+pub mod project_members;
 pub mod sign_in_providers;
 pub mod sub_issues;
 pub mod task_filter;

@@ -5,7 +5,7 @@ import { refIdentifier, taskFromRecord, taskIdentifier } from './models'
 const project: ProjectRecord = {
   id: 'project-1', workspace_id: 'workspace-1', name: 'Launch', key: 'LCH', color: '#123456',
   created_at: '2026-09-04T09:00:00Z', updated_at: '2026-09-04T09:00:00Z', version: 2,
-  auto_close_parent: true, auto_close_sub_issues: true,
+  auto_close_parent: true, auto_close_sub_issues: true, private: false,
 }
 const record: TaskRecord = {
   id: '01HZYTASK000000000000001', workspace_id: 'workspace-1', project_id: project.id, number: 12,

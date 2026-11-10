@@ -28,7 +28,7 @@ import { TaskStatusIcon } from './TaskStatusIcon'
 import { dueDateLabel, PRIORITY_LABEL, PRIORITY_ORDER, projectLabels, projectStatuses } from '@/features/tasks/taskMeta'
 import { refIdentifier, type Project, type Task, type TaskViewState } from '@/features/tasks/api/models'
 import { cachedDescendantIds, type PageTaskRecord } from '@/features/tasks/api/optimistic'
-import { useProjects } from '@/features/tasks/api/projects'
+import { useProjectAudience, useProjects } from '@/features/tasks/api/projects'
 import {
   useAddTaskRelation, useCreateTaskComment, useDeleteTask, useDeleteTaskAttachment, useRemoveTaskRelation,
   subIssuesQuery, useSubIssues, useTaskGithubLinks, useTaskRelations, useUpdateTask,
@@ -83,6 +83,7 @@ export function TaskDetail({ task, project, state, onClose, onOpenTask, onOpenPr
   const taskLabels = task ? projectLabels(state.labels, task.projectId).filter((label) => task.labels.includes(label.id)).sort((a, b) => a.name.localeCompare(b.name)) : []
   const moveToProject = useMoveToProject(workspace.id)
   const users = state.users
+  const audience = useProjectAudience(workspace.id, project, users)
   const descriptionRef = useRef<TaskDescriptionHandle>(null)
   // the date panel needs to close itself from Clear, so the popover stays controlled
   const [dueDateOpen, setDueDateOpen] = useState(false)
@@ -331,7 +332,7 @@ export function TaskDetail({ task, project, state, onClose, onOpenTask, onOpenPr
                 <DropdownMenuContent className="w-auto min-w-45">
                   <DropdownMenuGroup>
                     <DropdownMenuLabel>Assignees</DropdownMenuLabel>
-                    {users.map((u) => {
+                    {audience.map((u) => {
                       const active = task.assigneeIds.includes(u.id)
                       return (
                         <DropdownMenuCheckboxItem
@@ -492,7 +493,7 @@ export function TaskDetail({ task, project, state, onClose, onOpenTask, onOpenPr
 
             {/* the rich text comment field: blocks, @mentions, inline files (paste / drop / pick) */}
             <div className="mt-4 max-[899px]:mt-3">
-              <TaskCommentComposer workspaceId={workspace.id} taskId={task.id} pending={createComment.isPending} error={createComment.isError ? 'Comment failed.' : undefined} members={users} onSend={(bodyJson) => createComment.mutateAsync({ bodyJson })} />
+              <TaskCommentComposer workspaceId={workspace.id} taskId={task.id} pending={createComment.isPending} error={createComment.isError ? 'Comment failed.' : undefined} members={audience} onSend={(bodyJson) => createComment.mutateAsync({ bodyJson })} />
             </div>
           </div>
           {picker ? (

@@ -12,6 +12,7 @@ import { Tip } from '@/components/common/Tip'
 import { ColorDot } from '@/components/common/ColorDot'
 import { useQuery } from '@tanstack/react-query'
 import { useProjects } from '@/features/tasks/api/projects'
+import { ProjectLock } from '@/features/tasks/components/ProjectLock'
 import { NewProjectModal } from '@/features/tasks/components/NewProjectModal'
 import { savedViewsQueryOptions } from '@/features/views/api/views'
 import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
@@ -83,6 +84,7 @@ function SidebarNavItem({
   unread = false,
   tone,
   className,
+  trailing,
   ...props
 }: Omit<LinkProps, 'className' | 'children' | 'title'> & VariantProps<typeof sidebarNavTileVariants> & {
   className?: string
@@ -94,6 +96,8 @@ function SidebarNavItem({
   badge?: number
   /** Something waits for the user, but there is no count: a dot shows. */
   unread?: boolean
+  /** A mark right after the label, hidden with the label when the sidebar is collapsed. */
+  trailing?: ReactNode
 }) {
   const collapsed = useContext(SidebarNavCollapsed)
   const match = useMatch({ path: useResolvedPath(to).pathname, end })
@@ -112,6 +116,7 @@ function SidebarNavItem({
       >
         <SidebarNavTile icon={Icon} tone={tone} />
         <SidebarNavLabel>{label}</SidebarNavLabel>
+        {trailing ? <span aria-hidden="true" className="flex shrink-0 group-data-[collapsed=true]/sidebar-nav:hidden">{trailing}</span> : null}
         {badge > 0 ? (
           <span
             data-slot="sidebar-nav-badge"
@@ -240,7 +245,7 @@ function TasksAreaNav({ onNavigate, onBack }: { onNavigate?: () => void; onBack?
           <SidebarNavItem to={tasksPath({ project: null })} active={onTasks && !project} icon={Folder} label="All projects" onClick={onNavigate} />
           {projects.map((item) => (
             <div key={item.id} className="group/project relative">
-              <SidebarNavItem to={tasksPath({ project: item.id })} active={onTasks && project === item.id} icon={dotIcon(item.color)} label={item.name} className="pr-8" onClick={onNavigate} />
+              <SidebarNavItem to={tasksPath({ project: item.id })} active={onTasks && project === item.id} icon={dotIcon(item.color)} label={item.name} aria-label={item.private ? `${item.name}, private` : item.name} trailing={item.private ? <ProjectLock project={item} className="text-sidebar-nav" /> : undefined} className="pr-8" onClick={onNavigate} />
               {collapsed ? null : (
                 <Tip label="Project settings" side="right">
                   <Link

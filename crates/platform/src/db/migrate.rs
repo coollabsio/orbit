@@ -610,6 +610,11 @@ impl MigrationRunner {
                     include_str!("../../../../apps/server/migrations/0092_page_relations.sql"),
                     false,
                 ),
+                Migration::new(
+                    93,
+                    include_str!("../../../../apps/server/migrations/0093_private_projects.sql"),
+                    false,
+                ),
             ],
         );
         runner.postgres = vec![
@@ -890,6 +895,13 @@ impl MigrationRunner {
             Migration::new(
                 92,
                 include_str!("../../../../apps/server/migrations/postgres/0092_page_relations.sql"),
+                false,
+            ),
+            Migration::new(
+                93,
+                include_str!(
+                    "../../../../apps/server/migrations/postgres/0093_private_projects.sql"
+                ),
                 false,
             ),
         ];

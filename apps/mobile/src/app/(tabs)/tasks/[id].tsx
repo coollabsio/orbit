@@ -48,7 +48,7 @@ import {
 } from '../../../data/tasks'
 import { useAdoptSubIssue, useCommentAttachments, useCreateTask, useRelationWrites, useSubIssues, useTaskAttachments, useTaskRelations, useTaskWrite } from '../../../hooks/tasks'
 import { useOrbit } from '../../../orbit-context'
-import { useLabels, useMentionPeople, usePeople, useProjects, useStatuses } from '../../../queries'
+import { useLabels, useMentionPeople, usePeople, useProjects, useSeesProject, useStatuses } from '../../../queries'
 import { errorMessage } from '../../../session-context'
 import { alpha, useTheme } from '../../../theme'
 import { Avatar, Button, ErrorView, Icon, IconButton, type IconName, KeyboardSpace, LoadingView, PaneHeader, PriorityIcon, PullRefresh, SafeAreaView, StatusIcon, Text } from '../../../ui'
@@ -124,6 +124,7 @@ export default function TaskScreen() {
   const attachments = useTaskAttachments(id)
   const commentFiles = useCommentAttachments(id, comments.data ?? [])
   const write = useTaskWrite(id)
+  const seesProject = useSeesProject(task.data?.project_id ?? null)
   const relationWrites = useRelationWrites(id)
   const createSubIssue = useCreateTask()
   const adopt = useAdoptSubIssue(id)
@@ -440,6 +441,7 @@ export default function TaskScreen() {
               )
             )}
             <CommentComposer
+              projectId={current.project_id}
               value={draft}
               onChangeText={setDraft}
               files={draftFiles}
@@ -473,7 +475,7 @@ export default function TaskScreen() {
             }}
           />
         ) : null}
-        {sheet?.kind === 'assignees' ? <PeopleChoices people={people} value={current.assignee_ids} onChange={(ids) => write.mutate({ assignee_ids: ids })} /> : null}
+        {sheet?.kind === 'assignees' ? <PeopleChoices people={people.filter((person) => seesProject(person.id))} value={current.assignee_ids} onChange={(ids) => write.mutate({ assignee_ids: ids })} /> : null}
         {sheet?.kind === 'labels' ? <LabelChoices projectId={current.project_id} value={current.label_ids} onChange={(ids) => write.mutate({ label_ids: ids })} /> : null}
         {sheet?.kind === 'due' ? (
           <DueDateChoices
@@ -701,6 +703,7 @@ function CommentComposer({
   sending,
   onSend,
   onAttach,
+  projectId,
 }: {
   value: string
   onChangeText: (text: string) => void
@@ -710,10 +713,13 @@ function CommentComposer({
   sending: boolean
   onSend: () => void
   onAttach: () => void
+  projectId: string
 }) {
   const { colors, scheme } = useTheme()
   const [focused, setFocused] = useState(false)
-  const mention = useMentionField({ text: value, setText: onChangeText, people: useMentionPeople() })
+  const seesProject = useSeesProject(projectId)
+  const mentionPeople = useMentionPeople()
+  const mention = useMentionField({ text: value, setText: onChangeText, people: mentionPeople.filter((person) => seesProject(person.id)) })
   return (
     <View className={`mt-3 rounded-lg border bg-card/50 ${focused ? 'border-ring/50' : 'border-border'}`}>
       <MentionSuggestions suggestions={mention.suggestions} onPick={mention.pick} />
