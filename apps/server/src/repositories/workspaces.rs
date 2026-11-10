@@ -2151,7 +2151,9 @@ impl WorkspaceRepository {
         // API token grants hold their projects with ON DELETE RESTRICT.
         for sql in [
             format!("DELETE FROM api_token_projects WHERE project_id IN ({expired_projects})"),
-            format!("UPDATE api_tokens SET project_id = NULL WHERE project_id IN ({expired_projects})"),
+            format!(
+                "UPDATE api_tokens SET project_id = NULL WHERE project_id IN ({expired_projects})"
+            ),
             format!("DELETE FROM projects WHERE id IN ({expired_projects})"),
         ] {
             sqlx::query(sqlx::AssertSqlSafe(sql))
