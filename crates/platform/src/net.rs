@@ -38,6 +38,9 @@ pub fn is_public_ip(ip: IpAddr) -> bool {
                 || (segments[0] & 0xffc0) == 0xfe80 // link-local fe80::/10
                 || (segments[0] & 0xffc0) == 0xfec0 // site-local fec0::/10 (deprecated)
                 || (segments[0] == 0x64 && segments[1] == 0xff9b && segments[2] == 1) // local-use NAT64 64:ff9b:1::/48
+                || segments[..4] == [0x100, 0, 0, 0] // discard 100::/64
+                || (segments[0] == 0x2001 && segments[1] == 0) // Teredo 2001::/32
+                || (segments[0] == 0x3fff && segments[1] < 0x1000) // documentation 3fff::/20
                 || (segments[0] == 0x2001 && segments[1] == 0x0db8) // documentation
                 || ip == Ipv6Addr::LOCALHOST)
         }
@@ -56,6 +59,7 @@ fn is_public_v4(ip: Ipv4Addr) -> bool {
         || a == 0
         || (a == 100 && (b & 0xc0) == 64) // shared address space 100.64.0.0/10
         || (a == 192 && b == 0 && c == 0) // protocol assignments 192.0.0.0/24
+        || (a == 192 && b == 88 && c == 99) // 6to4 relay anycast 192.88.99.0/24
         || (a == 198 && (b & 0xfe) == 18) // benchmarks 198.18.0.0/15
         || a >= 240)
 }
@@ -107,6 +111,10 @@ mod tests {
             "2002:c0a8:1::",
             "fec0::1",
             "feff::1",
+            "100::1",
+            "2001::1",
+            "3fff::1",
+            "192.88.99.1",
         ] {
             assert!(!is_public_ip(local.parse().unwrap()), "{local}");
         }

@@ -1831,6 +1831,7 @@ struct InstanceSettingsView {
     smtp: Option<SmtpView>,
     storage: StorageView,
     limits: LimitsView,
+    mail: InstanceMailView,
     /// The Google and GitHub OAuth clients that are saved. A provider that is not listed is off.
     sign_in_providers: Vec<SignInProviderView>,
     /// The settings that `ORBIT_*` environment variables set. They replace the saved values, and changing them
@@ -1893,6 +1894,14 @@ fn set_by_environment(
     )
 }
 
+/// Mail on this installation; the health card is `GET /api/v1/admin/mail`.
+#[derive(Serialize, ToSchema)]
+struct InstanceMailView {
+    /// Mail is on for this installation (`PUT /api/v1/admin/mail`). Off: the mail app is hidden and
+    /// the workspace mail API refuses with `mail_disabled`.
+    mail_enabled: bool,
+}
+
 #[derive(Serialize, ToSchema)]
 struct SignInProviderView {
     provider: Provider,
@@ -1941,6 +1950,10 @@ async fn settings_view(
         .limits()
         .await
         .map_err(|_| internal(instance, request_id))?;
+    let mail_enabled = repository
+        .mail_enabled()
+        .await
+        .map_err(|_| internal(instance, request_id))?;
     let sign_in_providers = repository
         .sign_in_providers()
         .await
@@ -1984,6 +1997,7 @@ async fn settings_view(
             image_compression: state.image_compressor.as_ref().map(ImageCompressor::status),
         },
         limits: limits.into(),
+        mail: InstanceMailView { mail_enabled },
         registration_open: settings.registration_open,
         registration_ready,
         smtp: settings.smtp.map(|smtp| SmtpView {

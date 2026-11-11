@@ -107,7 +107,8 @@ async fn run_pending_migrations(
 ) -> Result<usize, GuardedMigrationError> {
     let pending = runner.pending(database).await?;
     if pending.iter().any(|migration| migration.destructive) {
-        let service = BackupService::new(&config.data.backups, &config.data.attachments);
+        let service = BackupService::new(&config.data.backups, &config.data.attachments)
+            .with_app_key(config.app_key.map(|key| *key.bytes()));
         let backup = service.create_pre_migration(database).await?;
         service.verify(&backup.id).await?;
     }

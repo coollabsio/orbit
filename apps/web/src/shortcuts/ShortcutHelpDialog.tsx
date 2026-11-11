@@ -3,20 +3,20 @@ import { Link } from 'react-router'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import type { Bindings } from './bindings'
-import { COMMANDS, type Command, type Group } from './commands'
+import { COMMANDS, isMailCommand, type Command, type Group } from './commands'
 import { ShortcutKeys } from './Shortcut'
 import { useAvailableCommands, useBindings } from './useCommand'
 
-const GROUPS: Group[] = ['General', 'Navigation', 'List', 'Task', 'Docs', 'Chat']
+const GROUPS: Group[] = ['General', 'Navigation', 'List', 'Task', 'Docs', 'Chat', 'Mail']
 
 interface Row { title: string; group: Group; keys: string[]; ids: string[] }
 
 /** One row per action: commands that do the same thing (J and the down arrow) share a row. */
-function shortcutRows(bindings: Bindings): Row[] {
+function shortcutRows(bindings: Bindings, mail: boolean): Row[] {
   const rows = new Map<string, Row>()
   for (const command of COMMANDS as readonly Command[]) {
     const keys = bindings[command.id]
-    if (!keys) continue
+    if (!keys || (!mail && isMailCommand(command.id))) continue
     const key = `${command.group}:${command.context}:${command.title}`
     const row = rows.get(key) ?? { title: command.title, group: command.group, keys: [], ids: [] }
     rows.set(key, { ...row, keys: [...row.keys, keys], ids: [...row.ids, command.id] })
@@ -48,7 +48,7 @@ function Rows({ label, rows }: { label: string; rows: Row[] }) {
 }
 
 /** Every shortcut with its current keys. A rare visit, so it opens with the dialog's normal motion. */
-export function ShortcutHelpDialog({ onClose }: { onClose: () => void }) {
+export function ShortcutHelpDialog({ onClose, mailEnabled: mail = false }: { onClose: () => void; /** Mail is on for the server: its shortcuts are listed. */ mailEnabled?: boolean }) {
   const bindings = useBindings()
   const [query, setQuery] = useState('')
   // what the page in view can do, read once: the dialog itself must not change the list
@@ -56,7 +56,7 @@ export function ShortcutHelpDialog({ onClose }: { onClose: () => void }) {
   const [onPage] = useState(() => new Set(available().filter((command) => command.context !== 'global').map((command) => command.id)))
 
   const needle = query.trim().toLowerCase()
-  const rows = shortcutRows(bindings).filter((row) => !needle || row.title.toLowerCase().includes(needle) || row.keys.some((keys) => keys.toLowerCase().includes(needle)))
+  const rows = shortcutRows(bindings, mail).filter((row) => !needle || row.title.toLowerCase().includes(needle) || row.keys.some((keys) => keys.toLowerCase().includes(needle)))
   const pageRows = rows.filter((row) => row.ids.some((id) => onPage.has(id)))
 
   return (

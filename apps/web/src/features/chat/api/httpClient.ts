@@ -85,6 +85,8 @@ export interface HttpChatClientOptions {
   onInboxChanged?: () => void
   /** Something the user asked to be notified about happened, and the server chose this tab over a push. */
   onNotify?: (notice: Notice) => void
+  /** An event of the `mail` topic (a thread of a mailbox the user reads changed); the mail feature applies it. */
+  onMailEvent?: (event: unknown) => void
   /** Opens the live socket; tests put their own in. */
   openSocket?: (options: LiveSocketOptions) => LiveSocket
   /** How long a send that could not reach the server waits for the connection to come back. Default 60000. */
@@ -194,6 +196,8 @@ export function createHttpChatClient(options: HttpChatClientOptions): ChatClient
           options.onInboxChanged?.()
         } else if (topic === 'notify') {
           options.onNotify?.(event as Notice)
+        } else if (topic === 'mail') {
+          options.onMailEvent?.(event)
         } else if (topic === 'chat') {
           const wire = event as WireEvent | WireTyping
           if (wire.type === 'typing') {

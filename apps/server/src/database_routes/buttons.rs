@@ -65,13 +65,17 @@ pub(super) async fn press_database_button(
     ApiJson(body): ApiJson<PressDatabaseButtonBody>,
 ) -> Result<Json<ButtonPress>, ApiError> {
     let request = request_id.as_ref();
-    let instance = format!(
-        "/api/v1/workspaces/{workspace}/databases/{database}/rows/{row}/press/{property}"
-    );
+    let instance =
+        format!("/api/v1/workspaces/{workspace}/databases/{database}/rows/{row}/press/{property}");
     let (workspace_id, database_id, actor_id) =
         scope(&state, &headers, &workspace, &database, &instance, request).await?;
     let row_id = child_id(&row, DatabaseError::NotFound, &instance, request)?;
-    let property_id = child_id(&property, DatabaseError::PropertyNotFound, &instance, request)?;
+    let property_id = child_id(
+        &property,
+        DatabaseError::PropertyNotFound,
+        &instance,
+        request,
+    )?;
     let now = TimestampMillis::now();
     if !state.presses.admit(actor_id, now) {
         return Err(ApiError::new(

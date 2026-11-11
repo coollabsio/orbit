@@ -1899,6 +1899,28 @@ impl IdentityRepository {
         })
     }
 
+    /// The user of session `session_id` while it is live (not revoked, not expired, the user not
+    /// suspended). For URLs bound to a session that arrive without its cookie (mail content).
+    pub async fn session_user(
+        &self,
+        session_id: Id,
+        now: TimestampMillis,
+    ) -> Result<Option<Id>, IdentityError> {
+        let user: Option<String> = sqlx::query_scalar(
+            "SELECT sessions.user_id FROM sessions JOIN users ON users.id = sessions.user_id \
+             WHERE sessions.id = $1 AND sessions.revoked_at IS NULL \
+             AND sessions.idle_expires_at > $2 AND sessions.absolute_expires_at > $3 \
+             AND users.suspended_at IS NULL",
+        )
+        .bind(session_id.to_string())
+        .bind(now.as_millis())
+        .bind(now.as_millis())
+        .fetch_optional(self.database.pool())
+        .await?;
+        user.map(|user| user.parse().map_err(|_| IdentityError::InvalidIdentifier))
+            .transpose()
+    }
+
     pub async fn list_sessions(
         &self,
         user_id: Id,

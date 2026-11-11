@@ -1,0 +1,38 @@
+Message-ID: <related-1@sender.example>
+Date: Thu, 22 Oct 2026 11:00:00 +0000
+From: Ann <ann@sender.example>
+To: bob@orbit.example
+Subject: Report with a logo
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="mixed-b"
+
+--mixed-b
+Content-Type: multipart/related; boundary="rel-b"
+
+--rel-b
+Content-Type: multipart/alternative; boundary="alt-b"
+
+--alt-b
+Content-Type: text/plain; charset=utf-8
+
+See the logo below.
+--alt-b
+Content-Type: text/html; charset=utf-8
+
+<p>See the logo below.</p><img src="cid:logo@sender.example">
+--alt-b--
+--rel-b
+Content-Type: image/png
+Content-Transfer-Encoding: base64
+Content-ID: <logo@sender.example>
+Content-Disposition: inline
+
+iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==
+--rel-b--
+--mixed-b
+Content-Type: application/pdf; name="report.pdf"
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="report.pdf"
+
+JVBERi0xLjQKJcOkw7zDtsOfCg==
+--mixed-b--

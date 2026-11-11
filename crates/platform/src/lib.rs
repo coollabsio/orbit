@@ -23,14 +23,15 @@ pub use auth::{
     generate_opaque_token, normalize_email,
 };
 pub use backup::{
-    AttachmentMutationCoordinator, AttachmentMutationGuard, BackupError, BackupFile, BackupKind,
-    BackupManifest, BackupService, BackupSnapshot, SnapshotReader, SnapshotRow,
+    AttachmentMutationCoordinator, AttachmentMutationGuard, BackupEncryption, BackupError,
+    BackupFile, BackupKind, BackupManifest, BackupService, BackupSnapshot, SnapshotReader,
+    SnapshotRow,
 };
 pub use config::{
     ApnsConfig, AppKey, BackupSchedule, BillingConfig, Config, ConfigError, DataConfig,
-    EnvironmentMode, HttpConfig, InstanceConfig, JobsConfig, MetricsConfig, OAuthClientConfig,
-    Plan, RateLimitConfig, Secret, SmtpConfig, SmtpSecurity, TrialConfig, UploadConfig,
-    redact_database_url,
+    EnvironmentMode, HttpConfig, InstanceConfig, JobsConfig, MailConfig, MailMode, MetricsConfig,
+    OAuthClientConfig, Plan, RateLimitConfig, Secret, SmtpConfig, SmtpSecurity, TrialConfig,
+    UploadConfig, redact_database_url,
 };
 pub use db::{
     Access, Backend, Column, Database, DatabaseConfig, DatabaseError, Flag, GuardedMigrationError,
