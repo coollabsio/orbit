@@ -1,21 +1,24 @@
-import { Calendar } from 'reicon-react'
+import { Calendar, Repeat } from 'reicon-react'
 import { cn } from 'cn'
 import type { Project, Task, TaskStatusDef } from '@/features/tasks/api/models'
 import { isOverdue } from '@/features/tasks/timeline/timelineLib'
 import { fullDate, shortDate } from '@/lib/format'
 import { ColorDot } from '@/components/common/ColorDot'
 
-/** Quiet due-date chip; open tasks past their day turn destructive. Font size comes from the caller. */
+/**
+ * Quiet due-date chip; open tasks past their day turn destructive, and a repeating task shows a repeat glyph instead of
+ * the calendar (the picker's tooltip names the rule). Font size comes from the caller.
+ */
 export function DueDateChip({ task, status, className }: { task: Task; status: TaskStatusDef | undefined; className?: string }) {
   if (!task.dueAt) return null
   const overdue = isOverdue(task, status?.category, new Date())
   return (
     <span
       data-property="due_date"
-      title={`Due ${fullDate(task.dueAt)}`}
+      title={task.recurrence ? undefined : `Due ${fullDate(task.dueAt)}`}
       className={cn('inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-muted-foreground tabular-nums', overdue && 'text-destructive', className)}
     >
-      <Calendar aria-hidden className="size-[1.1em]" />
+      {task.recurrence ? <Repeat aria-hidden className="size-[1.1em]" /> : <Calendar aria-hidden className="size-[1.1em]" />}
       {shortDate(task.dueAt)}
     </span>
   )

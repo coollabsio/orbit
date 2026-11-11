@@ -3,7 +3,7 @@ import { Platform, Pressable, Share, useColorScheme, View } from 'react-native'
 
 import { CUSTOM_THEME_PRESETS, type CustomTheme, normalizeHex, parseCustomTheme, readableOn, serializeCustomTheme } from '../../data/custom-theme'
 import { palettes, type Scheme, setCustomTheme, useCustomTheme, useSchemePreference, useTheme } from '../../theme'
-import { Button, Text } from '../../ui'
+import { Button, Text, LabelTip } from '../../ui'
 import { TextInput } from '../../ui/scaled'
 import { Dialog } from './Dialog'
 
@@ -88,7 +88,7 @@ function CustomThemeForm({ onDone }: { onDone: () => void }) {
       </View>
 
       <View className="gap-1.5">
-        <Text className="font-noto-medium text-[12px] text-muted-foreground">Share code</Text>
+        <LabelTip label="Share code" text="Paste a code that someone shared, or share yours." className="font-noto-medium text-[12px] text-muted-foreground" />
         <View className="flex-row items-center gap-2">
           <TextInput
             key={revision}
@@ -116,9 +116,7 @@ function CustomThemeForm({ onDone }: { onDone: () => void }) {
             }}
           />
         </View>
-        <Text className={`text-[12px] leading-[16px] ${codeError ? 'text-destructive' : 'text-muted-foreground'}`}>
-          {codeError ? 'A code is four hex colours, for example #3f0e40,#1164a3,#ecb22e,#ffffff.' : 'Paste a code that someone shared, or share yours.'}
-        </Text>
+        {codeError ? <Text className="text-[12px] leading-[16px] text-destructive">A code is four hex colours, for example #3f0e40,#1164a3,#ecb22e,#ffffff.</Text> : null}
       </View>
 
       <View className="flex-row flex-wrap items-center gap-2">
@@ -200,12 +198,7 @@ function ColorField({ label, hint, value, onChange }: { label: string; hint: str
     <View className="flex-row items-center gap-2.5">
       <View className="size-8 rounded-md border border-input" style={{ backgroundColor: value }} />
       <View className="flex-1 min-w-0">
-        <Text numberOfLines={1} className="text-[14px] leading-[18px]">
-          {label}
-        </Text>
-        <Text numberOfLines={1} className="text-[12px] leading-[16px] text-muted-foreground">
-          {hint}
-        </Text>
+        <LabelTip label={label} text={hint} className="text-[14px] leading-[18px]" />
       </View>
       <TextInput
         accessibilityLabel={`${label} colour`}

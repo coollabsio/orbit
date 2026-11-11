@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { recurrenceLabel } from '@orbit/api/recurrence'
 import { openURL } from 'expo-linking'
 import { router, useLocalSearchParams } from 'expo-router'
 import { type ReactNode, useMemo, useState } from 'react'
@@ -15,6 +16,7 @@ import {
   MenuChoices,
   PeopleChoices,
   PriorityChoices,
+  RecurrenceForm,
   SourceForm,
   StatusChoices,
   TaskChoices,
@@ -56,7 +58,7 @@ import { Avatar, Button, ErrorView, Icon, IconButton, type IconName, KeyboardSpa
 
 /** The one sheet of the page and what it shows. */
 type TaskSheet =
-  | { kind: 'status' | 'priority' | 'assignees' | 'labels' | 'due' | 'source' | 'parent-menu' | 'relation-menu' | 'attach' }
+  | { kind: 'status' | 'priority' | 'assignees' | 'labels' | 'due' | 'repeat' | 'source' | 'parent-menu' | 'relation-menu' | 'attach' }
   | { kind: 'pick-task'; purpose: 'parent' | 'sub-issue' | RelationKind }
 
 function sheetTitle(sheet: TaskSheet | null, subject: string): string {
@@ -72,6 +74,8 @@ function sheetTitle(sheet: TaskSheet | null, subject: string): string {
       return 'Labels'
     case 'due':
       return 'Due date'
+    case 'repeat':
+      return 'Repeat'
     case 'source':
       return 'Source'
     case 'parent-menu':
@@ -415,6 +419,14 @@ export default function TaskScreen() {
                 </Chip>
               </View>
             </PropertyGroup>
+            <PropertyGroup title="Repeat">
+              <View className="-ml-2 flex-row">
+                <Chip label="Repeat" onPress={() => sheets.open({ kind: 'repeat' })}>
+                  <Icon name="repeat" size={14} color={current.recurrence ? colors.foreground : colors.mutedForeground} />
+                  <ChipText muted={!current.recurrence}>{recurrenceLabel(current.recurrence)}</ChipText>
+                </Chip>
+              </View>
+            </PropertyGroup>
           </View>
 
           <View>
@@ -484,6 +496,19 @@ export default function TaskScreen() {
             onChange={(due) => {
               sheets.close()
               write.mutate({ due_at: due?.end ?? null, due_start_at: due?.start ?? null })
+            }}
+          />
+        ) : null}
+        {sheet?.kind === 'repeat' ? (
+          <RecurrenceForm
+            value={current.recurrence}
+            onSave={(recurrence) => {
+              sheets.close()
+              write.mutate({ recurrence })
+            }}
+            onStop={() => {
+              sheets.close()
+              write.mutate({ recurrence: null })
             }}
           />
         ) : null}

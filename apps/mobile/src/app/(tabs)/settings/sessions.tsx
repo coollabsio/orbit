@@ -1,5 +1,6 @@
 import { View } from 'react-native'
 
+import { ListPager, usePagedList } from '../../../components/settings/ListPager'
 import { ACCOUNT_NAV, Badge, InitialAvatar, Note, RowIcon, SettingsCard, SettingsRow, SettingsShell } from '../../../components/settings/Shell'
 import { relativeTime } from '../../../data/format'
 import { useRevokeSessions, useSessions } from '../../../hooks/account'
@@ -15,6 +16,8 @@ export default function SessionsScreen() {
   const revoke = useRevokeSessions()
   const list = sessions.data ?? []
   const others = list.filter((session) => !session.current)
+  // The current session stays first, so it is always on page 1.
+  const { visible, pager } = usePagedList([...list.filter((session) => session.current), ...others])
 
   return (
     <SettingsShell title="Account settings" nav={ACCOUNT_NAV} onRefresh={() => sessions.refetch()}>
@@ -26,7 +29,7 @@ export default function SessionsScreen() {
       >
         {sessions.isPending ? <View className="p-4"><Note loading>Loading sessions…</Note></View> : null}
         {sessions.isError ? <View className="p-4"><Note error>Sessions could not be loaded.</Note></View> : null}
-        {list.map((session, index) => (
+        {visible.map((session, index) => (
           <SettingsRow key={session.id} first={index === 0}>
             <RowIcon icon={session.current ? 'mobile' : 'monitor'} />
             <View className="flex-1 min-w-0 gap-0.5">
@@ -43,6 +46,7 @@ export default function SessionsScreen() {
             {!session.current ? <Button label="Revoke" variant="ghost" disabled={revoke.isPending} onPress={() => revoke.mutate([session.id])} /> : null}
           </SettingsRow>
         ))}
+        {pager.lastPage > 1 ? <ListPager {...pager} /> : null}
         {revoke.isPending ? <View className="p-4"><Note>Revoking {revoke.variables?.length ?? 1} session{revoke.variables?.length === 1 ? '' : 's'}…</Note></View> : null}
         {revoke.isError ? <View className="p-4"><Note error>{errorMessage(revoke.error)}</Note></View> : null}
       </SettingsCard>

@@ -2,6 +2,7 @@ import { useId, useState } from 'react'
 import { Add, Copy, Danger, Edit, Flash, Key, MoreH, Trash } from 'reicon-react'
 import { toast } from 'sonner'
 import { confirmAction } from '@/components/common/confirmAction'
+import { InfoTip } from '@/components/common/InfoTip'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Field, FieldError, FieldLabel } from '@/components/ui/field'
@@ -254,7 +255,10 @@ function WebhookInteractivity({ webhook, conversationId, onClose }: { webhook: C
         }}
       >
         <Field data-invalid={save.isError || undefined}>
-          <FieldLabel htmlFor={urlId}>Request URL</FieldLabel>
+          <FieldLabel htmlFor={urlId}>
+            Request URL
+            <InfoTip text="A click on a button without a link sends a signed block_actions payload here, as Slack does. Answer through its response_url to replace the message, delete it, or reply." />
+          </FieldLabel>
           <Input
             id={urlId}
             type="url"
@@ -267,10 +271,6 @@ function WebhookInteractivity({ webhook, conversationId, onClose }: { webhook: C
             <FieldError>{chatErrorMessage(save.error, 'The request URL was not saved.', { conflict: 'Use a public https URL.' })}</FieldError>
           ) : null}
         </Field>
-        <p className="text-xs text-muted-foreground">
-          A click on a button without a link sends a signed <code>block_actions</code> payload here, as Slack does. Answer through its{' '}
-          <code>response_url</code> to replace the message, delete it, or reply.
-        </p>
         <div className="flex justify-end gap-2">
           {webhook.requestUrl ? (
             <Button type="button" variant="outline" size="sm" disabled={save.isPending} onClick={() => submit(null)}>

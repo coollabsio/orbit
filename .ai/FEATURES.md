@@ -626,7 +626,7 @@ turns its routes, navigation and shortcuts off.
   unread replies, followed or not, in a joined conversation that is not muted (`GET …/chat/unread-threads`,
   `unreadGroups` in `lib/sidebar.ts`). Following only decides notifications and the Threads view. In a thread with no
   `chat_thread_members` row, the replies after the later of `chat_members.joined_at` and `threads_read_to` (migration
-  0093: the newest message at upgrade) are unread; reading the thread or "Mark all as read" writes a row that does not
+  0094: the newest message at upgrade) are unread; reading the thread or "Mark all as read" writes a row that does not
   follow. A reply also sent to the channel shows in the channel's group only.
 - Unread and mention counts come from the server (counters, not count queries).
 - Live updates, typing and presence come over the workspace's live socket

@@ -3,6 +3,7 @@ import { Link } from 'react-router'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { InfoTip } from '@/components/common/InfoTip'
 import { SettingsCard } from '@/components/common/SettingsCard'
 import { UnsavedBar } from '@/components/common/UnsavedBar'
 import { useDeleteGithubProjectConnection, useGithubProjectSettings, useSaveGithubProjectConnection } from '@/features/tasks/api/github'
@@ -90,9 +91,11 @@ function GithubCardContent({ settings, workspaceId, save, remove, onPendingChang
               </Select>
             </div>
             <div className="grid gap-1.5">
-              <Label htmlFor="github-label">Issue label</Label>
+              <Label htmlFor="github-label">
+                Issue label
+                <InfoTip text="Add this label to a GitHub issue to create a task in this project. Create the label in GitHub first." />
+              </Label>
               <Input id="github-label" maxLength={50} value={label} onChange={(event) => setLabel(event.target.value)} />
-              <p className="text-xs text-muted-foreground">Add this label to a GitHub issue to create a task in this project. Create the label in GitHub first.</p>
             </div>
             {save.isError || remove.isError ? <p role="alert" className="text-xs text-destructive">{save.error instanceof Error ? save.error.message : remove.error instanceof Error ? remove.error.message : 'The GitHub connection could not be saved.'}</p> : null}
           </> : null}
