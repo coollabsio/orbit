@@ -672,6 +672,7 @@ impl Authorized<'_> {
                 name,
                 key,
                 color.to_ascii_lowercase(),
+                false,
                 self.request_id,
                 TimestampMillis::now(),
             )

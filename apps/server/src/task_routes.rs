@@ -18,6 +18,7 @@ use utoipa::{IntoParams, ToSchema};
 use crate::auth_routes::{CookieMode, request_session};
 use crate::repositories::billing::TrialLimitReached;
 use crate::repositories::identity::{AuthenticatedSession, IdentityRepository};
+use crate::repositories::project_members::ProjectMemberRecord;
 use crate::repositories::sub_issues::AutoClosed;
 use crate::repositories::task_filter::{
     self, Condition, FilterField, FilterGroup, FilterNode, FilterOperator, GroupOp, OrderBy,
@@ -91,6 +92,14 @@ pub fn task_router(state: TaskState) -> Router {
         .route(
             "/api/v1/workspaces/{workspace_id}/projects/{project_id}",
             patch(update_project).delete(delete_project),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/projects/{project_id}/members",
+            get(list_project_members).post(add_project_member),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/projects/{project_id}/members/{user_id}",
+            delete(remove_project_member),
         )
         .route(
             "/api/v1/workspaces/{workspace_id}/projects/{project_id}/restore",
@@ -302,6 +311,9 @@ struct ProjectBody {
     name: String,
     key: String,
     color: String,
+    /// Only the project's members see it; the creator becomes the first member. Absent: false.
+    #[serde(default)]
+    private: bool,
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -315,6 +327,8 @@ struct ProjectUpdateBody {
     auto_close_parent: Option<bool>,
     /// Absent: unchanged.
     auto_close_sub_issues: Option<bool>,
+    /// Absent: unchanged. Making a project private adds the caller to its members.
+    private: Option<bool>,
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -364,6 +378,7 @@ async fn create_project(
             name,
             key,
             color,
+            body.private,
             request_id_value(request_id.as_ref()),
             TimestampMillis::now(),
         )
@@ -400,12 +415,101 @@ async fn update_project(
                 auto_close_parent: body.auto_close_parent,
                 auto_close_sub_issues: body.auto_close_sub_issues,
             },
+            body.private,
             body.expected_version,
             request_id_value(request_id.as_ref()),
             TimestampMillis::now(),
         )
         .await
         .map(Json)
+        .map_err(|error| task_problem(error, instance, request_id.as_ref()))
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+struct ProjectMemberBody {
+    /// An active workspace member who is not a guest.
+    user_id: String,
+}
+
+/// The members of a private project. Workspace owners and admins see every project and are
+/// listed only when someone added them.
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/projects/{project_id}/members", params(("workspace_id" = String, Path), ("project_id" = String, Path)), responses((status = 200, body = Vec<ProjectMemberRecord>)))]
+async fn list_project_members(
+    State(state): State<TaskState>,
+    Path((workspace, project)): Path<(String, String)>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<Json<Vec<ProjectMemberRecord>>, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace}/projects/{project}/members");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    let project_id = parse_id(&project, &instance, request_id.as_ref())?;
+    state
+        .tasks
+        .project_members(workspace_id, project_id, actor_id)
+        .await
+        .map(Json)
+        .map_err(|error| task_problem(error, instance, request_id.as_ref()))
+}
+
+/// Adds a member. Anyone who sees the project may; adding a member again returns their row.
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/projects/{project_id}/members", params(("workspace_id" = String, Path), ("project_id" = String, Path)), request_body = ProjectMemberBody, responses((status = 201, body = ProjectMemberRecord)))]
+async fn add_project_member(
+    State(state): State<TaskState>,
+    Path((workspace, project)): Path<(String, String)>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<ProjectMemberBody>,
+) -> Result<Response, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace}/projects/{project}/members");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    let project_id = parse_id(&project, &instance, request_id.as_ref())?;
+    let user_id = body
+        .user_id
+        .parse()
+        .map_err(|_| validation("user_id", &instance, request_id.as_ref()))?;
+    state
+        .tasks
+        .add_project_member(
+            workspace_id,
+            project_id,
+            actor_id,
+            user_id,
+            request_id_value(request_id.as_ref()),
+            TimestampMillis::now(),
+        )
+        .await
+        .map(|record| (StatusCode::CREATED, Json(record)).into_response())
+        .map_err(|error| task_problem(error, instance, request_id.as_ref()))
+}
+
+/// Removes a member, who then no longer sees the project while it is private.
+#[utoipa::path(delete, path = "/api/v1/workspaces/{workspace_id}/projects/{project_id}/members/{user_id}", params(("workspace_id" = String, Path), ("project_id" = String, Path), ("user_id" = String, Path)), responses((status = 204)))]
+async fn remove_project_member(
+    State(state): State<TaskState>,
+    Path((workspace, project, user)): Path<(String, String, String)>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<StatusCode, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace}/projects/{project}/members/{user}");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    let project_id = parse_id(&project, &instance, request_id.as_ref())?;
+    let user_id = parse_id(&user, &instance, request_id.as_ref())?;
+    state
+        .tasks
+        .remove_project_member(
+            workspace_id,
+            project_id,
+            actor_id,
+            user_id,
+            request_id_value(request_id.as_ref()),
+            TimestampMillis::now(),
+        )
+        .await
+        .map(|()| StatusCode::NO_CONTENT)
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 

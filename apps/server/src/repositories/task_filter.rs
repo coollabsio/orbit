@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use utoipa::ToSchema;
 
+use super::project_access::ProjectScope;
 use super::sub_issues;
 
 /// Groups may nest this many levels below the root group (the root is level 0).
@@ -829,6 +830,8 @@ fn condition(field: FilterField, operator: FilterOperator, value: Value) -> Filt
 /// `show_completed` window resolve against `now` (UTC).
 #[derive(Clone, Copy, Debug)]
 pub struct FilterContext {
+    /// The projects the reader sees: parents and sub-issues outside it do not count.
+    pub(crate) scope: ProjectScope,
     pub actor_id: Id,
     pub now: TimestampMillis,
 }
@@ -844,11 +847,17 @@ const TASK_STATUS: &str = "SELECT 1 FROM task_statuses WHERE task_statuses.id = 
 const DONE_STATUS: &str = "EXISTS (SELECT 1 FROM task_statuses \
      WHERE task_statuses.id = tasks.status_id \
      AND task_statuses.category IN ('completed', 'cancelled', 'duplicate'))";
-/// A live direct child of the outer task, counted like `TaskRecord.sub_issue_count`.
-const LIVE_CHILD: &str = "SELECT 1 FROM tasks AS child \
-     JOIN projects AS child_project ON child_project.id = child.project_id \
-     WHERE child.parent_task_id = tasks.id AND child.deleted_at IS NULL \
-     AND child_project.deleted_at IS NULL";
+/// A live direct child of the outer task that the reader sees, counted like
+/// `TaskRecord.sub_issue_count`.
+fn live_child_sql(scope: ProjectScope) -> String {
+    format!(
+        "SELECT 1 FROM tasks AS child \
+         JOIN projects AS child_project ON child_project.id = child.project_id \
+         WHERE child.parent_task_id = tasks.id AND child.deleted_at IS NULL \
+         AND child_project.deleted_at IS NULL AND {}",
+        scope.project("child.project_id")
+    )
+}
 
 /// Appends ` AND (<compiled tree>)` to `query`. Every value is bound. The tree must already be
 /// validated; an unexpected node fails closed (`0 = 1`).
@@ -966,8 +975,10 @@ fn push_condition(query: &mut SqlBuilder, condition: &Condition, ctx: &FilterCon
             push_date(query, "tasks.updated_at", condition, ctx.now);
         }
         (F::Text, O::Contains) => push_text(query, value),
-        (F::Parent, O::Is | O::IsNot) => push_parent(query, values(value, ctx, false), negated),
-        (F::SubIssues, O::Is) => push_sub_issues(query, values(value, ctx, false)),
+        (F::Parent, O::Is | O::IsNot) => {
+            push_parent(query, ctx.scope, values(value, ctx, false), negated)
+        }
+        (F::SubIssues, O::Is) => push_sub_issues(query, ctx.scope, values(value, ctx, false)),
         _ => {
             query.push("0 = 1");
         }
@@ -1049,14 +1060,14 @@ fn push_column_in(
 /// `parent is [ids…, "none"]`, matched against the visible parent (the `parent` field): a task
 /// whose parent is hidden has parent `none`. The positive expression is never NULL (the EXISTS
 /// is false for a NULL parent), so `is_not [id]` keeps top-level tasks.
-fn push_parent(query: &mut SqlBuilder, values: Vec<String>, negated: bool) {
+fn push_parent(query: &mut SqlBuilder, scope: ProjectScope, values: Vec<String>, negated: bool) {
     let none = values.iter().any(|value| value == "none");
     let ids: Vec<String> = values.into_iter().filter(|value| value != "none").collect();
     if !none && ids.is_empty() {
         query.push(if negated { "1 = 1" } else { "0 = 1" });
         return;
     }
-    let visible_parent = sub_issues::has_visible_parent_sql("tasks.parent_task_id");
+    let visible_parent = sub_issues::has_visible_parent_sql(scope, "tasks.parent_task_id");
     query.push(if negated { "NOT (" } else { "(" });
     if none {
         query.push("NOT ").push(&visible_parent);
@@ -1076,7 +1087,8 @@ fn push_parent(query: &mut SqlBuilder, values: Vec<String>, negated: bool) {
 }
 
 /// `sub_issues is [has|none]`: whether the task has live direct children.
-fn push_sub_issues(query: &mut SqlBuilder, values: Vec<String>) {
+fn push_sub_issues(query: &mut SqlBuilder, scope: ProjectScope, values: Vec<String>) {
+    let live_child = live_child_sql(scope);
     let has = values.iter().any(|value| value == "has");
     let none = values.iter().any(|value| value == "none");
     match (has, none) {
@@ -1084,10 +1096,10 @@ fn push_sub_issues(query: &mut SqlBuilder, values: Vec<String>) {
             query.push("1 = 1");
         }
         (true, false) => {
-            query.push("EXISTS (").push(LIVE_CHILD).push(")");
+            query.push("EXISTS (").push(&live_child).push(")");
         }
         (false, true) => {
-            query.push("NOT EXISTS (").push(LIVE_CHILD).push(")");
+            query.push("NOT EXISTS (").push(&live_child).push(")");
         }
         (false, false) => {
             query.push("0 = 1");
@@ -1893,6 +1905,7 @@ mod sql_tests {
             &mut query,
             &group,
             &FilterContext {
+                scope: ProjectScope::All,
                 actor_id: Id::new_v7(),
                 now: TimestampMillis::from_millis(0),
             },
@@ -1952,7 +1965,7 @@ mod sql_tests {
         let sql = compile(json!({ "op": "and", "children": [
             { "field": "parent", "operator": "is_not", "value": ["0190f5b4-7c1e-7a3b-8c4d-5e6f7a8b9c0d", "none"] }
         ] }));
-        let visible = sub_issues::has_visible_parent_sql("tasks.parent_task_id");
+        let visible = sub_issues::has_visible_parent_sql(ProjectScope::All, "tasks.parent_task_id");
         assert!(
             sql.contains(&format!(
                 "NOT (NOT {visible} OR ({visible} AND tasks.parent_task_id IN ($1)))"

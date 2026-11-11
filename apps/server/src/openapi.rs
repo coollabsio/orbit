@@ -172,6 +172,9 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::task_routes::create_project,
         crate::task_routes::update_project,
         crate::task_routes::delete_project,
+        crate::task_routes::list_project_members,
+        crate::task_routes::add_project_member,
+        crate::task_routes::remove_project_member,
         crate::task_routes::restore_project,
         crate::task_routes::list_project_trash,
         crate::task_routes::purge_project,
@@ -1247,6 +1250,9 @@ fn invalid_request_operation(operation_id: &str) -> bool {
             | "create_project"
             | "update_project"
             | "delete_project"
+            | "list_project_members"
+            | "add_project_member"
+            | "remove_project_member"
             | "restore_project"
             | "list_project_trash"
             | "list_statuses"
@@ -1568,6 +1574,9 @@ fn task_operation(operation_id: &str) -> bool {
             | "create_project"
             | "update_project"
             | "delete_project"
+            | "list_project_members"
+            | "add_project_member"
+            | "remove_project_member"
             | "restore_project"
             | "list_project_trash"
             | "purge_project"
