@@ -97,6 +97,25 @@
     }
    ]
   },
+  "database": {
+   "content": "none",
+   "attrs": [
+    {
+     "name": "databaseId",
+     "prop": true,
+     "missing": {
+      "value": ""
+     }
+    },
+    {
+     "name": "linkId",
+     "prop": true,
+     "missing": {
+      "value": ""
+     }
+    }
+   ]
+  },
   "divider": {
    "content": "none",
    "attrs": []
@@ -358,6 +377,18 @@
   }
  },
  "inline": {
+  "math": {
+   "content": "none",
+   "attrs": [
+    {
+     "name": "latex",
+     "prop": true,
+     "missing": {
+      "value": ""
+     }
+    }
+   ]
+  },
   "mention": {
    "content": "none",
    "attrs": [

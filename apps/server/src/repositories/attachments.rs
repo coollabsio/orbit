@@ -35,6 +35,14 @@ pub struct CreatedAttachment {
     pub deleted: bool,
 }
 
+/// A file attached to a task, as [`AttachmentRepository::task_files`] lists it.
+#[derive(Clone, Debug)]
+pub struct TaskFile {
+    pub id: Id,
+    pub sha256: String,
+    pub byte_size: i64,
+}
+
 #[derive(Clone, Debug)]
 pub struct AttachmentList {
     pub items: Vec<CreatedAttachment>,
@@ -372,7 +380,8 @@ impl AttachmentRepository {
              JOIN projects ON projects.id = tasks.project_id \
              JOIN workspaces ON workspaces.id = tasks.workspace_id \
              JOIN memberships ON memberships.workspace_id = tasks.workspace_id \
-             AND memberships.user_id = $1 JOIN users ON users.id = memberships.user_id \
+             AND memberships.user_id = $1 AND memberships.role <> 'guest' \
+             JOIN users ON users.id = memberships.user_id \
              JOIN sessions ON sessions.id = $2 AND sessions.user_id = users.id \
              WHERE attachment_references.id = $3 AND attachment_references.workspace_id = $4 \
              AND attachment_references.task_id = $5 AND attachment_references.comment_id IS NOT DISTINCT FROM $6 \
@@ -447,6 +456,112 @@ impl AttachmentRepository {
             )
             .await?;
         Ok((attachment, comment.expect("comment creation requested")))
+    }
+
+    /// Attaches bytes the server already holds (a file an importer downloaded) to a task as
+    /// `actor_id`. Goes through the same staging as an HTTP upload (size limit, file-name
+    /// validation, content sniffing, blob dedup); the actor must be an active non-guest member and the
+    /// task and its project live.
+    pub async fn create_from_bytes(
+        &self,
+        workspace_id: Id,
+        task_id: Id,
+        actor_id: Id,
+        file_name: &str,
+        bytes: &[u8],
+    ) -> Result<CreatedAttachment, AttachmentRepositoryError> {
+        let upload = self
+            .uploads
+            .stage(workspace_id, actor_id, file_name, bytes)
+            .await?;
+        let result = self
+            .finalize_for_member(workspace_id, task_id, actor_id, &upload)
+            .await;
+        if result.is_err() {
+            let _ = self.uploads.discard(&upload).await;
+        }
+        result
+    }
+
+    async fn finalize_for_member(
+        &self,
+        workspace_id: Id,
+        task_id: Id,
+        actor_id: Id,
+        upload: &StagedUpload,
+    ) -> Result<CreatedAttachment, AttachmentRepositoryError> {
+        let finalization = self.uploads.begin_finalization().await;
+        let now = self.database.database_now().await?;
+        let mut transaction = self.database.immediate_transaction().await?;
+        let Flag(allowed) = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM memberships JOIN users ON users.id = memberships.user_id \
+             JOIN tasks ON tasks.workspace_id = memberships.workspace_id AND tasks.id = $1 \
+             JOIN projects ON projects.id = tasks.project_id \
+             JOIN workspaces ON workspaces.id = tasks.workspace_id \
+             WHERE memberships.workspace_id = $2 AND memberships.user_id = $3 \
+             AND memberships.role <> 'guest' \
+             AND users.suspended_at IS NULL AND tasks.deleted_at IS NULL \
+             AND projects.deleted_at IS NULL AND workspaces.deleted_at IS NULL)",
+        )
+        .bind(task_id.to_string())
+        .bind(workspace_id.to_string())
+        .bind(actor_id.to_string())
+        .fetch_one(&mut *transaction)
+        .await?;
+        if !allowed {
+            return Err(AttachmentRepositoryError::NotFound);
+        }
+        let finalized = finalization
+            .finalize_in_transaction(
+                &mut transaction,
+                upload,
+                NewAttachmentReference::new(task_id, None),
+                now,
+            )
+            .await?;
+        transaction.commit().await?;
+        Ok(CreatedAttachment {
+            id: finalized.reference_id,
+            workspace_id,
+            task_id,
+            comment_id: None,
+            owner_id: actor_id,
+            display_name: upload.display_name.clone(),
+            media_type: upload.detected_media_type.clone(),
+            byte_size: upload.size_bytes,
+            created_at: finalized.created_at,
+            deleted: false,
+        })
+    }
+
+    /// The task's own attachments (not comment or inline files) with their content hash, so an
+    /// importer that retries a task can find the files it already attached.
+    pub async fn task_files(
+        &self,
+        workspace_id: Id,
+        task_id: Id,
+    ) -> Result<Vec<TaskFile>, AttachmentRepositoryError> {
+        let rows: Vec<(String, String, i64)> = sqlx::query_as(
+            "SELECT attachment_references.id, attachment_blobs.sha256, attachment_blobs.byte_size \
+             FROM attachment_references \
+             JOIN attachment_blobs ON attachment_blobs.id = attachment_references.blob_id \
+             WHERE attachment_references.workspace_id = $1 AND attachment_references.task_id = $2 \
+             AND attachment_references.comment_id IS NULL AND attachment_references.inline = 0",
+        )
+        .bind(workspace_id.to_string())
+        .bind(task_id.to_string())
+        .fetch_all(self.database.pool())
+        .await?;
+        Ok(rows
+            .into_iter()
+            .filter_map(|(id, sha256, byte_size)| {
+                Some(TaskFile {
+                    id: id.parse().ok()?,
+                    sha256,
+                    byte_size,
+                })
+            })
+            .collect())
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -525,6 +640,8 @@ impl AttachmentRepository {
                 workspace_id,
                 task_id,
                 author_id: session.user.id,
+                author_service_account_id: None,
+                author_service_account_name: None,
                 parent_id: None,
                 body: String::new(),
                 body_json: None,
@@ -578,6 +695,7 @@ where
     sqlx::query_scalar(
         "SELECT COUNT(*) FROM sessions JOIN users ON users.id = sessions.user_id \
          JOIN memberships ON memberships.user_id = users.id AND memberships.workspace_id = $1 \
+         AND memberships.role <> 'guest' \
          JOIN tasks ON tasks.workspace_id = memberships.workspace_id AND tasks.id = $2 \
          JOIN projects ON projects.id = tasks.project_id \
          JOIN workspaces ON workspaces.id = tasks.workspace_id \
@@ -608,18 +726,19 @@ async fn require_comment_editor(
     let actor: Actor = membership::actor(&mut *connection, workspace_id, session.user.id)
         .await?
         .ok_or(AttachmentRepositoryError::NotFound)?;
-    let author_id = sqlx::query_scalar::<_, String>(
-        "SELECT author_id FROM task_comments WHERE id = $1 AND workspace_id = $2 AND task_id = $3",
+    let (author_id, service_account) = sqlx::query_as::<_, (String, Option<String>)>(
+        "SELECT author_id, author_service_account_id FROM task_comments WHERE id = $1 AND workspace_id = $2 AND task_id = $3",
     )
     .bind(comment_id.to_string())
     .bind(workspace_id.to_string())
     .bind(task_id.to_string())
     .fetch_optional(&mut *connection)
     .await?
-    .ok_or(AttachmentRepositoryError::NotFound)?
-    .parse()
-    .map_err(|_| AttachmentRepositoryError::InvalidRecord)?;
-    if actor.can_edit_comment(author_id) {
+    .ok_or(AttachmentRepositoryError::NotFound)?;
+    let author_id: Id = author_id
+        .parse()
+        .map_err(|_| AttachmentRepositoryError::InvalidRecord)?;
+    if actor.can_edit_comment(service_account.is_none().then_some(author_id)) {
         Ok(())
     } else {
         Err(AttachmentRepositoryError::Forbidden)

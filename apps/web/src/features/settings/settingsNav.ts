@@ -1,9 +1,10 @@
 import { useContext, type ComponentType } from 'react'
-import { ArchiveBox, Brush, Card, Chart, ClipboardText, CloudConnection, Cpu, SecurityUser, Driver, Key, Keyboard, Link2, Lock, Login, Notification as Bell, Setting2 as Settings, ShieldTick as ShieldCheck, SmileCircle, Sms as Mail, Sticker, Danger as TriangleAlert, DocumentDownload, User, People as Users, Global, Routing, DirectInbox, Tag, SmsTracking } from 'reicon-react'
+import { ArchiveBox, Brush, Card, Chart, ClipboardText, CloudConnection, Cpu, SecurityUser, Driver, Key, Keyboard, Link2, Lock, Login, Notification as Bell, Setting2 as Settings, ShieldTick as ShieldCheck, SmileCircle, Sms as Mail, Sticker, Danger as TriangleAlert, DocumentDownload, Import, User, People as Users, Global, Routing, DirectInbox, Tag, SmsTracking } from 'reicon-react'
 import type { Permission } from '@orbit/api/generated/types.gen'
 import { RobotIcon } from '@/components/common/icons/RobotIcon'
 import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
 import { useBillingEnabled } from '@/features/workspaces/billing'
+import { guestMayOpen } from '@/app/shell/productNavigation'
 
 export interface SettingsNavItem {
   to: string
@@ -66,12 +67,14 @@ const AREAS: Record<SettingsAreaName, SettingsArea> = {
           { to: '/settings/file-storage', label: 'File storage', icon: CloudConnection },
           { to: '/settings/github', label: 'GitHub', icon: Link2 },
           { to: '/settings/agentic', label: 'Agentic', icon: RobotIcon },
-          { to: '/settings/api-tokens', label: 'API tokens', icon: Key, permission: 'api_tokens.manage' },
+          // every member but a guest may create a personal export token there
+          { to: '/settings/api-tokens', label: 'API tokens', icon: Key, permission: 'workspace.export_personal' },
         ],
       },
       {
         label: 'Advanced',
         items: [
+          { to: '/settings/import', label: 'Import', icon: Import },
           { to: '/settings/export', label: 'Export', icon: DocumentDownload, permission: 'workspace.export' },
           { to: '/settings/danger-zone', label: 'Danger zone', icon: TriangleAlert, permission: 'workspace.delete' },
         ],
@@ -142,6 +145,12 @@ const AREAS: Record<SettingsAreaName, SettingsArea> = {
   },
 }
 
+/**
+ * Where a link opens on a phone. There the area's root (`/settings`) is its menu, so the root page (`end`) has its
+ * own path below it.
+ */
+export const phonePath = (item: SettingsNavItem) => (item.end ? `${item.to}/general` : item.to)
+
 const under = (pathname: string, root: string) => pathname === root || pathname.startsWith(`${root}/`)
 
 /** The settings area a route belongs to; the sidebar shows that area's links instead of the app links. */
@@ -153,14 +162,18 @@ export function settingsAreaOf(pathname: string): SettingsAreaName | null {
 }
 
 /** An area's title, icon and the links this person may open. */
-export function useSettingsArea(name: SettingsAreaName): SettingsArea {
-  const permissions = useContext(WorkspaceContext)?.workspace.permissions ?? []
+/** `profileOnly`: just the Profile page, all that someone with no workspace who is not an operator may open. */
+export function useSettingsArea(name: SettingsAreaName, profileOnly = false): SettingsArea {
+  const workspace = useContext(WorkspaceContext)?.workspace
+  const permissions = workspace?.permissions ?? []
+  // a guest sees only the pages it may open (`guestMayOpen`)
+  const guest = workspace?.role === 'guest'
   const cloud = useBillingEnabled()
   const area = AREAS[name]
   const sections = area.sections
     .map((section) => ({
       ...section,
-      items: section.items.filter((item) => (!item.permission || permissions.includes(item.permission)) && (!item.cloud || cloud)),
+      items: section.items.filter((item) => (!item.permission || permissions.includes(item.permission)) && (!item.cloud || cloud) && (!profileOnly || item.to === '/profile') && (!guest || guestMayOpen(item.to))),
     }))
     .filter((section) => section.items.length > 0)
   return { ...area, sections }

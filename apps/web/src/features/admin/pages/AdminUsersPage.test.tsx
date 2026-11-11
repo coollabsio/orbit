@@ -19,8 +19,11 @@ const USERS: AdminUser[] = [
   { id: 'user-5', email: 'deleted-user-5@deleted.invalid', display_name: 'Deleted user', root: false, admin: false, suspended: true, deleted: true, created_at: '2026-10-04T10:00:00.000Z', last_active_at: null, workspace_count: 0, two_factor: false },
 ]
 
-/** The viewer is the root user unless `viewer` says otherwise; self-hosted with a mail server unless `options` says otherwise. */
-function renderPage(requests: string[] = [], viewer: { id: string; root: boolean } = { id: 'root-1', root: true }, options: Partial<AuthOptions> = {}) {
+/**
+ * The viewer is the root user unless `viewer` says otherwise; self-hosted with a mail server unless `options` says
+ * otherwise. The page lists nobody until a search, so it searches for `search` (every user has an `@`).
+ */
+function renderPage(requests: string[] = [], viewer: { id: string; root: boolean } = { id: 'root-1', root: true }, options: Partial<AuthOptions> = {}, search = '@') {
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const request = input as Request
     const url = new URL(request.url)
@@ -39,14 +42,41 @@ function renderPage(requests: string[] = [], viewer: { id: string; root: boolean
         ? Response.json({ sent_to: 'ada@orbit.test', expires_at: '2026-10-08T10:30:00.000Z' }, { status: 202 })
         : Response.json({ url: 'https://orbit.test/recovery?token=secret', expires_at: '2026-10-08T10:30:00.000Z' }, { status: 201 })
     }
+    if (url.pathname.endsWith('/summary')) return Response.json({ users: 4, active: { daily: 1, weekly: 2, monthly: 3 }, trials: options.billing_enabled ? { ongoing: 3, expired: 1 } : null })
     const q = url.searchParams.get('q')?.toLowerCase() ?? ''
-    return Response.json({ items: USERS.filter((user) => `${user.display_name} ${user.email}`.toLowerCase().includes(q)), next_cursor: null })
+    const items = USERS.filter((user) => `${user.display_name} ${user.email}`.toLowerCase().includes(q))
+    return Response.json({ items, next_cursor: q === 'more' ? 'user-9' : null })
   }) as unknown as typeof fetch
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
   client.setQueryData(queryKeys.currentUser, { id: viewer.id, email: 'viewer@orbit.test', display_name: 'Viewer', installation_admin: true, root: viewer.root, status: { presence: 'online' } })
-  client.setQueryData<AuthOptions>(queryKeys.authOptions, { registration_open: false, email_enabled: true, passkeys_enabled: false, billing_enabled: false, providers: [], provider_registration_open: false, ...options })
-  return render(<QueryClientProvider client={client}><AdminUsersPage /><Toaster /></QueryClientProvider>)
+  client.setQueryData<AuthOptions>(queryKeys.authOptions, { registration_open: false, email_enabled: true, passkeys_enabled: false, billing_enabled: false, providers: [], provider_registration_open: false, version: '0.1.0', ...options })
+  const view = render(<QueryClientProvider client={client}><AdminUsersPage /><Toaster /></QueryClientProvider>)
+  if (search) fireEvent.change(view.getByRole('searchbox', { name: 'Search users' }), { target: { value: search } })
+  return view
 }
+
+test('the page lists nobody until a search and says when more users match', async () => {
+  const requests: string[] = []
+  const view = renderPage(requests, undefined, undefined, '')
+  expect(view.getByText('Search by name or email to find a user.')).toBeTruthy()
+  await view.findByText('4')
+  expect(requests.some((request) => request.startsWith('GET /api/v1/admin/users?'))).toBe(false)
+  fireEvent.change(view.getByRole('searchbox', { name: 'Search users' }), { target: { value: 'more' } })
+  expect(await view.findByText(/Showing the first 20 matches/)).toBeTruthy()
+  expect(requests).toContain('GET /api/v1/admin/users?q=more&limit=20')
+})
+
+test('the overview counts users, and trials only on Orbit Cloud', async () => {
+  const self = renderPage()
+  expect(await self.findByText('4')).toBeTruthy()
+  expect(self.queryByText('Trials ongoing')).toBeNull()
+  self.unmount()
+
+  const cloud = renderPage(undefined, undefined, { billing_enabled: true })
+  const ongoing = (await cloud.findByText('Trials ongoing')).parentElement!
+  expect(ongoing.textContent).toBe('Trials ongoing3')
+  expect(cloud.getByText('Trials expired').parentElement!.textContent).toBe('Trials expired1')
+})
 
 test('the root user can only change their own email and a suspended account can only be reinstated or renamed', async () => {
   const view = renderPage()
@@ -96,7 +126,7 @@ test('the search asks the server for users by name or email', async () => {
   fireEvent.change(search, { target: { value: ' BOB@orbit ' } })
   await waitFor(() => expect(view.queryByText('Ada') === null).toBe(true))
   expect(view.getByText('Bob')).toBeTruthy()
-  expect(requests).toContain('GET /api/v1/admin/users?q=BOB%40orbit')
+  expect(requests).toContain('GET /api/v1/admin/users?q=BOB%40orbit&limit=20')
   fireEvent.change(search, { target: { value: 'nobody' } })
   expect(await view.findByText('No user matches "nobody".')).toBeTruthy()
 })

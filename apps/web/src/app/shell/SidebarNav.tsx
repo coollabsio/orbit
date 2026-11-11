@@ -15,7 +15,9 @@ import { useProjects } from '@/features/tasks/api/projects'
 import { NewProjectModal } from '@/features/tasks/components/NewProjectModal'
 import { savedViewsQueryOptions } from '@/features/views/api/views'
 import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
-import { settingsAreaOf, useSettingsArea, type SettingsAreaName } from '@/features/settings/settingsNav'
+import { useIsGuest } from '@/features/workspaces/permissions'
+import { phonePath, settingsAreaOf, useSettingsArea, type SettingsAreaName } from '@/features/settings/settingsNav'
+import { useIsPhone } from '@/features/chat/pages/useChatViewport'
 import { chatEnabled, docsHidden } from './productNavigation'
 import { hostsPageList } from './sidebarSlot'
 
@@ -30,21 +32,9 @@ const WORKSPACE_LINKS = [
 
 // Coolify tile navigation: the row never fills; the icon sits in a 3D tile and the current row shows a pink tile.
 // The Flat style (Account settings → Appearance) drops the tile: plain rows, and a filled row for the current page.
-const sidebarNavItemVariants = cva(
+const sidebarNavItemClass =
   'group/nav-item relative flex h-9 w-full min-w-0 shrink-0 items-center justify-start gap-2.5 overflow-hidden pr-2.5 pl-1 text-left text-[13px] font-medium whitespace-nowrap text-sidebar-nav transition-colors duration-120 outline-none hover:text-sidebar-nav-active focus-visible:text-sidebar-nav-active data-[active=true]:text-sidebar-nav-active group-data-[collapsed=true]/sidebar-nav:justify-center group-data-[collapsed=true]/sidebar-nav:px-0 '
-    + 'flat:h-8 flat:rounded-md flat:pl-2.5 flat:hover:not-disabled:bg-black/4 flat:data-[active=true]:bg-black/5 dark:flat:hover:not-disabled:bg-white/5 dark:flat:data-[active=true]:bg-white/6',
-  {
-    variants: {
-      size: {
-        default: '',
-        // nested under its parent entry while expanded: a label behind a 1px guide line, with a neutral pill when current;
-        // a plain tile while collapsed
-        sub: 'group-data-[collapsed=false]/sidebar-nav:ml-5 group-data-[collapsed=false]/sidebar-nav:h-7 group-data-[collapsed=false]/sidebar-nav:w-[calc(100%-20px)] group-data-[collapsed=false]/sidebar-nav:rounded-r-md group-data-[collapsed=false]/sidebar-nav:border-l group-data-[collapsed=false]/sidebar-nav:border-black/8 group-data-[collapsed=false]/sidebar-nav:pl-3 group-data-[collapsed=false]/sidebar-nav:data-[active=true]:bg-black/5 dark:group-data-[collapsed=false]/sidebar-nav:border-sidebar-tint/10 dark:group-data-[collapsed=false]/sidebar-nav:data-[active=true]:bg-white/6 group-data-[collapsed=false]/sidebar-nav:[&>[data-slot=sidebar-nav-tile]]:hidden',
-      },
-    },
-    defaultVariants: { size: 'default' },
-  },
-)
+    + 'flat:h-8 flat:rounded-md flat:pl-2.5 flat:hover:not-disabled:bg-black/4 flat:data-[active=true]:bg-black/5 dark:flat:hover:not-disabled:bg-white/5 dark:flat:data-[active=true]:bg-white/6'
 
 const sidebarNavTileVariants = cva(
   // 30px: a 16px icon, 6px padding and a 1px border, resting on a 2px ledge
@@ -93,11 +83,10 @@ function SidebarNavItem({
   badge = 0,
   unread = false,
   tag,
-  size,
   tone,
   className,
   ...props
-}: Omit<LinkProps, 'className' | 'children' | 'title'> & VariantProps<typeof sidebarNavItemVariants> & VariantProps<typeof sidebarNavTileVariants> & {
+}: Omit<LinkProps, 'className' | 'children' | 'title'> & VariantProps<typeof sidebarNavTileVariants> & {
   className?: string
   end?: boolean
   icon: SidebarNavIcon
@@ -121,7 +110,7 @@ function SidebarNavItem({
         data-active={isActive}
         aria-current={isActive ? 'page' : undefined}
         aria-label={name}
-        className={cn(sidebarNavItemVariants({ size }), className)}
+        className={cn(sidebarNavItemClass, className)}
         to={to}
         {...props}
       >
@@ -160,7 +149,7 @@ function SidebarNavComingSoon({ icon: Icon, label }: { icon: SidebarNavIcon; lab
       <Button
         data-slot="sidebar-nav-item"
         variant="ghost"
-        className={cn(sidebarNavItemVariants(), 'rounded-none border-0 hover:bg-transparent hover:text-sidebar-nav disabled:pointer-events-auto disabled:cursor-not-allowed disabled:opacity-[0.48] dark:hover:bg-transparent')}
+        className={cn(sidebarNavItemClass, 'rounded-none border-0 hover:bg-transparent hover:text-sidebar-nav disabled:pointer-events-auto disabled:cursor-not-allowed disabled:opacity-[0.48] dark:hover:bg-transparent')}
         disabled
       >
         <SidebarNavTile icon={Icon} />
@@ -189,7 +178,7 @@ const recentPaths: string[] = []
 let backPressed = false
 
 /** Tasks, its saved views and its trash. */
-const isTasksPath = (pathname: string) => /^\/(tasks|tasks-trash|views)(\/|$)/.test(pathname)
+const isTasksPath = (pathname: string) => /^\/(tasks|tasks-trash|tasks-import|views)(\/|$)/.test(pathname)
 
 /** The area whose links or list replace the app links: a settings area, Tasks, or a page with its own list. */
 function areaOf(pathname: string): string | null {
@@ -219,8 +208,7 @@ function dotIcon(color: string): SidebarNavIcon {
 }
 
 /**
- * The new UI's Tasks area: what used to sit beside Tasks in the app links (Views, the task pages under Personal) and
- * the project menu of the page header, as sidebar links.
+ * The Tasks area: Views, the task pages, the projects and favourite views, as sidebar links.
  */
 function TasksAreaNav({ onNavigate, onBack }: { onNavigate?: () => void; onBack?: () => void }) {
   const collapsed = useContext(SidebarNavCollapsed)
@@ -279,7 +267,7 @@ function TasksAreaNav({ onNavigate, onBack }: { onNavigate?: () => void; onBack?
         </>
       ) : <SidebarSection label="Projects" collapsed={collapsed} />}
       <Tip label={collapsed ? 'New project' : undefined} side="right">
-        <button type="button" data-slot="sidebar-nav-item" className={sidebarNavItemVariants()} aria-label="New project" onClick={() => setCreating(true)}>
+        <button type="button" data-slot="sidebar-nav-item" className={sidebarNavItemClass} aria-label="New project" onClick={() => setCreating(true)}>
           <SidebarNavTile icon={Plus} />
           <SidebarNavLabel>New project</SidebarNavLabel>
         </button>
@@ -349,21 +337,27 @@ function BackToApp({ label, onNavigate, onBack }: { label: string; onNavigate?: 
 
 /** Coolify's content-aware sidebar: inside Settings, Account settings or Admin, the area's links replace the app links. */
 function SettingsAreaNav({ area, onNavigate, onBack }: { area: SettingsAreaName; onNavigate?: () => void; onBack?: () => void }) {
-  const collapsed = useContext(SidebarNavCollapsed)
-  const { title, sections } = useSettingsArea(area)
+  const { title } = useSettingsArea(area)
   return (
     <>
       <BackToApp label={title} onNavigate={onNavigate} onBack={onBack} />
-      {sections.map((section) => (
-        <Fragment key={section.label}>
-          <SidebarSection label={section.label} collapsed={collapsed} />
-          {section.items.map((item) => (
-            <SidebarNavItem key={item.to} to={item.to} end={item.end} icon={item.icon} label={item.label} onClick={onNavigate} />
-          ))}
-        </Fragment>
-      ))}
+      <SettingsAreaLinks area={area} onNavigate={onNavigate} />
     </>
   )
+}
+
+/** A settings area's sections and links. `NoWorkspaceShell` shows them without Back: there is no app to go back to. */
+export function SettingsAreaLinks({ area, profileOnly, onNavigate }: { area: SettingsAreaName; profileOnly?: boolean; onNavigate?: () => void }) {
+  const collapsed = useContext(SidebarNavCollapsed)
+  const phone = useIsPhone()
+  return useSettingsArea(area, profileOnly).sections.map((section) => (
+    <Fragment key={section.label}>
+      <SidebarSection label={section.label} collapsed={collapsed} />
+      {section.items.map((item) => (
+        <SidebarNavItem key={item.to} to={phone ? phonePath(item) : item.to} end={item.end} icon={item.icon} label={item.label} onClick={onNavigate} />
+      ))}
+    </Fragment>
+  ))
 }
 
 /** Grouped sidebar navigation — shared by the desktop sidebar and the mobile drawer. */
@@ -375,7 +369,6 @@ export function SidebarNav({
   chatUnread,
   chatEnabled: chat = chatEnabled,
   isRoot = false,
-  contextual = false,
   backShowsMenu = false,
   pageListRef,
 }: {
@@ -391,15 +384,16 @@ export function SidebarNav({
   chatEnabled?: boolean
   /** The root user (installation administrator) also gets the Admin link. */
   isRoot?: boolean
-  /** The new UI: inside Tasks, Settings, Account settings or Admin the area's links and Back replace the app links. */
-  contextual?: boolean
   /** The mobile drawer: Back shows the main menu without leaving the page. Closing the drawer forgets it. */
   backShowsMenu?: boolean
   /** Set while the open page's own list (docs, chat) shows here instead of the app links: the element it renders in. */
   pageListRef?: (element: HTMLDivElement | null) => void
 }) {
   const location = useLocation()
-  const pageArea: SidebarArea | null = contextual ? (settingsAreaOf(location.pathname) ?? (isTasksPath(location.pathname) ? 'tasks' : null)) : null
+  // inside Tasks, Settings, Account settings or Admin the area's links and Back replace the app links;
+  // a guest has Chat and its account settings only (`GuestWorkspaceGate`)
+  const guest = useIsGuest()
+  const pageArea: SidebarArea | null = settingsAreaOf(location.pathname) ?? (isTasksPath(location.pathname) && !guest ? 'tasks' : null)
   // the area whose Back was pressed in the drawer: the main menu shows until the page moves to another area
   const [mainMenuFor, setMainMenuFor] = useState<SidebarArea | null>(null)
   const area = pageArea && pageArea === mainMenuFor ? null : pageArea
@@ -424,12 +418,7 @@ export function SidebarNav({
   const view = currentParams.get('view')
   const selectedProject = currentParams.get('project')
 
-  const taskViewPath = (nextView?: string) => {
-    const params = new URLSearchParams()
-    if (selectedProject) params.set('project', selectedProject)
-    if (nextView) params.set('view', nextView)
-    return `/tasks${params.size > 0 ? `?${params}` : ''}`
-  }
+  const tasksPath = selectedProject ? `/tasks?${new URLSearchParams({ project: selectedProject })}` : '/tasks'
 
   const paletteKeys = useBindings()['palette.open']
 
@@ -440,15 +429,15 @@ export function SidebarNav({
 
   // Tasks itself is active on its routes only while no task view is picked
   const tasksActive = useMatch({ path: '/tasks', end: false }) !== null && !view
-  const taskViewActive = (name: string) => location.pathname === '/tasks' && view === name
 
   return (
     <SidebarNavCollapsed.Provider value={collapsed}>
       <div data-slot="sidebar-nav" data-collapsed={collapsed} className="group/sidebar-nav flex min-h-0 flex-1 flex-col">
+        {guest ? null : (
         <div className="px-1 pb-3">
         <Tip label={collapsed ? 'Search' : undefined} side="right">
           {collapsed ? (
-            <button type="button" data-slot="sidebar-nav-item" className={sidebarNavItemVariants()} aria-label="Search" onClick={openSearch}>
+            <button type="button" data-slot="sidebar-nav-item" className={sidebarNavItemClass} aria-label="Search" onClick={openSearch}>
               <SidebarNavTile icon={Search} />
             </button>
           ) : (
@@ -468,6 +457,7 @@ export function SidebarNav({
           )}
         </Tip>
         </div>
+        )}
         {/* a new area slides in: forward from the right, back to the app links from the left */}
         <div
           key={content}
@@ -477,48 +467,41 @@ export function SidebarNav({
         >
           {pageList ? (
             <>
-              <BackToApp label={PAGE_LIST_TITLES[areaOf(location.pathname) ?? ''] ?? ''} onNavigate={onNavigate} />
+              {/* a guest has Chat alone: there is no main menu to go back to */}
+              {guest ? null : <BackToApp label={PAGE_LIST_TITLES[areaOf(location.pathname) ?? ''] ?? ''} onNavigate={onNavigate} />}
               {/* the page renders its list here (`InAppSidebar`); it scrolls on its own */}
               <div ref={pageListRef} data-slot="sidebar-page-list" className="-mx-3 mt-2 flex min-h-0 flex-1 flex-col" />
             </>
           ) : (
             <div className="-mx-1 flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto overscroll-contain px-1 pb-2">
-              {area === 'tasks' ? <TasksAreaNav onNavigate={onNavigate} onBack={backShowsMenu ? () => setMainMenuFor(area) : undefined} /> : area ? <SettingsAreaNav area={area} onNavigate={onNavigate} onBack={backShowsMenu ? () => setMainMenuFor(area) : undefined} /> : (
+              {area === 'tasks' ? <TasksAreaNav onNavigate={onNavigate} onBack={backShowsMenu ? () => setMainMenuFor(area) : undefined} /> : area ? <SettingsAreaNav area={area} onNavigate={onNavigate} onBack={backShowsMenu ? () => setMainMenuFor(area) : undefined} /> : guest ? (
+                <>
+                  <SidebarNavItem to="/chat" icon={MessageSquare} label="Chat" badge={chatBadge} unread={chatUnread} onClick={onNavigate} />
+                  {isRoot ? (
+                    <>
+                      <div className="flex-1" aria-hidden="true" />
+                      <SidebarNavItem to="/admin" icon={SecurityUser} tone="neutral" label="Admin" onClick={onNavigate} />
+                    </>
+                  ) : null}
+                </>
+              ) : (
                 <>
                   {WORKSPACE_LINKS.map((link) => link.enabled || (link.to === '/chat' && chat) ? (
-                    <Fragment key={link.to}>
-                      <SidebarNavItem
-                        to={link.to === '/tasks' ? taskViewPath() : link.to}
-                        active={link.to === '/tasks' ? tasksActive : undefined}
-                        end={link.to === '/'}
-                        icon={link.icon}
-                        label={link.label}
-                        tag={link.tag}
-                        badge={link.to === '/chat' ? chatBadge : link.to === '/mail' ? mailBadge : undefined}
-                        unread={link.to === '/chat' ? chatUnread : undefined}
-                        onClick={onNavigate}
-                      />
-                      {/* saved views belong to Tasks, so they nest under it instead of sitting beside the other apps;
-                          always shown so the rows below never move when the route changes */}
-                      {link.to === '/tasks' && !contextual ? (
-                        <>
-                          <SidebarNavItem to="/views" end size="sub" icon={Layer} label="Views" aria-label="Task views" onClick={onNavigate} />
-                          <SidebarNavItem to="/tasks-trash" size="sub" icon={Trash} label="Trash" aria-label="Task trash" onClick={onNavigate} />
-                        </>
-                      ) : null}
-                    </Fragment>
+                    <SidebarNavItem
+                      key={link.to}
+                      to={link.to === '/tasks' ? tasksPath : link.to}
+                      active={link.to === '/tasks' ? tasksActive : undefined}
+                      end={link.to === '/'}
+                      icon={link.icon}
+                      label={link.label}
+                      tag={link.tag}
+                      badge={link.to === '/chat' ? chatBadge : link.to === '/mail' ? mailBadge : undefined}
+                      unread={link.to === '/chat' ? chatUnread : undefined}
+                      onClick={onNavigate}
+                    />
                   ) : (
                     <SidebarNavComingSoon key={link.to} icon={link.icon} label={link.label} />
                   ))}
-                  {/* the new UI keeps these in the Tasks area */}
-                  {contextual ? null : (
-                    <>
-                      <SidebarSection label="Personal" collapsed={collapsed} />
-                      {TASK_PRESETS.map((preset) => (
-                        <SidebarNavItem key={preset.view} to={taskViewPath(preset.view)} active={taskViewActive(preset.view)} icon={preset.icon} label={preset.label} onClick={onNavigate} />
-                      ))}
-                    </>
-                  )}
                   <SidebarSection label="Manage" collapsed={collapsed} />
                   <SidebarNavItem to="/settings" icon={Settings} label="Settings" onClick={onNavigate} />
                   {isRoot ? (

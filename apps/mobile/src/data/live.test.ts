@@ -26,6 +26,7 @@ test('a workspace event refreshes the workspace data; a resync also the workspac
     ['pages', 'w'],
     ['page', 'w'],
     ['teamspaces', 'w'],
+    ['database', 'w'],
   ])
   const resync = parseWorkspaceEvent('{"version":1,"kind":"resync_required","sequence":"0"}')
   expect(workspaceEventKeys(resync!, 'w').at(-1)).toEqual(['workspaces'])

@@ -1,6 +1,6 @@
 import { afterEach, expect, mock, spyOn, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, waitFor } from '@testing-library/react'
+import { render, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router'
 import type { BillingView, PlanView } from '@orbit/api/generated/types.gen'
@@ -78,16 +78,21 @@ test('the owner of a read-only workspace picks a plan and goes to Stripe Checkou
   expect(view.getByText(/^Each workspace has its own plan\. Without an active plan, the workspace is read-only/)).toBeTruthy()
   expect(view.getByText('Not subscribed')).toBeTruthy()
   expect(view.queryAllByRole('button', { name: 'Manage billing' })).toHaveLength(0)
+  // Monthly and annual prices show side by side, with no switch between them.
+  expect(view.getAllByRole('heading', { level: 4 }).map((heading) => heading.textContent)).toEqual([
+    'Team · Monthly',
+    'Team · AnnualSave 16%',
+    'Business · Monthly',
+    'Business · AnnualSave 16%',
+  ])
   expect(view.getByText('$10')).toBeTruthy()
   expect(view.getByText('$29')).toBeTruthy()
-  expect(view.getAllByText('per workspace / month')).toHaveLength(2)
-
-  await userEvent.click(view.getByRole('button', { name: 'Annual · save 16%' }))
   expect(view.getByText('$100')).toBeTruthy()
   expect(view.getByText('$290')).toBeTruthy()
+  expect(view.getAllByText('per workspace / month')).toHaveLength(2)
   expect(view.getByText('$8.33 / month, billed yearly')).toBeTruthy()
-  expect(view.queryAllByText('$10')).toHaveLength(0)
-  await userEvent.click(view.getByRole('button', { name: 'Choose Team' }))
+  const teamAnnual = view.getByText('$100').closest('[data-slot="plan-card"]') as HTMLElement
+  await userEvent.click(within(teamAnnual).getByRole('button', { name: 'Choose annual' }))
 
   await waitFor(() => expect(assign).toHaveBeenCalledWith('https://checkout.stripe.test/cs'))
   const checkout = requests.find((request) => request.method === 'POST')!
@@ -114,7 +119,7 @@ test('the owner of a trial workspace sees when it ends and its usage, and can ch
   expect(view.getByText(/A new workspace starts with a 14-day trial\. Without an active plan after it/)).toBeTruthy()
   expect(view.getByText('Sun, Mar 17, 2030')).toBeTruthy()
   expect(view.getAllByRole('listitem').map((item) => item.textContent)).toEqual(['12 of 50 tasks', '3 of 20 pages', '1 of 3 members'])
-  expect(view.getAllByRole('button').map((button) => button.textContent)).toEqual(['Monthly', 'Annual · save 16%', 'Choose Team', 'Choose Business'])
+  expect(view.getAllByRole('button').map((button) => button.textContent)).toEqual(['Choose monthly', 'Choose annual', 'Choose monthly', 'Choose annual'])
 })
 
 test('a subscribed owner sees the renewal date and opens the billing portal', async () => {
@@ -126,7 +131,7 @@ test('a subscribed owner sees the renewal date and opens the billing portal', as
   expect(view.getByText('Team · Monthly')).toBeTruthy()
   expect(view.getByText('Active')).toBeTruthy()
   expect(view.getByText(/^Renews on /)).toBeTruthy()
-  expect(view.queryAllByRole('button', { name: 'Choose Team' })).toHaveLength(0)
+  expect(view.queryByText('Choose a plan')).toBeNull()
   await userEvent.click(view.getByRole('button', { name: 'Manage billing' }))
   await waitFor(() => expect(assign).toHaveBeenCalledWith('https://billing.stripe.test/p'))
   assign.mockRestore()
@@ -149,7 +154,7 @@ test('members see the prices but cannot choose a plan', async () => {
 
   await waitFor(() => expect(view.getByText('Only the workspace owner can choose a plan.')).toBeTruthy())
   expect(view.getByText('$10')).toBeTruthy()
-  expect(view.getAllByRole('button').map((button) => button.textContent)).toEqual(['Monthly', 'Annual · save 16%'])
+  expect(view.queryAllByRole('button')).toHaveLength(0)
 })
 
 test('without prices from Stripe each plan offers its name and a button', async () => {

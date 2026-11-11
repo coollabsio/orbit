@@ -3,16 +3,41 @@ name: Container image
 on:
   push:
     branches: [main]
+  # A published GitHub release also publishes the image as `<version>`, `<major>.<minor>` and `latest`.
+  release:
+    types: [published]
 
 concurrency:
-  group: ${{ github.workflow }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'push' }}
 
 permissions:
   contents: read
 
 jobs:
+  # `[workspace.package] version` in Cargo.toml is the Orbit version. A release tag must be `v<version>`.
+  version:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read version from Cargo.toml
+        id: version
+        env:
+          EVENT: ${{ github.event_name }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          version=$(bash scripts/version.sh)
+          echo "Orbit version: $version"
+          if [ "$EVENT" = release ] && [ "$TAG" != "v$version" ]; then
+            echo "::error::Release tag '$TAG' does not match Cargo.toml version '$version'. Use tag 'v$version', or change the version with 'just version <new>' first."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
   image:
+    needs: version
     strategy:
       fail-fast: false
       matrix:
@@ -54,6 +79,9 @@ jobs:
         with:
           context: .
           build-args: ORBIT_BUILD_REVISION=${{ github.sha }}
+          labels: |
+            org.opencontainers.image.version=${{ needs.version.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
           tags: ${{ steps.image.outputs.name }}
           load: true
           cache-from: type=gha,scope=orbit-${{ matrix.architecture }}
@@ -72,9 +100,57 @@ jobs:
         run: |
           image="ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_SHA::7}-${ARCHITECTURE}"
           docker push "$image"
+      # A release also gets the smoke-tested executable, so people can run Orbit without Docker.
+      - name: Extract release binary
+        if: github.event_name == 'release'
+        env:
+          ARCHITECTURE: ${{ matrix.architecture }}
+          UNAME: ${{ matrix.uname }}
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_SHA::7}-${ARCHITECTURE}"
+          binary="orbit-linux-$UNAME"
+          container=$(docker create "$image")
+          docker cp "$container:/orbit" "$binary"
+          docker rm -v "$container"
+          file "$binary" | tee file.txt
+          grep -E 'static(-pie|ally) linked' file.txt
+          grep ', stripped' file.txt
+          "./$binary" --help > /dev/null
+          mkdir package
+          mv "$binary" package/orbit
+          XZ_OPT=-9 tar -C package -cJf "$binary.tar.xz" orbit
+      - name: Keep release binary for the release job
+        if: github.event_name == 'release'
+        uses: actions/upload-artifact@v7
+        with:
+          name: orbit-linux-${{ matrix.uname }}
+          path: orbit-linux-${{ matrix.uname }}.tar.xz
+          if-no-files-found: error
+          retention-days: 1
+
+  release-binaries:
+    if: github.event_name == 'release'
+    needs: [version, image]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: orbit-linux-*
+          merge-multiple: true
+      - name: Attach binaries and checksums to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          files=(orbit-linux-x86_64.tar.xz orbit-linux-aarch64.tar.xz)
+          sha256sum "${files[@]}" | tee SHA256SUMS
+          # --clobber replaces the files when the workflow runs again for the same release.
+          gh release upload "$TAG" "${files[@]}" SHA256SUMS --clobber --repo "$GITHUB_REPOSITORY"
 
   publish:
-    needs: image
+    needs: [version, image]
     runs-on: ubuntu-24.04
     permissions:
       packages: write
@@ -87,18 +163,30 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - uses: docker/setup-buildx-action@v3
       - name: Publish multi-platform manifest
+        env:
+          EVENT: ${{ github.event_name }}
+          PRERELEASE: ${{ github.event.release.prerelease }}
+          VERSION: ${{ needs.version.outputs.version }}
         run: |
           image="ghcr.io/${GITHUB_REPOSITORY,,}"
           tag=${GITHUB_SHA::7}
-          docker buildx imagetools create \
-            --tag "$image:$tag" \
-            --tag "$image:main" \
+          if [ "$EVENT" = release ]; then
+            tags=(--tag "$image:$VERSION")
+            # a pre-release (for example 0.2.0-rc.1) gets only its exact tag
+            if [ "$PRERELEASE" != true ]; then
+              tags+=(--tag "$image:${VERSION%.*}" --tag "$image:latest")
+            fi
+          else
+            tags=(--tag "$image:$tag" --tag "$image:main")
+          fi
+          docker buildx imagetools create "${tags[@]}" \
             "$image:$tag-amd64" \
             "$image:$tag-arm64"
           docker buildx imagetools inspect "$image:$tag" | tee manifest.txt
           grep -E 'Platform:[[:space:]]+linux/amd64' manifest.txt
           grep -E 'Platform:[[:space:]]+linux/arm64' manifest.txt
       - name: Deploy to Coolify Cloud
+        if: github.event_name == 'push'
         env:
           COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
           COOLIFY_WEBHOOK: ${{ secrets.COOLIFY_WEBHOOK }}

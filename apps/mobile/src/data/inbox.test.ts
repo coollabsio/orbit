@@ -32,3 +32,13 @@ test('mentions are every mention kind, not assignments', () => {
   expect(isMention(notification({ kind: 'page_mentioned' }))).toBe(true)
   expect(isMention(notification({ kind: 'task_assigned' }))).toBe(false)
 })
+
+test('an import notice opens its import screen and names how it ended', () => {
+  const done = notification({ kind: 'import_finished', import_source: 'linear', import_id: 'imp-1', import_status: 'completed' })
+  expect(notificationTarget(done)).toBe('/settings/import/linear/imp-1')
+  expect(notificationCopy(done, undefined, 'Me')).toEqual({ title: 'Linear import complete', body: 'Open the import to see what was imported.' })
+  const failed = notification({ kind: 'import_finished', import_source: 'obsidian', import_id: 'imp-2', import_status: 'failed' })
+  expect(notificationTarget(failed)).toBe('/settings/import/obsidian/imp-2')
+  expect(notificationCopy(failed, undefined, 'Me').title).toBe('Obsidian import failed')
+  expect(isMention(done)).toBe(false)
+})

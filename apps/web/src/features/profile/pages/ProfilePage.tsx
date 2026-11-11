@@ -1,8 +1,9 @@
-import { useRef, useState } from 'react'
+import { useContext, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { ApiProblem } from '@orbit/api/problem'
 import { UnsavedBar } from '@/components/common/UnsavedBar'
-import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
+import { InfoTip } from '@/components/common/InfoTip'
+import { Field, FieldDescription, FieldError, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { PasswordInput } from '@/components/ui/password-input'
@@ -11,6 +12,8 @@ import { useAuthOptions, useChangePassword, useConnectedAccounts, useCurrentUser
 import { PROVIDER_NAMES } from '@/features/auth/providerSignIn'
 import { ConfirmWithProvider } from '@/features/auth/components/ConfirmWithProvider'
 import { userColor } from '@/features/workspaces/api'
+import { useIsInstallationAdmin } from '@/features/workspaces/permissions'
+import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import { avatarImage } from '@/features/profile/avatarImage'
 import { TimeZonePicker } from '@/features/profile/components/TimeZonePicker'
@@ -77,7 +80,7 @@ function AvatarField() {
         size={64}
       />
       <div className="flex min-w-0 flex-col gap-2">
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button type="button" variant="outline" disabled={setAvatar.isPending} onClick={() => inputRef.current?.click()}>
             {setAvatar.isPending ? 'Saving…' : me?.avatar_url ? 'Change picture' : 'Upload picture'}
           </Button>
@@ -86,12 +89,9 @@ function AvatarField() {
               Remove
             </Button>
           ) : null}
+          <InfoTip text="Cropped to a square. People in your workspaces see it." />
         </div>
-        {error ? (
-          <p className="text-xs text-destructive" role="alert">{error}</p>
-        ) : (
-          <p className="text-xs text-muted-foreground">Cropped to a square. People in your workspaces see it.</p>
-        )}
+        {error ? <p className="text-xs text-destructive" role="alert">{error}</p> : null}
       </div>
       <input
         ref={inputRef}
@@ -112,10 +112,14 @@ function AvatarField() {
 function SignInMethods({ hasPassword }: { hasPassword: boolean }) {
   const connected = useConnectedAccounts()
   const methods = [...(hasPassword ? ['Password'] : []), ...(connected.data ?? []).map((account) => PROVIDER_NAMES[account.provider])]
+  // with no workspace, only an operator can open Security (`WorkspaceProvider`)
+  const inWorkspace = useContext(WorkspaceContext) !== null
+  const isOperator = useIsInstallationAdmin()
+  const canManage = inWorkspace || isOperator
   if (methods.length === 0) return null
   return (
     <FieldDescription>
-      Sign-in methods: {methods.join(' · ')}. <Link to="/profile/security" className="font-medium text-foreground underline-offset-4 hover:underline">Manage</Link>
+      Sign-in methods: {methods.join(' · ')}.{canManage ? <>{' '}<Link to="/profile/security" className="font-medium text-foreground underline-offset-4 hover:underline">Manage</Link></> : null}
     </FieldDescription>
   )
 }
@@ -194,7 +198,6 @@ export function ProfilePage() {
             <form ref={formRef} onSubmit={saveDetails}>
               <SettingsCard
                 title="Profile details"
-                description="Your picture, name and what the people in your workspaces see of you."
               >
                 <AvatarField />
                 <FieldGrid className="mt-4">
@@ -229,7 +232,7 @@ export function ProfilePage() {
                     <Input id="profile-pronouns" maxLength={PROFILE_LIMITS.pronouns} placeholder="she/her" value={form.pronouns} onChange={(e) => set({ pronouns: e.target.value })} />
                   </Field>
                   <Field data-invalid={phoneInvalid || undefined}>
-                    <FieldLabel htmlFor="profile-phone">Phone number</FieldLabel>
+                    <FieldLabel htmlFor="profile-phone">Phone number <InfoTip text="The people in your workspaces can see it." /></FieldLabel>
                     <Input
                       id="profile-phone"
                       type="tel"
@@ -240,9 +243,7 @@ export function ProfilePage() {
                       value={form.phone}
                       onChange={(e) => set({ phone: e.target.value })}
                     />
-                    <FieldDescription>
-                      {phoneInvalid ? 'Use digits, spaces and + - ( ) . only.' : 'The people in your workspaces can see it.'}
-                    </FieldDescription>
+                    {phoneInvalid ? <FieldError>Use digits, spaces and + - ( ) . only.</FieldError> : null}
                   </Field>
                   <Field>
                     <FieldLabel htmlFor="profile-timezone">Time zone</FieldLabel>

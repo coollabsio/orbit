@@ -1,4 +1,4 @@
-import { ArrowRight, DocumentText } from 'reicon-react'
+import { ArrowRight, DocumentText, Grid } from 'reicon-react'
 import { cn } from 'cn'
 import { Emoji } from '@/components/common/Emoji'
 import { pageBlockState, usePageEditorContext } from './pageEditorContext'
@@ -33,7 +33,7 @@ export function PageBlockCard({ pageId }: { pageId: string }) {
       }}
     >
       <span className="flex size-[18px] shrink-0 items-center justify-center" aria-hidden>
-        {icon ? <Emoji value={icon} /> : <DocumentText className="size-[18px]" />}
+        {icon ? <Emoji value={icon} /> : state.kind !== 'missing' && state.database ? <Grid className="size-[18px]" /> : <DocumentText className="size-[18px]" />}
       </span>
       <span
         className={cn(

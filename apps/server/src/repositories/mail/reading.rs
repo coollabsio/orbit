@@ -317,6 +317,14 @@ pub(super) async fn reader(
             role: WorkspaceRole::parse(&role).ok_or(MailError::NotFound)?,
         },
     })
+    // A guest sees only chat.
+    .and_then(|reader| {
+        if reader.actor.is_guest() {
+            Err(MailError::NotFound)
+        } else {
+            Ok(reader)
+        }
+    })
 }
 
 /// `NotFound` unless the membership reads the mailbox of the workspace.

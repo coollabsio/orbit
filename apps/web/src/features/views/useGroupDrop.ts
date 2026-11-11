@@ -29,7 +29,7 @@ type DropZone = {
 }
 
 /** Slot among the zone's items (not counting the dragged one) at the pointer, by item midpoints. */
-function indexAt(zone: HTMLElement, itemSelector: string, clientY: number) {
+export function indexAt(zone: HTMLElement, itemSelector: string, clientY: number) {
   const items = Array.from(zone.querySelectorAll<HTMLElement>(`${itemSelector}:not([data-dragging])`))
   const below = items.findIndex((item) => {
     const rect = item.getBoundingClientRect()

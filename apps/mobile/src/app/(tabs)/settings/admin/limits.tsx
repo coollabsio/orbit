@@ -11,8 +11,8 @@ import { Button, Input } from '../../../../ui'
 export default function AdminLimitsScreen() {
   const settings = useInstanceSettings()
   return (
-    <AdminShell refreshing={settings.isRefetching} onRefresh={() => void settings.refetch()}>
-      {settings.isPending ? <SettingsCard title="Limits"><Note>Loading settings…</Note></SettingsCard> : null}
+    <AdminShell onRefresh={() => settings.refetch()}>
+      {settings.isPending ? <SettingsCard title="Limits"><Note loading>Loading settings…</Note></SettingsCard> : null}
       {settings.isError ? (
         <SettingsCard title="Limits">
           <View className="flex-row items-center gap-2">
@@ -46,19 +46,19 @@ function LimitsCard({ limits }: { limits: LimitsView }) {
       <View className="gap-4">
         <Input
           label="Workspaces per account"
+          help="Workspaces one account may own, not counting the trash. Admins have no limit."
           keyboardType="number-pad"
           placeholder="No limit"
           value={draft.workspaces}
           onChangeText={(workspaces) => edit({ workspaces })}
-          description="Workspaces one account may own, not counting the trash. Admins have no limit."
         />
         <Input
           label="Storage per workspace (GB)"
+          help="Files, emoji and stickers of one workspace, each file counted once."
           keyboardType="decimal-pad"
           placeholder="No limit"
           value={draft.storageGb}
           onChangeText={(storageGb) => edit({ storageGb })}
-          description="Files, emoji and stickers of one workspace, each file counted once."
         />
         {invalid ? <Note error>Enter a number, or leave the field empty for no limit.</Note> : null}
         {save.isError ? <Note error>{errorMessage(save.error)}</Note> : null}

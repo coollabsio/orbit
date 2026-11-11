@@ -3,9 +3,10 @@
 //! Every query reads one table for the whole workspace and groups the rows in memory (text only);
 //! file bytes stream from the blob store into the archive, which is written to a file on disk.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::io::Write;
 use std::path::PathBuf;
+use std::sync::Mutex;
 
 use orbit_platform::{BlobStore, BlobStoreError, Database, Id, Row, TimestampMillis};
 use serde_json::{Map, Value, json};
@@ -15,7 +16,7 @@ use tokio_util::sync::CancellationToken;
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipWriter};
 
-use super::ExportError;
+use super::{ExportError, ExportMode};
 use crate::export::names::{
     NameSet, STEM_MAX_CHARS, sanitize_segment, split_file_name, with_extension,
 };
@@ -26,23 +27,43 @@ pub(super) const README: &str = "\
 Orbit workspace export
 ======================
 
-All JSON field names are snake_case and stable. Times are RFC 3339 in UTC. People appear as
-{\"id\", \"name\"}; their email and role are in workspace.json. Chat and comment text keeps
-Orbit's mention tokens (<@user-id>, <#channel-id>, <!channel>, <!here>).
+All JSON field names are snake_case and stable. Times are RFC 3339 in UTC. Every record has
+the \"id\" it has in Orbit, so another Orbit instance can import the archive more than once
+without duplicates. People appear as {\"id\", \"name\"}; their email and role are in
+workspace.json. Chat and comment text keeps Orbit's mention tokens (<@user-id>,
+<#channel-id>, <!channel>, <!here>).
+
+manifest.json
+    What the archive is: {\"format\": \"orbit-workspace-export\", \"version\": 1, \"mode\",
+    \"orbit_version\", \"exported_at\", \"workspace_id\", \"workspace_name\",
+    \"exported_by\": {\"user_id\", \"email\"}}. \"mode\" is \"full\" (the workspace as the
+    member who started the export sees it) or \"personal\" (only that member's private pages,
+    the private channels and direct messages they are in, and the people who appear in them;
+    no tasks, projects, teamspaces or public channels).
 
 workspace.json
-    The workspace (name, created_at, exported_at, exported_by), its members (name, email,
-    role, joined_at), teamspaces, and projects with their statuses (workflow) and labels.
+    The workspace (id, name, created_at, exported_at, exported_by), its members (id, name,
+    email, role, joined_at), teamspaces, and projects with their statuses (workflow) and
+    labels. In a personal export, members are only the people who appear in the archive.
 
 tasks/<KEY>-<number>.json
     One file per task, also tasks in the trash (\"deleted\": true) and tasks of deleted
     projects: title, Markdown description, status, priority, dates, creator, assignees,
-    labels, relations, comments, attachments and activity (the task's audit events).
+    labels, relations, comments, attachments and activity (the task's audit events). A
+    comment written with a service account's API token has \"author_service_account\"
+    {\"id\", \"name\"} (else null); its \"author\" is the member the write was checked as.
 
 pages/<Teamspace>/<Page>.md, pages/Private/<Page>.md
     Every live page as Markdown, with its sub-pages in the folder <Page>/ next to it and its
     files in <Page>/assets/. Links between exported pages are relative. Private pages are
     only those of the member who started the export.
+pages/.../<Page>.blocknote.json
+    The same page without loss, next to its .md file: id, parent_id, teamspace_id (null for
+    a private page), title, icon, cover_url, position, created_by, created_at, updated_at,
+    content (Orbit's BlockNote document) and files. A file link in the content is
+    /api/v1/workspaces/<workspace-id>/pages/<page-id>/files/<file-id>; \"files\" lists those
+    files with their id, blob_id, name, media_type, size_bytes and path (the file in
+    <Page>/assets/, or null when it could not be read from storage).
 pages/comments.json
     The comment threads of the exported pages.
 
@@ -51,9 +72,10 @@ chat/<channel>.json, chat/DM - <names>.json
     thread replies (\"replies\"). Public channels are all included. Private channels and
     direct messages are included only if the member who started the export is in them.
 
-files/<file-id>/<name>
-    The files attached to tasks, comments and chat messages, once each. The JSON files
-    refer to them by \"path\". A file that was deleted from storage has \"path\": null.
+files/<blob-id>/<name>
+    The files attached to tasks, comments and chat messages, once per stored blob. The JSON
+    files refer to them by \"path\" and \"blob_id\". A file that was deleted from storage
+    has \"path\": null.
 
 Not included: trashed pages, page version history, notifications, saved views, API tokens,
 integrations, custom emoji and stickers, and other members' private pages.
@@ -65,6 +87,7 @@ pub(super) struct Source<'a> {
     pub blobs: &'a dyn BlobStore,
     pub workspace_id: Id,
     pub actor_id: Id,
+    pub mode: ExportMode,
     pub origin: &'a str,
     pub now: TimestampMillis,
     pub cancel: &'a CancellationToken,
@@ -233,14 +256,40 @@ fn optional_time(millis: Option<i64>) -> Value {
     millis.map_or(Value::Null, time)
 }
 
-/// `{"id", "name"}` of a user id.
-struct People(HashMap<String, String>);
+/// `{"id", "name"}` of a user id. It remembers who it named, for the members of a personal
+/// export.
+struct People {
+    names: HashMap<String, String>,
+    named: Mutex<BTreeSet<String>>,
+}
 
 impl People {
     fn of(&self, id: Option<String>) -> Value {
         match id {
-            Some(id) => json!({"name": self.0.get(&id), "id": id}),
+            Some(id) => {
+                let person = json!({"name": self.names.get(&id), "id": id});
+                self.named
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .insert(id);
+                person
+            }
             None => Value::Null,
+        }
+    }
+
+    /// Remembers the members that the `<@user-id>` tokens in `text` mention.
+    fn mentioned_in(&self, text: &str) {
+        let mut named = self
+            .named
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        for token in text.split("<@").skip(1) {
+            if let Some((id, _)) = token.split_once('>')
+                && self.names.contains_key(id)
+            {
+                named.insert(id.to_owned());
+            }
         }
     }
 }
@@ -252,8 +301,8 @@ fn push(map: &mut HashMap<String, Vec<Value>>, key: String, value: Value) {
 async fn contents(source: &Source<'_>, zip: &ZipSink) -> Result<(), ExportError> {
     let pool = source.database.pool();
     let workspace = source.workspace_id.to_string();
-    let people = People(
-        sqlx::query(
+    let people = People {
+        names: sqlx::query(
             "SELECT id, display_name FROM users WHERE id IN ( \
              SELECT user_id FROM memberships WHERE workspace_id = $1 \
              UNION SELECT creator_id FROM tasks WHERE workspace_id = $1 \
@@ -269,12 +318,16 @@ async fn contents(source: &Source<'_>, zip: &ZipSink) -> Result<(), ExportError>
         .into_iter()
         .map(|row| (row.get("id"), row.get("display_name")))
         .collect(),
-    );
+        named: Mutex::default(),
+    };
     let mut files = Files::default();
-    workspace_json(source, zip, &people).await?;
-    tasks(source, zip, &people, &mut files).await?;
+    if source.mode == ExportMode::Full {
+        tasks(source, zip, &people, &mut files).await?;
+    }
     pages(source, zip, &people).await?;
     chat(source, zip, &people, &mut files).await?;
+    // Last, so a personal export lists only the people that its content named.
+    workspace_json(source, zip, &people).await?;
 
     let mut missing = Vec::new();
     for (path, storage_key, compress) in files.order {
@@ -313,6 +366,32 @@ async fn workspace_json(
         .bind(&workspace)
         .fetch_one(pool)
         .await?;
+    let name: String = row.get("name");
+    let exported_by = people.of(Some(source.actor_id.to_string()));
+    let email: Option<String> = sqlx::query_scalar("SELECT email FROM users WHERE id = $1")
+        .bind(source.actor_id.to_string())
+        .fetch_optional(pool)
+        .await?;
+    zip.json(
+        "manifest.json".to_owned(),
+        &json!({
+            "format": "orbit-workspace-export",
+            "version": 1,
+            "mode": source.mode,
+            "orbit_version": env!("CARGO_PKG_VERSION"),
+            "exported_at": json!(source.now),
+            "workspace_id": workspace,
+            "workspace_name": name,
+            "exported_by": {"user_id": source.actor_id.to_string(), "email": email},
+        }),
+    )
+    .await?;
+    let personal = source.mode == ExportMode::Personal;
+    let named = people
+        .named
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone();
     let members: Vec<Value> = sqlx::query(
         "SELECT users.id, users.display_name, users.email, memberships.role, memberships.created_at \
          FROM memberships JOIN users ON users.id = memberships.user_id \
@@ -322,6 +401,7 @@ async fn workspace_json(
     .fetch_all(pool)
     .await?
     .into_iter()
+    .filter(|row| !personal || named.contains(&row.get::<String, _>("id")))
     .map(|row| {
         json!({
             "id": row.get::<String, _>("id"),
@@ -332,6 +412,31 @@ async fn workspace_json(
         })
     })
     .collect();
+    let (teamspaces, projects) = if personal {
+        (Vec::new(), Vec::new())
+    } else {
+        structure(source).await?
+    };
+    zip.json(
+        "workspace.json".to_owned(),
+        &json!({
+            "id": workspace,
+            "name": name,
+            "created_at": time(row.get("created_at")),
+            "exported_at": json!(source.now),
+            "exported_by": exported_by,
+            "members": members,
+            "teamspaces": teamspaces,
+            "projects": projects,
+        }),
+    )
+    .await
+}
+
+/// The teamspaces, and the projects with their statuses and labels.
+async fn structure(source: &Source<'_>) -> Result<(Vec<Value>, Vec<Value>), ExportError> {
+    let pool = source.database.pool();
+    let workspace = source.workspace_id.to_string();
     let teamspaces: Vec<Value> = sqlx::query(
         "SELECT id, name, icon, created_at FROM teamspaces WHERE workspace_id = $1 \
          ORDER BY position, id",
@@ -410,20 +515,7 @@ async fn workspace_json(
         })
     })
     .collect();
-    zip.json(
-        "workspace.json".to_owned(),
-        &json!({
-            "id": workspace,
-            "name": row.get::<String, _>("name"),
-            "created_at": time(row.get("created_at")),
-            "exported_at": json!(source.now),
-            "exported_by": people.of(Some(source.actor_id.to_string())),
-            "members": members,
-            "teamspaces": teamspaces,
-            "projects": projects,
-        }),
-    )
-    .await
+    Ok((teamspaces, projects))
 }
 
 async fn tasks(
@@ -495,6 +587,7 @@ async fn tasks(
         let media_type: String = row.get("media_type");
         let attachment = json!({
             "id": row.get::<String, _>("id"),
+            "blob_id": row.get::<String, _>("blob_id"),
             "name": name,
             "media_type": media_type,
             "size_bytes": row.get::<i64, _>("byte_size"),
@@ -509,18 +602,28 @@ async fn tasks(
     }
     let mut comments = HashMap::new();
     for row in fetch(
-        "SELECT id, task_id, parent_id, author_id, body, created_at, updated_at FROM task_comments \
-         WHERE workspace_id = $1 ORDER BY created_at, id",
+        "SELECT task_comments.id, task_comments.task_id, task_comments.parent_id, \
+         task_comments.author_id, task_comments.author_service_account_id, \
+         service_accounts.name AS author_service_account_name, task_comments.body, \
+         task_comments.created_at, task_comments.updated_at FROM task_comments \
+         LEFT JOIN service_accounts ON service_accounts.id = task_comments.author_service_account_id \
+         WHERE task_comments.workspace_id = $1 ORDER BY task_comments.created_at, task_comments.id",
     )
     .await?
     {
         let id: String = row.get("id");
+        let service_account = row
+            .get::<Option<String>, _>("author_service_account_id")
+            .map(|account| {
+                json!({"id": account, "name": row.get::<Option<String>, _>("author_service_account_name")})
+            });
         push(
             &mut comments,
             row.get("task_id"),
             json!({
                 "parent_id": row.get::<Option<String>, _>("parent_id"),
                 "author": people.of(row.get("author_id")),
+                "author_service_account": service_account,
                 "body": row.get::<String, _>("body"),
                 "created_at": time(row.get("created_at")),
                 "updated_at": time(row.get("updated_at")),
@@ -615,7 +718,12 @@ fn page_error(error: PageExportError) -> ExportError {
 
 async fn pages(source: &Source<'_>, zip: &ZipSink, people: &People) -> Result<(), ExportError> {
     let pages = PageExportRepository::new(source.database.clone())
-        .load_workspace(source.workspace_id, source.actor_id, "pages")
+        .load_workspace(
+            source.workspace_id,
+            source.actor_id,
+            "pages",
+            source.mode == ExportMode::Personal,
+        )
         .await
         .map_err(page_error)?;
     if pages.pages.is_empty() {
@@ -645,6 +753,7 @@ async fn pages(source: &Source<'_>, zip: &ZipSink, people: &People) -> Result<()
             )
         })
         .collect();
+    let mut page_files: HashMap<Id, Vec<Value>> = HashMap::new();
     for entry in plan.entries {
         match entry {
             ExportEntry::Markdown { path, text } => zip.file(path, text.into_bytes()).await?,
@@ -656,43 +765,68 @@ async fn pages(source: &Source<'_>, zip: &ZipSink, people: &People) -> Result<()
                 ..
             } => {
                 let file = &pages.files[&(page_id, file_id)];
-                zip.blob(
-                    source.blobs,
-                    source.cancel,
-                    path,
-                    &file.storage_key,
-                    compress,
-                )
-                .await?;
+                let stored = zip
+                    .blob(
+                        source.blobs,
+                        source.cancel,
+                        path.clone(),
+                        &file.storage_key,
+                        compress,
+                    )
+                    .await?;
+                page_files.entry(page_id).or_default().push(json!({
+                    "id": file.id.to_string(),
+                    "blob_id": file.blob_id.to_string(),
+                    "name": file.file_name,
+                    "media_type": file.mime_type,
+                    "size_bytes": file.size_bytes,
+                    "path": stored.then_some(path),
+                }));
             }
         }
     }
 
     let pool = source.database.pool();
     let workspace = source.workspace_id.to_string();
-    let mut comments = HashMap::new();
+    let mut details = HashMap::new();
     for row in sqlx::query(
-        "SELECT id, thread_id, author_id, body_text, created_at, edited_at, deleted_at \
-         FROM page_comments WHERE workspace_id = $1 ORDER BY created_at, id",
+        "SELECT id, teamspace_id, position, creator_id, created_at, updated_at FROM pages \
+         WHERE workspace_id = $1 AND deleted_at IS NULL",
     )
     .bind(&workspace)
     .fetch_all(pool)
     .await?
     {
-        push(
-            &mut comments,
-            row.get("thread_id"),
-            json!({
-                "id": row.get::<String, _>("id"),
-                "author": people.of(row.get("author_id")),
-                "body": row.get::<String, _>("body_text"),
-                "created_at": time(row.get("created_at")),
-                "edited_at": optional_time(row.get("edited_at")),
-                "deleted": row.get::<Option<i64>, _>("deleted_at").is_some(),
-            }),
-        );
+        details.insert(row.get::<String, _>("id"), row);
     }
-    let mut threads: HashMap<String, Vec<Value>> = HashMap::new();
+    for page in &pages.pages {
+        let id = page.id.to_string();
+        let (Some((path, _)), Some(row)) = (paths.get(&id), details.get(&id)) else {
+            continue;
+        };
+        let stem = path.strip_suffix(".md").unwrap_or(path);
+        zip.json(
+            format!("{stem}.blocknote.json"),
+            &json!({
+                "id": id,
+                "parent_id": page.parent_id.map(|parent| parent.to_string()),
+                "teamspace_id": row.get::<Option<String>, _>("teamspace_id"),
+                "title": page.title,
+                "icon": page.icon,
+                "cover_url": page.cover_url,
+                "position": row.get::<i64, _>("position"),
+                "created_by": people.of(row.get("creator_id")),
+                "created_at": time(row.get("created_at")),
+                "updated_at": time(row.get("updated_at")),
+                "content": page.content,
+                "files": page_files.remove(&page.id).unwrap_or_default(),
+            }),
+        )
+        .await?;
+    }
+
+    // Threads first, so only the comments of exported pages name their authors.
+    let mut threads: HashMap<String, Vec<(String, Value)>> = HashMap::new();
     let mut order = Vec::new();
     for row in sqlx::query(
         "SELECT id, page_id, created_by, quote, resolved_at, resolved_by, created_at \
@@ -710,32 +844,70 @@ async fn pages(source: &Source<'_>, zip: &ZipSink, people: &People) -> Result<()
         if !threads.contains_key(&page_id) {
             order.push(page_id.clone());
         }
-        push(
-            &mut threads,
-            page_id,
+        threads.entry(page_id).or_default().push((
+            id.clone(),
             json!({
                 "quote": row.get::<Option<String>, _>("quote"),
                 "created_by": people.of(row.get("created_by")),
                 "created_at": time(row.get("created_at")),
                 "resolved_at": optional_time(row.get("resolved_at")),
                 "resolved_by": people.of(row.get("resolved_by")),
-                "comments": comments.remove(&id).unwrap_or_default(),
                 "id": id,
             }),
-        );
+        ));
     }
     if order.is_empty() {
         return Ok(());
+    }
+    let exported: std::collections::HashSet<&str> = threads
+        .values()
+        .flatten()
+        .map(|(id, _)| id.as_str())
+        .collect();
+    let mut comments = HashMap::new();
+    for row in sqlx::query(
+        "SELECT id, thread_id, author_id, body_text, created_at, edited_at, deleted_at \
+         FROM page_comments WHERE workspace_id = $1 ORDER BY created_at, id",
+    )
+    .bind(&workspace)
+    .fetch_all(pool)
+    .await?
+    {
+        let thread_id: String = row.get("thread_id");
+        if !exported.contains(thread_id.as_str()) {
+            continue;
+        }
+        push(
+            &mut comments,
+            thread_id,
+            json!({
+                "id": row.get::<String, _>("id"),
+                "author": people.of(row.get("author_id")),
+                "body": row.get::<String, _>("body_text"),
+                "created_at": time(row.get("created_at")),
+                "edited_at": optional_time(row.get("edited_at")),
+                "deleted": row.get::<Option<i64>, _>("deleted_at").is_some(),
+            }),
+        );
     }
     let pages: Vec<Value> = order
         .into_iter()
         .map(|page_id| {
             let (path, title) = &paths[&page_id];
+            let threads: Vec<Value> = threads
+                .remove(&page_id)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(id, mut thread)| {
+                    thread["comments"] = json!(comments.remove(&id).unwrap_or_default());
+                    thread
+                })
+                .collect();
             json!({
                 "page_id": page_id,
                 "title": title,
                 "path": path,
-                "threads": threads.remove(&page_id).unwrap_or_default(),
+                "threads": threads,
             })
         })
         .collect();
@@ -752,12 +924,14 @@ async fn chat(
     let pool = source.database.pool();
     let conversations = sqlx::query(
         "SELECT id, kind, name, topic, is_default, archived_at, created_by, created_at \
-         FROM chat_conversations WHERE workspace_id = $1 AND (kind = 'public' OR EXISTS ( \
-         SELECT 1 FROM chat_members WHERE chat_members.conversation_id = chat_conversations.id \
-         AND chat_members.user_id = $2)) ORDER BY kind DESC, name, id",
+         FROM chat_conversations WHERE workspace_id = $1 AND ((kind = 'public' AND $3 = 0) \
+         OR (kind <> 'public' AND EXISTS (SELECT 1 FROM chat_members \
+         WHERE chat_members.conversation_id = chat_conversations.id AND chat_members.user_id = $2))) \
+         ORDER BY kind DESC, name, id",
     )
     .bind(source.workspace_id.to_string())
     .bind(source.actor_id.to_string())
+    .bind(i64::from(source.mode == ExportMode::Personal))
     .fetch_all(pool)
     .await?;
     let mut names = NameSet::default();
@@ -807,6 +981,7 @@ async fn chat(
                 row.get("message_id"),
                 json!({
                     "id": row.get::<String, _>("id"),
+                    "blob_id": row.get::<String, _>("blob_id"),
                     "name": name,
                     "media_type": media_type,
                     "size_bytes": row.get::<i64, _>("size_bytes"),
@@ -818,7 +993,8 @@ async fn chat(
         let mut roots: HashMap<String, usize> = HashMap::new();
         for row in fetch(
             "SELECT id, thread_root_id, kind, author_id, body, reply_to_id, forward_of_id, pinned_at, \
-             edited_at, deleted_at, created_at FROM chat_messages WHERE conversation_id = $1 ORDER BY id",
+             edited_at, deleted_at, created_at, bot_name, blocks FROM chat_messages WHERE conversation_id = $1 \
+             ORDER BY id",
         )
         .await?
         {
@@ -842,7 +1018,19 @@ async fn chat(
             message.insert("id".to_owned(), json!(message_id));
             message.insert("kind".to_owned(), json!(row.get::<String, _>("kind")));
             message.insert("author".to_owned(), people.of(row.get("author_id")));
-            message.insert("body".to_owned(), json!(row.get::<String, _>("body")));
+            // Set when an integration (an incoming webhook) posted it; `author` set the webhook up.
+            if let Some(bot_name) = row.get::<Option<String>, _>("bot_name") {
+                message.insert("bot_name".to_owned(), json!(bot_name));
+            }
+            // An integration's card, as it was posted (`body` is its plain text).
+            if let Some(blocks) = row.get::<Option<String>, _>("blocks")
+                && let Ok(blocks) = serde_json::from_str::<Value>(&blocks)
+            {
+                message.insert("blocks".to_owned(), blocks);
+            }
+            let body: String = row.get("body");
+            people.mentioned_in(&body);
+            message.insert("body".to_owned(), json!(body));
             message.insert("created_at".to_owned(), time(row.get("created_at")));
             message.insert("edited_at".to_owned(), optional_time(row.get("edited_at")));
             message.insert(
@@ -885,7 +1073,7 @@ async fn chat(
         let title = if kind == "dm" {
             let others: Vec<String> = member_ids
                 .iter()
-                .filter_map(|member| people.0.get(member).cloned())
+                .filter_map(|member| people.names.get(member).cloned())
                 .collect();
             format!("DM - {}", others.join(", "))
         } else {

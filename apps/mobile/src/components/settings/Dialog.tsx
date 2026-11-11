@@ -1,9 +1,9 @@
 import { type ReactNode, useEffect, useState } from 'react'
-import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, View } from 'react-native'
+import { Modal, Pressable, ScrollView, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { useTheme } from '../../theme'
-import { Button, Icon, type IconName, Input, Text } from '../../ui'
+import { Button, Icon, type IconName, Input, KeyboardSpace, Text } from '../../ui'
 
 export interface SheetAction {
   label: string
@@ -57,7 +57,7 @@ export function ActionSheet({ visible, title, actions, onClose }: { visible: boo
 export function Dialog({ visible, title, description, children, footer, onClose }: { visible: boolean; title: string; description?: string; children?: ReactNode; footer: ReactNode; onClose: () => void }) {
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} className="flex-1">
+      <KeyboardSpace className="flex-1">
         <Pressable accessibilityLabel="Close" onPress={onClose} className="absolute inset-0 bg-black/50" />
         <View pointerEvents="box-none" className="flex-1 justify-center p-4">
           <View accessibilityRole="none" accessibilityLabel={title} className="max-h-[90%] rounded-xl bg-popover border border-border">
@@ -71,7 +71,7 @@ export function Dialog({ visible, title, description, children, footer, onClose 
             </ScrollView>
           </View>
         </View>
-      </KeyboardAvoidingView>
+      </KeyboardSpace>
     </Modal>
   )
 }

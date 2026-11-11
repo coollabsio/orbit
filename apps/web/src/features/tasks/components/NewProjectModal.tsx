@@ -6,7 +6,6 @@ import { Field, FieldLabel } from '@/components/ui/field'
 import { Modal } from '@/components/common/Modal'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import type { Project } from '@/features/tasks/api/models'
-import { projectDraft } from '@/features/tasks/api/projectDraft'
 import { useCreateProject } from '@/features/tasks/api/projects'
 
 export function NewProjectModal({ onClose, onCreated }: { onClose: () => void; onCreated: (project: Project) => void }) {
@@ -20,7 +19,7 @@ export function NewProjectModal({ onClose, onCreated }: { onClose: () => void; o
     const projectName = name.trim()
     if (!projectName || createProject.isPending) return
     try {
-      onCreated(await createProject.mutateAsync(projectDraft(projectName)))
+      onCreated(await createProject.mutateAsync(projectName))
     } catch {
       // Keep the modal and draft open so the user can retry.
     }

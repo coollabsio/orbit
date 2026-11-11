@@ -9,6 +9,9 @@ import {
   changePassword as changePasswordRequest,
   createInvitation,
   deleteAccount as deleteAccountRequest,
+  deletePasskey as deletePasskeyRequest,
+  deletePushSubscription,
+  deleteWorkspace as deleteWorkspaceRequest,
   deleteStorageFile as deleteStorageFileRequest,
   disableTwoFactor,
   enableTotp,
@@ -17,10 +20,13 @@ import {
   getWorkspaceBucket,
   getWorkspaceStorage,
   listInvitations,
+  listPasskeys,
+  listPushSubscriptions,
   listSessions,
   putStatus,
   putNotificationPreferences,
   regenerateRecoveryCodes,
+  sendTestPush as sendTestPushRequest,
   removeAvatar,
   removeMember,
   removeWorkspaceBucket,
@@ -39,6 +45,8 @@ import type {
   OwnedWorkspace,
   InvitationRecord,
   NotificationPrefs,
+  PasskeyRecord,
+  PushSubscriptionRecord,
   S3Body,
   SessionRecord,
   TotpSetup,
@@ -54,13 +62,17 @@ import { ApiProblem } from '@orbit/api/problem'
 import type { MemberRecord, OrbitClient, User, WorkspaceRecord } from './orbit'
 import type { OAuthConnection } from '@orbit/api/mcp'
 import { STORAGE_FILES_PAGE } from '@orbit/api/storage'
+import { relativeTime } from './format'
 
-export type { InvitationRecord, NotificationPrefs, OwnedWorkspace, SessionRecord, TotpSetup, TwoFactorStatus, WorkspaceBucketView, WorkspaceStorage }
+export type { InvitationRecord, NotificationPrefs, OwnedWorkspace, PasskeyRecord, PushSubscriptionRecord, SessionRecord, TotpSetup, TwoFactorStatus, WorkspaceBucketView, WorkspaceStorage }
 
 /** Query keys of the account (not per workspace) and of the workspace settings. */
 export const accountKeys = {
   notificationPrefs: ['account', 'notification-prefs'] as const,
   sessions: ['account', 'sessions'] as const,
+  passkeys: ['account', 'passkeys'] as const,
+  pushDevices: ['account', 'push-devices'] as const,
+  apnsDevices: ['account', 'apns-devices'] as const,
   twoFactor: ['account', 'two-factor'] as const,
   connectedAccounts: ['account', 'connected-accounts'] as const,
   oauthConnections: ['account', 'oauth-connections'] as const,
@@ -185,6 +197,70 @@ export async function revokeSession(client: OrbitClient, id: string): Promise<vo
   await revokeSessionRequest({ client, path: { id }, throwOnError: true })
 }
 
+// ---- passkeys and push devices (the app lists and removes them; adding needs a browser)
+
+export async function passkeys(client: OrbitClient): Promise<PasskeyRecord[]> {
+  return (await listPasskeys({ client, throwOnError: true })).data
+}
+
+export async function deletePasskey(client: OrbitClient, id: string): Promise<void> {
+  await deletePasskeyRequest({ client, path: { id }, throwOnError: true })
+}
+
+/** The browsers that get push notifications. */
+export async function pushDevices(client: OrbitClient): Promise<PushSubscriptionRecord[]> {
+  return (await listPushSubscriptions({ client, throwOnError: true })).data
+}
+
+export async function removePushDevice(client: OrbitClient, id: string): Promise<void> {
+  await deletePushSubscription({ client, path: { id }, throwOnError: true })
+}
+
+/** An iPhone or iPad that gets notifications through APNs. Not in the generated SDK yet, so the calls are by hand. */
+export interface ApnsDevice {
+  id: string
+  label: string
+  environment: ApnsEnvironment
+  created_at: string
+}
+
+/** `sandbox` for a development build, `production` for TestFlight and the App Store. */
+export type ApnsEnvironment = 'production' | 'sandbox'
+
+/** Adds this device, or updates it when the server knows the token. It stops with the session. */
+export async function registerApnsDevice(client: OrbitClient, body: { token: string; environment: ApnsEnvironment; label: string }): Promise<ApnsDevice> {
+  return (await client.post<{ 200: ApnsDevice }, unknown, true>({ url: '/api/v1/push/apns', body, headers: { 'Content-Type': 'application/json' }, throwOnError: true })).data
+}
+
+/** The user's iOS devices. A server without the route has none. */
+export async function apnsDevices(client: OrbitClient): Promise<ApnsDevice[]> {
+  try {
+    return (await client.get<{ 200: ApnsDevice[] }, unknown, true>({ url: '/api/v1/push/apns', throwOnError: true })).data
+  } catch (error) {
+    if (error instanceof ApiProblem && error.status === 404) return []
+    throw error
+  }
+}
+
+export async function removeApnsDevice(client: OrbitClient, id: string): Promise<void> {
+  await client.delete({ url: '/api/v1/push/apns/{id}', path: { id }, throwOnError: true })
+}
+
+/** Sends a test notification to all the user's devices; resolves to how many took it. */
+export async function sendTestPush(client: OrbitClient): Promise<number> {
+  return (await sendTestPushRequest({ client, throwOnError: true })).data.sent
+}
+
+/** 503 `push_not_configured`: the server has no APNs key. */
+export const pushNotConfigured = (error: unknown) => error instanceof ApiProblem && error.code === 'push_not_configured'
+
+/** The web's `ago`: `just now`, `5m ago`, then `on Sep 4`. */
+export function passkeyAgo(iso: string, now: Date = new Date()): string {
+  const relative = relativeTime(iso, now)
+  if (relative === 'now') return 'just now'
+  return /^\d+[mhd]$/.test(relative) ? `${relative} ago` : `on ${relative}`
+}
+
 /** The MCP clients this person approved. The OAuth routes are not in the OpenAPI contract, so they have no SDK function. */
 export async function oauthConnections(client: OrbitClient): Promise<OAuthConnection[]> {
   return (await client.get<{ 200: { items: OAuthConnection[] } }, unknown, true>({ url: '/api/v1/oauth/grants', throwOnError: true })).data.items
@@ -210,12 +286,12 @@ export async function saveNotificationPrefs(client: OrbitClient, prefs: Notifica
   return (await putNotificationPreferences({ client, body: prefs, throwOnError: true })).data
 }
 
-/** The web's rows, in its order. */
-export const NOTIFICATION_CHOICES: readonly { field: keyof NotificationPrefs; label: string }[] = [
-  { field: 'direct_messages', label: 'Direct messages' },
-  { field: 'chat_mentions', label: 'Mentions in chat' },
-  { field: 'thread_replies', label: 'Replies in threads I follow' },
-  { field: 'channel_messages', label: 'All messages in channels set to "All messages"' },
+/** The web's rows, in its order. `chat`: also shown to a guest, who has only chat. */
+export const NOTIFICATION_CHOICES: readonly { field: keyof NotificationPrefs; label: string; chat?: true }[] = [
+  { field: 'direct_messages', label: 'Direct messages', chat: true },
+  { field: 'chat_mentions', label: 'Mentions in chat', chat: true },
+  { field: 'thread_replies', label: 'Replies in threads I follow', chat: true },
+  { field: 'channel_messages', label: 'All messages in channels set to "All messages"', chat: true },
   { field: 'task_assigned', label: 'Tasks assigned to me' },
   { field: 'mentions', label: 'Mentions in comments and pages' },
 ]
@@ -224,6 +300,11 @@ export const NOTIFICATION_CHOICES: readonly { field: keyof NotificationPrefs; la
 
 export async function renameWorkspace(client: OrbitClient, workspace: Pick<WorkspaceRecord, 'id' | 'version'>, name: string): Promise<WorkspaceRecord> {
   return (await renameWorkspaceRequest({ client, path: { workspace_id: workspace.id }, body: { name, expected_version: workspace.version }, throwOnError: true })).data
+}
+
+/** Moves the workspace to the trash (the owner can restore it for 30 days). */
+export async function deleteWorkspace(client: OrbitClient, workspace: Pick<WorkspaceRecord, 'id' | 'version'>): Promise<void> {
+  await deleteWorkspaceRequest({ client, path: { workspace_id: workspace.id }, query: { expected_version: workspace.version }, throwOnError: true })
 }
 
 /** Admins also get one page of the largest files, from `offset`. */
@@ -289,10 +370,14 @@ export const roleLabel = (role: WorkspaceRole | string) => role.charAt(0).toUppe
 
 export type MemberAction = { kind: 'role'; role: 'admin' | 'member' } | { kind: 'transfer' } | { kind: 'remove' }
 
-/** What the Manage menu offers on a member's row: none on your own row; the server decides the rest. */
+/**
+ * What the Manage menu offers on a member's row: none on your own row; the server decides the rest. A guest can only
+ * become a member ("Convert to member"); nobody becomes a guest.
+ */
 export function memberActions(member: MemberRecord, myUserId: string): MemberAction[] {
   if (member.user_id === myUserId) return []
-  const roles = member.can_change_role ? (['admin', 'member'] as const).filter((role) => role !== member.role) : []
+  const choices = member.role === 'guest' ? (['member'] as const) : (['admin', 'member'] as const)
+  const roles = member.can_change_role ? choices.filter((role) => role !== member.role) : []
   return [
     ...roles.map((role): MemberAction => ({ kind: 'role', role })),
     ...(member.can_transfer_ownership ? [{ kind: 'transfer' } as const] : []),
@@ -332,8 +417,17 @@ export async function pendingInvitations(client: OrbitClient, workspaceId: strin
 }
 
 /** `manual` answers with the link to share; `smtp` emails it. */
-export async function invite(client: OrbitClient, workspaceId: string, email: string, role: 'admin' | 'member', delivery: 'manual' | 'smtp'): Promise<{ invitation: InvitationRecord; url: string | null }> {
-  const { data } = await createInvitation({ client, path: { workspace_id: workspaceId }, body: { email, role, delivery }, throwOnError: true })
+export type InviteRole = 'admin' | 'member' | 'guest'
+
+/** Why an invitation cannot be sent yet: a guest needs one or more private channels. */
+export function invitationProblem(role: InviteRole, channelIds: readonly string[]): string | null {
+  return role === 'guest' && channelIds.length === 0 ? 'Choose one or more channels for the guest.' : null
+}
+
+/** Invites `email`. A guest invitation names its private channels; the other roles send none. */
+export async function invite(client: OrbitClient, workspaceId: string, email: string, role: InviteRole, channelIds: readonly string[], delivery: 'manual' | 'smtp'): Promise<{ invitation: InvitationRecord; url: string | null }> {
+  const body = role === 'guest' ? { email, role, delivery, conversation_ids: [...channelIds] } : { email, role, delivery }
+  const { data } = await createInvitation({ client, path: { workspace_id: workspaceId }, body, throwOnError: true })
   return { invitation: data.invitation, url: data.url ?? null }
 }
 

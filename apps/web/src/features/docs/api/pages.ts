@@ -6,6 +6,8 @@ import {
   duplicatePage,
   emptyPageTrash,
   getPage,
+  getTrashedPage,
+  listPageDescendants,
   listPages,
   listPageTrash,
   movePage,
@@ -15,7 +17,7 @@ import {
   updatePage,
   uploadPageFile,
 } from '@orbit/api/generated/sdk.gen'
-import type { CreatePageBody, Page, PageFile, PageSummary, PageTrashEmptied, PageUpdateBody, TrashedPage } from '@orbit/api/generated/types.gen'
+import type { CreatePageBody, Page, PageFavorite, PageFile, PageSummary, PageTrashEmptied, PageUpdateBody, TrashedPage } from '@orbit/api/generated/types.gen'
 import { ApiProblem } from '@orbit/api/problem'
 import { queryKeys } from '@/api/queryKeys'
 import { shrinkUpload } from '@/lib/shrinkUpload'
@@ -35,9 +37,12 @@ export function isPageVersionConflict(error: unknown): error is ApiProblem {
   return isTaskVersionConflict(error)
 }
 
-/** The toast for a failed move: the server's reason when it forbids the move, else a generic one. */
+/** Moves the server refuses with a reason to show (a database cannot be a row, the target database is full). */
+const MOVE_REFUSALS = new Set(['database_in_database', 'database_row_limit'])
+
+/** The toast for a failed move: the server's reason when it forbids or refuses the move, else a generic one. */
 export function movePageErrorMessage(error: unknown): string {
-  return error instanceof ApiProblem && error.status === 403 ? error.detail : 'Could not move the page.'
+  return error instanceof ApiProblem && (error.status === 403 || MOVE_REFUSALS.has(error.code ?? '')) ? error.detail : 'Could not move the page.'
 }
 
 export function isPageNotFound(error: unknown): boolean {
@@ -59,8 +64,8 @@ export function conflictCurrentVersion(error: unknown): number | null {
 }
 
 export function toSummary(page: Page | PageSummary): PageSummary {
-  const { id, parent_id, teamspace_id, private: isPrivate, title, icon, position, version, updated_at } = page
-  return { id, parent_id, teamspace_id, private: isPrivate, title, icon, position, version, updated_at }
+  const { id, parent_id, teamspace_id, private: isPrivate, kind, title, icon, position, version, updated_at } = page
+  return { id, parent_id, teamspace_id, private: isPrivate, kind, title, icon, position, version, updated_at }
 }
 
 /** Writes a server page into the detail cache and its summary into the tree cache (no refetch). */
@@ -69,9 +74,9 @@ export function reconcilePage(queryClient: QueryClient, workspaceId: string, pag
   queryClient.setQueryData(queryKeys.pages.tree(workspaceId), (tree: PageSummary[] | undefined) => {
     if (!tree) return tree
     const summary = toSummary(page)
-    return tree.some((item) => item.id === page.id)
-      ? tree.map((item) => (item.id === page.id ? summary : item))
-      : [...tree, summary]
+    if (tree.some((item) => item.id === page.id)) return tree.map((item) => (item.id === page.id ? summary : item))
+    // A database row is not in the tree: it lists in its database.
+    return page.database_id ? tree : [...tree, summary]
   })
 }
 
@@ -134,15 +139,35 @@ export function usePageTree(workspaceId: string, enabled = true) {
   return useQuery({ ...pageTreeQueryOptions(workspaceId), enabled })
 }
 
-export function usePage(workspaceId: string, pageId: string | undefined) {
-  return useQuery({
-    queryKey: queryKeys.pages.detail(workspaceId, pageId ?? ''),
-    enabled: Boolean(pageId),
-    queryFn: async () => {
-      const { data } = await getPage({ client: apiClient, path: { workspace_id: workspaceId, page_id: pageId! }, throwOnError: true })
-      return required(data, 'Page response was empty.')
+/**
+ * A page's live sub-pages at any depth, as summaries. The tree has them for a tree page; a database row and its
+ * sub-pages are not in the tree, so their sub-pages come from the server.
+ */
+export function descendantsQueryOptions(workspaceId: string, pageId: string) {
+  return {
+    queryKey: queryKeys.pages.descendants(workspaceId, pageId),
+    queryFn: async (): Promise<PageSummary[]> => {
+      const { data } = await listPageDescendants({ client: apiClient, path: { workspace_id: workspaceId, page_id: pageId }, throwOnError: true })
+      return required(data, 'Sub-pages response was empty.').items
     },
-  })
+  }
+}
+
+/** `pageId`'s sub-pages: from the tree when the page is in it, else from the server. */
+export async function subPagesOf(queryClient: QueryClient, workspaceId: string, tree: readonly PageSummary[], pageId: string): Promise<PageSummary[]> {
+  if (tree.some((page) => page.id === pageId)) return descendantsOf(tree, pageId)
+  return queryClient.fetchQuery(descendantsQueryOptions(workspaceId, pageId))
+}
+
+export function pageQueryOptions(workspaceId: string, pageId: string) {
+  return {
+    queryKey: queryKeys.pages.detail(workspaceId, pageId),
+    queryFn: () => fetchPage(apiClient, workspaceId, pageId),
+  }
+}
+
+export function usePage(workspaceId: string, pageId: string | undefined) {
+  return useQuery({ ...pageQueryOptions(workspaceId, pageId ?? ''), enabled: Boolean(pageId) })
 }
 
 export function usePageTrash(workspaceId: string) {
@@ -151,6 +176,18 @@ export function usePageTrash(workspaceId: string) {
     queryFn: async () => {
       const { data } = await listPageTrash({ client: apiClient, path: { workspace_id: workspaceId }, throwOnError: true })
       return required(data, 'Page trash response was empty.').items
+    },
+  })
+}
+
+/** A trashed page with its content and the sub-pages trashed with it, for the read-only preview. */
+export function useTrashedPage(workspaceId: string, pageId: string, enabled = true) {
+  return useQuery({
+    enabled,
+    queryKey: queryKeys.pages.trashed(workspaceId, pageId),
+    queryFn: async () => {
+      const { data } = await getTrashedPage({ client: apiClient, path: { workspace_id: workspaceId, page_id: pageId }, throwOnError: true })
+      return required(data, 'Trashed page response was empty.')
     },
   })
 }
@@ -237,8 +274,12 @@ export function useMovePage(workspaceId: string) {
       if (snapshot?.tree) queryClient.setQueryData(treeKey, snapshot.tree)
       return promptForConflict(error, () => void queryClient.invalidateQueries({ queryKey: treeKey }))
     },
-    // Only the moved page's version bumps; the open editor picks the new version up from the detail cache.
-    onSuccess: (page) => reconcilePage(queryClient, workspaceId, page),
+    // Only the moved page's version bumps; the open editor picks the new version up from the detail cache. A new row
+    // shows in its database at once.
+    onSuccess: (page) => {
+      reconcilePage(queryClient, workspaceId, page)
+      if (page.database_id) void queryClient.invalidateQueries({ queryKey: queryKeys.database(workspaceId, page.database_id) })
+    },
     // A space change also moves the subtree, so cached sub-page details, search hits and trash rows go stale.
     onSettled: (_page, _error, input) =>
       void queryClient.invalidateQueries({ queryKey: input.teamspace_id || input.private ? queryKeys.pages.all(workspaceId) : treeKey }),
@@ -248,7 +289,8 @@ export function useMovePage(workspaceId: string) {
 export function useTrashPage(workspaceId: string) {
   const queryClient = useQueryClient()
   const treeKey = queryKeys.pages.tree(workspaceId)
-  return useMutation<void, Error, { pageId: string; version: number }, TreeSnapshot & { subtree: string[] }>({
+  const favoritesKey = queryKeys.pages.favorites(workspaceId)
+  return useMutation<void, Error, { pageId: string; version: number }, TreeSnapshot & { subtree: string[]; favorites: PageFavorite[] | undefined }>({
     mutationFn: async ({ pageId, version }) => {
       await deletePage({
         client: apiClient,
@@ -262,13 +304,21 @@ export function useTrashPage(workspaceId: string) {
       const tree = queryClient.getQueryData<PageSummary[]>(treeKey)
       const subtree = [pageId, ...descendantsOf(tree ?? [], pageId).map((page) => page.id)]
       if (tree) queryClient.setQueryData(treeKey, removeSubtree(tree, pageId))
-      return { tree, subtree }
+      // Favorites list pages outside the tree too: drop the trashed ones now, the refetch brings the rest.
+      await queryClient.cancelQueries({ queryKey: favoritesKey })
+      const favorites = queryClient.getQueryData<PageFavorite[]>(favoritesKey)
+      if (favorites) queryClient.setQueryData(favoritesKey, favorites.filter((favorite) => !subtree.includes(favorite.page_id)))
+      return { tree, subtree, favorites }
     },
     onError: (error, _input, snapshot) => {
       if (snapshot?.tree) queryClient.setQueryData(treeKey, snapshot.tree)
+      if (snapshot?.favorites) queryClient.setQueryData(favoritesKey, snapshot.favorites)
       return promptForConflict(error, () => void queryClient.invalidateQueries({ queryKey: queryKeys.pages.all(workspaceId) }))
     },
-    onSuccess: (_result, _input, snapshot) => {
+    onSuccess: (_result, { pageId }, snapshot) => {
+      // A trashed row leaves its database's row list.
+      const databaseId = queryClient.getQueryData<Page>(queryKeys.pages.detail(workspaceId, pageId))?.database_id
+      if (databaseId) void queryClient.invalidateQueries({ queryKey: queryKeys.database(workspaceId, databaseId) })
       for (const id of snapshot?.subtree ?? []) queryClient.removeQueries({ queryKey: queryKeys.pages.detail(workspaceId, id), exact: true })
       void queryClient.invalidateQueries({ queryKey: treeKey })
       void queryClient.invalidateQueries({ queryKey: queryKeys.pages.trash(workspaceId) })
@@ -292,8 +342,9 @@ export function useRestorePage(workspaceId: string) {
     onError: (error) => promptForConflict(error, () => void queryClient.invalidateQueries({ queryKey: queryKeys.pages.trash(workspaceId) })),
     onSuccess: (page) => {
       queryClient.setQueryData(queryKeys.pages.detail(workspaceId, page.id), page)
-      // The restored subtree comes back too, so refetch rather than patch.
+      // The restored subtree comes back too, so refetch rather than patch. A restored row rejoins its database.
       void queryClient.invalidateQueries({ queryKey: queryKeys.pages.tree(workspaceId) })
+      if (page.database_id) void queryClient.invalidateQueries({ queryKey: queryKeys.database(workspaceId, page.database_id) })
       void queryClient.invalidateQueries({ queryKey: queryKeys.pages.trash(workspaceId) })
       // Favorites of the restored subtree come back.
       void queryClient.invalidateQueries({ queryKey: queryKeys.pages.favorites(workspaceId) })
@@ -353,8 +404,9 @@ export function useDuplicatePage(workspaceId: string) {
     },
     onSuccess: (page) => {
       reconcilePage(queryClient, workspaceId, page)
-      // Later siblings shift and copied sub-pages are new: refetch the tree.
+      // Later siblings shift and copied sub-pages are new: refetch the tree. A copied row is a new row of its database.
       void queryClient.invalidateQueries({ queryKey: queryKeys.pages.tree(workspaceId) })
+      if (page.database_id) void queryClient.invalidateQueries({ queryKey: queryKeys.database(workspaceId, page.database_id) })
     },
   })
 }

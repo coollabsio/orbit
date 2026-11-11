@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { Image, Modal, Platform, Pressable, Share, useWindowDimensions, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
-import { fileSize, hasReaction, isImage } from '../../data/chat'
+import { fileSize, hasReaction, isImage, type TextPart } from '../../data/chat'
 import type { ChatFileRecord } from '../../data/chat-api'
 import { relativeAgo, timeOfDay } from '../../data/format'
 import type { MessageRecord } from '../../data/orbit'
@@ -18,9 +18,13 @@ export interface MessageHandlers {
   nameOf: (userId: string) => string
   /** A stored body as shown: mentions as names, markdown as plain text. */
   text: (body: string) => string
+  /** Shown text split at its mentions, which the row marks as the web does. */
+  parts: (shown: string) => TextPart[]
   onLongPress: (message: MessageRecord) => void
   onReact: (message: MessageRecord, emoji: string) => void
   onAddReaction: (message: MessageRecord) => void
+  /** A thread you follow has unread replies: its summary gets the web's pink square and a bold count. */
+  threadUnread?: (rootId: string) => boolean
   /** Absent in a thread: its replies have no thread of their own. */
   onOpenThread?: (message: MessageRecord) => void
 }
@@ -30,15 +34,19 @@ export interface MessageHandlers {
  * reactions and the thread summary. A long press opens the action sheet.
  */
 export function MessageItem({ message, groupStart, highlighted = false, handlers }: { message: MessageRecord; groupStart: boolean; highlighted?: boolean; handlers: MessageHandlers }) {
-  const { colors } = useTheme()
+  const { colors, scheme } = useTheme()
   const { user } = useOrbit()
   const author = handlers.nameOf(message.author_id)
+  // the web's `data-mentioned` row: it mentions you, `@channel` or `@here`
+  const mentioned = message.mentions.user_ids.includes(user.id) || message.mentions.channel || message.mentions.here
 
   if (message.kind !== 'message') {
     const what = message.kind === 'join' ? 'joined' : message.kind === 'leave' ? 'left' : 'pinned a message'
     return (
-      <Text className="text-[12px] leading-[16px] px-3 py-1 text-muted-foreground">
-        {author} {what} · {timeOfDay(message.created_at)}
+      // the web `SystemRow`: the name a little brighter, the time 8px after the text
+      <Text className="text-[12px] leading-[16px] px-4 py-1 text-muted-foreground">
+        <Text className="font-noto-medium text-[12px] leading-[16px] text-foreground/80">{author}</Text> {what}
+        <Text className="text-[12px] leading-[16px] text-muted-foreground">{'  '}{timeOfDay(message.created_at)}</Text>
       </Text>
     )
   }
@@ -49,7 +57,7 @@ export function MessageItem({ message, groupStart, highlighted = false, handlers
       onLongPress={() => handlers.onLongPress(message)}
       delayLongPress={350}
       accessibilityHint="Long press for actions"
-      className={`${highlighted ? 'bg-primary/12' : 'active:bg-muted/50'} ${groupStart ? 'mt-2' : 'mt-0'}`}
+      className={`${highlighted ? 'bg-primary/12' : mentioned ? 'bg-primary/8' : ''} ${groupStart ? 'mt-2' : 'mt-0'}`}
     >
       {message.reply_to ? <Quote author={handlers.nameOf(message.reply_to.author_id)} body={message.reply_to.sticker && !message.reply_to.body ? 'Sticker' : handlers.text(message.reply_to.body)} /> : null}
       <View className={`flex-row gap-2 px-3 pb-0.5 ${groupStart ? 'pt-1' : 'pt-0.5'}`}>
@@ -72,7 +80,18 @@ export function MessageItem({ message, groupStart, highlighted = false, handlers
           ) : null}
           {body ? (
             <Text className={`text-[14px] leading-[21px] ${message.deleted ? 'text-muted-foreground' : 'text-foreground/85'}`}>
-              {body}
+              {message.deleted
+                ? body
+                : handlers.parts(body).map((part, index) =>
+                    part.mention ? (
+                      // the web's mention: primary text on a primary tint (`bg-primary/10`, `dark:bg-primary/20`)
+                      <Text key={index} className={`font-noto-medium text-[14px] leading-[21px] text-primary ${scheme === 'dark' ? 'bg-primary/20' : 'bg-primary/10'}`}>
+                        {part.text}
+                      </Text>
+                    ) : (
+                      part.text
+                    ),
+                  )}
               {message.edited_at && !message.deleted ? <Text className="text-[11px] text-muted-foreground"> (edited)</Text> : null}
             </Text>
           ) : null}
@@ -133,10 +152,11 @@ function Quote({ author, body }: { author: string; body: string }) {
 function ReplySummary({ message, handlers }: { message: MessageRecord; handlers: MessageHandlers }) {
   const reply = message.last_reply
   const replies = `${message.reply_count} ${message.reply_count === 1 ? 'reply' : 'replies'}`
+  const unread = handlers.threadUnread?.(message.id) ?? false
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`Open thread, ${replies}`}
+      accessibilityLabel={`Open thread, ${replies}${unread ? ', unread replies' : ''}`}
       onPress={() => handlers.onOpenThread?.(message)}
       className="mt-1.5 -ml-1 py-1 pl-1 pr-2 rounded-md active:bg-muted"
     >
@@ -153,8 +173,9 @@ function ReplySummary({ message, handlers }: { message: MessageRecord; handlers:
           </View>
         ) : null}
         <View className="flex-row items-center gap-1.5">
-          <Text className="font-noto-medium text-[12px] leading-[16px] text-foreground/90">{replies}</Text>
-          {message.last_reply_at ? <Text className="text-[12px] leading-[16px] text-muted-foreground">last reply {relativeAgo(message.last_reply_at)}</Text> : null}
+          {unread ? <View className="size-1.5 bg-primary" /> : null}
+          <Text className={`text-[12px] leading-[16px] ${unread ? 'font-noto-bold text-foreground' : 'font-noto-medium text-foreground/90'}`}>{replies}</Text>
+          {message.last_reply_at ? <Text className={`text-[12px] leading-[16px] text-muted-foreground ${unread ? 'font-noto-semibold' : ''}`}>last reply {relativeAgo(message.last_reply_at)}</Text> : null}
         </View>
       </View>
     </Pressable>
@@ -216,7 +237,7 @@ const fit = (width: number, height: number, maxWidth: number, maxHeight: number)
  * Downloads a chat file with the session's token into the cache and hands it to the system preview (Quick Look on
  * iOS, the app for its type on Android), where it can be saved or shared.
  */
-function useOpenFile() {
+export function useOpenFile() {
   const { session } = useOrbit()
   const image = useServerImage()
   const [opening, setOpening] = useState<string | null>(null)
@@ -271,7 +292,7 @@ function FileCard({ file }: { file: ChatFileRecord }) {
 }
 
 /** An image of a message over the whole screen, with its name, Close and Open (save or share). */
-function ImageViewer({ file, onClose }: { file: ChatFileRecord | null; onClose: () => void }) {
+export function ImageViewer({ file, onClose }: { file: ChatFileRecord | null; onClose: () => void }) {
   const image = useServerImage()
   const { open, opening } = useOpenFile()
   // Read outside the Modal: a SafeAreaView inside a full-screen iOS Modal measures no insets, and the bar sat under the status bar.

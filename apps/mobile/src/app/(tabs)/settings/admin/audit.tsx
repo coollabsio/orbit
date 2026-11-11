@@ -27,15 +27,15 @@ export default function AdminAuditScreen() {
   }
   const events = audit.data?.pages.flatMap((page) => page.items) ?? []
   return (
-    <AdminShell refreshing={audit.isRefetching} onRefresh={() => void audit.refetch()}>
+    <AdminShell onRefresh={() => audit.refetch()}>
       <SettingsCard
         title="Audit log"
         description="Sign-ins, account changes and other security events from every workspace."
-        actions={<Button label={exporting ? 'Exporting…' : 'Export CSV'} icon="download" variant="outline" size="sm" disabled={exporting} onPress={exportCsv} />}
+        actions={<Button label={exporting ? 'Exporting…' : 'Export CSV'} icon="download" variant="outline" disabled={exporting} onPress={exportCsv} />}
         flush
       >
         {exportError ? <View className="p-4 border-b border-border"><Note error>The export could not be opened. {exportError}</Note></View> : null}
-        {audit.isPending ? <View className="p-4"><Note>Loading events…</Note></View> : null}
+        {audit.isPending ? <View className="p-4"><Note loading>Loading events…</Note></View> : null}
         {audit.isError ? (
           <View className="p-4 flex-row items-center gap-2">
             <Note error>Events could not be loaded.</Note>
@@ -47,13 +47,14 @@ export default function AdminAuditScreen() {
           <SettingsRow key={event.id} first={index === 0}>
             <View className="flex-1 min-w-0 gap-0.5">
               <View className="flex-row items-center gap-1.5">
-                <Text numberOfLines={1} className="shrink font-mono text-[12px] text-foreground leading-[21px]">
+                <Text numberOfLines={1} className="shrink font-mono text-[12px] text-foreground leading-[16px]">
                   {event.action}
                 </Text>
                 {event.outcome === 'failure' ? <Badge label="Failed" tone="destructive" /> : null}
               </View>
-              <Text numberOfLines={1} className="text-[12px] text-muted-foreground">{`${auditActor(event)} · ${new Date(event.occurred_at).toLocaleString()}`}</Text>
+              <Text numberOfLines={1} className="text-[12px] leading-[16px] text-muted-foreground">{auditActor(event)}</Text>
             </View>
+            <Text className="shrink-0 text-[12px] leading-[16px] text-muted-foreground/70">{new Date(event.occurred_at).toLocaleString()}</Text>
           </SettingsRow>
         ))}
         {audit.hasNextPage ? (

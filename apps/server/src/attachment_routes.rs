@@ -65,16 +65,31 @@ impl AttachmentState {
         &self,
         shutdown: CancellationToken,
     ) -> Result<(), UploadError> {
-        self.uploads
-            .reconcile(TimestampMillis::now().as_millis())
-            .await?;
         let mut interval = tokio::time::interval(RECONCILE_INTERVAL);
-        interval.tick().await;
         loop {
             tokio::select! {
                 () = shutdown.cancelled() => return Ok(()),
                 _ = interval.tick() => {
-                    self.uploads.reconcile(TimestampMillis::now().as_millis()).await?;
+                    match self.uploads.reconcile(TimestampMillis::now().as_millis()).await {
+                        Ok(_) => {}
+                        Err(UploadError::Database(error))
+                            if orbit_platform::is_transient_lock_error(&error) =>
+                        {
+                            tracing::warn!(
+                                %error,
+                                "attachment reconciliation: the database is busy; retrying on the next round"
+                            );
+                        }
+                        // Wrong or rotated S3 credentials, or an unreachable bucket, must not stop the
+                        // server: the admin fixes them in Admin → Storage while Orbit keeps serving.
+                        Err(UploadError::BlobStore(BlobStoreError::ObjectStorage(error))) => {
+                            tracing::warn!(
+                                %error,
+                                "attachment reconciliation could not reach object storage; retrying on the next round"
+                            );
+                        }
+                        Err(error) => return Err(error),
+                    }
                 }
             }
         }
@@ -588,11 +603,11 @@ pub(crate) async fn stage_single_file(
     Ok(staged_uploads)
 }
 
-fn multipart_too_large(error: &axum::extract::multipart::MultipartError) -> bool {
+pub(crate) fn multipart_too_large(error: &axum::extract::multipart::MultipartError) -> bool {
     error.status() == StatusCode::PAYLOAD_TOO_LARGE || has_length_limit(error)
 }
 
-fn has_length_limit(error: &(dyn StdError + 'static)) -> bool {
+pub(crate) fn has_length_limit(error: &(dyn StdError + 'static)) -> bool {
     let mut source = Some(error);
     while let Some(error) = source {
         if error.is::<http_body_util::LengthLimitError>() {

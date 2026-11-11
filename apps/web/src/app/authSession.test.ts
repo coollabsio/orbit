@@ -25,12 +25,12 @@ test('a 401 from an unrelated request clears the authenticated user and navigate
       ),
     onUnauthorized: () => void clearExpiredSession(queryClient, (path) => {
       destination = path
-    }),
+    }, '/tasks/task-1'),
   })
 
   await expect(listWorkspaces({ client, throwOnError: true })).rejects.toMatchObject({ status: 401 })
   await Promise.resolve()
 
   expect(queryClient.getQueryData(['current-user'])).toBeUndefined()
-  expect(destination).toBe('/login')
+  expect(destination).toBe('/login?return_to=%2Ftasks%2Ftask-1')
 })

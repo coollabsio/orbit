@@ -2,9 +2,10 @@ import { toast } from 'sonner'
 import { Monitor, Mobile as Smartphone } from 'reicon-react'
 import type { NotificationPrefs } from '@orbit/api/generated/types.gen'
 import { SettingsCard } from '@/components/common/SettingsCard'
+import { InfoTip } from '@/components/common/InfoTip'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
+import { Field, FieldLabel } from '@/components/ui/field'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { AWAY_MINUTES, useAwayMinutes } from '@/features/realtime/idle'
@@ -22,12 +23,15 @@ import {
 import { FieldGrid, RowIcon, SettingsRow } from '@/features/settings/components/SettingsParts'
 import { shortDate } from '@/lib/format'
 import { MIN_VOLUME, playSound, SOUND_SETS, type SoundSet, useSoundSettings } from '@/lib/sounds'
+import { LoadingText } from '@/components/ui/spinner'
+import { useIsGuest } from '@/features/workspaces/permissions'
 
-const PREFERENCES: { field: keyof NotificationPrefs; label: string }[] = [
-  { field: 'direct_messages', label: 'Direct messages' },
-  { field: 'chat_mentions', label: 'Mentions in chat' },
-  { field: 'thread_replies', label: 'Replies in threads I follow' },
-  { field: 'channel_messages', label: 'All messages in channels set to "All messages"' },
+/** `chat`: also shown to a guest, who has only chat. */
+const PREFERENCES: { field: keyof NotificationPrefs; label: string; chat?: true }[] = [
+  { field: 'direct_messages', label: 'Direct messages', chat: true },
+  { field: 'chat_mentions', label: 'Mentions in chat', chat: true },
+  { field: 'thread_replies', label: 'Replies in threads I follow', chat: true },
+  { field: 'channel_messages', label: 'All messages in channels set to "All messages"', chat: true },
   { field: 'task_assigned', label: 'Tasks assigned to me' },
   { field: 'mentions', label: 'Mentions in comments and pages' },
 ]
@@ -96,7 +100,7 @@ function Devices() {
 
   return (
     <div className="flex flex-col divide-y">
-      {devices.isPending ? <SettingsRow role="status">Loading devices…</SettingsRow> : null}
+      {devices.isPending ? <SettingsRow><LoadingText>Loading devices…</LoadingText></SettingsRow> : null}
       {devices.isError ? <SettingsRow role="alert">Devices could not be loaded. <Button variant="ghost" onClick={() => void devices.refetch()}>Retry</Button></SettingsRow> : null}
       {devices.isSuccess && list.length === 0 ? <SettingsRow className="text-sm text-muted-foreground">No device gets notifications yet.</SettingsRow> : null}
       {list.map((device) => (
@@ -127,14 +131,15 @@ function Preferences() {
   const preferences = useNotificationPreferences()
   const save = useSaveNotificationPreferences()
   const current = preferences.data
+  const guest = useIsGuest()
 
-  if (preferences.isPending) return <p className="text-sm text-muted-foreground" role="status">Loading…</p>
+  if (preferences.isPending) return <p className="text-sm text-muted-foreground"><LoadingText>Loading…</LoadingText></p>
   if (!current) return <p className="text-sm text-muted-foreground" role="alert">Your choices could not be loaded. <Button variant="ghost" onClick={() => void preferences.refetch()}>Retry</Button></p>
 
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-col divide-y divide-border">
-        {PREFERENCES.map(({ field, label }) => (
+        {PREFERENCES.filter((preference) => !guest || preference.chat).map(({ field, label }) => (
           <div key={field} className="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0">
             <span className="text-sm font-medium text-foreground">{label}</span>
             <Switch
@@ -159,7 +164,7 @@ function OtherDevices() {
   return (
     <FieldGrid>
       <Field>
-        <FieldLabel htmlFor="away-minutes">Notify my other devices when this window is out of focus for</FieldLabel>
+        <FieldLabel htmlFor="away-minutes" className="items-center gap-1.5">Notify my other devices when this window is out of focus for <InfoTip text="Before that, only this device notifies you. A closed or idle Orbit always notifies your other devices." /></FieldLabel>
         <Select items={AWAY_OPTIONS} value={String(minutes)} onValueChange={(value) => setMinutes(Number(value))}>
           <SelectTrigger id="away-minutes">
             <SelectValue />
@@ -168,7 +173,6 @@ function OtherDevices() {
             {AWAY_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
           </SelectContent>
         </Select>
-        <FieldDescription>Before that, only this device notifies you. A closed or idle Orbit always notifies your other devices.</FieldDescription>
       </Field>
     </FieldGrid>
   )
@@ -227,7 +231,7 @@ export function NotificationsPage() {
       <SettingsCard title="This device" description="Get a notification here when you are not looking at Orbit.">
         <ThisDevice />
       </SettingsCard>
-      <SettingsCard title="Devices" description="Every browser and device that gets your notifications." flush>
+      <SettingsCard title="Devices" flush>
         <Devices />
       </SettingsCard>
       <SettingsCard title="Other devices" description="When your phone and other browsers get a notification that this device already shows.">

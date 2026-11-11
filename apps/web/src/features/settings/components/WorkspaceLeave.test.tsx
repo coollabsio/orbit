@@ -82,6 +82,6 @@ test('cancelling sends nothing; the owner is told to transfer ownership first', 
 
 test('on Orbit Cloud the owner is told that ownership transfer is not available', async () => {
   const owner = setup('owner', { billing: true })
-  expect(await owner.view.findByText('The owner cannot leave. Ownership transfer is not available on Orbit Cloud yet.')).toBeTruthy()
+  expect(await owner.view.findByText(/^The owner cannot leave. Ownership transfer is not available on Orbit Cloud yet./)).toBeTruthy()
   expect(owner.view.queryAllByText(/first transfer ownership/)).toHaveLength(0)
 })

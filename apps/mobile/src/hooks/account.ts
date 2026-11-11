@@ -10,6 +10,7 @@ import type { MemberRecord, User } from '../data/orbit'
 import * as providers from '../data/sign-in-provider'
 import { currentStatus, type OwnStatus, type UserStatus } from '../data/status'
 import { useOrbit } from '../orbit-context'
+import { useSignedIn } from '../session-context'
 import { providerDevice } from '../sign-in-provider'
 import { uploadPart } from '../upload-part'
 
@@ -139,6 +140,56 @@ export function useRevokeSessions() {
   })
 }
 
+export function usePasskeys() {
+  const { client } = useOrbit()
+  return useQuery({ queryKey: account.accountKeys.passkeys, queryFn: () => account.passkeys(client) })
+}
+
+export function useDeletePasskey() {
+  const { client } = useOrbit()
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => account.deletePasskey(client, id),
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: account.accountKeys.passkeys }),
+  })
+}
+
+/** The browsers that get push notifications. The iOS devices are in `useApnsDevices`. */
+export function usePushDevices() {
+  const { client } = useOrbit()
+  return useQuery({ queryKey: account.accountKeys.pushDevices, queryFn: () => account.pushDevices(client) })
+}
+
+export function useRemovePushDevice() {
+  const { client } = useOrbit()
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => account.removePushDevice(client, id),
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: account.accountKeys.pushDevices }),
+  })
+}
+
+export function useApnsDevices() {
+  const { client } = useOrbit()
+  return useQuery({ queryKey: account.accountKeys.apnsDevices, queryFn: () => account.apnsDevices(client) })
+}
+
+/** Resolves to the number of devices the test notification went to. */
+export function useSendTestPush() {
+  const { client } = useOrbit()
+  return useMutation({ mutationFn: () => account.sendTestPush(client) })
+}
+
+/** Deletes the open workspace: the workspace list drops it and the app opens the next one. */
+export function useDeleteWorkspace() {
+  const { client, workspace } = useOrbit()
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () => account.deleteWorkspace(client, workspace),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: keys.workspaces }),
+  })
+}
+
 export function useOAuthConnections() {
   const { client } = useOrbit()
   return useQuery({ queryKey: account.accountKeys.oauthConnections, queryFn: () => account.oauthConnections(client) })
@@ -172,7 +223,7 @@ export function useTwoFactorWrites() {
 }
 
 export function useConnectedAccounts() {
-  const { client } = useOrbit()
+  const { client } = useSignedIn()
   return useQuery({ queryKey: account.accountKeys.connectedAccounts, queryFn: () => providers.connectedAccounts(client) })
 }
 
@@ -181,7 +232,7 @@ export function useConnectedAccounts() {
  * `reauthentication_required` (pass it to `withReauthentication`). `false` when the person cancels.
  */
 export function useConfirmIdentity() {
-  const { client } = useOrbit()
+  const { client } = useSignedIn()
   const accounts = useConnectedAccounts()
   return async () => {
     const provider = accounts.data?.[0]?.provider
@@ -248,7 +299,7 @@ export function useRenameWorkspace() {
 }
 
 export function useAuthOptions() {
-  const { client } = useOrbit()
+  const { client } = useSignedIn()
   return useQuery({ queryKey: account.accountKeys.authOptions, queryFn: () => account.authOptions(client), staleTime: Infinity })
 }
 
@@ -271,7 +322,8 @@ export function useMemberWrites() {
     remove: useMutation({ mutationFn: (member: MemberRecord) => account.removeMembership(client, workspaceId, member), onSettled }),
     transfer: useMutation({ mutationFn: (member: MemberRecord) => account.transferOwnership(client, workspace, member), onSettled: workspaceChanged }),
     invite: useMutation({
-      mutationFn: ({ email, role, delivery }: { email: string; role: 'admin' | 'member'; delivery: 'manual' | 'smtp' }) => account.invite(client, workspaceId, email, role, delivery),
+      mutationFn: ({ email, role, channelIds, delivery }: { email: string; role: account.InviteRole; channelIds: readonly string[]; delivery: 'manual' | 'smtp' }) =>
+        account.invite(client, workspaceId, email, role, channelIds, delivery),
       onSettled,
     }),
     revokeInvitation: useMutation({ mutationFn: (id: string) => account.revokeInvitation(client, workspaceId, id), onSettled }),

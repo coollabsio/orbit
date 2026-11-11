@@ -166,30 +166,45 @@ pub(super) async fn request_email_change(
         .email_taken_by_other(session.user.id, email)
         .await
         .map_err(|_| ApiError::internal(CHANGE_EMAIL, rid))?;
-    if !taken
-        && state
-            .account_email_allowed(email)
-            .await
-            .map_err(|_| ApiError::internal(CHANGE_EMAIL, rid))?
-    {
-        let token = orbit_platform::generate_opaque_token();
-        let now = TimestampMillis::now();
-        state
-            .repository
-            .store_email_change_token(
-                session.user.id,
-                email,
-                &token,
-                TimestampMillis::from_millis(now.as_millis() + EMAIL_CHANGE_LIFETIME_MILLIS),
-                request_id_value(rid),
-                now,
-            )
-            .await
-            .map_err(|_| ApiError::internal(CHANGE_EMAIL, rid))?;
-        mailer.send_later(mail::templates::email_change(
-            email,
-            &mailer.link(&format!("/confirm-email?token={token}")),
-        ));
+    // The email limit, link and email run in the background, so a free address does not answer
+    // later than one another account uses.
+    if !taken {
+        let state = state.clone();
+        let mailer = mailer.clone();
+        let email = email.to_owned();
+        let user_id = session.user.id;
+        let request_id = request_id_value(rid).to_owned();
+        tokio::spawn(async move {
+            match state.account_email_allowed(&email).await {
+                Ok(true) => {}
+                Ok(false) => return,
+                Err(error) => {
+                    tracing::warn!(%error, "email change link not issued");
+                    return;
+                }
+            }
+            let token = orbit_platform::generate_opaque_token();
+            let now = TimestampMillis::now();
+            if let Err(error) = state
+                .repository
+                .store_email_change_token(
+                    user_id,
+                    &email,
+                    &token,
+                    TimestampMillis::from_millis(now.as_millis() + EMAIL_CHANGE_LIFETIME_MILLIS),
+                    &request_id,
+                    now,
+                )
+                .await
+            {
+                tracing::warn!(%error, "email change link not issued");
+                return;
+            }
+            mailer.send_later(mail::templates::email_change(
+                &email,
+                &mailer.link(&format!("/confirm-email?token={token}")),
+            ));
+        });
     }
     Ok(accepted(
         "We sent a link to the new address. Open it within 60 minutes to finish the change.",

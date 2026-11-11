@@ -9,6 +9,8 @@ use orbit_platform::{Database, Id};
 use serde_json::Value;
 use thiserror::Error;
 
+use super::databases::NOT_TEMPLATE;
+use super::databases::{ComputeScope, DatabaseError, DatabaseRepository, ExportDatabase};
 use super::pages::{json_text_array, parse_id, visible};
 use super::tasks::{TaskError, require_access};
 use crate::collab::CollabHub;
@@ -30,6 +32,8 @@ pub struct ExportPage {
 pub struct ExportFile {
     pub page_id: Id,
     pub id: Id,
+    /// The stored bytes; files with the same content share one blob.
+    pub blob_id: Id,
     pub file_name: String,
     pub mime_type: String,
     pub size_bytes: u64,
@@ -50,6 +54,8 @@ pub struct ExportSource {
     pub members: HashMap<Id, String>,
     /// Archive folder of a root page (path segments); a root without one goes to the archive root.
     pub root_dirs: HashMap<Id, Vec<String>>,
+    /// The exported database pages and the databases of exported `database` blocks.
+    pub databases: HashMap<Id, ExportDatabase>,
 }
 
 #[derive(Debug, Error)]
@@ -113,6 +119,7 @@ impl PageExportRepository {
                  UNION \
                  SELECT pages.id FROM pages JOIN subtree ON pages.parent_id = subtree.id \
                  WHERE $4 = 1 AND pages.workspace_id = $5 AND pages.deleted_at IS NULL AND {visible6} \
+                 AND {NOT_TEMPLATE} \
              ) \
              SELECT id FROM subtree LIMIT $7",
             visible3 = visible(3),
@@ -229,28 +236,37 @@ impl PageExportRepository {
 
         let files = self.load_files(workspace_id, &pages).await?;
         let members = self.load_members(workspace_id).await?;
+        let scope = ComputeScope::utc(workspace_id, actor_id);
+        let databases = self.load_databases(&pages, &titles, &scope).await?;
         Ok(ExportSource {
             pages,
             titles,
             files,
             members,
             root_dirs: HashMap::new(),
+            databases,
         })
     }
 
     /// Every live page `actor_id` can see in the workspace, as one forest: teamspace pages in the
-    /// folder `<root>/<Teamspace name>/`, the actor's private pages in `<root>/Private/`.
+    /// folder `<root>/<Teamspace name>/`, the actor's private pages in `<root>/Private/`. With
+    /// `private_only`, only the actor's private pages.
     pub async fn load_workspace(
         &self,
         workspace_id: Id,
         actor_id: Id,
         root: &str,
+        private_only: bool,
     ) -> Result<ExportSource, PageExportError> {
         let pool = self.database.pool();
         require_access(pool, workspace_id, actor_id).await?;
+        let visible = if private_only {
+            "(pages.teamspace_id IS NULL AND pages.owner_id = $2)".to_owned()
+        } else {
+            visible(2)
+        };
         let visible_pages = format!(
-            "FROM pages WHERE workspace_id = $1 AND deleted_at IS NULL AND {visible}",
-            visible = visible(2)
+            "FROM pages WHERE workspace_id = $1 AND deleted_at IS NULL AND {visible} AND {NOT_TEMPLATE}"
         );
         if let Some(hub) = CollabHub::existing(&self.database) {
             let ids: Vec<String> =
@@ -361,12 +377,15 @@ impl PageExportRepository {
             .collect();
         let files = self.load_files(workspace_id, &pages).await?;
         let members = self.load_members(workspace_id).await?;
+        let scope = ComputeScope::utc(workspace_id, actor_id);
+        let databases = self.load_databases(&pages, &titles, &scope).await?;
         Ok(ExportSource {
             pages,
             titles,
             files,
             members,
             root_dirs,
+            databases,
         })
     }
 
@@ -379,8 +398,8 @@ impl PageExportRepository {
         let exported: Vec<String> = pages.iter().map(|page| page.id.to_string()).collect();
         let exported = serde_json::to_string(&exported).map_err(|_| PageExportError::Corrupt)?;
         let file_rows = sqlx::query(sqlx::AssertSqlSafe(format!(
-            "SELECT page_files.id, page_files.page_id, page_files.file_name, page_files.mime_type, \
-             page_files.size_bytes, attachment_blobs.storage_key FROM page_files \
+            "SELECT page_files.id, page_files.page_id, page_files.blob_id, page_files.file_name, \
+             page_files.mime_type, page_files.size_bytes, attachment_blobs.storage_key FROM page_files \
              JOIN attachment_blobs ON attachment_blobs.id = page_files.blob_id \
              WHERE page_files.workspace_id = $1 AND page_files.page_id IN ({ids})",
             ids = json_text_array(self.database.backend(), 2)
@@ -398,6 +417,7 @@ impl PageExportRepository {
                 ExportFile {
                     page_id,
                     id,
+                    blob_id: parse_id(row.get("blob_id")).map_err(|_| PageExportError::Corrupt)?,
                     file_name: row.get("file_name"),
                     mime_type: row.get("mime_type"),
                     size_bytes: u64::try_from(row.get::<i64, _>("size_bytes")).unwrap_or(0),
@@ -406,6 +426,49 @@ impl PageExportRepository {
             );
         }
         Ok(files)
+    }
+
+    /// The exported database pages, and the databases that `database` blocks of exported pages
+    /// show when the actor sees them (`titles`), with the linked view blocks they use.
+    async fn load_databases(
+        &self,
+        pages: &[ExportPage],
+        titles: &HashMap<Id, String>,
+        scope: &ComputeScope,
+    ) -> Result<HashMap<Id, ExportDatabase>, PageExportError> {
+        let mut wanted: HashMap<Id, HashSet<Id>> = HashMap::new();
+        let exported: Vec<String> = pages.iter().map(|page| page.id.to_string()).collect();
+        let exported = serde_json::to_string(&exported).map_err(|_| PageExportError::Corrupt)?;
+        let database_pages: Vec<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+            "SELECT id FROM pages WHERE kind = 'database' AND id IN ({ids})",
+            ids = json_text_array(self.database.backend(), 1)
+        )))
+        .bind(&exported)
+        .fetch_all(self.database.pool())
+        .await?;
+        for id in database_pages {
+            wanted
+                .entry(parse_id(id).map_err(|_| PageExportError::Corrupt)?)
+                .or_default();
+        }
+        for page in pages {
+            for (database_id, link_id) in database_blocks(&page.content) {
+                if titles.contains_key(&database_id) {
+                    let links = wanted.entry(database_id).or_default();
+                    links.extend(link_id);
+                }
+            }
+        }
+        if wanted.is_empty() {
+            return Ok(HashMap::new());
+        }
+        DatabaseRepository::new(self.database.clone())
+            .export_data(&wanted, scope)
+            .await
+            .map_err(|error| match error {
+                DatabaseError::Unavailable(error) => PageExportError::Unavailable(error),
+                _ => PageExportError::Corrupt,
+            })
     }
 
     async fn load_members(&self, workspace_id: Id) -> Result<HashMap<Id, String>, PageExportError> {
@@ -424,4 +487,28 @@ impl PageExportRepository {
         }
         Ok(members)
     }
+}
+
+/// `(databaseId, linkId)` of every `database` block in `content`, nested ones too.
+fn database_blocks(content: &[Value]) -> Vec<(Id, Option<Id>)> {
+    let mut found = Vec::new();
+    let mut stack: Vec<&Value> = content.iter().collect();
+    while let Some(block) = stack.pop() {
+        if block.get("type").and_then(Value::as_str) == Some("database") {
+            let prop = |name: &str| {
+                block
+                    .get("props")
+                    .and_then(|props| props.get(name))
+                    .and_then(Value::as_str)
+                    .and_then(|value| value.parse::<Id>().ok())
+            };
+            if let Some(database_id) = prop("databaseId") {
+                found.push((database_id, prop("linkId")));
+            }
+        }
+        if let Some(children) = block.get("children").and_then(Value::as_array) {
+            stack.extend(children);
+        }
+    }
+    found
 }

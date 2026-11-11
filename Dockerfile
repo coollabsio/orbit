@@ -7,9 +7,11 @@ COPY apps/web/package.json apps/web/
 COPY apps/mobile/package.json apps/mobile/
 COPY packages/api/package.json packages/api/
 COPY packages/editor/package.json packages/editor/
+COPY packages/database/package.json packages/database/
 RUN bun install --frozen-lockfile --filter web
 COPY packages/api/ packages/api/
 COPY packages/editor/ packages/editor/
+COPY packages/database/ packages/database/
 COPY apps/web/ apps/web/
 WORKDIR /src/apps/web
 ARG ORBIT_BUILD_REVISION
@@ -40,7 +42,7 @@ RUN ORBIT_BUILD_REVISION=${ORBIT_BUILD_REVISION} \
     && cp target/release/orbit /orbit
 
 FROM alpine:3.23
-RUN apk add --no-cache bash ca-certificates tzdata \
+RUN apk add --no-cache bash ca-certificates tzdata postgresql-client sqlite \
     && mkdir -p /var/lib/orbit /var/backups/orbit \
     && chown -R 65532:65532 /var/lib/orbit /var/backups/orbit
 COPY --from=server /orbit /orbit

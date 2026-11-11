@@ -13,4 +13,4 @@ export function mcpClientCommands(url: string): { client: string; command: strin
 }
 
 /** An MCP client the signed-in person approved (`GET /api/v1/oauth/grants`). */
-export type OAuthConnection = { id: string; client_name: string; workspace_name: string; project_names: string[]; scope: string; created_at: number }
+export type OAuthConnection = { id: string; client_name: string; workspace_name: string; project_names: string[]; all_projects: boolean; scope: string; created_at: number }

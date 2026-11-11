@@ -1,13 +1,17 @@
 //! Object storage (S3) settings in Admin → Storage, against the in-memory S3 server.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode, header};
 use orbit_platform::{
-    AttachmentMutationCoordinator, LocalBlobStore, ObjectStorage, PasswordService, TestDatabase,
-    TieredBlobStore, TimestampMillis, start_fake_s3,
+    AttachmentMutationCoordinator, LocalBlobStore, ObjectStorage, ObjectStorageState,
+    PasswordService, S3Bucket, S3Config, TestDatabase, TieredBlobStore, TimestampMillis,
+    UploadLimits, UploadService, start_fake_s3,
 };
+use orbit_server::attachment_routes::AttachmentState;
+use orbit_server::auth_routes::CookieMode;
 use orbit_server::mail::Mailer;
 use orbit_server::object_storage::saved_storage;
 use orbit_server::repositories::identity::{IdentityRepository, SetupRequest};
@@ -292,4 +296,52 @@ async fn a_command_without_the_server_finds_the_backups_in_the_saved_bucket() {
         .await
         .unwrap_err();
     assert!(error.contains("cannot be decrypted"), "{error}");
+}
+
+#[tokio::test]
+async fn rejected_s3_credentials_do_not_stop_attachment_reconciliation() {
+    let fixture = fixture().await;
+    let root = tempfile::tempdir().unwrap();
+    // The fake bucket answers 403 to this key, as a bucket does after the secret was rotated.
+    let bucket = S3Bucket::new(S3Config {
+        access_key_id: "rotated".to_owned(),
+        ..start_fake_s3().await
+    })
+    .unwrap();
+    let storage = ObjectStorage::default();
+    storage.configure(ObjectStorageState {
+        bucket: Some(bucket),
+        backups: true,
+        ..ObjectStorageState::default()
+    });
+    let mutations = AttachmentMutationCoordinator::default();
+    let store = TieredBlobStore::new(LocalBlobStore::new(root.path()), storage, mutations.clone());
+    let uploads = UploadService::new(
+        (*fixture.database).clone(),
+        Arc::new(store),
+        mutations,
+        UploadLimits::new(1024, 1024).unwrap(),
+    );
+    let state = AttachmentState::new(
+        Arc::new(IdentityRepository::new((*fixture.database).clone())),
+        uploads,
+        CookieMode::secure(),
+    );
+    assert!(matches!(
+        state.reconcile_at(TimestampMillis::now().as_millis()).await,
+        Err(orbit_platform::UploadError::BlobStore(
+            orbit_platform::BlobStoreError::ObjectStorage(_)
+        ))
+    ));
+
+    // The first round runs at once and fails on S3; the service must keep running.
+    let shutdown = tokio_util::sync::CancellationToken::new();
+    let service = tokio::spawn({
+        let shutdown = shutdown.clone();
+        async move { state.run_reconciliation_service(shutdown).await }
+    });
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(!service.is_finished(), "{:?}", service.await);
+    shutdown.cancel();
+    service.await.unwrap().unwrap();
 }

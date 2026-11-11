@@ -3,7 +3,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, fireEvent, render, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
-import type { Page, PageSummary, Teamspace, WorkspaceRole } from '@orbit/api/generated/types.gen'
+import { Toaster } from 'sonner'
+import type { DatabaseDetail, DatabaseRow, Page, PageSummary, Teamspace, WorkspaceRole } from '@orbit/api/generated/types.gen'
 import { queryKeys } from '@/api/queryKeys'
 import { ConfirmationModalHost } from '@/components/common/ConfirmationModal'
 import { WorkspaceProvider } from '@/features/workspaces/WorkspaceProvider'
@@ -30,7 +31,7 @@ afterEach(() => {
 })
 
 const summary = (id: string, parent_id: string | null, position: number, title = id): PageSummary => ({
-  id, parent_id, teamspace_id: 'teamspace-1', private: false, position, title, icon: null, version: 1,
+  id, parent_id, teamspace_id: 'teamspace-1', private: false, kind: 'page', position, title, icon: null, version: 1,
   updated_at: '2026-09-25T10:00:00Z',
 })
 
@@ -42,7 +43,7 @@ const teamspace = (id: string, name: string, position: number, is_default = posi
 const defaultTeamspaces = [teamspace('teamspace-1', 'General', 0)]
 
 const fullPage = (id: string, patch: Partial<Page> = {}): Page => ({
-  ...summary(id, null, 0), workspace_id: 'workspace-1', cover_url: null, cover_position: null, content: [],
+  ...summary(id, null, 0), database_id: null, workspace_id: 'workspace-1', cover_url: null, cover_position: null, content: [],
   creator_id: 'user-1', updated_by: 'user-1', created_at: '2026-09-25T10:00:00Z', deleted_at: null, collab_epoch: 'epoch-1',
   full_width: false, locked_at: null, locked_by: null, updated_by_user: { id: 'user-1', display_name: 'Ada' },
   ...patch,
@@ -59,13 +60,20 @@ type Handler = (call: Call) => Response | Promise<Response> | undefined
 
 function Location() {
   const location = useLocation()
-  return <output data-testid="location">{location.pathname}</output>
+  return (
+    <>
+      <output data-testid="location">{location.pathname}</output>
+      <output data-testid="location-search">{location.search}</output>
+    </>
+  )
 }
 
 interface SetupOptions {
   /** What the collab server holds per page (default: an empty page). */
   content?: (target: CollabTarget) => unknown[]
   collab?: FakeCollab
+  /** Renders the toasts, for tests that read them. */
+  toasts?: boolean
 }
 
 function setup(path: string, handler: Handler, role: WorkspaceRole = 'owner', options: SetupOptions = {}) {
@@ -88,7 +96,7 @@ function setup(path: string, handler: Handler, role: WorkspaceRole = 'owner', op
   const view = render(
     <QueryClientProvider client={client}>
       <CollabConnectContext value={collab.connect}>
-        <MemoryRouter initialEntries={[`${path}?workspace=workspace-1`]}>
+        <MemoryRouter initialEntries={[`${path}${path.includes('?') ? '&' : '?'}workspace=workspace-1`]}>
           <ConfirmationModalHost />
           <WorkspaceProvider>
             <Routes>
@@ -97,6 +105,7 @@ function setup(path: string, handler: Handler, role: WorkspaceRole = 'owner', op
             </Routes>
           </WorkspaceProvider>
           <Location />
+          {options.toasts ? <Toaster /> : null}
         </MemoryRouter>
       </CollabConnectContext>
     </QueryClientProvider>,
@@ -105,6 +114,7 @@ function setup(path: string, handler: Handler, role: WorkspaceRole = 'owner', op
 }
 
 const location = (view: ReturnType<typeof render>) => view.getByTestId('location').textContent
+const search = (view: ReturnType<typeof render>) => view.getByTestId('location-search').textContent
 
 /** The editor mounts after the collaborative document's first sync. */
 /** Empties the title through its real onChange (this needs the DOM registered before react-dom loads, see `test/dom.ts`). */
@@ -254,6 +264,27 @@ test('the trash view lists trashed pages and restores them', async () => {
   expect(calls.find((call) => call.path === '/pages/old/restore')?.body).toEqual({ expected_version: 3 })
 })
 
+const ROW_LIMIT_TOAST = 'This database has the most rows it can hold (5,000).'
+
+test('restoring a row into a database at its 5,000-row cap says so', async () => {
+  const { view } = setup(
+    '/docs/trash',
+    (call) => {
+      if (call.path === '/pages') return Response.json({ items: [] })
+      if (call.path === '/pages/trash') {
+        return Response.json({ items: [{ ...summary('row', 'db', 0, 'Paper'), version: 3, can_purge: true, deleted_at: '2026-09-25T09:00:00Z' }] })
+      }
+      if (call.path === '/pages/row/restore') return problem(409, 'database_row_limit')
+    },
+    'owner',
+    { toasts: true },
+  )
+  const shown = () => view.queryAllByText(ROW_LIMIT_TOAST).length
+  const before = shown()
+  fireEvent.click(await view.findByRole('button', { name: 'Restore' }))
+  await waitFor(() => expect(shown()).toBe(before + 1))
+})
+
 const privatePage = (id: string, position: number, title = id): PageSummary => ({ ...summary(id, null, position, title), teamspace_id: null, private: true })
 
 test('/docs lands on the default teamspace first, then private pages, then other teamspaces', async () => {
@@ -305,15 +336,19 @@ test('the page header shows the space and "Move to" moves the page to the end of
   await waitFor(() => expect(path.textContent).toContain('Private'))
 })
 
+const favoriteEntry = (page_id: string, position: number, title: string, database?: { id: string; title: string }) => ({
+  page_id, position, title, icon: null, kind: 'page', database_id: database?.id ?? null, database_title: database?.title ?? null,
+})
+
 test('the header star and the page menu add and remove the page from favorites', async () => {
   let favorites: string[] = []
   const { view, calls } = setup('/docs/first', (call) => {
     if (call.path === '/pages') return Response.json({ items: [summary('first', null, 0, 'Plan')] })
     if (call.path === '/pages/first' && call.method === 'GET') return Response.json(fullPage('first', { title: 'Plan' }))
-    if (call.path === '/pages/favorites') return Response.json({ items: favorites.map((page_id, position) => ({ page_id, position })) })
+    if (call.path === '/pages/favorites') return Response.json({ items: favorites.map((page_id, position) => favoriteEntry(page_id, position, 'Plan')) })
     if (call.path === '/pages/first/favorite' && call.method === 'PUT') {
       favorites = ['first']
-      return Response.json({ page_id: 'first', position: 0 })
+      return Response.json(favoriteEntry('first', 0, 'Plan'))
     }
     if (call.path === '/pages/first/favorite' && call.method === 'DELETE') {
       favorites = []
@@ -513,7 +548,8 @@ test('content is live: a read-only preview until the first sync, then the live e
   await editorMounted(view)
   const editorSection = view.container.querySelector('section:last-of-type') as HTMLElement
   await waitFor(() => expect(editorSection.textContent).toContain('Shared text'))
-  expect(collabStatus(view).textContent).toBe('Live')
+  expect(collabStatus(view).dataset.collabStatus).toBe('live')
+  expect(collabStatus(view).hidden).toBe(true)
 
   act(() => collab.last().provider.replace(text('Edited elsewhere')))
   await waitFor(() => expect(editorSection.textContent).toContain('Edited elsewhere'))
@@ -528,7 +564,8 @@ test('content is live: a read-only preview until the first sync, then the live e
 test('offline: "Connecting…" then "Offline", beforeunload warns only with unsynced edits, reconnect is live again', async () => {
   const { view, collab } = setup('/docs/first', pageRoutes(), 'owner', { content: () => text('Body') })
   await editorMounted(view)
-  await waitFor(() => expect(collabStatus(view).textContent).toBe('Live'))
+  await waitFor(() => expect(collabStatus(view).dataset.collabStatus).toBe('live'))
+  expect(collabStatus(view).hidden).toBe(true)
   const provider = collab.last().provider
 
   act(() => provider.drop(1006))
@@ -542,7 +579,8 @@ test('offline: "Connecting…" then "Offline", beforeunload warns only with unsy
   expect(beforeUnloadBlocked()).toBeTrue()
 
   act(() => provider.connectAndSync())
-  await waitFor(() => expect(collabStatus(view).textContent).toBe('Live'))
+  await waitFor(() => expect(collabStatus(view).dataset.collabStatus).toBe('live'))
+  expect(collabStatus(view).hidden).toBe(true)
   expect(beforeUnloadBlocked()).toBeFalse()
 })
 
@@ -604,7 +642,8 @@ test('4409 (document reset) refetches the page and reconnects with the new epoch
   expect(collab.last().target.epoch).toBe('epoch-2')
   expect(collab.connections[0].provider.destroyed).toBeTrue()
   await waitFor(() => expect(editorSection.textContent).toContain('After reset'))
-  expect(collabStatus(view).textContent).toBe('Live')
+  expect(collabStatus(view).dataset.collabStatus).toBe('live')
+  expect(collabStatus(view).hidden).toBe(true)
   expect(location(view)).toBe('/docs/first')
 })
 
@@ -635,7 +674,8 @@ test('4413 shows a sync notice, stops editing, and "Reload page" opens a fresh d
   await waitFor(() => expect(view.container.querySelector('.bn-editor')?.getAttribute('contenteditable')).toBe('false'))
   fireEvent.click(within(notice).getByRole('button', { name: 'Reload page' }))
   await waitFor(() => expect(collab.connections).toHaveLength(2))
-  await waitFor(() => expect(collabStatus(view).textContent).toBe('Live'))
+  await waitFor(() => expect(collabStatus(view).dataset.collabStatus).toBe('live'))
+  expect(collabStatus(view).hidden).toBe(true)
   await waitForAbsence(() => view.queryByRole('alert'))
 })
 
@@ -725,4 +765,248 @@ test('a page without sub-pages offers Markdown and PDF export only', async () =>
   expect(await view.findByRole('menuitem', { name: 'PDF' })).toBeTruthy()
   expect(view.getByRole('menuitem', { name: 'Markdown' })).toBeTruthy()
   expect(view.queryByRole('menuitem', { name: 'Markdown with sub-pages' })).toBeNull()
+})
+
+const databaseRow = (id: string, title: string, values: DatabaseRow['values'] = {}): DatabaseRow => ({
+  id, title, icon: null, position: 0, version: 1, has_content: false, created_at: '2026-11-09T10:00:00Z', created_by: 'user-1',
+  updated_at: '2026-11-09T10:00:00Z', updated_by: 'user-1', values,
+})
+
+/** The database "db": a title, a checkbox "Done" and a text "Notes"; one table view. */
+const databaseDetail = (rows: DatabaseRow[]): DatabaseDetail => ({
+  database: { id: 'db', title: 'Research', icon: null, locked: false, row_count: rows.length },
+  properties: [
+    { id: 'p-title', name: 'Name', type: 'title', config: {}, position: 0 },
+    { id: 'p-done', name: 'Done', type: 'checkbox', config: {}, position: 1 },
+    { id: 'p-notes', name: 'Notes', type: 'text', config: {}, position: 2 },
+  ],
+  views: [{ id: 'v1', name: 'Table', type: 'table', config: {}, position: 0 }],
+  rows,
+})
+
+const databaseSummary: PageSummary = { ...summary('db', null, 0, 'Research'), kind: 'database' }
+const rowPage = (id: string, title: string) => fullPage(id, { title, parent_id: 'db', database_id: 'db' })
+
+/** Rows are not in the tree; the open page itself is the target of its own menu. */
+test('the page menu of a row opened as a full page duplicates the row and opens the copy with its properties', async () => {
+  let duplicated = false
+  const rows = () => [databaseRow('r1', 'Paper A'), ...(duplicated ? [databaseRow('r1-copy', 'Paper A (copy)')] : [])]
+  const { view, calls } = setup('/docs/r1', (call) => {
+    if (call.path === '/pages') return Response.json({ items: [databaseSummary] })
+    if (call.path === '/databases/db') return Response.json(databaseDetail(rows()))
+    if (call.path === '/pages/r1' && call.method === 'GET') return Response.json(rowPage('r1', 'Paper A'))
+    if (call.path === '/pages/r1/duplicate') {
+      duplicated = true
+      return Response.json(rowPage('r1-copy', 'Paper A (copy)'), { status: 201 })
+    }
+    if (call.path === '/pages/r1-copy') return Response.json(rowPage('r1-copy', 'Paper A (copy)'))
+  })
+  await view.findByLabelText('Page title')
+  fireEvent.click(within(view.container.querySelector('section:last-of-type') as HTMLElement).getAllByRole('button', { name: 'Page options' }).at(-1)!)
+  await userEvent.click(await view.findByRole('menuitem', { name: 'Duplicate' }))
+  await waitFor(() => expect(location(view)).toBe('/docs/r1-copy'))
+  expect(calls.find((call) => call.path === '/pages/r1/duplicate')?.body).toEqual({ include_children: false })
+  // The copy is a new row of the database: its page shows the property list once the database is read again.
+  await waitFor(() => expect((view.getByLabelText('Page title') as HTMLInputElement).value).toBe('Paper A (copy)'))
+  const properties = await view.findByRole('group', { name: 'Properties' })
+  expect(within(properties).getAllByText('Empty')).toHaveLength(1)
+})
+
+test('duplicating a row of a database at its 5,000-row cap says so', async () => {
+  const { view } = setup(
+    '/docs/r1',
+    (call) => {
+      if (call.path === '/pages') return Response.json({ items: [databaseSummary] })
+      if (call.path === '/databases/db') return Response.json(databaseDetail([databaseRow('r1', 'Paper A')]))
+      if (call.path === '/pages/r1' && call.method === 'GET') return Response.json(rowPage('r1', 'Paper A'))
+      if (call.path === '/pages/r1/duplicate') return problem(409, 'database_row_limit')
+    },
+    'owner',
+    { toasts: true },
+  )
+  await view.findByLabelText('Page title')
+  fireEvent.click(within(view.container.querySelector('section:last-of-type') as HTMLElement).getAllByRole('button', { name: 'Page options' }).at(-1)!)
+  // Sonner keeps toasts of earlier tests: count the new one.
+  const shown = () => view.queryAllByText(ROW_LIMIT_TOAST).length
+  const before = shown()
+  await userEvent.click(await view.findByRole('menuitem', { name: 'Duplicate' }))
+  await waitFor(() => expect(shown()).toBe(before + 1))
+  expect(location(view)).toBe('/docs/r1')
+})
+
+test('the star on a row opened as a full page lists the row in the sidebar Favorites', async () => {
+  let favorited = false
+  const { view } = setup('/docs/r1', (call) => {
+    if (call.path === '/pages') return Response.json({ items: [databaseSummary] })
+    if (call.path === '/databases/db') return Response.json(databaseDetail([databaseRow('r1', 'Paper A')]))
+    if (call.path === '/pages/r1' && call.method === 'GET') return Response.json(rowPage('r1', 'Paper A'))
+    const entry = favoriteEntry('r1', 0, 'Paper A', { id: 'db', title: 'Research' })
+    if (call.path === '/pages/favorites') return Response.json({ items: favorited ? [entry] : [] })
+    if (call.path === '/pages/r1/favorite' && call.method === 'PUT') {
+      favorited = true
+      return Response.json(entry)
+    }
+  })
+  const star = await view.findByRole('button', { name: 'Add to favorites' })
+  await waitFor(() => expect(star.hasAttribute('disabled')).toBeFalse())
+  fireEvent.click(star)
+  const section = await view.findByRole('group', { name: 'Favorites' })
+  await waitFor(() => expect(section.querySelector('[data-page-id="r1"]')?.textContent).toBe('Paper AResearch'))
+})
+
+test('"Move to trash" on a favorite row (not in the tree, not open) reads the row and trashes it', async () => {
+  const { view, calls } = setup('/docs/first', (call) => {
+    if (call.path === '/pages') return Response.json({ items: [summary('first', null, 0, 'Plan'), databaseSummary] })
+    if (call.path === '/pages/first' && call.method === 'GET') return Response.json(fullPage('first', { title: 'Plan' }))
+    if (call.path === '/pages/favorites') return Response.json({ items: [favoriteEntry('r1', 0, 'Paper A', { id: 'db', title: 'Research' })] })
+    if (call.path === '/pages/r1' && call.method === 'GET') return Response.json(rowPage('r1', 'Paper A'))
+    if (call.path === '/pages/r1' && call.method === 'DELETE') return new Response(null, { status: 204 })
+    if (call.path === '/pages/r1/descendants') return Response.json({ items: [] })
+  })
+  const section = await view.findByRole('group', { name: 'Favorites' })
+  const favorite = await waitFor(() => section.querySelector('[data-page-id="r1"]') as HTMLElement)
+  fireEvent.click(within(favorite).getByRole('button', { name: 'Page options' }))
+  await userEvent.click(await view.findByRole('menuitem', { name: 'Move to trash' }))
+  await userEvent.click(await view.findByRole('button', { name: 'Move to trash' }))
+  await waitFor(() => expect(calls.some((call) => call.method === 'DELETE' && call.path === '/pages/r1')).toBeTrue())
+  expect(calls.find((call) => call.method === 'DELETE' && call.path === '/pages/r1')?.search).toBe('?expected_version=1')
+})
+
+test('"Move to trash" on a row opened as a full page trashes it and goes back to its database', async () => {
+  const { view, calls } = setup('/docs/r1', (call) => {
+    if (call.path === '/pages') return Response.json({ items: [databaseSummary] })
+    if (call.path === '/databases/db') return Response.json(databaseDetail([databaseRow('r1', 'Paper A')]))
+    if (call.path === '/pages/r1' && call.method === 'GET') return Response.json(rowPage('r1', 'Paper A'))
+    if (call.path === '/pages/r1' && call.method === 'DELETE') return new Response(null, { status: 204 })
+    if (call.path === '/pages/r1/descendants') return Response.json({ items: [] })
+    if (call.path === '/pages/db') return Response.json(fullPage('db', { title: 'Research', kind: 'database' }))
+  })
+  await view.findByLabelText('Page title')
+  fireEvent.click(within(view.container.querySelector('section:last-of-type') as HTMLElement).getAllByRole('button', { name: 'Page options' }).at(-1)!)
+  await userEvent.click(await view.findByRole('menuitem', { name: 'Move to trash' }))
+  const dialog = await view.findByRole('dialog')
+  expect(dialog.textContent).toContain('Move “Paper A” to the trash?')
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Move to trash' }))
+  await waitFor(() => expect(location(view)).toBe('/docs/db'))
+  const trash = calls.find((call) => call.method === 'DELETE' && call.path === '/pages/r1')
+  expect(trash?.search).toBe('?expected_version=1')
+})
+
+test('a row with sub-pages (not in the tree) offers the sub-page copy and export', async () => {
+  const { view, calls } = setup('/docs/r1', (call) => {
+    if (call.path === '/pages') return Response.json({ items: [databaseSummary] })
+    if (call.path === '/databases/db') return Response.json(databaseDetail([databaseRow('r1', 'Paper A')]))
+    if (call.path === '/pages/r1' && call.method === 'GET') return Response.json(rowPage('r1', 'Paper A'))
+    if (call.path === '/pages/r1/descendants') return Response.json({ items: [summary('notes', 'r1', 0, 'Notes'), summary('deep', 'notes', 0, 'Deep')] })
+    if (call.path === '/pages/r1/duplicate') return Response.json(rowPage('r1-copy', 'Paper A (copy)'), { status: 201 })
+    if (call.path === '/pages/r1-copy') return Response.json(rowPage('r1-copy', 'Paper A (copy)'))
+  })
+  await view.findByLabelText('Page title')
+  fireEvent.click(within(view.container.querySelector('section:last-of-type') as HTMLElement).getAllByRole('button', { name: 'Page options' }).at(-1)!)
+  fireEvent.click(await view.findByRole('menuitem', { name: 'Export' }))
+  expect(await view.findByRole('menuitem', { name: 'Markdown with sub-pages' })).toBeTruthy()
+  await userEvent.click(view.getByRole('menuitem', { name: 'Duplicate with sub-pages' }))
+  await waitFor(() => expect(location(view)).toBe('/docs/r1-copy'))
+  expect(calls.find((call) => call.path === '/pages/r1/duplicate')?.body).toEqual({ include_children: true })
+})
+
+test('trashing a row opened as a full page counts its sub-pages', async () => {
+  const { view } = setup('/docs/r1', (call) => {
+    if (call.path === '/pages') return Response.json({ items: [databaseSummary] })
+    if (call.path === '/databases/db') return Response.json(databaseDetail([databaseRow('r1', 'Paper A')]))
+    if (call.path === '/pages/r1' && call.method === 'GET') return Response.json(rowPage('r1', 'Paper A'))
+    if (call.path === '/pages/r1/descendants') return Response.json({ items: [summary('notes', 'r1', 0, 'Notes'), summary('deep', 'notes', 0, 'Deep')] })
+  })
+  await view.findByLabelText('Page title')
+  fireEvent.click(within(view.container.querySelector('section:last-of-type') as HTMLElement).getAllByRole('button', { name: 'Page options' }).at(-1)!)
+  await userEvent.click(await view.findByRole('menuitem', { name: 'Move to trash' }))
+  const dialog = await view.findByRole('dialog')
+  expect(dialog.textContent).toContain('Its 2 sub-pages move with it.')
+})
+
+test('a thread link for a row opens the comments of the row in the peek, not on the database page', async () => {
+  const { view } = setup('/docs/db?row=r1&thread=t1', (call) => {
+    if (call.path === '/pages') return Response.json({ items: [databaseSummary] })
+    if (call.path === '/pages/db') return Response.json(fullPage('db', { title: 'Research', kind: 'database' }))
+    if (call.path === '/databases/db') return Response.json(databaseDetail([databaseRow('r1', 'Paper A')]))
+    if (call.path === '/pages/r1') return Response.json(rowPage('r1', 'Paper A'))
+    if (call.path === '/pages/r1/threads') return Response.json({ items: [] })
+  })
+  const peek = await view.findByRole('complementary', { name: 'Row' })
+  await within(peek).findByRole('complementary', { name: 'Comments' })
+  expect(view.getAllByRole('complementary', { name: 'Comments' })).toHaveLength(1)
+  await waitFor(() => expect(search(view)).not.toContain('thread='))
+  expect(search(view)).toContain('row=r1')
+})
+
+test('"Open" on a row puts ?row= in the URL and shows the peek; its property list has one line per property, "Empty" for a missing value, and a checkbox toggle is one PATCH; closing drops ?row=', async () => {
+  let done = false
+  const { view, calls } = setup('/docs/db', (call) => {
+    if (call.path === '/pages') return Response.json({ items: [databaseSummary] })
+    if (call.path === '/pages/db') return Response.json(fullPage('db', { title: 'Research', kind: 'database' }))
+    if (call.path === '/databases/db') return Response.json(databaseDetail([databaseRow('r1', 'Paper A', done ? { 'p-done': true } : {})]))
+    if (call.path === '/pages/r1') return Response.json(rowPage('r1', 'Paper A'))
+    if (call.method === 'PATCH' && call.path === '/databases/db/rows/r1/values') {
+      done = true
+      return Response.json(databaseRow('r1', 'Paper A', { 'p-done': true }))
+    }
+  })
+  fireEvent.click(await view.findByRole('button', { name: 'Open' }))
+  await waitFor(() => expect(search(view)).toContain('row=r1'))
+  const peek = await view.findByRole('complementary', { name: 'Row' })
+  const properties = await within(peek).findByRole('group', { name: 'Properties' })
+  expect(within(properties).getByText('Done')).toBeTruthy()
+  expect(within(properties).getByText('Notes')).toBeTruthy()
+  expect(within(properties).getAllByText('Empty')).toHaveLength(1)
+  const checkbox = within(properties).getByRole('checkbox', { name: 'Done' })
+  expect(checkbox.getAttribute('aria-checked')).toBe('false')
+  await userEvent.click(checkbox)
+  await waitFor(() => expect(calls.filter((call) => call.method === 'PATCH' && call.path === '/databases/db/rows/r1/values')).toHaveLength(1))
+  expect(calls.find((call) => call.method === 'PATCH' && call.path === '/databases/db/rows/r1/values')?.body).toEqual({ 'p-done': true })
+  await waitFor(() => expect(within(properties).getByRole('checkbox', { name: 'Done' }).getAttribute('aria-checked')).toBe('true'))
+  fireEvent.click(within(peek).getByRole('button', { name: 'Close row' }))
+  await waitFor(() => expect(search(view)).not.toContain('row='))
+})
+
+test('"Move to" on a row asks before it deletes the row\'s values, then moves it to the space', async () => {
+  const { view, calls } = setup('/docs/r1', (call) => {
+    if (call.path === '/pages') return Response.json({ items: [databaseSummary] })
+    if (call.path === '/databases/db') return Response.json(databaseDetail([databaseRow('r1', 'Paper A')]))
+    if (call.path === '/pages/r1' && call.method === 'GET') return Response.json(rowPage('r1', 'Paper A'))
+    if (call.path === '/pages/r1/move') {
+      const dryRun = (call.body as { dry_run?: boolean }).dry_run === true
+      return Response.json({ ...fullPage('r1', { title: 'Paper A', version: dryRun ? 1 : 2 }), dropped_values: 2 })
+    }
+  })
+  await view.findByLabelText('Page title')
+  fireEvent.click(within(view.container.querySelector('section:last-of-type') as HTMLElement).getAllByRole('button', { name: 'Page options' }).at(-1)!)
+  await userEvent.click(await view.findByRole('menuitem', { name: /General/ }))
+  const dialog = await view.findByRole('dialog')
+  expect(dialog.textContent).toContain('2 property values will be removed.')
+  expect(calls.filter((call) => call.path === '/pages/r1/move').map((call) => call.body)).toEqual([
+    { expected_version: 1, parent_id: null, position: 1, teamspace_id: 'teamspace-1', dry_run: true },
+  ])
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Move' }))
+  await waitFor(() => expect(calls.filter((call) => call.path === '/pages/r1/move').length).toBe(2))
+  expect(calls.filter((call) => call.path === '/pages/r1/move')[1]?.body).toEqual({
+    expected_version: 1, parent_id: null, position: 1, teamspace_id: 'teamspace-1',
+  })
+})
+
+test('"Move to → Page or database…" lists databases and makes the page a row without a dry run', async () => {
+  const { view, calls } = setup('/docs/plan', (call) => {
+    if (call.path === '/pages') return Response.json({ items: [databaseSummary, summary('plan', null, 1, 'Plan')] })
+    if (call.path === '/pages/plan' && call.method === 'GET') return Response.json(fullPage('plan', { title: 'Plan', position: 1 }))
+    if (call.path === '/pages/plan/move') return Response.json({ ...rowPage('plan', 'Plan'), version: 2, dropped_values: 0 })
+  })
+  await view.findByLabelText('Page title')
+  fireEvent.click(within(view.container.querySelector('section:last-of-type') as HTMLElement).getAllByRole('button', { name: 'Page options' }).at(-1)!)
+  await userEvent.click(await view.findByRole('menuitem', { name: 'Page or database…' }))
+  const dialog = await view.findByRole('dialog', { name: 'Move to' })
+  expect(within(dialog).queryByRole('option', { name: /Plan/ })).toBeNull()
+  await userEvent.click(within(dialog).getByRole('option', { name: /Research/ }))
+  await waitFor(() => expect(calls.some((call) => call.path === '/pages/plan/move')).toBeTrue())
+  expect(calls.filter((call) => call.path === '/pages/plan/move').map((call) => call.body)).toEqual([
+    { expected_version: 1, parent_id: 'db', position: 0 },
+  ])
 })

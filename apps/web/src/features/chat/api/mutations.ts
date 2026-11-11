@@ -2,7 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { extractMentions } from '../lib/mentionTokens'
 import { hasReaction, toggleReaction } from '../lib/reactions'
 import { useChatContext } from './chatContext'
-import type { ChannelInput, ChatClient, SendMessageInput, UploadOptions } from './client'
+import type { ChannelInput, ChatClient, SendMessageInput, UploadOptions, WebhookInput } from './client'
 import { patchMessage, updateOutbox } from './events'
 import { chatKeys } from './keys'
 import { requireClient } from './queries'
@@ -368,4 +368,59 @@ export function useSendTyping() {
     typingSentAt.set(key, now)
     client.sendTyping(conversationId, threadRootId)
   }
+}
+
+/** Webhook changes refresh the channel's list; their answers are not live events. */
+function useWebhookMutation<TInput extends { conversationId: string }, TResult>(run: (client: ChatClient, input: TInput) => Promise<TResult>) {
+  const { client, workspaceId } = useChatContext()
+  const queryClient = useQueryClient()
+  return useMutation<TResult, Error, TInput>({
+    mutationFn: (input) => run(requireClient(client), input),
+    onSettled: (_result, _error, input) => queryClient.invalidateQueries({ queryKey: chatKeys.webhooks(workspaceId, input.conversationId) }),
+  })
+}
+
+export function useCreateWebhook() {
+  return useWebhookMutation((client, input: { conversationId: string } & WebhookInput) =>
+    client.createWebhook(input.conversationId, { name: input.name, iconUrl: input.iconUrl }))
+}
+
+export function useUpdateWebhook() {
+  return useWebhookMutation((client, input: { conversationId: string; webhookId: string } & WebhookInput) =>
+    client.updateWebhook(input.conversationId, input.webhookId, { name: input.name, iconUrl: input.iconUrl }))
+}
+
+export function useRotateWebhook() {
+  return useWebhookMutation((client, input: { conversationId: string; webhookId: string }) => client.rotateWebhook(input.conversationId, input.webhookId))
+}
+
+export function useDeleteWebhook() {
+  return useWebhookMutation((client, input: { conversationId: string; webhookId: string }) => client.deleteWebhook(input.conversationId, input.webhookId))
+}
+
+export function useSetWebhookInteractivity() {
+  return useWebhookMutation((client, input: { conversationId: string; webhookId: string; requestUrl: string | null }) =>
+    client.setWebhookInteractivity(input.conversationId, input.webhookId, input.requestUrl))
+}
+
+/** Reveals (`rotate: false`) or rotates the signing secret of a webhook. */
+export function useWebhookSigningSecret() {
+  return useChatMutation((client, input: { conversationId: string; webhookId: string; rotate: boolean }) =>
+    client.webhookSigningSecret(input.conversationId, input.webhookId, input.rotate))
+}
+
+/** A click on an integration's button. The integration answers later, through the live socket. */
+export function useClickAction() {
+  return useChatMutation((client, input: { messageId: string; blockId: string; actionId: string }) =>
+    client.clickAction(input.messageId, input.blockId, input.actionId))
+}
+
+/** Hides an integration's reply that only the user sees. */
+export function useDismissEphemeral() {
+  const { workspaceId } = useChatContext()
+  const queryClient = useQueryClient()
+  return (message: Message) =>
+    queryClient.setQueryData<Message[]>(chatKeys.ephemeral(workspaceId, message.conversationId), (old = []) =>
+      old.filter((item) => item.id !== message.id),
+    )
 }

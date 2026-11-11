@@ -54,6 +54,13 @@ const TRIAL_DAYS_ENV: &str = "ORBIT_TRIAL_DAYS";
 const TRIAL_TASKS_ENV: &str = "ORBIT_TRIAL_TASKS";
 const TRIAL_PAGES_ENV: &str = "ORBIT_TRIAL_PAGES";
 const TRIAL_MEMBERS_ENV: &str = "ORBIT_TRIAL_MEMBERS";
+const APNS_KEY_ENV: &str = "ORBIT_APNS_KEY";
+const APNS_KEY_FILE_ENV: &str = "ORBIT_APNS_KEY_FILE";
+const APNS_KEY_ID_ENV: &str = "ORBIT_APNS_KEY_ID";
+const APNS_TEAM_ID_ENV: &str = "ORBIT_APNS_TEAM_ID";
+const APNS_TOPIC_ENV: &str = "ORBIT_APNS_TOPIC";
+/// The bundle id of the Orbit iOS app.
+const APNS_DEFAULT_TOPIC: &str = "io.coollabs.orbit";
 const STRIPE_API_BASE: &str = "https://api.stripe.com";
 /// Variables that scripts and tests use, not the server.
 const IGNORED_ENV_PREFIXES: [&str; 2] = ["ORBIT_DEV_", "ORBIT_TEST_"];
@@ -73,6 +80,61 @@ pub struct Config {
     pub app_key: Option<AppKey>,
     /// Stripe billing for Orbit Cloud (`ORBIT_CLOUD=true`); `None` on a self-hosted server.
     pub billing: Option<BillingConfig>,
+    /// Native iOS pushes through Apple's push service (`ORBIT_APNS_*`); `None` when the key is not
+    /// set: browsers still get Web Push.
+    pub apns: Option<ApnsConfig>,
+}
+
+/// The server's identity towards APNs: a token signing key (`.p8`) of the Apple developer team.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ApnsConfig {
+    /// The PEM text of the `.p8` key (PKCS#8, P-256).
+    pub key: Secret,
+    /// The 10-character id of the key.
+    pub key_id: String,
+    /// The 10-character id of the Apple developer team.
+    pub team_id: String,
+    /// The bundle id of the app (`apns-topic`).
+    pub topic: String,
+}
+
+/// The APNs variables, collected before they are checked together.
+#[derive(Default)]
+struct ApnsEnvironment {
+    key: Option<String>,
+    key_id: Option<String>,
+    team_id: Option<String>,
+    topic: Option<String>,
+}
+
+impl ApnsEnvironment {
+    /// `None` when none of the key, its id and the team id is set; all three, or an error.
+    fn into_config(self) -> Result<Option<ApnsConfig>, ConfigError> {
+        let missing = [
+            (APNS_KEY_ENV, self.key.is_none()),
+            (APNS_KEY_ID_ENV, self.key_id.is_none()),
+            (APNS_TEAM_ID_ENV, self.team_id.is_none()),
+        ];
+        if missing.iter().all(|(_, missing)| *missing) {
+            return Ok(None);
+        }
+        if let Some((key, _)) = missing.iter().find(|(_, missing)| *missing) {
+            return Err(ConfigError::InvalidSetting {
+                key,
+                detail: "ORBIT_APNS_KEY, ORBIT_APNS_KEY_ID and ORBIT_APNS_TEAM_ID are set together"
+                    .to_owned(),
+            });
+        }
+        Ok(Some(ApnsConfig {
+            key: Secret::new(self.key.unwrap_or_default()),
+            key_id: self.key_id.unwrap_or_default(),
+            team_id: self.team_id.unwrap_or_default(),
+            topic: self
+                .topic
+                .filter(|topic| !topic.is_empty())
+                .unwrap_or_else(|| APNS_DEFAULT_TOPIC.to_owned()),
+        }))
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -958,6 +1020,7 @@ fn apply_environment(
         APP_KEY_ENV,
         STRIPE_SECRET_KEY_ENV,
         STRIPE_WEBHOOK_SECRET_ENV,
+        APNS_KEY_ENV,
     ] {
         if environment.contains_key(key) && environment.contains_key(&format!("{key}_FILE")) {
             return Err(ConfigError::AmbiguousSecret {
@@ -966,6 +1029,7 @@ fn apply_environment(
         }
     }
     let mut billing = BillingEnvironment::default();
+    let mut apns = ApnsEnvironment::default();
 
     for (key, value) in environment {
         if key == ENVIRONMENT_ENV {
@@ -1061,6 +1125,16 @@ fn apply_environment(
             billing.trial_pages = Some(value.clone());
         } else if key == TRIAL_MEMBERS_ENV {
             billing.trial_members = Some(value.clone());
+        } else if key == APNS_KEY_ENV {
+            apns.key = Some(value.clone());
+        } else if key == APNS_KEY_FILE_ENV {
+            apns.key = Some(read_secret_file(key, Path::new(value))?);
+        } else if key == APNS_KEY_ID_ENV {
+            apns.key_id = Some(value.trim().to_owned());
+        } else if key == APNS_TEAM_ID_ENV {
+            apns.team_id = Some(value.trim().to_owned());
+        } else if key == APNS_TOPIC_ENV {
+            apns.topic = Some(value.trim().to_owned());
         } else if key.starts_with("ORBIT_")
             && !IGNORED_ENV_PREFIXES
                 .iter()
@@ -1070,6 +1144,7 @@ fn apply_environment(
         }
     }
     config.billing = billing.into_config()?;
+    config.apns = apns.into_config()?;
     Ok(())
 }
 
@@ -1181,6 +1256,38 @@ mod tests {
                 .map(|(key, value)| ((*key).to_owned(), (*value).to_owned())),
         );
         Config::from_environment(env).unwrap()
+    }
+
+    #[test]
+    fn apns_is_off_without_its_key_and_needs_the_key_id_and_team_id_with_it() {
+        assert_eq!(production(&[]).apns, None);
+        let apns = production(&[
+            ("ORBIT_APNS_KEY", "pem"),
+            ("ORBIT_APNS_KEY_ID", "KEY1234567"),
+            ("ORBIT_APNS_TEAM_ID", "TEAM123456"),
+        ])
+        .apns
+        .unwrap();
+        assert_eq!(
+            (
+                apns.key.expose(),
+                apns.key_id.as_str(),
+                apns.team_id.as_str(),
+                apns.topic.as_str()
+            ),
+            ("pem", "KEY1234567", "TEAM123456", "io.coollabs.orbit")
+        );
+        let partial: BTreeMap<String, String> = [("ORBIT_APNS_KEY", "pem")]
+            .into_iter()
+            .map(|(key, value)| (key.to_owned(), value.to_owned()))
+            .collect();
+        assert!(matches!(
+            Config::from_environment(partial),
+            Err(ConfigError::InvalidSetting {
+                key: "ORBIT_APNS_KEY_ID",
+                ..
+            })
+        ));
     }
 
     #[test]

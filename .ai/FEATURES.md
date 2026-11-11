@@ -18,7 +18,7 @@ Mail persists too (receiving and a read-only web client: domains, mailboxes, thr
 - User menu provides Account settings and a link to Account settings → Appearance (`/profile/appearance`).
 - Mobile uses a bottom dock and a full navigation drawer.
 - Topbar breadcrumbs are route-derived in `Topbar.tsx`.
-- Appearance (port of Coolify's Profile → Appearance, `lib/theme.tsx`): Layout Classic/New UI (`orbit:layout`, default classic, `[data-new-ui]` on `<html>`, `new-ui:` variant, `useNewUi()`): the new UI turns on the contextual sidebar (settings areas, the docs and chat lists in the sidebar, Back) and the whole-app custom theme on the sidebar, its menus (`MenuSurfaceContext`) and ⌘K; the classic layout keeps the custom theme on chat only. color theme Light/System/Dark (default dark, `localStorage.theme`), the custom theme (`lib/customTheme.ts`, `CustomThemeDialog`; replaces Light/System/Dark while set: `ThemeProvider` puts `customThemeVariables` on `<html>` and picks `.dark` from the message colour; picking a base theme clears it; the app sidebar uses `appSidebarTheme`, which puts `.dark` or `.light` on the sidebar so its `dark:` styles follow the sidebar colour), Navigation style Default/Floating (`orbit:nav-style`, `[data-floating]` on `<html>`, `floating:` variant, desktop only) and Style 3D/Flat (`orbit:style`, `[data-flat]`, `flat:` variant on buttons and sidebar items). `index.html` applies all of them before first paint. Coolify's Page width and Chart times are not ported.
+- Appearance (port of Coolify's Profile → Appearance, `lib/theme.tsx`): the sidebar is contextual (settings areas, the docs and chat lists in the sidebar, Back), and the custom theme colours the whole app, with the sidebar, its menus (`MenuSurfaceContext`) and ⌘K. Color theme Light/System/Dark (default dark, `localStorage.theme`), the custom theme (`lib/customTheme.ts`, `CustomThemeDialog`; replaces Light/System/Dark while set: `ThemeProvider` puts `customThemeVariables` on `<html>` and picks `.dark` from the message colour; picking a base theme clears it; the app sidebar uses `appSidebarTheme`, which puts `.dark` or `.light` on the sidebar so its `dark:` styles follow the sidebar colour), Navigation style Default/Floating (`orbit:nav-style`, `[data-floating]` on `<html>`, `floating:` variant, desktop only) and Style 3D/Flat (`orbit:style`, `[data-flat]`, `flat:` variant on buttons and sidebar items). `index.html` applies all of them before first paint. Coolify's Page width and Chart times are not ported.
 
 ## Home
 
@@ -70,6 +70,72 @@ Core files: `TasksPage.tsx`, `components/TaskList.tsx`, `components/TaskBoard.ts
 - Writes include the observed record version. Stale writes restore the server record and expose a conflict prompt.
 - Bulk and reorder requests are one atomic request of at most 100 items. Empty unchanged choices are local no-ops.
 - Task and project trash have server-backed restore flows and 30-day retention.
+- Asana import (`pages/AsanaImportPage.tsx`, `api/asanaImports.ts`; server `asana/`, routes `/imports/asana`, migration
+  0069): "Import from Asana" under "New project" in the Tasks sidebar (and in the header project menu) opens
+  `/tasks-import`. Same states and token rules as the Notion import (scan, choose, import; token encrypted, wiped in every
+  final state; private to its creator). Choose lists projects by workspace and team (archived ones unselected). Each
+  project becomes a new Orbit project. Sections become statuses: a status with the same name is reused, otherwise
+  done-like names are `completed`, the first section `unstarted`, the rest `started`. Completed Asana tasks outside a
+  completed status go to the project's Done. Tasks keep rich-text notes, dates (dates at 12:00 UTC), priority (custom field
+  "Priority"), tags as labels, assignee matched by email (else a description line), other custom fields, linked files (as
+  links), subtasks (five levels), comments (by the importer, prefixed with the Asana author and time), Asana-hosted files
+  and dependencies (blocked by). Tasks are created with `TaskRepository::import_task`: no notifications, no sub-issue
+  auto-close, Asana's `completed_at`. A restart resumes from `asana_import_items` without duplicates. A failed or cancelled
+  import keeps what it made.
+- Linear import (`pages/LinearImportPage.tsx`, `api/linearImports.ts`; server `linear/`, routes `/imports/linear`,
+  migration 0070): "Import from Linear" in the header project menu and in Settings → Import opens `/tasks-import/linear`.
+  Same states and key rules as the Asana import (personal API key encrypted, wiped in every final state; private to its
+  creator). Choose lists teams with issue counts (archived ones unselected). Each team becomes a new Orbit project keyed
+  by the team key. Workflow states become statuses: the same name is reused (Canceled matches Cancelled), otherwise
+  triage/backlog/unstarted → `unstarted`, started → `started`, completed → `completed`, canceled → `cancelled`; Linear's
+  "Duplicate" state lands on Cancelled until its duplicate relation moves it. Issues keep the markdown description, title,
+  priority (0-4 → none/urgent/high/medium/low), labels (`Group/Name` for grouped labels), assignee matched by email (else a
+  description line), due date (12:00 UTC), completed or canceled time, URL as source, sub-issues (five levels; deeper ones
+  and ones whose parent is in another team go to the top level with a "Parent" line). Linear project, cycle, milestone,
+  estimate and SLA become description lines; linked attachments a Links section. Uploads (`uploads.linear.app`) in the
+  description and comments are downloaded with the key, attached, and their URLs rewritten. Comments are written by the
+  importer with author and time, replies flattened in time order. Relations: blocks, related and duplicate (similar is
+  skipped); a relation Orbit cannot hold (one per pair of tasks, one duplicate per task, no chains) is checked before the
+  write, skipped and counted. Trashed issues are left out. Shared importer code: server `task_import.rs`, web
+  `api/importStatus.ts` and `components/ImportLayout.tsx`.
+- Trello import (`pages/TrelloImportPage.tsx`, `api/trelloImports.ts`; server `trello/`, routes `/imports/trello`,
+  migration 0071): "Import from Trello" in the header project menu and in Settings → Import opens `/tasks-import/trello`.
+  Same states and rules as the Asana and Linear imports. Connect takes a Power-Up API key and a read-only token (the page
+  links Trello's authorization page for the typed key); both are encrypted and wiped in every final state, and a key or
+  token Trello rejects shows Trello's reason under its field. Choose lists boards by Trello Workspace with open card counts
+  (archived boards unselected). Each board becomes a new Orbit project. Open lists become statuses in board order (same
+  name reused; a done-like name is completed, the first list unstarted, the others started); archived lists and archived
+  cards are skipped and counted. Open cards keep title, markdown description, card URL as source, labels (unnamed ones
+  named after their color, Trello colors kept), start and due dates, and list and card order; a card on a completed list
+  gets its last activity as completed time. A card member is assigned only when exactly one active Orbit member has the
+  same full name (Trello hides other members' emails); otherwise a "Members" line. Checklists become task lists
+  (checklist blocks) in the description, not sub-issues. Custom field values and "Due date: marked complete" on an open
+  list become description lines; link attachments a Links section. Uploaded attachments and uploads linked from the
+  description and comments are downloaded, attached, and their URLs rewritten; a download Trello refuses is counted.
+  Comments are written by the importer, oldest first, with author and time.
+- Orbit import (server `orbit_import/` with `client.rs`, `archive.rs`, `tasks.rs`, `pages.rs`, `chat.rs`; routes
+  `orbit_import_routes.rs` under `/imports/orbit` (`POST {url, token}`, `POST /upload`, `GET`, `GET /{id}?include=tree`,
+  `POST /{id}/start {selection}`, `POST /{id}/cancel`); migration 0085: `orbit_imports`, `orbit_import_items`,
+  `orbit_import_links`): copies another Orbit workspace from its export archive, pulled with an export API token
+  (`orbit.fetch` job: `/me`, `POST /exports` once, poll up to 24 h, download to storage, read the manifest and tree)
+  or uploaded as a ZIP. `mode` comes from the token's scope or the manifest: `full` (owner/admin of the target;
+  teamspaces matched by name, projects with statuses and labels, tasks parents first via `import_task` with creator
+  and assignees by email, attachments, comments, relations, teamspace pages, the exporter's private pages into the
+  importer's private space, public channels matched by name, private channels, DMs) or `personal` (any non-guest;
+  only private pages and private channels/DMs, `project_ids`/`teamspace_ids` refused; any import needs
+  `WorkspaceExportPersonal`, a full one also `WorkspaceExport`). Every created record is in `orbit_import_links`
+  keyed by the source workspace id and a `scope` (`''` for full imports, the importer's user id for personal ones):
+  a re-run in the same scope creates nothing twice; pre-existing pages keep their content and only gain new
+  comments. The archive is under the importer's control, so a personal import writes only its own scope, skips
+  (counts as existing) a channel or page a full import created, and writes every message and comment as the importer
+  with a name/time header, keeping only the importer's reactions. Consequence: a private channel or DM imported by a
+  member before the admin's full import, or by two members, exists once per scope. Chat history is inserted directly
+  (`chat.rs`): no notifications, mention rows, push, bots, webhooks or live events; read markers end at the last
+  message; unmatched authors get a name/time header. Report: `created` counts, `skipped_existing`, `unmatched_users`,
+  `failures`, `members_must_import_private`. Problem codes: `orbit_url_invalid`, `orbit_token_invalid`,
+  `orbit_scope_missing`, `orbit_unreachable`, `orbit_export_too_large`, `orbit_format_unsupported`,
+  `orbit_import_state_conflict`, `forbidden`. Source side: public `POST /api/public/v1/exports` reuses only a queued or
+  running export. Dev: `ORBIT_DEV_ORBIT_IMPORT_LOCAL=1` allows `http://127.0.0.1:<port>` as the source.
 
 ### Sub-issues
 
@@ -182,6 +248,98 @@ favorites through `/pages/favorites` (list), `/pages/{page_id}/favorite` (PUT/DE
   schema. The package also holds `codeLanguages`, `commentMarks()` (the comment mark for editors without threads),
   the framework-free `CollabSession` (status, close codes) and `ticketWebSocket` (a fresh socket ticket per connect). Custom `page` block links to a page; it greys out as "Missing page" when the target is trashed or gone.
   Slash items "Sub-page" (creates a child page, inserts the link, opens it) and "Link a page" (picker over the tree).
+  Custom `database` block `{databaseId, linkId}` (`editor/DatabaseBlock.tsx`, databases P2 spec section 3): the database's
+  title, view tabs, toolbar and table or board inside the page (`database/DatabaseSurface.tsx`, shared with the full
+  database page), 25 rows then "Load more" (25 cards per board column), rows open in the peek (`?row=&row_block=`). Its
+  root is isolated (`@orbit/editor/isolation`): keys, pastes and drags inside never reach the editor. Slash "Database –
+  inline" makes a database sub-page (shown in the tree) and the block; "Linked view of database" picks a database and
+  `POST /databases/{id}/links` gives the block views of its own (`database_views.link_id`; changes follow the host page's
+  lock, the database's own views stay as they are; `GET /databases/{id}?link=`). Deleting an inline block keeps the
+  database ("Move to trash" in the toast); "Turn into" swaps a page link to a database and a database block. States: "No
+  access to this database" (404), "Database in trash", "View not found" (offers the database's own views). Mobile shows a
+  card (icon, title, rows, first view) that opens the database screen with `link` and `view`; Markdown writes the block as
+  a link to its database; task text drops it; duplicates copy links and their views.
+- Database list and calendar views (databases P2/P3 spec section 13). List (`database/DatabaseList.tsx`): one 36 px line
+  per row (icon, title, then the visible columns that have a value, right-aligned); drag to reorder without sorts; click
+  opens the peek. Calendar (`database/DatabaseCalendar.tsx`, shared logic `@orbit/database/calendar`): config
+  `date_property_id` (a date, created time or last edited time; repair takes the first date property) and
+  `calendar_mode` (`month` 6-week grid, or `week`); a range is a bar across its days, a month cell shows 3 cards then
+  "+N more", "No date (N)" lists undated rows. Cards of a date property drag to another day (start and end move by the
+  same days, times kept in the viewer's zone) and a range's right edge drags to change the end; "+" on a day adds a row
+  with that date (plus filter values and the default template). Week start: the locale, or "⋯ → Start week on" (this
+  browser, `orbit:calendar-week-start`). Mobile: list views show all visible properties; a calendar is a month grid with
+  dots and the tapped day's rows under it (`components/database/Calendar.tsx`), no drag.
+- Database form views, members only (databases P2/P3 spec section 18, `database/DatabaseForm.tsx`, shared logic
+  `@orbit/database/form`). Config `form` `{questions: [{property_id, label?, description?, required}], title?,
+  description?, submit_label?, confirmation?, access: members|closed}`; a form view without one asks for the title.
+  Editors (view edit rules) build it: texts, question cards (drag or arrows to reorder, label, help text, Required),
+  "Add question" (a property not asked yet, or a new property), "Accepting answers"; "Preview" tries it without
+  sending. "Copy form link" copies `/docs/<database>/form/<view>`, a full-page form (`DatabaseFormPage.tsx`) for members
+  who can open the database. `POST /databases/{id}/forms/{view}/submit` `{answers}` adds the row as the submitter in
+  one transaction (row cap, `database.row_created` and `database.form_submitted` audit events); closed is 409, more
+  than 30 submissions per member per hour in a workspace is 429 (counted from the audit events). No computed,
+  unique ID, files, relation or button questions. Mobile fills and submits form views (`components/database/
+  FormFill.tsx`; screen `/docs/form/<database>/<view>`, which a web form link in a page opens); the builder is on the web.
+- Database email, phone, files and unique ID properties (databases P2/P3 spec section 12). Email and phone are checked
+  text shown as `mailto:`/`tel:` links. Files hold `[{file_id, name}]` (max 20) of the row page's own files: the web
+  popover uploads (button or drop), reorders and removes; mobile uploads from the photo library or files app. Unique ID
+  (`{prefix, next}`, one per database) numbers existing rows by creation when added and each new row in its create
+  transaction (also CSV import, template, duplicate, move-in, restore); numbers are never reused and only the Notion
+  import may set them. Notion email, phone, unique ID and uploaded files import as these types.
+- Database button property (databases P2/P3 spec section 17, server `repositories/databases/buttons.rs`, shared
+  `@orbit/database/buttons`). Config `{label, actions (max 5), confirm}`; actions `set_values` (this row), `add_row` (this
+  or another database the presser can open, appended) and `open_url` (one, client side). Values take `"me"` (person),
+  `"today"`/`"now"` (date), and in `add_row` a title string and `"this_row"`. `POST /databases/{id}/rows/{row}/press/
+  {property}` `{today?}` runs the server actions in one transaction (any failure rolls back all; 422 names
+  `actions[i]`), records `database.button_pressed` (plus `database.row_created` per added row) and returns `{row,
+  created_rows, open_url?}`; 10 presses per user per second per server (429 `database_button_rate_limit`). A button
+  stores no value, cannot be filtered or sorted, and is skipped by search, CSV import and forms. Web: the cell button
+  (confirm dialog, spinner, error toast; Enter presses it in the table), "Edit property → Edit button…" opens
+  `ButtonConfigDialog`. Mobile presses in the row's property list and in list, gallery, timeline and calendar rows
+  (`components/database/ButtonCell.tsx`); its config is edited on the web. Notion buttons stay skipped.
+- Database gallery and timeline views (databases P2/P3 spec section 16). Gallery (`database/DatabaseGallery.tsx`, shared
+  `@orbit/database/gallery`): a grid of 180/260/340 px cards (`card_size`) with a 3:2 preview (`card_preview`: `none`,
+  `cover`, `content` = the body's first image else its first 300 characters, or `{files: id}` = a files property's
+  first image; `fit_image`), the title and `card_properties`, "New" as the last card, drag to reorder without sorts.
+  `GET /databases/{id}` adds `preview` to rows only when a returned view is a gallery that needs it. Timeline
+  (`database/DatabaseTimeline.tsx`, shared `@orbit/database/timeline`): `start_property_id` and `end_property_id`
+  (dates; no end: a range's end, else one day), `zoom` (day to year), `show_table` and `table_columns` for the left
+  pane; drag a bar to move both dates or an edge to change one (a moved time keeps its local hour); undated rows list
+  under "No date" and a click on their track sets a date; zoom and "Today" above the axis; its own scroller, rows
+  virtualized. Mobile: a gallery is a 2-column grid (1 for large cards, `components/database/Gallery.tsx`); a timeline is
+  a list grouped by month with "Timeline · Edit on the web" (`TimelineList.tsx`). Notion gallery and timeline views
+  import with their preview, size, dates, zoom and table pane.
+- Database relation and rollup properties (databases P2/P3 spec section 11, D-P3-1/D-P3-5). A relation links rows to
+  rows of a target database (any space the user can open, or the same one); each link is one `page_relations` row under
+  the pair's primary property, and the synced property of a two-way pair ("Show on <database>") reads the same rows
+  from the other side. `GET /databases/{id}?tz=` fills relation values (visible page ids), `hidden_links` counts and
+  `related_pages` titles, and computes rollups (`repositories/databases/computed.rs`, the shared computed-value layer
+  that formulas also use); a write replaces the cell's visible links (max 100) and keeps hidden ones. Rollup functions
+  as Notion's (show, counts, percents, number, date and checkbox functions). Trashed pages are left out, permanent
+  deletes and moves out of a database drop links, a duplicated database keeps links one-way. Web: pills, a target-row
+  picker and relation/rollup setup in "New property"; mobile shows and edits links (search sheet) and edits their
+  configs on the web. Notion relations stay relations when both databases are imported (dual = two-way), outside
+  links stay as "<name> (titles)" text, rollups over them stay rollups.
+- Database formula property (databases P2/P3 spec section 15, D-P3-1/D-P3-3). Only the server runs formulas
+  (`repositories/databases/formula/`: `syntax` lexer and parser, `check` type checker to IR, `eval` with a step counter,
+  `dates` on jiff in the reader's `?tz=` zone), on every read as the formula pass of the computed-value layer. Config
+  `{expression, result_type}`; clients send `prop("Name")` or ids, the server stores ids and infers the type. A failed
+  cell is `{"error": message}` (`row.formulaErrors` on clients). Limits: 2,000 characters, 500 nodes, depth 32, 2,000
+  steps per cell, lists 1,000, text 10,000, 20 formulas, 15 formula layers, 2 s per read. `POST
+  …/formula/preview` checks an expression and computes the first 10 rows; save errors are 422 `formula_invalid` with
+  `formula: {message, start, end}` (UTF-16). Filters, sorts and calculations follow the result type
+  (`@orbit/database/formula/values`). Web: "Edit property → Edit formula…" (`FormulaDialog`: highlight, completion,
+  error, preview); cells show results or a muted "Error" with the message on hover (`cells/FormulaCell.tsx`). Mobile
+  shows results, taps show errors, editing says "Edit this formula on the web". Notion formulas that parse and type
+  check import live (`notion/formula.rs`), others keep static values.
+- Databases for API tokens and MCP (databases P2/P3 spec section 14): tools `get_database`, `query_database`,
+  `create_database_row`, `update_database_row`, `trash_database_rows` and REST `GET /docs/{id}/database`, `POST
+  /docs/{id}/database/query`, `POST /docs/{id}/rows`, `PATCH /docs/{id}/rows/{row}`, `POST /docs/{id}/rows/trash` under the
+  docs scopes (personal tokens only). Keys are property names or ids, options go by name, people by id, email or "me";
+  results name options and show people as `{id, name}`. Queries filter and sort in Rust in memory
+  (`repositories/databases/query.rs`, the rules of `@orbit/database` filter/sort; shared cases in
+  `packages/database/cases/`), 100 rows per page with an opaque cursor; name translation is
+  `repositories/databases/agent.rs`. `get_doc` of a row adds `values`.
   Custom `callout` block (`editor/CalloutBlock.tsx`; slash "Callout" in Basic blocks after Quote, aliases callout/note/tip/
   warning/info): inline rich text, props `emoji` (default 💡; click it to pick another in the app's emoji picker),
   `backgroundColor` (BlockNote color names, default `gray`; `default` = border only) and `textColor`, both editable in the
@@ -256,8 +414,24 @@ favorites through `/pages/favorites` (list), `/pages/{page_id}/favorite` (PUT/DE
   `TextRange { start, end }` in UTF-16 code units (JS string indices, end exclusive); the UI renders them as `<strong>`
   text nodes (no HTML). On Postgres, `page_search` is a table with a `tsvector` column in the `orbit_search` text search
   configuration (unaccent + simple), ranked by `ts_rank` with titles weighted 10x.
+- Obsidian import (`pages/ObsidianImportPane.tsx`, `components/ObsidianImportChooser.tsx`, `api/obsidianImports.ts`;
+  server `obsidian/` and `collab::markdown_import::obsidian_to_blocks`, routes `/imports/obsidian`, migration 0072):
+  Documents header "…" → "Import from Obsidian" and Settings → Import open `/docs/import/obsidian`. Upload one `.zip`
+  of a vault (progress, cancel) → `obsidian.scan` checks the archive safely (`obsidian/vault.rs`: no extraction, `..`,
+  absolute paths, symlinks, encryption, entry/size/ratio caps fail it with a message shown on the page; `.obsidian/`,
+  `.trash/`, `__MACOSX/`, dotfiles, canvases, CSV, oversized files and case duplicates are skipped and counted; one
+  top-level folder is stripped) → tree (folders that hold notes become pages; `Folder/Folder.md` is the folder page's
+  content; a folder without one lists its sub-pages) with the Notion import's tree picker and destination fields
+  (`components/ImportTreePicker.tsx`, `ImportDestinationFields.tsx`, `ImportParts.tsx`, `import/*.ts`, shared) →
+  `obsidian.import`: pass 1 creates pages parents first, pass 2 converts each note with wikilinks resolved like
+  Obsidian (relative path, vault path, else unique file name; `Note#Heading` links to the note, unresolved links stay
+  text), linked and embedded files attached as page files (images → image blocks, other files → file blocks, unlinked
+  attachments skipped), `![[Note]]` → link, `> [!type]` callouts → `callout` blocks, `==x==` → yellow background,
+  `%%comments%%` and frontmatter dropped, the Notion page size cap. Same lifecycle rules as the Notion import (private,
+  resumable, cancel keeps filled pages and trashes unfilled ones, trial page limit, read-only stop, 24 h expiry); the
+  archive is deleted in every final state.
 - Notion import (`pages/NotionImportPane.tsx`, `components/NotionImportChooser.tsx`, `api/notionImports.ts`,
-  `notionImport/selection.ts`; server `notion/import.rs`, routes `/imports/notion`): Documents header "…" → "Import from
+  `import/selection.ts`; server `notion/import.rs`, routes `/imports/notion`): Documents header "…" → "Import from
   Notion" opens `/docs/import`, a pane next to the tree like Trash. Steps follow the import's status at
   `/docs/import/:importId`: Connect (password field for a Notion personal access token, sent once, never cached client-side;
   problems map to sentences: invalid token, app key missing, import in progress + link to it, Notion unavailable) →
@@ -272,6 +446,14 @@ favorites through `/pages/favorites` (list), `/pages/{page_id}/favorite` (PUT/DE
   the light detail every 2 s only while scanning/queued/importing and fetches the tree once, under its own query key, when
   the import is `ready`. Notion callouts become `callout` blocks (emoji icon, color, nested children; a non-emoji icon
   becomes 💡 and counts as `callout_icon` in the report).
+  A Notion data source becomes an Orbit database (`notion/database.rs`, mapping in the databases spec section 14):
+  typed properties (computed Notion types as static values), option colors, row values, one table, board, list or calendar view for
+  each Notion view (AND filters and sorts kept), rows as row pages in Notion order (max 5,000). A database with several
+  data sources is one tree node and one database for each data source. An inline database is a database sub-page,
+  and its block becomes a `database` block of the database's own views. Pass 1 fetches each data source before writing and creates databases and
+  rows through the databases repository; property and option ids derive from the Notion ids, so a resumed import
+  finds them. The report adds `databases_imported`, `rows_truncated`, database lossy reasons and skipped
+  `property:<type>`; web and mobile render them as sentences (`@orbit/database/notionImport`).
   When an import fails (e.g. revoked token) or is cancelled, the pages it had created but not filled go to the trash (one
   audited batch per top-level page; a subtree is kept if anything in it has content or is not from the import) and the report
   counts them (`unfilled_pages_trashed`). Filled pages stay.
@@ -421,7 +603,7 @@ MessageItem,MailHtmlFrame,SafetyBanner,MailSearch}.tsx`), settings in `features/
 Design: `docs/superpowers/specs/2026-10-23-mail-slice-1-design.md` (local file). Operator guide:
 `docs/operations.md#mail`.
 
-Slice 1 receives and reads mail; it does not send. Server (migration 0066):
+Slice 1 receives and reads mail; it does not send. Server (migration 0094):
 
 - Provider intake (`mail_delivery.rs`, `mail_routes/{inbound,providers}.rs`, `crates/mail/src/inbound/`): Cloudflare,
   Postmark, Mailgun, Resend and SES post to `/api/v1/mail/inbound/{kind}/{id}`; instance and workspace providers
@@ -479,7 +661,7 @@ Not done yet (mail stays **Beta** until slices 1 to 5 are done):
 ## Chat
 
 Core files: `features/chat/pages/ChatPage.tsx`, `features/chat/components/*`, `features/chat/api/*`.
-Design: `docs/superpowers/specs/2026-10-01-chat-redesign-design.md` (UI) and
+Design: `docs/specs/2026-10-01-chat-redesign-design.md` (UI) and
 `2026-10-02-chat-backend-design.md` (backend); both are local files.
 
 Chat runs on the server and is on in every build. `lib/chatEnabled.ts` is the one switch that
@@ -509,6 +691,20 @@ turns its routes, navigation and shortcuts off.
   edited. Emoticons (`:D`) become emoji, a typed task ID (`GEN-1`) of a real project shows as a chip
   and a card, a message of only emoji (1 to 30) shows them large, and `<https://…>` is a link with no
   card. A backslash keeps `\:D`, `\:name:` and `\GEN-1` as text.
+- Incoming webhooks (`docs/chat-webhooks.md`): a tool posts JSON to a secret URL
+  (`POST /api/v1/hooks/chat/{id}/{secret}`, `chat_routes/hooks.rs`) and a message shows in one channel as that
+  tool (`message.bot`: name, icon, an "App" badge). The channel's creator and owners and admins manage them in
+  Edit channel > Integrations; only a hash of the secret is stored, so the URL shows once. `author_id` of such a
+  message is the member who made the webhook, but it is unread for them too, makes no Inbox item, and nobody
+  can edit it (`MessageRecord::sender_id`, `lib/bot.ts`). All bot posts go through `ChatRepository::post_as_bot`. A webhook may send Slack Block Kit `blocks` (header, section, context, image,
+  divider, markdown, rich_text; `repositories/chat/blocks.rs`, stored in `chat_messages.blocks`): they show in place
+  of the body (`MessageBlocks.tsx`; rich text becomes Markdown in `lib/blocks.ts`), and the body is their plain text. The hook is a drop-in for Slack's (`repositories/chat/slack.rs`): mrkdwn becomes
+  Markdown, legacy `attachments` become `attachment` blocks, form `payload=` works, unknown block types are left out,
+  long text is cut, `icon_emoji` is the avatar (`bot.icon_emoji`), and the answer is plain `ok`. Buttons without a URL are interactive when the webhook has a request URL
+  (Integrations > Interactivity): `chat_routes/interactions.rs` sends a Slack-signed `block_actions` payload (3 s, no
+  redirects, public addresses only outside development), and the integration answers through
+  `/api/v1/hooks/chat/{id}/responses/{token}` (5 uses, 30 min): replace, delete, `in_channel`, or an ephemeral reply
+  (live-only `message.ephemeral` event, `EphemeralMessages.tsx`). The signing secret is encrypted with the app key.
 - Custom emoji belong to the workspace (Workspace Settings > Emoji, owners and admins): `:name:` stays
   text in the body and in reactions and becomes the image when it is shown.
 - Stickers belong to the workspace too (Workspace Settings > Stickers, owners and admins; 512 KiB, 100 for

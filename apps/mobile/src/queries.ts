@@ -4,20 +4,22 @@ import { useMemo } from 'react'
 
 import { chatBadge, type Person } from './data/chat'
 import { keys } from './data/keys'
+import type { MentionTarget } from './data/mentions'
 import * as api from './data/orbit'
 import { useOrbit } from './orbit-context'
 
-export function useProjects() {
+export function useProjects(enabled = true) {
   const { client, workspaceId } = useOrbit()
-  return useQuery({ queryKey: keys.projects(workspaceId), queryFn: () => api.projects(client, workspaceId) })
+  return useQuery({ queryKey: keys.projects(workspaceId), queryFn: () => api.projects(client, workspaceId), enabled })
 }
 
 /** The statuses of every project. Reads the project list through the cache, so a refresh of one refreshes both. */
-export function useStatuses() {
+export function useStatuses(enabled = true) {
   const { client, workspaceId } = useOrbit()
   const queryClient = useQueryClient()
   return useQuery({
     queryKey: keys.statuses(workspaceId),
+    enabled,
     queryFn: async () => {
       const projects = await queryClient.ensureQueryData({ queryKey: keys.projects(workspaceId), queryFn: () => api.projects(client, workspaceId) })
       return api.statuses(client, workspaceId, projects.map((project) => project.id))
@@ -45,6 +47,15 @@ export function useMembers() {
 export function usePeople(): Person[] {
   const members = useMembers()
   return useMemo(() => (members.data ?? []).map((member) => ({ id: member.user_id, name: member.display_name })), [members.data])
+}
+
+/** Members who can be mentioned (not suspended), with the email's local part as the handle, as on the web. */
+export function useMentionPeople(): MentionTarget[] {
+  const members = useMembers()
+  return useMemo(
+    () => (members.data ?? []).filter((member) => !member.suspended_at).map((member) => ({ id: member.user_id, name: member.display_name, handle: member.email.split('@')[0] ?? member.email })),
+    [members.data],
+  )
 }
 
 export function useConversations() {
@@ -75,9 +86,10 @@ export function useNotifications() {
   return useQuery({ queryKey: keys.notifications(workspaceId), queryFn: () => api.notifications(client, workspaceId) })
 }
 
-export function useUnreadNotifications() {
+/** `enabled` is off for a guest: it has no Activity. */
+export function useUnreadNotifications(enabled = true) {
   const { client, workspaceId } = useOrbit()
-  return useQuery({ queryKey: keys.unreadNotifications(workspaceId), queryFn: () => api.unreadNotifications(client, workspaceId) })
+  return useQuery({ queryKey: keys.unreadNotifications(workspaceId), queryFn: () => api.unreadNotifications(client, workspaceId), enabled })
 }
 
 export function usePages() {

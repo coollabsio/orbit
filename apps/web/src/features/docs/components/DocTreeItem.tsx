@@ -1,11 +1,11 @@
-import { ChevronRight, Copy, MoreH as Ellipsis, DocumentText as FileText, Add as Plus, Star, Trash as Trash2 } from 'reicon-react'
-import type { PageSummary } from '@orbit/api/generated/types.gen'
+import { ChevronRight, Copy, MoreH as Ellipsis, DocumentText as FileText, Grid, Star, Trash as Trash2 } from 'reicon-react'
+import type { PageKind, PageSummary } from '@orbit/api/generated/types.gen'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Emoji } from '@/components/common/Emoji'
 import { useDocPageActions } from '@/features/docs/pageActions'
 import { childrenOf, pageTitle, type DropZone } from '@/features/docs/pageTree'
-import { TreeIconButton, TreeRowActions } from './TreeRow'
+import { TreeCreateMenu, TreeIconButton, TreeRowActions } from './TreeRow'
 
 export type DocDropZone = DropZone
 
@@ -23,11 +23,14 @@ export interface DocTreeDnd {
 /** The row menu's "Add to / Remove from favorites" item. */
 export interface DocTreeFavorites {
   isFavorite: (id: string) => boolean
-  onToggle: (id: string, favorite: boolean) => void
+  onToggle: (page: DocTreeItemPage, favorite: boolean) => void
 }
 
+/** What a row shows of its page: a favorite outside the tree (a database row) has no tree summary. */
+export type DocTreeItemPage = Pick<PageSummary, 'id' | 'kind' | 'title' | 'icon'>
+
 interface DocTreeItemProps {
-  page: PageSummary
+  page: DocTreeItemPage
   pages: PageSummary[]
   depth: number
   activeId: string | null
@@ -35,13 +38,15 @@ interface DocTreeItemProps {
   isExpanded: (id: string) => boolean
   onToggle: (id: string) => void
   onOpen: (id: string) => void
-  onCreateChild: (parentId: string) => void
+  onCreateChild: (parentId: string, kind: PageKind) => void
   onTrash: (id: string) => void
   favorites?: DocTreeFavorites
   /** Rows that can only be reordered (Favorites): no "inside" drop zone. */
   reorderOnly?: boolean
   /** Marks the rows of a sidebar section (`data-section`), e.g. "favorites". */
   section?: string
+  /** Muted text after the title (the database of a favorite row). */
+  hint?: string | null
 }
 
 /** Pointer position → drop zone: edges reorder among siblings, the middle nests inside. */
@@ -68,8 +73,11 @@ export function DocTreeItem({
   favorites,
   reorderOnly = false,
   section,
+  hint,
 }: DocTreeItemProps) {
-  const children = childrenOf(pages, page.id)
+  const isDatabase = page.kind === 'database'
+  // A database's rows list in the database, not in the tree.
+  const children = isDatabase ? [] : childrenOf(pages, page.id)
   const expanded = isExpanded(page.id)
   const favorite = favorites?.isFavorite(page.id) ?? false
   const actions = useDocPageActions()
@@ -110,7 +118,9 @@ export function DocTreeItem({
           e.preventDefault()
           e.stopPropagation()
           e.dataTransfer.dropEffect = 'move'
-          dnd.onDragOver(page.id, zoneAt(e.currentTarget, e.clientY, reorderOnly))
+          // A page dropped inside a database becomes a row; a database cannot.
+          const draggedDatabase = pages.find((item) => item.id === dnd.dragId)?.kind === 'database'
+          dnd.onDragOver(page.id, zoneAt(e.currentTarget, e.clientY, reorderOnly || (isDatabase && draggedDatabase)))
         }}
         onDragLeave={(e) => {
           if (!e.currentTarget.contains(e.relatedTarget as Node | null)) dnd.onDragLeave(page.id)
@@ -140,9 +150,12 @@ export function DocTreeItem({
           <span className="inline-flex size-5 shrink-0" aria-hidden="true" />
         )}
         <span className="inline-flex w-[18px] shrink-0 items-center justify-center text-sm leading-none text-muted-foreground/70">
-          {page.icon ? <Emoji value={page.icon} /> : <FileText className="size-[15px]" />}
+          {page.icon ? <Emoji value={page.icon} /> : isDatabase ? <Grid className="size-[15px]" /> : <FileText className="size-[15px]" />}
         </span>
-        <span className="min-w-0 flex-1 truncate">{pageTitle(page)}</span>
+        <span className="min-w-0 flex-1 truncate">
+          {pageTitle(page)}
+          {hint ? <span className="ml-1.5 font-normal text-muted-foreground/70">{hint}</span> : null}
+        </span>
         <TreeRowActions>
           <DropdownMenu>
             <DropdownMenuTrigger render={<TreeIconButton tip="Page options" aria-label="Page options" />}>
@@ -150,7 +163,7 @@ export function DocTreeItem({
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-auto min-w-36">
               {favorites ? (
-                <DropdownMenuItem onClick={() => favorites.onToggle(page.id, !favorite)}>
+                <DropdownMenuItem onClick={() => favorites.onToggle(page, !favorite)}>
                   <Star className="size-[14px]" weight={favorite ? 'Filled' : 'Outline'} />
                   {favorite ? 'Remove from favorites' : 'Add to favorites'}
                 </DropdownMenuItem>
@@ -174,9 +187,8 @@ export function DocTreeItem({
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-          <TreeIconButton tip="Add child page" aria-label="Add child page" onClick={() => onCreateChild(page.id)}>
-            <Plus className="size-[13px]" />
-          </TreeIconButton>
+          {/* The server refuses pages under a database: its rows are created in the database. */}
+          {isDatabase ? null : <TreeCreateMenu tip="Add child page" label="Add child page" onCreate={(kind) => onCreateChild(page.id, kind)} />}
         </TreeRowActions>
       </div>
       {expanded

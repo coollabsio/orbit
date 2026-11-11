@@ -1957,19 +1957,14 @@ async fn favorites_are_idempotent_ordered_and_reorderable() {
     ];
     let [a, b, c] = [id_of(&a), id_of(&b), id_of(&c)];
 
-    assert_eq!(
-        fixture.favorite(b).await,
-        json!({"page_id": b, "position": 0})
-    );
-    assert_eq!(
-        fixture.favorite(a).await,
-        json!({"page_id": a, "position": 1})
-    );
+    let entry = |id: &str, position: i64, title: &str| {
+        json!({"page_id": id, "position": position, "title": title, "icon": null, "kind": "page",
+               "database_id": null, "database_title": null})
+    };
+    assert_eq!(fixture.favorite(b).await, entry(b, 0, "B"));
+    assert_eq!(fixture.favorite(a).await, entry(a, 1, "A"));
     // Adding again keeps the favorite where it is.
-    assert_eq!(
-        fixture.favorite(b).await,
-        json!({"page_id": b, "position": 0})
-    );
+    assert_eq!(fixture.favorite(b).await, entry(b, 0, "B"));
     fixture.favorite(c).await;
     assert_eq!(
         fixture.favorites_as(&fixture.owner_cookie).await,
@@ -1980,11 +1975,7 @@ async fn favorites_are_idempotent_ordered_and_reorderable() {
     assert_eq!(status, StatusCode::OK, "{list}");
     assert_eq!(
         list,
-        json!({"items": [
-            {"page_id": c, "position": 0},
-            {"page_id": b, "position": 1},
-            {"page_id": a, "position": 2}
-        ]})
+        json!({"items": [entry(c, 0, "C"), entry(b, 1, "B"), entry(a, 2, "A")]})
     );
     let (status, _) = fixture.move_favorite(c, 99).await;
     assert_eq!(status, StatusCode::OK);
@@ -2377,4 +2368,37 @@ async fn add_member(fixture: &Fixture, workspace_id: &str, email: &str) -> (Id, 
         .await
         .unwrap();
     (id, format!("__Host-orbit_session={}", session.token))
+}
+
+#[tokio::test]
+async fn content_writes_drop_unsafe_link_and_file_urls() {
+    let fixture = Fixture::new().await;
+    let page = fixture.create(json!({"title": "Links"})).await;
+    let (status, updated) = fixture
+        .call(
+            "PATCH",
+            &fixture.page_uri(id_of(&page)),
+            Some(json!({
+                "expected_version": 0,
+                "content": [
+                    {"id": "a", "type": "paragraph", "content": [
+                        {"type": "link", "href": "javascript:alert(1)", "content": [{"type": "text", "text": "Click", "styles": {}}]}
+                    ], "children": []},
+                    {"id": "b", "type": "file", "props": {"url": "javascript:alert(2)", "name": "x"}, "children": []}
+                ]
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{updated}");
+    let stored: String = sqlx::query_scalar("SELECT content_json FROM pages WHERE id = $1")
+        .bind(id_of(&page))
+        .fetch_one(fixture.database.pool())
+        .await
+        .unwrap();
+    assert!(!stored.contains("javascript:"), "{stored}");
+    assert!(stored.contains("Click"), "{stored}");
+    assert_eq!(
+        fixture.get(id_of(&page)).await["content"],
+        updated["content"]
+    );
 }

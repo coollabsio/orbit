@@ -1,5 +1,5 @@
 //! Mail: domains, mailboxes, received messages (receipts), threads, labels and search
-//! (migration 0066).
+//! (migration 0094).
 //!
 //! A received message is stored as an ordinary blob, sealed with the workspace data key
 //! ([`MailKeys`]); `mail_receipts.blob_id` references it, so the blob reconcile removes a blob

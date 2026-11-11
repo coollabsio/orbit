@@ -3,9 +3,9 @@
 // mentionify -> linkify. Custom regex parser, zero dependencies. Shared by
 // message content and embed cards.
 import { Fragment } from 'react'
-import { appNavigate } from './navigateBridge'
+import { appNavigate, internalPath } from './navigateBridge'
 import { CodeBlock } from '@/components/common/CodeBlock'
-import { Emoji } from '@/components/common/Emoji'
+import { EmojiShortcode } from '@/components/common/Emoji'
 import { InternalLink } from '@/components/common/InternalLink'
 import { MarkdownText } from '@/components/common/MarkdownText'
 import { ProfileTrigger } from '@/components/common/ProfileTrigger'
@@ -51,11 +51,6 @@ function githubLink(url: string): { kind: 'issue' | 'pull' | 'discussion' | 'rep
   return { kind: 'repo', label: `${owner}/${repo}` }
 }
 
-/** Links to this app (message links, task links…) navigate in place, Discord-style. */
-function internalPath(url: string): string | null {
-  const origin = window.location.origin
-  return url.startsWith(`${origin}/`) ? url.slice(origin.length) : null
-}
 
 /** Plain text with its emoji as Twemoji images, unless the host draws it (`MarkdownTextContext`). */
 function emojify(text: string, key: string): React.ReactNode {
@@ -246,11 +241,17 @@ export function renderMarkdownText(text: string, keyPrefix: string, mentionToken
     } else if (token.startsWith('[')) {
       const linkMatch = token.match(/^\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)$/)
       if (linkMatch) {
+        // the label is already a link: the host puts no link of its own inside it
+        const label = <MarkdownTextContext value={null}>{renderMarkdownText(linkMatch[1], `${key}-link`, mentionTokens, options)}</MarkdownTextContext>
+        const path = internalPath(linkMatch[2])
         parts.push(
-          <a key={key} href={safeHref(linkMatch[2])} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
-            {/* the label is already a link: the host puts no link of its own inside it */}
-            <MarkdownTextContext value={null}>{renderMarkdownText(linkMatch[1], `${key}-link`, mentionTokens, options)}</MarkdownTextContext>
-          </a>,
+          path ? (
+            <InternalLink key={key} url={linkMatch[2]} path={path}>{label}</InternalLink>
+          ) : (
+            <a key={key} href={safeHref(linkMatch[2])} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
+              {label}
+            </a>
+          ),
         )
       } else {
         parts.push(token)
@@ -262,8 +263,7 @@ export function renderMarkdownText(text: string, keyPrefix: string, mentionToken
         </code>,
       )
     } else if (token.startsWith(':')) {
-      // a custom emoji of the workspace shows its image; any other name stays text
-      parts.push(EMOJI_SHORTCODES[token.slice(1, -1)] || <Emoji key={key} value={token} />)
+      parts.push(EMOJI_SHORTCODES[token.slice(1, -1)] || <EmojiShortcode key={key} value={token} />)
     } else if (token.startsWith('||')) {
       const inner = renderMarkdownText(token.slice(2, -2), `${key}-spoiler`, mentionTokens, options)
       parts.push(options.chat ? <Spoiler key={key}>{inner}</Spoiler> : <Fragment key={key}>||{inner}||</Fragment>)

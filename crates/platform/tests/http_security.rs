@@ -365,6 +365,52 @@ async fn trusted_proxy_headers_are_validated_and_used() {
 }
 
 #[tokio::test]
+async fn trusted_proxy_replaces_an_unusable_client_request_id() {
+    let policy =
+        OriginPolicy::new("https://orbit.test").trust_proxy(IpNet::from_str("10.0.0.0/8").unwrap());
+    let app = test_app(policy);
+    let send = |values: &'static [&'static str]| {
+        let mut request = request("GET", "/forwarding-view");
+        request
+            .extensions_mut()
+            .insert(ConnectInfo(SocketAddr::from((
+                Ipv4Addr::new(10, 1, 2, 3),
+                4123,
+            ))));
+        for value in values {
+            request
+                .headers_mut()
+                .append("x-request-id", HeaderValue::from_static(value));
+        }
+        app.clone().oneshot(request)
+    };
+
+    // ChatGPT's MCP client sends IDs with a slash suffix (issue #52).
+    let response = send(&["69bbe4ed-800c-4d1c-93fd-59cb80a7ccdf/tvke"])
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        body_json(response).await["request_id"],
+        "69bbe4ed-800c-4d1c-93fd-59cb80a7ccdf/tvke"
+    );
+
+    for values in [&["bad id with spaces"][..], &["a", "b"][..]] {
+        let response = send(values).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let generated = response.headers()["x-request-id"]
+            .to_str()
+            .unwrap()
+            .to_owned();
+        assert!(
+            generated.parse::<orbit_platform::Id>().is_ok(),
+            "{generated}"
+        );
+        assert_eq!(body_json(response).await["request_id"], generated.as_str());
+    }
+}
+
+#[tokio::test]
 async fn trusted_proxy_rejects_ambiguous_forwarded_headers() {
     let policy =
         OriginPolicy::new("https://orbit.test").trust_proxy(IpNet::from_str("10.0.0.0/8").unwrap());
@@ -664,7 +710,7 @@ async fn body_limit_is_streaming_and_does_not_poll_before_inner_auth_rejection()
 async fn readiness_requires_every_named_platform_check() {
     let registry = HealthRegistry::new()
         .with_check(HealthCheck::Migrations, || async { Ok(()) })
-        .with_check(HealthCheck::DatabaseIntegrity, || async { Ok(()) })
+        .with_check(HealthCheck::Database, || async { Ok(()) })
         .with_check(HealthCheck::WritableStorage, || async { Ok(()) })
         .with_check(HealthCheck::Scheduler, || async {
             Err("worker stopped".to_owned())
@@ -726,6 +772,53 @@ async fn endpoint_class_limits_return_correlated_problem_details() {
 }
 
 #[tokio::test]
+async fn refused_credentials_do_not_use_up_a_workspace_budget() {
+    let app = Router::new()
+        .route(
+            "/api/v1/workspaces/w1/tasks",
+            get(|headers: HeaderMap| async move {
+                let member = headers
+                    .get("cookie")
+                    .is_some_and(|cookie| cookie.as_bytes().starts_with(b"session=member"));
+                if member {
+                    StatusCode::OK
+                } else {
+                    StatusCode::UNAUTHORIZED
+                }
+            }),
+        )
+        .layer(
+            HttpPlatformLayer::new(OriginPolicy::new("http://127.0.0.1"))
+                .with_session_cookie("session")
+                .with_rate_limits(RateLimitConfig {
+                    general_per_minute: 2,
+                    workspace_multiplier: 1,
+                    ..RateLimitConfig::default()
+                }),
+        );
+    let request = |host: u8, cookie: &str| {
+        Request::get("/api/v1/workspaces/w1/tasks")
+            .header("cookie", cookie)
+            .extension(ConnectInfo(SocketAddr::from(([10, 0, 0, host], 4567))))
+            .body(Body::empty())
+            .unwrap()
+    };
+    // Made-up cookies from many hosts are all refused by the route.
+    for host in 1..=20 {
+        let cookie = format!("session=made-up-{host}");
+        let response = app.clone().oneshot(request(host, &cookie)).await.unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+    // Members still have the whole workspace budget, and then it ends.
+    for (host, cookie) in [(100, "session=member-a"), (101, "session=member-b")] {
+        let response = app.clone().oneshot(request(host, cookie)).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+    let response = app.oneshot(request(102, "session=member-c")).await.unwrap();
+    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+}
+
+#[tokio::test]
 async fn csp_allows_only_the_verified_bootstrap_hash_and_local_image_variants() {
     let app = Router::new()
         .route("/", get(|| async { StatusCode::OK }))
@@ -744,11 +837,11 @@ async fn csp_allows_only_the_verified_bootstrap_hash_and_local_image_variants() 
     assert!(csp.contains("script-src 'self' 'sha256-YWJj'"));
     // External https images load (covers, image blocks); plain http and other sources stay blocked.
     assert!(csp.contains("img-src 'self' data: blob: https:;"));
-    assert!(csp.contains("style-src 'self'; style-src-attr 'unsafe-inline'"));
+    assert!(csp.contains("style-src 'self' 'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='; style-src-attr 'unsafe-inline'"));
     assert!(!csp.contains("http:"));
     assert_eq!(
         csp,
-        "default-src 'self'; script-src 'self' 'sha256-YWJj'; style-src 'self'; style-src-attr 'unsafe-inline'; img-src 'self' data: blob: https:; frame-src https://www.youtube-nocookie.com; media-src 'self' https://video.twimg.com; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'self' https://github.com"
+        "default-src 'self'; script-src 'self' 'sha256-YWJj'; style-src 'self' 'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='; style-src-attr 'unsafe-inline'; img-src 'self' data: blob: https:; frame-src blob: https://www.youtube-nocookie.com https://player.vimeo.com; media-src 'self' https:; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'self' https://github.com"
     );
 }
 

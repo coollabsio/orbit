@@ -8,8 +8,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { UNDO_TOAST_DURATION } from '@/lib/toast'
 import { loadFailed } from '@/lib/connection'
-import { useScrollMemory } from '@/lib/useScrollMemory'
-import { Bookmark, ChevronDown, Add as Plus, Setting2 as Settings, TaskSquare as SquareCheck } from 'reicon-react'
+import { Bookmark, ChevronDown, Import, Add as Plus, Setting2 as Settings, TaskSquare as SquareCheck } from 'reicon-react'
 import { cn } from 'cn'
 import { ApiProblem } from '@orbit/api/problem'
 import { Button } from '@/components/ui/button'
@@ -24,7 +23,7 @@ import {
 import { EmptyState } from '@/components/common/EmptyState'
 import { Pane, PaneHeader, PaneTitle } from '@/components/common/Pane'
 import { useCurrentUser } from '@/features/auth/api'
-import { useMembers } from '@/features/workspaces/api'
+import { useTeamMembers } from '@/features/workspaces/api'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { useAllStatuses, useProjects } from '@/features/tasks/api/projects'
 import { useLabels } from '@/features/tasks/api/labels'
@@ -120,7 +119,7 @@ function WorkspaceTasksPage() {
   const projectsQuery = useProjects(workspace.id)
   const projects = projectsQuery.data ?? EMPTY_PROJECTS
   const statusesQuery = useAllStatuses(workspace.id, projects)
-  const membersQuery = useMembers(workspace.id)
+  const membersQuery = useTeamMembers(workspace.id)
   const labelsQuery = useLabels(workspace.id)
   const currentUser = useCurrentUser()
   const queryClient = useQueryClient()
@@ -318,9 +317,6 @@ function WorkspaceTasksPage() {
     const frame = requestAnimationFrame(() => focusTaskRow(id, pointer))
     return () => cancelAnimationFrame(frame)
   }, [listKey, pointer, tasksShown])
-  // the board scrolls in the page; the list and the timeline remember their own scrollers
-  const boardScroller = useRef<HTMLDivElement>(null)
-  useScrollMemory(boardScroller, 'task-board', tasksShown && layout === 'board')
   // list keys work in every layout; rows can be selected in the list only (it has the bulk toolbar)
   useListNavigation(detailOpen ? null : openTask, { selectable: layout === 'list' })
 
@@ -423,6 +419,9 @@ function WorkspaceTasksPage() {
                     </div>)}
                     <DropdownMenuSeparator />
                     <DropdownMenuItem onClick={() => setShowNewProject(true)}><Plus />New project</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => navigate('/tasks-import')}><Import />Import from Asana</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => navigate('/tasks-import/linear')}><Import />Import from Linear</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => navigate('/tasks-import/trello')}><Import />Import from Trello</DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
                 <PaneTitle className="max-[899px]:min-w-0 max-[899px]:flex-1 max-[899px]:basis-0">{viewTitle}</PaneTitle>
@@ -492,7 +491,7 @@ function WorkspaceTasksPage() {
             }}
           />
           {showNewProject ? <NewProjectModal onClose={() => setShowNewProject(false)} onCreated={(project) => { setProjectFilter(project.id); setShowNewProject(false) }} /> : null}
-          <div ref={boardScroller} className={cn('min-h-0 flex-1', layout === 'timeline' ? 'overflow-hidden' : 'overflow-y-auto')}>
+          <div className={cn('min-h-0 flex-1', layout === 'timeline' ? 'overflow-hidden' : 'overflow-y-auto')}>
             {tasksQuery.error || tasksQuery.isLoading ? (
               <div className="flex h-full flex-col p-2 *:flex-1">
                 {tasksQuery.error

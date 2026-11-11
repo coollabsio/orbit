@@ -23,21 +23,31 @@ import type * as Y from 'yjs'
 import { ImageViewer } from '@/components/common/ImageViewer'
 import { Spinner } from '@/components/ui/spinner'
 import type { Attachment } from '@/lib/attachmentLib'
+import { appNavigate, internalPath } from '@/lib/navigateBridge'
 import { useTheme } from '@/lib/themeContext'
 import { cn } from 'cn'
 import { collabBlockPresence } from '../collab/blockPresence'
 import { renderCollabCursor } from '../collab/cursor'
 import { ImageZoomButton } from './ImageZoomButton'
+import { setEditableInPlace } from '@orbit/editor/editable'
 import { internalPageLinkId, isSafeLinkHref } from '@orbit/editor/links'
 import { linkMentions, pastedFilesToCopy, toEditorContent, toStoredContent, type FileScope, type FileToCopy } from './content'
-import { insertPageBlock } from './pageBlockCommands'
-import { PageEditorContext, type PageEditorContextValue, type PageRef } from './pageEditorContext'
+import { insertDatabaseBlock, insertPageBlock } from './pageBlockCommands'
+import { PageEditorContext, type DatabaseBlockHost, type PageEditorContextValue, type PageRef } from './pageEditorContext'
 import { watchDeletedFiles } from '@orbit/editor/deletedFiles'
 import type { PageEditorInstance } from '@orbit/editor/schema'
+import type { PageKind } from '@orbit/api/generated/types.gen'
+import { isolatedDragsExtension, isolatedDropCursor } from '@orbit/editor/isolation'
+import { selectBlockExtension } from '@orbit/editor/selectBlock'
+import { marginSelectExtension, selectMarginBlock } from '@orbit/editor/marginSelect'
+import { collabUndoExtension } from '@orbit/editor/collab/undo'
 import { EDITOR_BLOCK_TYPES, markdownToTaskBlocks, pageEditorSchema, TASK_EDITOR_BLOCK_TYPES, taskEditorSchema } from './schema'
 import { getPageSlashMenuItems, getTaskSlashMenuItems } from './slashMenu'
-import { PageMentionMenu } from './MentionMenu'
+import { PageMentionMenu, TaskMenu } from './MentionMenu'
+import { TabCompletesSuggestion } from './TabCompletesSuggestion'
+import { EditorReferencePreview } from './EditorReferencePreview'
 import { PageMentionNamesContext, type PageMentionOptions } from './pageMentions'
+import { BlockSideMenuController } from './BlockSideMenu'
 import { ThemedBlockNoteView } from './ThemedBlockNoteView'
 import { commentsApi, threadsQueryOptions } from '../comments/api'
 import { commentComponents } from '../comments/components'
@@ -48,7 +58,7 @@ import { COMMENT_POPUP_ATTR, FloatingThreadCard, NewCommentCard } from '../comme
 import { ThreadList } from '../comments/ThreadList'
 import { NoCommentsThreadStore, OrbitThreadStore, type OrbitThreadStoreOptions } from '../comments/threadStore'
 
-export type { PageRef } from './pageEditorContext'
+export type { DatabaseBlockHost, PageRef } from './pageEditorContext'
 
 export interface PageEditorHandle {
   /** Current document as sanitized JSON (same shape `onChange` receives). */
@@ -56,7 +66,12 @@ export interface PageEditorHandle {
   focus: () => void
   /** Adds blocks at the end (files picked outside the editor). */
   appendBlocks: (blocks: unknown[]) => void
+  /** A press on the layout around the editor (the pane padding) beside a database block selects it. Whether it did. */
+  selectBlockBeside: (event: globalThis.MouseEvent) => boolean
 }
+
+/** Blocks selected as a whole by a press in the margin beside them. */
+const MARGIN_SELECT_TYPES = new Set(['database'])
 
 /** Real-time co-editing: the document lives in `fragment` (already synced with the server) instead of `initialContent`. */
 export interface PageEditorCollab {
@@ -139,10 +154,16 @@ export interface PageEditorProps {
   resolvePage?: (pageId: string) => PageRef | null
   /** Opens an in-app `/docs/<id>` link; without it the link navigates like any link. */
   onOpenPage?: (pageId: string) => void
-  /** Creates a child page of `pageId`; resolves to the new page id (reject/throw to abort). Page profile only. */
-  onCreateSubpage?: () => Promise<string>
+  /** Creates a child page (or database) of `pageId`; resolves to the new page id (reject/throw to abort). Page profile only. */
+  onCreateSubpage?: (kind: PageKind) => Promise<string>
   /** Lets the user pick an existing page; resolves to its id, or null when cancelled. Page profile only. */
   onPickPage?: () => Promise<string | null>
+  /** Database blocks load their database through this page (page profile). Without it they show a plain card. */
+  databaseHost?: DatabaseBlockHost
+  /** Lets the user pick a database and links it to this page; resolves to the new linked view, or null. */
+  onLinkDatabase?: () => Promise<{ databaseId: string; linkId: string } | null>
+  /** The user deleted an inline database block; its database stays a sub-page. */
+  onDatabaseBlockRemoved?: (databaseId: string) => void
   /**
    * Uploads a file for an image/file block (slash menu, file panel, paste, drop) and resolves to its URL.
    * Reject to abort; the caller reports the error. Without it the editor offers no uploads.
@@ -184,6 +205,9 @@ function PageEditorInner({
   onOpenPage,
   onCreateSubpage = noSubpage,
   onPickPage = noPicker,
+  databaseHost,
+  onLinkDatabase,
+  onDatabaseBlockRemoved,
   uploadFile,
   comments,
   mentions,
@@ -255,7 +279,7 @@ function PageEditorInner({
         const anchor = linkAnchor(event.target)
         const href = anchor?.getAttribute('href')
         if (!href || !isSafeLinkHref(href)) return true
-        if (internalPageLinkId(href) && !opensNewTab(event)) return true
+        if ((internalPageLinkId(href) || internalPath(href)) && !opensNewTab(event)) return true
         window.open(href, '_blank', 'noopener,noreferrer')
         return true
       },
@@ -276,6 +300,8 @@ function PageEditorInner({
     // Tiptap would inject its base stylesheet as a <style> tag, which the production CSP (`style-src 'self'`)
     // blocks. The same rules ship statically at the end of src/index.css instead.
     _tiptapOptions: { injectCSS: false },
+    extensions: [selectBlockExtension(), isolatedDragsExtension(), marginSelectExtension([...MARGIN_SELECT_TYPES])],
+    dropCursor: isolatedDropCursor,
     domAttributes: ariaLabel ? { editor: { 'aria-label': ariaLabel } } : undefined,
     dictionary,
   }
@@ -293,6 +319,8 @@ function PageEditorInner({
         withCollaboration({
           ...options,
           extensions: [
+            ...options.extensions,
+            collabUndoExtension(),
             // Task documents carry no comment marks, so they need no comments extension.
             ...(task ? [] : [commentsExtension]),
             ...(collab.provider.awareness ? [collabBlockPresence({ awareness: collab.provider.awareness, selfId: collab.user.id })] : []),
@@ -327,6 +355,13 @@ function PageEditorInner({
     latest.setEditor(editor)
   }, [latest, editor])
 
+  // The view mounts once, with the first value; later changes switch the mounted editor (see `setEditableInPlace`).
+  const [mountEditable] = useState(editable)
+  const viewShown = !collab || threadsSettled
+  useEffect(() => {
+    if (viewShown) setEditableInPlace(editor, editable)
+  }, [editor, editable, viewShown])
+
   // A file an admin deleted answers 410: its file block says so.
   useEffect(() => watchDeletedFiles(editor, isDeletedFile), [editor])
 
@@ -358,26 +393,80 @@ function PageEditorInner({
         const last = editor.document.at(-1)
         if (last) editor.insertBlocks(blocks as never, last, 'after')
       },
+      selectBlockBeside: (event) => {
+        const view = editor.prosemirrorView
+        // Only the elements that hold the editor: other pane UI (and the editor's own content) keeps its clicks.
+        const layout = event.target instanceof Element && event.target !== view?.dom && event.target.contains(view?.dom ?? null)
+        return !!view && layout && selectMarginBlock(view, MARGIN_SELECT_TYPES, event)
+      },
     }),
     [editor, fileScope],
   )
 
-  const context = useMemo<PageEditorContextValue>(() => ({ resolvePage, onOpenPage: onOpenPage ?? (() => {}) }), [resolvePage, onOpenPage])
+  const context = useMemo<PageEditorContextValue>(
+    () => ({ resolvePage, onOpenPage: onOpenPage ?? (() => {}), databaseHost: databaseHost ?? null }),
+    [resolvePage, onOpenPage, databaseHost],
+  )
 
+  // An inline database block the user deleted (not undo, not another tab): its database is still in the tree.
+  const removedRef = useRef(onDatabaseBlockRemoved)
+  useEffect(() => {
+    removedRef.current = onDatabaseBlockRemoved
+  }, [onDatabaseBlockRemoved])
+  useEffect(
+    () =>
+      editor.onChange((changed, { getChanges }) => {
+        const notify = removedRef.current
+        if (!notify) return
+        const left = new Set(databaseIds(changed.document))
+        for (const change of getChanges()) {
+          if (change.type !== 'delete' || change.source.type !== 'local' || change.block.type !== 'database') continue
+          const { databaseId, linkId } = change.block.props
+          if (databaseId && !linkId && !left.has(databaseId)) notify(databaseId)
+        }
+      }, false),
+    [editor],
+  )
+
+  /** Creates the sub-page, links it at the cursor's block, then opens it. */
+  const createLinkedPage = (kind: PageKind) => {
+    const anchorId = editor.getTextCursorPosition().block.id
+    void onCreateSubpage(kind).then(
+      (pageId) => {
+        if (!mounted.current) return
+        insertPageBlock(editor, anchorId, pageId)
+        onOpenPage?.(pageId)
+      },
+      () => {
+        // Creation failed; the caller reports the error. Nothing to insert.
+      },
+    )
+  }
   const slashActions = {
-    onSubpage: () => {
-      const anchorId = editor.getTextCursorPosition().block.id
-      void onCreateSubpage().then(
-        (pageId) => {
-          if (!mounted.current) return
-          insertPageBlock(editor, anchorId, pageId)
-          onOpenPage?.(pageId)
-        },
-        () => {
-          // Creation failed; the caller reports the error. Nothing to insert.
-        },
-      )
-    },
+    onSubpage: () => createLinkedPage('page'),
+    onDatabase: () => createLinkedPage('database'),
+    onInlineDatabase: databaseHost
+      ? () => {
+          const anchorId = editor.getTextCursorPosition().block.id
+          void onCreateSubpage('database').then(
+            (databaseId) => {
+              if (mounted.current) insertDatabaseBlock(editor, anchorId, { databaseId, linkId: '' })
+            },
+            () => {},
+          )
+        }
+      : undefined,
+    onLinkedView: onLinkDatabase
+      ? () => {
+          const anchorId = editor.getTextCursorPosition().block.id
+          void onLinkDatabase().then(
+            (linked) => {
+              if (linked && mounted.current) insertDatabaseBlock(editor, anchorId, linked)
+            },
+            () => {},
+          )
+        }
+      : undefined,
     onLinkPage: () => {
       const anchorId = editor.getTextCursorPosition().block.id
       void onPickPage().then(
@@ -389,14 +478,24 @@ function PageEditorInner({
     },
   }
 
-  /** `/docs/<uuid>` links navigate in the app (no reload, no new tab) unless a modifier asks for a new tab. */
+  /**
+   * `/docs/<uuid>` links and links to this app (same origin) navigate in the app (no reload, no new tab) unless a
+   * modifier asks for a new tab.
+   */
   const onClickCapture = (event: MouseEvent<HTMLDivElement>) => {
-    const anchor = linkAnchor(event.target)
-    const pageId = internalPageLinkId(anchor?.getAttribute('href'))
+    const href = linkAnchor(event.target)?.getAttribute('href')
+    if (!href || event.button !== 0 || opensNewTab(event.nativeEvent)) return
+    const pageId = internalPageLinkId(href)
     const openPage = openPageRef.current
-    if (!pageId || !openPage || event.button !== 0 || opensNewTab(event.nativeEvent)) return
+    if (pageId && openPage) {
+      event.preventDefault()
+      openPage(pageId)
+      return
+    }
+    const path = internalPath(href)
+    if (!path) return
     event.preventDefault()
-    openPage(pageId)
+    appNavigate(path)
   }
 
   /** Cmd/Ctrl+Enter and Escape for fields that submit or cancel (comments, the new task dialog). */
@@ -428,7 +527,7 @@ function PageEditorInner({
       <div className="contents" onClickCapture={onClickCapture} onKeyDownCapture={onKeyDownCapture}>
         <ThemedBlockNoteView
           editor={editor}
-          editable={editable}
+          editable={mountEditable}
           theme={theme}
           data-slot="page-editor"
           className={cn(
@@ -441,8 +540,8 @@ function PageEditorInner({
             // The callout's placeholder sits next to the emoji (BlockNote's would follow the whole row).
             "[&>.bn-editor[contenteditable=true]_.bn-block-content[data-content-type=callout]:has(.ProseMirror-trailingBreak:only-child)]:after:content-['Callout']!",
             '[&>.bn-editor[contenteditable=true]_.bn-block-content[data-content-type=callout]:has(.ProseMirror-trailingBreak:only-child)]:after:absolute [&>.bn-editor[contenteditable=true]_.bn-block-content[data-content-type=callout]:has(.ProseMirror-trailingBreak:only-child)]:after:top-px [&>.bn-editor[contenteditable=true]_.bn-block-content[data-content-type=callout]:has(.ProseMirror-trailingBreak:only-child)]:after:left-8',
-            // Headings scale with their text: the app's global `h1 { leading-7 }` is a fixed 28px, too short for a 3em
-            // heading, so its text ran into the next block.
+            // Headings scale with their text: the app's global `h1 { leading-7 }` is a fixed 28px, too short for these
+            // headings, so the text ran into the next block. Sizes live in index.css.
             '[&_.bn-editor_:is(h1,h2,h3,h4,h5,h6)]:leading-[1.3]',
             // Inline links use the app's link style instead of the browser's blue.
             '[&_.bn-editor_a[data-inline-content-type=link]]:text-primary! [&_.bn-editor_a[data-inline-content-type=link]]:underline! [&_.bn-editor_a[data-inline-content-type=link]]:underline-offset-2!',
@@ -490,18 +589,22 @@ function PageEditorInner({
               "[&>.bn-editor[contenteditable=true]_.bn-block-content[data-is-only-empty-block]:has(.ProseMirror-trailingBreak:only-child)]:after:content-['Leave_a_reply…']!",
             className,
           )}
-          sideMenu={sideMenu}
+          sideMenu={false}
           slashMenu={false}
           formattingToolbar={false}
           comments={false}
           onChange={onChange ? (changed) => onChange(toStoredContent(changed.document, fileScope)) : undefined}
         >
+          {sideMenu ? <BlockSideMenuController /> : null}
           <SuggestionMenuController
             triggerCharacter="/"
             getItems={async (query) => (task ? getTaskSlashMenuItems(editor, query) : getPageSlashMenuItems(editor, slashActions, query))}
           />
           <FormattingToolbarController formattingToolbar={formattingToolbar} />
           <PageMentionMenu editor={editor} options={() => mentionsRef.current} />
+          <TaskMenu editor={editor} />
+          <TabCompletesSuggestion />
+          <EditorReferencePreview />
           {collab && !task ? (
             <MentionNamesContext value={names}>
               <MentionCandidatesContext value={comments?.mentionable ?? []}>
@@ -535,6 +638,15 @@ function PageEditorInner({
 interface PasteContext {
   editor: PageEditorInstance
   defaultPasteHandler: () => boolean | undefined
+}
+
+/** The databases of the inline database blocks in `blocks` (nested ones too). */
+function databaseIds(blocks: readonly { type: string; props: unknown; children: readonly unknown[] }[]): string[] {
+  return blocks.flatMap((block) => {
+    const props = block.props as { databaseId?: string; linkId?: string }
+    const own = block.type === 'database' && props.databaseId && !props.linkId ? [props.databaseId] : []
+    return [...own, ...databaseIds(block.children as typeof blocks)]
+  })
 }
 
 function blockIds(blocks: readonly { id: string; children: readonly unknown[] }[]): string[] {

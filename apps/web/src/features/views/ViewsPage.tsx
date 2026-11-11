@@ -8,7 +8,7 @@ import { UserAvatar } from '@/components/common/UserAvatar'
 import { Button } from '@/components/ui/button'
 import { TaskSearchBox } from '@/features/tasks/components/TaskSearchBox'
 import type { User } from '@/features/workspaces/models'
-import { useMembers } from '@/features/workspaces/api'
+import { useTeamMembers } from '@/features/workspaces/api'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { useReorderFavorites, useSavedViews, type SavedView } from './api/views'
 import { FavoriteStar } from './components/FavoriteStar'
@@ -21,6 +21,7 @@ import { rebaseViewSessionEdit } from './useViewState'
 import { viewPath } from './viewActions'
 import { defaultViewState, isGroup, normalizeViewState, type FilterField, type FilterGroup } from './viewState'
 import { loadFailed } from '@/lib/connection'
+import { LoadingText } from '@/components/ui/spinner'
 
 type RowDialog = { mode: 'edit' | 'duplicate'; view: SavedView }
 type Section = { key: string; label: string; icon: IconComponent; views: SavedView[]; reorderable?: boolean }
@@ -30,7 +31,7 @@ export function ViewsPage() {
   const { workspace } = useWorkspace()
   const navigate = useNavigate()
   const viewsQuery = useSavedViews(workspace.id)
-  const members = useMembers(workspace.id).data ?? []
+  const members = useTeamMembers(workspace.id).data ?? []
   const [search, setSearch] = useState('')
   const [dialog, setDialog] = useState<RowDialog | null>(null)
   const scroller = useRef<HTMLDivElement>(null)
@@ -80,7 +81,7 @@ export function ViewsPage() {
       </div>
       <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto">
         {viewsQuery.isPending ? (
-          <p className="p-4 text-[13px] text-muted-foreground">Loading views…</p>
+          <p className="p-4 text-[13px] text-muted-foreground"><LoadingText>Loading views…</LoadingText></p>
         ) : loadFailed(viewsQuery) ? (
           <div className="flex h-full flex-col p-2 *:flex-1">
             <EmptyState icon={Layer} title="Views unavailable" description="The server could not load views." />

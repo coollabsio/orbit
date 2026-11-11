@@ -23,7 +23,7 @@ import { SideSheet, SideSheetContent } from '@/components/common/SideSheet'
 import { ErrorBoundary } from '@/components/common/ErrorBoundary'
 import { Tip } from '@/components/common/Tip'
 import { useWorkspace, WorkspaceContext } from '@/features/workspaces/workspaceContext'
-import { useIsInstallationAdmin } from '@/features/workspaces/permissions'
+import { useIsGuest, useIsInstallationAdmin } from '@/features/workspaces/permissions'
 import { WorkspaceSwitcher } from './WorkspaceSwitcher'
 import { ActivityBell } from './ActivityBell'
 import { CommandPalette } from './CommandPalette'
@@ -35,11 +35,11 @@ import { Topbar } from './Topbar'
 import { UserMenu } from './UserMenu'
 import { SidebarResizeHandle, usePageListWidth } from './pageListWidth'
 import { MobileDock } from './MobileDock'
+import { DonationReminder } from './DonationReminder'
 import { ProfilePopoverProvider } from './ProfilePopover'
-import { OperatorShell } from './OperatorShell'
-import { useAppSidebarTheme } from '@/lib/customTheme'
+import { NoWorkspaceShell } from './NoWorkspaceShell'
+import { setOpenPage, useAppSidebarTheme } from '@/lib/customTheme'
 import { MenuSurfaceContext } from '@/components/ui/menuSurface'
-import { useNewUi } from '@/lib/themeContext'
 import { useSidebarMenuSurface } from './sidebarMenu'
 import { hostsPageList, SidebarSlotContext } from './sidebarSlot'
 
@@ -51,9 +51,9 @@ const subscribeDesktop = (onChange: () => void) => {
 }
 const isDesktop = () => window.matchMedia(desktopQuery).matches
 
-/** The signed-in app. An operator with no workspace (`WorkspaceProvider` lets only them in) gets Admin alone. */
+/** The signed-in app. With no workspace, `WorkspaceProvider` lets in only Admin (operators) and account settings. */
 export function AppShell() {
-  return useContext(WorkspaceContext) ? <WorkspaceShell /> : <OperatorShell />
+  return useContext(WorkspaceContext) ? <WorkspaceShell /> : <NoWorkspaceShell />
 }
 
 /** Shortcuts exist only here, with the user's own keys; the sign-in pages have none. */
@@ -71,17 +71,19 @@ function WorkspaceShell() {
 
 function Shell() {
   const { workspace } = useWorkspace()
+  const guest = useIsGuest()
   const live = useWorkspaceEvents(workspace.id)
   const { total: chatBadge, unread: chatUnread } = useChatBadges()
   const mailBadge = useMailInboxUnread()
-  // The tab icon gets a dot while chat, mail or the Inbox has something unread.
-  const inboxUnread = useHasUnreadNotifications(workspace.id).data === true
+  // The tab icon gets a dot while chat, mail or the Inbox has something unread. A guest has only chat.
+  const inboxUnread = useHasUnreadNotifications(workspace.id, !guest).data === true
   const isRoot = useIsInstallationAdmin()
   useUnreadFavicon(chatBadge + mailBadge + (inboxUnread ? 1 : 0))
   // Signed in: the worker that shows notifications may run. This asks for no permission.
   useEffect(() => startPushWorker(), [])
-  // The rich text editor (tasks, comments, docs, the new task dialog) is ready before its first use.
-  useEffect(() => preloadPageEditorWhenIdle(), [])
+  // The rich text editor (tasks, comments, docs, the new task dialog) is ready before its first use. A guest
+  // never opens them.
+  useEffect(() => (guest ? undefined : preloadPageEditorWhenIdle()), [guest])
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   // One saved preference for every page, so collapsing the sidebar in chat keeps it collapsed in tasks too.
@@ -97,18 +99,20 @@ function Shell() {
     setDrawerPage(pathname + search)
     setDrawerOpen(false)
   }
-  // only in the new UI (Account settings → Appearance → Layout)
-  const newUi = useNewUi()
-  const hostsList = newUi && desktop && !sidebarCollapsed && hostsPageList(pathname)
+  const hostsList = desktop && !sidebarCollapsed && hostsPageList(pathname)
   // a long page tree needs room: the sidebar that holds it can be dragged wider
   const [pageListWidth, setPageListWidth] = usePageListWidth()
   const [resizing, setResizing] = useState(false)
   const [pageListSlot, setPageListSlot] = useState<HTMLElement | null>(null)
   // Account settings → Appearance → Custom colours the sidebar too, not only chat
   const sidebarTheme = useAppSidebarTheme()
-  // the new UI's sidebar menus share one look and the custom theme; the classic ones keep their own
-  const sidebarMenuSurface = useSidebarMenuSurface()
-  const menuSurface = newUi ? sidebarMenuSurface : null
+  // Appearance → Per app colours docs, chat and tasks each in their own way; before paint, so no page shows wrong colours
+  useLayoutEffect(() => {
+    setOpenPage(pathname)
+    return () => setOpenPage(null)
+  }, [pathname])
+  // the sidebar menus share one look and the custom theme
+  const menuSurface = useSidebarMenuSurface()
 
   useLayoutEffect(() => {
     const viewport = window.visualViewport
@@ -152,7 +156,7 @@ function Shell() {
     <NewTaskProvider>
     <SidebarSlotContext value={hostsList ? pageListSlot : null}>
     {/* Floating navigation (Account settings → Appearance, desktop): framed panels on a dotted backdrop */}
-    <div className="flex h-[var(--app-height,100svh)] w-full overflow-hidden bg-background pt-[env(safe-area-inset-top,0px)] pl-[env(safe-area-inset-left,0px)] pr-[env(safe-area-inset-right,0px)] min-[900px]:floating:gap-2 min-[900px]:floating:p-2 min-[900px]:floating:bg-[radial-gradient(circle,rgb(0_0_0/0.13)_1px,transparent_1.3px)] min-[900px]:floating:bg-size-[20px_20px] dark:min-[900px]:floating:bg-[radial-gradient(circle,rgb(255_255_255/0.09)_1px,transparent_1.3px)]">
+    <div className="flex h-[var(--app-height,100svh)] w-full overflow-hidden bg-background pt-[env(safe-area-inset-top,0px)] pl-[env(safe-area-inset-left,0px)] pr-[env(safe-area-inset-right,0px)] min-[900px]:floating:gap-2 min-[900px]:floating:p-2">
       <aside
         className={cn(
           sidebarTheme.scheme,
@@ -173,9 +177,10 @@ function Shell() {
             )}
           >
             <WorkspaceSwitcher collapsed={sidebarCollapsed} />
-            <ActivityBell unread={inboxUnread} />
+            {/* a guest has no Activity page */}
+            {guest ? null : <ActivityBell unread={inboxUnread} />}
           </div>
-          <SidebarNav contextual={newUi} collapsed={sidebarCollapsed} chatBadge={chatBadge} chatUnread={chatUnread} mailBadge={mailBadge} isRoot={isRoot} pageListRef={hostsList ? setPageListSlot : undefined} />
+          <SidebarNav collapsed={sidebarCollapsed} chatBadge={chatBadge} chatUnread={chatUnread} mailBadge={mailBadge} isRoot={isRoot} pageListRef={hostsList ? setPageListSlot : undefined} />
           <div
             className={cn(
               'flex shrink-0 items-center justify-between gap-1 py-2',
@@ -208,6 +213,7 @@ function Shell() {
           </ErrorBoundary>
         </div>
         <MobileDock chatBadge={chatBadge} chatUnread={chatUnread} mailBadge={mailBadge} />
+        {!guest && <DonationReminder />}
       </div>
 
       <SideSheet open={drawerOpen} onOpenChange={setDrawerOpen}>
@@ -218,12 +224,13 @@ function Shell() {
           style={sidebarTheme.style}
         >
           <MenuSurfaceContext value={menuSurface}>
-            <SidebarNav contextual={newUi} backShowsMenu onNavigate={() => setDrawerOpen(false)} chatBadge={chatBadge} chatUnread={chatUnread} mailBadge={mailBadge} isRoot={isRoot} />
+            <SidebarNav backShowsMenu onNavigate={() => setDrawerOpen(false)} chatBadge={chatBadge} chatUnread={chatUnread} mailBadge={mailBadge} isRoot={isRoot} />
           </MenuSurfaceContext>
         </SideSheetContent>
       </SideSheet>
 
-      {paletteOpen ? <CommandPalette onClose={() => setPaletteOpen(false)} /> : null}
+      {/* a guest has nothing the palette searches (tasks, docs) */}
+      {paletteOpen && !guest ? <CommandPalette onClose={() => setPaletteOpen(false)} /> : null}
       {helpOpen ? <ShortcutHelpDialog onClose={() => setHelpOpen(false)} /> : null}
       <NavigationCommands />
       <SequenceHint />

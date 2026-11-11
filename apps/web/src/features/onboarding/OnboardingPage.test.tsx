@@ -35,6 +35,7 @@ function renderOnboarding(workspaces: object[] = []) {
         <Routes>
           <Route path="onboarding" element={<OnboardingPage />} />
           <Route path="tasks" element={<p>Tasks</p>} />
+          <Route path="profile" element={<p>Account</p>} />
         </Routes>
         <Location />
       </MemoryRouter>
@@ -65,4 +66,10 @@ test('the workspace step leads to naming the default project, whose tag follows 
 test('someone who already has a workspace goes straight to the tasks', async () => {
   const { view } = renderOnboarding([WORKSPACE])
   await waitFor(() => expect(view.getByTestId('location').textContent).toBe('/tasks'))
+})
+
+test('someone with no workspace can open their account settings instead, to delete the account (#39)', async () => {
+  const { view } = renderOnboarding()
+  await userEvent.click(await view.findByRole('link', { name: 'Account settings' }))
+  await waitFor(() => expect(view.getByTestId('location').textContent).toBe('/profile'))
 })

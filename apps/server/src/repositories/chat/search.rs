@@ -9,7 +9,7 @@ use utoipa::ToSchema;
 
 use super::{
     ChatError, ChatRepository, Dialect, MESSAGE_SELECT, MessageRecord, hydrate, id_list, in_ids,
-    load_access, load_actor, parse_id,
+    load_access, load_actor, parse_id, public_for, reachable_dm,
 };
 use crate::repositories::pages::{fts_query, pg_tsquery, split_marks};
 
@@ -98,12 +98,14 @@ impl ChatRepository {
                 .to_owned(),
             None => "SELECT m.id, m.body AS marked FROM chat_messages m".to_owned(),
         };
-        sql.push_str(
+        sql.push_str(&format!(
             " JOIN chat_conversations c ON c.id = m.conversation_id \
              WHERE c.workspace_id = $1 AND m.kind = 'message' AND m.deleted_at IS NULL \
-             AND (c.kind = 'public' OR EXISTS (SELECT 1 FROM chat_members \
-                  WHERE chat_members.conversation_id = c.id AND chat_members.user_id = $2))",
-        );
+             AND ({} OR EXISTS (SELECT 1 FROM chat_members \
+                  WHERE chat_members.conversation_id = c.id AND chat_members.user_id = $2)) AND {}",
+            public_for("$2"),
+            reachable_dm()
+        ));
         if let Some(n) = &expression_param {
             sql.push_str(&if postgres {
                 format!(" AND chat_search.search_vector @@ to_tsquery('orbit_search', {n})")
@@ -115,7 +117,11 @@ impl ChatRepository {
             sql.push_str(&format!(" AND m.conversation_id = {}", param()));
         }
         if input.author_id.is_some() {
-            sql.push_str(&format!(" AND m.author_id = {}", param()));
+            // A member's integrations are not the member.
+            sql.push_str(&format!(
+                " AND m.author_id = {} AND m.webhook_id IS NULL",
+                param()
+            ));
         }
         if input.has_file {
             sql.push_str(" AND EXISTS (SELECT 1 FROM chat_message_files WHERE message_id = m.id)");

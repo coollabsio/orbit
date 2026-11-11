@@ -115,10 +115,39 @@ fn lists_nest_number_and_check() {
             {"type": "paragraph", "content": "hidden"},
         ]},
     ]));
+    // A list numbered from 3 and an item's paragraph child would otherwise continue the text
+    // above them (CommonMark's lazy continuation), so a blank line goes before them.
     assert_eq!(
         text,
-        "- a\n  - a.1\n  1. a.n\n- b\n3. three\n4. four\n   - [x] done\n\n1. restart\n- [ ] todo\n- toggle\n  hidden\n"
+        "- a\n  - a.1\n  1. a.n\n- b\n\n3. three\n4. four\n   - [x] done\n\n1. restart\n- [ ] todo\n- toggle\n\n  hidden\n"
     );
+    // It reads back as written, except that an empty paragraph between two numbered lists is
+    // invisible (the second list continues the first).
+    let blocks = orbit_server::collab::markdown_import::markdown_to_blocks(&text, &[]);
+    assert_eq!(
+        md(Value::Array(blocks)),
+        text.replace("\n\n1. restart", "\n5. restart")
+    );
+}
+
+#[test]
+fn inline_math_exports_as_dollars() {
+    let text = md(json!([
+        {"type": "paragraph", "content": [
+            {"type": "text", "text": "Energy is ", "styles": {}},
+            {"type": "math", "props": {"latex": "E=mc^2"}},
+            {"type": "text", "text": " and ", "styles": {}},
+            {"type": "math", "props": {"latex": "a$b"}},
+            {"type": "text", "text": " ", "styles": {}},
+            {"type": "math", "props": {"latex": "\\pi"}},
+            {"type": "math", "props": {"latex": "  "}},
+        ]},
+    ]));
+    assert_eq!(text, "Energy is $E=mc^2$ and $a\\\\$b$ $\\\\pi$\n");
+    let blocks = orbit_server::collab::markdown_import::markdown_to_blocks(&text, &[]);
+    assert_eq!(blocks[0]["content"][1]["props"]["latex"], "E=mc^2");
+    assert_eq!(blocks[0]["content"][3]["props"]["latex"], "a$b");
+    assert_eq!(blocks[0]["content"][5]["props"]["latex"], "\\pi");
 }
 
 #[test]
@@ -155,7 +184,7 @@ fn tables_escape_pipes_span_columns_and_break_lines() {
 }
 
 #[test]
-fn media_and_page_blocks_use_the_resolver() {
+fn media_page_and_database_blocks_use_the_resolver() {
     struct Links;
     impl LinkResolver for Links {
         fn page(&self, page_id: &str) -> Option<PageLink> {
@@ -174,12 +203,14 @@ fn media_and_page_blocks_use_the_resolver() {
         {"type": "file", "props": {"url": "https://e.com/r (1).pdf"}},
         {"type": "page", "props": {"pageId": "known"}},
         {"type": "page", "props": {"pageId": "gone"}},
+        {"type": "database", "props": {"databaseId": "known", "linkId": "l"}},
+        {"type": "database", "props": {"databaseId": "gone", "linkId": ""}},
         {"type": "paragraph", "content": [{"type": "link", "href": "/files/x", "content": [{"type": "text", "text": "see", "styles": {"code": true}}]}]},
     ]);
     let text = blocks_to_markdown(blocks.as_array().unwrap(), &Links);
     assert_eq!(
         text,
-        "![a.png](/p/assets/a.png)\n\n*The \\*cap\\**\n\n[r (1).pdf](https://e.com/r%20%281%29.pdf)\n\n[Child \\[1\\]](Parent/Child%20page.md)\n\n*Missing page*\n\n[`see`](/assets/x)\n"
+        "![a.png](/p/assets/a.png)\n\n*The \\*cap\\**\n\n[r (1).pdf](https://e.com/r%20%281%29.pdf)\n\n[Child \\[1\\]](Parent/Child%20page.md)\n\n*Missing page*\n\n[Child \\[1\\]](Parent/Child%20page.md)\n\n*Missing database*\n\n[`see`](/assets/x)\n"
     );
 }
 
@@ -251,4 +282,39 @@ fn mentions_render_as_at_names_with_live_names_first() {
         blocks_to_markdown(blocks.as_array().unwrap(), &Members),
         "Hi @Ann Renamed and @Bob_Stone@Unknown user\n\n| @Cell\\|Name |\n| --- |\n"
     );
+}
+
+/// Each block's span names its lines: its own text (`head`) and its children, nested or not.
+#[test]
+fn spans_name_the_lines_of_every_block() {
+    use orbit_server::export::markdown::blocks_to_markdown_with_spans;
+    let blocks = json!([
+        {"type": "heading", "props": {"level": 2}, "content": "Title", "children": [
+            {"type": "paragraph", "content": "under the title"},
+        ]},
+        {"type": "paragraph", "content": ""},
+        {"type": "bulletListItem", "content": "item", "children": [
+            {"type": "bulletListItem", "content": "nested"},
+            {"type": "paragraph", "content": "note"},
+        ]},
+        {"type": "callout", "props": {"emoji": "💡"}, "content": "tip", "children": [
+            {"type": "paragraph", "content": "more"},
+        ]},
+        {"type": "image", "props": {"url": "https://x.dev/a.png", "caption": "cap"}},
+    ]);
+    let (text, spans) = blocks_to_markdown_with_spans(blocks.as_array().unwrap(), &KeepLinks);
+    let lines: Vec<&str> = text.lines().collect();
+    let at = |range: &std::ops::Range<usize>| lines[range.clone()].join("\n");
+    assert_eq!(spans.len(), 5);
+    assert_eq!(at(&spans[0].head), "## Title");
+    assert_eq!(at(&spans[0].children[0].full), "under the title");
+    assert_eq!(at(&spans[0].full), "## Title\n\nunder the title");
+    assert!(spans[1].full.is_empty());
+    assert_eq!(at(&spans[2].head), "- item");
+    assert_eq!(at(&spans[2].children[0].full), "  - nested");
+    assert_eq!(at(&spans[2].children[1].full), "  note");
+    assert_eq!(at(&spans[3].head), "> 💡 tip");
+    assert_eq!(at(&spans[3].children[0].full), "> more");
+    assert_eq!(at(&spans[4].full), "![cap](https://x.dev/a.png)\n\n*cap*");
+    assert_eq!(spans[4].full.end, lines.len());
 }

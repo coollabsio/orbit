@@ -14,9 +14,10 @@ use hyper_util::server::conn::auto::Builder as ConnectionBuilder;
 use hyper_util::service::TowerToHyperService;
 use orbit_platform::{
     BackupService, BlobStoreError, Config, Database, DatabaseConfig, HealthCheck, HealthRegistry,
-    HttpLimits, IntegrityService, JobError, JobKind, JobStore, LocalBlobStore, MigrationError,
-    MigrationRunner, ObjectStorage, OriginPolicy, RecurringSchedule, Scheduler, TieredBlobStore,
-    TimestampMillis, UploadLimits, UploadService, Worker, WorkerConfig, run_guarded_migrations,
+    HttpLimits, IntegrityError, IntegrityService, JobError, JobKind, JobStore, LargeUpload,
+    LocalBlobStore, MigrationError, MigrationRunner, ObjectStorage, OriginPolicy,
+    RecurringSchedule, ScheduleError, Scheduler, TieredBlobStore, TimestampMillis, UploadLimits,
+    UploadService, Worker, WorkerConfig, run_guarded_migrations,
 };
 use serde_json::json;
 use thiserror::Error;
@@ -24,12 +25,19 @@ use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 use tower::ServiceExt;
 
+use crate::asana::client::AsanaClientConfig;
+use crate::asana::import::{AsanaImportService, AsanaImportSettings};
+use crate::asana_import_routes::AsanaImportState;
 use crate::attachment_routes::AttachmentState;
 use crate::auth_routes::{CookieMode, initialize_auth};
 use crate::chat_routes::ChatState;
 use crate::export_routes::ExportState;
+use crate::import_people_routes::ImportPeopleState;
 use crate::import_routes::ImportState;
 use crate::integration_routes::IntegrationState;
+use crate::linear::client::LinearClientConfig;
+use crate::linear::import::{LinearImportService, LinearImportSettings};
+use crate::linear_import_routes::LinearImportState;
 use crate::mail_delivery::ProviderIntake;
 use crate::mail_dns::{DnsChecker, DnsLookup, HickoryDns};
 use crate::mail_intake::MailIntake;
@@ -38,6 +46,10 @@ use crate::mail_routes::{MailSettings, MailState};
 use crate::metrics::Metrics;
 use crate::notion::client::NotionClientConfig;
 use crate::notion::import::{NotionImportService, NotionImportSettings};
+use crate::obsidian::import::{ObsidianImportService, ObsidianImportSettings};
+use crate::obsidian_import_routes::ObsidianImportState;
+use crate::orbit_import::{OrbitImportService, OrbitImportSettings};
+use crate::orbit_import_routes::OrbitImportState;
 use crate::page_comment_routes::PageCommentState;
 use crate::page_file_routes::PageFileState;
 use crate::page_routes::PageState;
@@ -55,6 +67,9 @@ use crate::socket_ticket::SocketTickets;
 use crate::static_assets::{FRONTEND_REVISION, StaticAssetError, StaticAssets};
 use crate::task_routes::TaskState;
 use crate::teamspace_routes::TeamspaceState;
+use crate::trello::client::TrelloClientConfig;
+use crate::trello::import::{TrelloImportService, TrelloImportSettings};
+use crate::trello_import_routes::TrelloImportState;
 use crate::workspace_export::WorkspaceExportService;
 use crate::workspace_export_routes::WorkspaceExportState;
 use crate::workspace_routes::WorkspaceState;
@@ -70,6 +85,9 @@ const OWNERSHIP_CHECK_INTERVAL: Duration = Duration::from_secs(5);
 const NOTION_CLEANUP: &str = "notion.cleanup";
 /// Hourly: creates a backup when the saved schedule (Admin → Storage) says one is due.
 const SCHEDULED_BACKUP: &str = "backup.scheduled";
+/// Hourly, and first at startup: computes the searchable property values of database rows that
+/// have none yet (after migration 0083 or a restore), a batch per transaction.
+const SEARCH_TEXT_FILL: &str = "docs.search_text";
 
 pub struct App {
     config: Config,
@@ -194,6 +212,8 @@ impl App {
             .reconcile_github_attribution(orbit_platform::TimestampMillis::now())
             .await
             .map_err(|error| AppError::Database(error.to_string()))?;
+        // Imports made before their people were kept; in the background, never fatal.
+        tokio::spawn(crate::import_people::backfill(database.clone()));
 
         let identity = Arc::new(IdentityRepository::new(database.clone()));
         let (auth, setup) = initialize_auth(
@@ -270,6 +290,8 @@ impl App {
         }
 
         let mailer = Mailer::new(database.clone(), app_key, &config.http.public_origin);
+        let import_notices =
+            crate::import_notice::ImportNotices::new(database.clone(), mailer.clone());
         let notion_imports = NotionImportService::new(
             database.clone(),
             PageFileRepository::new(database.clone(), attachment_state.uploads.clone()),
@@ -337,6 +359,69 @@ impl App {
             config.mail.mode,
         );
 
+        let linear_imports = LinearImportService::new(
+            database.clone(),
+            crate::repositories::attachments::AttachmentRepository::new(
+                database.clone(),
+                attachment_state.uploads.clone(),
+            ),
+            LinearImportSettings {
+                client: LinearClientConfig::default(),
+                app_key,
+                max_file_bytes: config.uploads.max_file_bytes,
+            },
+        );
+        let trello_imports = TrelloImportService::new(
+            database.clone(),
+            crate::repositories::attachments::AttachmentRepository::new(
+                database.clone(),
+                attachment_state.uploads.clone(),
+            ),
+            TrelloImportSettings {
+                client: TrelloClientConfig::default(),
+                app_key,
+                max_file_bytes: config.uploads.max_file_bytes,
+            },
+        );
+        let obsidian_imports = ObsidianImportService::new(
+            database.clone(),
+            PageFileRepository::new(database.clone(), attachment_state.uploads.clone()),
+            object_storage.clone(),
+            &config.data.backups,
+            ObsidianImportSettings {
+                max_archive_bytes: config.uploads.max_request_bytes,
+                max_file_bytes: config.uploads.max_file_bytes,
+            },
+        );
+        // Development only: an import may name http://127.0.0.1:<port> as the other instance,
+        // for a second local server (`ORBIT_DEV_ORBIT_IMPORT_LOCAL=1`).
+        let orbit_import_local = config.environment == orbit_platform::EnvironmentMode::Development
+            && std::env::var("ORBIT_DEV_ORBIT_IMPORT_LOCAL").is_ok_and(|value| value == "1");
+        let orbit_imports = OrbitImportService::new(
+            database.clone(),
+            attachment_state.uploads.clone(),
+            object_storage.clone(),
+            &config.data.backups,
+            OrbitImportSettings {
+                app_key,
+                max_file_bytes: config.uploads.max_file_bytes,
+                max_archive_bytes: crate::orbit_import::MAX_ARCHIVE_BYTES,
+                allow_local: orbit_import_local,
+            },
+        );
+        let asana_imports = AsanaImportService::new(
+            database.clone(),
+            crate::repositories::attachments::AttachmentRepository::new(
+                database.clone(),
+                attachment_state.uploads.clone(),
+            ),
+            AsanaImportSettings {
+                client: AsanaClientConfig::default(),
+                app_key,
+                max_file_bytes: config.uploads.max_file_bytes,
+            },
+        );
+
         let billing = config.billing.clone().map(|billing| {
             crate::billing::Billing::new(billing, database.clone(), &config.http.public_origin)
         });
@@ -362,6 +447,12 @@ impl App {
             notion_imports.clone(),
             dns_checker,
             Arc::clone(&mail),
+            asana_imports.clone(),
+            linear_imports.clone(),
+            trello_imports.clone(),
+            obsidian_imports.clone(),
+            import_notices,
+            orbit_imports.clone(),
             workspace_exports.clone(),
             billing.clone(),
             config.jobs.concurrency,
@@ -369,7 +460,7 @@ impl App {
         .await?;
 
         let draining = Arc::new(AtomicBool::new(false));
-        let health = health_registry(&config, &database, &integrity, &draining);
+        let health = health_registry(&config, &database, &draining);
         if !health.readiness().await.ready {
             return Err(AppError::Readiness);
         }
@@ -407,6 +498,17 @@ impl App {
                     )
                     .with_oauth(oauth.clone()),
                     &config.http.public_origin,
+                ),
+                public_api: crate::public_api::router(
+                    crate::public_api::PublicApiState::new(
+                        Arc::new(ApiTokenRepository::new(database.clone())),
+                        Arc::new(TaskRepository::new(database.clone())),
+                        &config.http.public_origin,
+                    )
+                    .with_pages(Arc::new(crate::repositories::pages::PageRepository::new(
+                        database.clone(),
+                    )))
+                    .with_exports(workspace_exports.clone()),
                 ),
                 oauth: crate::oauth::router(oauth),
                 auth: {
@@ -479,10 +581,41 @@ impl App {
                     app_key,
                 ),
                 imports: ImportState::new(Arc::clone(&identity), notion_imports, cookie_mode),
+                asana_imports: AsanaImportState::new(
+                    Arc::clone(&identity),
+                    asana_imports,
+                    cookie_mode,
+                ),
+                linear_imports: LinearImportState::new(
+                    Arc::clone(&identity),
+                    linear_imports,
+                    cookie_mode,
+                ),
+                trello_imports: TrelloImportState::new(
+                    Arc::clone(&identity),
+                    trello_imports,
+                    cookie_mode,
+                ),
+                obsidian_imports: ObsidianImportState::new(
+                    Arc::clone(&identity),
+                    obsidian_imports,
+                    cookie_mode,
+                ),
+                import_people: ImportPeopleState::new(Arc::clone(&identity), cookie_mode),
+                orbit_imports: OrbitImportState::new(
+                    Arc::clone(&identity),
+                    orbit_imports,
+                    cookie_mode,
+                ),
                 chat: ChatState::new(
                     Arc::clone(&identity),
                     attachment_state.uploads.clone(),
                     cookie_mode,
+                )
+                .with_public_origin(&config.http.public_origin)
+                .with_interactivity(
+                    app_key,
+                    config.environment == orbit_platform::EnvironmentMode::Development,
                 ),
                 mail: MailState::new(
                     Arc::clone(&identity),
@@ -507,6 +640,13 @@ impl App {
             HttpLimits {
                 max_body_bytes: usize::try_from(upload_limits.max_request_bytes())
                     .unwrap_or(usize::MAX),
+                // Orbit archive imports go above the upload limit; the route checks its own.
+                large_upload: Some(LargeUpload {
+                    path_suffix: crate::orbit_import_routes::UPLOAD_PATH_SUFFIX,
+                    max_bytes: crate::orbit_import_routes::upload_body_limit(
+                        crate::orbit_import::MAX_ARCHIVE_BYTES,
+                    ),
+                }),
                 ..HttpLimits::default()
             },
             config.rate_limits,
@@ -623,7 +763,7 @@ impl App {
                 .map_err(|source| AppError::MetricsBind { address, source })?;
             let router = self.metrics.router();
             let token = service_shutdown.clone();
-            services.spawn(async move {
+            spawn_service(&mut services, "metrics server", async move {
                 serve_http(listener, router, HEADER_READ_TIMEOUT, token)
                     .await
                     .map_err(|error| error.to_string())
@@ -635,7 +775,7 @@ impl App {
         })?;
         let integrity_failure = production.integrity_failure.clone();
         let token = service_shutdown.clone();
-        services.spawn(async move {
+        spawn_service(&mut services, "job worker", async move {
             production
                 .worker
                 .run(token)
@@ -644,21 +784,37 @@ impl App {
         });
         let database = self.database.clone();
         let token = service_shutdown.clone();
-        services.spawn(async move { watch_database_ownership(database, token).await });
+        spawn_service(
+            &mut services,
+            "database ownership watch",
+            watch_database_ownership(database, token),
+        );
         let database = self.database.clone();
         let scheduler = production.scheduler;
         let token = service_shutdown.clone();
-        services.spawn(async move { run_scheduler_service(scheduler, database, token).await });
+        spawn_service(
+            &mut services,
+            "scheduler",
+            run_scheduler_service(scheduler, database, token),
+        );
         // Subscribed before HTTP starts: nothing the first clients do is missed.
         let member = crate::cluster::join(&self.database)
             .await
             .map_err(|error| AppError::Background(error.to_string()))?;
         let token = service_shutdown.clone();
-        services.spawn(async move { member.run(token).await });
+        spawn_service(&mut services, "cluster member", async move {
+            member.run(token).await
+        });
         let push = crate::push::PushService::of(&self.database);
         push.set_origin(&self.config.http.public_origin);
+        if let Some(apns) = &self.config.apns {
+            let client = crate::push::apns::ApnsClient::new(apns).map_err(AppError::Background)?;
+            push.set_apns_sender(std::sync::Arc::new(client));
+        }
         let token = service_shutdown.clone();
-        services.spawn(async move { push.run_inbox_service(token).await });
+        spawn_service(&mut services, "push inbox", async move {
+            push.run_inbox_service(token).await
+        });
         let mover = crate::object_storage::run_mover(
             self.database.clone(),
             self.attachments.uploads.clone(),
@@ -666,10 +822,10 @@ impl App {
             self.object_storage.clone(),
             service_shutdown.clone(),
         );
-        services.spawn(mover);
+        spawn_service(&mut services, "object storage mover", mover);
         let attachments = self.attachments.clone();
         let token = service_shutdown.clone();
-        services.spawn(async move {
+        spawn_service(&mut services, "attachment reconciliation", async move {
             attachments
                 .run_reconciliation_service(token)
                 .await
@@ -889,7 +1045,6 @@ fn ensure_safe_data_layout(
 fn health_registry(
     config: &Config,
     database: &Database,
-    integrity: &IntegrityService,
     draining: &Arc<AtomicBool>,
 ) -> HealthRegistry {
     let migrations_database = database.clone();
@@ -909,7 +1064,17 @@ fn health_registry(
             }
         }
     });
-    integrity.register_readiness(&mut health);
+    let readiness_database = database.clone();
+    health.register(HealthCheck::Database, move || {
+        let database = readiness_database.clone();
+        async move {
+            database
+                .scalar::<i64>("SELECT 1")
+                .await
+                .map(drop)
+                .map_err(|error| error.to_string())
+        }
+    });
     let attachment_path = config.data.attachments.clone();
     let backup_path = config.data.backups.clone();
     health.register(HealthCheck::WritableStorage, move || {
@@ -973,6 +1138,12 @@ async fn initialize_production_services(
     notion_imports: NotionImportService,
     dns_checker: DnsChecker,
     mail: Arc<MailRepository>,
+    asana_imports: AsanaImportService,
+    linear_imports: LinearImportService,
+    trello_imports: TrelloImportService,
+    obsidian_imports: ObsidianImportService,
+    import_notices: crate::import_notice::ImportNotices,
+    orbit_imports: OrbitImportService,
     workspace_exports: WorkspaceExportService,
     billing: Option<crate::billing::Billing>,
     concurrency: usize,
@@ -1011,23 +1182,68 @@ async fn initialize_production_services(
                 let integrity = integrity_service.clone();
                 let failure = integrity_failure.clone();
                 async move {
-                    integrity.full().await.map_err(|error| {
-                        failure.cancel();
-                        JobError::Permanent(error.to_string())
+                    integrity.full().await.map_err(|error| match error {
+                        IntegrityError::Busy { .. } => JobError::Retryable(error.to_string()),
+                        IntegrityError::Failed { .. } => {
+                            failure.cancel();
+                            JobError::Permanent(error.to_string())
+                        }
                     })
                 }
             })
         })
         .and_then(|worker| {
             let cleanup = notion_imports.clone();
+            let asana_cleanup = asana_imports.clone();
+            let linear_cleanup = linear_imports.clone();
+            let trello_cleanup = trello_imports.clone();
+            let obsidian_cleanup = obsidian_imports.clone();
+            let orbit_cleanup = orbit_imports.clone();
+            // One hourly schedule expires and fails stale imports of every source.
             worker.with_handler(maintenance_kind(NOTION_CLEANUP), move |_| {
                 let service = cleanup.clone();
+                let asana = asana_cleanup.clone();
+                let linear = linear_cleanup.clone();
+                let trello = trello_cleanup.clone();
+                let obsidian = obsidian_cleanup.clone();
+                let orbit = orbit_cleanup.clone();
                 async move {
                     service
                         .expire_stale(TimestampMillis::now())
                         .await
                         .map(|_| ())
-                        .map_err(|_| JobError::Retryable("Notion import cleanup failed".to_owned()))
+                        .map_err(|_| {
+                            JobError::Retryable("Notion import cleanup failed".to_owned())
+                        })?;
+                    asana
+                        .expire_stale(TimestampMillis::now())
+                        .await
+                        .map_err(|_| {
+                            JobError::Retryable("Asana import cleanup failed".to_owned())
+                        })?;
+                    linear
+                        .expire_stale(TimestampMillis::now())
+                        .await
+                        .map_err(|_| {
+                            JobError::Retryable("Linear import cleanup failed".to_owned())
+                        })?;
+                    trello
+                        .expire_stale(TimestampMillis::now())
+                        .await
+                        .map_err(|_| {
+                            JobError::Retryable("Trello import cleanup failed".to_owned())
+                        })?;
+                    obsidian
+                        .expire_stale(TimestampMillis::now())
+                        .await
+                        .map_err(|_| {
+                            JobError::Retryable("Obsidian import cleanup failed".to_owned())
+                        })?;
+                    orbit
+                        .expire_stale(TimestampMillis::now())
+                        .await
+                        .map(|_| ())
+                        .map_err(|_| JobError::Retryable("Orbit import cleanup failed".to_owned()))
                 }
             })
         })
@@ -1043,7 +1259,36 @@ async fn initialize_production_services(
                 }
             })
         })
-        .and_then(|worker| crate::notion::import::register_jobs(worker, notion_imports))
+        .and_then(|worker| {
+            let databases =
+                crate::repositories::databases::DatabaseRepository::new(database.clone());
+            worker.with_handler(maintenance_kind(SEARCH_TEXT_FILL), move |_| {
+                let databases = databases.clone();
+                async move {
+                    while databases.fill_search_text().await.map_err(|error| {
+                        JobError::Retryable(format!("filling search text failed: {error}"))
+                    })? > 0
+                    {}
+                    Ok(())
+                }
+            })
+        })
+        .and_then(|worker| {
+            crate::notion::import::register_jobs(worker, notion_imports, import_notices.clone())
+        })
+        .and_then(|worker| {
+            crate::asana::import::register_jobs(worker, asana_imports, import_notices.clone())
+        })
+        .and_then(|worker| {
+            crate::linear::import::register_jobs(worker, linear_imports, import_notices.clone())
+        })
+        .and_then(|worker| {
+            crate::trello::import::register_jobs(worker, trello_imports, import_notices.clone())
+        })
+        .and_then(|worker| {
+            crate::obsidian::import::register_jobs(worker, obsidian_imports, import_notices.clone())
+        })
+        .and_then(|worker| crate::orbit_import::register_jobs(worker, orbit_imports))
         .and_then(|worker| {
             worker.with_handler(dns_check_kind(), move |context| {
                 let checker = dns_checker.clone();
@@ -1082,6 +1327,7 @@ async fn initialize_production_services(
             })
         })
         .and_then(|worker| crate::workspace_export::register_job(worker, workspace_exports))
+        .and_then(|worker| crate::import_people::register_job(worker, database.clone()))
         .and_then(|worker| match billing {
             Some(billing) => crate::billing::register_jobs(worker, billing),
             None => Ok(worker),
@@ -1143,6 +1389,13 @@ async fn initialize_production_services(
         now,
     )
     .await?;
+    ensure_schedule(
+        &scheduler,
+        SEARCH_TEXT_FILL,
+        Duration::from_secs(60 * 60),
+        now,
+    )
+    .await?;
     scheduler
         .validate_enabled()
         .await
@@ -1192,14 +1445,19 @@ async fn run_scheduler_service(
     shutdown: CancellationToken,
 ) -> Result<(), String> {
     loop {
-        let now = database
-            .database_now()
-            .await
-            .map_err(|error| error.to_string())?;
-        scheduler
-            .materialize_due(now)
-            .await
-            .map_err(|error| error.to_string())?;
+        let materialized = match database.database_now().await {
+            Ok(now) => scheduler.materialize_due(now).await.map(drop),
+            Err(error) => Err(ScheduleError::from(error)),
+        };
+        match materialized {
+            Ok(()) => {}
+            Err(ScheduleError::Database(error))
+                if orbit_platform::is_transient_lock_error(&error) =>
+            {
+                tracing::warn!(%error, "scheduler: the database is busy; retrying on the next round");
+            }
+            Err(error) => return Err(error.to_string()),
+        }
         tokio::select! {
             () = shutdown.cancelled() => return Ok(()),
             () = tokio::time::sleep(Duration::from_secs(60)) => {}
@@ -1223,6 +1481,15 @@ async fn watch_database_ownership(
             .await
             .map_err(|error| error.to_string())?;
     }
+}
+
+/// Runs a background service of [`App::serve`]; its error names it.
+fn spawn_service(
+    services: &mut JoinSet<Result<(), String>>,
+    name: &'static str,
+    service: impl Future<Output = Result<(), String>> + Send + 'static,
+) {
+    services.spawn(async move { service.await.map_err(|error| format!("{name}: {error}")) });
 }
 
 fn joined_service_error(

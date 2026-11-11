@@ -28,15 +28,15 @@ pub use backup::{
     SnapshotRow,
 };
 pub use config::{
-    AppKey, BillingConfig, Config, ConfigError, DataConfig, EnvironmentMode, HttpConfig,
-    JobsConfig, MailConfig, MailMode, MetricsConfig, Plan, RateLimitConfig, Secret, TrialConfig,
-    UploadConfig, redact_database_url,
+    ApnsConfig, AppKey, BillingConfig, Config, ConfigError, DataConfig, EnvironmentMode,
+    HttpConfig, JobsConfig, MailConfig, MailMode, MetricsConfig, Plan, RateLimitConfig, Secret,
+    TrialConfig, UploadConfig, redact_database_url,
 };
 pub use db::{
     Access, Backend, Column, Database, DatabaseConfig, DatabaseError, Flag, GuardedMigrationError,
     Migration, MigrationError, MigrationRunner, NotBool, PendingMigration, Row, Separated,
-    Singleton, SqlBuilder, TestDatabase, TestDatabaseError, lock_database_ownership,
-    run_guarded_migrations, testing_postgres,
+    Singleton, SqlBuilder, TestDatabase, TestDatabaseError, is_transient_lock_error,
+    lock_database_ownership, run_guarded_migrations, testing_postgres,
 };
 #[cfg(any(test, feature = "test-support"))]
 pub use files::start_fake_s3;
@@ -51,8 +51,8 @@ pub use files::{
 };
 pub use health::{HealthCheck, HealthCheckResult, HealthRegistry, ReadinessReport};
 pub use http::{
-    ClientIp, HttpLimits, HttpPlatformLayer, OriginPolicy, RequestId, RequestTransport,
-    bearer_token,
+    ClientIp, HttpLimits, HttpPlatformLayer, LargeUpload, OriginPolicy, RequestId,
+    RequestTransport, bearer_token,
 };
 pub use id::{Id, ParseIdError};
 pub use integrity::{IntegrityError, IntegrityService};

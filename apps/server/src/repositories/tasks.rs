@@ -1,6 +1,6 @@
 use orbit_domain::{Actor, DEFAULT_STATUSES, StatusCategory};
 use orbit_platform::SqlBuilder;
-use orbit_platform::{Backend, Database, Flag, Id, Row, TimestampMillis};
+use orbit_platform::{BLOB_REFERENCE_COUNT, Backend, Database, Flag, Id, Row, TimestampMillis};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -11,18 +11,57 @@ use utoipa::ToSchema;
 use super::billing::{TrialCapacityError, TrialLimitReached, ensure_trial_capacity};
 use super::membership;
 use super::page_mentions::mentioned_users;
+use super::pages::revision;
 use super::sub_issues::{self, AutoClosed};
 use super::task_filter::{self, FilterError, FilterGroup, ShowCompleted, SubIssuesDisplay};
+use super::task_recurrences::{self, RecurrenceRule, TaskRecurrence};
 use super::task_relations::{self, RelationActor};
 use crate::audit::{self, AuditOutcome};
 use crate::billing::TrialLimit;
 use crate::collab::kind_task::members;
 use crate::collab::markdown_import::markdown_to_blocks;
-use crate::collab::sanitize::sanitize_blocks_for;
+use crate::collab::sanitize::{sanitize_blocks_for, trim_comment_blocks};
 use crate::collab::{CollabError, CollabHub, CollabWrite, DocKey, DocKind, LinkPolicy};
 use crate::export::markdown::{KeepLinks, blocks_to_markdown};
 
 const TRASH_RETENTION_MILLIS: i64 = 30 * 24 * 60 * 60 * 1_000;
+/// Tasks deleted forever per write transaction when a project or the trash is emptied: the
+/// transaction holds every writer, and imported projects have thousands of tasks.
+const PURGE_BATCH: i64 = 200;
+
+/// Result of emptying the tasks trash.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct TaskTrashEmptied {
+    /// Tasks deleted forever, also those of the purged projects.
+    pub purged_tasks: u64,
+    pub purged_projects: u64,
+}
+
+/// A task in the trash (or in a trashed project), with who moved it there. It carries its
+/// status and labels: the status and label lists leave out trashed projects.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct TrashedTask {
+    #[serde(flatten)]
+    pub task: TaskRecord,
+    pub status: StatusRecord,
+    pub labels: Vec<LabelRecord>,
+    /// The user who moved the task to the trash, from the audit log; null for an API service
+    /// account or when the audit row is gone.
+    #[schema(value_type = Option<String>, required = true)]
+    pub deleted_by: Option<Id>,
+}
+
+/// A project in the trash, with who moved it there and its statuses (the status list leaves
+/// out trashed projects).
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct TrashedProject {
+    #[serde(flatten)]
+    pub project: ProjectRecord,
+    pub statuses: Vec<StatusRecord>,
+    /// The user who moved the project to the trash, from the audit log; null when unknown.
+    #[schema(value_type = Option<String>, required = true)]
+    pub deleted_by: Option<Id>,
+}
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
 pub struct ProjectRecord {
@@ -113,6 +152,9 @@ pub struct TaskRecord {
     pub due_start_at: Option<TimestampMillis>,
     #[schema(value_type = Option<String>, format = DateTime)]
     pub due_at: Option<TimestampMillis>,
+    /// How the task repeats; null when it does not. Completing it creates the next occurrence.
+    #[schema(required = true)]
+    pub recurrence: Option<TaskRecurrence>,
     pub version: u64,
     #[schema(value_type = Option<String>, format = DateTime)]
     pub deleted_at: Option<TimestampMillis>,
@@ -168,8 +210,15 @@ pub struct CommentRecord {
     pub workspace_id: Id,
     #[schema(value_type = String)]
     pub task_id: Id,
+    /// The member the comment was written as. For a comment from a service account's API token,
+    /// the workspace member the write was checked as; show `author_service_account_name` then.
     #[schema(value_type = String)]
     pub author_id: Id,
+    /// Set when a service account wrote the comment through an API token.
+    #[schema(value_type = Option<String>, required = true)]
+    pub author_service_account_id: Option<Id>,
+    #[schema(required = true)]
+    pub author_service_account_name: Option<String>,
     #[schema(value_type = Option<String>)]
     pub parent_id: Option<Id>,
     /// Markdown copy of `body_json`.
@@ -200,7 +249,7 @@ pub struct NotificationRecord {
     pub actor_user_id: Id,
     /// `task_assigned`, `comment_mentioned` (task comment), `description_mentioned` (task
     /// description), `page_comment_mentioned`, `page_mentioned` (an @mention in a page body) or
-    /// `chat_mentioned` (a chat message).
+    /// `chat_mentioned` (a chat message) or `import_finished` (a long import ended).
     pub kind: String,
     /// Set for task notifications.
     #[schema(value_type = Option<String>)]
@@ -223,6 +272,14 @@ pub struct NotificationRecord {
     pub chat_conversation_id: Option<Id>,
     #[schema(value_type = Option<String>)]
     pub chat_message_id: Option<Id>,
+    /// The importer of an `import_finished` notification: `asana`, `linear`, `trello`, `notion`
+    /// or `obsidian`.
+    pub import_source: Option<String>,
+    /// The import of an `import_finished` notification.
+    #[schema(value_type = Option<String>)]
+    pub import_id: Option<Id>,
+    /// How the import ended: `completed` or `failed`.
+    pub import_status: Option<String>,
     #[schema(value_type = Option<String>, format = DateTime)]
     pub read_at: Option<TimestampMillis>,
     #[schema(value_type = String, format = DateTime)]
@@ -253,6 +310,16 @@ pub struct CreateTask {
     pub due_start_at: Option<TimestampMillis>,
     pub due_at: Option<TimestampMillis>,
     pub parent_task_id: Option<Id>,
+}
+
+/// How `insert_task` creates a task: as a person does (notifications, sub-issue automation), or
+/// silently for an import.
+#[derive(Clone, Copy)]
+enum CreateMode {
+    Interactive,
+    Import {
+        completed_at: Option<TimestampMillis>,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -308,6 +375,8 @@ pub struct TaskChanges {
     pub duplicate_of_id: Option<Option<Id>>,
     /// `Some(Some(id))` makes the task a sub-issue of `id`; `Some(None)` detaches it.
     pub parent_task_id: Option<Option<Id>>,
+    /// `Some(Some(rule))` sets or replaces the series' rule; `Some(None)` stops repeating.
+    pub recurrence: Option<Option<RecurrenceRule>>,
 }
 
 #[derive(Clone, Debug)]
@@ -397,6 +466,10 @@ pub enum TaskError {
     ParentCycle,
     #[error("the parent task is not available")]
     ParentInvalid,
+    #[error("only a project in the trash can be deleted forever")]
+    ProjectNotTrashed,
+    #[error("only a task in the trash can be deleted forever")]
+    TaskNotTrashed,
     #[error("task repository is unavailable")]
     Unavailable(#[from] sqlx::Error),
     /// Co-editing is at its memory budget, or another server reset the document: try again.
@@ -442,18 +515,124 @@ impl From<FilterError> for TaskError {
     }
 }
 
+/// The API token behind a write, for its audit rows: the token, and the service account it acts as.
+#[derive(Clone, Debug)]
+pub struct TokenActor {
+    pub token_id: Id,
+    pub service_account: Option<(Id, String)>,
+}
+
 #[derive(Clone)]
 pub struct TaskRepository {
     database: Database,
     project_grant: Option<Vec<Id>>,
+    token: Option<TokenActor>,
+    /// `expected_version` of task updates and deletes is the task's [`revision`].
+    revisions: bool,
 }
 
 impl TaskRepository {
     pub fn with_project_grant(&self, projects: Vec<Id>) -> Self {
         Self {
-            database: self.database.clone(),
             project_grant: Some(projects),
+            ..self.clone()
         }
+    }
+
+    #[must_use]
+    pub fn with_token(self, token: TokenActor) -> Self {
+        Self {
+            token: Some(token),
+            ..self
+        }
+    }
+
+    /// Updates and deletes check the task's [`revision`] instead of its version, so they also
+    /// conflict with co-edits of the description made after the caller's read (the token API).
+    #[must_use]
+    pub fn with_revisions(self) -> Self {
+        Self {
+            revisions: true,
+            ..self
+        }
+    }
+
+    /// The task's version when `expected` proves that the caller saw `current`: `expected` is
+    /// the version, or with [`Self::with_revisions`] the revision.
+    fn expected_version(&self, expected: u64, current: &TaskRecord) -> Result<u64, TaskError> {
+        if !self.revisions {
+            check_version(expected, current.version, current)?;
+            return Ok(current.version);
+        }
+        let revision = revision(current.version, current.updated_at);
+        if expected != revision {
+            // The conflict names the value the caller sends next.
+            let mut record = serde_json::to_value(current).map_err(|_| TaskError::Conflict)?;
+            record["version"] = json!(revision);
+            return Err(TaskError::VersionConflict {
+                current: Box::new(record),
+            });
+        }
+        Ok(current.version)
+    }
+
+    /// Whether the write notifies members. A service account's write does not: a notification
+    /// names a member as the actor, and no member did it.
+    fn notifies(&self) -> bool {
+        self.service_account().is_none()
+    }
+
+    fn service_account(&self) -> Option<(Id, &str)> {
+        self.token
+            .as_ref()
+            .and_then(|token| token.service_account.as_ref())
+            .map(|(id, name)| (*id, name.as_str()))
+    }
+
+    /// The audit actor and metadata of a write: the person, or for a service-account token none,
+    /// with the token and service account named in `metadata`.
+    fn attribution(&self, actor_id: Id, mut metadata: Value) -> (Option<Id>, Value) {
+        let Some(token) = &self.token else {
+            return (Some(actor_id), metadata);
+        };
+        metadata["api_token_id"] = json!(token.token_id);
+        match &token.service_account {
+            Some((id, name)) => {
+                metadata["actor_service_account_id"] = json!(id);
+                metadata["actor_service_account_name"] = json!(name);
+                (None, metadata)
+            }
+            None => (Some(actor_id), metadata),
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn record_write(
+        &self,
+        tx: &mut Transaction<'_, Any>,
+        workspace_id: Id,
+        actor_id: Id,
+        (action, resource_type): (&str, &str),
+        resource_id: Id,
+        request_id: &str,
+        metadata: Value,
+        now: TimestampMillis,
+    ) -> Result<(), TaskError> {
+        let (actor, metadata) = self.attribution(actor_id, metadata);
+        audit::record(
+            tx,
+            workspace_id,
+            actor,
+            action,
+            AuditOutcome::Success,
+            resource_type,
+            Some(resource_id),
+            request_id,
+            metadata,
+            now,
+        )
+        .await?;
+        Ok(())
     }
     async fn check_project_grant(
         &self,
@@ -548,6 +727,8 @@ impl TaskRepository {
         Self {
             database,
             project_grant: None,
+            token: None,
+            revisions: false,
         }
     }
 
@@ -641,7 +822,32 @@ impl TaskRepository {
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<ProjectRecord, TaskError> {
-        let project_id = Id::new_v7();
+        self.create_project_with_id(
+            Id::new_v7(),
+            workspace_id,
+            actor_id,
+            name,
+            key,
+            color,
+            request_id,
+            now,
+        )
+        .await
+    }
+
+    /// `create_project` under a caller-chosen id (an import records it before creating).
+    #[allow(clippy::too_many_arguments)]
+    pub async fn create_project_with_id(
+        &self,
+        project_id: Id,
+        workspace_id: Id,
+        actor_id: Id,
+        name: String,
+        key: String,
+        color: String,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<ProjectRecord, TaskError> {
         let mut tx = self.database.immediate_transaction().await?;
         require_access_tx(&mut tx, workspace_id, actor_id).await?;
         let inserted = sqlx::query(
@@ -662,14 +868,14 @@ impl TaskRepository {
         }
         inserted?;
         insert_default_statuses(&mut tx, workspace_id, project_id, now).await?;
-        record_mutation(
+        self.record_write(
             &mut tx,
             workspace_id,
             actor_id,
-            "project.created",
-            "project",
+            ("project.created", "project"),
             project_id,
             request_id,
+            json!({}),
             now,
         )
         .await?;
@@ -921,6 +1127,212 @@ impl TaskRepository {
                 project.id.to_string(),
             ]
         })
+    }
+
+    /// Deletes the trashed project `project_id` forever with all its tasks, as the trash
+    /// retention purge does after 30 days. Like [`Self::purge_task`], it takes a workspace owner
+    /// or admin.
+    pub async fn purge_project(
+        &self,
+        workspace_id: Id,
+        project_id: Id,
+        actor_id: Id,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<(), TaskError> {
+        let actor = require_access(self.database.pool(), workspace_id, actor_id).await?;
+        self.require_granted_project(project_id)?;
+        let deleted_at: Option<i64> = sqlx::query_scalar(
+            "SELECT deleted_at FROM projects WHERE id = $1 AND workspace_id = $2",
+        )
+        .bind(project_id.to_string())
+        .bind(workspace_id.to_string())
+        .fetch_optional(self.database.pool())
+        .await?
+        .ok_or(TaskError::NotFound)?;
+        let Some(deleted_at) = deleted_at else {
+            return Err(TaskError::ProjectNotTrashed);
+        };
+        if deleted_at <= now.as_millis().saturating_sub(TRASH_RETENTION_MILLIS) {
+            return Err(TaskError::NotFound);
+        }
+        if !actor.can_purge_task() {
+            return Err(TaskError::Forbidden);
+        }
+        let purged = self
+            .purge_trashed_project(workspace_id, project_id, actor_id, request_id, now)
+            .await;
+        CollabHub::revalidate_database(&self.database, Some(workspace_id));
+        match purged? {
+            Some(_) => Ok(()),
+            // Restored while its tasks were being purged.
+            None => Err(TaskError::ProjectNotTrashed),
+        }
+    }
+
+    /// Deletes forever every task and project the tasks trash shows: the trashed tasks of live
+    /// projects, then each trashed project with all its tasks. `purged_tasks` counts every task
+    /// deleted, also those of the projects.
+    pub async fn empty_trash(
+        &self,
+        workspace_id: Id,
+        actor_id: Id,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<TaskTrashEmptied, TaskError> {
+        let actor = require_access(self.database.pool(), workspace_id, actor_id).await?;
+        // A grant names live projects; the trash spans the whole workspace.
+        if self.project_grant.is_some() || !actor.can_purge_task() {
+            return Err(TaskError::Forbidden);
+        }
+        let result = self
+            .empty_trash_batches(workspace_id, actor_id, request_id, now)
+            .await;
+        CollabHub::revalidate_database(&self.database, Some(workspace_id));
+        result
+    }
+
+    async fn empty_trash_batches(
+        &self,
+        workspace_id: Id,
+        actor_id: Id,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<TaskTrashEmptied, TaskError> {
+        let cutoff = now.as_millis().saturating_sub(TRASH_RETENTION_MILLIS);
+        let mut purged_tasks = 0_u64;
+        loop {
+            let mut tx = self.database.immediate_transaction().await?;
+            // Selected inside the write transaction, so a task restored meanwhile is skipped.
+            let batch = sqlx::query_scalar::<_, String>(
+                "SELECT tasks.id FROM tasks JOIN projects ON projects.id = tasks.project_id \
+                 WHERE tasks.workspace_id = $1 AND tasks.deleted_at > $2 AND projects.deleted_at IS NULL \
+                 ORDER BY tasks.id LIMIT $3",
+            )
+            .bind(workspace_id.to_string())
+            .bind(cutoff)
+            .bind(PURGE_BATCH)
+            .fetch_all(&mut *tx)
+            .await?;
+            if batch.is_empty() {
+                break;
+            }
+            for id in &batch {
+                purge_task_in_tx(&mut tx, id, now).await?;
+                self.record_write(
+                    &mut tx,
+                    workspace_id,
+                    actor_id,
+                    ("task.purged", "task"),
+                    parse_id(id.clone())?,
+                    request_id,
+                    json!({"tasks": 1}),
+                    now,
+                )
+                .await?;
+            }
+            tx.commit().await?;
+            purged_tasks += batch.len() as u64;
+        }
+        let projects = sqlx::query_scalar::<_, String>(
+            "SELECT id FROM projects WHERE workspace_id = $1 AND deleted_at > $2 ORDER BY deleted_at, id",
+        )
+        .bind(workspace_id.to_string())
+        .bind(cutoff)
+        .fetch_all(self.database.pool())
+        .await?;
+        let mut purged_projects = 0_u64;
+        for project_id in projects {
+            if let Some(tasks) = self
+                .purge_trashed_project(
+                    workspace_id,
+                    parse_id(project_id)?,
+                    actor_id,
+                    request_id,
+                    now,
+                )
+                .await?
+            {
+                purged_tasks += tasks;
+                purged_projects += 1;
+            }
+        }
+        Ok(TaskTrashEmptied {
+            purged_tasks,
+            purged_projects,
+        })
+    }
+
+    /// Deletes the tasks of a trashed project, [`PURGE_BATCH`] per write transaction (whatever
+    /// their own `deleted_at`), then the project row in its own transaction. Each transaction
+    /// first checks that the project is still in the trash, so a concurrent restore stops it
+    /// (`None`), and a run that stopped midway is finished by the next. Sub-issues in other
+    /// projects lose their parent (`parent_task_id` is `ON DELETE SET NULL`), as in the
+    /// retention purge. Returns how many tasks this run deleted.
+    async fn purge_trashed_project(
+        &self,
+        workspace_id: Id,
+        project_id: Id,
+        actor_id: Id,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<Option<u64>, TaskError> {
+        let mut purged = 0_u64;
+        loop {
+            let mut tx = self.database.immediate_transaction().await?;
+            let trashed: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM projects WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NOT NULL",
+            )
+            .bind(project_id.to_string())
+            .bind(workspace_id.to_string())
+            .fetch_one(&mut *tx)
+            .await?;
+            if trashed == 0 {
+                return Ok(None);
+            }
+            let batch = sqlx::query_scalar::<_, String>(
+                "SELECT id FROM tasks WHERE project_id = $1 ORDER BY id LIMIT $2",
+            )
+            .bind(project_id.to_string())
+            .bind(PURGE_BATCH)
+            .fetch_all(&mut *tx)
+            .await?;
+            if batch.is_empty() {
+                // API token grants hold the project with ON DELETE RESTRICT; the token keeps
+                // its other projects. Statuses and labels go through the foreign keys.
+                sqlx::query("DELETE FROM api_token_projects WHERE project_id = $1")
+                    .bind(project_id.to_string())
+                    .execute(&mut *tx)
+                    .await?;
+                sqlx::query("UPDATE api_tokens SET project_id = NULL WHERE project_id = $1")
+                    .bind(project_id.to_string())
+                    .execute(&mut *tx)
+                    .await?;
+                sqlx::query("DELETE FROM projects WHERE id = $1 AND workspace_id = $2")
+                    .bind(project_id.to_string())
+                    .bind(workspace_id.to_string())
+                    .execute(&mut *tx)
+                    .await?;
+                self.record_write(
+                    &mut tx,
+                    workspace_id,
+                    actor_id,
+                    ("project.purged", "project"),
+                    project_id,
+                    request_id,
+                    json!({"tasks": purged}),
+                    now,
+                )
+                .await?;
+                tx.commit().await?;
+                return Ok(Some(purged));
+            }
+            for id in &batch {
+                purge_task_in_tx(&mut tx, id, now).await?;
+            }
+            tx.commit().await?;
+            purged += batch.len() as u64;
+        }
     }
 
     pub async fn statuses(
@@ -1492,7 +1904,59 @@ impl TaskRepository {
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<TaskUpdateOutcome, TaskError> {
-        let id = Id::new_v7();
+        self.insert_task(
+            Id::new_v7(),
+            workspace_id,
+            actor_id,
+            input,
+            CreateMode::Interactive,
+            request_id,
+            now,
+        )
+        .await
+    }
+
+    /// Creates a task copied from another tool under a caller-chosen `id` (recorded before the
+    /// call, so a restarted import can tell whether it already exists). Unlike `create_task` it
+    /// notifies nobody (assignees, mentions) and runs no sub-issue automation: the source
+    /// already decided each task's state. `completed_at` is kept when the status is closed.
+    /// The audit record is written as usual.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn import_task(
+        &self,
+        id: Id,
+        workspace_id: Id,
+        actor_id: Id,
+        input: CreateTask,
+        completed_at: Option<TimestampMillis>,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<TaskRecord, TaskError> {
+        self.insert_task(
+            id,
+            workspace_id,
+            actor_id,
+            input,
+            CreateMode::Import { completed_at },
+            request_id,
+            now,
+        )
+        .await
+        .map(|outcome| outcome.task)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn insert_task(
+        &self,
+        id: Id,
+        workspace_id: Id,
+        actor_id: Id,
+        input: CreateTask,
+        mode: CreateMode,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<TaskUpdateOutcome, TaskError> {
+        let interactive = matches!(mode, CreateMode::Interactive);
         if input
             .due_start_at
             .is_some_and(|start| input.due_at.is_none_or(|end| start > end))
@@ -1506,9 +1970,14 @@ impl TaskRepository {
         if self
             .project_grant
             .as_ref()
-            .is_some_and(|g| !g.contains(&input.project_id) || input.parent_task_id.is_some())
+            .is_some_and(|g| !g.contains(&input.project_id))
         {
             return Err(TaskError::NotFound);
+        }
+        // The new sub-issue joins its parent's tree, which task automation can change.
+        if let Some(parent_id) = input.parent_task_id {
+            self.check_project_grant(&mut tx, workspace_id, parent_id)
+                .await?;
         }
         ensure_trial_capacity(&self.database, &mut tx, workspace_id, TrialLimit::Tasks, 1).await?;
         validate_project_status(&mut tx, workspace_id, input.project_id, input.status_id).await?;
@@ -1522,102 +1991,68 @@ impl TaskRepository {
         if let Some(parent_id) = input.parent_task_id {
             sub_issues::validate_parent_in_tx(&mut tx, workspace_id, None, parent_id).await?;
         }
-        let position = match input.position {
-            Some(position) => position,
-            None => sqlx::query_scalar::<_, i64>(
-                "SELECT COALESCE(MAX(position) + 1, 0) FROM tasks WHERE workspace_id = $1 AND project_id = $2 AND status_id = $3 AND deleted_at IS NULL",
-            )
-            .bind(workspace_id.to_string())
-            .bind(input.project_id.to_string())
-            .bind(input.status_id.to_string())
-            .fetch_one(&mut *tx)
-            .await?,
+        let completed_at = match mode {
+            CreateMode::Import { completed_at } => completed_at,
+            CreateMode::Interactive => None,
         };
-        // A markdown description stays markdown until the description is first opened.
-        let (description, blocks) = match &input.description_json {
-            Some(blocks) => {
-                let (markdown, blocks) = description_from_blocks(workspace_id, id, blocks);
-                (markdown, Some(blocks))
-            }
-            // markdown (API, MCP, chat): converted now, so its mentions notify like typed ones
-            None if input.description.trim().is_empty() => (input.description.clone(), None),
-            None => {
-                let members = members(&mut *tx, workspace_id).await?;
-                let blocks = sanitize_blocks_for(
-                    &markdown_to_blocks(&input.description, &members),
-                    &task_policy(workspace_id, id),
-                );
-                (input.description.clone(), Some(blocks))
-            }
-        };
-        let description_json = blocks
-            .as_ref()
-            .map(|blocks| Value::Array(blocks.clone()).to_string());
-        sqlx::query(
-            "INSERT INTO tasks (id, workspace_id, project_id, status_id, title, description, source_url, priority, position, creator_id, due_start_at, due_at, parent_task_id, version, created_at, updated_at, description_json) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 0, $14, $15, $16)",
+        let blocks = insert_task_rows_in_tx(
+            &mut tx,
+            id,
+            workspace_id,
+            actor_id,
+            self.service_account().map(|(id, _)| id),
+            &input,
+            completed_at,
+            None,
+            now,
         )
-        .bind(id.to_string())
-        .bind(workspace_id.to_string())
-        .bind(input.project_id.to_string())
-        .bind(input.status_id.to_string())
-        .bind(&input.title)
-        .bind(&description)
-        .bind(&input.source_url)
-        .bind(&input.priority)
-        .bind(position)
-        .bind(actor_id.to_string())
-        .bind(input.due_start_at.map(TimestampMillis::as_millis))
-        .bind(input.due_at.map(TimestampMillis::as_millis))
-        .bind(input.parent_task_id.map(|id| id.to_string()))
-        .bind(now.as_millis())
-        .bind(now.as_millis())
-        .bind(description_json)
-        .execute(&mut *tx)
         .await?;
-        replace_assignees(&mut tx, id, &input.assignee_ids).await?;
-        if let Some(blocks) = &blocks {
+        let notifies = interactive && self.notifies();
+        if let Some(blocks) = blocks.as_ref().filter(|_| notifies) {
             // everyone the new description mentions is newly mentioned
             notify_description_mentions(&mut tx, workspace_id, id, &[], blocks, actor_id, now)
                 .await?;
         }
-        replace_labels(&mut tx, id, &input.label_ids).await?;
-        notify_users(
+        if notifies {
+            notify_users(
+                &mut tx,
+                workspace_id,
+                actor_id,
+                NotificationRequest {
+                    kind: "task_assigned",
+                    task_id: id,
+                    comment_id: None,
+                    recipients: &input.assignee_ids,
+                },
+                now,
+            )
+            .await?;
+        }
+        self.record_write(
             &mut tx,
             workspace_id,
             actor_id,
-            NotificationRequest {
-                kind: "task_assigned",
-                task_id: id,
-                comment_id: None,
-                recipients: &input.assignee_ids,
-            },
-            now,
-        )
-        .await?;
-        record_mutation(
-            &mut tx,
-            workspace_id,
-            actor_id,
-            "task.created",
-            "task",
+            ("task.created", "task"),
             id,
             request_id,
+            json!({}),
             now,
         )
         .await?;
         // Rule A: a sub-issue created closed can complete its parent (an open one never does).
         let mut auto_closed = Vec::new();
-        if let Some(parent_id) = input.parent_task_id {
+        if interactive && let Some(parent_id) = input.parent_task_id {
             let actor = sub_issues::AutomationActor {
                 workspace_id,
                 actor_id,
-                service_account: None,
+                service_account: self.service_account(),
                 request_id,
                 now,
             };
             sub_issues::close_ancestors_in_tx(&mut tx, actor, parent_id, id, &mut auto_closed)
                 .await?;
+            // A recurring parent the new sub-issue closed repeats.
+            task_recurrences::spawn_next_in_tx(&self.database, &mut tx, actor).await?;
         }
         let task = task_in_tx(&mut tx, workspace_id, id, false).await?;
         tx.commit().await?;
@@ -1693,7 +2128,7 @@ impl TaskRepository {
             let current_status_id: String = row.get("status_id");
             let status_id: String = if issue.state_changed || was_deleted {
                 sqlx::query_scalar(
-                        "SELECT id FROM task_statuses WHERE workspace_id = $1 AND project_id = $2 AND category = $3 ORDER BY position, id LIMIT 1",
+                        "SELECT id FROM task_statuses WHERE workspace_id = $1 AND project_id = $2 AND category = $3 ORDER BY CASE WHEN lower(name) = 'done' THEN 0 ELSE 1 END, position, id LIMIT 1",
                     ).bind(workspace_id.to_string()).bind(row.get::<String, _>("project_id"))
                         .bind(status_category).fetch_optional(&mut *tx).await?
                         .unwrap_or_else(|| current_status_id.clone())
@@ -1808,14 +2243,14 @@ impl TaskRepository {
             }
             // Spec §4: the automation follows every write path, GitHub's included.
             let after = sub_issues::snapshot_in_tx(&mut tx, task_id).await?;
+            let actor = sub_issues::AutomationActor {
+                workspace_id,
+                actor_id,
+                service_account: Some((service_account_id, &service_account_name)),
+                request_id,
+                now,
+            };
             if let (Some(before), Some(after)) = (before, after) {
-                let actor = sub_issues::AutomationActor {
-                    workspace_id,
-                    actor_id,
-                    service_account: Some((service_account_id, &service_account_name)),
-                    request_id,
-                    now,
-                };
                 let mut auto_closed = Vec::new();
                 sub_issues::run_automation_in_tx(
                     &mut tx,
@@ -1827,6 +2262,7 @@ impl TaskRepository {
                 )
                 .await?;
             }
+            task_recurrences::spawn_next_in_tx(&self.database, &mut tx, actor).await?;
             let resumed = sqlx::query("UPDATE github_issue_links SET sync_paused = 0, pull_state = $1 WHERE task_id = $2 AND (sync_paused != 0 OR pull_state IS DISTINCT FROM $3)")
                     .bind(issue.state)
                     .bind(task_id.to_string())
@@ -1855,7 +2291,7 @@ impl TaskRepository {
         }
         ensure_trial_capacity(&self.database, &mut tx, workspace_id, TrialLimit::Tasks, 1).await?;
         let status_id: String = sqlx::query_scalar(
-            "SELECT id FROM task_statuses WHERE workspace_id = $1 AND project_id = $2 AND category <> 'duplicate' ORDER BY CASE WHEN category = $3 THEN 0 WHEN category = 'unstarted' THEN 1 ELSE 2 END, position, id LIMIT 1",
+            "SELECT id FROM task_statuses WHERE workspace_id = $1 AND project_id = $2 AND category <> 'duplicate' ORDER BY CASE WHEN category = $3 THEN 0 WHEN category = 'unstarted' THEN 1 ELSE 2 END, CASE WHEN lower(name) = 'done' THEN 0 ELSE 1 END, position, id LIMIT 1",
         ).bind(workspace_id.to_string()).bind(issue.project_id.to_string())
             .bind(status_category)
             .fetch_optional(&mut *tx).await?.ok_or(TaskError::NotFound)?;
@@ -2052,37 +2488,53 @@ impl TaskRepository {
         require_access_tx(&mut tx, workspace_id, actor_id).await?;
         self.check_project_grant(&mut tx, workspace_id, update.id)
             .await?;
+        // A new parent joins its tree to the task's tree.
+        if let Some(Some(parent_id)) = update.changes.parent_task_id {
+            self.check_project_grant(&mut tx, workspace_id, parent_id)
+                .await?;
+        }
         let before = sub_issues::snapshot_in_tx(&mut tx, update.id).await?;
         let task_before = task_in_tx(&mut tx, workspace_id, update.id, false).await?;
-        let blocks =
-            update_task_in_tx(&mut tx, workspace_id, actor_id, update, request_id, now).await?;
+        // Read after the description's pending co-edits were stored (the room lock above).
+        let update = &TaskUpdate {
+            expected_version: self.expected_version(update.expected_version, &task_before)?,
+            ..update.clone()
+        };
+        let blocks = update_task_in_tx(
+            &mut tx,
+            workspace_id,
+            actor_id,
+            update,
+            request_id,
+            now,
+            self.notifies(),
+        )
+        .await?;
         if let (Some(collab), Some(blocks)) = (collab.as_mut(), &blocks) {
             collab.replace(&mut tx, blocks, actor_id, now).await?;
         }
         let after = sub_issues::snapshot_in_tx(&mut tx, update.id).await?;
         let task_after = task_in_tx(&mut tx, workspace_id, update.id, false).await?;
-        audit::record(
+        self.record_write(
             &mut tx,
             workspace_id,
-            Some(actor_id),
-            "task.updated",
-            AuditOutcome::Success,
-            "task",
-            Some(update.id),
+            actor_id,
+            ("task.updated", "task"),
+            update.id,
             request_id,
             json!({ "changes": updated_fields(update, &task_before, &task_after) }),
             now,
         )
         .await?;
         let mut auto_closed = Vec::new();
+        let actor = sub_issues::AutomationActor {
+            workspace_id,
+            actor_id,
+            service_account: self.service_account(),
+            request_id,
+            now,
+        };
         if let (Some(before), Some(after)) = (before, after) {
-            let actor = sub_issues::AutomationActor {
-                workspace_id,
-                actor_id,
-                service_account: None,
-                request_id,
-                now,
-            };
             sub_issues::run_automation_in_tx(
                 &mut tx,
                 actor,
@@ -2093,6 +2545,7 @@ impl TaskRepository {
             )
             .await?;
         }
+        task_recurrences::spawn_next_in_tx(&self.database, &mut tx, actor).await?;
         // Re-read: the automation may have changed this task's sub-issue counts.
         let task = task_in_tx(&mut tx, workspace_id, update.id, false).await?;
         tx.commit().await?;
@@ -2100,6 +2553,79 @@ impl TaskRepository {
             collab.commit();
         }
         Ok(TaskUpdateOutcome { task, auto_closed })
+    }
+
+    /// Replaces `from` with `to` among the assignees of each task, in the caller's transaction
+    /// and without notifications: Settings → Import gives all tasks of an imported person to a
+    /// member at once, and one notification per task would bury them. Skips deleted tasks and
+    /// tasks with another assignee who left the workspace. Returns how many tasks changed.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn swap_assignee_in_tx(
+        &self,
+        tx: &mut Transaction<'_, Any>,
+        workspace_id: Id,
+        actor_id: Id,
+        task_ids: &[Id],
+        (from, to): (Option<Id>, Option<Id>),
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<u32, TaskError> {
+        let mut changed = 0;
+        for &task_id in task_ids {
+            let before = match task_in_tx(tx, workspace_id, task_id, false).await {
+                Ok(task) => task,
+                Err(TaskError::NotFound) => continue,
+                Err(error) => return Err(error),
+            };
+            let mut assignees: Vec<Id> = before
+                .assignee_ids
+                .iter()
+                .copied()
+                .filter(|id| Some(*id) != from)
+                .collect();
+            if let Some(to) = to
+                && !assignees.contains(&to)
+            {
+                assignees.push(to);
+            }
+            if assignees.len() == before.assignee_ids.len()
+                && assignees.iter().all(|id| before.assignee_ids.contains(id))
+            {
+                continue;
+            }
+            let update = TaskUpdate {
+                id: task_id,
+                expected_version: before.version,
+                changes: TaskChanges {
+                    assignee_ids: Some(assignees),
+                    ..TaskChanges::default()
+                },
+            };
+            // Validation fails before any write, so the transaction stays usable.
+            match update_task_in_tx(tx, workspace_id, actor_id, &update, request_id, now, false)
+                .await
+            {
+                Ok(_) => {}
+                Err(TaskError::Invalid {
+                    field: "assignee_ids",
+                }) => continue,
+                Err(error) => return Err(error),
+            }
+            let after = task_in_tx(tx, workspace_id, task_id, false).await?;
+            self.record_write(
+                tx,
+                workspace_id,
+                actor_id,
+                ("task.updated", "task"),
+                task_id,
+                request_id,
+                json!({ "changes": updated_fields(&update, &before, &after) }),
+                now,
+            )
+            .await?;
+            changed += 1;
+        }
+        Ok(changed)
     }
 
     pub async fn bulk_update_tasks(
@@ -2156,13 +2682,38 @@ impl TaskRepository {
         let mut snapshots = Vec::with_capacity(updates.len());
         for update in updates {
             let before = sub_issues::snapshot_in_tx(&mut tx, update.id).await?;
-            let blocks =
-                update_task_in_tx(&mut tx, workspace_id, actor_id, update, request_id, now).await?;
+            let task_before = task_in_tx(&mut tx, workspace_id, update.id, false).await?;
+            let blocks = update_task_in_tx(
+                &mut tx,
+                workspace_id,
+                actor_id,
+                update,
+                request_id,
+                now,
+                self.notifies(),
+            )
+            .await?;
             if let (Some(collab), Some(blocks)) = (collabs.get_mut(&update.id), &blocks) {
                 collab.replace(&mut tx, blocks, actor_id, now).await?;
             }
             let after = sub_issues::snapshot_in_tx(&mut tx, update.id).await?;
             snapshots.push(before.zip(after));
+            // The task's own activity feed shows what changed (a reorder alone changes nothing it shows).
+            let task_after = task_in_tx(&mut tx, workspace_id, update.id, false).await?;
+            let changes = updated_fields(update, &task_before, &task_after);
+            if changes.as_object().is_some_and(|fields| !fields.is_empty()) {
+                self.record_write(
+                    &mut tx,
+                    workspace_id,
+                    actor_id,
+                    ("task.updated", "task"),
+                    update.id,
+                    request_id,
+                    json!({ "changes": changes }),
+                    now,
+                )
+                .await?;
+            }
         }
         record_mutation(
             &mut tx,
@@ -2198,6 +2749,7 @@ impl TaskRepository {
                 .await?;
             }
         }
+        task_recurrences::spawn_next_in_tx(&self.database, &mut tx, actor).await?;
         let mut tasks = Vec::with_capacity(updates.len());
         for update in updates {
             tasks.push(task_in_tx(&mut tx, workspace_id, update.id, false).await?);
@@ -2254,27 +2806,120 @@ impl TaskRepository {
         self.check_project_grant(&mut tx, workspace_id, task_id)
             .await?;
         let current = task_in_tx(&mut tx, workspace_id, task_id, false).await?;
-        check_version(expected_version, current.version, &current)?;
-        let descendants = sub_issues::live_descendants(&mut *tx, task_id).await?;
+        self.trash_in_tx(
+            &mut tx,
+            workspace_id,
+            actor_id,
+            &current,
+            expected_version,
+            request_id,
+            now,
+        )
+        .await?;
+        tx.commit().await?;
+        // Open task descriptions re-check access (closed while the task is in the trash).
+        CollabHub::revalidate_database(&self.database, Some(workspace_id));
+        Ok(())
+    }
+
+    /// Deletes a task forever with the sub-issues that were trashed with it, as the trash
+    /// retention purge does after 30 days. A live task needs `expected_version` and is first
+    /// moved to the trash with its live sub-issues, like [`Self::delete_task`]. A task in the
+    /// trash cannot change, so its version is not checked. Like teamspace pages, it takes a
+    /// workspace owner or admin. Without `expected_version` only a task in the trash is deleted
+    /// ([`TaskError::TaskNotTrashed`] otherwise).
+    #[allow(clippy::too_many_arguments)]
+    pub async fn purge_task(
+        &self,
+        workspace_id: Id,
+        task_id: Id,
+        actor_id: Id,
+        expected_version: Option<u64>,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<(), TaskError> {
+        let mut tx = self.database.immediate_transaction().await?;
+        let actor = require_access_tx(&mut tx, workspace_id, actor_id).await?;
+        self.check_project_grant(&mut tx, workspace_id, task_id)
+            .await?;
+        let task = match task_in_tx(&mut tx, workspace_id, task_id, false).await {
+            Err(TaskError::NotFound) => task_in_tx(&mut tx, workspace_id, task_id, true).await?,
+            result => result?,
+        };
+        if !actor.can_purge_task() {
+            return Err(TaskError::Forbidden);
+        }
+        let deleted_at = match (task.deleted_at, expected_version) {
+            (Some(deleted_at), _) => deleted_at.as_millis(),
+            (None, None) => return Err(TaskError::TaskNotTrashed),
+            (None, Some(expected_version)) => {
+                self.trash_in_tx(
+                    &mut tx,
+                    workspace_id,
+                    actor_id,
+                    &task,
+                    expected_version,
+                    request_id,
+                    now,
+                )
+                .await?;
+                now.as_millis()
+            }
+        };
+        let batch = sub_issues::trashed_with(&mut *tx, task_id, deleted_at).await?;
+        for id in std::iter::once(task_id).chain(batch.iter().copied()) {
+            purge_task_in_tx(&mut tx, &id.to_string(), now).await?;
+        }
+        self.record_write(
+            &mut tx,
+            workspace_id,
+            actor_id,
+            ("task.purged", "task"),
+            task_id,
+            request_id,
+            json!({"tasks": batch.len() + 1}),
+            now,
+        )
+        .await?;
+        tx.commit().await?;
+        CollabHub::revalidate_database(&self.database, Some(workspace_id));
+        Ok(())
+    }
+
+    /// Moves the live task `current` and its live sub-issues to the trash.
+    #[allow(clippy::too_many_arguments)]
+    async fn trash_in_tx(
+        &self,
+        tx: &mut Transaction<'_, Any>,
+        workspace_id: Id,
+        actor_id: Id,
+        current: &TaskRecord,
+        expected_version: u64,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<(), TaskError> {
+        let task_id = current.id;
+        let expected_version = self.expected_version(expected_version, current)?;
+        let descendants = sub_issues::live_descendants(&mut **tx, task_id).await?;
         sqlx::query("UPDATE tasks SET deleted_at = $1, version = version + 1, updated_at = $2 WHERE id = $3 AND workspace_id = $4 AND deleted_at IS NULL AND version = $5")
-            .bind(now.as_millis()).bind(now.as_millis()).bind(task_id.to_string()).bind(workspace_id.to_string()).bind(expected_version as i64).execute(&mut *tx).await?;
+            .bind(now.as_millis()).bind(now.as_millis()).bind(task_id.to_string()).bind(workspace_id.to_string()).bind(expected_version as i64).execute(&mut **tx).await?;
         for id in &descendants {
             sqlx::query("UPDATE tasks SET deleted_at = $1, version = version + 1, updated_at = $2 WHERE id = $3 AND deleted_at IS NULL")
                 .bind(now.as_millis())
                 .bind(now.as_millis())
                 .bind(id.to_string())
-                .execute(&mut *tx)
+                .execute(&mut **tx)
                 .await?;
         }
         for id in std::iter::once(task_id).chain(descendants.iter().copied()) {
-            record_mutation(
-                &mut tx,
+            self.record_write(
+                tx,
                 workspace_id,
                 actor_id,
-                "task.deleted",
-                "task",
+                ("task.deleted", "task"),
                 id,
                 request_id,
+                json!({}),
                 now,
             )
             .await?;
@@ -2285,17 +2930,14 @@ impl TaskRepository {
             let actor = sub_issues::AutomationActor {
                 workspace_id,
                 actor_id,
-                service_account: None,
+                service_account: self.service_account(),
                 request_id,
                 now,
             };
             let mut auto_closed = Vec::new();
-            sub_issues::close_ancestors_in_tx(&mut tx, actor, parent_id, task_id, &mut auto_closed)
+            sub_issues::close_ancestors_in_tx(tx, actor, parent_id, task_id, &mut auto_closed)
                 .await?;
         }
-        tx.commit().await?;
-        // Open task descriptions re-check access (closed while the task is in the trash).
-        CollabHub::revalidate_database(&self.database, Some(workspace_id));
         Ok(())
     }
 
@@ -2451,6 +3093,188 @@ impl TaskRepository {
         Ok(page)
     }
 
+    /// A task the trash shows, for its preview: trashed itself, or in a trashed project, within
+    /// the retention period.
+    pub async fn trashed_task(
+        &self,
+        workspace_id: Id,
+        task_id: Id,
+        actor_id: Id,
+        now: TimestampMillis,
+    ) -> Result<TrashedTask, TaskError> {
+        require_access(self.database.pool(), workspace_id, actor_id).await?;
+        let cutoff = now.as_millis().saturating_sub(TRASH_RETENTION_MILLIS);
+        let sql = format!(
+            "SELECT {} FROM tasks JOIN projects ON projects.id = tasks.project_id WHERE tasks.id = $1 AND tasks.workspace_id = $2 \
+             AND ((tasks.deleted_at > $3 AND projects.deleted_at IS NULL) OR projects.deleted_at > $4)",
+            task_columns(self.database.backend(), true)
+        );
+        let row = sqlx::query(sqlx::AssertSqlSafe(sql))
+            .bind(task_id.to_string())
+            .bind(workspace_id.to_string())
+            .bind(cutoff)
+            .bind(cutoff)
+            .fetch_optional(self.database.pool())
+            .await?
+            .ok_or(TaskError::NotFound)?;
+        let task = task_from_row(self.database.pool(), row).await?;
+        self.require_granted_project(task.project_id)?;
+        let deleted_by = match task.deleted_at {
+            Some(deleted_at) => {
+                deleted_by(
+                    self.database.pool(),
+                    workspace_id,
+                    ("task.deleted", "task"),
+                    task_id,
+                    deleted_at,
+                )
+                .await?
+            }
+            None => None,
+        };
+        let pool = self.database.pool();
+        let status = status_from_row(
+            sqlx::query("SELECT id, workspace_id, project_id, name, description, color, category, position, version FROM task_statuses WHERE id = $1")
+                .bind(task.status_id.to_string())
+                .fetch_one(pool)
+                .await?,
+        )?;
+        let labels = sqlx::query(
+            "SELECT id, workspace_id, project_id, name, color, version FROM labels \
+             WHERE id IN (SELECT label_id FROM task_labels WHERE task_id = $1) ORDER BY name, id",
+        )
+        .bind(task_id.to_string())
+        .fetch_all(pool)
+        .await?
+        .into_iter()
+        .map(label_from_row)
+        .collect::<Result<_, _>>()?;
+        Ok(TrashedTask {
+            task,
+            status,
+            labels,
+            deleted_by,
+        })
+    }
+
+    /// A project in the trash within the retention period, for its preview.
+    pub async fn trashed_project(
+        &self,
+        workspace_id: Id,
+        project_id: Id,
+        actor_id: Id,
+        now: TimestampMillis,
+    ) -> Result<TrashedProject, TaskError> {
+        let project = self
+            .trashed_project_record(workspace_id, project_id, actor_id, now)
+            .await?;
+        let deleted_by = match project.deleted_at {
+            Some(deleted_at) => {
+                deleted_by(
+                    self.database.pool(),
+                    workspace_id,
+                    ("project.deleted", "project"),
+                    project_id,
+                    deleted_at,
+                )
+                .await?
+            }
+            None => None,
+        };
+        let statuses = sqlx::query(
+            "SELECT id, workspace_id, project_id, name, description, color, category, position, version \
+             FROM task_statuses WHERE project_id = $1 ORDER BY position, id",
+        )
+        .bind(project_id.to_string())
+        .fetch_all(self.database.pool())
+        .await?
+        .into_iter()
+        .map(status_from_row)
+        .collect::<Result<_, _>>()?;
+        Ok(TrashedProject {
+            project,
+            statuses,
+            deleted_by,
+        })
+    }
+
+    /// The tasks of a trashed project (whatever their own `deleted_at`), by number.
+    pub async fn trashed_project_tasks(
+        &self,
+        workspace_id: Id,
+        project_id: Id,
+        actor_id: Id,
+        cursor: Option<&str>,
+        limit: usize,
+        now: TimestampMillis,
+    ) -> Result<Page<TaskRecord>, TaskError> {
+        self.trashed_project_record(workspace_id, project_id, actor_id, now)
+            .await?;
+        let fingerprint = format!("trashed-project-tasks:{project_id}");
+        let after = cursor_i64_pair(cursor, &fingerprint)?;
+        let mut query = SqlBuilder::new(format!(
+            "SELECT {} FROM tasks JOIN projects ON projects.id = tasks.project_id WHERE tasks.project_id = ",
+            task_columns(self.database.backend(), false)
+        ));
+        query.push_bind(project_id.to_string());
+        if let Some((number, id)) = after {
+            query
+                .push(" AND (tasks.number > ")
+                .push_bind(number)
+                .push(" OR (tasks.number = ")
+                .push_bind(number)
+                .push(" AND tasks.id > ")
+                .push_bind(id.to_string())
+                .push("))");
+        }
+        let limit = limit.clamp(1, 100);
+        query
+            .push(" ORDER BY tasks.number, tasks.id LIMIT ")
+            .push_bind((limit + 1) as i64);
+        let rows = query.build().fetch_all(self.database.pool()).await?;
+        let mut items = Vec::with_capacity(rows.len());
+        for row in rows {
+            items.push(task_from_row(self.database.pool(), row).await?);
+        }
+        finish_page(items, limit, &fingerprint, |task| {
+            vec![task.number.to_string(), task.id.to_string()]
+        })
+    }
+
+    async fn trashed_project_record(
+        &self,
+        workspace_id: Id,
+        project_id: Id,
+        actor_id: Id,
+        now: TimestampMillis,
+    ) -> Result<ProjectRecord, TaskError> {
+        require_access(self.database.pool(), workspace_id, actor_id).await?;
+        self.require_granted_project(project_id)?;
+        let row = sqlx::query(
+            "SELECT id, workspace_id, name, COALESCE(restore_project_key, project_key) AS project_key, color, auto_close_parent, auto_close_sub_issues, version, deleted_at, created_at, updated_at \
+             FROM projects WHERE id = $1 AND workspace_id = $2 AND deleted_at > $3",
+        )
+        .bind(project_id.to_string())
+        .bind(workspace_id.to_string())
+        .bind(now.as_millis().saturating_sub(TRASH_RETENTION_MILLIS))
+        .fetch_optional(self.database.pool())
+        .await?
+        .ok_or(TaskError::NotFound)?;
+        project_from_row(row)
+    }
+
+    /// An API token reads only the projects it was granted.
+    fn require_granted_project(&self, project_id: Id) -> Result<(), TaskError> {
+        if self
+            .project_grant
+            .as_ref()
+            .is_some_and(|grant| !grant.contains(&project_id))
+        {
+            return Err(TaskError::NotFound);
+        }
+        Ok(())
+    }
+
     pub async fn comments(
         &self,
         workspace_id: Id,
@@ -2464,8 +3288,11 @@ impl TaskRepository {
         let fingerprint = format!("comments:{task_id}");
         let after = cursor_i64_pair(cursor, &fingerprint)?;
         let mut query = SqlBuilder::new(
-            "SELECT id, workspace_id, task_id, author_id, parent_id, body, body_json, version, created_at, updated_at \
-             FROM task_comments WHERE workspace_id = ",
+            "SELECT task_comments.id, task_comments.workspace_id, task_id, author_id, author_service_account_id, \
+             service_accounts.name AS author_service_account_name, parent_id, body, body_json, task_comments.version, \
+             task_comments.created_at, task_comments.updated_at FROM task_comments \
+             LEFT JOIN service_accounts ON service_accounts.id = task_comments.author_service_account_id \
+             WHERE task_comments.workspace_id = ",
         );
         query
             .push_bind(workspace_id.to_string())
@@ -2473,17 +3300,17 @@ impl TaskRepository {
             .push_bind(task_id.to_string());
         if let Some((created_at, id)) = after {
             query
-                .push(" AND (created_at > ")
+                .push(" AND (task_comments.created_at > ")
                 .push_bind(created_at)
-                .push(" OR (created_at = ")
+                .push(" OR (task_comments.created_at = ")
                 .push_bind(created_at)
-                .push(" AND id > ")
+                .push(" AND task_comments.id > ")
                 .push_bind(id.to_string())
                 .push("))");
         }
         let limit = limit.clamp(1, 100);
         query
-            .push(" ORDER BY created_at, id LIMIT ")
+            .push(" ORDER BY task_comments.created_at, task_comments.id LIMIT ")
             .push_bind((limit + 1) as i64);
         let items = query
             .build()
@@ -2513,7 +3340,19 @@ impl TaskRepository {
     ) -> Result<CommentRecord, TaskError> {
         let id = Id::new_v7();
         let mut tx = self.database.immediate_transaction().await?;
-        require_task_tx(&mut tx, workspace_id, task_id, actor_id).await?;
+        let actor = require_task_tx(&mut tx, workspace_id, task_id, actor_id).await?;
+        if let Some(grant) = &self.project_grant {
+            let project: String = sqlx::query_scalar(
+                "SELECT project_id FROM tasks WHERE id = $1 AND workspace_id = $2",
+            )
+            .bind(task_id.to_string())
+            .bind(workspace_id.to_string())
+            .fetch_one(&mut *tx)
+            .await?;
+            if !grant.iter().any(|id| id.to_string() == project) {
+                return Err(TaskError::NotFound);
+            }
+        }
         if let Some(parent_id) = parent_id {
             let exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM task_comments WHERE id = $1 AND workspace_id = $2 AND task_id = $3").bind(parent_id.to_string()).bind(workspace_id.to_string()).bind(task_id.to_string()).fetch_one(&mut *tx).await?;
             if exists != 1 {
@@ -2530,29 +3369,32 @@ impl TaskRepository {
                 mentioned_user_ids, ..
             } => mentioned_user_ids,
         };
-        sqlx::query("INSERT INTO task_comments (id, workspace_id, task_id, author_id, parent_id, body, body_json, version, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, 0, $8, $9)")
-            .bind(id.to_string()).bind(workspace_id.to_string()).bind(task_id.to_string()).bind(actor_id.to_string()).bind(parent_id.map(|id| id.to_string())).bind(&body).bind(Value::Array(blocks.clone()).to_string()).bind(now.as_millis()).bind(now.as_millis()).execute(&mut *tx).await?;
-        notify_users(
+        let service_account = self.service_account();
+        sqlx::query("INSERT INTO task_comments (id, workspace_id, task_id, author_id, parent_id, body, body_json, version, created_at, updated_at, author_service_account_id) VALUES ($1, $2, $3, $4, $5, $6, $7, 0, $8, $9, $10)")
+            .bind(id.to_string()).bind(workspace_id.to_string()).bind(task_id.to_string()).bind(actor_id.to_string()).bind(parent_id.map(|id| id.to_string())).bind(&body).bind(Value::Array(blocks.clone()).to_string()).bind(now.as_millis()).bind(now.as_millis()).bind(service_account.map(|(id, _)| id.to_string())).execute(&mut *tx).await?;
+        if self.notifies() {
+            notify_users(
+                &mut tx,
+                workspace_id,
+                actor_id,
+                NotificationRequest {
+                    kind: "comment_mentioned",
+                    task_id,
+                    comment_id: Some(id),
+                    recipients: &mentioned_user_ids,
+                },
+                now,
+            )
+            .await?;
+        }
+        self.record_write(
             &mut tx,
             workspace_id,
             actor_id,
-            NotificationRequest {
-                kind: "comment_mentioned",
-                task_id,
-                comment_id: Some(id),
-                recipients: &mentioned_user_ids,
-            },
-            now,
-        )
-        .await?;
-        record_mutation(
-            &mut tx,
-            workspace_id,
-            actor_id,
-            "comment.created",
-            "comment",
+            ("comment.created", "comment"),
             id,
             request_id,
+            json!({}),
             now,
         )
         .await?;
@@ -2562,11 +3404,13 @@ impl TaskRepository {
             workspace_id,
             task_id,
             author_id: actor_id,
+            author_service_account_id: service_account.map(|(id, _)| id),
+            author_service_account_name: service_account.map(|(_, name)| name.to_owned()),
             parent_id,
             body,
             body_json: Some(blocks),
-            can_edit: true,
-            can_delete: true,
+            can_edit: actor.can_edit_comment(service_account.is_none().then_some(actor_id)),
+            can_delete: actor.can_delete_comment(service_account.is_none().then_some(actor_id)),
             version: 0,
             created_at: now,
             updated_at: now,
@@ -2687,7 +3531,7 @@ impl TaskRepository {
         let after = cursor_i64_pair(cursor, &fingerprint)?;
         let mut query = SqlBuilder::new(
             "SELECT id, workspace_id, recipient_user_id, actor_user_id, kind, task_id, comment_id, page_id, \
-             page_thread_id, page_comment_id, page_block_id, chat_conversation_id, chat_message_id, read_at, created_at FROM notifications WHERE workspace_id = ",
+             page_thread_id, page_comment_id, page_block_id, chat_conversation_id, chat_message_id, import_source, import_id, import_status, read_at, created_at FROM notifications WHERE workspace_id = ",
         );
         query
             .push_bind(workspace_id.to_string())
@@ -2706,8 +3550,10 @@ impl TaskRepository {
                 " AND (chat_conversation_id IS NULL OR EXISTS (SELECT 1 FROM chat_conversations c \
                  WHERE c.id = notifications.chat_conversation_id AND (c.kind = 'public' \
                  OR EXISTS (SELECT 1 FROM chat_members WHERE chat_members.conversation_id = c.id \
-                 AND chat_members.user_id = notifications.recipient_user_id))))",
-            );
+                 AND chat_members.user_id = notifications.recipient_user_id)) AND ",
+            )
+            .push(crate::repositories::chat::reachable_dm())
+            .push("))");
         if unread_only {
             query.push(" AND read_at IS NULL");
         }
@@ -2761,7 +3607,7 @@ impl TaskRepository {
         .await?;
         let row = sqlx::query(
             "SELECT id, workspace_id, recipient_user_id, actor_user_id, kind, task_id, comment_id, page_id, \
-             page_thread_id, page_comment_id, page_block_id, chat_conversation_id, chat_message_id, read_at, created_at FROM notifications WHERE id = $1 AND workspace_id = $2 AND recipient_user_id = $3",
+             page_thread_id, page_comment_id, page_block_id, chat_conversation_id, chat_message_id, import_source, import_id, import_status, read_at, created_at FROM notifications WHERE id = $1 AND workspace_id = $2 AND recipient_user_id = $3",
         )
         .bind(notification_id.to_string())
         .bind(workspace_id.to_string())
@@ -2793,6 +3639,83 @@ impl TaskRepository {
     }
 }
 
+/// Writes a new task with its assignees and labels, validated by the caller; no notifications
+/// and no audit record. Returns the description's blocks (for the mention notifications).
+#[allow(clippy::too_many_arguments)]
+pub(super) async fn insert_task_rows_in_tx(
+    tx: &mut Transaction<'_, Any>,
+    id: Id,
+    workspace_id: Id,
+    actor_id: Id,
+    creator_service_account_id: Option<Id>,
+    input: &CreateTask,
+    completed_at: Option<TimestampMillis>,
+    recurrence_id: Option<&str>,
+    now: TimestampMillis,
+) -> Result<Option<Vec<Value>>, TaskError> {
+    let position = match input.position {
+        Some(position) => position,
+        None => sqlx::query_scalar::<_, i64>(
+            "SELECT COALESCE(MAX(position) + 1, 0) FROM tasks WHERE workspace_id = $1 AND project_id = $2 AND status_id = $3 AND deleted_at IS NULL",
+        )
+        .bind(workspace_id.to_string())
+        .bind(input.project_id.to_string())
+        .bind(input.status_id.to_string())
+        .fetch_one(&mut **tx)
+        .await?,
+    };
+    // A markdown description stays markdown until the description is first opened.
+    let (description, blocks) = match &input.description_json {
+        Some(blocks) => {
+            let (markdown, blocks) = description_from_blocks(workspace_id, id, blocks);
+            (markdown, Some(blocks))
+        }
+        // markdown (API, MCP, chat): converted now, so its mentions notify like typed ones
+        None if input.description.trim().is_empty() => (input.description.clone(), None),
+        None => {
+            let members = members(&mut **tx, workspace_id).await?;
+            let blocks = sanitize_blocks_for(
+                &markdown_to_blocks(&input.description, &members),
+                &task_policy(workspace_id, id),
+            );
+            (input.description.clone(), Some(blocks))
+        }
+    };
+    let description_json = blocks
+        .as_ref()
+        .map(|blocks| Value::Array(blocks.clone()).to_string());
+    sqlx::query(
+        "INSERT INTO tasks (id, workspace_id, project_id, status_id, title, description, source_url, priority, position, creator_id, due_start_at, due_at, parent_task_id, version, created_at, updated_at, description_json, creator_service_account_id, completed_at, recurrence_id) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 0, $14, $15, $16, $17, \
+         CASE WHEN EXISTS (SELECT 1 FROM task_statuses WHERE id = $18 AND category IN ('completed', 'cancelled')) THEN $19 END, $20)",
+    )
+    .bind(id.to_string())
+    .bind(workspace_id.to_string())
+    .bind(input.project_id.to_string())
+    .bind(input.status_id.to_string())
+    .bind(&input.title)
+    .bind(&description)
+    .bind(&input.source_url)
+    .bind(&input.priority)
+    .bind(position)
+    .bind(actor_id.to_string())
+    .bind(input.due_start_at.map(TimestampMillis::as_millis))
+    .bind(input.due_at.map(TimestampMillis::as_millis))
+    .bind(input.parent_task_id.map(|id| id.to_string()))
+    .bind(now.as_millis())
+    .bind(now.as_millis())
+    .bind(description_json)
+    .bind(creator_service_account_id.map(|id| id.to_string()))
+    .bind(input.status_id.to_string())
+    .bind(completed_at.map(TimestampMillis::as_millis))
+    .bind(recurrence_id)
+    .execute(&mut **tx)
+    .await?;
+    replace_assignees(tx, id, &input.assignee_ids).await?;
+    replace_labels(tx, id, &input.label_ids).await?;
+    Ok(blocks)
+}
+
 pub(super) async fn update_task_in_tx(
     tx: &mut Transaction<'_, Any>,
     workspace_id: Id,
@@ -2800,6 +3723,7 @@ pub(super) async fn update_task_in_tx(
     update: &TaskUpdate,
     request_id: &str,
     now: TimestampMillis,
+    notify: bool,
 ) -> Result<Option<Vec<Value>>, TaskError> {
     let current = task_in_tx(tx, workspace_id, update.id, false).await?;
     check_version(update.expected_version, current.version, &current)?;
@@ -2956,6 +3880,10 @@ pub(super) async fn update_task_in_tx(
     // and keeps the old identifier in `task_number_aliases`.
     sqlx::query("UPDATE tasks SET project_id = $1, number = CASE WHEN project_id = $2 THEN number ELSE NULL END, status_id = $3, title = $4, description = $5, source_url = $6, priority = $7, position = $8, due_start_at = $9, due_at = $10, parent_task_id = $11, version = version + 1, updated_at = $12 WHERE id = $13 AND workspace_id = $14 AND deleted_at IS NULL AND version = $15")
         .bind(project_id.to_string()).bind(project_id.to_string()).bind(status_id.to_string()).bind(&title).bind(&description).bind(&source_url).bind(&priority).bind(position).bind(due_start_at.map(TimestampMillis::as_millis)).bind(due_at.map(TimestampMillis::as_millis)).bind(parent_task_id.map(|id| id.to_string())).bind(now.as_millis()).bind(update.id.to_string()).bind(workspace_id.to_string()).bind(update.expected_version as i64).execute(&mut **tx).await?;
+    if let Some(rule) = update.changes.recurrence {
+        task_recurrences::set_in_tx(tx, workspace_id, update.id, actor_id, rule, due_at, now)
+            .await?;
+    }
     if parent_task_id != current.parent_task_id {
         // Project ids let the activity feed build cross-project identifiers (ORB-91C0). A hidden
         // old parent (trashed, or in a trashed project) has no `current.parent`, so read its
@@ -3037,19 +3965,21 @@ pub(super) async fn update_task_in_tx(
             .filter(|id| !current.assignee_ids.contains(id))
             .collect();
         replace_assignees(tx, update.id, assignees).await?;
-        notify_users(
-            tx,
-            workspace_id,
-            actor_id,
-            NotificationRequest {
-                kind: "task_assigned",
-                task_id: update.id,
-                comment_id: None,
-                recipients: &added,
-            },
-            now,
-        )
-        .await?;
+        if notify {
+            notify_users(
+                tx,
+                workspace_id,
+                actor_id,
+                NotificationRequest {
+                    kind: "task_assigned",
+                    task_id: update.id,
+                    comment_id: None,
+                    recipients: &added,
+                },
+                now,
+            )
+            .await?;
+        }
     }
     if let Some(labels) = &label_ids {
         replace_labels(tx, update.id, labels).await?;
@@ -3061,8 +3991,10 @@ pub(super) async fn update_task_in_tx(
         Some(blocks) => blocks,
         None => imported_description(tx, workspace_id, &current.description).await?,
     };
-    notify_description_mentions(tx, workspace_id, update.id, &before, &blocks, actor_id, now)
-        .await?;
+    if notify {
+        notify_description_mentions(tx, workspace_id, update.id, &before, &blocks, actor_id, now)
+            .await?;
+    }
     sqlx::query("UPDATE tasks SET description_json = $1 WHERE id = $2")
         .bind(Value::Array(blocks.clone()).to_string())
         .bind(update.id.to_string())
@@ -3424,7 +4356,7 @@ async fn validate_assignees(
         });
     }
     for id in ids {
-        let exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM memberships JOIN users ON users.id = memberships.user_id WHERE memberships.workspace_id = $1 AND memberships.user_id = $2 AND users.suspended_at IS NULL")
+        let exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM memberships JOIN users ON users.id = memberships.user_id WHERE memberships.workspace_id = $1 AND memberships.user_id = $2 AND memberships.role <> 'guest' AND users.suspended_at IS NULL")
             .bind(workspace_id.to_string()).bind(id.to_string()).fetch_one(&mut **tx).await?;
         if exists != 1 {
             return Err(TaskError::Invalid {
@@ -3435,14 +4367,14 @@ async fn validate_assignees(
     Ok(())
 }
 
-struct NotificationRequest<'a> {
-    kind: &'a str,
-    task_id: Id,
-    comment_id: Option<Id>,
-    recipients: &'a [Id],
+pub(super) struct NotificationRequest<'a> {
+    pub(super) kind: &'a str,
+    pub(super) task_id: Id,
+    pub(super) comment_id: Option<Id>,
+    pub(super) recipients: &'a [Id],
 }
 
-async fn notify_users(
+pub(super) async fn notify_users(
     tx: &mut Transaction<'_, Any>,
     workspace_id: Id,
     actor_id: Id,
@@ -3468,7 +4400,8 @@ async fn notify_users(
     {
         let exists: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM memberships JOIN users ON users.id = memberships.user_id \
-             WHERE memberships.workspace_id = $1 AND memberships.user_id = $2 AND users.suspended_at IS NULL",
+             WHERE memberships.workspace_id = $1 AND memberships.user_id = $2 AND memberships.role <> 'guest' \
+             AND users.suspended_at IS NULL",
         )
         .bind(workspace_id.to_string())
         .bind(recipient.to_string())
@@ -3546,7 +4479,8 @@ async fn replace_assignees(
         .await?;
     for id in ids {
         let membership_id: String = sqlx::query_scalar(
-            "SELECT id FROM memberships WHERE workspace_id = (SELECT workspace_id FROM tasks WHERE id = $1) AND user_id = $2",
+            "SELECT id FROM memberships WHERE workspace_id = (SELECT workspace_id FROM tasks WHERE id = $1) AND user_id = $2 \
+             AND role <> 'guest'",
         )
         .bind(task_id.to_string())
         .bind(id.to_string())
@@ -3651,6 +4585,9 @@ fn updated_fields(update: &TaskUpdate, before: &TaskRecord, after: &TaskRecord) 
     if before.source_url != after.source_url {
         changes.insert("source_url".into(), json!(true));
     }
+    if before.recurrence != after.recurrence {
+        changes.insert("recurrence".into(), json!(after.recurrence));
+    }
     Value::Object(changes)
 }
 
@@ -3711,7 +4648,7 @@ async fn mentionable(
         let Flag(member) = sqlx::query_scalar(
             "SELECT EXISTS(SELECT 1 FROM memberships JOIN users ON users.id = memberships.user_id \
              WHERE memberships.workspace_id = $1 AND memberships.user_id = $2 \
-             AND users.suspended_at IS NULL)",
+             AND memberships.role <> 'guest' AND users.suspended_at IS NULL)",
         )
         .bind(workspace_id.to_string())
         .bind(user_id.to_string())
@@ -3735,15 +4672,19 @@ async fn comment_content(
     let policy = task_policy(workspace_id, task_id);
     match content {
         CommentContent::Blocks(blocks) => {
-            let blocks = sanitize_blocks_for(blocks, &policy);
+            let blocks = trim_comment_blocks(sanitize_blocks_for(blocks, &policy));
             if !has_content(&Value::Array(blocks.clone())) {
                 return Err(TaskError::Invalid { field: "body_json" });
             }
             Ok((description_markdown(&blocks), blocks))
         }
         CommentContent::Markdown { body, .. } => {
+            let body = body.trim();
             let blocks = imported_description(tx, workspace_id, body).await?;
-            Ok((body.clone(), sanitize_blocks_for(&blocks, &policy)))
+            Ok((
+                body.to_owned(),
+                trim_comment_blocks(sanitize_blocks_for(&blocks, &policy)),
+            ))
         }
     }
 }
@@ -3825,8 +4766,10 @@ async fn notify_description_mentions(
 }
 
 /// Writes a co-edited description: `description_json` and its markdown copy, without a version
-/// bump (title, status and the other fields keep their version check). With `audit`, records
-/// `task.updated` (which also tells other clients to refresh). Returns whether anything changed.
+/// bump (title, status and the other fields keep their version check). `updated_at` always moves
+/// forward, also within one millisecond, so the task's [`revision`] changes with every edit.
+/// With `audit`, records `task.updated` (which also tells other clients to refresh). Returns
+/// whether anything changed.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn project_task_description(
     tx: &mut Transaction<'_, Any>,
@@ -3864,7 +4807,8 @@ pub(crate) async fn project_task_description(
     }
     let markdown = description_markdown(blocks);
     sqlx::query(
-        "UPDATE tasks SET description_json = $1, description = $2, updated_at = $3 WHERE id = $4",
+        "UPDATE tasks SET description_json = $1, description = $2, \
+         updated_at = CASE WHEN updated_at < $3 THEN $3 ELSE updated_at + 1 END WHERE id = $4",
     )
     .bind(Value::Array(blocks.to_vec()).to_string())
     .bind(&markdown)
@@ -3888,6 +4832,29 @@ pub(crate) async fn project_task_description(
         .await?;
     }
     Ok(true)
+}
+
+/// Who moved a record to the trash: the actor of its trash audit row. That row is written in
+/// the same transaction with `occurred_at` equal to the record's `deleted_at`.
+async fn deleted_by(
+    pool: &sqlx::AnyPool,
+    workspace_id: Id,
+    (action, resource_type): (&str, &str),
+    resource_id: Id,
+    deleted_at: TimestampMillis,
+) -> Result<Option<Id>, TaskError> {
+    let actor: Option<Option<String>> = sqlx::query_scalar(
+        "SELECT actor_id FROM audit_events WHERE workspace_id = $1 AND occurred_at = $2 \
+         AND action = $3 AND resource_type = $4 AND resource_id = $5 ORDER BY id DESC LIMIT 1",
+    )
+    .bind(workspace_id.to_string())
+    .bind(deleted_at.as_millis())
+    .bind(action)
+    .bind(resource_type)
+    .bind(resource_id.to_string())
+    .fetch_optional(pool)
+    .await?;
+    actor.flatten().map(parse_id).transpose()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3923,8 +4890,10 @@ async fn github_service_account_in_tx(
     actor_id: Id,
     now: TimestampMillis,
 ) -> Result<(Id, String), TaskError> {
+    // Revoking tokens never disables this account; one disabled otherwise is enabled again, as
+    // the unique name allows only one.
     if let Some((id, name)) = sqlx::query_as::<_, (String, String)>(
-        "SELECT id, name FROM service_accounts WHERE workspace_id = $1 AND lower(name) = 'github' AND disabled_at IS NULL",
+        "UPDATE service_accounts SET disabled_at = NULL WHERE workspace_id = $1 AND lower(name) = 'github' RETURNING id, name",
     ).bind(workspace_id.to_string()).fetch_optional(&mut **tx).await? {
         return Ok((parse_id(id)?, name));
     }
@@ -4031,6 +5000,63 @@ async fn label_in_tx(
     label_from_row(row)
 }
 
+/// Deletes the task `task_id` forever, for the trash retention purge and [`TaskRepository::purge_task`]:
+/// its attachments (their blobs, and the stored files through `attachment_file_deletions`, when
+/// no other reference holds them), the duplicates it held, and through the foreign keys its
+/// comments, relations, description document and the rest. Returns how many attachment
+/// references and blobs went.
+pub(crate) async fn purge_task_in_tx(
+    tx: &mut Transaction<'_, Any>,
+    task_id: &str,
+    now: TimestampMillis,
+) -> Result<(u64, u64), TaskError> {
+    let blobs = sqlx::query(
+        "SELECT DISTINCT attachment_blobs.id, attachment_blobs.storage_key \
+         FROM attachment_references JOIN attachment_blobs ON attachment_blobs.id = attachment_references.blob_id \
+         WHERE attachment_references.task_id = $1",
+    )
+    .bind(task_id)
+    .fetch_all(&mut **tx)
+    .await?;
+    let references = sqlx::query("DELETE FROM attachment_references WHERE task_id = $1")
+        .bind(task_id)
+        .execute(&mut **tx)
+        .await?
+        .rows_affected();
+    task_relations::release_duplicates_in_tx(tx, task_id, now).await?;
+    sqlx::query("DELETE FROM tasks WHERE id = $1")
+        .bind(task_id)
+        .execute(&mut **tx)
+        .await?;
+    let mut blobs_purged = 0;
+    for blob in blobs {
+        let blob_id: String = blob.get("id");
+        let held: i64 = sqlx::query_scalar(BLOB_REFERENCE_COUNT)
+            .bind(&blob_id)
+            .bind(&blob_id)
+            .fetch_one(&mut **tx)
+            .await?;
+        if held == 0 {
+            sqlx::query(
+                "INSERT INTO attachment_file_deletions \
+                 (id, path_kind, path, created_at) VALUES ($1, 'blob', $2, $3) \
+                 ON CONFLICT DO NOTHING",
+            )
+            .bind(Id::new_v7().to_string())
+            .bind(blob.get::<String, _>("storage_key"))
+            .bind(now.as_millis())
+            .execute(&mut **tx)
+            .await?;
+            blobs_purged += sqlx::query("DELETE FROM attachment_blobs WHERE id = $1")
+                .bind(blob_id)
+                .execute(&mut **tx)
+                .await?
+                .rows_affected();
+        }
+    }
+    Ok((references, blobs_purged))
+}
+
 pub(super) async fn task_in_tx(
     tx: &mut Transaction<'_, Any>,
     workspace_id: Id,
@@ -4061,7 +5087,7 @@ async fn comment_in_tx(
     comment_id: Id,
     actor: Actor,
 ) -> Result<CommentRecord, TaskError> {
-    let row = sqlx::query("SELECT id, workspace_id, task_id, author_id, parent_id, body, body_json, version, created_at, updated_at FROM task_comments WHERE id = $1 AND workspace_id = $2 AND task_id = $3")
+    let row = sqlx::query("SELECT task_comments.id, task_comments.workspace_id, task_id, author_id, author_service_account_id, service_accounts.name AS author_service_account_name, parent_id, body, body_json, task_comments.version, task_comments.created_at, task_comments.updated_at FROM task_comments LEFT JOIN service_accounts ON service_accounts.id = task_comments.author_service_account_id WHERE task_comments.id = $1 AND task_comments.workspace_id = $2 AND task_id = $3")
         .bind(comment_id.to_string()).bind(workspace_id.to_string()).bind(task_id.to_string()).fetch_optional(&mut **tx).await?.ok_or(TaskError::NotFound)?;
     comment_from_row(row, actor)
 }
@@ -4216,7 +5242,8 @@ fn task_columns(backend: Backend, rich: bool) -> String {
          tasks.source_url, tasks.priority, tasks.position, tasks.creator_id, \
          tasks.creator_service_account_id, \
          (SELECT name FROM service_accounts WHERE id = tasks.creator_service_account_id) AS creator_service_account_name, \
-         tasks.due_start_at, tasks.due_at, tasks.version, tasks.deleted_at, tasks.created_at, tasks.updated_at, \
+         tasks.due_start_at, tasks.due_at, {} AS recurrence_json, \
+         tasks.version, tasks.deleted_at, tasks.created_at, tasks.updated_at, \
          {} AS duplicate_of_json, \
          EXISTS (SELECT 1 FROM task_relations AS blocker_relation \
                  JOIN tasks AS blocker ON blocker.id = blocker_relation.task_id \
@@ -4240,6 +5267,10 @@ fn task_columns(backend: Backend, rich: bool) -> String {
             "tasks.description_json"
         } else {
             "NULL"
+        },
+        {
+            let (open, close) = json_object_sql(backend);
+            task_recurrences::json_subquery(open, close)
         },
         duplicate_of_subquery(backend, "tasks.id"),
         sub_issues::parent_subquery(backend, "tasks.parent_task_id")
@@ -4319,6 +5350,7 @@ fn task_record_from_row(
         due_at: row
             .get::<Option<i64>, _>("due_at")
             .map(TimestampMillis::from_millis),
+        recurrence: task_recurrences::from_json(row.get("recurrence_json")),
         version: parse_version(row.get("version"))?,
         deleted_at: row
             .get::<Option<i64>, _>("deleted_at")
@@ -4355,6 +5387,9 @@ fn notification_from_row(row: sqlx::any::AnyRow) -> Result<NotificationRecord, T
         page_block_id: row.get("page_block_id"),
         chat_conversation_id: optional_id(row.get("chat_conversation_id"))?,
         chat_message_id: optional_id(row.get("chat_message_id"))?,
+        import_source: row.get("import_source"),
+        import_id: optional_id(row.get("import_id"))?,
+        import_status: row.get("import_status"),
         read_at: row
             .get::<Option<i64>, _>("read_at")
             .map(TimestampMillis::from_millis),
@@ -4364,13 +5399,20 @@ fn notification_from_row(row: sqlx::any::AnyRow) -> Result<NotificationRecord, T
 
 fn comment_from_row(row: sqlx::any::AnyRow, actor: Actor) -> Result<CommentRecord, TaskError> {
     let author_id = parse_id(row.get("author_id"))?;
+    let author_service_account_id = row
+        .get::<Option<String>, _>("author_service_account_id")
+        .map(parse_id)
+        .transpose()?;
+    let member_author = author_service_account_id.is_none().then_some(author_id);
     Ok(CommentRecord {
         id: parse_id(row.get("id"))?,
         workspace_id: parse_id(row.get("workspace_id"))?,
         task_id: parse_id(row.get("task_id"))?,
         author_id,
-        can_edit: actor.can_edit_comment(author_id),
-        can_delete: actor.can_delete_comment(author_id),
+        author_service_account_id,
+        author_service_account_name: row.get("author_service_account_name"),
+        can_edit: actor.can_edit_comment(member_author),
+        can_delete: actor.can_delete_comment(member_author),
         parent_id: row
             .get::<Option<String>, _>("parent_id")
             .map(parse_id)

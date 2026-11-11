@@ -8,6 +8,7 @@ use orbit_platform::{
 };
 use orbit_server::auth_routes::CookieMode;
 use orbit_server::backup_item_routes::{BackupItemState, backup_item_router};
+use orbit_server::database_routes::{DatabaseState, database_router};
 use orbit_server::page_file_routes::{PageFileState, page_file_router};
 use orbit_server::page_routes::{PageState, page_router};
 use orbit_server::repositories::identity::{IdentityRepository, SetupRequest};
@@ -91,6 +92,10 @@ impl Fixture {
                 Some(backups.clone()),
                 uploads.clone(),
                 cookie_mode,
+            )))
+            .merge(database_router(DatabaseState::new(
+                Arc::clone(&identity),
+                cookie_mode,
             )));
         Self {
             root,
@@ -148,6 +153,74 @@ impl Fixture {
 
     fn pages_uri(&self) -> String {
         format!("/api/v1/workspaces/{}/pages", self.workspace_id)
+    }
+
+    fn database_uri(&self, path: &str) -> String {
+        format!("/api/v1/workspaces/{}/databases/{path}", self.workspace_id)
+    }
+
+    /// A database call that must succeed; returns the body.
+    async fn database_ok(&self, method: &str, path: &str, body: Option<Value>) -> Value {
+        let (status, value) = self.call(method, &self.database_uri(path), body).await;
+        assert!(status.is_success(), "{method} {path}: {status} {value}");
+        value
+    }
+
+    /// A database with a `Priority` select (options `High`, `Low`), a `Done` checkbox, a second
+    /// table view sorted and grouped by `Priority` with `Done` hidden, and two rows with values.
+    /// Returns `(database id, priority id, done id, high option id)`.
+    async fn create_database(&self, title: &str) -> (String, String, String, String) {
+        let (status, page) = self
+            .call(
+                "POST",
+                &self.pages_uri(),
+                Some(json!({"kind": "database", "title": title})),
+            )
+            .await;
+        assert_eq!(status, StatusCode::CREATED, "{page}");
+        let db = page["id"].as_str().unwrap().to_owned();
+        let priority = self
+            .database_ok(
+                "POST",
+                &format!("{db}/properties"),
+                Some(json!({"name": "Priority", "type": "select", "config": {"options": [{"name": "High"}, {"name": "Low"}]}})),
+            )
+            .await;
+        let priority_id = priority["id"].as_str().unwrap().to_owned();
+        let high = priority["config"]["options"][0]["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let done = self
+            .database_ok(
+                "POST",
+                &format!("{db}/properties"),
+                Some(json!({"name": "Done", "type": "checkbox"})),
+            )
+            .await;
+        let done_id = done["id"].as_str().unwrap().to_owned();
+        self.database_ok(
+            "POST",
+            &format!("{db}/views"),
+            Some(json!({"name": "By priority", "type": "board", "config": {
+                "columns": [{"property_id": priority_id, "width": 120, "hidden": false}, {"property_id": done_id, "width": 80, "hidden": true}],
+                "sorts": [{"property_id": priority_id, "direction": "desc"}],
+                "group_by": priority_id,
+            }})),
+        )
+        .await;
+        for (title, values) in [
+            ("First", json!({&priority_id: high, &done_id: true})),
+            ("Second", json!({&priority_id: null, &done_id: false})),
+        ] {
+            self.database_ok(
+                "POST",
+                &format!("{db}/rows"),
+                Some(json!({"title": title, "values": values})),
+            )
+            .await;
+        }
+        (db, priority_id, done_id, high)
     }
 
     fn backup_uri(&self, backup: &str) -> String {
@@ -621,6 +694,235 @@ async fn a_page_purged_after_the_backup_restores_with_its_file_from_the_snapshot
         .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(bytes, PNG);
+}
+
+#[tokio::test]
+async fn a_database_restores_with_its_properties_views_rows_and_values() {
+    let fixture = Fixture::new().await;
+    let (db, priority_id, done_id, high) = fixture.create_database("Tasks").await;
+    // A linked view block's views are the link's, not the database's.
+    let host = fixture.create_page("Host", None).await;
+    let linked = fixture
+        .database_ok(
+            "POST",
+            &format!("{db}/links"),
+            Some(json!({"host_page_id": host})),
+        )
+        .await;
+    fixture
+        .database_ok(
+            "PATCH",
+            &format!(
+                "{db}/views/{}?link_id={}",
+                linked["views"][0]["id"].as_str().unwrap(),
+                linked["link"]["id"].as_str().unwrap()
+            ),
+            Some(json!({"name": "Linked"})),
+        )
+        .await;
+    let backup = fixture.backup().await;
+    fixture.purge(&db).await;
+
+    let (status, restored) = fixture
+        .restore(&backup, json!({"kind": "page", "id": db}))
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{restored}");
+    let copy = restored["id"].as_str().unwrap().to_owned();
+    assert_eq!(fixture.page(&copy).await["kind"], "database");
+    let database = fixture.database_ok("GET", &copy, None).await;
+    let properties = database["properties"].as_array().unwrap();
+    let by_name = |name: &str| {
+        properties
+            .iter()
+            .find(|property| property["name"] == name)
+            .unwrap_or_else(|| panic!("no property {name}: {database}"))
+    };
+    assert_eq!(
+        properties
+            .iter()
+            .map(|property| (
+                property["name"].as_str().unwrap(),
+                property["type"].as_str().unwrap()
+            ))
+            .collect::<Vec<_>>(),
+        [
+            ("Name", "title"),
+            ("Tags", "multi_select"),
+            ("Priority", "select"),
+            ("Done", "checkbox")
+        ]
+    );
+    let new_priority = by_name("Priority")["id"].as_str().unwrap().to_owned();
+    let new_done = by_name("Done")["id"].as_str().unwrap().to_owned();
+    assert_ne!(new_priority, priority_id);
+    assert_eq!(
+        by_name("Priority")["config"]["options"][0],
+        json!({"id": high, "name": "High", "color": by_name("Priority")["config"]["options"][0]["color"]})
+    );
+    let views = database["views"].as_array().unwrap();
+    assert_eq!(
+        views
+            .iter()
+            .map(|view| view["name"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["Table", "By priority"]
+    );
+    let board = &views[1]["config"];
+    assert_eq!(board["group_by"], new_priority);
+    assert_eq!(
+        board["sorts"],
+        json!([{"property_id": new_priority, "direction": "desc"}])
+    );
+    let hidden: Vec<&str> = board["columns"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|column| column["hidden"] == true)
+        .map(|column| column["property_id"].as_str().unwrap())
+        .collect();
+    assert_eq!(hidden, [new_done.as_str()]);
+    let views_text = Value::Array(views.clone()).to_string();
+    assert!(
+        !views_text.contains(&priority_id) && !views_text.contains(&done_id),
+        "{views_text}"
+    );
+    let rows = database["rows"].as_array().unwrap();
+    assert_eq!(
+        rows.iter()
+            .map(|row| (row["title"].as_str().unwrap(), row["values"].clone()))
+            .collect::<Vec<_>>(),
+        [
+            ("First", json!({&new_priority: high, &new_done: true})),
+            ("Second", json!({})),
+        ]
+    );
+    assert_eq!(database["database"]["row_count"], 2);
+}
+
+#[tokio::test]
+async fn a_row_restores_into_its_live_database_with_the_values_that_still_fit() {
+    let fixture = Fixture::new().await;
+    let (db, priority_id, done_id, high) = fixture.create_database("Tasks").await;
+    let database = fixture.database_ok("GET", &db, None).await;
+    let first = database["rows"][0]["id"].as_str().unwrap().to_owned();
+    let backup = fixture.backup().await;
+    fixture.purge(&first).await;
+    fixture
+        .database_ok("DELETE", &format!("{db}/properties/{done_id}"), None)
+        .await;
+
+    let (status, restored) = fixture
+        .restore(&backup, json!({"kind": "page", "id": first}))
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{restored}");
+    let copy = restored["id"].as_str().unwrap().to_owned();
+    let page = fixture.page(&copy).await;
+    assert_eq!(
+        (
+            page["parent_id"].as_str(),
+            page["database_id"].as_str(),
+            page["kind"].as_str()
+        ),
+        (Some(db.as_str()), Some(db.as_str()), Some("page"))
+    );
+    let database = fixture.database_ok("GET", &db, None).await;
+    let rows = database["rows"].as_array().unwrap();
+    assert_eq!(
+        rows.iter()
+            .map(|row| (row["title"].as_str().unwrap(), row["values"].clone()))
+            .collect::<Vec<_>>(),
+        [
+            ("Second", json!({})),
+            ("First (restored)", json!({&priority_id: high})),
+        ]
+    );
+
+    // A value that no longer parses against the property's current type is dropped too.
+    fixture
+        .database_ok(
+            "PATCH",
+            &format!("{db}/properties/{priority_id}"),
+            Some(json!({"type": "number"})),
+        )
+        .await;
+    let (status, restored) = fixture
+        .restore(&backup, json!({"kind": "page", "id": first}))
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{restored}");
+    let database = fixture.database_ok("GET", &db, None).await;
+    assert_eq!(database["rows"][2]["values"], json!({}));
+
+    // Without a live database to hold it, the row is a plain page at the top level, with no values.
+    fixture.trash(&db).await;
+    let (status, restored) = fixture
+        .restore(&backup, json!({"kind": "page", "id": first}))
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{restored}");
+    let orphan = restored["id"].as_str().unwrap().to_owned();
+    let page = fixture.page(&orphan).await;
+    assert_eq!(
+        (page["parent_id"].as_str(), page["database_id"].as_str()),
+        (None, None)
+    );
+    let values: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM page_property_values WHERE page_id = $1")
+            .bind(&orphan)
+            .fetch_one(fixture.database.pool())
+            .await
+            .unwrap();
+    assert_eq!(values, 0);
+}
+
+#[tokio::test]
+async fn a_row_does_not_restore_into_a_database_that_holds_5000_rows() {
+    let fixture = Fixture::new().await;
+    let (db, ..) = fixture.create_database("Tasks").await;
+    let database = fixture.database_ok("GET", &db, None).await;
+    let first = database["rows"][0]["id"].as_str().unwrap().to_owned();
+    let backup = fixture.backup().await;
+    let teamspace = fixture.page(&db).await["teamspace_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    // Two rows exist; SQL fills the database to the cap (the API would take minutes).
+    let now = TimestampMillis::now().as_millis();
+    let mut tx = fixture.database.pool().begin().await.unwrap();
+    for position in 2..5_000_i64 {
+        sqlx::query(
+            "INSERT INTO pages (id, workspace_id, parent_id, teamspace_id, title, position, creator_id, updated_by, created_at, updated_at) \
+             VALUES ($1, $2, $3, $4, 'Row', $5, $6, $7, $8, $9)",
+        )
+        .bind(Id::new_v7().to_string())
+        .bind(&fixture.workspace_id)
+        .bind(&db)
+        .bind(&teamspace)
+        .bind(position)
+        .bind(fixture.owner_id.to_string())
+        .bind(fixture.owner_id.to_string())
+        .bind(now)
+        .bind(now)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    }
+    tx.commit().await.unwrap();
+
+    let (status, body) = fixture
+        .restore(&backup, json!({"kind": "page", "id": first}))
+        .await;
+    assert_eq!(
+        (status, body["code"].as_str()),
+        (StatusCode::CONFLICT, Some("database_row_limit")),
+        "{body}"
+    );
+    let live: i64 = sqlx::query_scalar(
+        "SELECT CAST(COUNT(*) AS BIGINT) FROM pages WHERE parent_id = $1 AND deleted_at IS NULL",
+    )
+    .bind(&db)
+    .fetch_one(fixture.database.pool())
+    .await
+    .unwrap();
+    assert_eq!(live, 5_000);
 }
 
 #[tokio::test]

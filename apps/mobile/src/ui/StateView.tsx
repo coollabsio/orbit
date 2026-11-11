@@ -1,13 +1,14 @@
 import { View } from 'react-native'
 
 import { Button } from './Button'
-import { Spinner } from './Spinner'
+import { OrbitLoader } from './OrbitLoader'
 import { Text } from './Text'
 
+/** A screen that loads: the pixel "O" loader, as on the web. */
 export function LoadingView() {
   return (
     <View className="flex-1 items-center justify-center">
-      <Spinner size="large" />
+      <OrbitLoader />
     </View>
   )
 }

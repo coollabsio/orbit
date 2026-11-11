@@ -18,7 +18,7 @@ import {
   Trash as Trash2,
   People as Users,
 } from 'reicon-react'
-import type { PageSummary, Teamspace } from '@orbit/api/generated/types.gen'
+import type { PageKind, PageSummary, Teamspace } from '@orbit/api/generated/types.gen'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -41,6 +41,7 @@ import {
   dropOnSpace,
   dropToMove,
   moveSpace,
+  pageTitle,
   revealPage,
   rootsOf,
   spaceKey,
@@ -62,7 +63,7 @@ import {
   useUpdateTeamspace,
 } from '@/features/docs/api/teamspaces'
 import { DocTreeItem, type DocDropZone, type DocTreeDnd, type DocTreeFavorites } from './DocTreeItem'
-import { TreeIconButton, TreeRowActions } from './TreeRow'
+import { TreeCreateMenu, TreeIconButton, TreeRowActions } from './TreeRow'
 
 interface DocTreeProps {
   workspaceId: string
@@ -219,16 +220,17 @@ export function DocTree({
   }, [revealedId, revealOpened, loading])
 
   /** A sub-page (`parentId`), a root page of `space`, or (neither) a root page of the default teamspace. */
-  const handleCreate = (parentId: string | null, space?: SpaceKey) => {
+  const handleCreate = (parentId: string | null, space?: SpaceKey, kind: PageKind = 'page') => {
     if (createPage.isPending) return
-    createPage.mutate(parentId ? { parent_id: parentId } : space ? spaceRequest(space) : {}, {
+    const place = parentId ? { parent_id: parentId } : space ? spaceRequest(space) : {}
+    createPage.mutate(kind === 'database' ? { ...place, kind } : place, {
       onSuccess: (page) => {
         if (parentId) expand(parentId)
         setSpaceCollapsed(spaceKey(page), false)
         navigate(`/docs/${page.id}`)
       },
       onError: (error) => {
-        if (!isPaymentRequired(error)) toast.error('Could not create the page. Try again.')
+        if (!isPaymentRequired(error)) toast.error(kind === 'database' ? 'Could not create the database. Try again.' : 'Could not create the page. Try again.')
       },
     })
   }
@@ -241,7 +243,9 @@ export function DocTree({
       { pageId: dragged.id, version: dragged.version, ...move },
       {
         onSuccess: () => {
-          if (from !== to) toast.success(`Moved to ${spaceLabel(to, teamspaces)}`)
+          const database = pages.find((page) => page.id === move.parent_id && page.kind === 'database')
+          if (database) toast.success(`Moved to “${pageTitle(database)}” as a row`)
+          else if (from !== to) toast.success(`Moved to ${spaceLabel(to, teamspaces)}`)
         },
         onError: (error) => {
           if (!isPageVersionConflict(error)) toast.error(movePageErrorMessage(error))
@@ -293,15 +297,17 @@ export function DocTree({
     onDrop: handleDrop,
   }
 
-  // Favorites: only pages still in the tree (a trashed page drops out before the refetch lands).
+  // Favorites list from the server's entries: database rows and their sub-pages are not in the tree. A tree page
+  // shows its tree summary, which follows a title being typed.
   const pageById = new Map(pages.map((page) => [page.id, page]))
-  const favoriteIds = (favoritesQuery.data ?? []).filter((id) => pageById.has(id))
-  const favoriteSet = new Set(favoritesQuery.data ?? [])
+  const favoriteEntries = favoritesQuery.data ?? []
+  const favoriteIds = favoriteEntries.map((favorite) => favorite.page_id)
+  const favoriteSet = new Set(favoriteIds)
   const favorites: DocTreeFavorites = {
     isFavorite: (id) => favoriteSet.has(id),
-    onToggle: (id, favorite) =>
+    onToggle: (page, favorite) =>
       toggleFavorite.mutate(
-        { pageId: id, favorite },
+        { pageId: page.id, favorite, page },
         { onError: () => toast.error(favorite ? 'Could not add the page to favorites.' : 'Could not remove the page from favorites.') },
       ),
   }
@@ -352,10 +358,10 @@ export function DocTree({
     onDrop: (e: DragEvent<HTMLElement>) => {
       e.preventDefault()
       e.stopPropagation()
-      const id = dragId
+      const dragged = pages.find((page) => page.id === dragId)
       setFavoritesDrop(false)
       endDrag()
-      if (id && !favoriteSet.has(id)) favorites.onToggle(id, true)
+      if (dragged && !favoriteSet.has(dragged.id)) favorites.onToggle(dragged, true)
     },
   }
 
@@ -405,7 +411,7 @@ export function DocTree({
         isExpanded={isExpanded}
         onToggle={toggle}
         onOpen={(id) => navigate(`/docs/${id}`)}
-        onCreateChild={(parentId) => handleCreate(parentId)}
+        onCreateChild={(parentId, kind) => handleCreate(parentId, undefined, kind)}
         onTrash={onTrash}
         favorites={favorites}
       />
@@ -534,6 +540,14 @@ export function DocTree({
           <Import className="size-[14px]" />
           Import from Notion
         </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => navigate('/docs/import/obsidian')}>
+          <Import className="size-[14px]" />
+          Import from Obsidian
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => navigate('/docs/import/csv')}>
+          <Import className="size-[14px]" />
+          Import CSV
+        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   )
@@ -590,7 +604,7 @@ export function DocTree({
           </div>
         ) : (
           <nav className="flex flex-col gap-px p-2" role="tree" aria-label="Pages">
-            {favoriteIds.length > 0 ? (
+            {favoriteEntries.length > 0 ? (
               <div className="mb-3 flex flex-col gap-px" role="group" aria-label="Favorites">
                 <SectionLabel
                   label="Favorites"
@@ -602,10 +616,11 @@ export function DocTree({
                   action={null}
                 />
                 <SpacePages open={favoritesOpen}>
-                  {favoriteIds.map((id) => (
+                  {favoriteEntries.map((favorite) => (
                       <DocTreeItem
-                        key={id}
-                        page={pageById.get(id)!}
+                        key={favorite.page_id}
+                        page={pageById.get(favorite.page_id) ?? { ...favorite, id: favorite.page_id }}
+                        hint={favorite.database_title}
                         pages={pages}
                         depth={0}
                         activeId={activeId}
@@ -613,7 +628,7 @@ export function DocTree({
                         isExpanded={isFavoriteExpanded}
                         onToggle={toggleFavoriteRow}
                         onOpen={(pageId) => navigate(`/docs/${pageId}`)}
-                        onCreateChild={(parentId) => handleCreate(parentId)}
+                        onCreateChild={(parentId, kind) => handleCreate(parentId, undefined, kind)}
                         onTrash={onTrash}
                         favorites={favorites}
                         reorderOnly
@@ -692,9 +707,7 @@ export function DocTree({
                         onMove={(offset) => submitTeamspaceMove(teamspace, index + offset)}
                         onDelete={() => void requestDelete(teamspace)}
                       />
-                      <TreeIconButton tip="Add page" aria-label={`Add page to ${teamspace.name}`} onClick={() => handleCreate(null, space)}>
-                        <Plus className="size-[13px]" />
-                      </TreeIconButton>
+                      <TreeCreateMenu tip="Add page" label={`Add page to ${teamspace.name}`} onCreate={(kind) => handleCreate(null, space, kind)} />
                     </TreeRowActions>
                   </SpaceRow>
                   <SpacePages open={open}>{renderPages(space, 1)}</SpacePages>
@@ -710,9 +723,7 @@ export function DocTree({
                 onToggle={() => setSpaceCollapsed(PRIVATE_SPACE, !collapsed.has(PRIVATE_SPACE))}
                 dropProps={spaceDropProps(PRIVATE_SPACE)}
                 action={
-                  <TreeIconButton tip="Add private page" aria-label="Add private page" onClick={() => handleCreate(null, PRIVATE_SPACE)}>
-                    <Plus className="size-[13px]" />
-                  </TreeIconButton>
+                  <TreeCreateMenu tip="Add private page" label="Add private page" onCreate={(kind) => handleCreate(null, PRIVATE_SPACE, kind)} />
                 }
               />
               <SpacePages open={!collapsed.has(PRIVATE_SPACE)}>{renderPages(PRIVATE_SPACE, 0)}</SpacePages>

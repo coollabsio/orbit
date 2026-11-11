@@ -1,6 +1,4 @@
 import { useEffect, useState } from 'react'
-import { cn } from 'cn'
-import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { Navigate, useSearchParams } from 'react-router'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -50,29 +48,32 @@ function priced(plans: PlanView[], interval: PlanInterval) {
   return plans.find((plan) => plan.interval === interval && plan.amount != null && plan.currency)
 }
 
-/** The smallest whole-percent saving of annual over 12 monthly payments across products, so the label holds for each. */
-function annualSaving(products: PlanView[][]) {
-  const savings = products.flatMap((plans) => {
-    const monthly = priced(plans, 'month')
-    const annual = priced(plans, 'year')
-    if (!monthly?.amount || !annual?.amount || monthly.currency !== annual.currency) return []
-    return [Math.floor((1 - annual.amount / (12 * monthly.amount)) * 100)]
-  })
-  const saving = savings.length ? Math.min(...savings) : 0
+/** The whole-percent saving of one product's annual plan over 12 monthly payments. */
+function annualSaving(plans: PlanView[]) {
+  const monthly = priced(plans, 'month')
+  const annual = priced(plans, 'year')
+  if (!monthly?.amount || !annual?.amount || monthly.currency !== annual.currency) return null
+  const saving = Math.floor((1 - annual.amount / (12 * monthly.amount)) * 100)
   return saving > 0 ? saving : null
+}
+
+function planTitle(plan: PlanView) {
+  return plan.interval ? `${plan.name} · ${INTERVAL_LABELS[plan.interval]}` : plan.name
 }
 
 function subscribedPlan(billing: BillingView) {
   const plan = billing.plans.find((candidate) => candidate.key === billing.plan)
-  if (!plan) return billing.plan
-  return plan.interval ? `${plan.name} · ${INTERVAL_LABELS[plan.interval]}` : plan.name
+  return plan ? planTitle(plan) : billing.plan
 }
 
-function PlanCard({ plan, onChoose, disabled }: { plan: PlanView; onChoose?: () => void; disabled: boolean }) {
+function PlanCard({ plan, saving, onChoose, disabled }: { plan: PlanView; saving: number | null; onChoose?: () => void; disabled: boolean }) {
   const price = plan.amount != null && plan.currency ? { amount: plan.amount, currency: plan.currency } : null
   return (
     <div data-slot="plan-card" className="flex flex-col gap-3 rounded-lg border p-4">
-      <h4 className="text-sm font-medium">{plan.name}</h4>
+      <h4 className="flex items-center gap-2 text-sm font-medium">
+        {planTitle(plan)}
+        {saving ? <span className="rounded-full bg-primary/15 px-2 py-0.5 text-xs font-medium text-primary">Save {saving}%</span> : null}
+      </h4>
       {price ? (
         <div className="flex flex-col gap-1">
           <p className="flex items-baseline gap-1.5">
@@ -87,42 +88,28 @@ function PlanCard({ plan, onChoose, disabled }: { plan: PlanView; onChoose?: () 
       ) : null}
       {onChoose ? (
         <Button className="mt-auto w-full" disabled={disabled} onClick={onChoose}>
-          Choose {plan.name}
+          {plan.interval ? `Choose ${INTERVAL_LABELS[plan.interval].toLowerCase()}` : `Choose ${plan.name}`}
         </Button>
       ) : null}
     </div>
   )
 }
 
+/** Every plan side by side: each product's monthly and annual prices next to each other. */
 function PlanChooser({ plans, onChoose, disabled }: { plans: PlanView[]; onChoose?: (key: string) => void; disabled: boolean }) {
-  const [period, setPeriod] = useState<PlanInterval>('month')
-  const products = groupByProduct(plans)
-  const switchable = products.some((group) => priced(group, 'month') && priced(group, 'year'))
-  const saving = annualSaving(products)
   return (
-    <div className="flex flex-col gap-4">
-      {switchable ? (
-        <ToggleGroup
-          aria-label="Billing interval"
-          variant="outline"
-          size="sm"
-          spacing={0}
-          value={[period]}
-          onValueChange={(value: string[]) => {
-            const next = value[0]
-            if (next === 'month' || next === 'year') setPeriod(next)
-          }}
-        >
-          <ToggleGroupItem value="month">Monthly</ToggleGroupItem>
-          <ToggleGroupItem value="year">{saving ? `Annual · save ${saving}%` : 'Annual'}</ToggleGroupItem>
-        </ToggleGroup>
-      ) : null}
-      <div className={cn('grid gap-3 sm:grid-cols-2', products.length > 2 && 'lg:grid-cols-3')}>
-        {products.map((group) => {
-          const plan = group.find((candidate) => candidate.interval === period) ?? group[0]
-          return <PlanCard key={plan.key} plan={plan} disabled={disabled} onChoose={onChoose ? () => onChoose(plan.key) : undefined} />
-        })}
-      </div>
+    <div className="grid gap-3 sm:grid-cols-2">
+      {groupByProduct(plans).flatMap((group) =>
+        group.map((plan) => (
+          <PlanCard
+            key={plan.key}
+            plan={plan}
+            saving={plan.interval === 'year' ? annualSaving(group) : null}
+            disabled={disabled}
+            onChoose={onChoose ? () => onChoose(plan.key) : undefined}
+          />
+        )),
+      )}
     </div>
   )
 }

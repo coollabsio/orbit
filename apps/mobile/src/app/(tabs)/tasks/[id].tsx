@@ -1,10 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { recurrenceLabel } from '@orbit/api/recurrence'
 import { openURL } from 'expo-linking'
 import { router, useLocalSearchParams } from 'expo-router'
 import { type ReactNode, useMemo, useState } from 'react'
-import { Alert, KeyboardAvoidingView, Platform, Pressable, RefreshControl, ScrollView, View } from 'react-native'
+import { Alert, Pressable, ScrollView, View } from 'react-native'
 import { TextInput } from '../../../ui/scaled'
 
+import { MentionSuggestions, useMentionField } from '../../../components/MentionSuggestions'
 import { Attachments, type ShownFile } from '../../../components/tasks/Attachments'
 import { type FileSource, pickFiles } from '../../../components/tasks/files'
 import {
@@ -14,6 +16,7 @@ import {
   MenuChoices,
   PeopleChoices,
   PriorityChoices,
+  RecurrenceForm,
   SourceForm,
   StatusChoices,
   TaskChoices,
@@ -24,6 +27,8 @@ import { activityRows, buildFeed, type ActivityRow, type CommentThread, foldRun 
 import { relativeAgo } from '../../../data/format'
 import { keys } from '../../../data/keys'
 import { markdownToText } from '../../../data/markdown'
+import { mentionedUserIds } from '../../../data/mentions'
+import { linkTaskIdsInMarkdown } from '../../../data/taskIds'
 import * as api from '../../../data/orbit'
 import * as taskApi from '../../../data/task-api'
 import {
@@ -46,14 +51,14 @@ import {
 } from '../../../data/tasks'
 import { useAdoptSubIssue, useCommentAttachments, useCreateTask, useRelationWrites, useSubIssues, useTaskAttachments, useTaskRelations, useTaskWrite } from '../../../hooks/tasks'
 import { useOrbit } from '../../../orbit-context'
-import { useLabels, usePeople, useProjects, useStatuses } from '../../../queries'
+import { useLabels, useMentionPeople, usePeople, useProjects, useStatuses } from '../../../queries'
 import { errorMessage } from '../../../session-context'
 import { alpha, useTheme } from '../../../theme'
-import { Avatar, Button, ErrorView, Icon, type IconName, IconButton, LoadingView, PaneHeader, PriorityIcon, SafeAreaView, StatusIcon, Text } from '../../../ui'
+import { Avatar, Button, ErrorView, Icon, IconButton, type IconName, KeyboardSpace, LoadingView, PaneHeader, PriorityIcon, PullRefresh, SafeAreaView, StatusIcon, Text } from '../../../ui'
 
 /** The one sheet of the page and what it shows. */
 type TaskSheet =
-  | { kind: 'status' | 'priority' | 'assignees' | 'labels' | 'due' | 'source' | 'parent-menu' | 'relation-menu' | 'attach' }
+  | { kind: 'status' | 'priority' | 'assignees' | 'labels' | 'due' | 'repeat' | 'source' | 'parent-menu' | 'relation-menu' | 'attach' }
   | { kind: 'pick-task'; purpose: 'parent' | 'sub-issue' | RelationKind }
 
 function sheetTitle(sheet: TaskSheet | null, subject: string): string {
@@ -69,6 +74,8 @@ function sheetTitle(sheet: TaskSheet | null, subject: string): string {
       return 'Labels'
     case 'due':
       return 'Due date'
+    case 'repeat':
+      return 'Repeat'
     case 'source':
       return 'Source'
     case 'parent-menu':
@@ -91,7 +98,7 @@ let draftFileCount = 0
 
 export default function TaskScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
-  const { client, workspaceId, user } = useOrbit()
+  const { client, workspaceId, user, session } = useOrbit()
   const queryClient = useQueryClient()
   const { colors } = useTheme()
   const projects = useProjects()
@@ -104,11 +111,16 @@ export default function TaskScreen() {
   const [unfolded, setUnfolded] = useState<readonly string[]>([])
   const [composingSubIssue, setComposingSubIssue] = useState(false)
 
+  // every task list loaded under `tasks` (the tasks page keeps one list per filter)
+  const loadedTasks = () =>
+    queryClient
+      .getQueriesData<unknown>({ queryKey: keys.tasks(workspaceId) })
+      .flatMap(([, data]) => (Array.isArray(data) ? (data as api.TaskRecord[]) : []))
   const task = useQuery({
     queryKey: keys.task(workspaceId, id),
     queryFn: () => api.task(client, workspaceId, id),
     // the list row the user tapped, until the full task arrives
-    placeholderData: () => queryClient.getQueryData<api.TaskRecord[]>(keys.tasks(workspaceId))?.find((item) => item.id === id),
+    placeholderData: () => loadedTasks().find((item) => item.id === id),
   })
   const comments = useQuery({ queryKey: keys.comments(workspaceId, id), queryFn: () => api.comments(client, workspaceId, id) })
   const activity = useQuery({ queryKey: keys.taskActivity(workspaceId, id), queryFn: () => api.taskActivity(client, workspaceId, id) })
@@ -121,8 +133,11 @@ export default function TaskScreen() {
   const createSubIssue = useCreateTask()
   const adopt = useAdoptSubIssue(id)
 
+  const mentionable = useMentionPeople()
   const sendComment = useMutation({
-    mutationFn: (body: string) => api.addComment(client, workspaceId, id, body),
+    // a typed task ID goes as a link to the task, as the web's "#" inserts it
+    mutationFn: (body: string) =>
+      api.addComment(client, workspaceId, id, linkTaskIdsInMarkdown(body, (projects.data ?? []).map((project) => project.key), session.server), mentionedUserIds(body, mentionable)),
     onSuccess: (comment) => {
       setDraft('')
       setDraftFiles([])
@@ -147,7 +162,7 @@ export default function TaskScreen() {
 
   const feed = useMemo(() => {
     if (!activity.data || !comments.data) return []
-    const known = queryClient.getQueryData<api.TaskRecord[]>(keys.tasks(workspaceId)) ?? []
+    const known = loadedTasks()
     const rows = activityRows(activity.data, {
       statuses: statuses.data ?? [],
       people,
@@ -185,7 +200,7 @@ export default function TaskScreen() {
   }
 
   const header = (
-    <PaneHeader className="px-3">
+    <PaneHeader className="min-h-12 px-3">
       <IconButton icon="back" label="Back to tasks" color={alpha(colors.mutedForeground, 0.7)} onPress={close} />
       <View className="flex-1 flex-row items-center gap-1.5 min-w-0">
         {project ? (
@@ -223,7 +238,7 @@ export default function TaskScreen() {
 
   if (!current) {
     return (
-      <SafeAreaView edges={['top', 'left', 'right']} className="flex-1 bg-background">
+      <SafeAreaView edges={['left', 'right']} className="flex-1 bg-background">
         {header}
         {task.isError ? <ErrorView error={task.error} onRetry={() => void task.refetch()} /> : <LoadingView />}
       </SafeAreaView>
@@ -265,18 +280,14 @@ export default function TaskScreen() {
   const sheet = sheets.sheet
 
   return (
-    <SafeAreaView edges={['top', 'left', 'right']} className="flex-1 bg-background">
+    <SafeAreaView edges={['left', 'right']} className="flex-1 bg-background">
       {header}
-      <KeyboardAvoidingView className="flex-1" behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardSpace className="flex-1">
         <ScrollView
           contentContainerClassName="px-3.5 pt-4 pb-7 gap-3.5"
           keyboardShouldPersistTaps="handled"
           refreshControl={
-            <RefreshControl
-              refreshing={task.isRefetching}
-              onRefresh={() => void Promise.all([task.refetch(), comments.refetch(), activity.refetch(), relations.refetch(), subIssues.refetch(), attachments.refetch()])}
-              tintColor={colors.mutedForeground}
-            />
+            <PullRefresh onRefresh={() => Promise.all([task.refetch(), comments.refetch(), activity.refetch(), relations.refetch(), subIssues.refetch(), attachments.refetch()])} />
           }
         >
           <View>
@@ -408,6 +419,14 @@ export default function TaskScreen() {
                 </Chip>
               </View>
             </PropertyGroup>
+            <PropertyGroup title="Repeat">
+              <View className="-ml-2 flex-row">
+                <Chip label="Repeat" onPress={() => sheets.open({ kind: 'repeat' })}>
+                  <Icon name="repeat" size={14} color={current.recurrence ? colors.foreground : colors.mutedForeground} />
+                  <ChipText muted={!current.recurrence}>{recurrenceLabel(current.recurrence)}</ChipText>
+                </Chip>
+              </View>
+            </PropertyGroup>
           </View>
 
           <View>
@@ -447,7 +466,7 @@ export default function TaskScreen() {
             />
           </View>
         </ScrollView>
-      </KeyboardAvoidingView>
+      </KeyboardSpace>
 
       <Sheet visible={sheets.visible} title={sheetTitle(sheet, subject)} onClose={sheets.close}>
         {sheet?.kind === 'status' ? (
@@ -477,6 +496,19 @@ export default function TaskScreen() {
             onChange={(due) => {
               sheets.close()
               write.mutate({ due_at: due?.end ?? null, due_start_at: due?.start ?? null })
+            }}
+          />
+        ) : null}
+        {sheet?.kind === 'repeat' ? (
+          <RecurrenceForm
+            value={current.recurrence}
+            onSave={(recurrence) => {
+              sheets.close()
+              write.mutate({ recurrence })
+            }}
+            onStop={() => {
+              sheets.close()
+              write.mutate({ recurrence: null })
             }}
           />
         ) : null}
@@ -709,21 +741,25 @@ function CommentComposer({
 }) {
   const { colors, scheme } = useTheme()
   const [focused, setFocused] = useState(false)
+  const mention = useMentionField({ text: value, setText: onChangeText, people: useMentionPeople(), tasks: true })
   return (
     <View className={`mt-3 rounded-lg border bg-card/50 ${focused ? 'border-ring/50' : 'border-border'}`}>
+      <MentionSuggestions suggestions={mention.suggestions} onPick={mention.pick} />
       <TextInput
+        {...mention.inputProps}
         value={value}
         onChangeText={onChangeText}
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
         placeholder="Leave a comment… Use @ to mention"
+        editorSize
         placeholderTextColor={colors.mutedForeground}
         selectionColor={colors.primary}
         keyboardAppearance={scheme}
         multiline
         numberOfLines={1}
         accessibilityLabel="Comment"
-        className="min-h-10 max-h-40 px-3 pt-2.5 pb-0 font-noto text-[16px] leading-[24px] text-foreground"
+        className="min-h-9 max-h-40 px-3 pt-[13px] pb-0 font-noto text-[13px] leading-[19px] text-foreground"
       />
       {files.length > 0 ? (
         <View className="px-3">

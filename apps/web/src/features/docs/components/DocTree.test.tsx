@@ -2,7 +2,7 @@ import { afterEach, expect, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter } from 'react-router'
+import { MemoryRouter, useLocation } from 'react-router'
 import type { Page, PageSummary, Teamspace } from '@orbit/api/generated/types.gen'
 import { ConfirmationModalHost } from '@/components/common/ConfirmationModal'
 import { emojibaseResponse } from '@/test/emojibase'
@@ -19,11 +19,11 @@ const teamspace = (id: string, name: string, position: number): Teamspace => ({
 })
 
 const page = (id: string, parent_id: string | null, position: number, teamspace_id: string | null, title = id): PageSummary => ({
-  id, parent_id, position, title, teamspace_id, private: teamspace_id === null, icon: null, version: 1, updated_at: '2026-09-25T10:00:00Z',
+  id, parent_id, position, title, teamspace_id, private: teamspace_id === null, kind: 'page', icon: null, version: 1, updated_at: '2026-09-25T10:00:00Z',
 })
 
 const fullPage = (summary: PageSummary): Page => ({
-  ...summary, workspace_id: 'workspace-1', cover_url: null, cover_position: null, content: [], creator_id: 'user-1',
+  ...summary, database_id: null, workspace_id: 'workspace-1', cover_url: null, cover_position: null, content: [], creator_id: 'user-1',
   updated_by: 'user-1', created_at: '2026-09-25T10:00:00Z', deleted_at: null, collab_epoch: 'epoch-1',
   full_width: false, locked_at: null, locked_by: null, updated_by_user: { id: 'user-1', display_name: 'Ada' },
 })
@@ -35,6 +35,10 @@ const problem = (status: number, code: string) =>
   )
 
 type Call = { method: string; path: string; search: string; body: Record<string, unknown> | undefined }
+
+function Location() {
+  return <output data-testid="location">{useLocation().pathname}</output>
+}
 
 const tree = [
   page('roadmap', null, 0, 't1', 'Roadmap'),
@@ -90,6 +94,7 @@ function setup({
           canDeleteTeamspaces={canDelete}
           onTrash={() => {}}
         />
+        <Location />
       </MemoryRouter>
     </QueryClientProvider>
   )
@@ -154,17 +159,50 @@ test('renaming inline patches the teamspace name', async () => {
   expect(await view.findByText('Product design')).toBeTruthy()
 })
 
-test('"+" on a section creates a root page in that space', async () => {
+test('"+" on a section creates a root page or database in that space', async () => {
   const { view, calls } = setup({
     handler: (call) => (call.method === 'POST' && call.path === '/pages' ? Response.json(fullPage(page('fresh', null, 1, null)), { status: 201 }) : undefined),
   })
   const posts = () => calls.filter((call) => call.method === 'POST')
   fireEvent.click(await view.findByRole('button', { name: 'Add private page' }))
+  await userEvent.click(await view.findByRole('menuitem', { name: 'New page' }))
   await waitFor(() => expect(posts()).toHaveLength(1))
   expect(posts()[0].body).toEqual({ private: true })
   fireEvent.click(view.getByRole('button', { name: 'Add page to Design' }))
+  await userEvent.click(await view.findByRole('menuitem', { name: 'New database' }))
   await waitFor(() => expect(posts()).toHaveLength(2))
-  expect(posts()[1].body).toEqual({ teamspace_id: 't2' })
+  expect(posts()[1].body).toEqual({ teamspace_id: 't2', kind: 'database' })
+})
+
+test('a database row has no "Add child page" and no expand arrow', async () => {
+  const database = { ...page('db', null, 1, 't1', 'Reading list'), kind: 'database' as const }
+  const { view } = setup({ pages: [...tree, database, page('stray', 'db', 0, 't1', 'Stray')] })
+  await view.findByRole('group', { name: 'General' })
+  const item = pageRow(view, 'db')
+  expect(within(item).queryByRole('button', { name: 'Add child page' })).toBeNull()
+  expect(within(item).queryByRole('button', { name: 'Expand' })).toBeNull()
+  expect(within(pageRow(view, 'roadmap')).getByRole('button', { name: 'Add child page' })).toBeTruthy()
+})
+
+test('a page dropped inside a database becomes its row; a database only reorders next to it', async () => {
+  const database = { ...page('db', null, 1, 't1', 'Reading list'), kind: 'database' as const }
+  const other = { ...page('other-db', null, 2, 't1', 'Other list'), kind: 'database' as const }
+  const { view, calls } = setup({ pages: [...tree, database, other] })
+  await view.findByRole('group', { name: 'General' })
+
+  const dragged = dataTransfer()
+  fireEvent.dragStart(pageRow(view, 'other-db'), { dataTransfer: dragged })
+  fireEvent.dragOver(pageRow(view, 'db'), { dataTransfer: dragged })
+  expect(pageRow(view, 'db').getAttribute('data-drop')).toBe('after')
+  fireEvent.dragEnd(pageRow(view, 'other-db'), { dataTransfer: dragged })
+
+  const transfer = dataTransfer()
+  fireEvent.dragStart(pageRow(view, 'roadmap'), { dataTransfer: transfer })
+  fireEvent.dragOver(pageRow(view, 'db'), { dataTransfer: transfer })
+  expect(pageRow(view, 'db').getAttribute('data-drop')).toBe('inside')
+  fireEvent.drop(pageRow(view, 'db'), { dataTransfer: transfer })
+  await waitFor(() => expect(calls.some((call) => call.path === '/pages/roadmap/move')).toBeTrue())
+  expect(calls.find((call) => call.path === '/pages/roadmap/move')?.body).toEqual({ expected_version: 1, parent_id: 'db', position: 0 })
 })
 
 test('creating a teamspace from the dialog posts its name', async () => {
@@ -222,9 +260,16 @@ test('dropping on an empty section row moves the page into that space', async ()
   })
 })
 
-const favoritesHandler = (ids: string[]) => (call: Call) =>
+type FavoriteEntry = { page_id: string; position: number; title: string; icon: string | null; kind: 'page' | 'database'; database_id: string | null; database_title: string | null }
+
+/** The server's entry for a favorite of `tree` (or a page outside it, named by its id). */
+const favoriteEntry = (page_id: string, position: number, patch: Partial<FavoriteEntry> = {}): FavoriteEntry => ({
+  page_id, position, title: tree.find((item) => item.id === page_id)?.title ?? page_id, icon: null, kind: 'page', database_id: null, database_title: null, ...patch,
+})
+
+const favoritesHandler = (ids: string[], patch: Record<string, Partial<FavoriteEntry>> = {}) => (call: Call) =>
   call.method === 'GET' && call.path === '/pages/favorites'
-    ? Response.json({ items: ids.map((page_id, position) => ({ page_id, position })) })
+    ? Response.json({ items: ids.map((id, position) => favoriteEntry(id, position, patch[id])) })
     : undefined
 
 const favoriteRow = (view: ReturnType<typeof render>, id: string) =>
@@ -238,8 +283,8 @@ test('the Favorites section is hidden without favorites', async () => {
   expect(view.queryByText('Favorites')).toBeNull()
 })
 
-test('favorites come first in their own order; rows expand to sub-pages and skip unknown pages', async () => {
-  const { view } = setup({ handler: favoritesHandler(['notes', 'gone', 'roadmap']) })
+test('favorites come first in their own order; rows expand to sub-pages', async () => {
+  const { view } = setup({ handler: favoritesHandler(['notes', 'roadmap']) })
   const section = await view.findByRole('group', { name: 'Favorites' })
   const nav = view.getByRole('tree', { name: 'Pages' })
   expect(nav.firstElementChild).toBe(section)
@@ -252,6 +297,32 @@ test('favorites come first in their own order; rows expand to sub-pages and skip
   fireEvent.click(within(favoriteRow(view, 'notes')).getByRole('button', { name: 'Expand' }))
   expect(within(section).getByText('Draft')).toBeTruthy()
   expect(within(view.getByRole('group', { name: 'Private' })).queryByText('Draft')).toBeNull()
+})
+
+test('a favorite database row (not in the tree) lists with its database, opens its page and reorders', async () => {
+  const { view, calls } = setup({
+    handler: favoritesHandler(['row-1', 'roadmap', 'row-note'], {
+      'row-1': { title: 'Paper A', icon: '📄', database_id: 'db', database_title: 'Research' },
+      'row-note': { title: 'Reading notes' },
+    }),
+  })
+  const section = await view.findByRole('group', { name: 'Favorites' })
+  const rows = [...section.querySelectorAll('[data-section="favorites"][data-page-id]')].map((row) => row.getAttribute('data-page-id'))
+  expect(rows).toEqual(['row-1', 'roadmap', 'row-note'])
+  expect(favoriteRow(view, 'row-1').textContent).toEndWith('Paper AResearch')
+  expect(favoriteRow(view, 'row-note').textContent).toBe('Reading notes')
+  // The page stays out of the spaces.
+  expect(view.container.querySelectorAll('[data-page-id="row-1"]')).toHaveLength(1)
+
+  fireEvent.click(favoriteRow(view, 'row-1'))
+  expect(view.getByTestId('location').textContent).toBe('/docs/row-1')
+
+  const transfer = dataTransfer()
+  fireEvent.dragStart(favoriteRow(view, 'row-1'), { dataTransfer: transfer })
+  fireEvent.dragOver(favoriteRow(view, 'row-note'), { dataTransfer: transfer })
+  fireEvent.drop(favoriteRow(view, 'row-note'), { dataTransfer: transfer })
+  await waitFor(() => expect(calls.some((call) => call.path === '/pages/favorites/row-1/move')).toBeTrue())
+  expect(calls.find((call) => call.path === '/pages/favorites/row-1/move')?.body).toEqual({ position: 2 })
 })
 
 test('dragging a favorite reorders the favorites without moving the page', async () => {
@@ -300,7 +371,7 @@ test('drops between Favorites and the other sections do nothing', async () => {
 test('dropping a page on the Favorites header adds it as a favorite', async () => {
   const { view, calls } = setup({
     handler: (call) =>
-      call.method === 'PUT' ? Response.json({ page_id: 'notes', position: 1 }) : favoritesHandler(['roadmap'])(call),
+      call.method === 'PUT' ? Response.json(favoriteEntry('notes', 1)) : favoritesHandler(['roadmap'])(call),
   })
   await view.findByRole('group', { name: 'Favorites' })
   const transfer = dataTransfer()
@@ -321,7 +392,7 @@ test('the row menu adds and removes favorites', async () => {
       const id = call.path.split('/')[2]
       if (call.method === 'PUT') {
         ids = [...ids, id]
-        return Response.json({ page_id: id, position: ids.length - 1 })
+        return Response.json(favoriteEntry(id, ids.length - 1))
       }
       if (call.method === 'DELETE') {
         ids = ids.filter((item) => item !== id)

@@ -2,7 +2,9 @@
 //! `ORBIT_TEST_POSTGRES_URL` is set (see `TestDatabase`).
 
 use orbit_platform::{Database, Id, TestDatabase, TimestampMillis};
-use orbit_server::repositories::api_tokens::{ApiTokenError, ApiTokenRepository, ApiTokenScope};
+use orbit_server::repositories::api_tokens::{
+    ApiTokenError, ApiTokenRepository, ApiTokenScope, TokenProjects,
+};
 
 struct Seed {
     owner: Id,
@@ -80,8 +82,7 @@ async fn scenario(database: &Database) {
             seed.owner,
             "Reader".into(),
             seed.projects.to_vec(),
-            true,
-            false,
+            &[ApiTokenScope::TasksRead],
             false,
             None,
             "req-1",
@@ -90,7 +91,7 @@ async fn scenario(database: &Database) {
         .await
         .unwrap();
     let principal = tokens
-        .authenticate(&reader.token, ApiTokenScope::Read, now)
+        .authenticate(&reader.token, Some(ApiTokenScope::TasksRead), now)
         .await
         .unwrap();
     assert_eq!(principal.workspace_id, seed.workspace);
@@ -98,36 +99,34 @@ async fn scenario(database: &Database) {
     assert_eq!(principal.project_ids, seed.projects.to_vec());
     assert!(matches!(
         tokens
-            .authenticate(&reader.token, ApiTokenScope::Write, now)
+            .authenticate(&reader.token, Some(ApiTokenScope::TasksWrite), now)
             .await,
         Err(ApiTokenError::Forbidden)
     ));
 
     let docs = tokens
-        .create_scoped(
+        .create(
             seed.workspace,
             seed.owner,
             "Docs reader".into(),
             seed.projects.to_vec(),
-            false,
-            false,
+            &[ApiTokenScope::DocsRead, ApiTokenScope::ChatRead],
             false,
             None,
             "test",
             now,
-            "docs:read chat:read",
         )
         .await
         .unwrap();
-    assert_eq!(docs.api_token.scopes, vec!["docs:read", "chat:read"]);
-    let principal = tokens
-        .authenticate(&docs.token, ApiTokenScope::Mcp, now)
-        .await
-        .unwrap();
+    assert_eq!(
+        docs.api_token.scopes,
+        vec![ApiTokenScope::DocsRead, ApiTokenScope::ChatRead]
+    );
+    let principal = tokens.authenticate(&docs.token, None, now).await.unwrap();
     assert!(principal.scopes.contains(&ApiTokenScope::DocsRead));
     assert!(principal.scopes.contains(&ApiTokenScope::ChatRead));
-    assert!(!principal.scopes.contains(&ApiTokenScope::Read));
-    assert!(!principal.scopes.contains(&ApiTokenScope::Write));
+    assert!(!principal.scopes.contains(&ApiTokenScope::TasksRead));
+    assert!(!principal.scopes.contains(&ApiTokenScope::TasksWrite));
     assert!(
         tokens
             .list(seed.workspace, seed.owner)
@@ -135,18 +134,13 @@ async fn scenario(database: &Database) {
             .unwrap()
             .iter()
             .any(|token| token.id == docs.api_token.id
-                && token.scopes.contains(&"docs:read".to_owned()))
+                && token.scopes.contains(&ApiTokenScope::DocsRead))
     );
     tokens
         .revoke(seed.workspace, docs.api_token.id, seed.owner, "test", now)
         .await
         .unwrap();
-    assert!(
-        tokens
-            .authenticate(&docs.token, ApiTokenScope::Mcp, now)
-            .await
-            .is_err()
-    );
+    assert!(tokens.authenticate(&docs.token, None, now).await.is_err());
 
     // Service accounts are matched by name without case.
     let bot = tokens
@@ -155,8 +149,7 @@ async fn scenario(database: &Database) {
             seed.owner,
             "Bot".into(),
             vec![seed.projects[1]],
-            true,
-            true,
+            &[ApiTokenScope::TasksRead, ApiTokenScope::TasksWrite],
             true,
             Some(TimestampMillis::from_millis(now.as_millis() + 60_000)),
             "req-2",
@@ -170,8 +163,7 @@ async fn scenario(database: &Database) {
             seed.owner,
             "bot".into(),
             vec![seed.projects[1]],
-            true,
-            false,
+            &[ApiTokenScope::TasksRead],
             true,
             None,
             "req-3",
@@ -185,17 +177,20 @@ async fn scenario(database: &Database) {
         bot_again.api_token.service_account_id
     );
     let bot_principal = tokens
-        .authenticate(&bot.token, ApiTokenScope::Write, now)
+        .authenticate(&bot.token, Some(ApiTokenScope::TasksWrite), now)
         .await
         .unwrap();
     assert_eq!(
-        bot_principal.service_account_id,
+        bot_principal
+            .service_account
+            .as_ref()
+            .map(|account| account.id),
         bot.api_token.service_account_id
     );
     let expired = TimestampMillis::from_millis(now.as_millis() + 120_000);
     assert!(matches!(
         tokens
-            .authenticate(&bot.token, ApiTokenScope::Read, expired)
+            .authenticate(&bot.token, Some(ApiTokenScope::TasksRead), expired)
             .await,
         Err(ApiTokenError::NotFound)
     ));
@@ -212,7 +207,7 @@ async fn scenario(database: &Database) {
         .unwrap();
     assert!(matches!(
         tokens
-            .authenticate(&reader.token, ApiTokenScope::Read, now)
+            .authenticate(&reader.token, Some(ApiTokenScope::TasksRead), now)
             .await,
         Err(ApiTokenError::NotFound)
     ));
@@ -236,8 +231,11 @@ async fn scenario(database: &Database) {
             .iter()
             .all(|token| token.service_account_name.as_deref() == Some("Bot"))
     );
-    assert_eq!(listed[0].scopes, ["read"]);
-    assert_eq!(listed[1].scopes, ["read", "write"]);
+    assert_eq!(listed[0].scopes, [ApiTokenScope::TasksRead]);
+    assert_eq!(
+        listed[1].scopes,
+        [ApiTokenScope::TasksRead, ApiTokenScope::TasksWrite]
+    );
     assert_eq!(listed[1].last_used_at, Some(now));
     assert!(matches!(
         tokens.list(seed.workspace, seed.outsider).await,
@@ -271,4 +269,254 @@ async fn scenario(database: &Database) {
 async fn api_tokens_on_the_configured_backend() {
     let database = TestDatabase::new().await.unwrap();
     scenario(&database).await;
+}
+
+#[tokio::test]
+async fn service_account_tokens_cannot_get_docs_or_chat_scopes() {
+    let database = TestDatabase::new().await.unwrap();
+    let now = TimestampMillis::now();
+    let seed = seed(&database, now.as_millis()).await;
+    let tokens = ApiTokenRepository::new(database.clone());
+
+    for scope in [
+        ApiTokenScope::DocsRead,
+        ApiTokenScope::DocsWrite,
+        ApiTokenScope::ChatRead,
+    ] {
+        let refused = tokens
+            .create(
+                seed.workspace,
+                seed.owner,
+                "Bot".into(),
+                vec![seed.projects[0]],
+                &[ApiTokenScope::TasksRead, scope],
+                true,
+                None,
+                "test",
+                now,
+            )
+            .await;
+        assert!(
+            matches!(refused, Err(ApiTokenError::NotFound)),
+            "{scope:?}: {refused:?}"
+        );
+    }
+    for table in ["api_tokens", "service_accounts", "audit_events"] {
+        assert_eq!(
+            database
+                .scalar::<i64>(&format!("SELECT COUNT(*) FROM {table}"))
+                .await
+                .unwrap(),
+            0,
+            "{table}"
+        );
+    }
+
+    // A personal token may still have them.
+    tokens
+        .create(
+            seed.workspace,
+            seed.owner,
+            "Docs".into(),
+            vec![seed.projects[0]],
+            &[ApiTokenScope::DocsWrite, ApiTokenScope::ChatRead],
+            false,
+            None,
+            "test",
+            now,
+        )
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn only_a_task_scope_needs_a_project() {
+    let database = TestDatabase::new().await.unwrap();
+    let now = TimestampMillis::now();
+    let seed = seed(&database, now.as_millis()).await;
+    let tokens = ApiTokenRepository::new(database.clone());
+    let create = |name: &str, project_ids: Vec<Id>, scopes: Vec<ApiTokenScope>| {
+        let tokens = tokens.clone();
+        let name = name.to_owned();
+        async move {
+            tokens
+                .create(
+                    seed.workspace,
+                    seed.owner,
+                    name,
+                    project_ids,
+                    &scopes,
+                    false,
+                    None,
+                    "test",
+                    now,
+                )
+                .await
+        }
+    };
+
+    let refused = create(
+        "Tasks",
+        vec![],
+        vec![ApiTokenScope::TasksRead, ApiTokenScope::DocsRead],
+    )
+    .await;
+    assert!(
+        matches!(refused, Err(ApiTokenError::NotFound)),
+        "{refused:?}"
+    );
+
+    // Projects only limit task access, so a token without a task scope stores none.
+    let docs = create("Docs", vec![], vec![ApiTokenScope::DocsRead])
+        .await
+        .unwrap();
+    let docs_with_project = create(
+        "Docs with project",
+        vec![seed.projects[0]],
+        vec![ApiTokenScope::DocsWrite, ApiTokenScope::ChatRead],
+    )
+    .await
+    .unwrap();
+    for issued in [&docs, &docs_with_project] {
+        assert!(issued.api_token.project_ids.is_empty());
+        let principal = tokens
+            .authenticate(&issued.token, Some(ApiTokenScope::DocsRead), now)
+            .await
+            .unwrap();
+        assert!(principal.project_ids.is_empty());
+        assert!(matches!(
+            tokens
+                .authenticate(&issued.token, Some(ApiTokenScope::TasksRead), now)
+                .await,
+            Err(ApiTokenError::Forbidden)
+        ));
+    }
+    assert_eq!(
+        database
+            .scalar::<i64>("SELECT COUNT(*) FROM api_tokens WHERE project_id IS NULL")
+            .await
+            .unwrap(),
+        2
+    );
+    assert_eq!(
+        database
+            .scalar::<i64>("SELECT COUNT(*) FROM api_token_projects")
+            .await
+            .unwrap(),
+        0
+    );
+    let listed = tokens.list(seed.workspace, seed.owner).await.unwrap();
+    assert!(listed.iter().all(|token| token.project_ids.is_empty()));
+
+    // A task token whose projects are all deleted stops working.
+    let tasks = create(
+        "Tasks",
+        vec![seed.projects[1]],
+        vec![ApiTokenScope::TasksRead, ApiTokenScope::DocsRead],
+    )
+    .await
+    .unwrap();
+    assert_eq!(tasks.api_token.project_ids, [seed.projects[1]]);
+    database
+        .execute(&format!(
+            "UPDATE projects SET deleted_at = {} WHERE id = '{}'",
+            now.as_millis(),
+            seed.projects[1]
+        ))
+        .await
+        .unwrap();
+    assert!(matches!(
+        tokens
+            .authenticate(&tasks.token, Some(ApiTokenScope::DocsRead), now)
+            .await,
+        Err(ApiTokenError::NotFound)
+    ));
+    tokens.authenticate(&docs.token, None, now).await.unwrap();
+}
+
+#[tokio::test]
+async fn all_projects_tokens_follow_the_live_projects_of_their_workspace() {
+    let database = TestDatabase::new().await.unwrap();
+    let now = TimestampMillis::now();
+    let seed = seed(&database, now.as_millis()).await;
+    let tokens = ApiTokenRepository::new(database.clone());
+    let create = |name: &str, projects: TokenProjects| {
+        let tokens = tokens.clone();
+        let name = name.to_owned();
+        async move {
+            tokens
+                .create(
+                    seed.workspace,
+                    seed.owner,
+                    name,
+                    projects,
+                    &[ApiTokenScope::TasksRead],
+                    false,
+                    None,
+                    "test",
+                    now,
+                )
+                .await
+                .unwrap()
+        }
+    };
+    let all = create("All", TokenProjects::All).await;
+    let fixed = create("Fixed", TokenProjects::Only(vec![seed.projects[0]])).await;
+    assert!(all.api_token.all_projects);
+    assert_eq!(all.api_token.project_ids, seed.projects.to_vec());
+    assert!(!fixed.api_token.all_projects);
+    let project_ids = |token: String| {
+        let tokens = tokens.clone();
+        async move {
+            tokens
+                .authenticate(&token, Some(ApiTokenScope::TasksRead), now)
+                .await
+                .map(|principal| principal.project_ids)
+        }
+    };
+
+    // A project created after the token is covered; the other workspace's project never is.
+    let later = Id::new_v7();
+    sqlx::query("INSERT INTO projects (id, workspace_id, name, project_key, color, created_at, updated_at) VALUES ($1, $2, 'Later', 'LAT', '#ff0000', $3, $3)")
+        .bind(later.to_string())
+        .bind(seed.workspace.to_string())
+        .bind(now.as_millis() + 10)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    assert_eq!(
+        project_ids(all.token.clone()).await.unwrap(),
+        vec![seed.projects[0], seed.projects[1], later]
+    );
+    assert_eq!(
+        project_ids(fixed.token.clone()).await.unwrap(),
+        vec![seed.projects[0]]
+    );
+
+    // A deleted project is not covered. The fixed token loses its only project and stops
+    // working; the all-projects token stays valid even with no project left.
+    sqlx::query("UPDATE projects SET deleted_at = $1 WHERE workspace_id = $2")
+        .bind(now.as_millis())
+        .bind(seed.workspace.to_string())
+        .execute(database.pool())
+        .await
+        .unwrap();
+    assert!(matches!(
+        project_ids(fixed.token.clone()).await,
+        Err(ApiTokenError::NotFound)
+    ));
+    assert_eq!(
+        project_ids(all.token.clone()).await.unwrap(),
+        Vec::<Id>::new()
+    );
+    assert_eq!(
+        database
+            .scalar::<i64>(&format!(
+                "SELECT COUNT(*) FROM api_token_projects WHERE token_id = '{}'",
+                all.api_token.id
+            ))
+            .await
+            .unwrap(),
+        0
+    );
 }

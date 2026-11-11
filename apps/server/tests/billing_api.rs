@@ -1140,6 +1140,80 @@ async fn a_new_workspace_is_on_a_trial_with_limits() {
             &json!("The trial allows 3 members. Choose a plan to add more.")
         )
     );
+    // Guests are no members: one is invited at the limit and does not count.
+    let (status, channel) = server
+        .call(
+            "POST",
+            &server.workspace("/chat/conversations"),
+            Some(json!({"name": "with-guests", "kind": "private", "member_ids": []})),
+        )
+        .await;
+    assert_eq!(status, 200, "{channel}");
+    // Padded past 64 KiB: the guard reads the whole body to see the role, and keeps it.
+    let body = json!({"email": "guest@example.com", "role": "guest", "delivery": "manual",
+                      "conversation_ids": [channel["result"]["id"]]});
+    let response = server
+        .http
+        .post(format!(
+            "{}{}",
+            server.base,
+            server.workspace("/invitations")
+        ))
+        .header("origin", &server.base)
+        .header("cookie", format!("{COOKIE}={}", server.session))
+        .header("content-type", "application/json")
+        .body(format!("{body}{}", " ".repeat(80 * 1024)))
+        .send()
+        .await
+        .unwrap();
+    let status = response.status().as_u16();
+    let invitation: Value = response.json().await.unwrap();
+    assert_eq!(status, 201, "{invitation}");
+    let guest = server.add_user("guest@example.com", false).await;
+    let token = invitation["url"]
+        .as_str()
+        .unwrap()
+        .split("token=")
+        .nth(1)
+        .unwrap();
+    let (status, accepted) = server
+        .call_as(
+            &guest,
+            "POST",
+            "/api/v1/workspaces/invitations/accept",
+            Some(json!({"token": token})),
+        )
+        .await;
+    assert_eq!(status, 200, "{accepted}");
+    let (_, billing) = server
+        .call("GET", &server.workspace("/billing"), None)
+        .await;
+    assert_eq!(billing["trial"]["members"], json!({"used": 3, "limit": 3}));
+    // A guest who would become a member takes a seat, so the promotion is refused at the limit.
+    let (_, members) = server
+        .call("GET", &server.workspace("/members"), None)
+        .await;
+    let guest_membership = members["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["role"] == "guest")
+        .unwrap()
+        .clone();
+    let (status, problem) = server
+        .call(
+            "PATCH",
+            &server.workspace(&format!(
+                "/members/{}",
+                guest_membership["id"].as_str().unwrap()
+            )),
+            Some(json!({"role": "member", "expected_version": guest_membership["version"]})),
+        )
+        .await;
+    assert_eq!(
+        (status, &problem["code"]),
+        (402, &json!("trial_limit_reached"))
+    );
 
     // A stranger learns nothing about the trial: the handler refuses them as on any workspace.
     let stranger = server.add_user("stranger@example.com", false).await;
@@ -1522,6 +1596,81 @@ async fn other_workspaces_of_root_and_workspaces_of_other_users_are_on_a_trial()
     server.stop().await;
 }
 
+#[tokio::test]
+async fn the_admin_user_summary_counts_accounts_and_trials() {
+    let stripe = FakeStripe::default();
+    let server = Server::start_with_root_team(Some(&stripe.start().await)).await;
+    let other_user = server.add_user("other@example.com", false).await;
+    server.add_user("gone@example.com", false).await;
+    sqlx::query("UPDATE users SET deleted_at = $1 WHERE email = 'gone@example.com'")
+        .bind(TimestampMillis::now().as_millis())
+        .execute(server.database.pool())
+        .await
+        .unwrap();
+    let mut workspace_ids = Vec::new();
+    for name in ["Ongoing", "Expired", "Deleted"] {
+        let (status, workspace) = server
+            .call_as(
+                &other_user,
+                "POST",
+                "/api/v1/workspaces",
+                Some(json!({"name": name})),
+            )
+            .await;
+        assert_eq!(status, 201, "{workspace}");
+        workspace_ids.push(workspace["id"].as_str().unwrap().to_owned());
+    }
+    let now = TimestampMillis::now().as_millis();
+    for (query, id) in [
+        (
+            "UPDATE workspaces SET created_at = $1 WHERE id = $2",
+            &workspace_ids[1],
+        ),
+        (
+            "UPDATE workspaces SET deleted_at = $1 WHERE id = $2",
+            &workspace_ids[2],
+        ),
+    ] {
+        sqlx::query(query)
+            .bind(now - 30 * DAY_MILLIS)
+            .bind(id)
+            .execute(server.database.pool())
+            .await
+            .unwrap();
+    }
+
+    // The root user is active today; `other_user` was last active 10 days ago; the deleted account is not counted.
+    sqlx::query(
+        "UPDATE sessions SET last_activity_at = $1 \
+         WHERE user_id = (SELECT id FROM users WHERE email = 'other@example.com')",
+    )
+    .bind(now - 10 * DAY_MILLIS)
+    .execute(server.database.pool())
+    .await
+    .unwrap();
+
+    let (status, summary) = server
+        .call("GET", "/api/v1/admin/users/summary", None)
+        .await;
+    assert_eq!(status, 200, "{summary}");
+    assert_eq!(
+        summary,
+        json!({
+            "users": 2,
+            "active": {"daily": 1, "weekly": 1, "monthly": 2},
+            "trials": {"ongoing": 1, "expired": 1}
+        })
+    );
+    let (status, problem) = server
+        .call_as(&other_user, "GET", "/api/v1/admin/users/summary", None)
+        .await;
+    assert_eq!(
+        (status, &problem["code"]),
+        (403, &json!("installation_admin_required"))
+    );
+    server.stop().await;
+}
+
 /// Status and problem code of a task created by an anonymous caller, by `stranger` and by `member`.
 async fn write_answers(server: &Server, stranger: &str, member: &str) -> [(u16, Value); 3] {
     let mut answers = Vec::new();
@@ -1560,6 +1709,10 @@ async fn self_hosted_servers_have_no_billing_and_no_guard() {
     assert_eq!(response.status().as_u16(), 404);
     let (_, options) = server.call("GET", "/api/v1/auth/options", None).await;
     assert_eq!(options["billing_enabled"], false);
+    let (_, summary) = server
+        .call("GET", "/api/v1/admin/users/summary", None)
+        .await;
+    assert_eq!(summary["trials"], Value::Null, "{summary}");
     server.stop().await;
 }
 

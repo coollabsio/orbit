@@ -2,10 +2,13 @@
 
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use hkdf::Hkdf;
+use hmac::{Hmac, Mac};
 use orbit_platform::{
     AuthenticatedUser, Id, IssuedSession, Row, TimestampMillis, generate_opaque_token,
 };
 use serde::Serialize;
+use sha2::Sha256;
 use utoipa::ToSchema;
 use webauthn_rs::prelude::Passkey;
 
@@ -82,6 +85,30 @@ pub fn credential_key(credential_id: &[u8]) -> String {
 }
 
 /// A recovery code without the dash, spaces and case the user may type.
+/// Hashes recovery codes with HMAC-SHA256 under a subkey of the app key. A copy of the database alone then
+/// cannot be searched for the codes: the 50 bits of a code are few enough to guess against a plain hash.
+#[derive(Clone)]
+pub struct RecoveryCodeKey([u8; 32]);
+
+impl RecoveryCodeKey {
+    /// Derives the key from the server's app key (`ORBIT_APP_KEY`).
+    #[must_use]
+    pub fn new(app_key: &[u8; 32]) -> Self {
+        let mut key = [0_u8; 32];
+        Hkdf::<Sha256>::new(None, app_key)
+            .expand(b"orbit recovery code v1", &mut key)
+            .expect("32 bytes is a valid HKDF-SHA256 output length");
+        Self(key)
+    }
+
+    fn hash(&self, code: &str) -> Vec<u8> {
+        let mut mac =
+            Hmac::<Sha256>::new_from_slice(&self.0).expect("HMAC takes a key of any length");
+        mac.update(normalized_recovery_code(code).as_bytes());
+        mac.finalize().into_bytes().to_vec()
+    }
+}
+
 fn normalized_recovery_code(code: &str) -> String {
     code.chars()
         .filter(char::is_ascii_alphanumeric)
@@ -166,6 +193,7 @@ impl IdentityRepository {
         &self,
         user_id: Id,
         step: i64,
+        codes_key: &RecoveryCodeKey,
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<Option<Vec<String>>, IdentityError> {
@@ -183,7 +211,7 @@ impl IdentityRepository {
         if changed != 1 {
             return Ok(None);
         }
-        let codes = replace_recovery_codes(&mut transaction, user_id, now).await?;
+        let codes = replace_recovery_codes(&mut transaction, user_id, codes_key, now).await?;
         audit::record_global(
             &mut transaction,
             Some(user_id),
@@ -221,18 +249,23 @@ impl IdentityRepository {
         &self,
         user_id: Id,
         code: &str,
+        codes_key: &RecoveryCodeKey,
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<bool, IdentityError> {
         let mut transaction = self.database().immediate_transaction().await?;
-        let used =
-            sqlx::query("DELETE FROM user_recovery_codes WHERE user_id = $1 AND code_hash = $2")
-                .bind(user_id.to_string())
-                .bind(token_hash(&normalized_recovery_code(code)).to_vec())
-                .execute(&mut *transaction)
-                .await?
-                .rows_affected()
-                == 1;
+        // Codes made before the HMAC are stored as a plain SHA-256 and keep working until they are used or
+        // replaced, so nobody loses their codes. Drop the second hash once no such rows are left.
+        let used = sqlx::query(
+            "DELETE FROM user_recovery_codes WHERE user_id = $1 AND code_hash IN ($2, $3)",
+        )
+        .bind(user_id.to_string())
+        .bind(codes_key.hash(code))
+        .bind(token_hash(&normalized_recovery_code(code)).to_vec())
+        .execute(&mut *transaction)
+        .await?
+        .rows_affected()
+            == 1;
         if used {
             audit::record_global(
                 &mut transaction,
@@ -255,6 +288,7 @@ impl IdentityRepository {
     pub async fn regenerate_recovery_codes(
         &self,
         user_id: Id,
+        codes_key: &RecoveryCodeKey,
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<Option<Vec<String>>, IdentityError> {
@@ -268,7 +302,7 @@ impl IdentityRepository {
         if enabled == 0 {
             return Ok(None);
         }
-        let codes = replace_recovery_codes(&mut transaction, user_id, now).await?;
+        let codes = replace_recovery_codes(&mut transaction, user_id, codes_key, now).await?;
         audit::record_global(
             &mut transaction,
             Some(user_id),
@@ -551,6 +585,7 @@ impl IdentityRepository {
 async fn replace_recovery_codes(
     transaction: &mut sqlx::Transaction<'_, sqlx::Any>,
     user_id: Id,
+    codes_key: &RecoveryCodeKey,
     now: TimestampMillis,
 ) -> Result<Vec<String>, sqlx::Error> {
     sqlx::query("DELETE FROM user_recovery_codes WHERE user_id = $1")
@@ -563,7 +598,7 @@ async fn replace_recovery_codes(
             "INSERT INTO user_recovery_codes (user_id, code_hash, created_at) VALUES ($1, $2, $3)",
         )
         .bind(user_id.to_string())
-        .bind(token_hash(&normalized_recovery_code(code)).to_vec())
+        .bind(codes_key.hash(code))
         .bind(now.as_millis())
         .execute(&mut **transaction)
         .await?;

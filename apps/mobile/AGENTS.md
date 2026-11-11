@@ -43,13 +43,16 @@ Run lint and typecheck before declaring any task done.
 - Import `Link`, `router`, and `useLocalSearchParams` from `expo-router`.
 - Docs: https://docs.expo.dev/router/introduction.md
 
-## Building with EAS
+## Release builds (no EAS)
 
-Use EAS to build, sign, and submit the app in the cloud (`eas build`, `eas submit`) and to ship over-the-air updates (`eas update`) — no local Xcode or Android Studio required. Run EAS CLI as `bunx eas-cli <command>` in Bun projects, or `npx eas-cli@latest <command>` otherwise; substitute that for bare `eas` in docs examples.
-Docs: https://docs.expo.dev/eas/index.md
+The project does not use EAS. The GitHub workflow `.github/workflows/testflight.yml` (manual run) builds the iOS app on a
+macOS runner with `expo prebuild` and `xcodebuild`, signs it with the certificate and profile in GitHub secrets, and
+uploads it to TestFlight with the App Store Connect API key. The certificate and the profile expire each year: renew
+them at developer.apple.com and update the `IOS_*` secrets. Do not add `eas.json`, `eas-cli` or an EAS project link.
+App icons and the splash image are in `assets/` and configured in `app.json`.
 
 ## Rules
 
 - If `ios/` and `android/` directories do not exist, they are generated (Continuous Native Generation). Never create or edit them by hand — configure native behavior in `app.json` and config plugins.
-- Expo Go only includes its bundled native modules. After adding a library with native code, the app needs a development build: `npx expo run:ios|android` locally, or `eas build --profile development`.
+- Expo Go only includes its bundled native modules. After adding a library with native code, the app needs a development build: `npx expo run:ios|android` locally.
 - Prefer recommended Expo modules over third-party libraries, and check your available skills before adding dependencies. Docs: https://docs.expo.dev/versions/latest/index.md

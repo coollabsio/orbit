@@ -6,9 +6,9 @@ use orbit_domain::{Actor, WorkspaceRole};
 use orbit_platform::Id;
 use sqlx::Any;
 
-/// The caller as a member of a live workspace, or `None` for outsiders and trashed workspaces.
-/// Repositories call this inside their own transaction, so the rule holds for every caller
-/// (HTTP sessions, API tokens, MCP, webhooks) and cannot go stale before the write.
+/// The caller as a member of a live workspace, or `None` for outsiders, guests and trashed
+/// workspaces. Repositories call this inside their own transaction, so the rule holds for every
+/// caller (HTTP sessions, API tokens, MCP, webhooks) and cannot go stale before the write.
 pub(crate) async fn actor<'e, E>(
     executor: E,
     workspace_id: Id,
@@ -30,14 +30,40 @@ pub(crate) async fn actor_in<'e, E>(
 where
     E: sqlx::Executor<'e, Database = Any>,
 {
+    Ok(any_actor(executor, workspace_id, user_id, trashed)
+        .await?
+        .filter(|actor| !actor.is_guest()))
+}
+
+/// As `actor`, but guests too: only chat calls it, and chat checks each conversation itself.
+pub(crate) async fn chat_actor<'e, E>(
+    executor: E,
+    workspace_id: Id,
+    user_id: Id,
+) -> Result<Option<Actor>, sqlx::Error>
+where
+    E: sqlx::Executor<'e, Database = Any>,
+{
+    any_actor(executor, workspace_id, user_id, false).await
+}
+
+async fn any_actor<'e, E>(
+    executor: E,
+    workspace_id: Id,
+    user_id: Id,
+    trashed: bool,
+) -> Result<Option<Actor>, sqlx::Error>
+where
+    E: sqlx::Executor<'e, Database = Any>,
+{
     let role: Option<String> = sqlx::query_scalar(
         "SELECT memberships.role FROM memberships JOIN workspaces ON workspaces.id = memberships.workspace_id \
          WHERE memberships.workspace_id = $1 AND memberships.user_id = $2 \
-         AND (workspaces.deleted_at IS NOT NULL) = $3",
+         AND (CASE WHEN workspaces.deleted_at IS NULL THEN 0 ELSE 1 END) = $3",
     )
     .bind(workspace_id.to_string())
     .bind(user_id.to_string())
-    .bind(trashed)
+    .bind(i64::from(trashed))
     .fetch_optional(executor)
     .await?;
     // The schema only stores known roles; an unknown one grants nothing.

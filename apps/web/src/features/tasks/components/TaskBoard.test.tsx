@@ -2,6 +2,7 @@ import { afterEach, expect, spyOn, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, createEvent, fireEvent, render, waitFor, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
+import { MemoryRouter } from 'react-router'
 import { toast } from 'sonner'
 import type { Project, Task, TaskStatusDef } from '@/features/tasks/api/models'
 import type { GroupContext } from '@/features/views/grouping'
@@ -47,7 +48,7 @@ function renderBoard(tasks: Task[], options: { statuses?: TaskStatusDef[]; displ
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>
-      <WorkspaceContext.Provider value={{ workspace, workspaces: [workspace], selectWorkspace: () => {} }}>{children}</WorkspaceContext.Provider>
+      <WorkspaceContext.Provider value={{ workspace, workspaces: [workspace], selectWorkspace: () => {} }}><MemoryRouter>{children}</MemoryRouter></WorkspaceContext.Provider>
     </QueryClientProvider>
   )
   return render(
@@ -127,7 +128,7 @@ test('saving a board move does not add a grid item or flash a loading label', as
   let finishRequest: ((response: Response) => void) | undefined
   globalThis.fetch = (() => new Promise<Response>((resolve) => { finishRequest = resolve })) as unknown as typeof fetch
   const view = renderBoard([task('moving', 'todo', 0), task('other', 'todo', 1)], { statuses: [todo] })
-  const board = view.container.firstElementChild!
+  const board = view.container.querySelector('[aria-busy]')!
 
   fireEvent.dragStart(cardOf(view, 'Moving'), { dataTransfer })
   dropAt(columnOf(view, 'Todo'), 10_000)

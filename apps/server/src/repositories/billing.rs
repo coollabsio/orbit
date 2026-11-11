@@ -108,6 +108,49 @@ pub async fn write_access(
     workspace_access(database, workspace_id, &billing.0).await
 }
 
+/// Workspaces by trial state, for the Admin area. Deleted workspaces are not counted.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Serialize, utoipa::ToSchema)]
+pub struct TrialCounts {
+    /// On a trial now: writable within the trial limits.
+    pub ongoing: i64,
+    /// The trial ended without a subscription, so the workspace is read-only.
+    pub expired: i64,
+}
+
+/// The [`TrialCounts`] of the instance; `None` on a self-hosted server, which has no trials.
+pub async fn trial_counts(database: &Database) -> Result<Option<TrialCounts>, sqlx::Error> {
+    let Some(billing) = database.existing_extension::<BillingOn>() else {
+        return Ok(None);
+    };
+    let rows = sqlx::query(
+        "SELECT workspaces.created_at, workspaces.billing_exempt, s.status FROM workspaces \
+         LEFT JOIN workspace_subscriptions s ON s.workspace_id = workspaces.id \
+         WHERE workspaces.deleted_at IS NULL",
+    )
+    .fetch_all(database.pool())
+    .await?;
+    let now = TimestampMillis::now().as_millis();
+    let mut counts = TrialCounts::default();
+    for row in rows {
+        let status = row
+            .get::<Option<String>, _>("status")
+            .as_deref()
+            .and_then(SubscriptionStatus::parse);
+        match access(
+            row.get("billing_exempt"),
+            status,
+            row.get("created_at"),
+            now,
+            billing.0.millis(),
+        ) {
+            WorkspaceAccess::Trial => counts.ongoing += 1,
+            WorkspaceAccess::ReadOnly => counts.expired += 1,
+            WorkspaceAccess::Full => {}
+        }
+    }
+    Ok(Some(counts))
+}
+
 /// The access of one workspace; one primary-key lookup, run by the guard on each write.
 pub async fn workspace_access(
     database: &Database,
@@ -186,8 +229,8 @@ async fn trial_usage_in<'e>(
         )
         .bind(workspace_id.to_string()),
         TrialLimit::Members => sqlx::query_scalar(
-            "SELECT CAST((SELECT COUNT(*) FROM memberships WHERE workspace_id = $1) \
-             + (SELECT COUNT(*) FROM workspace_invitations WHERE workspace_id = $1 \
+            "SELECT CAST((SELECT COUNT(*) FROM memberships WHERE workspace_id = $1 AND role <> 'guest') \
+             + (SELECT COUNT(*) FROM workspace_invitations WHERE workspace_id = $1 AND role <> 'guest' \
              AND accepted_at IS NULL AND revoked_at IS NULL AND replaced_at IS NULL \
              AND expires_at > $2) AS BIGINT)",
         )

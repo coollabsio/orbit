@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, mock, test } from 'bun:test'
 import { act, fireEvent, render } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createRef } from 'react'
+import { setAppNavigate } from '@/lib/navigateBridge'
 import { emojibaseResponse } from '@/test/emojibase'
 import { PageEditor, type PageEditorHandle, type PageEditorProps, type PageRef } from './PageEditor'
 
@@ -49,6 +50,39 @@ describe('PageEditor', () => {
     const root = view.container.querySelector('[data-slot="page-editor"]')!
     expect(root.classList.contains('bn-root')).toBe(true)
     expect(root.querySelector(':scope > .bn-editor')).toBeTruthy()
+  })
+
+  test('an inline formula sits in the sentence and a click opens its source', async () => {
+    const { view } = await renderEditor({
+      initialContent: [
+        {
+          id: 'p',
+          type: 'paragraph',
+          content: [
+            { type: 'text', text: 'Energy is ', styles: {} },
+            { type: 'math', props: { latex: 'E=mc^2' } },
+            { type: 'text', text: ' today', styles: {} },
+          ],
+        },
+      ],
+    })
+    const formula = view.container.querySelector('[data-slot="inline-math"]')
+    expect(formula).toBeTruthy()
+    expect(formula!.querySelector('.katex')).toBeTruthy()
+    expect(formula!.querySelector('.katex-display')).toBeNull()
+    const line = formula!.closest('.bn-inline-content')
+    expect(line!.textContent).toContain('Energy is')
+    expect(line!.textContent).toContain('today')
+
+    fireEvent.mouseDown(formula!)
+    const input = (await view.findByLabelText('Formula')) as HTMLInputElement
+    expect(input.value).toBe('E=mc^2')
+    fireEvent.change(input, { target: { value: 'a^2' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    const drawn = view.container.querySelector('[data-slot="inline-math"]')
+    expect(drawn!.querySelector('.katex')).toBeTruthy()
+    expect(drawn!.querySelector('.katex-display')).toBeNull()
+    expect(drawn!.textContent).not.toContain('E=mc^2')
   })
 
   test('starts from empty content with a single empty paragraph and no change event', async () => {
@@ -135,6 +169,36 @@ describe('PageEditor', () => {
     })
     document.removeEventListener('click', stop)
     expect(props.onOpenPage).toHaveBeenCalledTimes(1)
+  })
+
+  test('links to this app (same origin) navigate in the app on click, other links do not', async () => {
+    const navigate = mock((_to: string) => {})
+    setAppNavigate(navigate)
+    const url = `${window.location.origin}/tasks/ENG-1`
+    const { view } = await renderEditor({
+      editable: false,
+      initialContent: [
+        {
+          id: 'b',
+          type: 'paragraph',
+          content: [
+            { type: 'link', href: url, content: [{ type: 'text', text: 'Task', styles: {} }] },
+            { type: 'link', href: 'https://elsewhere.example/tasks/ENG-1', content: [{ type: 'text', text: 'Outside', styles: {} }] },
+          ],
+        },
+      ],
+    })
+    // stops happy-dom from navigating for the clicks the editor lets through
+    const stop = (event: Event) => event.preventDefault()
+    document.addEventListener('click', stop)
+    const click = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 })
+    act(() => {
+      view.getByText('Task').closest('a')!.dispatchEvent(click)
+      view.getByText('Task').closest('a')!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0, ctrlKey: true }))
+      view.getByText('Outside').closest('a')!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }))
+    })
+    document.removeEventListener('click', stop)
+    expect(navigate.mock.calls).toEqual([['/tasks/ENG-1']])
   })
 
   test('renders uploaded images from their page file URL and blanks unsafe media URLs', async () => {

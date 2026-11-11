@@ -18,7 +18,8 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::task_routes::ProblemBody,
         crate::workspace_routes::ProblemBody,
         crate::attachment_routes::AttachmentProblem,
-        crate::repositories::task_filter::FilterGroup
+        crate::repositories::task_filter::FilterGroup,
+        crate::repositories::databases::ButtonConfig
     )),
     modifiers(&ProblemDetails),
     paths(
@@ -37,6 +38,9 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::auth_routes::push::list_push_subscriptions,
         crate::auth_routes::push::create_push_subscription,
         crate::auth_routes::push::delete_push_subscription,
+        crate::auth_routes::push::list_apns_devices,
+        crate::auth_routes::push::create_apns_device,
+        crate::auth_routes::push::delete_apns_device,
         crate::auth_routes::push::send_test_push,
         crate::auth_routes::push::get_notification_preferences,
         crate::auth_routes::push::put_notification_preferences,
@@ -99,6 +103,7 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::workspace_routes::create_api_token,
         crate::workspace_routes::revoke_api_token,
         crate::workspace_routes::list_admin_users,
+        crate::workspace_routes::get_admin_user_summary,
         crate::workspace_routes::get_instance_settings,
         crate::workspace_routes::set_registration,
         crate::workspace_routes::save_smtp,
@@ -127,6 +132,34 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::backup_item_routes::list_backup_workspaces,
         crate::backup_item_routes::list_backup_items,
         crate::backup_item_routes::restore_backup_item,
+        crate::public_api::me,
+        crate::public_api::projects,
+        crate::public_api::create_project,
+        crate::public_api::statuses,
+        crate::public_api::labels,
+        crate::public_api::members,
+        crate::public_api::list_tasks,
+        crate::public_api::get_task,
+        crate::public_api::create_task,
+        crate::public_api::update_task,
+        crate::public_api::delete_task,
+        crate::public_api::comments,
+        crate::public_api::create_comment,
+        crate::public_api::docs,
+        crate::public_api::doc,
+        crate::public_api::create_doc,
+        crate::public_api::update_doc,
+        crate::public_api::databases::database,
+        crate::public_api::databases::query_database,
+        crate::public_api::databases::create_row,
+        crate::public_api::databases::update_row,
+        crate::public_api::databases::trash_rows,
+        crate::public_api::databases::create_property,
+        crate::public_api::databases::update_property,
+        crate::public_api::databases::delete_property,
+        crate::public_api::create_export,
+        crate::public_api::get_export,
+        crate::public_api::download_export,
         crate::integration_routes::create_discord_event,
         crate::integration_routes::github_webhook,
         crate::integration_routes::github_manifest_callback,
@@ -141,6 +174,9 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::task_routes::delete_project,
         crate::task_routes::restore_project,
         crate::task_routes::list_project_trash,
+        crate::task_routes::purge_project,
+        crate::task_routes::get_trashed_project,
+        crate::task_routes::list_trashed_project_tasks,
         crate::task_routes::list_statuses,
         crate::task_routes::create_status,
         crate::task_routes::update_status,
@@ -166,6 +202,9 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::task_routes::delete_task,
         crate::task_routes::restore_task,
         crate::task_routes::list_task_trash,
+        crate::task_routes::empty_task_trash,
+        crate::task_routes::get_trashed_task,
+        crate::task_routes::purge_task,
         crate::task_routes::list_comments,
         crate::task_routes::create_comment,
         crate::task_routes::update_comment,
@@ -200,10 +239,12 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::page_routes::delete_page,
         crate::page_routes::restore_page,
         crate::page_routes::list_page_trash,
+        crate::page_routes::get_trashed_page,
         crate::page_routes::purge_page,
         crate::page_routes::empty_page_trash,
         crate::page_routes::duplicate_page,
         crate::page_routes::search_pages,
+        crate::page_routes::list_page_descendants,
         crate::page_routes::list_page_favorites,
         crate::page_routes::add_page_favorite,
         crate::page_routes::remove_page_favorite,
@@ -214,6 +255,27 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::page_routes::set_page_lock,
         crate::page_routes::record_page_visit,
         crate::page_routes::list_recent_pages,
+        crate::database_routes::get_database,
+        crate::database_routes::create_database_property,
+        crate::database_routes::update_database_property,
+        crate::database_routes::delete_database_property,
+        crate::database_routes::create_database_link,
+        crate::database_routes::delete_database_link,
+        crate::database_routes::create_database_view,
+        crate::database_routes::update_database_view,
+        crate::database_routes::delete_database_view,
+        crate::database_routes::create_database_row,
+        crate::database_routes::update_database_row_values,
+        crate::database_routes::trash_database_rows,
+        crate::database_routes::move_database_row,
+        crate::database_routes::buttons::press_database_button,
+        crate::database_routes::import::import_database_csv,
+        crate::database_routes::forms::submit_database_form,
+        crate::database_routes::formula::preview_database_formula,
+        crate::database_routes::import::create_database_from_csv,
+        crate::database_routes::templates::create_database_template,
+        crate::database_routes::templates::update_database_template,
+        crate::database_routes::templates::delete_database_template,
         crate::page_file_routes::upload_page_file,
         crate::page_file_routes::download_page_file,
         crate::page_comment_routes::list_page_threads,
@@ -242,6 +304,34 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::import_routes::get_notion_import,
         crate::import_routes::start_notion_import,
         crate::import_routes::cancel_notion_import,
+        crate::asana_import_routes::create_asana_import,
+        crate::asana_import_routes::list_asana_imports,
+        crate::asana_import_routes::get_asana_import,
+        crate::asana_import_routes::start_asana_import,
+        crate::asana_import_routes::cancel_asana_import,
+        crate::linear_import_routes::create_linear_import,
+        crate::linear_import_routes::list_linear_imports,
+        crate::linear_import_routes::get_linear_import,
+        crate::linear_import_routes::start_linear_import,
+        crate::linear_import_routes::cancel_linear_import,
+        crate::trello_import_routes::create_trello_import,
+        crate::trello_import_routes::list_trello_imports,
+        crate::trello_import_routes::get_trello_import,
+        crate::trello_import_routes::start_trello_import,
+        crate::trello_import_routes::cancel_trello_import,
+        crate::obsidian_import_routes::create_obsidian_import,
+        crate::obsidian_import_routes::list_obsidian_imports,
+        crate::obsidian_import_routes::get_obsidian_import,
+        crate::obsidian_import_routes::start_obsidian_import,
+        crate::obsidian_import_routes::cancel_obsidian_import,
+        crate::import_people_routes::list_import_people,
+        crate::import_people_routes::update_import_person,
+        crate::orbit_import_routes::create_orbit_import,
+        crate::orbit_import_routes::upload_orbit_import,
+        crate::orbit_import_routes::list_orbit_imports,
+        crate::orbit_import_routes::get_orbit_import,
+        crate::orbit_import_routes::start_orbit_import,
+        crate::orbit_import_routes::cancel_orbit_import,
         crate::chat_routes::conversations::list_chat_conversations,
         crate::chat_routes::conversations::create_chat_channel,
         crate::chat_routes::conversations::update_chat_channel,
@@ -344,6 +434,18 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::mail_routes::admin::get_mail_test_address,
         crate::mail_routes::admin::list_failed_mail_receipts,
         crate::mail_routes::admin::retry_mail_receipt,
+        crate::chat_routes::hooks::list_chat_webhooks,
+        crate::chat_routes::hooks::create_chat_webhook,
+        crate::chat_routes::hooks::update_chat_webhook,
+        crate::chat_routes::hooks::rotate_chat_webhook,
+        crate::chat_routes::hooks::delete_chat_webhook,
+        crate::chat_routes::hooks::post_incoming_webhook,
+        crate::chat_routes::hooks::post_action_response,
+        crate::chat_routes::interactions::click_chat_action,
+        crate::chat_routes::interactions::set_chat_webhook_interactivity,
+        crate::chat_routes::interactions::get_chat_webhook_signing_secret,
+        crate::chat_routes::interactions::rotate_chat_webhook_signing_secret,
+        crate::chat_routes::interactions::list_chat_webhook_deliveries,
     )
 )]
 struct ApiDocument;
@@ -357,6 +459,7 @@ impl Modify for ProblemDetails {
             WorkspaceRole::Owner,
             WorkspaceRole::Admin,
             WorkspaceRole::Member,
+            WorkspaceRole::Guest,
         ]
         .into_iter()
         .map(|role| {
@@ -404,23 +507,31 @@ impl Modify for ProblemDetails {
             .into_iter()
             .flatten()
             {
-                let schema = problem_schema(route);
                 let operation_id = operation.operation_id.clone().unwrap_or_default();
-                operation.security = Some(if operation_id == "create_discord_event" {
-                    vec![SecurityRequirement::new("bearerAuth", Vec::<String>::new())]
-                } else if public_operation(&operation_id) {
-                    vec![SecurityRequirement::default()]
-                } else if matches!(
-                    operation_id.as_str(),
-                    "accept_invitation" | "start_provider_sign_in" | "exchange_provider_sign_in"
-                ) {
-                    vec![
-                        SecurityRequirement::default(),
-                        SecurityRequirement::new("cookieAuth", Vec::<String>::new()),
-                    ]
+                let public_api = public_api_operation(route, &operation_id);
+                let schema = if public_api {
+                    "Problem"
                 } else {
-                    vec![SecurityRequirement::new("cookieAuth", Vec::<String>::new())]
-                });
+                    problem_schema(route)
+                };
+                operation.security =
+                    Some(if operation_id == "create_discord_event" || public_api {
+                        vec![SecurityRequirement::new("bearerAuth", Vec::<String>::new())]
+                    } else if public_operation(&operation_id) {
+                        vec![SecurityRequirement::default()]
+                    } else if matches!(
+                        operation_id.as_str(),
+                        "accept_invitation"
+                            | "start_provider_sign_in"
+                            | "exchange_provider_sign_in"
+                    ) {
+                        vec![
+                            SecurityRequirement::default(),
+                            SecurityRequirement::new("cookieAuth", Vec::<String>::new()),
+                        ]
+                    } else {
+                        vec![SecurityRequirement::new("cookieAuth", Vec::<String>::new())]
+                    });
                 operation.parameters.get_or_insert_default().push(
                     ParameterBuilder::new()
                         .name("X-Orbit-Contract")
@@ -435,7 +546,12 @@ impl Modify for ProblemDetails {
                         .build(),
                 );
 
-                for (status, description) in problem_responses(&operation_id) {
+                let responses = if public_api {
+                    public_api_responses(&operation_id)
+                } else {
+                    problem_responses(&operation_id)
+                };
+                for (status, description) in responses {
                     operation
                         .responses
                         .responses
@@ -462,6 +578,7 @@ fn problem_schema(route: &str) -> &'static str {
         || route.contains("/views")
         || route.contains("/view-")
         || route.contains("/pages")
+        || route.contains("/databases")
         || route.contains("/teamspaces")
         || route.contains("/imports/")
         || route.contains("/chat/")
@@ -489,6 +606,8 @@ fn public_operation(operation_id: &str) -> bool {
             | "registration_complete"
             | "preview_invitation"
             | "github_webhook"
+            | "post_incoming_webhook"
+            | "post_action_response"
             | "github_manifest_callback"
             | "get_mail_content"
             | "get_mail_part"
@@ -500,6 +619,154 @@ fn public_operation(operation_id: &str) -> bool {
     )
 }
 
+/// The public REST API (`crate::public_api`) under `/api/public/v1`, apart from the Discord
+/// endpoint, which has its own errors.
+fn public_api_operation(route: &str, operation_id: &str) -> bool {
+    route.starts_with("/api/public/v1/") && operation_id != "create_discord_event"
+}
+
+/// The problem codes of the public REST API, as `crate::public_api` writes them.
+fn public_api_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
+    let mut responses = BTreeMap::<&str, Vec<&str>>::new();
+    // From the HTTP layer in front of every route.
+    add_code(&mut responses, "400", "invalid_proxy_headers");
+    add_code(&mut responses, "409", "contract_mismatch");
+    add_code(&mut responses, "413", "request_too_large");
+    add_code(&mut responses, "429", "rate_limit_exceeded");
+    add_code(&mut responses, "500", "internal_error");
+    add_code(&mut responses, "401", "unauthorized");
+    // `GET /me` needs no scope.
+    if operation_id != "public_get_me" {
+        add_code(&mut responses, "403", "insufficient_scope");
+    }
+    add_code(&mut responses, "404", "not_found");
+    if matches!(
+        operation_id,
+        "public_list_statuses"
+            | "public_list_labels"
+            | "public_list_members"
+            | "public_list_tasks"
+            | "public_get_task"
+            | "public_list_comments"
+            | "public_query_database"
+            | "public_create_export"
+    ) {
+        add_code(&mut responses, "400", "invalid_request");
+    }
+    if matches!(
+        operation_id,
+        "public_create_export" | "public_get_export" | "public_download_export"
+    ) {
+        // The token's creator is no longer an owner or admin (a full export).
+        add_code(&mut responses, "403", "workspace_action_forbidden");
+    }
+    match operation_id {
+        "public_create_export" => add_code(&mut responses, "403", "origin_forbidden"),
+        "public_download_export" => add_code(&mut responses, "409", "export_not_ready"),
+        _ => {}
+    }
+    if matches!(
+        operation_id,
+        "public_list_statuses"
+            | "public_list_labels"
+            | "public_list_tasks"
+            | "public_list_comments"
+    ) {
+        add_code(&mut responses, "400", "invalid_cursor");
+    }
+    let write = matches!(
+        operation_id,
+        "public_create_task"
+            | "public_update_task"
+            | "public_delete_task"
+            | "public_create_comment"
+            | "public_create_doc"
+            | "public_update_doc"
+            | "public_create_database_row"
+            | "public_update_database_row"
+            | "public_trash_database_rows"
+    );
+    if write {
+        add_code(&mut responses, "400", "invalid_request");
+        add_code(&mut responses, "402", "workspace_read_only");
+        add_code(&mut responses, "403", "origin_forbidden");
+        add_code(&mut responses, "503", "service_unavailable");
+    }
+    if matches!(
+        operation_id,
+        "public_create_task" | "public_create_doc" | "public_create_database_row"
+    ) {
+        add_code(&mut responses, "402", "trial_limit_reached");
+    }
+    if matches!(
+        operation_id,
+        "public_create_doc" | "public_update_doc" | "public_create_database_row"
+    ) {
+        add_code(&mut responses, "413", "doc_too_large");
+    }
+    if matches!(
+        operation_id,
+        "public_create_task"
+            | "public_update_task"
+            | "public_create_comment"
+            | "public_create_doc"
+            | "public_update_doc"
+            | "public_query_database"
+            | "public_create_database_row"
+            | "public_update_database_row"
+            | "public_trash_database_rows"
+    ) {
+        add_code(&mut responses, "422", "validation_failed");
+    }
+    if matches!(
+        operation_id,
+        "public_update_task" | "public_delete_task" | "public_update_doc"
+    ) {
+        add_code(&mut responses, "409", "conflict");
+    }
+    if matches!(
+        operation_id,
+        "public_create_task"
+            | "public_update_task"
+            | "public_delete_task"
+            | "public_create_comment"
+    ) {
+        add_code(&mut responses, "409", "task_conflict");
+    }
+    match operation_id {
+        "public_create_task" => {
+            add_code(&mut responses, "422", "parent_cycle");
+            add_code(&mut responses, "422", "parent_invalid");
+        }
+        "public_update_task" => {
+            add_code(&mut responses, "409", "github_content_read_only");
+            add_code(&mut responses, "409", "github_linked_move");
+            add_code(&mut responses, "503", "task_busy");
+        }
+        // `permanent=true` without a workspace owner or admin.
+        "public_delete_task" => add_code(&mut responses, "403", "workspace_action_forbidden"),
+        "public_update_doc" => {
+            add_code(&mut responses, "423", "page_locked");
+            add_code(&mut responses, "503", "page_busy");
+        }
+        "public_create_database_row" => {
+            add_code(&mut responses, "409", "database_row_limit");
+            add_code(&mut responses, "409", "conflict");
+            add_code(&mut responses, "503", "page_busy");
+        }
+        "public_update_database_row" => {
+            add_code(&mut responses, "409", "conflict");
+            add_code(&mut responses, "423", "page_locked");
+            add_code(&mut responses, "503", "page_busy");
+        }
+        _ => {}
+    }
+    responses
+        .into_iter()
+        .map(|(status, codes)| (status, codes.join(", ")))
+        .collect()
+}
+
 fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
     let mut responses = BTreeMap::<&str, Vec<&str>>::new();
     add_code(&mut responses, "400", "invalid_proxy_headers");
@@ -509,7 +776,11 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
     if unsafe_operation(operation_id)
         && !matches!(
             operation_id,
-            "create_discord_event" | "github_webhook" | "stripe_webhook"
+            "create_discord_event"
+                | "github_webhook"
+                | "stripe_webhook"
+                | "post_incoming_webhook"
+                | "post_action_response"
         )
     {
         add_code(&mut responses, "403", "origin_forbidden");
@@ -552,6 +823,10 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
         }
         "put_status" => add_code(&mut responses, "422", "invalid_status"),
         "create_push_subscription" => add_code(&mut responses, "422", "invalid_subscription"),
+        "create_apns_device" => {
+            add_code(&mut responses, "422", "invalid_token");
+            add_code(&mut responses, "503", "push_not_configured");
+        }
         "put_shortcuts" => add_code(&mut responses, "422", "invalid_shortcuts"),
         "change_password" => {
             add_code(&mut responses, "401", "invalid_credentials");
@@ -622,6 +897,26 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             add_code(&mut responses, "409", "integration_event_conflict");
             add_code(&mut responses, "422", "validation_failed");
             add_code(&mut responses, "422", "integration_project_unavailable");
+        }
+        "post_action_response" => {
+            add_code(&mut responses, "400", "invalid_json");
+            add_code(&mut responses, "402", "workspace_read_only");
+            add_code(&mut responses, "403", "chat_channel_archived");
+            add_code(&mut responses, "404", "response_url_not_found");
+            add_code(&mut responses, "413", "payload_too_large");
+            add_code(&mut responses, "415", "unsupported_media_type");
+            add_code(&mut responses, "422", "validation_failed");
+            add_code(&mut responses, "429", "rate_limit_exceeded");
+        }
+        "post_incoming_webhook" => {
+            add_code(&mut responses, "400", "invalid_json");
+            add_code(&mut responses, "402", "workspace_read_only");
+            add_code(&mut responses, "403", "chat_channel_archived");
+            add_code(&mut responses, "404", "webhook_not_found");
+            add_code(&mut responses, "413", "payload_too_large");
+            add_code(&mut responses, "415", "unsupported_media_type");
+            add_code(&mut responses, "422", "validation_failed");
+            add_code(&mut responses, "429", "rate_limit_exceeded");
         }
         "github_webhook" => {
             add_code(&mut responses, "401", "invalid_github_signature");
@@ -712,6 +1007,7 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             add_code(&mut responses, "409", "workspace_conflict");
             add_code(&mut responses, "409", "email_not_configured");
             add_code(&mut responses, "422", "invalid_email");
+            add_code(&mut responses, "422", "invalid_guest_channels");
             add_code(&mut responses, "502", "email_failed");
         }
         "get_instance_settings" | "remove_smtp" | "get_job_limits" => {
@@ -818,7 +1114,7 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             add_code(&mut responses, "422", "invalid_email");
             add_code(&mut responses, "422", "same_email");
         }
-        "list_admin_users" => {
+        "list_admin_users" | "get_admin_user_summary" => {
             add_code(&mut responses, "403", "installation_admin_required");
         }
         "list_global_audit" | "export_global_audit" => {
@@ -844,6 +1140,7 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
                 add_code(&mut responses, "404", "item_not_found");
                 add_code(&mut responses, "409", "project_missing");
                 add_code(&mut responses, "409", "teamspace_missing");
+                add_code(&mut responses, "409", "database_row_limit");
                 add_code(&mut responses, "413", "storage_quota_exceeded");
             }
         }
@@ -889,9 +1186,22 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             add_code(&mut responses, "413", "export_too_large");
         }
         id if notion_import_operation(id) => notion_import_errors(id, &mut responses),
+        id if asana_import_operation(id) => asana_import_errors(id, &mut responses),
+        id if linear_import_operation(id) => linear_import_errors(id, &mut responses),
+        id if trello_import_operation(id) => trello_import_errors(id, &mut responses),
+        id if obsidian_import_operation(id) => obsidian_import_errors(id, &mut responses),
+        "list_import_people" | "update_import_person" => {
+            add_code(&mut responses, "403", "workspace_action_forbidden");
+            add_code(&mut responses, "404", "import_person_not_found");
+            if operation_id == "update_import_person" {
+                add_code(&mut responses, "422", "validation_failed");
+            }
+        }
+        id if orbit_import_operation(id) => orbit_import_errors(id, &mut responses),
         id if task_operation(id) => task_errors(id, &mut responses),
         id if page_comment_operation(id) => page_comment_errors(id, &mut responses),
         id if page_operation(id) => page_errors(id, &mut responses),
+        id if database_operation(id) => database_errors(id, &mut responses),
         id if teamspace_operation(id) => teamspace_errors(id, &mut responses),
         id if id.contains("chat") => chat_errors(id, &mut responses),
         id if id.contains("mail_domain") => mail_domain_errors(id, &mut responses),
@@ -911,6 +1221,8 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             | "create_page"
             | "duplicate_page"
             | "restore_page"
+            | "create_database_row"
+            | "submit_database_form"
             | "create_invitation"
     ) {
         add_code(&mut responses, "402", "trial_limit_reached");
@@ -953,6 +1265,7 @@ fn invalid_request_operation(operation_id: &str) -> bool {
             | "update_me"
             | "put_status"
             | "create_push_subscription"
+            | "create_apns_device"
             | "put_notification_preferences"
             | "put_shortcuts"
             | "change_password"
@@ -1021,6 +1334,10 @@ fn invalid_request_operation(operation_id: &str) -> bool {
             | "delete_task"
             | "restore_task"
             | "list_task_trash"
+            | "get_trashed_task"
+            | "purge_task"
+            | "get_trashed_project"
+            | "list_trashed_project_tasks"
             | "list_comments"
             | "create_comment"
             | "update_comment"
@@ -1052,6 +1369,21 @@ fn invalid_request_operation(operation_id: &str) -> bool {
             | "create_notion_import"
             | "get_notion_import"
             | "start_notion_import"
+            | "create_asana_import"
+            | "get_asana_import"
+            | "start_asana_import"
+            | "create_linear_import"
+            | "get_linear_import"
+            | "start_linear_import"
+            | "create_trello_import"
+            | "get_trello_import"
+            | "start_trello_import"
+            | "get_obsidian_import"
+            | "start_obsidian_import"
+            | "update_import_person"
+            | "create_orbit_import"
+            | "get_orbit_import"
+            | "start_orbit_import"
     )
 }
 
@@ -1091,6 +1423,184 @@ fn notion_import_errors(
     }
 }
 
+fn asana_import_operation(operation_id: &str) -> bool {
+    matches!(
+        operation_id,
+        "create_asana_import"
+            | "list_asana_imports"
+            | "get_asana_import"
+            | "start_asana_import"
+            | "cancel_asana_import"
+    )
+}
+
+fn asana_import_errors(
+    operation_id: &str,
+    responses: &mut BTreeMap<&'static str, Vec<&'static str>>,
+) {
+    add_code(responses, "404", "asana_import_not_found");
+    match operation_id {
+        "create_asana_import" => {
+            add_code(responses, "409", "app_key_missing");
+            add_code(responses, "409", "import_in_progress");
+            add_code(responses, "422", "asana_token_invalid");
+            add_code(responses, "502", "asana_unavailable");
+        }
+        "start_asana_import" => {
+            add_code(responses, "409", "import_in_progress");
+            add_code(responses, "409", "asana_import_state_conflict");
+            add_code(responses, "422", "validation_failed");
+        }
+        "cancel_asana_import" => add_code(responses, "409", "asana_import_state_conflict"),
+        _ => {}
+    }
+}
+
+fn linear_import_operation(operation_id: &str) -> bool {
+    matches!(
+        operation_id,
+        "create_linear_import"
+            | "list_linear_imports"
+            | "get_linear_import"
+            | "start_linear_import"
+            | "cancel_linear_import"
+    )
+}
+
+fn linear_import_errors(
+    operation_id: &str,
+    responses: &mut BTreeMap<&'static str, Vec<&'static str>>,
+) {
+    add_code(responses, "404", "linear_import_not_found");
+    match operation_id {
+        "create_linear_import" => {
+            add_code(responses, "409", "app_key_missing");
+            add_code(responses, "409", "import_in_progress");
+            add_code(responses, "422", "linear_token_invalid");
+            add_code(responses, "502", "linear_unavailable");
+        }
+        "start_linear_import" => {
+            add_code(responses, "409", "import_in_progress");
+            add_code(responses, "409", "linear_import_state_conflict");
+            add_code(responses, "422", "validation_failed");
+        }
+        "cancel_linear_import" => add_code(responses, "409", "linear_import_state_conflict"),
+        _ => {}
+    }
+}
+
+fn obsidian_import_operation(operation_id: &str) -> bool {
+    matches!(
+        operation_id,
+        "create_obsidian_import"
+            | "list_obsidian_imports"
+            | "get_obsidian_import"
+            | "start_obsidian_import"
+            | "cancel_obsidian_import"
+    )
+}
+
+fn obsidian_import_errors(
+    operation_id: &str,
+    responses: &mut BTreeMap<&'static str, Vec<&'static str>>,
+) {
+    add_code(responses, "404", "obsidian_import_not_found");
+    match operation_id {
+        "create_obsidian_import" => {
+            add_code(responses, "409", "import_in_progress");
+            add_code(responses, "413", "obsidian_archive_too_large");
+            add_code(responses, "422", "obsidian_archive_invalid");
+        }
+        "start_obsidian_import" => {
+            add_code(responses, "404", "page_not_found");
+            add_code(responses, "404", "teamspace_not_found");
+            add_code(responses, "409", "import_in_progress");
+            add_code(responses, "409", "obsidian_import_state_conflict");
+            add_code(responses, "422", "validation_failed");
+            add_code(responses, "422", "obsidian_import_too_large");
+        }
+        "cancel_obsidian_import" => add_code(responses, "409", "obsidian_import_state_conflict"),
+        _ => {}
+    }
+}
+
+fn orbit_import_operation(operation_id: &str) -> bool {
+    matches!(
+        operation_id,
+        "create_orbit_import"
+            | "upload_orbit_import"
+            | "list_orbit_imports"
+            | "get_orbit_import"
+            | "start_orbit_import"
+            | "cancel_orbit_import"
+    )
+}
+
+fn orbit_import_errors(
+    operation_id: &str,
+    responses: &mut BTreeMap<&'static str, Vec<&'static str>>,
+) {
+    add_code(responses, "404", "orbit_import_not_found");
+    match operation_id {
+        "create_orbit_import" => {
+            add_code(responses, "403", "forbidden");
+            add_code(responses, "409", "app_key_missing");
+            add_code(responses, "409", "import_in_progress");
+            add_code(responses, "422", "orbit_url_invalid");
+            add_code(responses, "422", "orbit_token_invalid");
+            add_code(responses, "422", "orbit_scope_missing");
+            add_code(responses, "502", "orbit_unreachable");
+        }
+        "upload_orbit_import" => {
+            add_code(responses, "409", "import_in_progress");
+            add_code(responses, "413", "orbit_export_too_large");
+            add_code(responses, "422", "orbit_format_unsupported");
+        }
+        "start_orbit_import" => {
+            add_code(responses, "403", "forbidden");
+            add_code(responses, "409", "import_in_progress");
+            add_code(responses, "409", "orbit_import_state_conflict");
+            add_code(responses, "422", "validation_failed");
+        }
+        "cancel_orbit_import" => add_code(responses, "409", "orbit_import_state_conflict"),
+        _ => {}
+    }
+}
+
+fn trello_import_operation(operation_id: &str) -> bool {
+    matches!(
+        operation_id,
+        "create_trello_import"
+            | "list_trello_imports"
+            | "get_trello_import"
+            | "start_trello_import"
+            | "cancel_trello_import"
+    )
+}
+
+fn trello_import_errors(
+    operation_id: &str,
+    responses: &mut BTreeMap<&'static str, Vec<&'static str>>,
+) {
+    add_code(responses, "404", "trello_import_not_found");
+    match operation_id {
+        "create_trello_import" => {
+            add_code(responses, "409", "app_key_missing");
+            add_code(responses, "409", "import_in_progress");
+            add_code(responses, "422", "trello_key_invalid");
+            add_code(responses, "422", "trello_token_invalid");
+            add_code(responses, "502", "trello_unavailable");
+        }
+        "start_trello_import" => {
+            add_code(responses, "409", "import_in_progress");
+            add_code(responses, "409", "trello_import_state_conflict");
+            add_code(responses, "422", "validation_failed");
+        }
+        "cancel_trello_import" => add_code(responses, "409", "trello_import_state_conflict"),
+        _ => {}
+    }
+}
+
 fn workspace_resource_errors(responses: &mut BTreeMap<&'static str, Vec<&'static str>>) {
     add_code(responses, "403", "workspace_action_forbidden");
     add_code(responses, "404", "workspace_resource_not_found");
@@ -1125,6 +1635,12 @@ fn task_operation(operation_id: &str) -> bool {
             | "delete_project"
             | "restore_project"
             | "list_project_trash"
+            | "purge_project"
+            | "empty_task_trash"
+            | "get_trashed_project"
+            | "list_trashed_project_tasks"
+            | "get_trashed_task"
+            | "purge_task"
             | "list_statuses"
             | "create_status"
             | "update_status"
@@ -1167,6 +1683,7 @@ fn task_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec<&'
             | "list_tasks"
             | "query_tasks"
             | "list_task_trash"
+            | "list_trashed_project_tasks"
             | "list_comments"
     ) {
         add_code(responses, "400", "invalid_cursor");
@@ -1242,6 +1759,18 @@ fn task_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec<&'
     if matches!(operation_id, "update_comment" | "delete_comment") {
         add_code(responses, "403", "task_action_forbidden");
     }
+    if matches!(
+        operation_id,
+        "purge_project" | "empty_task_trash" | "purge_task"
+    ) {
+        add_code(responses, "403", "task_action_forbidden");
+    }
+    if operation_id == "purge_task" {
+        add_code(responses, "409", "task_not_trashed");
+    }
+    if operation_id == "purge_project" {
+        add_code(responses, "409", "project_not_trashed");
+    }
 }
 
 fn view_operation(operation_id: &str) -> bool {
@@ -1292,11 +1821,13 @@ fn page_operation(operation_id: &str) -> bool {
         "list_pages"
             | "create_page"
             | "get_page"
+            | "list_page_descendants"
             | "update_page"
             | "move_page"
             | "delete_page"
             | "restore_page"
             | "list_page_trash"
+            | "get_trashed_page"
             | "purge_page"
             | "empty_page_trash"
             | "duplicate_page"
@@ -1350,8 +1881,93 @@ fn page_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec<&'
     if matches!(operation_id, "update_page" | "restore_page_version") {
         add_code(responses, "423", "page_locked");
     }
+    if matches!(operation_id, "create_page" | "move_page") {
+        add_code(responses, "409", "database_in_database");
+    }
+    if operation_id == "restore_page" {
+        add_code(responses, "409", "database_trashed");
+    }
+    if matches!(
+        operation_id,
+        "restore_page" | "duplicate_page" | "create_page" | "move_page"
+    ) {
+        add_code(responses, "409", "database_row_limit");
+    }
     if operation_id == "list_recent_pages" {
         add_code(responses, "422", "validation_failed");
+    }
+}
+
+fn database_operation(operation_id: &str) -> bool {
+    matches!(
+        operation_id,
+        "get_database"
+            | "create_database_property"
+            | "update_database_property"
+            | "delete_database_property"
+            | "create_database_view"
+            | "update_database_view"
+            | "delete_database_view"
+            | "create_database_row"
+            | "update_database_row_values"
+            | "trash_database_rows"
+            | "move_database_row"
+            | "import_database_csv"
+            | "create_database_from_csv"
+            | "submit_database_form"
+            | "create_database_template"
+            | "update_database_template"
+            | "delete_database_template"
+    )
+}
+
+fn database_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec<&'static str>>) {
+    add_code(responses, "404", "page_not_found");
+    if operation_id == "get_database" {
+        return;
+    }
+    add_code(responses, "400", "invalid_request");
+    add_code(responses, "402", "workspace_read_only");
+    add_code(responses, "422", "validation_failed");
+    if operation_id.contains("property") || operation_id.contains("view") {
+        add_code(responses, "423", "page_locked");
+    }
+    if matches!(
+        operation_id,
+        "update_database_property" | "delete_database_property"
+    ) {
+        add_code(responses, "404", "database_property_not_found");
+        add_code(responses, "409", "database_title_property");
+    }
+    if matches!(
+        operation_id,
+        "update_database_view" | "delete_database_view"
+    ) {
+        add_code(responses, "404", "database_view_not_found");
+    }
+    match operation_id {
+        "create_database_property" => add_code(responses, "409", "database_property_limit"),
+        "create_database_view" => add_code(responses, "409", "database_view_limit"),
+        "delete_database_view" => add_code(responses, "409", "database_last_view"),
+        "create_database_row" => add_code(responses, "409", "database_row_limit"),
+        "create_database_template" => add_code(responses, "409", "database_template_limit"),
+        "update_database_template" | "delete_database_template" => {
+            add_code(responses, "404", "database_template_not_found");
+        }
+        "import_database_csv" => {
+            add_code(responses, "409", "database_row_limit");
+            add_code(responses, "409", "database_property_limit");
+            add_code(responses, "413", "request_too_large");
+            add_code(responses, "423", "page_locked");
+        }
+        "create_database_from_csv" => add_code(responses, "413", "request_too_large"),
+        "submit_database_form" => {
+            add_code(responses, "404", "database_view_not_found");
+            add_code(responses, "409", "database_form_closed");
+            add_code(responses, "409", "database_row_limit");
+            add_code(responses, "429", "database_form_rate_limited");
+        }
+        _ => {}
     }
 }
 
@@ -1432,6 +2048,37 @@ fn chat_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec<&'
     }
     if matches!(operation_id, "delete_chat_emoji" | "delete_chat_sticker") {
         add_code(responses, "403", "chat_forbidden");
+        return;
+    }
+    if operation_id == "click_chat_action" {
+        add_code(responses, "403", "chat_forbidden");
+        add_code(responses, "422", "validation_failed");
+        add_code(responses, "409", "chat_conflict");
+        add_code(responses, "502", "integration_failed");
+        add_code(responses, "503", "app_key_missing");
+        return;
+    }
+    if matches!(
+        operation_id,
+        "set_chat_webhook_interactivity"
+            | "get_chat_webhook_signing_secret"
+            | "rotate_chat_webhook_signing_secret"
+            | "list_chat_webhook_deliveries"
+    ) {
+        add_code(responses, "403", "chat_forbidden");
+        add_code(responses, "409", "chat_conflict");
+        add_code(responses, "422", "validation_failed");
+        add_code(responses, "503", "app_key_missing");
+        return;
+    }
+    if operation_id.ends_with("_chat_webhook") || operation_id == "list_chat_webhooks" {
+        add_code(responses, "403", "chat_forbidden");
+        if matches!(operation_id, "create_chat_webhook" | "update_chat_webhook") {
+            add_code(responses, "422", "validation_failed");
+        }
+        if operation_id == "create_chat_webhook" {
+            add_code(responses, "409", "chat_conflict");
+        }
         return;
     }
     if !operation_id.starts_with("list_") {

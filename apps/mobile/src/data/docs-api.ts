@@ -12,31 +12,41 @@ import {
   deleteTeamspace,
   duplicatePage,
   emptyPageTrash,
+  getTrashedPage,
+  listPageDescendants,
   listPageFavorites,
   listPageThreads,
   listPageTrash,
+  listRecentPages,
+  movePage,
   moveTeamspace,
   purgePage,
   removePageFavorite,
   restorePage,
+  searchPages,
   socketTicket,
   updatePage,
   updateTeamspace,
   uploadPageFile,
 } from '@orbit/api/generated/sdk.gen'
-import type { CreatePageBody, PageThread, PageUpdateBody, TrashedPage } from '@orbit/api/generated/types.gen'
+import type { CreatePageBody, PageFavorite, PageSearchResult, PageThread, PageUpdateBody, RecentPage, TrashedPage, TrashedPageDetail } from '@orbit/api/generated/types.gen'
 import type { TicketResult } from '@orbit/editor/collab/ticketSocket'
 
 import { multipart, type UploadFile } from './account-api'
+import type { MoveRequest } from './docs'
 import type { OrbitClient, Page, PageSummary, Teamspace } from './orbit'
 
-export type { PageThread, TrashedPage }
+export type { PageSearchResult, PageThread, RecentPage, TrashedPage, TrashedPageDetail }
 
 /** Under the `pages` and `page` prefixes, so the workspace events socket refreshes them with the tree. */
 export const docsKeys = {
   favorites: (workspaceId: string) => ['pages', workspaceId, 'favorites'] as const,
+  search: (workspaceId: string, q: string) => ['pages', workspaceId, 'search', q] as const,
+  recent: (workspaceId: string) => ['pages', workspaceId, 'recent'] as const,
   trash: (workspaceId: string) => ['pages', workspaceId, 'trash'] as const,
   threads: (workspaceId: string, pageId: string) => ['page', workspaceId, pageId, 'threads'] as const,
+  /** Outside those prefixes: a restore or a purge must not refetch the preview it is leaving (a 404). */
+  trashedPage: (workspaceId: string, pageId: string) => ['trashed-page', workspaceId, pageId] as const,
 }
 
 const pagePath = (workspaceId: string, pageId: string) => ({ workspace_id: workspaceId, page_id: pageId })
@@ -106,10 +116,35 @@ export async function fileDataUrl(server: string, token: string, url: string): P
   }
 }
 
-/** The favorite page ids, in the user's order. */
-export async function favorites(client: OrbitClient, workspaceId: string): Promise<string[]> {
+/** The page's live sub-pages at any depth (a database row's too: rows are not in the tree). */
+export async function descendants(client: OrbitClient, workspaceId: string, pageId: string): Promise<PageSummary[]> {
+  const { data } = await listPageDescendants({ client, path: pagePath(workspaceId, pageId), throwOnError: true })
+  return data.items
+}
+
+/**
+ * Moves the page (and its sub-pages) under `request`. With `dryRun` the server only counts the property values the
+ * move would delete (a row leaving its database, or entering one without the same properties) and changes nothing.
+ */
+export async function movePageTo(client: OrbitClient, workspaceId: string, page: Pick<Page, 'id' | 'version'>, request: MoveRequest, dryRun = false): Promise<number> {
+  const body = { ...request, expected_version: page.version, ...(dryRun ? { dry_run: true } : {}) }
+  return (await movePage({ client, path: pagePath(workspaceId, page.id), body, throwOnError: true })).data.dropped_values
+}
+
+/** Server title, body and property-value search (best match first); `q` is at most 200 characters. */
+export async function search(client: OrbitClient, workspaceId: string, q: string): Promise<PageSearchResult[]> {
+  return (await searchPages({ client, path: { workspace_id: workspaceId }, query: { q }, throwOnError: true })).data.items
+}
+
+/** The pages the user opened last, latest first. */
+export async function recentPages(client: OrbitClient, workspaceId: string): Promise<RecentPage[]> {
+  return (await listRecentPages({ client, path: { workspace_id: workspaceId }, throwOnError: true })).data.items
+}
+
+/** The favorites with what the list shows of each page, in the user's order. */
+export async function favorites(client: OrbitClient, workspaceId: string): Promise<PageFavorite[]> {
   const { data } = await listPageFavorites({ client, path: { workspace_id: workspaceId }, throwOnError: true })
-  return [...data.items].sort((a, b) => a.position - b.position).map((item) => item.page_id)
+  return [...data.items].sort((a, b) => a.position - b.position)
 }
 
 export async function setFavorite(client: OrbitClient, workspaceId: string, pageId: string, favorite: boolean): Promise<void> {
@@ -127,6 +162,11 @@ export async function trashPage(client: OrbitClient, workspaceId: string, page: 
 export async function trash(client: OrbitClient, workspaceId: string): Promise<TrashedPage[]> {
   const { data } = await listPageTrash({ client, path: { workspace_id: workspaceId }, throwOnError: true })
   return [...data.items].sort((a, b) => b.deleted_at.localeCompare(a.deleted_at))
+}
+
+/** A trashed page with its content and the sub-pages trashed with it, for the read-only preview. */
+export async function trashedPage(client: OrbitClient, workspaceId: string, pageId: string): Promise<TrashedPageDetail> {
+  return (await getTrashedPage({ client, path: pagePath(workspaceId, pageId), throwOnError: true })).data
 }
 
 export async function restoreFromTrash(client: OrbitClient, workspaceId: string, page: Pick<TrashedPage, 'id' | 'version'>): Promise<Page> {

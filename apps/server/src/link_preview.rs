@@ -438,7 +438,7 @@ struct FxFormat {
     container: Option<String>,
 }
 
-/// The host of X's videos. The web client may play media of this host only (CSP `media-src`).
+/// The host of X's videos. Chat plays an `mp4` from this host.
 const X_VIDEO_HOST: &str = "video.twimg.com";
 /// About 720p. A chat card needs no more.
 const MAX_VIDEO_BITRATE: u64 = 2_500_000;

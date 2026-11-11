@@ -1210,6 +1210,54 @@ async fn bulk_updates_and_reorders_are_atomic() {
 }
 
 #[tokio::test]
+async fn bulk_updates_show_in_each_tasks_activity_and_reorders_do_not() {
+    let fixture = Fixture::new().await;
+    let task = fixture.create_task("Dragged to another column").await;
+    let todo: String =
+        sqlx::query_scalar("SELECT id FROM task_statuses WHERE project_id = $1 AND name = 'Todo'")
+            .bind(&fixture.project_id)
+            .fetch_one(fixture.database.pool())
+            .await
+            .unwrap();
+    let workspace = &fixture.workspace_id;
+    let (status, _) = call(
+        &fixture,
+        "POST",
+        &format!("/api/v1/workspaces/{workspace}/tasks/bulk"),
+        Some(json!({"updates":[{"id":task["id"], "expected_version":0, "status_id":todo, "position":5}]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = call(
+        &fixture,
+        "POST",
+        &format!("/api/v1/workspaces/{workspace}/tasks/reorder"),
+        Some(json!({"items":[{"id":task["id"], "expected_version":1, "position":9}]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (_, page) = call(
+        &fixture,
+        "GET",
+        &format!("{}/activity", task_uri(&fixture, id_of(&task))),
+        None,
+    )
+    .await;
+    let updates: Vec<_> = page["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|event| event["action"] == "task.updated")
+        .map(|event| event["metadata"]["changes"].clone())
+        .collect();
+    assert_eq!(
+        updates,
+        vec![json!({"status": {"from": fixture.status_id, "to": todo}})]
+    );
+}
+
+#[tokio::test]
 async fn project_deletion_hides_children_and_trash_expires_after_thirty_days() {
     let fixture = Fixture::new().await;
     let task = fixture.create_task("Hidden child").await;
@@ -7299,6 +7347,12 @@ async fn markdown_comment_body_still_works() {
     assert_eq!(status, StatusCode::CREATED, "{comment}");
     assert_eq!(comment["body"], "plain");
     assert_eq!(comment["body_json"][0]["content"][0]["text"], "plain");
+
+    // API and MCP clients get the same trim as the editor: no empty lines around the text.
+    let (status, comment) = post_comment(&fixture, &task, json!({"body": "\n\n  plain\n\n"})).await;
+    assert_eq!(status, StatusCode::CREATED, "{comment}");
+    assert_eq!(comment["body"], "plain");
+    assert_eq!(comment["body_json"].as_array().map(Vec::len), Some(1));
 }
 
 #[tokio::test]

@@ -3,7 +3,7 @@ import { alpha, mix } from './color'
 
 /**
  * Settings → Appearance → Custom: a personal colour theme, the web's `lib/customTheme.ts`. Four colours, and every
- * text colour is derived so that it stays readable. In the new UI it colours the whole app; in the classic layout, chat.
+ * text colour is derived so that it stays readable. It colours the whole app.
  */
 export interface CustomTheme {
   /** The sidebar (drawer) background. */

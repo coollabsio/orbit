@@ -1,24 +1,43 @@
 import { useState } from 'react'
-import { Share, View } from 'react-native'
+import { Pressable, Share, View } from 'react-native'
 import { TextInput } from '../../../ui/scaled'
 
+import { ListPager, usePagedList } from '../../../components/settings/ListPager'
 import { ActionSheet, ConfirmDialog, type ConfirmRequest, type SheetAction } from '../../../components/settings/Dialog'
-import { ProfilePicture } from '../../../components/settings/ProfilePicture'
-import { Badge, Note, RowText, Segmented, SettingsCard, SettingsRow, SettingsShell, WORKSPACE_NAV } from '../../../components/settings/Shell'
-import { filterMembers, type MemberAction, memberActions, roleLabel } from '../../../data/account-api'
+import { Badge, FieldLabel, InitialAvatar, Note, RowText, Select, SettingsCard, SettingsRow, SettingsShell, SmallOutlineButton, WORKSPACE_NAV } from '../../../components/settings/Shell'
+import { filterMembers, type InviteRole, invitationProblem, type MemberAction, memberActions, roleLabel } from '../../../data/account-api'
 import { shortDate } from '../../../data/format'
 import type { MemberRecord } from '../../../data/orbit'
 import { useAuthOptions, useInvitations, useMemberWrites } from '../../../hooks/account'
 import { useOrbit } from '../../../orbit-context'
-import { useMembers } from '../../../queries'
+import { useConversations, useMembers } from '../../../queries'
 import { errorMessage } from '../../../session-context'
 import { alpha, useTheme } from '../../../theme'
-import { Button, Icon, IconButton, Input } from '../../../ui'
+import { Button, Icon, IconButton, Input, Text, LabelTip } from '../../../ui'
 
 const INVITE_ROLES = [
-  { value: 'member', label: 'Member' },
   { value: 'admin', label: 'Admin' },
+  { value: 'member', label: 'Member' },
+  { value: 'guest', label: 'Guest' },
 ] as const
+
+type Sort = 'name_asc' | 'name_desc' | 'email_asc' | 'role'
+const ROLE_FILTERS = [{ value: 'all', label: 'All roles' }, ...['owner', 'admin', 'member', 'guest'].map((role) => ({ value: role, label: roleLabel(role) }))]
+const SORTS: { value: Sort; label: string }[] = [
+  { value: 'name_asc', label: 'Name A–Z' },
+  { value: 'name_desc', label: 'Name Z–A' },
+  { value: 'email_asc', label: 'Email A–Z' },
+  { value: 'role', label: 'Role' },
+]
+
+/** The web's role filter and sort over the searched members. */
+function sortedMembers(members: MemberRecord[], role: string, sort: Sort): MemberRecord[] {
+  const list = role === 'all' ? members : members.filter((member) => member.role === role)
+  if (sort === 'name_desc') return [...list].sort((a, b) => b.display_name.localeCompare(a.display_name))
+  if (sort === 'email_asc') return [...list].sort((a, b) => a.email.localeCompare(b.email))
+  if (sort === 'role') return [...list].sort((a, b) => a.role.localeCompare(b.role))
+  return list
+}
 
 /** The web's Members page: search, the members with their roles and Manage menu, then invitations. */
 export default function MembersScreen() {
@@ -30,7 +49,10 @@ export default function MembersScreen() {
   const [search, setSearch] = useState('')
   const [managing, setManaging] = useState<MemberRecord | null>(null)
   const [confirm, setConfirm] = useState<ConfirmRequest | null>(null)
-  const list = filterMembers(members.data ?? [], search)
+  const [roleFilter, setRoleFilter] = useState('all')
+  const [sort, setSort] = useState<Sort>('name_asc')
+  const list = sortedMembers(filterMembers(members.data ?? [], search), roleFilter, sort)
+  const { visible, pager, resetPage } = usePagedList(list)
   const writeError = [writes.changeRole, writes.remove, writes.transfer].find((write) => write.isError)?.error
 
   const run = (member: MemberRecord, action: MemberAction) => {
@@ -41,7 +63,7 @@ export default function MembersScreen() {
   }
   const sheet: SheetAction[] = managing
     ? memberActions(managing, user.id).map((action) => ({
-        label: action.kind === 'role' ? `Make ${action.role}` : action.kind === 'transfer' ? 'Transfer ownership' : 'Remove member',
+        label: action.kind === 'role' ? (managing.role === 'guest' ? 'Convert to member' : `Make ${action.role}`) : action.kind === 'transfer' ? 'Transfer ownership' : 'Remove member',
         icon: action.kind === 'role' ? 'userEdit' : action.kind === 'transfer' ? 'crown' : 'trash',
         destructive: action.kind === 'remove',
         onPress: () => run(managing, action),
@@ -49,9 +71,9 @@ export default function MembersScreen() {
     : []
 
   return (
-    <SettingsShell title="Settings" nav={WORKSPACE_NAV} refreshing={members.isRefetching} onRefresh={() => void members.refetch()}>
+    <SettingsShell title="Settings" nav={WORKSPACE_NAV} onRefresh={() => members.refetch()}>
       <SettingsCard title="Members" flush>
-        <View className="p-3 border-b border-border">
+        <View className="p-3 gap-2 border-b border-border">
           <View className="h-8 flex-row items-center gap-2 px-2.5 rounded-lg border border-input">
             <Icon name="search" size={14} color={alpha(colors.mutedForeground, 0.7)} />
             <TextInput
@@ -59,37 +81,49 @@ export default function MembersScreen() {
               placeholder="Search members"
               placeholderTextColor={colors.mutedForeground}
               value={search}
-              onChangeText={setSearch}
+              onChangeText={(text) => {
+                setSearch(text)
+                resetPage()
+              }}
               autoCapitalize="none"
               autoCorrect={false}
               className="font-noto text-[14px] leading-[1.45] flex-1 py-0 text-foreground"
             />
             {search ? <IconButton icon="close" label="Clear search" size={22} iconSize={12} color={colors.mutedForeground} onPress={() => setSearch('')} /> : null}
           </View>
+          <Select label="Filter by role" value={roleFilter} options={ROLE_FILTERS} onChange={(value) => { setRoleFilter(value); resetPage() }} />
+          <Select label="Sort members" value={sort} options={SORTS} onChange={(value) => { setSort(value); resetPage() }} />
         </View>
-        {members.isPending ? <View className="p-4"><Note>Loading workspace members…</Note></View> : null}
+        {members.isPending ? <View className="p-4"><Note loading>Loading workspace members…</Note></View> : null}
         {members.isError ? <View className="p-4"><Note error>Workspace members could not be loaded.</Note></View> : null}
         {members.data && list.length === 0 ? <View className="p-4"><Note>No matching members. Try a different name, email address, or role.</Note></View> : null}
-        {list.map((member, index) => {
+        {visible.length > 0 ? (
+          // the web's member table at phone width: Name, Role and Actions (the email column hides)
+          <View className="h-10 flex-row items-center gap-4 px-4 border-b border-muted bg-foreground/[0.02]">
+            <Text className="flex-1 font-noto-medium text-[13px] text-muted-foreground">Name</Text>
+            <Text className="font-noto-medium text-[13px] text-muted-foreground">Role</Text>
+            <Text className="font-noto-medium text-[13px] text-muted-foreground text-right">Actions</Text>
+          </View>
+        ) : null}
+        {visible.map((member) => {
           const actions = memberActions(member, user.id)
           return (
-            <SettingsRow key={member.id} first={index === 0}>
-              <ProfilePicture id={member.user_id} name={member.display_name} url={member.avatar_url} size={28} />
-              <RowText
-                title={member.display_name}
-                subtitle={member.email}
-                badges={
-                  <>
-                    {member.user_id === user.id ? <Badge label="You" /> : null}
-                    {member.suspended_at ? <Badge label="Suspended" tone="destructive" /> : null}
-                  </>
-                }
-              />
+            <View key={member.id} className="min-h-12 flex-row items-center gap-4 px-4 py-2.5 border-b border-border">
+              <View className="flex-1 min-w-0 flex-row items-center gap-2">
+                {/* the web's initial avatar; the app knows only your own presence (the web's comes over its socket) */}
+                <InitialAvatar name={member.display_name || member.email} size={28} presence={member.user_id === user.id ? user.status.presence : undefined} />
+                <Text numberOfLines={1} className="shrink font-noto-medium text-[13px] text-foreground">
+                  {member.display_name}
+                </Text>
+                {member.user_id === user.id ? <Badge label="You" /> : null}
+                {member.suspended_at ? <Badge label="Suspended" tone="destructive" /> : null}
+              </View>
               <Badge label={roleLabel(member.role)} tone="secondary" />
-              {actions.length > 0 ? <Button label="Manage" size="sm" variant="outline" onPress={() => setManaging(member)} /> : null}
-            </SettingsRow>
+              {actions.length > 0 ? <SmallOutlineButton label="Manage" accessibilityLabel={`Manage ${member.display_name}`} onPress={() => setManaging(member)} /> : null}
+            </View>
           )
         })}
+        {list.length > 0 ? <ListPager {...pager} /> : null}
         {writeError ? <View className="p-4"><Note error>{errorMessage(writeError)}</Note></View> : null}
       </SettingsCard>
 
@@ -102,22 +136,29 @@ export default function MembersScreen() {
   )
 }
 
+/** The web's `outline` `icon-sm` pager button. */
 function Invite() {
   const { invite } = useMemberWrites()
   const emailEnabled = useAuthOptions().data?.email_enabled ?? false
   const [email, setEmail] = useState('')
-  const [role, setRole] = useState<'member' | 'admin'>('member')
-  const [link, setLink] = useState<string | null>(null)
+  const [role, setRole] = useState<InviteRole>('member')
+  const [channelIds, setChannelIds] = useState<string[]>([])
+  const [problem, setProblem] = useState<string | null>(null)
+  // The role is the one the link was issued with, not the role picked since.
+  const [link, setLink] = useState<{ url: string; role: InviteRole } | null>(null)
   const [sent, setSent] = useState<string | null>(null)
   const send = (delivery: 'manual' | 'smtp') => {
     const address = email.trim()
     if (!address) return
     setSent(null)
+    const reason = invitationProblem(role, channelIds)
+    setProblem(reason)
+    if (reason) return
     invite.mutate(
-      { email: address, role, delivery },
+      { email: address, role, channelIds, delivery },
       {
         onSuccess: ({ url }) => {
-          if (delivery === 'manual') setLink(url)
+          if (delivery === 'manual') setLink(url ? { url, role } : null)
           else {
             setLink(null)
             setEmail('')
@@ -133,20 +174,25 @@ function Invite() {
       description="Create a reusable invitation link or deliver it by email."
       actions={
         <>
-          <Button label="Send email" icon="bell" variant="outline" disabled={!emailEnabled || invite.isPending || !email.trim()} onPress={() => send('smtp')} />
-          <Button label="Generate link" icon="plus" disabled={invite.isPending || !email.trim()} onPress={() => send('manual')} />
+          <Button label="Send email" icon="inbox" variant="outline" disabled={!emailEnabled || invite.isPending} onPress={() => send('smtp')} />
+          <Button label="Generate link" icon="plus" disabled={invite.isPending} onPress={() => send('manual')} />
         </>
       }
     >
       <View className="gap-4">
         <Input label="Email address" required value={email} onChangeText={setEmail} placeholder="teammate@example.com" keyboardType="email-address" autoCapitalize="none" autoCorrect={false} autoComplete="email" />
-        <Segmented label="Role" value={role} options={INVITE_ROLES} onChange={setRole} />
+        <View className="gap-2">
+          <FieldLabel>Role</FieldLabel>
+          <Select label="Role" value={role} options={INVITE_ROLES} onChange={setRole} />
+        </View>
+        {role === 'guest' ? <GuestChannels value={channelIds} onChange={setChannelIds} /> : null}
+        {problem ? <Note error>{problem}</Note> : null}
         {!emailEnabled ? <Note>Email delivery is not configured. Share the invitation link instead.</Note> : null}
         {link ? (
           <View className="gap-2">
-            <Input label={`Invitation link (${roleLabel(role)})`} value={link} editable={false} selectTextOnFocus />
+            <Input label={`Invitation link (${roleLabel(link.role)})`} value={link.url} editable={false} selectTextOnFocus />
             <View className="flex-row">
-              <Button label="Share link" icon="send" variant="outline" onPress={() => void Share.share({ message: link })} />
+              <Button label="Share link" icon="send" variant="outline" onPress={() => void Share.share({ message: link.url })} />
             </View>
           </View>
         ) : null}
@@ -157,14 +203,53 @@ function Invite() {
   )
 }
 
+/** The private channels a guest joins: the open private channels the admin is in. */
+function GuestChannels({ value, onChange }: { value: readonly string[]; onChange: (ids: string[]) => void }) {
+  const { colors } = useTheme()
+  const conversations = useConversations()
+  const channels = (conversations.data ?? [])
+    .filter((conversation) => conversation.kind === 'private' && !conversation.archived)
+    .sort((a, b) => a.name.localeCompare(b.name))
+  return (
+    <View className="gap-1.5">
+      <LabelTip label="Channels" text="A guest sees only these private channels and the people in them." />
+      {conversations.isPending ? <Note>Loading channels…</Note> : null}
+      {conversations.isError && !conversations.data ? (
+        <View className="flex-row items-center gap-2">
+          <Note error>Channels could not be loaded.</Note>
+          <Button label="Retry" variant="outline" size="sm" disabled={conversations.isFetching} onPress={() => void conversations.refetch()} />
+        </View>
+      ) : null}
+      {conversations.data && channels.length === 0 ? <Note>You are in no private channel. Make one in Chat first.</Note> : null}
+      {channels.map((channel) => {
+        const checked = value.includes(channel.id)
+        return (
+          <Pressable
+            key={channel.id}
+            accessibilityRole="checkbox"
+            accessibilityState={{ checked }}
+            accessibilityLabel={channel.name}
+            onPress={() => onChange(checked ? value.filter((id) => id !== channel.id) : [...value, channel.id])}
+            className="h-10 flex-row items-center gap-2 rounded-md border border-border px-3 active:bg-muted"
+          >
+            <Icon name={checked ? 'checkCircle' : 'circle'} size={18} color={checked ? colors.primary : colors.mutedForeground} />
+            <Icon name="lock" size={14} color={colors.mutedForeground} />
+            <Text numberOfLines={1} className="flex-1 text-[14px]">{channel.name}</Text>
+          </Pressable>
+        )
+      })}
+    </View>
+  )
+}
+
 function PendingInvitations() {
   const invitations = useInvitations(true)
   const { revokeInvitation } = useMemberWrites()
-  if (invitations.isPending) return <SettingsCard title="Pending invitations"><Note>Loading invitations…</Note></SettingsCard>
+  if (invitations.isPending) return <SettingsCard title="Pending invitations"><Note loading>Loading invitations…</Note></SettingsCard>
   if (invitations.isError) return <SettingsCard title="Pending invitations"><Note error>Invitations could not be loaded.</Note></SettingsCard>
   if (invitations.data.length === 0) return null
   return (
-    <SettingsCard title="Pending invitations" description="Invitation links that have not been accepted." flush>
+    <SettingsCard title="Pending invitations" flush>
       {invitations.data.map((invitation, index) => (
         <SettingsRow key={invitation.id} first={index === 0}>
           <RowText title={invitation.email} subtitle={`Expires ${shortDate(invitation.expires_at)}`} />

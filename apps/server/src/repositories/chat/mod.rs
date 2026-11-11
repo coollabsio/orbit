@@ -11,13 +11,17 @@
 //! Each write returns the chat events it caused, with their audience, for the caller's response
 //! and for the live socket.
 
+mod blocks;
 mod conversations;
 mod emoji;
 mod files;
+mod interactions;
 mod messages;
 mod search;
+mod slack;
 mod state;
 mod stickers;
+mod webhooks;
 
 use std::collections::HashMap;
 
@@ -30,14 +34,24 @@ use thiserror::Error;
 use utoipa::ToSchema;
 
 use super::membership;
+use crate::live::NewEvent;
 pub use crate::live::Recipients;
 
-pub use conversations::{ChannelCreate, ChannelUpdate};
+pub use blocks::{BlocksError, MessageBlock, check_message_blocks, parse_blocks};
+pub use conversations::{
+    ChannelCreate, ChannelUpdate, MAX_GUEST_CHANNELS, join_invited_channels, require_guest_channels,
+};
 pub use emoji::{CustomEmojiImage, CustomEmojiRecord, EMOJI_MAX_BYTES};
+pub use interactions::{Click, ResponseTarget};
+pub use messages::BotPost;
 pub use messages::{ForwardInput, MessageCursor, SendInput};
 pub use search::{SearchHitRecord, SearchInput, SearchPage};
+pub use slack::{attachment_blocks, cut, emoji_name, mrkdwn_to_markdown};
 pub use state::{ConversationCursor, ReadSnapshot, StateUpdate, ThreadCursor};
 pub use stickers::{CustomStickerImage, CustomStickerRecord, STICKER_MAX_BYTES, StickerRecord};
+pub use webhooks::{
+    BotSender, DeliveryRecord, HookTarget, WebhookInput, WebhookRecord, WebhookWithSecret,
+};
 
 /// Characters in one message body.
 pub const MESSAGE_MAX_CHARS: usize = 4000;
@@ -248,6 +262,9 @@ pub struct ReplyToRecord {
     pub body: String,
     /// The quoted message has a sticker: a quote with no text says so.
     pub sticker: bool,
+    /// Set when an integration posted the quoted message: show it as the author.
+    #[schema(required = true)]
+    pub bot_name: Option<String>,
 }
 
 /// Characters of the quoted body in a [`ReplyToRecord`].
@@ -261,13 +278,14 @@ impl ReplyToRecord {
             author_id: target.author_id,
             body: target.body.chars().take(REPLY_TO_BODY_CHARS).collect(),
             sticker: target.sticker_id.is_some(),
+            bot_name: target.bot.as_ref().map(|bot| bot.name.clone()),
         })
     }
 }
 
 /// Where a forwarded message came from: the original message as it was when it was forwarded.
 /// The original may be gone, or in a conversation that the reader cannot open.
-#[derive(Clone, Copy, Debug, Serialize, ToSchema)]
+#[derive(Clone, Debug, Serialize, ToSchema)]
 pub struct ForwardedRecord {
     #[schema(value_type = String)]
     pub message_id: Id,
@@ -278,6 +296,26 @@ pub struct ForwardedRecord {
     /// When the original message was sent.
     #[schema(value_type = String, format = DateTime)]
     pub created_at: TimestampMillis,
+    /// Set when an integration posted the original: show it as the author.
+    #[schema(required = true)]
+    pub bot_name: Option<String>,
+}
+
+/// The integration that posted a message. `author_id` of such a message is the member who set the
+/// integration up; show this name and icon instead.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct BotRecord {
+    #[schema(value_type = String)]
+    pub webhook_id: Id,
+    pub name: String,
+    /// An https image, or null for the default bot avatar.
+    #[schema(required = true)]
+    pub icon_url: Option<String>,
+    /// An emoji name (`ghost`, without colons) shown as the avatar instead of `icon_url`.
+    #[schema(required = true)]
+    pub icon_emoji: Option<String>,
+    /// Its buttons without a `url` send clicks: the webhook is live and has a request URL.
+    pub interactive: bool,
 }
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
@@ -338,6 +376,13 @@ pub struct MessageRecord {
     /// Null when the message has no sticker, or the sticker is deleted.
     #[schema(required = true)]
     pub sticker: Option<StickerRecord>,
+    /// Set when an integration (an incoming webhook) posted the message. Nobody can edit it.
+    #[schema(required = true)]
+    pub bot: Option<BotRecord>,
+    /// Layout blocks that show as a card in place of `body`; `body` is then their plain text.
+    /// Only integrations post them.
+    #[schema(required = true)]
+    pub blocks: Option<Vec<MessageBlock>>,
     #[serde(skip)]
     pub(crate) last_reply_id: Option<Id>,
 }
@@ -346,6 +391,15 @@ impl MessageRecord {
     /// The message shows in the conversation's main list.
     fn in_main(&self) -> bool {
         self.thread_root_id.is_none() || self.also_in_channel
+    }
+
+    /// Who counts as the sender, whose own message is never unread and never mentions them: the
+    /// author, or for an integration's message the webhook, which is no member. So a webhook's
+    /// message is unread for everyone, also for the member who set the webhook up.
+    fn sender_id(&self) -> Id {
+        self.bot
+            .as_ref()
+            .map_or(self.author_id, |bot| bot.webhook_id)
     }
 }
 
@@ -449,6 +503,9 @@ pub enum ChatEvent {
     /// A custom sticker was added or deleted: read the list again.
     #[serde(rename = "stickers.changed")]
     StickersChanged,
+    /// An integration's reply that only this member sees, live; it is not stored.
+    #[serde(rename = "message.ephemeral")]
+    MessageEphemeral { message: MessageRecord },
 }
 
 /// Who an event is for, as the write that made it sees it.
@@ -471,6 +528,27 @@ pub struct Emitted {
     pub event: ChatEvent,
 }
 
+/// The topic of chat events on the live socket.
+const LIVE_TOPIC: &str = "chat";
+
+impl Emitted {
+    /// The event as the live socket numbers and sends it.
+    #[must_use]
+    pub fn live(&self) -> NewEvent {
+        live_event(self.recipients.clone(), &self.event)
+    }
+}
+
+/// A chat event for the live socket.
+#[must_use]
+pub fn live_event(recipients: Recipients, event: &ChatEvent) -> NewEvent {
+    NewEvent {
+        recipients,
+        topic: LIVE_TOPIC,
+        event: serde_json::to_value(event).unwrap_or_default(),
+    }
+}
+
 /// The result of a write and the events it caused.
 #[derive(Clone, Debug)]
 pub struct Written<T> {
@@ -488,12 +566,14 @@ pub struct Written<T> {
 }
 
 impl<T> Written<T> {
-    /// The events the caller itself sees.
+    /// The events the caller itself sees. Only managers write workspace-wide events (emoji,
+    /// stickers, categories) and guests only write in their own conversations, so the caller
+    /// counts as a member here.
     #[must_use]
     pub fn events_for(&self, user_id: Id) -> Vec<ChatEvent> {
         self.events
             .iter()
-            .filter(|emitted| emitted.recipients.includes(user_id))
+            .filter(|emitted| emitted.recipients.includes(user_id, false))
             .map(|emitted| emitted.event.clone())
             .collect()
     }
@@ -557,9 +637,25 @@ async fn finish<T>(
     events: Events,
     value: T,
 ) -> Result<Written<T>, ChatError> {
+    let emitted = resolve(&mut tx, events.events).await?;
+    tx.commit().await?;
+    Ok(Written {
+        value,
+        events: emitted,
+        counted: events.counted,
+        replied: events.replied,
+        inbox: events.inbox,
+    })
+}
+
+/// The audiences of `events` as user ids: the readers of each conversation as `conn` sees it.
+async fn resolve(
+    conn: &mut AnyConnection,
+    events: Vec<(Audience, ChatEvent)>,
+) -> Result<Vec<Emitted>, ChatError> {
     let mut members: HashMap<Id, (bool, Vec<Id>)> = HashMap::new();
-    let mut emitted = Vec::with_capacity(events.events.len());
-    for (audience, event) in events.events {
+    let mut emitted = Vec::with_capacity(events.len());
+    for (audience, event) in events {
         let recipients = match audience {
             Audience::Workspace => Recipients::Workspace,
             Audience::User(user_id) => Recipients::Users(vec![user_id]),
@@ -571,9 +667,9 @@ async fn finish<T>(
                             "SELECT kind = 'public' FROM chat_conversations WHERE id = $1",
                         )
                         .bind(id.to_string())
-                        .fetch_optional(&mut *tx)
+                        .fetch_optional(&mut *conn)
                         .await?;
-                        let users = member_ids(&mut tx, id).await?;
+                        let users = member_ids(&mut *conn, id).await?;
                         members
                             .entry(id)
                             .or_insert((public.is_some_and(|flag| flag.0), users))
@@ -588,14 +684,7 @@ async fn finish<T>(
         };
         emitted.push(Emitted { recipients, event });
     }
-    tx.commit().await?;
-    Ok(Written {
-        value,
-        events: emitted,
-        counted: events.counted,
-        replied: events.replied,
-        inbox: events.inbox,
-    })
+    Ok(emitted)
 }
 
 #[derive(Clone)]
@@ -739,13 +828,14 @@ impl Access {
     }
 }
 
-/// Non-members of the workspace and trashed workspaces are `NotFound`.
+/// Non-members of the workspace and trashed workspaces are `NotFound`. Guests pass: every
+/// conversation check below decides what a guest may see.
 async fn load_actor(
     conn: &mut AnyConnection,
     workspace_id: Id,
     user_id: Id,
 ) -> Result<Actor, ChatError> {
-    membership::actor(&mut *conn, workspace_id, user_id)
+    membership::chat_actor(&mut *conn, workspace_id, user_id)
         .await?
         .ok_or(ChatError::NotFound)
 }
@@ -784,7 +874,8 @@ async fn load_member(
     .transpose()
 }
 
-/// A private channel or DM that the caller is not in does not exist for the caller.
+/// A private channel or DM that the caller is not in does not exist for the caller. Neither does
+/// a public channel for a guest: guests only see the conversations they are in.
 async fn load_access(
     conn: &mut AnyConnection,
     workspace_id: Id,
@@ -796,8 +887,20 @@ async fn load_access(
         .await?
         .ok_or(ChatError::NotFound)?;
     let member = load_member(conn, conversation_id, user_id).await?;
-    if member.is_none() && conversation.kind != ConversationKind::Public {
+    if member.is_none() && (conversation.kind != ConversationKind::Public || actor.is_guest()) {
         return Err(ChatError::NotFound);
+    }
+    if conversation.kind == ConversationKind::Dm {
+        let Flag(reachable) = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+            "SELECT EXISTS(SELECT 1 FROM chat_conversations c WHERE c.id = $1 AND {})",
+            reachable_dm()
+        )))
+        .bind(conversation_id.to_string())
+        .fetch_one(&mut *conn)
+        .await?;
+        if !reachable {
+            return Err(ChatError::NotFound);
+        }
     }
     Ok(Access {
         actor,
@@ -821,7 +924,7 @@ async fn member_ids(conn: &mut AnyConnection, conversation_id: Id) -> Result<Vec
 /// Puts a new workspace member into every live public channel, with everything read, the way
 /// the `chat_default_channel_for_member` trigger does for `#general`. Every insert into
 /// `memberships` calls this in the same transaction, so a public channel always has every
-/// workspace member. Channels the member is in already stay as they are.
+/// workspace member. Channels the member is in already stay as they are. Guests join none.
 pub async fn join_public_channels(
     conn: &mut AnyConnection,
     workspace_id: Id,
@@ -836,6 +939,8 @@ pub async fn join_public_channels(
                 c.message_count, $2 \
          FROM chat_conversations c \
          WHERE c.workspace_id = $3 AND c.kind = 'public' AND c.archived_at IS NULL \
+         AND EXISTS (SELECT 1 FROM memberships WHERE memberships.workspace_id = c.workspace_id \
+                     AND memberships.user_id = $1 AND memberships.role <> 'guest') \
          ON CONFLICT (conversation_id, user_id) DO NOTHING",
     )
     .bind(user_id.to_string())
@@ -846,15 +951,61 @@ pub async fn join_public_channels(
     Ok(())
 }
 
-/// Every member of the workspace.
+/// Every member of the workspace who is in its public channels: everyone but guests.
 async fn workspace_member_ids(
     conn: &mut AnyConnection,
     workspace_id: Id,
 ) -> Result<Vec<Id>, ChatError> {
     sqlx::query_scalar::<_, String>(
-        "SELECT user_id FROM memberships WHERE workspace_id = $1 ORDER BY created_at, user_id",
+        "SELECT user_id FROM memberships WHERE workspace_id = $1 AND role <> 'guest' \
+         ORDER BY created_at, user_id",
     )
     .bind(workspace_id.to_string())
+    .fetch_all(&mut *conn)
+    .await?
+    .into_iter()
+    .map(parse_id)
+    .collect()
+}
+
+/// SQL: the conversation `c` is public, and `user_id` (an SQL expression) is no guest, so it
+/// may read it without being in it.
+fn public_for(user_id: &str) -> String {
+    format!(
+        "(c.kind = 'public' AND EXISTS (SELECT 1 FROM memberships reader \
+         WHERE reader.workspace_id = c.workspace_id AND reader.user_id = {user_id} \
+         AND reader.role <> 'guest'))"
+    )
+}
+
+/// SQL: the conversation `c` is no DM, or every guest in it still shares an open channel with
+/// every other member. A DM that fails this does not exist for anyone, as in `open_dm`.
+pub(crate) fn reachable_dm() -> &'static str {
+    "(c.kind <> 'dm' OR NOT EXISTS (SELECT 1 FROM chat_members dm_guest \
+     JOIN memberships dm_role ON dm_role.workspace_id = c.workspace_id \
+          AND dm_role.user_id = dm_guest.user_id AND dm_role.role = 'guest' \
+     JOIN chat_members dm_other ON dm_other.conversation_id = dm_guest.conversation_id \
+          AND dm_other.user_id <> dm_guest.user_id \
+     WHERE dm_guest.conversation_id = c.id AND NOT EXISTS (SELECT 1 FROM chat_members dm_own \
+          JOIN chat_members dm_theirs ON dm_theirs.conversation_id = dm_own.conversation_id \
+          JOIN chat_conversations dm_shared ON dm_shared.id = dm_own.conversation_id \
+          WHERE dm_own.workspace_id = c.workspace_id AND dm_own.user_id = dm_guest.user_id \
+          AND dm_theirs.user_id = dm_other.user_id AND dm_shared.kind <> 'dm' \
+          AND dm_shared.archived_at IS NULL)))"
+}
+
+/// The guests among `user_ids`, which has no duplicates.
+async fn guest_ids(
+    conn: &mut AnyConnection,
+    workspace_id: Id,
+    user_ids: &[Id],
+) -> Result<Vec<Id>, ChatError> {
+    sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(format!(
+        "SELECT user_id FROM memberships WHERE workspace_id = $1 AND role = 'guest' AND user_id {}",
+        in_ids(&*conn, 2)
+    )))
+    .bind(workspace_id.to_string())
+    .bind(id_list(user_ids.iter().copied()))
     .fetch_all(&mut *conn)
     .await?
     .into_iter()
@@ -917,10 +1068,15 @@ const MESSAGE_SELECT: &str = "SELECT m.id, m.conversation_id, m.thread_root_id, 
      l.sticker_id IS NOT NULL AS last_sticker, q.sticker_id IS NOT NULL AS quoted_sticker, \
      m.reply_to_id, q.author_id AS quoted_author_id, substr(q.body, 1, 200) AS quoted_body, \
      m.forward_of_id, m.forward_conversation_id, m.forward_author_id, m.forward_created_at, \
+     m.forward_bot_name, q.bot_name AS quoted_bot_name, m.webhook_id, m.bot_name, m.bot_icon_url, m.bot_icon_emoji, \
+     CAST(CASE WHEN wh.request_url IS NOT NULL AND wh.revoked_at IS NULL THEN 1 ELSE 0 END AS BIGINT) \
+     AS bot_interactive, \
+     m.blocks, \
      m.sticker_id, s.workspace_id AS sticker_workspace_id, s.name AS sticker_name \
      FROM chat_messages m LEFT JOIN chat_messages l ON l.id = m.last_reply_id \
      LEFT JOIN chat_messages q ON q.id = m.reply_to_id AND q.deleted_at IS NULL \
-     LEFT JOIN custom_stickers s ON s.id = m.sticker_id";
+     LEFT JOIN custom_stickers s ON s.id = m.sticker_id \
+     LEFT JOIN chat_webhooks wh ON wh.id = m.webhook_id";
 
 fn message_from_row(row: &AnyRow) -> Result<MessageRecord, ChatError> {
     let body: String = row.get("body");
@@ -950,6 +1106,7 @@ fn message_from_row(row: &AnyRow) -> Result<MessageRecord, ChatError> {
             author_id: parse_id(author_id)?,
             body: row.get("quoted_body"),
             sticker: row.get("quoted_sticker"),
+            bot_name: row.get("quoted_bot_name"),
         }),
         _ => None,
     };
@@ -966,6 +1123,7 @@ fn message_from_row(row: &AnyRow) -> Result<MessageRecord, ChatError> {
                 conversation_id,
                 author_id,
                 created_at: TimestampMillis::from_millis(created_at),
+                bot_name: row.get("forward_bot_name"),
             })
         }
         _ => None,
@@ -983,6 +1141,18 @@ fn message_from_row(row: &AnyRow) -> Result<MessageRecord, ChatError> {
             url: stickers::image_url(workspace_id, id),
         }),
         _ => None,
+    };
+    let bot = parse_optional_id(row.get("webhook_id"))?.map(|webhook_id| BotRecord {
+        webhook_id,
+        name: row.get::<Option<String>, _>("bot_name").unwrap_or_default(),
+        icon_url: row.get("bot_icon_url"),
+        icon_emoji: row.get("bot_icon_emoji"),
+        interactive: row.get("bot_interactive"),
+    });
+    let blocks = match row.get::<Option<String>, _>("blocks") {
+        Some(_) if deleted => None,
+        Some(json) => Some(serde_json::from_str(&json).map_err(|_| corrupt("message blocks"))?),
+        None => None,
     };
     Ok(MessageRecord {
         id: parse_id(row.get("id"))?,
@@ -1023,6 +1193,8 @@ fn message_from_row(row: &AnyRow) -> Result<MessageRecord, ChatError> {
         forwarded,
         sticker_id,
         sticker,
+        bot,
+        blocks,
         last_reply_id: parse_optional_id(row.get("last_reply_id"))?,
     })
 }

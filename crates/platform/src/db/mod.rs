@@ -60,6 +60,30 @@ pub fn testing_postgres() -> bool {
     test_postgres_url().is_some()
 }
 
+/// Whether `error` only means that another writer held a lock for too long: SQLite's
+/// `SQLITE_BUSY` / `SQLITE_LOCKED` after the busy timeout, or a Postgres lock timeout, deadlock or
+/// serialization failure. The same statement can succeed later, so a background loop retries it
+/// on its next round instead of stopping the server.
+#[must_use]
+pub fn is_transient_lock_error(error: &sqlx::Error) -> bool {
+    let Some(error) = error.as_database_error() else {
+        return false;
+    };
+    let code = error.code().unwrap_or_default();
+    if error
+        .try_downcast_ref::<sqlx::sqlite::SqliteError>()
+        .is_some()
+    {
+        // An extended result code; its low byte is the primary one.
+        return code
+            .parse::<i32>()
+            .is_ok_and(|code| matches!(code & 0xff, 5 | 6));
+    }
+    error
+        .try_downcast_ref::<sqlx::postgres::PgDatabaseError>()
+        .is_some_and(|_| matches!(code.as_ref(), "55P03" | "40P01" | "40001"))
+}
+
 fn test_postgres_url() -> Option<String> {
     std::env::var(TEST_POSTGRES_ENV)
         .ok()

@@ -1,52 +1,33 @@
 import { type Href, router, useGlobalSearchParams, usePathname } from 'expo-router'
 import { createContext, Fragment, type ReactNode, use, useEffect, useMemo, useRef, useState } from 'react'
-import { AccessibilityInfo, Animated, Easing, Modal, PanResponder, type PanResponderGestureState, Pressable, ScrollView, useWindowDimensions, View } from 'react-native'
+import { Animated, Easing, Modal, PanResponder, type PanResponderGestureState, Pressable, ScrollView, useWindowDimensions, View } from 'react-native'
 import { NativeText as RNText } from '../ui/scaled'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg'
 
+import { useAuthOptions } from '../hooks/account'
 import { useOrbit } from '../orbit-context'
-import { useChatBadge, useProjects, useUnreadNotifications } from '../queries'
+import { useChatBadge, useProjects } from '../queries'
 import { splitAlpha } from '../data/color'
 import { customSidebarTheme } from '../data/custom-theme'
-import { alpha, cssColors, mix, useAppCustomTheme, useButtonStyle, useLayout, useTheme } from '../theme'
+import { alpha, cssColors, mix, useButtonStyle, useCustomTheme, useTheme } from '../theme'
 import { ColorScope } from '../theme/ColorScope'
-import { Avatar, CountBadge, Icon, type IconName, IconButton, PickerSheet } from '../ui'
-import { AccountMenu } from './AccountMenu'
+import { CountBadge, Icon, type IconName, useReduceMotion } from '../ui'
 import { NewProjectSheet } from './NewProjectSheet'
 import { DRAWER_AREA_TITLES, type DrawerArea, drawerAreaOf, drawerSections, TASK_PRESETS, tasksHref } from './drawerAreas'
 import { ACCOUNT_NAV, ADMIN_NAV, allowedNav, WORKSPACE_NAV } from './settings/Shell'
+import { guestSettings, isGuestRole } from '../data/guest'
 
 const DrawerContext = createContext<(() => void) | null>(null)
 
-/** The ☰ button of every tab header, and the Activity bell beside it: like the web's phone top bar. */
-export function MenuButton() {
-  const { colors } = useTheme()
-  const open = use(DrawerContext)
-  const pathname = usePathname()
-  const unread = (useUnreadNotifications().data?.length ?? 0) > 0
-  const onActivity = pathname === '/activity'
-  return (
-    <>
-      <IconButton icon="menu" label="Menu" iconSize={18} color={alpha(colors.mutedForeground, 0.7)} onPress={open ?? undefined} />
-      <Pressable
-        accessibilityRole="link"
-        accessibilityLabel={unread ? 'Activity, unread' : 'Activity'}
-        accessibilityState={{ selected: onActivity }}
-        onPress={() => router.navigate('/activity')}
-        hitSlop={6}
-        className={`size-7 items-center justify-center rounded-md active:bg-muted ${onActivity ? 'bg-muted' : ''}`}
-      >
-        <Icon name="bell" size={17} color={onActivity ? colors.foreground : alpha(colors.mutedForeground, 0.7)} />
-        {unread ? <View className="absolute top-0.5 right-0.5 size-2 rounded-full bg-primary" /> : null}
-      </Pressable>
-    </>
-  )
+/** Opens the drawer: the top bar's sidebar button. */
+export function useOpenDrawer() {
+  return use(DrawerContext) ?? undefined
 }
 
-/** The tab roots: on a pushed screen the same edge swipe is iOS's back gesture. */
+/** The tab roots: a pushed screen keeps its own gestures. */
 const SWIPE_ROOTS = new Set(['/', '/tasks', '/docs', '/chat', '/settings', '/activity'])
-/** A swipe opens the drawer only when it starts this close to the left edge. */
+/** A swipe opens the drawer only when it starts this close to the right edge. */
 const EDGE = 24
 
 /** A clear horizontal move, so taps and vertical scrolling stay with the screen. */
@@ -56,8 +37,9 @@ const horizontal = (gesture: PanResponderGestureState, direction: 1 | -1) =>
 const clamp = (value: number) => Math.min(1, Math.max(0, value))
 
 /**
- * Holds the drawer of the tab screens. Mount once, around the tabs. The ☰ button opens it; a swipe from the left
- * edge of a tab root drags it open and a swipe to the left drags it closed, following the finger.
+ * Holds the drawer of the tab screens, on the right like the web's phone sheet. Mount once, around the tabs. The top
+ * bar's sidebar button opens it; a swipe from the right edge of a tab root drags it open and a swipe to the right
+ * drags it closed, following the finger.
  */
 export function DrawerProvider({ children }: { children: ReactNode }) {
   const { width: screen } = useWindowDimensions()
@@ -66,8 +48,8 @@ export function DrawerProvider({ children }: { children: ReactNode }) {
   const [mounted, setMounted] = useState(false)
   const progress = useRef(new Animated.Value(0)).current
   // The pan responders are created once: they read the current values through this ref.
-  const live = useRef({ width, mounted, swipeable: false })
-  live.current = { width, mounted, swipeable: SWIPE_ROOTS.has(pathname) }
+  const live = useRef({ width, screen, mounted, swipeable: false })
+  live.current = { width, screen, mounted, swipeable: SWIPE_ROOTS.has(pathname) }
 
   const settle = (open: boolean, velocity = 0) => {
     if (open) setMounted(true)
@@ -96,22 +78,22 @@ export function DrawerProvider({ children }: { children: ReactNode }) {
         touchStartX.current = event.nativeEvent.pageX
         return false
       },
-      onMoveShouldSetPanResponderCapture: (_, gesture) => live.current.swipeable && !live.current.mounted && touchStartX.current <= EDGE && horizontal(gesture, 1),
+      onMoveShouldSetPanResponderCapture: (_, gesture) => live.current.swipeable && !live.current.mounted && touchStartX.current >= live.current.screen - EDGE && horizontal(gesture, -1),
       onPanResponderGrant: () => {
         progress.setValue(0)
         setMounted(true)
       },
-      onPanResponderMove: (_, gesture) => progress.setValue(clamp(gesture.dx / live.current.width)),
-      onPanResponderRelease: (_, gesture) => settle(gesture.dx > live.current.width / 3 || gesture.vx > 0.5, gesture.vx),
+      onPanResponderMove: (_, gesture) => progress.setValue(clamp(-gesture.dx / live.current.width)),
+      onPanResponderRelease: (_, gesture) => settle(-gesture.dx > live.current.width / 3 || gesture.vx < -0.5, gesture.vx),
       onPanResponderTerminate: () => settle(false),
     }),
   ).current
 
   const back = useRef(
     PanResponder.create({
-      onMoveShouldSetPanResponderCapture: (_, gesture) => horizontal(gesture, -1),
-      onPanResponderMove: (_, gesture) => progress.setValue(clamp(1 + gesture.dx / live.current.width)),
-      onPanResponderRelease: (_, gesture) => settle(!(gesture.dx < -live.current.width / 3 || gesture.vx < -0.5), gesture.vx),
+      onMoveShouldSetPanResponderCapture: (_, gesture) => horizontal(gesture, 1),
+      onPanResponderMove: (_, gesture) => progress.setValue(clamp(1 - gesture.dx / live.current.width)),
+      onPanResponderRelease: (_, gesture) => settle(!(gesture.dx > live.current.width / 3 || gesture.vx > 0.5), gesture.vx),
       onPanResponderTerminate: () => settle(true),
     }),
   ).current
@@ -138,7 +120,7 @@ interface NavLink {
 }
 
 /**
- * The settings areas of the new UI's contextual drawer: the links of Shell.tsx's sub-navigation. A function, because
+ * The settings areas of the contextual drawer: the links of Shell.tsx's nav lists. A function, because
  * Shell.tsx imports this file: its arrays may not exist yet while this module loads.
  */
 const areaNavs = () => ({ workspace: WORKSPACE_NAV, account: ACCOUNT_NAV, admin: ADMIN_NAV })
@@ -157,8 +139,8 @@ function Drawer({
   panHandlers: ReturnType<typeof PanResponder.create>['panHandlers']
   onClose: () => void
 }) {
-  // the new UI's custom theme colours the drawer with its sidebar colour (the web's `appSidebarTheme`)
-  const custom = useAppCustomTheme()
+  // the custom theme colours the drawer with its sidebar colour (the web's `appSidebarTheme`)
+  const custom = useCustomTheme()
   const sidebarTheme = useMemo(() => (custom ? customSidebarTheme(custom) : null), [custom])
   const panel = <DrawerPanel mounted={mounted} width={width} onClose={onClose} />
   return (
@@ -170,7 +152,7 @@ function Drawer({
       {/* Animated: only the slide; the look is the web's classes on the inner view */}
       <Animated.View
         accessibilityLabel="Navigation"
-        style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width, transform: [{ translateX: progress.interpolate({ inputRange: [0, 1], outputRange: [-width, 0] }) }] }}
+        style={{ position: 'absolute', top: 0, bottom: 0, right: 0, width, transform: [{ translateX: progress.interpolate({ inputRange: [0, 1], outputRange: [width, 0] }) }] }}
       >
         {sidebarTheme ? (
           <ColorScope scheme={sidebarTheme.scheme} colors={sidebarTheme.colors}>
@@ -186,28 +168,36 @@ function Drawer({
 }
 
 /**
- * The web's `SidebarNav`: workspace, Search, the products, Personal, Manage, the user. In the new UI a settings page
- * shows its area's links and Back instead of the app links; Back shows the app links again without leaving the page.
+ * The web's `SidebarNav`: Search, the products, Manage. A settings page or Tasks shows its area's links and Back
+ * instead of the app links; Back shows the app links again without leaving the page.
  */
 function DrawerPanel({ mounted, width, onClose }: { mounted: boolean; width: number; onClose: () => void }) {
-  const { colors, scheme } = useTheme()
-  const { user, workspace, workspaces, selectWorkspace } = useOrbit()
+  const { colors } = useTheme()
+  const { user, workspace } = useOrbit()
+  const cloud = useAuthOptions().data?.billing_enabled ?? false
   const insets = useSafeAreaInsets()
   const pathname = usePathname()
   const { view, project } = useGlobalSearchParams<{ view?: string; project?: string }>()
   const chatBadge = useChatBadge()
-  const inboxUnread = (useUnreadNotifications().data?.length ?? 0) > 0
-  const [switching, setSwitching] = useState(false)
-  const [accountOpen, setAccountOpen] = useState(false)
-  const newUi = useLayout() === 'new'
+  // a guest has Chat and its account settings only
+  const guest = isGuestRole(workspace.role)
   const reduceMotion = useReduceMotion()
 
   const navs = areaNavs()
-  const pageArea = newUi ? drawerAreaOf(pathname, navs) : null
+  const routeArea = drawerAreaOf(pathname, navs)
+  const pageArea = guest && routeArea === 'tasks' ? null : routeArea
   // the area whose Back was pressed: the app links show until the page moves to another area or the drawer closes
   const [mainMenuFor, setMainMenuFor] = useState<DrawerArea | null>(null)
   if (!mounted && mainMenuFor) setMainMenuFor(null)
-  const area = pageArea && pageArea !== mainMenuFor ? pageArea : null
+  // the area Settings or Admin opened in the drawer: its links show without leaving the page, like the web's sidebar
+  const [openedArea, setOpenedArea] = useState<DrawerArea | null>(null)
+  if (!mounted && openedArea) setOpenedArea(null)
+  const area = openedArea ?? (pageArea && pageArea !== mainMenuFor ? pageArea : null)
+  // Back shows the app links again, also over the area of the page that is open
+  const backToApp = () => {
+    setOpenedArea(null)
+    setMainMenuFor(pageArea)
+  }
   // Only a change while the drawer is open slides in: an area from the right, the app links back from the left.
   const content = area ?? 'app'
   const [shown, setShown] = useState(content)
@@ -225,46 +215,16 @@ function DrawerPanel({ mounted, width, onClose }: { mounted: boolean; width: num
   const onTasks = pathname === '/tasks' || pathname.startsWith('/tasks/')
   const onSettings = pathname === '/settings' || pathname.startsWith('/settings/')
   const onAdmin = pathname.startsWith('/settings/admin')
-  const onActivity = pathname === '/activity'
-  const taskView = (name: string) => pathname === '/tasks' && view === name
   const workspaceLinks: NavLink[] = [
     { label: 'Home', icon: 'home', href: '/', active: pathname === '/' },
     { label: 'Tasks', icon: 'tasks', href: tasksHref({ project }, {}), active: onTasks && !view },
   ]
-  // the new UI keeps the task presets in the Tasks area
-  const personal: NavLink[] = newUi ? [] : TASK_PRESETS.map((preset) => ({ label: preset.label, icon: preset.icon, href: tasksHref({ project }, { view: preset.view }), active: taskView(preset.view) }))
-  const dark = scheme === 'dark'
 
   return (
-    <View className="flex-1 border-r border-sidebar-edge bg-sidebar px-3" style={{ paddingTop: insets.top, paddingBottom: 12 + insets.bottom }}>
+    <View className="flex-1 overflow-hidden rounded-l-2xl border-l border-sidebar-edge bg-sidebar px-3" style={{ paddingTop: 12 + insets.top, paddingBottom: 12 + insets.bottom }}>
       <Wash color={colors.sidebarWash} width={width} />
-      <View className="mb-2 h-12 flex-row items-center justify-between gap-2 px-1.5">
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={`Workspace: ${workspace.name}`}
-          onPress={() => setSwitching(true)}
-          className="shrink flex-row items-center gap-[7px]"
-        >
-          <RNText numberOfLines={1} className="shrink font-noto-bold text-[17px] tracking-[-0.34px] text-foreground">
-            {workspace.name}
-          </RNText>
-          <Icon name="chevronDown" size={13} color={alpha(colors.mutedForeground, 0.7)} />
-        </Pressable>
-        {/* the web's `ActivityBell`: Activity stays in view in every drawer area */}
-        <Pressable
-          accessibilityRole="link"
-          accessibilityLabel={inboxUnread ? 'Activity, unread' : 'Activity'}
-          accessibilityState={{ selected: onActivity }}
-          onPress={() => go('/activity')}
-          hitSlop={6}
-          className={`size-8 items-center justify-center rounded-md active:bg-neutral-100 dark:active:bg-white/6 ${onActivity ? 'bg-neutral-100 dark:bg-white/6' : ''}`}
-        >
-          <Icon name="bell" size={18} color={onActivity ? colors.sidebarNavActive : colors.sidebarNav} />
-          {inboxUnread ? <View className="absolute top-1.5 right-1.5 size-2 rounded-full bg-primary" /> : null}
-        </Pressable>
-      </View>
-
-      <View className="px-1 pb-3">
+      {/* the web's phone sheet: no workspace header or account button, the top bar has them */}
+      {guest ? null : <View className="px-1 pb-3">
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Search"
@@ -274,16 +234,16 @@ function DrawerPanel({ mounted, width, onClose }: { mounted: boolean; width: num
           <Icon name="search" size={16} color={alpha(colors.mutedForeground, 0.9)} />
           <RNText className="font-noto-medium text-[13px] text-muted-foreground">Search</RNText>
         </Pressable>
-      </View>
+      </View>}
 
       <SlideIn key={content} from={reduceMotion ? null : enter}>
         <ScrollView className="-mx-1 flex-1" contentContainerClassName="grow gap-0.5 px-1 pb-2">
           {area === 'tasks' ? (
-            <TasksArea view={view} project={project} onTasks={pathname === '/tasks'} onBack={() => setMainMenuFor(area)} go={go} />
+            <TasksArea view={view} project={project} onTasks={pathname === '/tasks'} onBack={backToApp} go={go} />
           ) : area ? (
             <>
-              <BackRow label={DRAWER_AREA_TITLES[area]} onPress={() => setMainMenuFor(area)} />
-              {drawerSections(area, allowedNav(navs[area], workspace.permissions)).map((section) => (
+              <BackRow label={DRAWER_AREA_TITLES[area]} onPress={backToApp} />
+              {drawerSections(area, allowedNav(navs[area], workspace.permissions, cloud, guest)).map((section) => (
                 <Fragment key={section.label}>
                   <Section label={section.label} />
                   {section.items.map((item) => (
@@ -292,26 +252,32 @@ function DrawerPanel({ mounted, width, onClose }: { mounted: boolean; width: num
                 </Fragment>
               ))}
             </>
+          ) : guest ? (
+            <>
+              <NavRow link={{ label: 'Chat', icon: 'chat', href: '/chat', active: pathname.startsWith('/chat'), badge: chatBadge.count, dot: chatBadge.unread }} onPress={() => go('/chat')} />
+              <NavRow link={{ label: 'Settings', icon: 'settings', href: guestSettings, active: onSettings && !onAdmin }} onPress={() => go(guestSettings)} />
+              {user.installation_admin ? (
+                <>
+                  <View className="flex-1" />
+                  <NavRow link={{ label: 'Admin', icon: 'admin', href: '/settings/admin', active: onAdmin }} tone="neutral" onPress={() => go('/settings/admin')} />
+                </>
+              ) : null}
+            </>
           ) : (
             <>
               {workspaceLinks.map((link) => (
                 <NavRow key={link.label} link={link} onPress={() => go(link.href)} />
               ))}
-              {newUi ? null : <SubRow label="Views" onPress={() => go('/tasks')} />}
               <NavRow link={{ label: 'Docs', icon: 'docs', href: '/docs', active: pathname.startsWith('/docs') }} onPress={() => go('/docs')} />
               <NavRow link={{ label: 'Chat', icon: 'chat', href: '/chat', active: pathname.startsWith('/chat'), badge: chatBadge.count, dot: chatBadge.unread }} onPress={() => go('/chat')} />
               <NavRow link={{ label: 'Mail', icon: 'mail', href: '/', active: false }} comingSoon />
-              {personal.length > 0 ? <Section label="Personal" /> : null}
-              {personal.map((link) => (
-                <NavRow key={link.label} link={link} onPress={() => go(link.href)} />
-              ))}
               <Section label="Manage" />
-              <NavRow link={{ label: 'Settings', icon: 'settings', href: '/settings', active: onSettings && !onAdmin }} onPress={() => go('/settings')} />
+              <NavRow link={{ label: 'Settings', icon: 'settings', href: '/settings', active: onSettings && !onAdmin }} onPress={() => setOpenedArea('workspace')} />
               {user.installation_admin ? (
                 <>
                   {/* the installation, not the workspace: it sits apart at the bottom */}
                   <View className="flex-1" />
-                  <NavRow link={{ label: 'Admin', icon: 'admin', href: '/settings/admin', active: onAdmin }} tone="neutral" onPress={() => go('/settings/admin')} />
+                  <NavRow link={{ label: 'Admin', icon: 'admin', href: '/settings/admin', active: onAdmin }} tone="neutral" onPress={() => setOpenedArea('admin')} />
                 </>
               ) : null}
             </>
@@ -319,38 +285,12 @@ function DrawerPanel({ mounted, width, onClose }: { mounted: boolean; width: num
         </ScrollView>
       </SlideIn>
 
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={`Account menu for ${user.display_name}`}
-        onPress={() => setAccountOpen(true)}
-        // one set of classes per scheme: Uniwind does not let `dark:border-*` win over `border-border`
-        className={`mt-2 h-8 flex-row items-center gap-2 rounded-[10px] border px-2 ${dark ? 'border-sidebar-tint/24 bg-primary/14 active:border-sidebar-tint/34 active:bg-primary/18' : 'border-border bg-background active:bg-muted'}`}
-      >
-        <Avatar id={user.id} name={user.display_name} size={20} presence={user.status.presence} />
-        <RNText numberOfLines={1} className="flex-1 font-noto-medium text-[12px] text-foreground dark:text-[#fbe9ee]">
-          {user.display_name}
-        </RNText>
-        <Icon name="chevronDown" size={14} color={dark ? colors.sidebarTint : alpha(colors.mutedForeground, 0.7)} />
-      </Pressable>
-      <AccountMenu visible={accountOpen} surface={newUi ? 'sidebarPopover' : 'popover'} onClose={() => setAccountOpen(false)} onNavigate={go} />
-      <PickerSheet
-        visible={switching}
-        title="Workspaces"
-        surface={newUi ? 'sidebarPopover' : 'popover'}
-        options={workspaces.map((item) => ({ key: item.id, label: item.name, subtitle: item.role, selected: item.id === workspace.id }))}
-        onSelect={(id) => {
-          setSwitching(false)
-          onClose()
-          selectWorkspace(id)
-        }}
-        onClose={() => setSwitching(false)}
-      />
     </View>
   )
 }
 
 /**
- * The new UI's Tasks area (the web's `TasksAreaNav`): All tasks, Views, the task presets and the projects. A preset
+ * The Tasks area (the web's `TasksAreaNav`): All tasks, Views, the task presets and the projects. A preset
  * keeps the project and a project keeps the preset. The web's Favorite views are left out: the app has no saved views.
  */
 function TasksArea({ view, project, onTasks, onBack, go }: { view?: string; project?: string; onTasks: boolean; onBack: () => void; go: (href: Href) => void }) {
@@ -374,6 +314,7 @@ function TasksArea({ view, project, onTasks, onBack, go }: { view?: string; proj
         </>
       ) : <Section label="Projects" />}
       <NavRow link={{ label: 'New project', icon: 'plus', href: '/tasks', active: false }} onPress={() => setCreating(true)} />
+      <NavRow link={{ label: 'Trash', icon: 'trash', href: '/tasks/trash', active: false }} onPress={() => go('/tasks/trash')} />
       <NewProjectSheet visible={creating} onClose={() => setCreating(false)} onCreated={(created) => {
         setCreating(false)
         go(tasksHref(current, { project: created.id }))
@@ -396,17 +337,6 @@ function SlideIn({ from, children }: { from: SlideFrom | null; children: ReactNo
       {children}
     </Animated.View>
   )
-}
-
-/** The system's Reduce motion setting. */
-function useReduceMotion(): boolean {
-  const [reduce, setReduce] = useState(false)
-  useEffect(() => {
-    void AccessibilityInfo.isReduceMotionEnabled().then(setReduce)
-    const subscription = AccessibilityInfo.addEventListener('reduceMotionChanged', setReduce)
-    return () => subscription.remove()
-  }, [])
-  return reduce
 }
 
 /**
@@ -506,16 +436,6 @@ function Tile({ icon, active, pressed, tone }: { icon: IconName; active: boolean
     >
       <Icon name={icon} size={16} color={icon_} />
     </View>
-  )
-}
-
-/** "Views" nested under Tasks behind a 1px guide line. */
-function SubRow({ label, onPress }: { label: string; onPress: () => void }) {
-  const dark = useTheme().scheme === 'dark'
-  return (
-    <Pressable accessibilityRole="button" accessibilityLabel="Task views" onPress={onPress} className={`ml-5 h-7 justify-center border-l pl-3 ${dark ? 'border-sidebar-tint/10' : 'border-black/8'}`}>
-      <RNText className="font-noto-medium text-[13px] text-sidebar-nav">{label}</RNText>
-    </Pressable>
   )
 }
 

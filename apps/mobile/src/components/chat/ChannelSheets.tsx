@@ -7,14 +7,14 @@ import { router } from 'expo-router'
 import { useState } from 'react'
 import { Pressable, Switch, View } from 'react-native'
 
-import { CHANNEL_NAME_MAX, channelNameFinal, channelNameInput, matchPeople, messageablePeople, type Person, pickablePeople } from '../../data/chat'
+import { addablePeople, CHANNEL_NAME_MAX, channelNameFinal, channelNameInput, matchPeople, messageablePeople, type Person, pickablePeople } from '../../data/chat'
 import * as chat from '../../data/chat-api'
 import type { CategoryRecord, ConversationRecord } from '../../data/orbit'
 import { useChatWrite } from '../../hooks/chat'
 import { useOrbit } from '../../orbit-context'
-import { useChatCategories, useMembers } from '../../queries'
+import { useChatCategories, useConversations, useMembers } from '../../queries'
 import { useTheme } from '../../theme'
-import { Avatar, Icon, Input, PickerSheet, Text } from '../../ui'
+import { Avatar, Icon, Input, PickerSheet, Text, LabelTip } from '../../ui'
 import { ChoiceGroup, FormSheet } from './Sheet'
 
 const isConflict = (error: unknown) => error instanceof ApiProblem && error.status === 409
@@ -56,7 +56,7 @@ function NameField({ value, onChange, error }: { value: string; onChange: (value
   return (
     <Input
       label="Name"
-      required
+      help="Lowercase, with hyphens in place of spaces."
       autoFocus
       autoCapitalize="none"
       autoCorrect={false}
@@ -64,7 +64,6 @@ function NameField({ value, onChange, error }: { value: string; onChange: (value
       placeholder="design-team"
       value={value}
       onChangeText={(text) => onChange(channelNameInput(text))}
-      description="Lowercase, with hyphens in place of spaces."
       error={error}
     />
   )
@@ -120,9 +119,8 @@ export function NewChannelSheet({ categoryId, onClose }: { categoryId: string | 
       />
       {kind === 'private' ? (
         <View className="gap-2">
-          <Text className="font-noto-medium text-[14px] leading-[19.25px]">Add people</Text>
+          <LabelTip label="Add people" text="You are a member already. You can add more people later." />
           <MemberPicker people={pickablePeople(members, user.id)} selectedIds={memberIds} onChange={setMemberIds} />
-          <Text className="text-[14px] leading-[21px] text-muted-foreground">You are a member already. You can add more people later.</Text>
         </View>
       ) : null}
     </FormSheet>
@@ -172,16 +170,16 @@ export function EditChannelSheet({ conversation, onClose }: { conversation: Conv
       <Input label="Topic" value={topic} maxLength={250} placeholder="What this channel is about" onChangeText={setTopic} />
       <CategoryField value={category} onChange={setCategory} />
       <View className={`flex-row items-center gap-3 ${conversation.is_default ? 'opacity-50' : 'opacity-100'}`}>
-        <View className="flex-1 gap-1">
-          <Text className="font-noto-medium text-[14px] leading-[19.25px]">Private channel</Text>
-          <Text className="text-[13px] leading-[18px] text-muted-foreground">
-            {conversation.is_default
-              ? `#${conversation.name} is the default channel. Everybody is in it, so it cannot be private.`
-              : isPrivate
-                ? 'Only the people in it can see it. New people must be added.'
-                : 'Everyone in the workspace is in it.'}
-          </Text>
-        </View>
+        {conversation.is_default ? (
+          <View className="flex-1 gap-1">
+            <Text className="font-noto-medium text-[14px] leading-[19.25px]">Private channel</Text>
+            <Text className="text-[13px] leading-[18px] text-muted-foreground">{`#${conversation.name} is the default channel. Everybody is in it, so it cannot be private.`}</Text>
+          </View>
+        ) : (
+          <View className="flex-1">
+            <LabelTip label="Private channel" text={isPrivate ? 'Only the people in it can see it. New people must be added.' : 'Everyone in the workspace is in it.'} />
+          </View>
+        )}
         <Switch accessibilityLabel="Private channel" value={isPrivate} disabled={conversation.is_default} onValueChange={setIsPrivate} trackColor={{ true: colors.primary, false: colors.input }} />
       </View>
     </FormSheet>
@@ -214,6 +212,7 @@ export function CategorySheet({ category, onClose }: { category?: CategoryRecord
 export function NewMessageSheet({ onClose }: { onClose: () => void }) {
   const { user } = useOrbit()
   const members = useMembers().data ?? []
+  const conversations = useConversations().data ?? []
   const run = useChatWrite()
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
@@ -229,7 +228,7 @@ export function NewMessageSheet({ onClose }: { onClose: () => void }) {
   }
   return (
     <FormSheet visible title="New message" description="Choose one person, several for a group conversation, or yourself for notes." submitLabel="Open" canSubmit={selectedIds.length > 0} busy={busy} onSubmit={() => void submit()} onClose={onClose}>
-      <MemberPicker autoFocus people={messageablePeople(members, user.id)} selectedIds={selectedIds} onChange={setSelectedIds} />
+      <MemberPicker autoFocus people={messageablePeople(members, conversations, user.id)} selectedIds={selectedIds} onChange={setSelectedIds} />
     </FormSheet>
   )
 }
@@ -257,7 +256,7 @@ export function AddPeopleSheet({ conversation, onClose }: { conversation: Conver
       onSubmit={() => void submit()}
       onClose={onClose}
     >
-      <MemberPicker autoFocus people={pickablePeople(members, user.id, conversation.member_ids)} selectedIds={selectedIds} onChange={setSelectedIds} />
+      <MemberPicker autoFocus people={addablePeople(conversation, members, user.id)} selectedIds={selectedIds} onChange={setSelectedIds} />
     </FormSheet>
   )
 }

@@ -18,6 +18,7 @@ export const queryKeys = {
   notificationPreferences: ['notification-preferences'] as const,
   backups: ['admin', 'backups'] as const,
   adminUsers: ['admin', 'users'] as const,
+  adminUserSummary: ['admin', 'user-summary'] as const,
   adminSettings: ['admin', 'settings'] as const,
   adminJobLimits: ['admin', 'job-limits'] as const,
   /** The Admin mail page (switch and health card). Workspace mail keys are `mailKeys` in `features/mail/api/keys`. */
@@ -34,6 +35,8 @@ export const queryKeys = {
   memberProfile: (workspaceId: string, userId: string) => [...workspace(workspaceId), 'profiles', userId] as const,
   invitations: (workspaceId: string) => [...workspace(workspaceId), 'invitations'] as const,
   apiTokens: (workspaceId: string) => [...workspace(workspaceId), 'api-tokens'] as const,
+  /** People from Asana, Linear and Trello imports, mapped to members in Settings → Import. */
+  importPeople: (workspaceId: string) => [...workspace(workspaceId), 'import-people'] as const,
   /** Full workspace exports (ZIP archives) that have not expired. */
   workspaceExports: (workspaceId: string) => [...workspace(workspaceId), 'exports'] as const,
   /** Orbit Cloud: the workspace's subscription and access. */
@@ -75,14 +78,20 @@ export const queryKeys = {
     tree: (workspaceId: string) => [...workspace(workspaceId), 'pages', 'tree'] as const,
     detail: (workspaceId: string, pageId: string) => [...workspace(workspaceId), 'pages', 'detail', pageId] as const,
     trash: (workspaceId: string) => [...workspace(workspaceId), 'pages', 'trash'] as const,
+    /** A trashed page's read-only preview; not under `trash`, so trash writes do not refetch it. */
+    trashed: (workspaceId: string, pageId: string) => [...workspace(workspaceId), 'pages', 'trashed', pageId] as const,
     search: (workspaceId: string, query: string) => [...workspace(workspaceId), 'pages', 'search', query] as const,
     favorites: (workspaceId: string) => [...workspace(workspaceId), 'pages', 'favorites'] as const,
+    /** A page's live sub-pages from the server: database rows and their sub-pages are not in the tree. */
+    descendants: (workspaceId: string, pageId: string) => [...workspace(workspaceId), 'pages', 'descendants', pageId] as const,
     recent: (workspaceId: string) => [...workspace(workspaceId), 'pages', 'recent'] as const,
     versions: (workspaceId: string, pageId: string) => [...workspace(workspaceId), 'pages', 'versions', pageId] as const,
     threads: (workspaceId: string, pageId: string) => [...workspace(workspaceId), 'pages', 'threads', pageId] as const,
     version: (workspaceId: string, pageId: string, versionId: string) =>
       [...workspace(workspaceId), 'pages', 'versions', pageId, versionId] as const,
   },
+  /** A database page's properties, views and rows (`GET /databases/{id}`); realtime refetches it with the workspace. */
+  database: (workspaceId: string, databaseId: string) => [...workspace(workspaceId), 'databases', databaseId] as const,
   /**
    * Deliberately outside the workspace prefix: realtime events invalidate that whole prefix, and an import creates
    * thousands of pages. The import views poll these keys instead of refetching a (large) scan tree on every event.
@@ -92,6 +101,40 @@ export const queryKeys = {
     list: (workspaceId: string) => ['notion-imports', workspaceId, 'list'] as const,
     detail: (workspaceId: string, importId: string) => ['notion-imports', workspaceId, 'detail', importId] as const,
     tree: (workspaceId: string, importId: string) => ['notion-imports', workspaceId, 'tree', importId] as const,
+  },
+  /** Outside the workspace prefix for the same reason as `notionImports`. */
+  obsidianImports: {
+    all: (workspaceId: string) => ['obsidian-imports', workspaceId] as const,
+    list: (workspaceId: string) => ['obsidian-imports', workspaceId, 'list'] as const,
+    detail: (workspaceId: string, importId: string) => ['obsidian-imports', workspaceId, 'detail', importId] as const,
+    tree: (workspaceId: string, importId: string) => ['obsidian-imports', workspaceId, 'tree', importId] as const,
+  },
+  /** Outside the workspace prefix for the same reason as `notionImports`: an import creates thousands of tasks. */
+  asanaImports: {
+    all: (workspaceId: string) => ['asana-imports', workspaceId] as const,
+    list: (workspaceId: string) => ['asana-imports', workspaceId, 'list'] as const,
+    detail: (workspaceId: string, importId: string) => ['asana-imports', workspaceId, 'detail', importId] as const,
+    tree: (workspaceId: string, importId: string) => ['asana-imports', workspaceId, 'tree', importId] as const,
+  },
+  /** Outside the workspace prefix for the same reason as `notionImports`. */
+  linearImports: {
+    all: (workspaceId: string) => ['linear-imports', workspaceId] as const,
+    list: (workspaceId: string) => ['linear-imports', workspaceId, 'list'] as const,
+    detail: (workspaceId: string, importId: string) => ['linear-imports', workspaceId, 'detail', importId] as const,
+    tree: (workspaceId: string, importId: string) => ['linear-imports', workspaceId, 'tree', importId] as const,
+  },
+  /** Outside the workspace prefix for the same reason as `notionImports`. */
+  orbitImports: {
+    list: (workspaceId: string) => ['orbit-imports', workspaceId, 'list'] as const,
+    detail: (workspaceId: string, importId: string) => ['orbit-imports', workspaceId, 'detail', importId] as const,
+    tree: (workspaceId: string, importId: string) => ['orbit-imports', workspaceId, 'tree', importId] as const,
+  },
+  /** Outside the workspace prefix for the same reason as `notionImports`. */
+  trelloImports: {
+    all: (workspaceId: string) => ['trello-imports', workspaceId] as const,
+    list: (workspaceId: string) => ['trello-imports', workspaceId, 'list'] as const,
+    detail: (workspaceId: string, importId: string) => ['trello-imports', workspaceId, 'detail', importId] as const,
+    tree: (workspaceId: string, importId: string) => ['trello-imports', workspaceId, 'tree', importId] as const,
   },
   /**
    * Deliberately outside the workspace prefix: the list changes rarely, and the chat socket says when it does

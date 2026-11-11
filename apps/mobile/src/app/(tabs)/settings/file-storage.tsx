@@ -10,7 +10,7 @@ import { s3Body, s3Draft } from '../../../data/admin-api'
 import { useDeleteStorageFile, useWorkspaceBucket, useWorkspaceBucketWrites, useWorkspaceStorage } from '../../../hooks/account'
 import { useOrbit } from '../../../orbit-context'
 import { errorMessage } from '../../../session-context'
-import { Button, Input, Spinner, Text } from '../../../ui'
+import { Button, Input, Spinner, Text, LabelTip } from '../../../ui'
 
 const TITLE = 'Own bucket'
 const DESCRIPTION =
@@ -31,8 +31,7 @@ export default function FileStorageScreen() {
     <SettingsShell
       title="Settings"
       nav={WORKSPACE_NAV}
-      refreshing={storage.isRefetching || bucket.isRefetching}
-      onRefresh={() => { void storage.refetch(); if (allowed) void bucket.refetch() }}
+      onRefresh={() => Promise.all([storage.refetch(), allowed ? bucket.refetch() : null])}
     >
       {!allowed ? null : bucket.data ? (
         <BucketCard key={workspace.id} view={bucket.data} />
@@ -44,7 +43,7 @@ export default function FileStorageScreen() {
               <Button label="Retry" variant="ghost" onPress={() => void bucket.refetch()} />
             </View>
           ) : (
-            <Note>Loading file storage…</Note>
+            <Note loading>Loading file storage…</Note>
           )}
         </SettingsCard>
       )}
@@ -52,7 +51,7 @@ export default function FileStorageScreen() {
         title="Usage"
         description="Files, emoji and stickers of this workspace. A file attached more than once counts once; a deleted file stops counting about a day after the trash is emptied."
       >
-        {storage.data ? <StorageBar {...storageUse(storage.data)} /> : <Note error={storage.isError}>{storage.isError ? 'Storage use could not be loaded.' : 'Loading storage…'}</Note>}
+        {storage.data ? <StorageBar {...storageUse(storage.data)} /> : <Note error={storage.isError} loading={!storage.isError}>{storage.isError ? 'Storage use could not be loaded.' : 'Loading storage…'}</Note>}
         {files.length ? (
           <LargestFiles files={files} page={page} loading={storage.isFetching} onPage={setOffset} />
         ) : null}
@@ -66,6 +65,8 @@ function BucketCard({ view }: { view: WorkspaceBucketView }) {
   const s3 = view.s3 ?? null
   const [draft, setDraft] = useState(() => s3Draft(s3))
   const [confirm, setConfirm] = useState<ConfirmRequest | null>(null)
+  // like the web form, Save is always on; a press with an empty required field says so instead of saving
+  const [tried, setTried] = useState(false)
   const edit = (change: Partial<typeof draft>) => {
     save.reset()
     setDraft((current) => ({ ...current, ...change }))
@@ -104,17 +105,18 @@ function BucketCard({ view }: { view: WorkspaceBucketView }) {
           value={draft.secret_access_key}
           onChangeText={set('secret_access_key')}
         />
-        <View className="flex-row items-center gap-3">
-          <View className="flex-1 min-w-0">
-            <FieldLabel>Path-style URLs</FieldLabel>
-            <OptionHint>MinIO and some other S3-compatible services.</OptionHint>
-          </View>
+        {/* the web's switch with its label after it */}
+        <View className="flex-row items-center gap-2">
           <Toggle label="Path-style URLs" value={draft.path_style} onChange={(path_style) => edit({ path_style })} />
+          <View className="flex-1">
+            <LabelTip label="Path-style URLs" text="For MinIO and some other S3-compatible services." className="text-[13px] leading-[18px] text-foreground" />
+          </View>
         </View>
         {save.isError ? <Note error>{errorMessage(save.error)}</Note> : null}
         {remove.isError ? <Note error>{errorMessage(remove.error)}</Note> : null}
         {save.isSuccess ? <Note>Bucket saved.</Note> : null}
-        <View className="flex-row flex-wrap justify-end gap-2">
+        {tried && !ready ? <Note error>Fill in the required fields.</Note> : null}
+        <View className="flex-row flex-wrap gap-2">
           {s3 && !view.removing ? (
             <Button
               label="Remove"
@@ -131,7 +133,7 @@ function BucketCard({ view }: { view: WorkspaceBucketView }) {
               }
             />
           ) : null}
-          <Button label={save.isPending ? 'Testing bucket…' : 'Save bucket'} disabled={save.isPending || !ready} onPress={() => save.mutate(s3Body(draft), stored)} />
+          <Button label={save.isPending ? 'Testing bucket…' : 'Save bucket'} disabled={save.isPending} onPress={() => (ready ? save.mutate(s3Body(draft), stored) : setTried(true))} />
         </View>
       </View>
       <ConfirmDialog request={confirm} onClose={() => setConfirm(null)} />

@@ -155,6 +155,25 @@ impl Fixture {
         self.session(id, email, name).await
     }
 
+    /// A guest whose membership row is inserted directly; it is in no conversation yet.
+    async fn add_guest(&self, name: &str) -> Member {
+        let (id, email) = self.add_user(name).await;
+        let now = TimestampMillis::now();
+        sqlx::query(
+            "INSERT INTO memberships (id, workspace_id, user_id, role, version, created_at, updated_at) \
+             VALUES ($1, $2, $3, 'guest', 0, $4, $5)",
+        )
+        .bind(Id::new_v7().to_string())
+        .bind(&self.workspace_id)
+        .bind(id.to_string())
+        .bind(now.as_millis())
+        .bind(now.as_millis())
+        .execute(self.database.pool())
+        .await
+        .unwrap();
+        self.session(id, email, name).await
+    }
+
     /// A member who joins by accepting an invitation, as in the app.
     async fn invite_member(&self, name: &str) -> Member {
         let (id, email) = self.add_user(name).await;
@@ -166,6 +185,7 @@ impl Fixture {
                 self.owner.id,
                 email.clone(),
                 WorkspaceRole::Member,
+                &[],
                 InvitationDelivery::Manual,
                 "invite",
                 now,
@@ -1164,6 +1184,43 @@ async fn edits_reactions_and_limits() {
     let removed = fixture.ok(&ada, "DELETE", &path, None).await;
     assert_eq!(removed["result"]["reactions"], json!([]));
     fixture.assert_counters_exact("edits").await;
+}
+
+#[tokio::test]
+async fn a_message_keeps_no_empty_lines_at_its_start_and_end() {
+    let fixture = Fixture::new().await;
+    let general = fixture.general().await;
+
+    // Like Discord: the lines between the text stay, the ones around it go (on a send and an edit).
+    let sent = fixture
+        .send_with(
+            &fixture.owner,
+            &general,
+            json!({ "body": "\n\n  hello\n\nthere \n\n" }),
+        )
+        .await;
+    assert_eq!(sent["result"]["body"], "hello\n\nthere");
+    let message = sent["result"]["id"].as_str().unwrap();
+    let edited = fixture
+        .ok(
+            &fixture.owner,
+            "PATCH",
+            &format!("/messages/{message}"),
+            Some(json!({ "body": "\nedited\n\n" })),
+        )
+        .await;
+    assert_eq!(edited["result"]["body"], "edited");
+
+    // Only empty lines is an empty message.
+    let (status, _) = fixture
+        .call(
+            &fixture.owner,
+            "POST",
+            &format!("/conversations/{general}/messages"),
+            Some(json!({ "body": "\n \n", "nonce": "blank" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
 }
 
 #[tokio::test]
@@ -3669,4 +3726,284 @@ async fn a_forward_needs_a_readable_source_and_a_writable_destination() {
     assert_eq!(kept["deleted"], true);
     assert_eq!(kept["forwarded"], Value::Null);
     fixture.assert_counters_exact("after the refusals").await;
+}
+
+#[tokio::test]
+async fn a_guest_sees_only_its_own_conversations_and_the_people_in_them() {
+    let fixture = Fixture::new().await;
+    let owner = fixture.owner.clone();
+    let member = fixture.add_member("member").await;
+    let stranger = fixture.add_member("stranger").await;
+    let guest = fixture.add_guest("guest").await;
+    let general = fixture.general().await;
+    let public = fixture.channel(&owner, "news", "public", &[]).await;
+    let public_message = fixture.send(&owner, &public, "Public plans").await;
+    fixture
+        .reply(&owner, &public, &public_message, "Public reply")
+        .await;
+    let shared = fixture
+        .channel(&owner, "with-guest", "private", &[&member, &guest])
+        .await;
+    let other = fixture
+        .channel(&owner, "without-guest", "private", &[&member])
+        .await;
+    fixture.send(&member, &shared, "Hello guest plans").await;
+
+    // A guest joins no public channel, not even #general, when it becomes a member or a
+    // public channel is made.
+    let mut members = fixture.member_ids(&owner, &general).await;
+    assert!(!members.contains(&guest.id.to_string()));
+    members = fixture.member_ids(&owner, &public).await;
+    assert!(!members.contains(&guest.id.to_string()));
+    assert!(members.contains(&stranger.id.to_string()));
+
+    // It lists only its own conversation and no category.
+    let listed = fixture.ok(&guest, "GET", "/conversations", None).await;
+    let ids: Vec<&str> = listed
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|conversation| conversation["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, [shared.as_str()]);
+    fixture
+        .ok(
+            &owner,
+            "POST",
+            "/categories",
+            Some(json!({"name": "Projects"})),
+        )
+        .await;
+    assert_eq!(
+        fixture.ok(&guest, "GET", "/categories", None).await,
+        json!([])
+    );
+
+    // Public channels do not exist for it.
+    for (method, path, body) in [
+        ("GET", format!("/conversations/{public}/messages"), None),
+        ("GET", format!("/conversations/{general}/messages"), None),
+        ("POST", format!("/conversations/{public}/join"), None),
+        ("GET", format!("/conversations/{public}/files"), None),
+        ("GET", format!("/conversations/{public}/pins"), None),
+        ("GET", format!("/conversations/{public}/threads"), None),
+        ("GET", format!("/threads/{public_message}"), None),
+        (
+            "POST",
+            format!("/conversations/{public}/messages"),
+            Some(json!({"body": "hi", "nonce": "guest-1"})),
+        ),
+        ("GET", format!("/conversations/{other}/messages"), None),
+    ] {
+        let (status, body) = fixture.call(&guest, method, &path, body).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{method} {path}: {body}");
+    }
+    // Search finds only its own conversation's messages.
+    let found = fixture.ok(&guest, "GET", "/search?query=plans", None).await;
+    let bodies: Vec<&str> = found["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| item["message"]["body"].as_str().unwrap())
+        .collect();
+    assert_eq!(bodies, ["Hello guest plans"], "{found}");
+    // Even a thread it follows stays hidden once it is in a public channel.
+    sqlx::query(
+        "INSERT INTO chat_thread_members (root_id, user_id, workspace_id, conversation_id, following) \
+         VALUES ($1, $2, $3, $4, 1)",
+    )
+    .bind(&public_message)
+    .bind(guest.id.to_string())
+    .bind(&fixture.workspace_id)
+    .bind(&public)
+    .execute(fixture.database.pool())
+    .await
+    .unwrap();
+    let followed = fixture.ok(&guest, "GET", "/threads", None).await;
+    assert_eq!(followed, json!([]), "{followed}");
+
+    // It writes in its own channel, and makes no channel.
+    fixture.send(&guest, &shared, "Hi all").await;
+    let (status, _) = fixture
+        .call(
+            &guest,
+            "POST",
+            "/conversations",
+            Some(json!({"name": "mine", "kind": "private", "member_ids": []})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // Nobody puts a guest into a public channel, or makes a channel with guests public.
+    let (status, _) = fixture
+        .call(
+            &owner,
+            "POST",
+            &format!("/conversations/{public}/members"),
+            Some(json!({"user_ids": [guest.id.to_string()]})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _) = fixture
+        .call(
+            &owner,
+            "POST",
+            "/conversations",
+            Some(json!({"name": "open", "kind": "public", "member_ids": [guest.id.to_string()]})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _) = fixture
+        .call(
+            &owner,
+            "PATCH",
+            &format!("/conversations/{shared}"),
+            Some(json!({"kind": "public"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    // A channel manager adds the guest to another private channel.
+    fixture
+        .ok(
+            &owner,
+            "POST",
+            &format!("/conversations/{other}/members"),
+            Some(json!({"user_ids": [guest.id.to_string()]})),
+        )
+        .await;
+
+    // A DM only with people it shares a channel with, either way round.
+    let dm = |user: &Member| json!({"user_ids": [user.id.to_string()]});
+    fixture.ok(&guest, "POST", "/dms", Some(dm(&member))).await;
+    fixture.ok(&member, "POST", "/dms", Some(dm(&guest))).await;
+    let (status, _) = fixture
+        .call(&guest, "POST", "/dms", Some(dm(&stranger)))
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _) = fixture
+        .call(&stranger, "POST", "/dms", Some(dm(&guest)))
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let group = json!({"user_ids": [member.id.to_string(), stranger.id.to_string()]});
+    let (status, _) = fixture.call(&guest, "POST", "/dms", Some(group)).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn a_dm_with_a_guest_is_gone_once_they_share_no_channel() {
+    let fixture = Fixture::new().await;
+    let owner = fixture.owner.clone();
+    let member = fixture.add_member("member").await;
+    let guest = fixture.add_guest("guest").await;
+    let shared = fixture
+        .channel(&owner, "with-guest", "private", &[&member, &guest])
+        .await;
+    let opened = fixture
+        .ok(
+            &guest,
+            "POST",
+            "/dms",
+            Some(json!({"user_ids": [member.id.to_string()]})),
+        )
+        .await;
+    let dm = opened["result"]["id"].as_str().unwrap().to_owned();
+    fixture.send(&guest, &dm, "Secret plans").await;
+    let listed = |listed: &Value| {
+        listed
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|conversation| conversation["id"] == dm.as_str())
+    };
+
+    // The guest leaves the only channel it shares with the member.
+    fixture
+        .ok(
+            &owner,
+            "DELETE",
+            &format!("/conversations/{shared}/members/{}", guest.id),
+            None,
+        )
+        .await;
+    for user in [&guest, &member] {
+        assert!(!listed(
+            &fixture.ok(user, "GET", "/conversations", None).await
+        ));
+        for (method, path, body) in [
+            ("GET", format!("/conversations/{dm}/messages"), None),
+            (
+                "POST",
+                format!("/conversations/{dm}/messages"),
+                Some(json!({"body": "still there?", "nonce": format!("n-{}", user.id)})),
+            ),
+        ] {
+            let (status, body) = fixture.call(user, method, &path, body).await;
+            assert_eq!(status, StatusCode::NOT_FOUND, "{method} {path}: {body}");
+        }
+        let found = fixture.ok(user, "GET", "/search?query=plans", None).await;
+        assert_eq!(found["items"], json!([]), "{found}");
+    }
+
+    // Back in a shared channel, the DM is back with its messages.
+    fixture
+        .ok(
+            &owner,
+            "POST",
+            &format!("/conversations/{shared}/members"),
+            Some(json!({"user_ids": [guest.id.to_string()]})),
+        )
+        .await;
+    assert!(listed(
+        &fixture.ok(&member, "GET", "/conversations", None).await
+    ));
+    fixture.send(&member, &dm, "Welcome back").await;
+}
+
+#[tokio::test]
+async fn a_guest_push_names_no_public_channel() {
+    let fixture = Fixture::new().await;
+    let pushes = Arc::new(RecordedPushes::default());
+    let push = orbit_server::push::PushService::with_sender(&fixture.database, pushes.clone());
+    let ada = fixture.add_member("ada").await;
+    let guest = fixture.add_guest("guest").await;
+    for member in [&ada, &guest] {
+        let session: String = sqlx::query_scalar("SELECT id FROM sessions WHERE user_id = $1")
+            .bind(member.id.to_string())
+            .fetch_one(fixture.database.pool())
+            .await
+            .unwrap();
+        push.subscribe(
+            member.id,
+            session.parse().unwrap(),
+            &format!("https://fcm.googleapis.com/fcm/send/{}", member.id),
+            "key",
+            "auth",
+            "Browser",
+            TimestampMillis::now(),
+        )
+        .await
+        .unwrap();
+    }
+    let general = fixture.general().await;
+    let shared = fixture
+        .channel(&fixture.owner, "shared", "private", &[&ada, &guest])
+        .await;
+    let body = format!("<@{}> <@{}> see <#{general}>", ada.id, guest.id);
+    fixture.send(&fixture.owner, &shared, &body).await;
+    let mut sent = Vec::new();
+    for _ in 0..100 {
+        sent = pushes.0.lock().unwrap().clone();
+        if sent.len() >= 2 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    let body_for = |member: &Member| {
+        let endpoint = format!("https://fcm.googleapis.com/fcm/send/{}", member.id);
+        sent.iter()
+            .find(|(to, _)| *to == endpoint)
+            .map(|(_, push)| push["body"].clone())
+    };
+    assert_eq!(body_for(&ada), Some(json!("@ada @guest see #general")));
+    assert_eq!(body_for(&guest), Some(json!("@ada @guest see #channel")));
 }

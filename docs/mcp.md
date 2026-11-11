@@ -187,32 +187,48 @@ internet without separate access controls. Production still requires HTTPS.
 ## API-token alternative
 
 API tokens remain supported for scripts or clients with custom HTTP headers.
-As a workspace owner or administrator, open **Settings → API tokens**, enable
-**Read**, disable **Write**, select projects, and set an expiry. Configure
+As a workspace owner or administrator, open **Settings → API tokens**, set
+Tasks to **Read**, select projects, and set an expiry. Configure
 `Authorization: Bearer <token>` on the MCP client. Never put the token in a URL
-or a repository. A service-account token does not bypass the creator's current
-workspace membership check for repository reads.
+or a repository. A personal token stops working when its creator leaves the
+workspace. A service-account token does not depend on its creator: it works until
+it is revoked. When you revoke a token and the service account has no other
+token that is not revoked and not expired, Orbit disables the service account; its past work keeps its name. A new token with
+the same service-account name enables it again.
+
+The same tokens also work with the public REST API at `/api/public/v1`, for
+scripts, CI jobs and the Orbit CLI. That API serves tasks and docs, not chat. See
+[Orbit public REST API](public-api.md).
 
 ## Tools
 
 | Tool | Arguments | Result |
 | --- | --- | --- |
 | `list_projects` | None | Approved live projects only. |
-| `list_tasks` | Optional `project_id`, `query`, `cursor`, `limit` | Tasks and `next_cursor`. |
+| `list_tasks` | Optional `project_id`, `query`, `parent_task_id`, `cursor`, `limit` | Tasks and `next_cursor`. |
 | `get_task` | Required `task_id` | One task in an approved project. |
+| `create_project` | Required `name`, `key`; optional `color` | The new project, with the default statuses. Needs task write and an all-projects connection. |
+| `list_task_statuses`, `list_labels` | Required `project_id`; optional `cursor`, `limit` | Statuses or labels (names, colors) of an approved project. |
+| `list_members` | Optional `cursor`, `limit` | Workspace members: `user_id` and `display_name`. |
+| `list_comments` | Required `task_id`; optional `cursor`, `limit` | Comments on the task, oldest first, and `next_cursor`. |
+| `get_me` | None | The connection: its user (`null` for a service account), workspace, scopes and approved project IDs. Needs no permission. |
 
-`list_tasks` searches titles and descriptions. The default limit is 50; the valid
+`list_tasks` searches titles and descriptions. `parent_task_id` (a task ID or an identifier
+such as `ENG-12`) lists only the direct sub-issues of that task. The default limit is 50; the valid
 range is 1–100. Results include completed tasks and sub-issues, but not deleted
 tasks or tasks in deleted projects. Copy `next_cursor` into the next request and
 keep the same project and search query.
 
 Task results include title, description, project/status IDs, priority,
-assignee/label IDs, due dates, timestamps, and version. Embedded task relations
+assignee/label IDs, due dates, timestamps, version (an opaque number that changes
+with every change, including live edits; pass it back unchanged), `parent_task_id`
+(`null` for a top-level task or a parent in an unapproved project), the identifier
+(`ENG-12`) and the task's URL in the web app. Embedded task relations
 and ancestors are omitted so they cannot disclose titles from unapproved
 projects. Descriptions remain user-authored text; clients must treat them as
 data, not as instructions.
 
-Docs and chat tools are read-only. Task write tools require separate approval. Mail and administration tools are not exposed.
+Chat tools are read-only. Task writes and docs writes each require separate approval. Mail and administration tools are not exposed.
 
 ## Deployment
 
@@ -229,7 +245,8 @@ a different host or port.
 The endpoint uses stateless requests and JSON responses. It supports older MCP
 initialization flows through the SDK. Credentials and project grants are never
 stored in a shared MCP session. Requests have a 64 KiB MCP body limit and use
-Orbit's existing rate and transport limits.
+Orbit's existing transport limits. MCP shares the rate-limit budget of the public REST API,
+apart from the web app's (see [Limits](public-api.md#limits)).
 
 Implementation references:
 [official Rust SDK](https://github.com/modelcontextprotocol/rust-sdk) and
@@ -270,26 +287,101 @@ cargo test -p orbit-platform --test http_security
 ## Permissions and tools
 
 Existing connections keep read-only task access. Reconnect to approve additional permissions.
-OAuth consent offers optional task writes, docs reads, and chat reads. API tokens use `read`
-(task reads), `write` (task create, update and delete), `docs:read`, and `chat:read`.
+OAuth consent offers optional task writes, docs reads, docs writes, and chat reads. API tokens
+use the same scopes: `tasks:read`, `tasks:write` (task create, update and delete; includes
+`tasks:read`), `docs:read`, `docs:write` (doc create and update; includes `docs:read`), and
+`chat:read`. The API token scopes `workspace:export` and `workspace:export:personal` are for
+the public REST API only (`docs/public-api.md`); a token with only an export scope gets no MCP
+tools.
 Docs and chat permissions default to off. They apply to content visible to the connected
 person in the selected workspace, including their private docs, private channels and DMs.
 Service-account tokens support tasks only; docs and chat require a personal identity.
 
 | Permission | Tools |
 | --- | --- |
-| Task read | `list_projects`, `list_tasks`, `get_task`, `list_task_statuses` |
-| Task write | `create_task`, `update_task`, `delete_task` |
-| Docs read | `list_docs`, `get_doc` |
-| Chat read | `list_conversations`, `list_messages`, `get_thread` |
+| Task read | `list_projects`, `list_tasks`, `get_task`, `list_task_statuses`, `list_labels`, `list_members`, `list_comments` |
+| Task write | `create_task`, `update_task`, `delete_task`, `create_comment`, `create_project` |
+| None | `get_me` |
+| Docs read | `list_docs`, `get_doc`, `get_database`, `query_database` |
+| Docs write | `create_doc`, `update_doc`, `create_database_row`, `update_database_row`, `trash_database_rows`, `create_database_property`, `update_database_property`, `delete_database_property` |
+| Chat read | `list_conversations`, `list_messages`, `get_thread`, `search_messages` |
 
-Task create takes `project_id`, `status_id`, `title`, optional markdown `description` and
-`priority`. Task update takes `task_id`, `expected_version`, and optional title, description,
-status or priority. Delete takes `task_id` and `expected_version` and moves the task subtree
-to trash. Read the latest task version before updating or deleting. Task writes require
+Task create takes `project_id`, `status_id`, `title`, optional markdown `description`,
+`priority`, `parent_task_id` (creates a sub-issue) and `assignee_ids`. Task update takes `task_id`,
+`expected_version`, and optional title, description, status, priority, `assignee_ids` or
+`parent_task_id`: a task ID or identifier moves the task under that task, and `null` detaches it.
+`assignee_ids` replaces the whole list with member user IDs from `list_members` or `get_me`, and
+`[]` unassigns everyone; to claim a task, send the current list plus your own `get_me` user ID.
+`create_project` works only for a connection approved for all projects (choose all projects at
+consent, or when you create the token): a connection for chosen projects could not use the new
+project. `key` is the identifier prefix (1 to 20 letters, digits or underscores, unique in the
+workspace).
+`create_comment` takes `task_id` and a Markdown `body` and writes as the connection's user (or
+its service account). A task
+cannot become a sub-issue of itself or of its own sub-issues. Delete takes `task_id` and `expected_version` and moves the task subtree
+to the trash for 30 days. With `permanent: true` it deletes the subtree forever instead, with
+its comments and attachments; this cannot be undone. It also works for a task that is
+already in the trash (then the version is not checked), and needs a connection of a workspace
+owner or admin. Read the latest task version before updating or deleting. `update_task`,
+`delete_task` and `update_doc` fail with "version changed" if the task or doc changed after
+your read, including edits in the editor. Read it again and retry. A malformed task
+identifier is an invalid-params error. Task writes require
 approval for every project in the related parent/sub-issue tree, since task automations can
 change related tasks. Task tools return a projection that excludes references outside grants.
+Doc create takes optional `title`, Markdown `markdown`, and a place: `parent_id`, or for a
+root doc `teamspace_id` or `private: true` (omitted: the default teamspace). Doc update takes
+`page_id`, `expected_version`, and optional `title` or `markdown`. `markdown` is the whole new content: send the Markdown that `get_doc` returned, with your
+edits. Only what you change changes, also in open editors. An update that changes nothing
+keeps the doc's version. Unchanged blocks keep their colors,
+comments and other settings, and edited blocks keep their settings and kind. New blocks get only
+what Markdown can express (no colors, toggles, callouts, comments or file blocks). `get_doc`, `create_doc` and `update_doc` return the doc with
+`markdown` (its content as Markdown) next to the BlockNote `content`. Sub-page links use the
+page's title, or "Untitled" for pages you cannot see. Doc writes act as the connected person
+and fail on a locked doc. A doc can have at most 4,000 blocks (nested ones included):
+`create_doc` with more, `update_doc` with `markdown` that gives more, or `update_doc` with
+`markdown` for a doc that already has more, fail with "A doc can have at most 4,000 blocks"
+and change nothing. A database outage on a doc or chat tool is a JSON-RPC internal error
+(-32603), not "Resource is not available".
+Databases are docs with `kind: "database"` in `list_docs`, and their rows are docs: `get_doc`
+of a row also returns its `database_id` and `values`. `get_database` takes `database_id` and
+returns the properties (with option names), views, templates and `row_count`.
+`query_database` takes `database_id` and optional `filter`, `sorts`, `view_id`, `limit`
+(1–100, default 50), `cursor` and `tz` (an IANA zone for relative dates and computed values;
+default UTC). The filter is a view filter: an AND/OR group of up to 3 levels, 10 children per
+group and 20 rules, such as `{"op": "and", "children": [{"property_id": "Status", "operator":
+"is", "value": ["Done"]}]}`. With `view_id`, the query starts from that view's filter and sorts;
+`filter` must then match too, and `sorts` replace the view's. It returns `items`, `next_cursor`
+and `total`; a cursor works only with the same query. Orbit filters and sorts on the server
+with the web app's rules. `create_database_row` takes `database_id` and optional `title`,
+`values`, `markdown` (the body) and `template_id`. `update_database_row` takes `database_id`,
+`row_id`, and `values`, `title` or both; the last write wins and no version is needed.
+`trash_database_rows` takes `database_id` and 1–100 `row_ids` and returns `trashed`. Values
+use property names or IDs as keys (a name that two properties share is an error), option
+names or IDs (values never add options), user IDs, member emails or `"me"` for people, and
+`YYYY-MM-DD`, a UTC time, a time with a UTC offset (stored as UTC) or `start/end` for dates,
+and page IDs for relations. Results show option names, people (also of a formula) as
+`{id, name}`, related pages that the token's creator can read as `{id, title}` (`hidden_links`
+counts the others) and unique IDs as `"PREFIX-12"`; a unique ID filter takes `"PREFIX-12"` or
+`12`. An invalid value or filter fails with "Invalid database input", its field, such as
+`values.Status`, and what the field needs. A write has at most 50 values. See
+[Databases in the public API](public-api.md#databases) for every value shape.
+The schema tools change a database's properties (columns) as the connected person, who must be
+able to edit the database. `create_database_property` takes `database_id`, `name`, `type` and
+optional `config` and `position`. `update_database_property` takes `database_id`, `property` (a
+name or ID) and one or more of `name`, `type`, `config`, `add_options` and `position`, and
+optional `dry_run`; it returns the property with `converted` and `cleared` value counts. A new
+type converts the values and gives the type's default config; send `config` in a later call.
+`config` replaces the whole config: options left out are removed from every row. Select,
+multi-select and status options can be plain names or `{name, color, group}` objects; an option
+sent by name only keeps the ID, color and group of the option with that name, so its values stay.
+`add_options` appends options and skips names the property already has; it cannot be sent with
+`config`. `delete_database_property` takes `database_id` and `property` and deletes the property
+with its values; the title property cannot be deleted or change its type.
 Chat message and thread tools accept `before` and `limit` (1–100) for pagination.
+`search_messages` takes `query` (up to 500 characters; every word must match, the last one as a
+prefix) and optional `conversation_id`, `author_id`, `has_file` and `cursor` filters. It returns
+20 hits per page, newest first, from conversations the user can read. Copy `cursor` from the
+result into the next request to get older hits. An empty query needs at least one filter.
 
 Tool annotations describe operations; server-side grants enforce access.
 See the [MCP tools specification](https://modelcontextprotocol.io/specification/2025-06-18/server/tools).

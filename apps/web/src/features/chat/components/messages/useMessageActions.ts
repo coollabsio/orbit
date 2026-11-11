@@ -19,9 +19,11 @@ import { confirmAction } from '@/components/common/confirmAction'
 import type { DropdownMenuContent } from '@/components/ui/dropdown-menu'
 import { useChatContext } from '../../api/chatContext'
 import { useDeleteMessage, useMarkUnread, useSetPinned, useToggleReaction } from '../../api/mutations'
-import type { Message } from '../../api/types'
+import { useConversations } from '../../api/queries'
+import type { Conversation, Message } from '../../api/types'
 import { useChatHost } from '../../chatHost'
 import { messagePath } from '../../chatRoutes'
+import { isOwnMessage } from '../../lib/bot'
 import { canEdit, canForward } from '../../lib/forward'
 import { decodeMentions } from '../../lib/mentionTokens'
 import { useChatNavigation } from '../../useChatNavigation'
@@ -55,6 +57,8 @@ interface MessageActionOptions {
   onMarkUnread?: (message: Message) => void
 }
 
+const NO_CONVERSATIONS: Conversation[] = []
+
 /**
  * What a member can do with a message. The `…` menu, the right-click menu and the mobile action sheet all show
  * `actionsFor(message)`, so they never differ.
@@ -70,6 +74,7 @@ export function useMessageActions({ inThread, onReply, onForward, onAddReaction,
   const { mutate: deleteMessage } = useDeleteMessage()
   const role = currentUserId ? people.byId.get(currentUserId)?.role : undefined
   const moderator = role === 'Owner' || role === 'Admin'
+  const conversations = useConversations().data ?? NO_CONVERSATIONS
 
   function react(message: Message, emoji: string) {
     toggleReaction({ message, emoji }, { onError: () => toast.error('Could not update the reaction. Try again.') })
@@ -113,7 +118,9 @@ export function useMessageActions({ inThread, onReply, onForward, onAddReaction,
   function actionsFor(message: Message): MessageAction[] {
     // A message the server has not confirmed has no id to act on; its row offers retry and delete instead.
     if (message.sendState || message.kind !== 'message') return []
-    const own = message.authorId === currentUserId
+    const own = isOwnMessage(message, currentUserId)
+    // An integration's message belongs to the channel: its managers delete it.
+    const canDelete = message.bot ? moderator || conversations.find((item) => item.id === message.conversationId)?.createdBy === currentUserId : own || moderator
     const actions: MessageAction[] = []
     if (!message.deleted) {
       actions.push({ key: 'react', label: 'Add reaction', icon: SmileCircle, run: () => onAddReaction(message) })
@@ -141,7 +148,7 @@ export function useMessageActions({ inThread, onReply, onForward, onAddReaction,
         icon: Copy,
         run: () => copy(decodeMentions(message.body, people.members, people.channels), 'Text copied'),
       },
-      { key: 'task', label: 'Create task', icon: TaskSquare, run: () => host.createTask(message) },
+      ...(host.createTask ? [{ key: 'task', label: 'Create task', icon: TaskSquare, run: () => host.createTask?.(message) }] : []),
       {
         key: 'pin',
         label: message.pinned ? 'Unpin' : 'Pin',
@@ -163,7 +170,7 @@ export function useMessageActions({ inThread, onReply, onForward, onAddReaction,
       },
     )
     if (canEdit(message, currentUserId)) actions.push({ key: 'edit', label: 'Edit', icon: Edit, run: () => onEdit(message) })
-    if (own || moderator) {
+    if (canDelete) {
       actions.push({ key: 'delete', label: 'Delete', icon: Trash, destructive: true, run: () => void remove(message) })
     }
     return actions

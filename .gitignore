@@ -4,6 +4,7 @@ shadow/
 **/.DS_Store
 target/
 /data/
+.dev-instances/
 backups/
 .env.local
 todo.md
@@ -12,3 +13,7 @@ todo.md
 deploy/.env
 
 node_modules
+
+# Release videos: keep only video.json and contact-sheet.jpg
+marketing/releases/*/build/
+marketing/releases/*/*.mp4

@@ -54,10 +54,14 @@ pub enum Permission {
     /// Export the whole workspace as a ZIP archive and download its exports.
     #[serde(rename = "workspace.export")]
     WorkspaceExport,
+    /// Export one's own private pages, private channels and DMs, and create an API token whose
+    /// only scope is `workspace:export:personal`.
+    #[serde(rename = "workspace.export_personal")]
+    WorkspaceExportPersonal,
 }
 
 impl Permission {
-    pub const ALL: [Self; 16] = [
+    pub const ALL: [Self; 17] = [
         Self::WorkspaceUpdate,
         Self::WorkspaceDelete,
         Self::WorkspaceTransfer,
@@ -74,6 +78,7 @@ impl Permission {
         Self::BillingManage,
         Self::StorageManage,
         Self::WorkspaceExport,
+        Self::WorkspaceExportPersonal,
     ];
 }
 
@@ -94,6 +99,8 @@ pub enum MembershipDenied {
     OwnerProtected,
     /// The owner role only moves through an ownership transfer.
     TransferRequired,
+    /// A member never becomes a guest; remove them and invite them again.
+    GuestDowngrade,
 }
 
 impl Actor {
@@ -102,15 +109,22 @@ impl Actor {
         Policy::can(self.role, permission)
     }
 
-    /// Only the author rewrites a task comment.
+    /// Guests only see the private chat channels and DMs they belong to.
     #[must_use]
-    pub fn can_edit_comment(self, author_id: Id) -> bool {
-        self.user_id == author_id
+    pub const fn is_guest(self) -> bool {
+        matches!(self.role, WorkspaceRole::Guest)
+    }
+
+    /// Only the author rewrites a task comment. `author_id` is `None` for a comment that a
+    /// service account wrote: no member is its author.
+    #[must_use]
+    pub fn can_edit_comment(self, author_id: Option<Id>) -> bool {
+        author_id == Some(self.user_id)
     }
 
     #[must_use]
-    pub fn can_delete_comment(self, author_id: Id) -> bool {
-        self.user_id == author_id || self.can(Permission::CommentsModerate)
+    pub fn can_delete_comment(self, author_id: Option<Id>) -> bool {
+        author_id == Some(self.user_id) || self.can(Permission::CommentsModerate)
     }
 
     /// `shared` is workspace visibility; a personal view is only ever its owner's.
@@ -147,6 +161,12 @@ impl Actor {
         private || self.can(Permission::PagesPurge)
     }
 
+    /// Tasks are shared like teamspace pages, so deleting one forever takes the same role.
+    #[must_use]
+    pub const fn can_purge_task(self) -> bool {
+        self.can(Permission::PagesPurge)
+    }
+
     /// Moving teamspace pages into a private space hides them from everyone else and lets the
     /// new owner delete them forever, so it takes [`Permission::PagesPurge`] unless the actor
     /// created every page that moves.
@@ -177,6 +197,9 @@ impl Actor {
             return Err(MembershipDenied::RoleForbidden);
         }
         self.owner_protected(target_role)?;
+        if new_role == WorkspaceRole::Guest {
+            return Err(MembershipDenied::GuestDowngrade);
+        }
         self.admin_protected(target_role)
     }
 
@@ -243,7 +266,7 @@ impl Error for PolicyError {}
 pub struct Policy;
 
 impl Policy {
-    /// The only place that maps a role to what it may do.
+    /// The only place that maps a role to what it may do. Guests hold no permission.
     #[must_use]
     pub const fn can(role: WorkspaceRole, permission: Permission) -> bool {
         match permission {
@@ -267,6 +290,7 @@ impl Policy {
             | Permission::WorkspaceExport => {
                 matches!(role, WorkspaceRole::Owner | WorkspaceRole::Admin)
             }
+            Permission::WorkspaceExportPersonal => !matches!(role, WorkspaceRole::Guest),
         }
     }
 

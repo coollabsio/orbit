@@ -9,8 +9,8 @@ import { Button } from '../../../../ui'
 export default function AdminGeneralScreen() {
   const settings = useInstanceSettings()
   return (
-    <AdminShell refreshing={settings.isRefetching} onRefresh={() => void settings.refetch()}>
-      {settings.isPending ? <SettingsCard title="General"><Note>Loading settings…</Note></SettingsCard> : null}
+    <AdminShell onRefresh={() => settings.refetch()}>
+      {settings.isPending ? <SettingsCard title="General"><Note loading>Loading settings…</Note></SettingsCard> : null}
       {settings.isError ? (
         <SettingsCard title="General">
           <View className="flex-row items-center gap-2">
@@ -31,12 +31,8 @@ function RegistrationCard({ open, emailReady }: { open: boolean; emailReady: boo
   return (
     <SettingsCard title="Registration" description="Who can create an account on this Orbit." flush>
       <SettingsRow first>
-        <OptionText title="Open registration">
-          <OptionHint>
-            {emailReady
-              ? 'On: anyone can create an account with a link sent to their email. Off: people join only by invitation.'
-              : 'Set up a mail server in Email first: the sign-up link goes out by email.'}
-          </OptionHint>
+        <OptionText title="Open registration" help={emailReady ? 'On: anyone can create an account with a link sent to their email. Off: people join only by invitation.' : undefined}>
+          {emailReady ? null : <OptionHint>Set up a mail server in Email first: the sign-up link goes out by email.</OptionHint>}
           {setRegistration.isError ? <OptionHint error>{errorMessage(setRegistration.error)}</OptionHint> : null}
         </OptionText>
         <Toggle label="Open registration" value={open} disabled={(!emailReady && !open) || setRegistration.isPending} onChange={(checked) => setRegistration.mutate(checked)} />

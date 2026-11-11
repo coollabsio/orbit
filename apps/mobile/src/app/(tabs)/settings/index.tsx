@@ -1,58 +1,35 @@
-import { router } from 'expo-router'
+import { Redirect, router } from 'expo-router'
 import { useState } from 'react'
 import { View } from 'react-native'
 
 import { ConfirmDialog, type ConfirmRequest } from '../../../components/settings/Dialog'
-import { ACCOUNT_NAV, Note, RowIcon, RowText, SettingsCard, SettingsRow, SettingsShell, WORKSPACE_NAV } from '../../../components/settings/Shell'
+import { Note, SettingsCard, SettingsShell, WORKSPACE_NAV } from '../../../components/settings/Shell'
+import { guestSettings } from '../../../data/guest'
 import { useAuthOptions, useMemberWrites, useRenameWorkspace } from '../../../hooks/account'
-import { useOrbit } from '../../../orbit-context'
+import { useIsGuest, useOrbit } from '../../../orbit-context'
 import { useMembers } from '../../../queries'
 import { errorMessage } from '../../../session-context'
-import { useTheme } from '../../../theme'
-import { Button, Icon, Input } from '../../../ui'
+import { Button, Input, Text } from '../../../ui'
 
 /**
- * The dock's Settings: the web's workspace General page (name, leave), and the account pages,
- * the server and Sign out, which the web keeps in the account menu.
+ * The dock's Settings: the web's workspace General page (name, leave, version). The account pages and Sign out are in
+ * the account menu, as on the web. A guest has no workspace settings, so it gets its account settings.
  */
 export default function GeneralScreen() {
-  const { workspace, session, user, signOut } = useOrbit()
-  const { colors } = useTheme()
-  const [signingOut, setSigningOut] = useState(false)
-  const [signOutError, setSignOutError] = useState<string | null>(null)
+  const guest = useIsGuest()
+  if (guest) return <Redirect href={guestSettings} />
+  return <General />
+}
+
+function General() {
+  const { workspace } = useOrbit()
+  const version = useAuthOptions().data?.version
 
   return (
     <SettingsShell title="Settings" nav={WORKSPACE_NAV}>
       {workspace.permissions.includes('workspace.update') ? <WorkspaceName key={workspace.id} /> : null}
-
-      <SettingsCard title="Account" description={`${user.email} on ${session.server}`} flush>
-        {ACCOUNT_NAV.map((item, index) => (
-          <SettingsRow key={item.href} first={index === 0} label={item.label} onPress={() => router.push(item.href)}>
-            <RowIcon icon={item.icon} />
-            <RowText title={item.label} />
-            <Icon name="chevronRight" size={14} color={colors.mutedForeground} />
-          </SettingsRow>
-        ))}
-        <View className="p-4 border-t border-border gap-2 items-start">
-          <Button
-            label="Sign out"
-            variant="outline"
-            icon="logout"
-            loading={signingOut}
-            onPress={() => {
-              setSigningOut(true)
-              setSignOutError(null)
-              signOut().catch((error: unknown) => {
-                setSigningOut(false)
-                setSignOutError(errorMessage(error))
-              })
-            }}
-          />
-          {signOutError ? <Note error>{signOutError}</Note> : null}
-        </View>
-      </SettingsCard>
-
       <LeaveWorkspace key={`leave-${workspace.id}`} />
+      {version ? <Text className="text-center text-[12px] leading-[16px] text-muted-foreground">Orbit v{version}</Text> : null}
     </SettingsShell>
   )
 }
@@ -63,8 +40,8 @@ function WorkspaceName() {
   const [name, setName] = useState(workspace.name)
   const dirty = name.trim() !== workspace.name
   return (
-    <SettingsCard title="Workspace" description="Rename this workspace.">
-      <Input label="Name" required value={name} onChangeText={setName} maxLength={100} returnKeyType="done" onSubmitEditing={() => dirty && name.trim() && rename.mutate(name.trim())} />
+    <SettingsCard title="Workspace">
+      <Input label="Name" value={name} onChangeText={setName} maxLength={100} returnKeyType="done" onSubmitEditing={() => dirty && name.trim() && rename.mutate(name.trim())} />
       {rename.isError ? <View className="mt-3"><Note error>Workspace rename failed. {errorMessage(rename.error)}</Note></View> : null}
       {dirty ? (
         <View className="mt-4 flex-row gap-2 justify-end">
@@ -73,6 +50,15 @@ function WorkspaceName() {
         </View>
       ) : null}
     </SettingsCard>
+  )
+}
+
+/** The web's underlined link inside a sentence. */
+function InlineLink({ label, href }: { label: string; href: '/settings/danger-zone' | '/settings/members' }) {
+  return (
+    <Text accessibilityRole="link" onPress={() => router.push(href)} className="text-[13px] leading-[19px] text-foreground underline">
+      {label}
+    </Text>
   )
 }
 
@@ -88,17 +74,23 @@ function LeaveWorkspace() {
 
   if (membership && !membership.can_remove) {
     return (
-      <SettingsCard title="Leave workspace" description="You own this workspace.">
-        <Note>
-          {billing
-            ? 'The owner cannot leave. Ownership transfer is not available on Orbit Cloud yet.'
-            : 'To leave, first transfer ownership to another member in Members.'}
-        </Note>
+      <SettingsCard title="Leave workspace">
+        {billing ? (
+          <Note>
+            The owner cannot leave. Ownership transfer is not available on Orbit Cloud yet. To remove the workspace, delete it in{' '}
+            <InlineLink label="Danger zone" href="/settings/danger-zone" />.
+          </Note>
+        ) : (
+          <Note>
+            To leave, first transfer ownership to another member in <InlineLink label="Members" href="/settings/members" />, or delete the workspace in{' '}
+            <InlineLink label="Danger zone" href="/settings/danger-zone" />.
+          </Note>
+        )}
       </SettingsCard>
     )
   }
   return (
-    <SettingsCard title="Leave workspace" description="Remove yourself from this workspace.">
+    <SettingsCard title="Leave workspace">
       <View className="items-start gap-2">
         <Button
           label={leave.isPending ? 'Leaving…' : 'Leave workspace'}

@@ -977,10 +977,32 @@ fn download_metadata_allows_only_safe_images_inline_and_always_uses_nosniff() {
     for media_type in ["image/svg+xml", "text/html", "application/pdf"] {
         let download = UploadService::download_metadata(media_type, "report\".svg");
         assert_eq!(download.disposition, ContentDisposition::Attachment);
+        assert_eq!(download.content_type, media_type);
         assert_eq!(download.x_content_type_options, "nosniff");
         assert!(!download.content_disposition.contains('\r'));
         assert!(!download.content_disposition.contains('\n'));
     }
+
+    // A sniffed octet-stream keeps `nosniff`, so the player type has to come from the file name.
+    let video = UploadService::download_metadata("application/octet-stream", "flower.MP4");
+    assert_eq!(video.content_type, "video/mp4");
+    assert_eq!(video.disposition, ContentDisposition::Inline);
+    let audio = UploadService::download_metadata("application/octet-stream", "beep.wav");
+    assert_eq!(audio.content_type, "audio/wav");
+    assert_eq!(audio.disposition, ContentDisposition::Inline);
+    let text = UploadService::download_metadata("application/octet-stream", "note.txt");
+    assert_eq!(text.content_type, "text/plain; charset=utf-8");
+    assert_eq!(text.disposition, ContentDisposition::Inline);
+    let pdf = UploadService::download_metadata("application/pdf", "orbit.pdf");
+    assert_eq!(pdf.content_type, "application/pdf");
+    assert_eq!(pdf.disposition, ContentDisposition::Attachment);
+    let unknown = UploadService::download_metadata("application/octet-stream", "data.bin");
+    assert_eq!(unknown.content_type, "application/octet-stream");
+    assert_eq!(unknown.disposition, ContentDisposition::Attachment);
+    // A sniffed HTML file stays HTML even when the name says otherwise.
+    let html = UploadService::download_metadata("text/html", "note.txt");
+    assert_eq!(html.content_type, "text/html");
+    assert_eq!(html.disposition, ContentDisposition::Attachment);
 }
 
 #[tokio::test]

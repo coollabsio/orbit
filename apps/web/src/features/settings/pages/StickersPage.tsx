@@ -5,8 +5,9 @@ import { ApiProblem } from '@orbit/api/problem'
 import { confirmAction } from '@/components/common/confirmAction'
 import { EmptyState } from '@/components/common/EmptyState'
 import { SettingsCard } from '@/components/common/SettingsCard'
+import { InfoTip } from '@/components/common/InfoTip'
 import { Button } from '@/components/ui/button'
-import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
+import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { FieldGrid, RequiredMark, SettingsRow } from '@/features/settings/components/SettingsParts'
 import { useMembers } from '@/features/workspaces/api'
@@ -15,6 +16,7 @@ import { useCan } from '@/features/workspaces/permissions'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { STICKER_IMAGE_TYPES, STICKER_NAME_MAX, stickerNameFromFile, stickerProblem } from '@/lib/customSticker'
 import { shortDate } from '@/lib/format'
+import { LoadingText } from '@/components/ui/spinner'
 
 /** What the server can answer to a new sticker or a delete, in words for the page. */
 const SERVER_PROBLEMS: Record<string, string> = {
@@ -81,7 +83,7 @@ export function StickersPage() {
       <form className="flex flex-col gap-4" onSubmit={(event) => void submit(event)}>
         <FieldGrid>
           <Field>
-            <FieldLabel htmlFor="sticker-file">Image <RequiredMark /></FieldLabel>
+            <div className="flex items-center gap-1.5"><FieldLabel htmlFor="sticker-file">Image <RequiredMark /></FieldLabel><InfoTip text="PNG, JPEG, WebP or GIF, at most 512 KB." /></div>
             <Input
               ref={fileInput}
               id="sticker-file"
@@ -94,12 +96,10 @@ export function StickersPage() {
                 if (chosen) setName(stickerNameFromFile(chosen.name))
               }}
             />
-            <FieldDescription>PNG, JPEG, WebP or GIF, at most 512 KB.</FieldDescription>
           </Field>
           <Field>
-            <FieldLabel htmlFor="sticker-name">Name <RequiredMark /></FieldLabel>
+            <FieldLabel htmlFor="sticker-name" className="items-center gap-1.5">Name <RequiredMark /> <InfoTip text="2 to 30 characters. People find the sticker by this name." /></FieldLabel>
             <Input id="sticker-name" value={name} maxLength={STICKER_NAME_MAX} placeholder="Party Parrot" onChange={(event) => { setName(event.target.value); setProblem(null) }} />
-            <FieldDescription>2 to 30 characters. People find the sticker by this name.</FieldDescription>
           </Field>
         </FieldGrid>
         <div className="flex flex-wrap items-center gap-3">
@@ -113,7 +113,7 @@ export function StickersPage() {
     ) : (
       <SettingsCard title="Stickers" description={stickers.data ? `${stickers.data.length} of 100 in this workspace.` : undefined} flush>
         <div className="flex flex-col divide-y">
-          {stickers.isPending ? <SettingsRow>Loading stickers…</SettingsRow> : null}
+          {stickers.isPending ? <SettingsRow><LoadingText>Loading stickers…</LoadingText></SettingsRow> : null}
           {stickers.isError ? <SettingsRow role="alert">Stickers could not be loaded.</SettingsRow> : null}
           {stickers.data?.map((entry) => (
             <SettingsRow className="flex-nowrap" key={entry.id}>

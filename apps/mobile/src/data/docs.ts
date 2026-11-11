@@ -2,11 +2,24 @@
  * Docs as the web's sidebar tree (`features/docs/pageTree.ts`), a page's BlockNote blocks as readable lines, and the
  * plain paragraphs the app can add to a page. No React.
  */
-import type { CreatePageBody } from '@orbit/api/generated/types.gen'
+import type { CreatePageBody, PageFavorite, PageKind } from '@orbit/api/generated/types.gen'
 
+import { type MentionTarget, mentionInlineContent, type TaskLinking } from './mentions'
 import type { PageSummary, Teamspace } from './orbit'
 
 export const pageTitle = (page: Pick<PageSummary, 'title'>) => page.title.trim() || 'Untitled'
+
+/** Trashed pages whose title contains the query, ignoring case; all of them for a blank query. */
+export function filterTrash<T extends Pick<PageSummary, 'title'>>(pages: readonly T[], query: string): T[] {
+  const needle = query.trim().toLocaleLowerCase()
+  return needle ? pages.filter((page) => pageTitle(page).toLocaleLowerCase().includes(needle)) : [...pages]
+}
+
+/** Whole days until the trash deletes a page trashed at `deletedAt` for good (30 days, rounded up, never below 0). */
+export function daysUntilPurge(deletedAt: string, now = Date.now()): number {
+  const day = 24 * 60 * 60 * 1000
+  return Math.max(0, Math.ceil((new Date(deletedAt).getTime() + 30 * day - now) / day))
+}
 
 export interface TreeRow {
   page: PageSummary
@@ -65,18 +78,76 @@ export function descendantsOf(pages: readonly PageSummary[], pageId: string): Pa
   return out
 }
 
-/** The web's "Move to trash" confirmation. */
-export function trashPrompt(pages: readonly PageSummary[], page: PageSummary): { title: string; description: string } {
-  const below = descendantsOf(pages, page.id).length
+/**
+ * A page's live sub-pages: from the tree for a tree page; a database row and its sub-pages are not in the tree, so
+ * theirs come from `server` (`GET …/pages/{id}/descendants`).
+ */
+export async function subPagesOf(pages: readonly PageSummary[], pageId: string, server: (pageId: string) => Promise<PageSummary[]>): Promise<PageSummary[]> {
+  return pages.some((page) => page.id === pageId) ? descendantsOf(pages, pageId) : server(pageId)
+}
+
+/** "Private", the teamspace's name, or "Teamspace" while the list is unknown. */
+export function spaceLabel(space: string, teamspaces: readonly Pick<Teamspace, 'id' | 'name'>[] | undefined): string {
+  if (space === 'private') return 'Private'
+  return teamspaces?.find((teamspace) => `teamspace:${teamspace.id}` === space)?.name ?? 'Teamspace'
+}
+
+/** Where "Move to" sends a page: the end of a space's root pages, or the last sub-page (or row) of a page or database. */
+export type MoveDestination = { kind: 'space'; space: string } | { kind: 'page'; page: PageSummary }
+
+export interface MoveRequest {
+  parent_id: string | null
+  position: number
+  private?: boolean
+  teamspace_id?: string
+}
+
+/** The web's `destinationMove`: the `POST …/pages/{id}/move` body (without the version) for `destination`. */
+export function moveRequest(pages: readonly PageSummary[], movingId: string, destination: MoveDestination): MoveRequest {
+  if (destination.kind === 'page') {
+    const siblings = pages.filter((page) => page.parent_id === destination.page.id && page.id !== movingId)
+    return { parent_id: destination.page.id, position: siblings.length }
+  }
+  const roots = pages.filter((page) => page.parent_id === null && spaceOf(page) === destination.space && page.id !== movingId)
+  const space = destination.space === 'private' ? { private: true } : { teamspace_id: destination.space.replace(/^teamspace:/, '') }
+  return { parent_id: null, position: roots.length, ...space }
+}
+
+/** The search result's hint, as the web palette: "Row · Research" for a database row, else "Page · General". */
+export function searchHint(result: { database_title: string | null; private: boolean; teamspace_id: string | null }, teamspaces: readonly Pick<Teamspace, 'id' | 'name'>[] | undefined): string {
+  if (result.database_title !== null) return `Row · ${result.database_title || 'Untitled'}`
+  return `Page · ${spaceLabel(result.private || !result.teamspace_id ? 'private' : `teamspace:${result.teamspace_id}`, teamspaces)}`
+}
+
+/** The web's "Move to trash" confirmation; `below` is the number of sub-pages that go with the page. */
+export function trashPrompt(page: Pick<PageSummary, 'title'>, below: number): { title: string; description: string } {
   return {
     title: `Move “${pageTitle(page)}” to the trash?`,
     description: below > 0 ? `Its ${below} sub-page${below === 1 ? '' : 's'} move with it. You can restore them from Trash.` : 'You can restore it from Trash.',
   }
 }
 
-/** The favorite pages that still exist, in the favorites' order. */
-export function favoritePages(pages: readonly PageSummary[], ids: readonly string[]): PageSummary[] {
-  return ids.flatMap((id) => pages.find((page) => page.id === id) ?? [])
+export interface FavoriteRow {
+  id: string
+  title: string
+  icon: string | null
+  kind: PageKind
+  /** The database of a favorite row. */
+  hint: string | null
+  /** The tree summary; `null` for a page outside the tree (a database row or one of its sub-pages). */
+  page: PageSummary | null
+}
+
+/**
+ * The favorites in their order, from the server's entries: rows of databases are not in the tree. A tree page shows
+ * its tree summary, which a save updates at once.
+ */
+export function favoritePages(pages: readonly PageSummary[], favorites: readonly PageFavorite[]): FavoriteRow[] {
+  return favorites.map((favorite) => {
+    const page = pages.find((item) => item.id === favorite.page_id) ?? null
+    const shown = page ?? favorite
+    return { id: favorite.page_id, title: shown.title, icon: shown.icon, kind: shown.kind, hint: favorite.database_title, page }
+  })
 }
 
 /** The web's cover URL rule: an http(s) URL up to 2048 characters. */
@@ -97,8 +168,14 @@ export function blockId(random: () => number = Math.random): string {
   })
 }
 
-/** One BlockNote paragraph per non-empty line, as the web editor stores typed text. */
-export function paragraphBlocks(text: string, makeId: () => string = blockId): Record<string, unknown>[] {
+/** One BlockNote paragraph per non-empty line, as the web editor stores typed text; `@Name` of `people` is a mention. */
+export function paragraphBlocks(
+  text: string,
+  makeId: () => string = blockId,
+  people: readonly MentionTarget[] = [],
+  /** With it, a typed task ID becomes a link to the task. */
+  tasks?: TaskLinking,
+): Record<string, unknown>[] {
   return text
     .split('\n')
     .map((line) => line.trimEnd())
@@ -107,7 +184,7 @@ export function paragraphBlocks(text: string, makeId: () => string = blockId): R
       id: makeId(),
       type: 'paragraph',
       props: { backgroundColor: 'default', textAlignment: 'left', textColor: 'default' },
-      content: [{ type: 'text', text: line, styles: {} }],
+      content: mentionInlineContent(line, people, tasks),
       children: [],
     }))
 }

@@ -19,7 +19,7 @@ use tower::{Layer, Service};
 use crate::{Database, Problem, RateLimitConfig};
 use rate_limit::RateLimiter;
 
-pub use limits::HttpLimits;
+pub use limits::{HttpLimits, LargeUpload};
 pub use request_id::RequestId;
 pub use security::{ClientIp, OriginPolicy, RequestTransport, bearer_token};
 use security::{add_security_headers, inspect_request, strip_forwarding_headers};
@@ -262,7 +262,7 @@ where
                 ));
             }
 
-            if let Err(refused) = rate_limiter
+            let workspace_charge = match rate_limiter
                 .check(
                     client_ip.0,
                     request.method(),
@@ -271,25 +271,28 @@ where
                 )
                 .await
             {
-                let mut response = problem_response(
-                    StatusCode::TOO_MANY_REQUESTS,
-                    "rate_limit_exceeded",
-                    "Rate limit exceeded",
-                    "Too many requests were made to this endpoint class.",
-                    &request_id,
-                    request.uri().path(),
-                );
-                response.headers_mut().insert(
-                    RETRY_AFTER,
-                    HeaderValue::from(refused.retry_after.as_secs()),
-                );
-                return Ok(finish_response(
-                    response,
-                    &request_id,
-                    transport.is_secure(),
-                    csp_script_hash.as_deref(),
-                ));
-            }
+                Ok(charge) => charge,
+                Err(refused) => {
+                    let mut response = problem_response(
+                        StatusCode::TOO_MANY_REQUESTS,
+                        "rate_limit_exceeded",
+                        "Rate limit exceeded",
+                        "Too many requests were made to this endpoint class.",
+                        &request_id,
+                        request.uri().path(),
+                    );
+                    response.headers_mut().insert(
+                        RETRY_AFTER,
+                        HeaderValue::from(refused.retry_after.as_secs()),
+                    );
+                    return Ok(finish_response(
+                        response,
+                        &request_id,
+                        transport.is_secure(),
+                        csp_script_hash.as_deref(),
+                    ));
+                }
+            };
 
             if limits.request_is_too_large(&request) {
                 return Ok(finish_response(
@@ -370,6 +373,11 @@ where
                     ));
                 }
             };
+            if let Some(charge) = workspace_charge
+                && rate_limit::WorkspaceCharge::applies_to(response.status())
+            {
+                rate_limiter.charge(charge).await;
+            }
             let response = if response.status() == StatusCode::INTERNAL_SERVER_ERROR {
                 let status = response.status();
                 tracing::error!(request_id = request_id.as_str(), %status, "http request failed");

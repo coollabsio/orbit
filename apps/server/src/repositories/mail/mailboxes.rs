@@ -470,7 +470,10 @@ async fn is_workspace_membership(
     membership_id: Id,
 ) -> Result<bool, MailError> {
     let found: Option<String> =
-        sqlx::query_scalar("SELECT id FROM memberships WHERE id = $1 AND workspace_id = $2")
+        // A guest sees only chat, so a mailbox cannot have one.
+        sqlx::query_scalar(
+            "SELECT id FROM memberships WHERE id = $1 AND workspace_id = $2 AND role <> 'guest'",
+        )
             .bind(membership_id.to_string())
             .bind(workspace_id.to_string())
             .fetch_optional(&mut **transaction)
@@ -667,14 +670,14 @@ async fn insert_mailbox(
     Ok(mailbox_id)
 }
 
-/// Members of the workspace without a personal mailbox, oldest first, with their names.
+/// Members (not guests) of the workspace without a personal mailbox, oldest first, with their names.
 async fn members_without_mailbox(
     transaction: &mut Transaction<'_, Any>,
     workspace_id: Id,
 ) -> Result<Vec<(Id, String, String)>, MailError> {
     let rows = sqlx::query(
         "SELECT ms.id, u.display_name, u.email FROM memberships ms \
-         JOIN users u ON u.id = ms.user_id WHERE ms.workspace_id = $1 \
+         JOIN users u ON u.id = ms.user_id WHERE ms.workspace_id = $1 AND ms.role <> 'guest' \
          AND NOT EXISTS (SELECT 1 FROM mailboxes m WHERE m.owner_membership_id = ms.id) \
          ORDER BY ms.created_at, ms.id",
     )

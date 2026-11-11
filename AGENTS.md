@@ -16,6 +16,18 @@ a keyboard-only or desktop-only feature, or a fix for a component that mobile do
 which changes you did not port, and why. When mobile lacks a screen that the change needs, say so and offer to port
 that screen.
 
+## UI: help text goes in a tooltip
+
+Do not put help paragraphs under a title, a field label or a switch label. For a card or section title, give the
+text to `SettingsCard`'s `description`; for another heading, use `TitleTip`
+(`apps/web/src/components/common/TitleTip.tsx`). Both give the title a solid underline (as in Coolify) and show the
+text on hover. For a field or switch label, put the text in an info icon with a tooltip next to the label: `InfoTip`
+(`apps/web/src/components/common/InfoTip.tsx`), for example `<FieldLabel>Request URL <InfoTip text="…" /></FieldLabel>`.
+Short errors (`FieldError`), empty states, steps, links and "why is this disabled" notes stay visible. Use this in new
+views, and change an old view to it when you edit that view. Mobile has no hover: there, a tap shows the text. Use
+`Input`'s `help` prop, `LabelTip` (`apps/mobile/src/ui/LabelTip.tsx`), `OptionText`'s `help` prop, or the mobile
+`SettingsCard` `description`.
+
 ## Databases: SQLite and Postgres
 
 Orbit runs on SQLite (default, `ORBIT_DATABASE_PATH`) or Postgres (`ORBIT_DATABASE_URL`).
@@ -39,3 +51,43 @@ Every change must work on both.
 - **Postgres setup:** the database must use `LOCALE_PROVIDER builtin BUILTIN_LOCALE 'C.UTF-8' LOCALE 'C.UTF-8'`
   (Orbit refuses other databases), and the server needs `ORBIT_APP_KEY`. S3 for files and backups stays optional
   and is set in Admin → Storage. Operator details: [`docs/operations.md`](docs/operations.md).
+
+## Development servers: one per worktree
+
+Jean starts the dev server with `./scripts/dev run` (from `jean.json`). It wraps `just dev`, so several worktrees
+can run at the same time:
+
+- **Ports:** the main checkout uses web 18888 and API 18080. Each worktree gets a fixed slot for its branch: web
+  `24000 + slot*10`, API one higher. Slots are kept in `.dev-instances/slots` next to the shared git directory.
+- **Database:** a worktree uses its own SQLite file in `data/` and does not read the main checkout's `.env.local`.
+  Thus a branch's migrations never change the main dev database. A worktree can have its own `.env.local`.
+- **URL:** when Tailscale runs, the web port is published over HTTPS on the tailnet name
+  (`https://<host>.ts.net:<web port>`), and the server uses it as its public origin.
+
+To test a running app, call Jean MCP `get_run_environments` with your `worktreeId`, and use the ports and URL it
+gives for your worktree. If your worktree has no running environment, start it with `start_run_environment`. Do not
+use another worktree's server: it runs other code and another database. `./scripts/dev urls` lists all instances.
+Before you trust a page, check who owns its port (`ss -ltnp`, then `readlink /proc/<pid>/cwd`).
+`./scripts/dev teardown` frees a worktree's slot (Jean runs it when it removes the worktree). `just e2e` still uses
+the fixed port 18080, so it cannot run while the main checkout's server runs.
+
+## Development mail: Mailpit
+
+In development, Orbit sends mail to Mailpit (SMTP `127.0.0.1:11025`, inbox at `http://127.0.0.1:18026`). The dev
+seed (`just dev`, `just seed`) sets this mail server when none is set, and opens registration. If you test sign-up,
+invitations, recovery or email changes, make sure Mailpit runs (`docker ps --filter name=orbit-mailpit`), and start
+it if needed:
+
+```bash
+docker start orbit-mailpit 2>/dev/null || docker run -d --name orbit-mailpit --restart unless-stopped \
+  -p 127.0.0.1:11025:1025 -p 127.0.0.1:18026:8025 axllent/mailpit
+```
+
+Without Mailpit, sending fails. A mail server set in **Admin → Email** stays: the seed does not change it. If the
+container runs but `docker port orbit-mailpit` prints nothing, it lost its network (seen on 2026-11-04): run
+`docker network connect bridge orbit-mailpit && docker restart orbit-mailpit`.
+
+## Release video
+
+To make the product update video or release-note screenshots of a release, follow
+[`marketing/release-video/GUIDE.md`](marketing/release-video/GUIDE.md).

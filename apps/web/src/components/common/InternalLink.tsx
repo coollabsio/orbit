@@ -1,21 +1,25 @@
-import { useContext } from 'react'
+import { useContext, type ReactNode } from 'react'
 import { InternalLinkContext } from '@/lib/internalLinkContext'
-import { appNavigate } from '@/lib/navigateBridge'
+import { appNavigate, isPlainClick } from '@/lib/navigateBridge'
 
-/** A bare link to this app in rendered markdown: it navigates in place, unless the host draws it (`InternalLinkContext`). */
-export function InternalLink({ url, path }: { url: string; path: string }) {
+/**
+ * A link to this app in rendered text: it navigates in place. A bare link (no `children`) shows its URL, unless the host
+ * draws it (`InternalLinkContext`).
+ */
+export function InternalLink({ url, path, children, className = 'text-primary hover:underline' }: { url: string; path: string; children?: ReactNode; className?: string }) {
   const render = useContext(InternalLinkContext)
   const plain = (
     <a
       href={path}
-      className="text-primary hover:underline"
+      className={className}
       onClick={(e) => {
+        if (!isPlainClick(e)) return
         e.preventDefault()
         appNavigate(path)
       }}
     >
-      {url}
+      {children ?? url}
     </a>
   )
-  return render ? render(url, plain) : plain
+  return render && children === undefined ? render(url, plain) : plain
 }

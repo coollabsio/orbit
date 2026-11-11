@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { contentEquals, isPageFileUrl, isSafeFileUrl, isTaskAttachmentUrl, linkMentions, pastedFilesToCopy, taskAttachmentUrl, toEditorContent, toStoredContent } from './content'
+import { contentEquals, isPageFileUrl, isSafeFileUrl, isTaskAttachmentUrl, linkMentions, pastedFilesToCopy, taskAttachmentUrl, toEditorContent, toStoredContent, trimBlocks } from './content'
 
 const TYPES = new Set(['paragraph', 'heading', 'table', 'page'])
 const TAB = String.fromCharCode(9)
@@ -176,5 +176,35 @@ describe('linkMentions', () => {
     expect(linkMentions(paragraph(text('@Adam')), [{ id: 'a', name: 'Ada' }])).toEqual(paragraph(text('@Adam')))
     expect(linkMentions(paragraph(text('mail@Ada')), [{ id: 'a', name: 'Ada' }])).toEqual(paragraph(text('mail@Ada')))
     expect(linkMentions(paragraph(text('@Ada', { code: true })), [{ id: 'a', name: 'Ada' }])).toEqual(paragraph(text('@Ada', { code: true })))
+  })
+})
+
+describe('trimBlocks', () => {
+  const text = (value: string) => ({ type: 'text', text: value, styles: {} })
+  const paragraph = (...content: unknown[]) => ({ type: 'paragraph', content, children: [] })
+
+  test('drops empty lines around a comment and keeps the ones inside it', () => {
+    const blocks = [paragraph(), paragraph(text('  ')), paragraph(text('hi')), paragraph(), paragraph(text('there')), paragraph(), paragraph()]
+    expect(trimBlocks(blocks)).toEqual([paragraph(text('hi')), paragraph(), paragraph(text('there'))])
+  })
+
+  test('trims line breaks at the start of the first block and the end of the last', () => {
+    expect(trimBlocks([paragraph(text('\nhi')), paragraph(text('there\n\n'), text('\n'))])).toEqual([paragraph(text('hi')), paragraph(text('there'))])
+  })
+
+  test('keeps an image, a code block and a paragraph with children as they are', () => {
+    const image = { type: 'image', props: { url: '/x.png' }, children: [] }
+    const code = { type: 'codeBlock', content: [text('a\n')], children: [] }
+    const nested = { type: 'paragraph', content: [], children: [paragraph(text('x'))] }
+    expect(trimBlocks([paragraph(), image, code, nested])).toEqual([image, code, nested])
+  })
+
+  test('inline code at the ends keeps its white space', () => {
+    const code = (value: string) => ({ type: 'text', text: value, styles: { code: true } })
+    expect(trimBlocks([paragraph(code('  x')), paragraph(text('a '), code('y  '))])).toEqual([paragraph(code('  x')), paragraph(text('a '), code('y  '))])
+  })
+
+  test('an empty comment becomes no blocks', () => {
+    expect(trimBlocks([paragraph(), paragraph(text('\n'))])).toEqual([])
   })
 })

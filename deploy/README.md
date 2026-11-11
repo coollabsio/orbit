@@ -28,6 +28,19 @@ For Tailscale-only hosting, use an existing Tailscale HTTPS proxy instead of the
 
 The image contains a statically linked Linux executable with all frontend assets embedded. It needs no Node, Bun, Rust installation, or separate web directory at runtime.
 
+Each GitHub release has this executable for `x86_64` and `aarch64` as a `.tar.xz` file (about 15 MB), and a `SHA256SUMS` file. Download the file for your architecture, check it and unpack it:
+
+```sh
+version=0.1.0 arch=$(uname -m)  # x86_64 or aarch64
+base=https://github.com/coollabsio/orbit/releases/download/v$version
+curl -fLO "$base/orbit-linux-$arch.tar.xz" -fLO "$base/SHA256SUMS"
+sha256sum --check --ignore-missing SHA256SUMS
+tar -xJf "orbit-linux-$arch.tar.xz"  # extracts ./orbit
+./orbit --help
+```
+
+To build the executable yourself, copy it out of a local image:
+
 ```sh
 docker build -t orbit:local .
 container=$(docker create orbit:local)
@@ -52,7 +65,17 @@ export ORBIT_ENV=production \
 ./orbit serve
 ```
 
-Run under an unprivileged service account and an HTTPS reverse proxy. The binary architecture matches the Docker build platform. The latest commit on `main` publishes one image manifest for `linux/amd64` and `linux/arm64` to `ghcr.io/<owner>/<repository>:<seven-character-commit-sha>`. A newer commit cancels an older image build. Each image is built and smoke-tested on a native runner; the image workflow does not use QEMU. The workflow does not create GitHub Releases or downloadable binaries. Local builds do not publish anything.
+Run under an unprivileged service account and an HTTPS reverse proxy. The binary architecture matches the Docker build platform. The latest commit on `main` publishes one image manifest for `linux/amd64` and `linux/arm64` to `ghcr.io/<owner>/<repository>:<seven-character-commit-sha>` and `:main`. A newer commit cancels an older image build. Each image is built and smoke-tested on a native runner; the image workflow does not use QEMU. Local builds do not publish anything.
+
+## Versions and releases
+
+`[workspace.package] version` in `Cargo.toml` is the Orbit version (now `0.1.0`). The server returns it in `GET /api/v1/auth/options` (`version`), and Settings → General shows it as `Orbit v0.1.0`. To publish a versioned image:
+
+1. Run `just version 0.2.0`. This sets the version in `Cargo.toml` and updates `Cargo.lock`.
+2. Commit both files and push them to `main`.
+3. On GitHub, publish a release with the tag `v0.2.0`.
+
+The image workflow then publishes `ghcr.io/<owner>/<repository>:0.2.0`, `:0.2` and `:latest`. A pre-release gets only its exact tag (for example `:0.3.0-rc.1`). If the tag is not `v` plus the version in `Cargo.toml`, the workflow stops before it builds. The workflow also attaches the smoke-tested executables (`orbit-linux-x86_64.tar.xz`, `orbit-linux-aarch64.tar.xz`) and `SHA256SUMS` to the release. It stops if an executable is not statically linked. Run `just version` to print the current version.
 
 ## Backups and upgrades
 

@@ -3,11 +3,13 @@ import { createContext, type ReactNode, use, useEffect, useState } from 'react'
 
 import { accountKeys, authOptions } from './data/account-api'
 import { billingKey, workspaceBilling } from './data/billing'
+import { isGuestRole } from './data/guest'
 import { keys } from './data/keys'
 import { type OrbitClient, type User, type WorkspaceRecord, workspaces as listWorkspaces } from './data/orbit'
 import { loadWorkspaceId, saveWorkspaceId, type StoredSession } from './session'
 import { useSession } from './session-context'
-import { Button, EmptyState, ErrorView, LoadingView, Screen } from './ui'
+// not the `./ui` barrel: its `Avatar` reads this context, and the barrel would make a require cycle
+import { ErrorView, LoadingView } from './ui/StateView'
 
 export interface Orbit {
   client: OrbitClient
@@ -27,7 +29,7 @@ const OrbitContext = createContext<Orbit | null>(null)
  * The signed-in session and its current workspace: the one the user chose last, else the first. Renders its children
  * only once both are known, so every screen below can rely on `useOrbit()`.
  */
-export function OrbitProvider({ children }: { children: ReactNode }) {
+export function OrbitProvider({ children, noWorkspace }: { children: ReactNode; /** Shown while the user has no workspace. */ noWorkspace: ReactNode }) {
   const { state, signOut, setUser } = useSession()
   if (state.status !== 'signed_in') throw new Error('OrbitProvider needs a signed-in session')
   const { client, session, user } = state
@@ -47,13 +49,7 @@ export function OrbitProvider({ children }: { children: ReactNode }) {
 
   const live = list.data.filter((workspace) => !workspace.deleted_at)
   const workspace = live.find((item) => item.id === chosen) ?? live[0]
-  if (!workspace) {
-    return (
-      <Screen centered>
-        <EmptyState icon="home" title="No workspaces" description="Ask an admin to invite you, or create a workspace in Orbit on the web." action={<Button label="Sign out" variant="outline" onPress={() => void signOut()} />} />
-      </Screen>
-    )
-  }
+  if (!workspace) return noWorkspace
 
   const selectWorkspace = (id: string) => {
     setChosen(id)
@@ -79,8 +75,18 @@ function BillingReady({ children }: { children: ReactNode }) {
   return ready ? children : <LoadingView />
 }
 
+/** `useOrbit()` for parts that also render outside a session (`src/ui`): `null` there. */
+export function useOrbitIfSignedIn(): Orbit | null {
+  return use(OrbitContext)
+}
+
 export function useOrbit(): Orbit {
   const value = use(OrbitContext)
   if (!value) throw new Error('useOrbit must be used inside <OrbitProvider>')
   return value
+}
+
+/** A guest of the current workspace: it sees only Chat, its own channels and the people in them (`data/guest.ts`). */
+export function useIsGuest(): boolean {
+  return isGuestRole(useOrbit().workspace.role)
 }

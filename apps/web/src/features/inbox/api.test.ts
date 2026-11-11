@@ -25,3 +25,14 @@ test('a description mention is a mention that opens the task', () => {
   expect(notificationTarget(notification)).toBe('/tasks/task-1')
   expect(notificationCopy(notification).body).toBe('Someone mentioned you in a task description.')
 })
+
+test('an import notice opens its import and names how it ended', () => {
+  const done = { kind: 'import_finished', import_source: 'linear', import_id: 'imp-1', import_status: 'completed' } as NotificationRecord
+  expect(notificationTarget(done)).toBe('/tasks-import/linear/imp-1')
+  expect(notificationCopy(done)).toEqual({ title: 'Linear import complete', body: 'Open the import to see what was imported.' })
+  const failed = { ...done, import_source: 'notion', import_status: 'failed' } as NotificationRecord
+  expect(notificationTarget(failed)).toBe('/docs/import/imp-1')
+  expect(notificationCopy(failed).title).toBe('Notion import failed')
+  expect(notificationTarget({ ...done, import_source: 'asana' })).toBe('/tasks-import/imp-1')
+  expect(isMention(done)).toBe(false)
+})

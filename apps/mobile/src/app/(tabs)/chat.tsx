@@ -1,11 +1,11 @@
 import { router } from 'expo-router'
 import { type ReactNode, useMemo, useState } from 'react'
-import { Pressable, RefreshControl, ScrollView, View } from 'react-native'
+import { Pressable, ScrollView, View } from 'react-native'
 
 import { AccountMenu } from '../../components/AccountMenu'
-import { MenuButton } from '../../components/Drawer'
 import { CategorySheet, NewChannelSheet, NewMessageSheet } from '../../components/chat/ChannelSheets'
 import { ConversationOptions } from '../../components/chat/ConversationOptions'
+import { CustomThemeSheet } from '../../components/settings/CustomThemeSheet'
 import { Emoji } from '../../components/chat/EmojiPicker'
 import { ActionSheet, type SheetItem } from '../../components/chat/Sheet'
 import { chatSections, conversationBadge, conversationTitle, unreadThreadCount } from '../../data/chat'
@@ -13,11 +13,11 @@ import * as chat from '../../data/chat-api'
 import type { CategoryRecord, ConversationRecord, ConversationStateRecord } from '../../data/orbit'
 import { useOwnStatus } from '../../hooks/account'
 import { confirmAction, useChatWrite, useFollowedThreads, useIsChatAdmin } from '../../hooks/chat'
-import { useOrbit } from '../../orbit-context'
+import { useIsGuest, useOrbit } from '../../orbit-context'
 import { useChatCategories, useChatStates, useChatBadge, useConversations, usePeople } from '../../queries'
 import { useTheme } from '../../theme'
-import { Avatar, CountBadge, EmptyState, ErrorView, HeaderTitle, Icon, type IconName, IconButton, LoadingView, PaneHeader, SafeAreaView, Text } from '../../ui'
-import { ChatColorScope } from '../../components/chat/ChatColorScope'
+import { Avatar, CountBadge, EmptyState, ErrorView, HeaderTitle, Icon, type IconName, IconButton, LoadingView, PaneHeader, PullRefresh, SafeAreaView, Text } from '../../ui'
+import { useShownPresence } from '../../components/chat/Pane'
 
 const PRESENCE_LABEL = { online: 'Online', idle: 'Idle', dnd: 'Do not disturb', invisible: 'Invisible' } as const
 
@@ -31,14 +31,6 @@ type Overlay =
 
 /** The web's mobile chat list: Unreads and Threads, then each section, then the user bar. */
 export default function ChatScreen() {
-  return (
-    <ChatColorScope surface="list">
-      <ChatScreenContent />
-    </ChatColorScope>
-  )
-}
-
-function ChatScreenContent() {
   const { user } = useOrbit()
   const { colors } = useTheme()
   const conversations = useConversations()
@@ -48,8 +40,11 @@ function ChatScreenContent() {
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
   const [overlay, setOverlay] = useState<Overlay | null>(null)
   const [accountOpen, setAccountOpen] = useState(false)
+  const [themeOpen, setThemeOpen] = useState(false)
   const ownStatus = useOwnStatus()
   const admin = useIsChatAdmin()
+  // a guest is only in the private channels it was added to: it browses and makes none
+  const guest = useIsGuest()
   const run = useChatWrite()
   const threads = useFollowedThreads()
   const unreads = useChatBadge().count
@@ -69,13 +64,15 @@ function ChatScreenContent() {
     })
 
   return (
-    <SafeAreaView edges={['top', 'left', 'right']} className="flex-1 bg-card">
-      <PaneHeader className="bg-card">
-        <MenuButton />
+    <SafeAreaView edges={['left', 'right']} className="flex-1 bg-card">
+      {/* the web chat sidebar's header: 48px, `gap-1 pr-2` on a 12px start */}
+      <PaneHeader className="bg-card h-12 gap-1 pl-3 pr-2">
         <View className="flex-1">
           <HeaderTitle>Chat</HeaderTitle>
         </View>
-        <IconButton icon="plus" label="New" size={32} iconSize={20} color={colors.mutedForeground} onPress={() => setOverlay({ kind: 'new' })} />
+        {/* the web passes size={20}, but the button's `[&_svg:not([class*='size-'])]:size-4` draws the icons at 16px */}
+        <IconButton icon="brush" label="Custom theme" size={32} iconSize={16} color={colors.mutedForeground} onPress={() => setThemeOpen(true)} />
+        <IconButton icon="plus" label="New" size={32} iconSize={16} color={colors.mutedForeground} onPress={() => setOverlay({ kind: 'new' })} />
       </PaneHeader>
       {!conversations.data || !categories.data || !states.data ? (
         conversations.error || categories.error || states.error ? (
@@ -84,20 +81,26 @@ function ChatScreenContent() {
           <LoadingView />
         )
       ) : (
-        <ScrollView refreshControl={<RefreshControl refreshing={conversations.isRefetching} onRefresh={() => void refresh()} tintColor={colors.mutedForeground} />}>
+        <ScrollView refreshControl={<PullRefresh onRefresh={() => refresh()} />}>
           <View className="px-2 pt-2 gap-px">
             <PinnedRow icon="directInbox" name="Unreads" count={unreads} onPress={() => router.push('/chat/unreads')} />
             <PinnedRow icon="layer" name="Threads" count={unreadThreadCount(threads.data ?? [])} onPress={() => router.push('/chat/threads')} />
           </View>
           <View className="p-2 pt-3 gap-3">
-            {sections.length === 0 ? <EmptyState icon="chat" title="No conversations" description="Start a direct message or create a channel with New." /> : null}
+            {sections.length === 0 ? (
+              <EmptyState
+                icon="chat"
+                title="No conversations"
+                description={guest ? 'As a guest, you see only the channels that you are added to. Ask a channel manager to add you to a channel.' : 'Start a direct message or create a channel with New.'}
+              />
+            ) : null}
             {sections.map((section) => {
               const open = !collapsed.has(section.key)
               const category = admin ? categories.data?.find((item) => `category-${item.id}` === section.key) : undefined
               const onAdd =
                 section.key === 'dms'
                   ? () => setOverlay({ kind: 'message' })
-                  : section.key === 'favorites'
+                  : section.key === 'favorites' || guest
                     ? null
                     : () => setOverlay({ kind: 'channel', categoryId: section.key.startsWith('category-') ? section.key.slice('category-'.length) : null })
               return (
@@ -156,13 +159,16 @@ function ChatScreenContent() {
           </View>
         </Pressable>
       </View>
+      <CustomThemeSheet visible={themeOpen} onClose={() => setThemeOpen(false)} />
       <AccountMenu visible={accountOpen} onClose={() => setAccountOpen(false)} onNavigate={(href) => router.navigate(href)} />
       <ActionSheet
         visible={overlay?.kind === 'new'}
         items={[
           { key: 'message', label: 'New message', icon: 'messages2', onPress: () => setOverlay({ kind: 'message' }) },
-          { key: 'channel', label: 'New channel', icon: 'hashtag', onPress: () => setOverlay({ kind: 'channel', categoryId: null }) },
-          { key: 'browse', label: 'Browse channels', icon: 'search', onPress: () => router.push('/chat/browse') },
+          ...(guest ? [] : [
+            { key: 'channel', label: 'New channel', icon: 'hashtag' as const, onPress: () => setOverlay({ kind: 'channel', categoryId: null }) },
+            { key: 'browse', label: 'Browse channels', icon: 'search' as const, onPress: () => router.push('/chat/browse') },
+          ]),
           ...(admin ? [{ key: 'category', label: 'New category', icon: 'category' as const, onPress: () => setOverlay({ kind: 'category' }) }] : []),
         ]}
         onClose={close}
@@ -231,10 +237,13 @@ function ConversationRow({ conversation, title, state, userId }: { conversation:
   const { colors } = useTheme()
   const badge = conversationBadge(conversation, state, userId)
   const [options, setOptions] = useState(false)
-  const peer = conversation.member_ids.find((id) => id !== userId) ?? userId
+  const shown = useShownPresence()
+  const peers = conversation.member_ids.filter((id) => id !== userId)
+  const peer = peers[0] ?? userId
   const leading =
     conversation.kind === 'dm' ? (
-      <Avatar id={peer} name={title} size={20} presence={peer === userId ? undefined : 'offline'} surface={colors.card} />
+      // like the web, a presence dot only for a DM with one other person
+      <Avatar id={peer} name={title} size={20} presence={peers.length === 1 ? shown(peer) : undefined} surface={colors.card} />
     ) : (
       <View accessibilityLabel={conversation.kind === 'private' ? 'Private channel' : undefined}>
         <Glyph icon={conversation.kind === 'private' ? 'lock' : 'hashtag'} />

@@ -1,0 +1,143 @@
+name: TestFlight
+
+# Builds the iOS app on a GitHub macOS runner and uploads it to TestFlight. No EAS.
+# Secrets:
+#   IOS_DIST_CERT_P12        base64 of the distribution certificate (.p12)
+#   IOS_DIST_CERT_PASSWORD   password of the .p12
+#   IOS_PROVISIONING_PROFILE base64 of the App Store provisioning profile for io.coollabs.orbit
+#   ASC_API_KEY_P8, ASC_KEY_ID, ASC_ISSUER_ID  App Store Connect API key (App Manager)
+#   ASC_APP_ID               App Store Connect → App Information → Apple ID
+# The certificate and the profile expire after one year: renew them and update the secrets.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  ios:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: apps/mobile
+    env:
+      EXPO_PUBLIC_ORBIT_SERVER: https://app.orbit.so
+      EXPO_NO_GIT_STATUS: 1
+      BUILD_NUMBER: ${{ github.run_number }}.${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@v5
+      # React Native needs Xcode 16.1+; App Store uploads need the iOS 26 SDK or later.
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - run: bun install --frozen-lockfile
+        working-directory: .
+
+      - name: Install signing certificate and profile
+        env:
+          P12: ${{ secrets.IOS_DIST_CERT_P12 }}
+          P12_PASSWORD: ${{ secrets.IOS_DIST_CERT_PASSWORD }}
+          PROFILE: ${{ secrets.IOS_PROVISIONING_PROFILE }}
+        run: |
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          keychain_password="$(openssl rand -hex 16)"
+          printf '%s' "$P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$RUNNER_TEMP/cert.p12" -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$keychain"
+          security set-key-partition-list -S apple-tool:,apple: -k "$keychain_password" "$keychain" > /dev/null
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          security find-identity -v -p codesigning "$keychain"
+
+          profile="$RUNNER_TEMP/profile.mobileprovision"
+          printf '%s' "$PROFILE" | base64 --decode > "$profile"
+          uuid="$(security cms -D -i "$profile" | plutil -extract UUID raw -)"
+          for dir in "$HOME/Library/MobileDevice/Provisioning Profiles" "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"; do
+            mkdir -p "$dir" && cp "$profile" "$dir/$uuid.mobileprovision"
+          done
+          echo "PROFILE_UUID=$uuid" >> "$GITHUB_ENV"
+          echo "APPLE_TEAM_ID=$(security cms -D -i "$profile" | plutil -extract TeamIdentifier.0 raw -)" >> "$GITHUB_ENV"
+
+      - name: Generate the Xcode project
+        run: |
+          # The App Store build pushes through production APNs: the entitlement must say so (the profile must include Push Notifications).
+          jq --arg n "$BUILD_NUMBER" '.expo.ios.buildNumber = $n
+            | .expo.plugins |= map(if type == "array" and .[0] == "expo-notifications" then [.[0], (.[1] + {mode: "production"})] else . end)' app.json > app.ci.json && mv app.ci.json app.json
+          bunx expo prebuild --platform ios --clean
+          grep -A1 '<key>aps-environment</key>' ios/*/*.entitlements | grep -q '<string>production</string>' || { echo 'aps-environment is not production'; exit 1; }
+          # Sign only the app target; build settings on the xcodebuild command line would also hit the Pods targets.
+          ruby -rxcodeproj -e '
+            project = Xcodeproj::Project.open(Dir["ios/*.xcodeproj"].first)
+            app = project.targets.find { |t| t.product_type == "com.apple.product-type.application" }
+            app.build_configurations.each do |config|
+              s = config.build_settings
+              s["CODE_SIGN_STYLE"] = "Manual"
+              s["DEVELOPMENT_TEAM"] = ENV.fetch("APPLE_TEAM_ID")
+              s["CODE_SIGN_IDENTITY"] = s["CODE_SIGN_IDENTITY[sdk=iphoneos*]"] = "Apple Distribution"
+              s["PROVISIONING_PROFILE_SPECIFIER"] = ENV.fetch("PROFILE_UUID")
+            end
+            project.save'
+
+      - name: Archive
+        run: |
+          workspace="$(ls -d ios/*.xcworkspace)"
+          xcodebuild archive \
+            -workspace "$workspace" \
+            -scheme "$(basename "$workspace" .xcworkspace)" \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/Orbit.xcarchive"
+
+      - name: Export the .ipa
+        run: |
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>signingStyle</key><string>manual</string>
+            <key>teamID</key><string>$APPLE_TEAM_ID</string>
+            <key>signingCertificate</key><string>Apple Distribution</string>
+            <key>provisioningProfiles</key>
+            <dict><key>io.coollabs.orbit</key><string>$PROFILE_UUID</string></dict>
+          </dict>
+          </plist>
+          EOF
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/Orbit.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
+            -exportPath "$RUNNER_TEMP/export"
+
+      - name: Upload to TestFlight
+        env:
+          ASC_API_KEY_P8: ${{ secrets.ASC_API_KEY_P8 }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_APP_ID: ${{ secrets.ASC_APP_ID }}
+        run: |
+          mkdir -p ~/.appstoreconnect/private_keys
+          printf '%s\n' "$ASC_API_KEY_P8" > ~/.appstoreconnect/private_keys/AuthKey_$ASC_KEY_ID.p8
+          xcrun altool --upload-package "$(ls "$RUNNER_TEMP"/export/*.ipa)" \
+            --type ios \
+            --apple-id "$ASC_APP_ID" \
+            --bundle-id io.coollabs.orbit \
+            --bundle-version "$BUILD_NUMBER" \
+            --bundle-short-version-string "$(jq -r .expo.version app.json)" \
+            --apiKey "$ASC_KEY_ID" \
+            --apiIssuer "$ASC_ISSUER_ID"
+
+      - name: Remove signing files
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/signing.keychain-db" || true
+          rm -f "$RUNNER_TEMP/cert.p12" "$RUNNER_TEMP/profile.mobileprovision" ~/.appstoreconnect/private_keys/*.p8

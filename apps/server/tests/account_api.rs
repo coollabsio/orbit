@@ -9,6 +9,7 @@ use orbit_platform::{AuthenticatedUser, Id, PasswordService, TestDatabase, Times
 use orbit_server::auth_routes::{AuthState, CookieMode, auth_router};
 use orbit_server::mail::{Mailer, Outbox, OutgoingEmail};
 use orbit_server::repositories::identity::{IdentityRepository, SetupRequest};
+use orbit_server::repositories::two_factor::RecoveryCodeKey;
 use orbit_server::task_routes::{TaskState, task_router};
 use orbit_server::workspace_routes::{WorkspaceState, workspace_router};
 use serde_json::{Value, json};
@@ -999,7 +1000,7 @@ impl Fixture {
             .await
             .unwrap();
         self.identity
-            .enable_totp(ada, 1, "test", now)
+            .enable_totp(ada, 1, &RecoveryCodeKey::new(&[7; 32]), "test", now)
             .await
             .unwrap()
             .unwrap();

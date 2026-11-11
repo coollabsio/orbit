@@ -11,7 +11,17 @@ function isEmptyInlineBlock(block: { content?: unknown }): boolean {
  * an async action was pending, the block is appended at the end.
  */
 export function insertPageBlock(editor: PageEditorInstance, anchorId: string, pageId: string): void {
-  const pageBlock = { type: 'page' as const, props: { pageId } }
+  insertCardBlock(editor, anchorId, { type: 'page' as const, props: { pageId } })
+}
+
+/** Inserts a `database` block (an inline database, or a linked view with `linkId`) like `insertPageBlock`. */
+export function insertDatabaseBlock(editor: PageEditorInstance, anchorId: string, props: { databaseId: string; linkId: string }): void {
+  insertCardBlock(editor, anchorId, { type: 'database' as const, props })
+}
+
+type CardBlock = { type: 'page'; props: { pageId: string } } | { type: 'database'; props: { databaseId: string; linkId: string } }
+
+function insertCardBlock(editor: PageEditorInstance, anchorId: string, pageBlock: CardBlock): void {
   editor.transact(() => {
     const anchor = editor.getBlock(anchorId)
     let inserted

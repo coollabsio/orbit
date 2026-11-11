@@ -29,7 +29,7 @@ use crate::image_compression::{CompressionStatus, ImageCompressor};
 use crate::mail::{self, Mailer};
 use crate::object_storage::Owner;
 use crate::repositories::api_tokens::{
-    ApiTokenError, ApiTokenRecord, ApiTokenRepository, IssuedApiToken,
+    ApiTokenError, ApiTokenRecord, ApiTokenRepository, ApiTokenScope, IssuedApiToken, TokenProjects,
 };
 use crate::repositories::identity::{
     AdminAccountError, AdminUser, AuthenticatedSession, IdentityRepository,
@@ -265,6 +265,7 @@ pub fn workspace_router(state: WorkspaceState) -> Router {
             post(start_image_compression),
         )
         .route("/api/v1/admin/users", get(list_admin_users))
+        .route("/api/v1/admin/users/summary", get(get_admin_user_summary))
         .route(
             "/api/v1/admin/users/{user_id}/suspension",
             post(set_account_suspension),
@@ -632,17 +633,6 @@ async fn put_member_note(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[derive(Clone, Copy, Deserialize, ToSchema)]
-#[serde(rename_all = "lowercase")]
-enum ApiTokenScope {
-    Read,
-    Write,
-    #[serde(rename = "docs:read")]
-    DocsRead,
-    #[serde(rename = "chat:read")]
-    ChatRead,
-}
-
 #[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 struct CreateApiTokenBody {
@@ -653,6 +643,10 @@ struct CreateApiTokenBody {
     #[serde(default)]
     project_ids: Vec<String>,
     project_id: Option<String>,
+    /// Cover every live project of the workspace, including projects created later, instead of
+    /// `project_ids`.
+    #[serde(default)]
+    all_projects: bool,
     scopes: Vec<ApiTokenScope>,
 }
 
@@ -697,43 +691,25 @@ async fn create_api_token(
             project_ids.push(id);
         }
     }
+    // Projects only limit task access, so a token without a task scope stores none.
+    let task_scope = ApiTokenScope::grants_tasks(&body.scopes);
+    if !task_scope || body.all_projects {
+        project_ids.clear();
+    }
     if name.is_empty()
         || name.chars().count() > 100
-        || project_ids.is_empty()
-        || body.scopes.is_empty()
-        || (body.service_account
-            && body
-                .scopes
-                .iter()
-                .any(|s| matches!(s, ApiTokenScope::DocsRead | ApiTokenScope::ChatRead)))
+        || (task_scope && !body.all_projects && project_ids.is_empty())
+        || !ApiTokenScope::valid_combination(&body.scopes, body.service_account)
     {
         return Err(ApiError::new(
             StatusCode::UNPROCESSABLE_ENTITY,
             "invalid_api_token",
             "Invalid API token",
-            "Token names must contain 1 to 100 characters, and at least one project and scope are required.",
+            "Token names must contain 1 to 100 characters, at least one scope is required, a task scope needs at least one project or all projects, an export scope must be the only scope of a personal token, and a service account gets task scopes only.",
             instance,
             request_id.as_ref(),
         ));
     }
-    let can_read = body
-        .scopes
-        .iter()
-        .any(|scope| matches!(scope, ApiTokenScope::Read));
-    let can_write = body
-        .scopes
-        .iter()
-        .any(|scope| matches!(scope, ApiTokenScope::Write));
-    let mcp_scopes = body
-        .scopes
-        .iter()
-        .filter_map(|s| match s {
-            ApiTokenScope::DocsRead => Some("docs:read"),
-            ApiTokenScope::ChatRead => Some("chat:read"),
-            _ => None,
-        })
-        .collect::<Vec<_>>()
-        .join(" ");
     let now = TimestampMillis::now();
     let expires_at = match body.expires_in_days {
         None => None,
@@ -753,18 +729,20 @@ async fn create_api_token(
     };
     let issued = state
         .api_tokens
-        .create_scoped(
+        .create(
             workspace_id,
             session.user.id,
             name.to_owned(),
-            project_ids,
-            can_read,
-            can_write,
+            if body.all_projects {
+                TokenProjects::All
+            } else {
+                TokenProjects::Only(project_ids)
+            },
+            &body.scopes,
             body.service_account,
             expires_at,
             request_id_value(request_id.as_ref()),
             now,
-            &mcp_scopes,
         )
         .await
         .map_err(|error| api_token_problem(error, &instance, request_id.as_ref()))?;
@@ -806,6 +784,7 @@ enum RoleBody {
     Owner,
     Admin,
     Member,
+    Guest,
 }
 
 impl From<RoleBody> for WorkspaceRole {
@@ -814,6 +793,7 @@ impl From<RoleBody> for WorkspaceRole {
             RoleBody::Owner => Self::Owner,
             RoleBody::Admin => Self::Admin,
             RoleBody::Member => Self::Member,
+            RoleBody::Guest => Self::Guest,
         }
     }
 }
@@ -930,6 +910,10 @@ struct InvitationBody {
     email: String,
     role: RoleBody,
     delivery: DeliveryBody,
+    /// The private channels a guest joins; required (one or more) for `guest`, refused for
+    /// other roles.
+    #[serde(default)]
+    conversation_ids: Vec<String>,
 }
 
 #[derive(Serialize, ToSchema)]
@@ -960,6 +944,18 @@ async fn create_invitation(
             request_id.as_ref(),
         ));
     }
+    let conversation_ids = body
+        .conversation_ids
+        .iter()
+        .map(|id| id.parse())
+        .collect::<Result<Vec<Id>, _>>()
+        .map_err(|_| {
+            workspace_problem(
+                WorkspaceError::GuestChannels,
+                &instance,
+                request_id.as_ref(),
+            )
+        })?;
     let delivery = match body.delivery {
         DeliveryBody::Manual => InvitationDelivery::Manual,
         DeliveryBody::Smtp => InvitationDelivery::Smtp,
@@ -980,6 +976,7 @@ async fn create_invitation(
             session.user.id,
             body.email.trim().to_owned(),
             body.role.into(),
+            &conversation_ids,
             delivery,
             request_id_value(request_id.as_ref()),
             TimestampMillis::now(),
@@ -1019,16 +1016,17 @@ async fn create_invitation(
                     request_id.as_ref(),
                 ));
             }
-            let workspace_name = state
+            let (workspace_name, channels) = state
                 .workspaces
                 .preview_invitation(&issued.token, now)
                 .await
-                .map(|preview| preview.workspace_name)
-                .unwrap_or_else(|_| "Orbit".to_owned());
+                .map(|preview| (preview.workspace_name, preview.channels))
+                .unwrap_or_else(|_| ("Orbit".to_owned(), Vec::new()));
             mailer
                 .send(mail::templates::invitation(
                     &issued.invitation.email,
                     &workspace_name,
+                    &channels,
                     &link,
                 ))
                 .await
@@ -1180,6 +1178,12 @@ async fn accept_invitation(
             )
             .await
             .map_err(|error| workspace_problem(error, instance, request_id.as_ref()))?;
+        crate::import_people::map_joined_member(
+            state.identity.database(),
+            accepted.membership_id,
+            request_id_value(request_id.as_ref()),
+        )
+        .await;
         return Ok(Json(accepted).into_response());
     }
     let email = body
@@ -1262,6 +1266,12 @@ async fn accept_invitation(
         .registration_throttler
         .finish_success(reservation)
         .await;
+    crate::import_people::map_joined_member(
+        state.identity.database(),
+        registered.acceptance.membership_id,
+        request_id_value(request_id.as_ref()),
+    )
+    .await;
     let cookie = issued_session_cookie(
         state.cookie_mode,
         &registered.session.token,
@@ -1464,6 +1474,53 @@ async fn list_admin_users(
             )
         })?;
     Ok(Json(Page { items, next_cursor }))
+}
+
+/// How many accounts and trials this instance has, for the Admin area.
+#[derive(Serialize, ToSchema)]
+struct AdminUserSummary {
+    /// Accounts, deleted accounts excluded.
+    users: i64,
+    /// Accounts active in the last day, week and month.
+    active: crate::repositories::identity::ActiveUserCounts,
+    /// Workspaces by trial state; `null` on a self-hosted server, which has no trials.
+    trials: Option<crate::repositories::billing::TrialCounts>,
+}
+
+/// The number of accounts and of ongoing and expired trials.
+#[utoipa::path(get, path = "/api/v1/admin/users/summary", responses((status = 200, body = AdminUserSummary)))]
+async fn get_admin_user_summary(
+    State(state): State<WorkspaceState>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<Json<AdminUserSummary>, ApiError> {
+    let instance = "/api/v1/admin/users/summary";
+    let session = authenticate(&state, &headers, instance, request_id.as_ref()).await?;
+    require_installation_admin(&state, session.user.id, instance, request_id.as_ref()).await?;
+    let internal = || {
+        ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "internal_error",
+            "Internal server error",
+            "An unexpected error occurred. Use the request ID when contacting support.",
+            instance,
+            request_id.as_ref(),
+        )
+    };
+    let users = state.identity.count_users().await.map_err(|_| internal())?;
+    let active = state
+        .identity
+        .active_user_counts()
+        .await
+        .map_err(|_| internal())?;
+    let trials = crate::repositories::billing::trial_counts(state.identity.database())
+        .await
+        .map_err(|_| internal())?;
+    Ok(Json(AdminUserSummary {
+        users,
+        active,
+        trials,
+    }))
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -2582,6 +2639,23 @@ async fn save_s3(
         crate::secret_box::encrypt_secret(key, &secret)
             .map_err(|()| internal(instance, request_id.as_ref()))?,
     );
+    let workspaces = WorkspaceStorageRepository::new(state.identity.database().clone())
+        .all()
+        .await
+        .map_err(|_| internal(instance, request_id.as_ref()))?;
+    if let Some(workspace) = workspaces
+        .iter()
+        .find(|workspace| crate::object_storage::overlap(&workspace.s3, &s3))
+    {
+        return Err(invalid(
+            "prefix",
+            &format!(
+                "workspace {} keeps its files in this bucket under this prefix, or a prefix inside or around \
+                 it; use another bucket or prefix.",
+                workspace.workspace_id
+            ),
+        ));
+    }
     if let Some(old) = &saved.s3 {
         let moved =
             (&old.endpoint, &old.bucket, &old.prefix) != (&s3.endpoint, &s3.bucket, &s3.prefix);
@@ -2807,11 +2881,12 @@ async fn save_workspace_bucket(
     if installation
         .s3
         .as_ref()
-        .is_some_and(|own| location_of(own) == location_of(&s3))
+        .is_some_and(|own| crate::object_storage::overlap(own, &s3))
     {
         return Err(invalid(
-            "bucket",
-            "the installation keeps its files under this bucket and prefix; use another prefix.",
+            "prefix",
+            "the installation keeps its files in this bucket under this prefix, or a prefix inside or around it; \
+             use another bucket or prefix.",
         ));
     }
     if let Some(old) = saved.filter(|old| location_of(&old.s3) != location_of(&s3)) {
@@ -3568,7 +3643,7 @@ fn api_token_problem(
             StatusCode::FORBIDDEN,
             "workspace_action_forbidden",
             "Workspace action forbidden",
-            "Only workspace owners and administrators may manage API tokens.",
+            "Only workspace owners and administrators may manage API tokens. Other members may create a personal token whose only scope is `workspace:export:personal`.",
             instance,
             request_id,
         ),
@@ -3646,6 +3721,14 @@ fn workspace_problem(
             instance,
             request_id,
         ),
+        WorkspaceError::GuestChannels => ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_guest_channels",
+            "Invalid guest channels",
+            "A guest needs one or more open private channels that you manage; other roles take none.",
+            instance,
+            request_id,
+        ),
         WorkspaceError::Conflict => ApiError::new(
             StatusCode::CONFLICT,
             "workspace_conflict",
@@ -3670,6 +3753,14 @@ fn workspace_problem(
                     "workspaces"
                 }
             ),
+            instance,
+            request_id,
+        ),
+        WorkspaceError::TrialLimit(reached) => ApiError::new(
+            StatusCode::PAYMENT_REQUIRED,
+            "trial_limit_reached",
+            "Trial limit reached",
+            reached.detail(),
             instance,
             request_id,
         ),

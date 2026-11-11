@@ -44,6 +44,9 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
+      // `@orbit/editor` is a symlink under node_modules. Vite skips that folder, so a change in
+      // packages/editor stays cached until this dev server starts again. The alias is the real source.
+      '@orbit/editor': fileURLToPath(new URL('../../packages/editor/src', import.meta.url)),
     },
   },
   plugins: [

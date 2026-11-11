@@ -2232,6 +2232,7 @@ dependencies = [
  "defmt",
  "jiff-core",
  "jiff-static",
+ "jiff-tzdb",
  "jiff-tzdb-platform",
  "log",
  "portable-atomic",
@@ -2822,7 +2823,7 @@ checksum = "7e036b411754132fd6b74e94b74e9a13c5cf606fa93d1885c35860d3060820b1"
 
 [[package]]
 name = "orbit-domain"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "orbit-platform",
  "serde",
@@ -2831,7 +2832,7 @@ dependencies = [
 
 [[package]]
 name = "orbit-mail"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "ammonia",
  "base64 0.22.1",
@@ -2857,7 +2858,7 @@ dependencies = [
 
 [[package]]
 name = "orbit-platform"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "argon2",
  "async-compression",
@@ -2894,7 +2895,7 @@ dependencies = [
 
 [[package]]
 name = "orbit-server"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "aes-gcm",
  "axum",
@@ -2910,6 +2911,7 @@ dependencies = [
  "hyper-util",
  "image",
  "include_dir",
+ "jiff",
  "lettre",
  "mime_guess",
  "multer",
@@ -2930,6 +2932,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "sqlx",
+ "subtle",
  "tempfile",
  "thiserror 2.0.20",
  "tokio",
@@ -3637,6 +3640,7 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-util",
+ "h2",
  "http",
  "http-body",
  "http-body-util",

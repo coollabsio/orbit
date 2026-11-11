@@ -43,6 +43,16 @@ test('a customer with no workspace is sent to the onboarding', async () => {
   await waitFor(() => expect(view.getByTestId('page').textContent).toBe('/onboarding no workspace'))
 })
 
+test('a customer with no workspace may open their account settings, to delete the account (#39)', async () => {
+  const view = renderAt('/profile', { operator: false, workspaces: [] })
+  await waitFor(() => expect(view.getByTestId('page').textContent).toBe('/profile no workspace'))
+})
+
+test('with no workspace, the other account pages of a customer lead to the profile', async () => {
+  const view = renderAt('/profile/security', { operator: false, workspaces: [] })
+  await waitFor(() => expect(view.getByTestId('page').textContent).toBe('/profile no workspace'))
+})
+
 test('an operator with no workspace lands in Admin, without a workspace', async () => {
   const view = renderAt('/tasks', { operator: true, workspaces: [] })
   await waitFor(() => expect(view.getByTestId('page').textContent).toBe('/admin no workspace'))

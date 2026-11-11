@@ -1,12 +1,13 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import * as Clipboard from 'expo-clipboard'
+import { type ReactNode, useState } from 'react'
 import { Image, Linking, Share, View } from 'react-native'
 
 import { ConfirmDialog, type ConfirmRequest, Dialog, PromptDialog, type PromptRequest } from '../../../components/settings/Dialog'
 import { ACCOUNT_NAV, Badge, Note, RowIcon, RowText, SettingsCard, SettingsRow, SettingsShell } from '../../../components/settings/Shell'
-import { accountKeys, type TotpSetup, twoFactorSummary } from '../../../data/account-api'
+import { accountKeys, type PasskeyRecord, passkeyAgo, type TotpSetup, twoFactorSummary } from '../../../data/account-api'
 import { type Provider, PROVIDER_LABEL, type ProviderOutcome, providerErrorMessage, providerRows, startProviderSignIn, withReauthentication } from '../../../data/sign-in-provider'
-import { useAuthOptions, useConfirmIdentity, useConnectedAccounts, useDisconnectAccount, useTwoFactor, useTwoFactorWrites } from '../../../hooks/account'
+import { useAuthOptions, useConfirmIdentity, useConnectedAccounts, useDeletePasskey, useDisconnectAccount, usePasskeys, useTwoFactor, useTwoFactorWrites } from '../../../hooks/account'
 import { useOrbit } from '../../../orbit-context'
 import { errorMessage } from '../../../session-context'
 import { providerDevice } from '../../../sign-in-provider'
@@ -15,8 +16,8 @@ import { Button, Input, Text } from '../../../ui'
 /**
  * The web's Security page: the authenticator app (set up, new recovery codes, turn off) and the connected Google and
  * GitHub accounts. An account with a password confirms each authenticator step with it; one without confirms with a
- * fresh provider sign-in when the server asks. Passkeys need the browser's WebAuthn prompt, which Expo Go does not
- * offer, so they stay on the web.
+ * fresh provider sign-in when the server asks. Passkeys are listed and removed here; adding one needs the browser's
+ * WebAuthn prompt, which Expo Go does not offer, so Add passkey stays on the web.
  */
 export default function SecurityScreen() {
   const { client, user } = useOrbit()
@@ -33,6 +34,8 @@ export default function SecurityScreen() {
   const [twoFactorError, setTwoFactorError] = useState<string | null>(null)
   const [accountsError, setAccountsError] = useState<string | null>(null)
   const [pending, setPending] = useState<Provider | 'two_factor' | null>(null)
+  const passkeys = usePasskeys()
+  const removePasskey = useDeletePasskey()
   const enabled = status.data?.totp_enabled === true
   const rows = providerRows(options.data?.providers ?? [], accounts.data ?? [])
 
@@ -94,15 +97,40 @@ export default function SecurityScreen() {
       },
     })
 
+  const passkeysOn = options.data?.passkeys_enabled === true
+  const askRemovePasskey = (passkey: PasskeyRecord) =>
+    setConfirm({
+      title: `Remove ${passkey.name}?`,
+      description: 'You can no longer sign in with this passkey.',
+      confirmLabel: 'Remove passkey',
+      danger: true,
+      onConfirm: () => removePasskey.mutate(passkey.id),
+    })
+
+  const passkeyRows: { key: string; content: ReactNode }[] = [
+    ...(options.data && !passkeysOn ? [{ key: 'domain', content: <View className="flex-1"><Note>Passkeys need Orbit to be opened at a domain name.</Note></View> }] : []),
+    ...(passkeys.isPending ? [{ key: 'loading', content: <View className="flex-1"><Note loading>Loading passkeys…</Note></View> }] : []),
+    ...(passkeys.isError ? [{ key: 'error', content: <><Note error>Passkeys could not be loaded.</Note><Button label="Retry" variant="ghost" onPress={() => void passkeys.refetch()} /></> }] : []),
+    ...(passkeys.isSuccess && passkeys.data.length === 0 && passkeysOn ? [{ key: 'empty', content: <View className="flex-1"><Note>No passkeys yet.</Note></View> }] : []),
+    ...(passkeys.data ?? []).map((passkey) => ({
+      key: passkey.id,
+      content: (
+        <>
+          <RowIcon icon="fingerScan" />
+          <RowText title={passkey.name} subtitle={`Added ${passkeyAgo(passkey.created_at)} · ${passkey.last_used_at ? `Last used ${passkeyAgo(passkey.last_used_at)}` : 'Never used'}`} />
+          <Button label="Remove" variant="ghost" disabled={removePasskey.isPending} onPress={() => askRemovePasskey(passkey)} />
+        </>
+      ),
+    })),
+    ...(removePasskey.isError ? [{ key: 'remove-error', content: <View className="flex-1"><Note error>The passkey could not be removed. {errorMessage(removePasskey.error)}</Note></View> }] : []),
+    ...(passkeysOn ? [{ key: 'hint', content: <View className="flex-1"><Note>Adding a passkey needs a browser's passkey prompt: add one in Orbit on the web.</Note></View> }] : []),
+  ]
+
   return (
     <SettingsShell
       title="Account settings"
       nav={ACCOUNT_NAV}
-      refreshing={status.isRefetching || accounts.isRefetching}
-      onRefresh={() => {
-        void status.refetch()
-        void accounts.refetch()
-      }}
+      onRefresh={() => Promise.all([status.refetch(), accounts.refetch(), passkeys.refetch()])}
     >
       <SettingsCard
         title="Authenticator app"
@@ -148,7 +176,7 @@ export default function SecurityScreen() {
         }
         flush
       >
-        {status.isPending ? <View className="p-4"><Note>Loading…</Note></View> : null}
+        {status.isPending ? <View className="p-4"><Note loading>Loading…</Note></View> : null}
         {status.isError ? <View className="p-4"><Note error>Two-factor sign-in could not be loaded.</Note></View> : null}
         {status.data ? (
           <SettingsRow first>
@@ -177,8 +205,14 @@ export default function SecurityScreen() {
         </SettingsCard>
       ) : null}
 
-      <SettingsCard title="Passkeys" description="Sign in with your fingerprint, face or device screen lock instead of a password.">
-        <Note>Add and remove passkeys in Orbit in a browser: creating one needs the browser's passkey prompt.</Note>
+      <SettingsCard
+        title="Passkeys"
+        description="Sign in with your fingerprint, face or device screen lock instead of a password."
+        // the web's Add passkey needs the browser's passkey prompt, which the app does not have: off here, the last row says why
+        actions={passkeysOn ? <Button label="Add passkey" variant="outline" disabled /> : undefined}
+        flush
+      >
+        {passkeyRows.map((row, index) => <SettingsRow key={row.key} first={index === 0}>{row.content}</SettingsRow>)}
       </SettingsCard>
 
       <PromptDialog request={prompt} onClose={() => setPrompt(null)} />
@@ -244,6 +278,7 @@ function RecoveryCodesDialog({ codes, onClose }: { codes: { title: string; codes
       onClose={onClose}
       footer={
         <>
+          <Button label="Copy" icon="copy" variant="outline" onPress={() => void Clipboard.setStringAsync(codes?.codes.join('\n') ?? '')} />
           <Button label="Share" icon="send" variant="outline" onPress={() => void Share.share({ message: text })} />
           <Button label="Done" onPress={onClose} />
         </>
@@ -260,7 +295,7 @@ function RecoveryCodesDialog({ codes, onClose }: { codes: { title: string; codes
   )
 }
 
-/** A read-only value to select or share (the app has no clipboard module). */
+/** A read-only value with the web's copy button. */
 function CopyValue({ label, value }: { label: string; value: string }) {
   return (
     <View className="gap-2">
@@ -269,7 +304,7 @@ function CopyValue({ label, value }: { label: string; value: string }) {
         <Text selectable className="flex-1 font-mono text-[13px] text-foreground p-2 rounded-md border border-input leading-[21px]">
           {value}
         </Text>
-        <Button label="Share" variant="outline" size="sm" onPress={() => void Share.share({ message: value })} />
+        <Button label="Copy" icon="copy" variant="outline" size="sm" onPress={() => void Clipboard.setStringAsync(value)} />
       </View>
     </View>
   )

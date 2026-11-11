@@ -1,7 +1,7 @@
 use sqlx::{query, query_scalar};
 use thiserror::Error;
 
-use crate::{Backend, Database, HealthCheck, HealthRegistry};
+use crate::{Backend, Database, is_transient_lock_error};
 
 /// Runs SQLite's own checks of the database file. Postgres has no equivalent cheap enough to run
 /// here (it enforces foreign keys on every write, and page damage needs `amcheck`), so on Postgres
@@ -18,6 +18,28 @@ pub enum IntegrityError {
         check: &'static str,
         details: String,
     },
+    /// Another writer held the database too long (see [`is_transient_lock_error`]): the check did
+    /// not run to its end and says nothing about the database; run it again later.
+    #[error("database {check} could not run: {source}")]
+    Busy {
+        check: &'static str,
+        source: sqlx::Error,
+    },
+}
+
+/// The error of a check whose statement `error` failed.
+fn statement_failed(check: &'static str, error: sqlx::Error) -> IntegrityError {
+    if is_transient_lock_error(&error) {
+        IntegrityError::Busy {
+            check,
+            source: error,
+        }
+    } else {
+        IntegrityError::Failed {
+            check,
+            details: error.to_string(),
+        }
+    }
 }
 
 impl IntegrityService {
@@ -49,10 +71,7 @@ impl IntegrityService {
         let violations = query("PRAGMA foreign_key_check")
             .fetch_all(self.database.pool())
             .await
-            .map_err(|error| IntegrityError::Failed {
-                check: "foreign_key_check",
-                details: error.to_string(),
-            })?;
+            .map_err(|error| statement_failed("foreign_key_check", error))?;
         if violations.is_empty() {
             return Ok(());
         }
@@ -60,14 +79,6 @@ impl IntegrityService {
             check: "foreign_key_check",
             details: format!("{} violation(s)", violations.len()),
         })
-    }
-
-    pub fn register_readiness(&self, registry: &mut HealthRegistry) {
-        let service = self.clone();
-        registry.register(HealthCheck::DatabaseIntegrity, move || {
-            let service = service.clone();
-            async move { service.quick().await.map_err(|error| error.to_string()) }
-        });
     }
 
     /// `PRAGMA integrity_check`, except that FTS5 index findings are confirmed with FTS5's own
@@ -78,10 +89,7 @@ impl IntegrityService {
         let results: Vec<String> = query_scalar("PRAGMA integrity_check")
             .fetch_all(self.database.pool())
             .await
-            .map_err(|error| IntegrityError::Failed {
-                check: "integrity_check",
-                details: error.to_string(),
-            })?;
+            .map_err(|error| statement_failed("integrity_check", error))?;
         if results.len() == 1 && results[0].eq_ignore_ascii_case("ok") {
             return Ok(());
         }
@@ -92,11 +100,16 @@ impl IntegrityService {
                     let command = format!(
                         "INSERT INTO \"{schema}\".\"{table}\"(\"{table}\") VALUES ('integrity-check')"
                     );
-                    if let Err(error) = query(sqlx::AssertSqlSafe(command))
+                    // A write: it waits for other writers like any other.
+                    match query(sqlx::AssertSqlSafe(command))
                         .execute(self.database.pool())
                         .await
                     {
-                        remaining.push(format!("{line} ({error})"));
+                        Ok(_) => {}
+                        Err(error) if is_transient_lock_error(&error) => {
+                            return Err(statement_failed("integrity_check", error));
+                        }
+                        Err(error) => remaining.push(format!("{line} ({error})")),
                     }
                 }
                 None => remaining.push(line.clone()),
@@ -116,10 +129,7 @@ impl IntegrityService {
         let results: Vec<String> = query_scalar(sqlx::AssertSqlSafe(query))
             .fetch_all(self.database.pool())
             .await
-            .map_err(|error| IntegrityError::Failed {
-                check,
-                details: error.to_string(),
-            })?;
+            .map_err(|error| statement_failed(check, error))?;
         if results.len() == 1 && results[0].eq_ignore_ascii_case("ok") {
             return Ok(());
         }

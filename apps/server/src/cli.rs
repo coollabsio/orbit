@@ -69,6 +69,8 @@ pub enum Command {
         yes: bool,
     },
     Seed,
+    /// Opens an interactive SQL shell on the database: `psql` for Postgres, `sqlite3` for SQLite.
+    Db,
     RecoveryLink {
         #[arg(long)]
         email: String,
@@ -181,6 +183,7 @@ pub async fn run(cli: Cli, env: BTreeMap<String, String>) -> Result<String, CliE
         Command::Attachments { command } => attachments(config()?, command).await,
         Command::DbReset { yes } => reset(config()?, *yes).await,
         Command::Seed => seed(config()?).await,
+        Command::Db => database_shell(&config()?.data),
         Command::RecoveryLink { email, origin } => {
             recovery_link(config()?, email, origin.as_deref()).await
         }
@@ -293,6 +296,55 @@ async fn shutdown_signal() {
 #[cfg(not(unix))]
 async fn shutdown_signal() {
     let _ = tokio::signal::ctrl_c().await;
+}
+
+fn database_shell(data: &DataConfig) -> Result<String, CliError> {
+    let mut shell = database_shell_command(data)?;
+    let program = shell.get_program().to_string_lossy().into_owned();
+    let failed = |error: std::io::Error| {
+        CliError::Operation(format!(
+            "could not start {program}: {error}. Is it installed?"
+        ))
+    };
+    // Replace this process, so Ctrl+C reaches only the shell (it cancels the query, not the session).
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        Err(failed(shell.exec()))
+    }
+    #[cfg(not(unix))]
+    {
+        let status = shell.status().map_err(failed)?;
+        if status.success() {
+            Ok(String::new())
+        } else {
+            Err(CliError::Operation(format!(
+                "{program} exited with {status}"
+            )))
+        }
+    }
+}
+
+/// The password goes in `PGPASSWORD`, not the arguments, so other users cannot read it from the process list.
+fn database_shell_command(data: &DataConfig) -> Result<std::process::Command, CliError> {
+    let Some(database_url) = &data.database_url else {
+        let mut shell = std::process::Command::new("sqlite3");
+        shell.arg(&data.database);
+        return Ok(shell);
+    };
+    let mut url = url::Url::parse(database_url).map_err(operation)?;
+    let mut shell = std::process::Command::new("psql");
+    if let Some(password) = url.password() {
+        let password = percent_encoding::percent_decode_str(password)
+            .decode_utf8()
+            .map_err(operation)?
+            .into_owned();
+        shell.env("PGPASSWORD", password);
+        url.set_password(None)
+            .map_err(|()| CliError::Operation("invalid database URL".to_owned()))?;
+    }
+    shell.arg(url.as_str());
+    Ok(shell)
 }
 
 async fn setup_token(config: Config, command: &SetupTokenCommand) -> Result<String, CliError> {
@@ -852,6 +904,9 @@ async fn install_seed_data(database: Database) -> Result<String, CliError> {
     const PASSWORD_HASH: &str = "$argon2id$v=19$m=19456,t=2,p=1$WUH9bzy7j6QyIqQ+iO+WUA$E+J7gy74Md7ZnwnccCH7oMqGdoj/u2SDc5QLvOzKMpA";
     const TASK_TITLE: &str = "Review the Orbit foundation";
     const TASK_DESCRIPTION: &str = "A safe, idempotent development seed record.";
+    /// Mailpit's SMTP port as AGENTS.md starts it.
+    const DEV_SMTP_HOST: &str = "127.0.0.1";
+    const DEV_SMTP_PORT: i64 = 11025;
     let identity = IdentityRepository::new(database.clone());
     let now = TimestampMillis::now();
     let existing_developer = identity.find_by_email(EMAIL).await.map_err(operation)?;
@@ -913,7 +968,8 @@ async fn install_seed_data(database: Database) -> Result<String, CliError> {
         Some(setup) => setup.workspace_id,
         None => {
             let workspace = sqlx::query_scalar::<_, String>(
-                "SELECT workspace_id FROM memberships WHERE user_id = $1 ORDER BY created_at LIMIT 1",
+                "SELECT workspace_id FROM memberships WHERE user_id = $1 AND role <> 'guest' \
+                 ORDER BY created_at LIMIT 1",
             )
             .bind(user_id.to_string())
             .fetch_optional(database.pool())
@@ -1005,6 +1061,28 @@ async fn install_seed_data(database: Database) -> Result<String, CliError> {
     .await
     .map_err(operation)?;
     seed_chat(&database, workspace_id, user_id, member_id).await?;
+    // Development mail goes to the local Mailpit (AGENTS.md), unless a mail server is set already.
+    sqlx::query(
+        "UPDATE instance_settings SET smtp_host = $1, smtp_port = $2, smtp_security = 'none', \
+         smtp_from_address = $3, updated_at = $4 WHERE id = 1 AND smtp_host IS NULL",
+    )
+    .bind(DEV_SMTP_HOST)
+    .bind(DEV_SMTP_PORT)
+    .bind("orbit@orbit.local")
+    .bind(now.as_millis())
+    .execute(database.pool())
+    .await
+    .map_err(operation)?;
+    // Development is open for sign-up, so new accounts can be tried without an invitation. Every seed run opens it
+    // again.
+    sqlx::query(
+        "UPDATE instance_settings SET registration_open = 1, updated_at = $1 \
+         WHERE id = 1 AND registration_open = 0",
+    )
+    .bind(now.as_millis())
+    .execute(database.pool())
+    .await
+    .map_err(operation)?;
     if already_seeded == 0 {
         let status_id: String = sqlx::query_scalar(
             "SELECT id FROM task_statuses WHERE project_id = $1 ORDER BY position LIMIT 1",
@@ -1039,7 +1117,7 @@ async fn install_seed_data(database: Database) -> Result<String, CliError> {
             .map_err(operation)?;
     }
     Ok(
-        "development seed data installed\nusers: test@example.com, member@example.com\npassword: password"
+        "development seed data installed\nusers: test@example.com, member@example.com\npassword: password\nregistration: open\nmail: Mailpit at 127.0.0.1:11025 unless a mail server is set"
             .to_owned(),
     )
 }
@@ -1319,6 +1397,15 @@ pub fn redacted_config(config: &Config) -> String {
         }
         None => lines.push("ORBIT_CLOUD=false".to_owned()),
     }
+    match &config.apns {
+        Some(apns) => lines.extend([
+            "ORBIT_APNS_KEY=[REDACTED]".to_owned(),
+            format!("ORBIT_APNS_KEY_ID={}", apns.key_id),
+            format!("ORBIT_APNS_TEAM_ID={}", apns.team_id),
+            format!("ORBIT_APNS_TOPIC={}", apns.topic),
+        ]),
+        None => lines.push("# ORBIT_APNS_KEY is not set: no native iOS pushes".to_owned()),
+    }
     lines.join("\n")
 }
 
@@ -1394,10 +1481,12 @@ mod tests {
     };
     use orbit_server::repositories::identity::{IdentityRepository, SetupRequest};
 
+    use orbit_platform::DataConfig;
+
     use super::{
         BackupCommand, Cli, Command, ConfigCommand, MigrateCommand, SetupTokenCommand,
-        config_command, failure_message, healthcheck, parent_directory, redacted_config,
-        remove_sidecars, run, validate_reset_paths,
+        config_command, database_shell_command, failure_message, healthcheck, parent_directory,
+        redacted_config, remove_sidecars, run, validate_reset_paths,
     };
 
     fn environment(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
@@ -1840,6 +1929,24 @@ mod tests {
     }
 
     #[test]
+    fn database_shell_keeps_the_postgres_password_out_of_the_arguments() {
+        let data = DataConfig {
+            database_url: Some("postgres://orbit:p%40ss@db:5432/orbit?sslmode=require".to_owned()),
+            ..DataConfig::default()
+        };
+        let shell = database_shell_command(&data).unwrap();
+        assert_eq!(shell.get_program(), "psql");
+        let args: Vec<_> = shell.get_args().collect();
+        assert_eq!(args, ["postgres://orbit@db:5432/orbit?sslmode=require"]);
+        let envs: Vec<_> = shell.get_envs().collect();
+        assert_eq!(envs, [("PGPASSWORD".as_ref(), Some("p@ss".as_ref()))]);
+
+        let shell = database_shell_command(&DataConfig::default()).unwrap();
+        assert_eq!(shell.get_program(), "sqlite3");
+        assert_eq!(shell.get_args().collect::<Vec<_>>(), ["data/orbit.sqlite"]);
+    }
+
+    #[test]
     fn operational_failures_include_a_concise_recovery_message() {
         let message = failure_message("database is owned");
 
@@ -2038,6 +2145,11 @@ mod tests {
         .execute(prepared.pool())
         .await
         .unwrap();
+        // The first run pointed mail at Mailpit; a mail server set later stays.
+        sqlx::query("UPDATE instance_settings SET smtp_host = 'mail.example.com'")
+            .execute(prepared.pool())
+            .await
+            .unwrap();
         drop(prepared);
 
         let second = run(args(), development()).await.unwrap();
@@ -2105,6 +2217,23 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(developer.display_name, "Edited Developer");
+        // Development mail went to Mailpit (port and security), the later host stayed, and sign-up is open.
+        assert_eq!(
+            database
+                .scalar::<String>(
+                    "SELECT smtp_host || ':' || smtp_port || ':' || smtp_security FROM instance_settings",
+                )
+                .await
+                .unwrap(),
+            "mail.example.com:11025:none"
+        );
+        assert_eq!(
+            database
+                .scalar::<i64>("SELECT registration_open FROM instance_settings WHERE id = 1")
+                .await
+                .unwrap(),
+            1
+        );
         assert!(
             orbit_platform::PasswordService::default()
                 .verify("password", developer.password_hash.as_deref().unwrap())

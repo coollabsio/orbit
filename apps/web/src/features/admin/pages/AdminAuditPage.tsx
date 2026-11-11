@@ -4,6 +4,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { useGlobalAudit } from '@/features/admin/api'
 import { SettingsRow } from '@/features/settings/components/SettingsParts'
+import { LoadingText } from '@/components/ui/spinner'
 
 /** Security events of every workspace and of the instance, newest first. */
 export function AdminAuditPage() {
@@ -21,7 +22,7 @@ export function AdminAuditPage() {
       flush
     >
       <div className="flex flex-col divide-y text-[13px]">
-        {audit.isPending ? <SettingsRow role="status">Loading events…</SettingsRow> : null}
+        {audit.isPending ? <SettingsRow><LoadingText>Loading events…</LoadingText></SettingsRow> : null}
         {audit.isError ? <SettingsRow role="alert">Events could not be loaded. <Button variant="ghost" onClick={() => void audit.refetch()}>Retry</Button></SettingsRow> : null}
         {audit.data?.length === 0 ? <SettingsRow className="text-muted-foreground">No events yet.</SettingsRow> : null}
         {audit.data?.map((event) => {

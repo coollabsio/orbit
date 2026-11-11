@@ -7,10 +7,11 @@ import type { ConnectedAccount, PasskeyRecord, Provider, TotpSetup } from '@orbi
 import { confirmAction } from '@/components/common/confirmAction'
 import { ProviderMark } from '@/components/common/icons/ProviderMark'
 import { SettingsCard } from '@/components/common/SettingsCard'
+import { InfoTip } from '@/components/common/InfoTip'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field'
+import { Field, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { useAuthOptions, useConnectedAccounts, useCurrentUser, useDisconnectAccount, useStartProviderSignIn } from '@/features/auth/api'
 import { ConfirmWithProvider } from '@/features/auth/components/ConfirmWithProvider'
@@ -29,6 +30,7 @@ import {
 } from '@/features/settings/api/security'
 import { RowIcon, SettingsRow } from '@/features/settings/components/SettingsParts'
 import { relativeTime } from '@/lib/format'
+import { LoadingText } from '@/components/ui/spinner'
 
 function problemDetail(error: unknown, fallback: string) {
   return error instanceof ApiProblem ? error.detail : fallback
@@ -84,7 +86,7 @@ function AuthenticatorCard() {
       ) : undefined}
       flush
     >
-      {status.isPending ? <SettingsRow role="status">Loading…</SettingsRow> : null}
+      {status.isPending ? <SettingsRow><LoadingText>Loading…</LoadingText></SettingsRow> : null}
       {status.isError ? <SettingsRow role="alert">Two-factor sign-in could not be loaded. <Button variant="ghost" onClick={() => void status.refetch()}>Retry</Button></SettingsRow> : null}
       {status.data ? (
         <SettingsRow className="flex-nowrap">
@@ -334,7 +336,7 @@ function PasskeysCard() {
         {available && !supported ? <SettingsRow className="text-[13px] text-muted-foreground">This browser does not support passkeys.</SettingsRow> : null}
         {!adding && add.isPending ? <SettingsRow role="status" className="text-[13px] text-muted-foreground">Confirm the new passkey in your browser…</SettingsRow> : null}
         {addError ? <SettingsRow role="alert" className="text-[13px] text-destructive">{addError}</SettingsRow> : null}
-        {passkeys.isPending ? <SettingsRow role="status">Loading passkeys…</SettingsRow> : null}
+        {passkeys.isPending ? <SettingsRow><LoadingText>Loading passkeys…</LoadingText></SettingsRow> : null}
         {passkeys.isError ? <SettingsRow role="alert">Passkeys could not be loaded. <Button variant="ghost" onClick={() => void passkeys.refetch()}>Retry</Button></SettingsRow> : null}
         {passkeys.isSuccess && list.length === 0 && available ? <SettingsRow className="text-[13px] text-muted-foreground">No passkeys yet.</SettingsRow> : null}
         {list.map((passkey) => (
@@ -376,9 +378,8 @@ function AddPasskeyDialog({ add, onAdd, onClose }: { add: ReturnType<typeof useA
           </DialogHeader>
           <FieldGroup>
             <Field>
-              <FieldLabel htmlFor={nameId}>Name</FieldLabel>
+              <FieldLabel htmlFor={nameId} className="items-center gap-1.5">Name <InfoTip text={'So you can tell your passkeys apart, e.g. "MacBook" or "YubiKey".'} /></FieldLabel>
               <Input id={nameId} required maxLength={64} value={name} onChange={(event) => setName(event.target.value)} />
-              <FieldDescription>So you can tell your passkeys apart, e.g. "MacBook" or "YubiKey".</FieldDescription>
             </Field>
             {/* Only the password check fails while the dialog is open. */}
             <CurrentPassword returnTo={SECURITY_PATH} hasPassword={hasPassword} value={password} onChange={setPassword} error={add.error} fallback="The passkey could not be added." />

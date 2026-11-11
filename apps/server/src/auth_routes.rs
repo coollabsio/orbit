@@ -401,6 +401,11 @@ pub fn auth_router(state: AuthState) -> Router {
             "/api/v1/push/subscriptions/{id}",
             delete(push::delete_push_subscription),
         )
+        .route(
+            "/api/v1/push/apns",
+            get(push::list_apns_devices).post(push::create_apns_device),
+        )
+        .route("/api/v1/push/apns/{id}", delete(push::delete_apns_device))
         .route("/api/v1/push/test", post(push::send_test_push))
         .route(
             "/api/v1/notification-preferences",
@@ -1669,6 +1674,8 @@ struct AuthOptions {
     providers: Vec<crate::sign_in_providers::Provider>,
     /// A first sign-in with one of `providers` creates an account (registration is open; no mail server needed).
     provider_registration_open: bool,
+    /// The Orbit release this server runs, from `[workspace.package] version` in `Cargo.toml` (for example `0.1.0`).
+    version: &'static str,
 }
 
 /// What the sign-in pages offer. Public.
@@ -1692,6 +1699,7 @@ async fn auth_options(
         billing_enabled: state.billing_enabled,
         provider_registration_open: settings.registration_open && !providers.is_empty(),
         providers,
+        version: env!("CARGO_PKG_VERSION"),
     }))
 }
 
@@ -1738,28 +1746,41 @@ async fn registration_request(
         .await
         .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?
         .is_some();
-    if !exists
-        && state
-            .account_email_allowed(email)
-            .await
-            .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?
-    {
-        let token = orbit_platform::generate_opaque_token();
-        let now = TimestampMillis::now();
-        state
-            .repository
-            .store_registration_token(
-                email,
-                &token,
-                TimestampMillis::from_millis(now.as_millis() + LIFETIME_MILLIS),
-                now,
-            )
-            .await
-            .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?;
-        mailer.send_later(mail::templates::registration(
-            email,
-            &mailer.link(&format!("/register?token={token}")),
-        ));
+    // As with password reset: the email limit, link and email run in the background, so a new
+    // address does not answer later than one that already has an account.
+    if !exists {
+        let state = state.clone();
+        let mailer = mailer.clone();
+        let email = email.to_owned();
+        tokio::spawn(async move {
+            match state.account_email_allowed(&email).await {
+                Ok(true) => {}
+                Ok(false) => return,
+                Err(error) => {
+                    tracing::warn!(%error, "registration link not issued");
+                    return;
+                }
+            }
+            let token = orbit_platform::generate_opaque_token();
+            let now = TimestampMillis::now();
+            if let Err(error) = state
+                .repository
+                .store_registration_token(
+                    &email,
+                    &token,
+                    TimestampMillis::from_millis(now.as_millis() + LIFETIME_MILLIS),
+                    now,
+                )
+                .await
+            {
+                tracing::warn!(%error, "registration link not issued");
+                return;
+            }
+            mailer.send_later(mail::templates::registration(
+                &email,
+                &mailer.link(&format!("/register?token={token}")),
+            ));
+        });
     }
     Ok(accepted(
         "We sent a link to that address. Open it to finish creating your account.",

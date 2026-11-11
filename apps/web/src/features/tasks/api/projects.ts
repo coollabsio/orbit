@@ -1,5 +1,5 @@
 import { confirmAction } from '@/components/common/confirmAction'
-import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
+import { queryOptions, useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/api/client'
 import { fetchAllPages } from '@/api/pagination'
 import {
@@ -9,14 +9,16 @@ import {
   deleteStatus,
   listProjects,
   listProjectTrash,
+  listTrashedProjectTasks,
+  getTrashedProject,
   listStatuses,
+  purgeProject,
   reorderStatuses,
   restoreProject,
   updateProject,
   updateStatus,
 } from '@orbit/api/generated/sdk.gen'
 import type {
-  ProjectBody,
   ProjectRecord,
   ProjectUpdateBody,
   ReorderItem,
@@ -27,6 +29,7 @@ import type {
 import { queryKeys } from '@/api/queryKeys'
 import type { StatusCategory, TaskStatusDef } from './models'
 import { isTaskVersionConflict } from './conflicts'
+import { projectDraft } from './projectDraft'
 import { loadFailed } from '@/lib/connection'
 
 function required<T>(data: T | undefined, message: string): T {
@@ -50,27 +53,26 @@ export function statusFromRecord(status: StatusRecord): TaskStatusDef {
   }
 }
 
-export function useProjects(workspaceId: string, enabled = true) {
-  return useQuery({
-    queryKey: queryKeys.projects(workspaceId),
-    enabled,
-    queryFn: async () => {
-      const page = await fetchAllPages(async (cursor) => {
-        const { data } = await listProjects({ client: apiClient, path: { workspace_id: workspaceId }, query: { limit: 100, cursor }, throwOnError: true })
-        return required(data, 'Projects response was empty.')
-      })
-      return page.items
-    },
+async function fetchProjects(workspaceId: string): Promise<ProjectRecord[]> {
+  const page = await fetchAllPages(async (cursor) => {
+    const { data } = await listProjects({ client: apiClient, path: { workspace_id: workspaceId }, query: { limit: 100, cursor }, throwOnError: true })
+    return required(data, 'Projects response was empty.')
   })
+  return page.items
 }
 
-export function useProjectStatuses(workspaceId: string, projectId: string | undefined) {
-  return useQuery({
-    queryKey: queryKeys.statuses(workspaceId, projectId ?? ''),
-    enabled: Boolean(projectId),
+/** The workspace's projects; shared by `useProjects` and code that reads them outside React (`fetchQuery`). */
+export function projectsQuery(workspaceId: string) {
+  return queryOptions({ queryKey: queryKeys.projects(workspaceId), queryFn: () => fetchProjects(workspaceId) })
+}
+
+/** A project's statuses; shared by the status hooks and code that reads them outside React (`fetchQuery`). */
+export function statusesQuery(workspaceId: string, projectId: string) {
+  return queryOptions({
+    queryKey: queryKeys.statuses(workspaceId, projectId),
     queryFn: async () => {
       const page = await fetchAllPages(async (cursor) => {
-        const { data } = await listStatuses({ client: apiClient, path: { workspace_id: workspaceId, project_id: projectId! }, query: { limit: 100, cursor }, throwOnError: true })
+        const { data } = await listStatuses({ client: apiClient, path: { workspace_id: workspaceId, project_id: projectId }, query: { limit: 100, cursor }, throwOnError: true })
         return required(data, 'Statuses response was empty.')
       })
       return page.items.map(statusFromRecord)
@@ -78,18 +80,17 @@ export function useProjectStatuses(workspaceId: string, projectId: string | unde
   })
 }
 
+export function useProjects(workspaceId: string, enabled = true) {
+  return useQuery({ ...projectsQuery(workspaceId), enabled })
+}
+
+export function useProjectStatuses(workspaceId: string, projectId: string | undefined) {
+  return useQuery({ ...statusesQuery(workspaceId, projectId ?? ''), enabled: Boolean(projectId) })
+}
+
 export function useAllStatuses(workspaceId: string, projects: ProjectRecord[]) {
   const results = useQueries({
-    queries: projects.map((project) => ({
-      queryKey: queryKeys.statuses(workspaceId, project.id),
-      queryFn: async () => {
-        const page = await fetchAllPages(async (cursor) => {
-          const { data } = await listStatuses({ client: apiClient, path: { workspace_id: workspaceId, project_id: project.id }, query: { limit: 100, cursor }, throwOnError: true })
-          return required(data, 'Statuses response was empty.')
-        })
-        return page.items.map(statusFromRecord)
-      },
-    })),
+    queries: projects.map((project) => statusesQuery(workspaceId, project.id)),
   })
   return {
     data: results.flatMap((result) => result.data ?? []),
@@ -103,7 +104,10 @@ export function useAllStatuses(workspaceId: string, projects: ProjectRecord[]) {
 export function useCreateProject(workspaceId: string) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: async (body: ProjectBody) => {
+    mutationFn: async (name: string) => {
+      // A fresh list, so the key skips the keys of projects that other members made since the last load.
+      const existing = await fetchProjects(workspaceId)
+      const body = projectDraft(name, existing.map((project) => project.key))
       const { data } = await createProject({ client: apiClient, path: { workspace_id: workspaceId }, body, throwOnError: true })
       return required(data, 'Create project response was empty.')
     },
@@ -155,6 +159,33 @@ export function useProjectTrash(workspaceId: string) {
   })
 }
 
+/** A project in the trash with its statuses, for its read-only preview. */
+export function useTrashedProject(workspaceId: string, projectId: string) {
+  return useQuery({
+    queryKey: [...queryKeys.projectTrash(workspaceId), 'preview', projectId],
+    queryFn: async () => {
+      const { data } = await getTrashedProject({ client: apiClient, path: { workspace_id: workspaceId, project_id: projectId }, throwOnError: true })
+      return required(data, 'Trashed project response was empty.')
+    },
+    retry: false,
+  })
+}
+
+/** Every task of a trashed project, by number. */
+export function useTrashedProjectTasks(workspaceId: string, projectId: string) {
+  return useQuery({
+    queryKey: [...queryKeys.projectTrash(workspaceId), 'preview', projectId, 'tasks'],
+    queryFn: async () => {
+      const page = await fetchAllPages(async (cursor) => {
+        const { data } = await listTrashedProjectTasks({ client: apiClient, path: { workspace_id: workspaceId, project_id: projectId }, query: { limit: 100, cursor }, throwOnError: true })
+        return required(data, 'Trashed project tasks response was empty.')
+      })
+      return page.items
+    },
+    retry: false,
+  })
+}
+
 export function useRestoreProject(workspaceId: string) {
   const queryClient = useQueryClient()
   return useMutation({
@@ -168,6 +199,17 @@ export function useRestoreProject(workspaceId: string) {
       }
     },
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: queryKeys.workspace(workspaceId) }),
+  })
+}
+
+/** Deletes a trashed project forever with all its tasks. */
+export function usePurgeProject(workspaceId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (projectId: string) => {
+      await purgeProject({ client: apiClient, path: { workspace_id: workspaceId, project_id: projectId }, throwOnError: true })
+    },
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: queryKeys.workspace(workspaceId) }),
   })
 }
 

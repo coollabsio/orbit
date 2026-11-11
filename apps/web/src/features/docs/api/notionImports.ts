@@ -27,17 +27,6 @@ export function isFinalImport(status: NotionImportStatus | undefined): boolean {
   return status === 'completed' || status === 'failed' || status === 'cancelled' || status === 'expired'
 }
 
-export const NOTION_IMPORT_STATUS_LABELS: Record<NotionImportStatus, string> = {
-  scanning: 'Scanning',
-  ready: 'Ready to import',
-  queued: 'Queued',
-  importing: 'Importing',
-  completed: 'Completed',
-  failed: 'Failed',
-  cancelled: 'Cancelled',
-  expired: 'Expired',
-}
-
 /** A user-facing sentence for a failed Notion import request. */
 export function notionImportErrorMessage(error: unknown): string {
   if (error instanceof ApiProblem) {

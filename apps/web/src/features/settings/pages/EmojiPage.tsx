@@ -5,8 +5,9 @@ import { ApiProblem } from '@orbit/api/problem'
 import { confirmAction } from '@/components/common/confirmAction'
 import { EmptyState } from '@/components/common/EmptyState'
 import { SettingsCard } from '@/components/common/SettingsCard'
+import { InfoTip } from '@/components/common/InfoTip'
 import { Button } from '@/components/ui/button'
-import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
+import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { emojiNamed, loadEmojiIndex } from '@/features/chat/lib/emojiSearch'
 import { FieldGrid, RequiredMark, RowIcon, SettingsRow } from '@/features/settings/components/SettingsParts'
@@ -17,6 +18,7 @@ import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { EMOJI_IMAGE_TYPES, emojiNameFromFile, emojiProblem } from '@/lib/customEmoji'
 import { shortDate } from '@/lib/format'
 import { EMOJI_SHORTCODES } from '@/lib/markdown'
+import { LoadingText } from '@/components/ui/spinner'
 
 /** What the server can answer to a new emoji or a delete, in words for the page. */
 const SERVER_PROBLEMS: Record<string, string> = {
@@ -87,7 +89,7 @@ export function EmojiPage() {
       <form className="flex flex-col gap-4" onSubmit={(event) => void submit(event)}>
         <FieldGrid>
           <Field>
-            <FieldLabel htmlFor="emoji-file">Image <RequiredMark /></FieldLabel>
+            <div className="flex items-center gap-1.5"><FieldLabel htmlFor="emoji-file">Image <RequiredMark /></FieldLabel><InfoTip text="PNG, JPEG, WebP or GIF, at most 256 KB." /></div>
             <Input
               ref={fileInput}
               id="emoji-file"
@@ -100,12 +102,10 @@ export function EmojiPage() {
                 if (chosen) setName(emojiNameFromFile(chosen.name))
               }}
             />
-            <FieldDescription>PNG, JPEG, WebP or GIF, at most 256 KB.</FieldDescription>
           </Field>
           <Field>
-            <FieldLabel htmlFor="emoji-name">Name <RequiredMark /></FieldLabel>
+            <FieldLabel htmlFor="emoji-name" className="items-center gap-1.5">Name <RequiredMark /> <InfoTip text={`Lower case letters, digits and underscores. In a message, type :${name || 'name'}:`} /></FieldLabel>
             <Input id="emoji-name" value={name} maxLength={32} placeholder="party_parrot" onChange={(event) => { setName(event.target.value.toLowerCase()); setProblem(null) }} />
-            <FieldDescription>Lower case letters, digits and underscores. In a message, type :{name || 'name'}:</FieldDescription>
           </Field>
         </FieldGrid>
         <div className="flex flex-wrap items-center gap-3">
@@ -119,7 +119,7 @@ export function EmojiPage() {
     ) : (
       <SettingsCard title="Emoji" description={emoji.data ? `${emoji.data.length} of 200 in this workspace.` : undefined} flush>
         <div className="flex flex-col divide-y">
-          {emoji.isPending ? <SettingsRow>Loading emoji…</SettingsRow> : null}
+          {emoji.isPending ? <SettingsRow><LoadingText>Loading emoji…</LoadingText></SettingsRow> : null}
           {emoji.isError ? <SettingsRow role="alert">Emoji could not be loaded.</SettingsRow> : null}
           {emoji.data?.map((entry) => (
             <SettingsRow className="flex-nowrap" key={entry.id}>

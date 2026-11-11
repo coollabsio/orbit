@@ -1,15 +1,15 @@
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { applyChatActions, applyChatEvents, chatQueryKeys } from '../../chat-cache'
 import { router } from 'expo-router'
-import { type ReactElement, useMemo, useRef, useState } from 'react'
+import { type ReactElement, useEffect, useMemo, useRef, useState } from 'react'
 import { FlatList, Platform, Pressable, Share, View } from 'react-native'
 
-import { decodeMentions, hasReaction, type MessageAction, messageActions, type MessageRow, type Person, quickReactions, type ThreadPages, toggleReaction, upsertThreadMessage } from '../../data/chat'
+import { decodeMentions, mentionParts, emojiNames, hasReaction, hasShortcode, type MessageAction, messageActions, type MessageRow, type Person, quickReactions, type ThreadPages, toggleReaction, upsertThreadMessage, withEmoji } from '../../data/chat'
 import * as chat from '../../data/chat-api'
 import { dayLabel } from '../../data/format'
 import { markdownToText } from '../../data/markdown'
 import type { MessageRecord } from '../../data/orbit'
-import { confirmAction, showError, useChatWrite, useIsChatAdmin } from '../../hooks/chat'
+import { confirmAction, showError, useChatWrite, useFollowedThreads, useIsChatAdmin } from '../../hooks/chat'
 
 import { useOrbit } from '../../orbit-context'
 import { useConversations, usePeople } from '../../queries'
@@ -21,14 +21,40 @@ import { ActionSheet, type SheetItem } from './Sheet'
 
 export type ListRow = MessageRow | { type: 'pending'; key: string; pending: PendingMessage }
 
-/** Names and shown text for message rows: members by id, mentions decoded, markdown flattened. */
+/**
+ * The standard emoji names for `:name:` in bodies. Like the web, the emoji data loads the first time a shown body has a
+ * shortcode (`sawShortcode`); the picker's copy of the same data counts too.
+ */
+function useEmojiNames() {
+  const { session } = useOrbit()
+  const seen = useRef(false)
+  const [wanted, setWanted] = useState(false)
+  const query = useQuery({ queryKey: chatQueryKeys.emojibase(session.server), queryFn: () => chat.emojibase(session.server), staleTime: Infinity, gcTime: Infinity, retry: 1, enabled: wanted })
+  useEffect(() => {
+    if (seen.current && !wanted) setWanted(true)
+  })
+  const names = useMemo(() => (query.data ? emojiNames(query.data) : null), [query.data])
+  return {
+    names,
+    sawShortcode: (body: string) => {
+      if (!names && hasShortcode(body)) seen.current = true
+    },
+  }
+}
+
+/** Names and shown text for message rows: members by id, emoji shortcodes and mentions decoded, markdown flattened. */
 export function useMessageText() {
   const people = usePeople()
   const conversations = useConversations()
+  const emoji = useEmojiNames()
   const channels: Person[] = useMemo(() => (conversations.data ?? []).map((item) => ({ id: item.id, name: item.name })), [conversations.data])
   return {
     nameOf: (userId: string) => people.find((person) => person.id === userId)?.name ?? 'Unknown',
-    text: (body: string) => markdownToText(decodeMentions(body, people, channels)),
+    text: (body: string) => {
+      emoji.sawShortcode(body)
+      return markdownToText(decodeMentions(withEmoji(body, emoji.names), people, channels))
+    },
+    parts: (shown: string) => mentionParts(shown, people, channels),
   }
 }
 
@@ -53,6 +79,7 @@ export function useMessageSheet({ inThread, composer, loaded, onMarkedUnread }: 
   const moderator = useIsChatAdmin()
   const run = useChatWrite()
   const words = useMessageText()
+  const followed = useFollowedThreads()
   const [selected, setSelected] = useState<MessageRecord | null>(null)
   const [picking, setPicking] = useState<MessageRecord | null>(null)
 
@@ -147,6 +174,7 @@ export function useMessageSheet({ inThread, composer, loaded, onMarkedUnread }: 
     },
     onReact: react,
     onAddReaction: setPicking,
+    threadUnread: (rootId) => followed.data?.some((thread) => thread.root.id === rootId && thread.state.following && thread.state.unread_replies > 0) ?? false,
     onOpenThread: inThread ? undefined : (message) => router.push(`/chat/thread/${message.id}`),
   }
 
@@ -174,6 +202,17 @@ function DayChip({ label }: { label: string }) {
       <View className="px-3 py-0.5 rounded-full border border-border bg-card">
         <Text className="font-noto-medium text-[12px] leading-[16px] text-muted-foreground">{label}</Text>
       </View>
+    </View>
+  )
+}
+
+/** The web `NewLine`: where the unread messages start, a pink square, "New" and a pink hairline. */
+function NewLine() {
+  return (
+    <View accessibilityRole="header" accessibilityLabel="New messages" className="flex-row items-center gap-2 px-4 py-1">
+      <View className="size-1.5 bg-primary" />
+      <Text className="font-noto-semibold text-[12px] leading-[16px] text-primary">New</Text>
+      <View className="flex-1 h-px bg-primary" />
     </View>
   )
 }
@@ -219,7 +258,7 @@ export function MessageList({
       keyboardShouldPersistTaps="handled"
       keyboardDismissMode="interactive"
       // the list is flipped: `flex-end` is the top of the screen
-      contentContainerClassName={`pt-3 ${fromTop ? 'grow justify-end' : ''}`}
+      contentContainerClassName={`pt-5 ${fromTop ? 'grow justify-end' : ''}`}
       initialScrollIndex={highlightIndex > 0 ? highlightIndex : undefined}
       onScrollToIndexFailed={({ index, averageItemLength }) => {
         list.current?.scrollToOffset({ offset: index * averageItemLength, animated: false })
@@ -233,6 +272,7 @@ export function MessageList({
       ListFooterComponent={loadingOlder ? <View className="p-4"><Spinner /></View> : start}
       renderItem={({ item }) => {
         if (item.type === 'day') return <DayChip label={dayLabel(item.at)} />
+        if (item.type === 'new') return <NewLine />
         if (item.type === 'pending') return <PendingRow pending={item.pending} text={handlers.text} />
         return <MessageItem message={item.message} groupStart={item.groupStart} highlighted={item.message.id === highlightedId} handlers={handlers} />
       }}

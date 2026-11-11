@@ -4,10 +4,12 @@ import type { LimitsView } from '@orbit/api/generated/types.gen'
 import { ApiProblem } from '@orbit/api/problem'
 import { SettingsCard } from '@/components/common/SettingsCard'
 import { Button } from '@/components/ui/button'
-import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
+import { InfoTip } from '@/components/common/InfoTip'
+import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { useInstanceSettings, useSaveLimits } from '@/features/admin/api'
 import { FieldGrid } from '@/features/settings/components/SettingsParts'
+import { LoadingText } from '@/components/ui/spinner'
 
 function problemText(error: unknown, fallback: string) {
   return error instanceof ApiProblem ? error.detail : fallback
@@ -16,7 +18,7 @@ function problemText(error: unknown, fallback: string) {
 /** What one account and one workspace may use. */
 export function AdminLimitsPage() {
   const settings = useInstanceSettings()
-  if (settings.isPending) return <SettingsCard title="Limits"><p role="status">Loading settings…</p></SettingsCard>
+  if (settings.isPending) return <SettingsCard title="Limits"><p><LoadingText>Loading settings…</LoadingText></p></SettingsCard>
   if (settings.isError) return <SettingsCard title="Limits"><p role="alert">Settings could not be loaded. <Button variant="ghost" onClick={() => void settings.refetch()}>Retry</Button></p></SettingsCard>
   // Remount on save so the form shows what the server stored.
   return <LimitsCard key={JSON.stringify(settings.data.limits)} limits={settings.data.limits} />
@@ -56,14 +58,12 @@ function LimitsCard({ limits }: { limits: LimitsView }) {
       <SettingsCard title="Limits" description="What one account and one workspace may use. Empty or 0 means no limit. A lower limit removes nothing that exists.">
         <FieldGrid>
           <Field>
-            <FieldLabel htmlFor="limit-workspaces">Workspaces per account</FieldLabel>
+            <FieldLabel htmlFor="limit-workspaces">Workspaces per account <InfoTip text="Workspaces one account may own, not counting the trash. Admins have no limit." /></FieldLabel>
             <Input id="limit-workspaces" type="number" min={0} step={1} placeholder="No limit" value={workspaces} onChange={(event) => setWorkspaces(event.target.value)} />
-            <FieldDescription>Workspaces one account may own, not counting the trash. Admins have no limit.</FieldDescription>
           </Field>
           <Field>
-            <FieldLabel htmlFor="limit-storage">Storage per workspace (GB)</FieldLabel>
+            <FieldLabel htmlFor="limit-storage">Storage per workspace (GB) <InfoTip text="Files, emoji and stickers of one workspace, each file counted once." /></FieldLabel>
             <Input id="limit-storage" type="number" min={0} step="any" placeholder="No limit" value={storage} onChange={(event) => setStorage(event.target.value)} />
-            <FieldDescription>Files, emoji and stickers of one workspace, each file counted once.</FieldDescription>
           </Field>
         </FieldGrid>
         <div className="mt-4 flex justify-end">

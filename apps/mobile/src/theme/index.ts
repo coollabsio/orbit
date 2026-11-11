@@ -38,19 +38,12 @@ export interface Theme {
 
 const SCHEME_KEY = 'orbit.theme'
 const STYLE_KEY = 'orbit.style'
-const LAYOUT_KEY = 'orbit.layout'
 const CUSTOM_THEME_KEY = 'orbit.customTheme'
 /** `null` follows the system; the Profile header's theme button sets one explicitly, like the web toggle. */
 let preference: Scheme | null = null
 /** The web's Appearance → Style: `3d` buttons rest on a raised edge, `flat` ones have none. */
 export type ButtonStyle = '3d' | 'flat'
 let buttonStyle: ButtonStyle = '3d'
-/**
- * The web's Appearance → Layout. `new` is the new UI: a contextual drawer (settings links and Back) and a custom theme
- * that colours the whole app. `classic` keeps the drawer with the app links only, and a custom theme that colours chat.
- */
-export type Layout = 'classic' | 'new'
-let layout: Layout = 'new'
 /** Settings → Appearance → Custom. `null` is the chosen Light, System or Dark. */
 let customTheme: CustomTheme | null = null
 const listeners = new Set<() => void>()
@@ -74,12 +67,6 @@ export function setButtonStyle(style: ButtonStyle) {
   void storage.set(STYLE_KEY, style)
 }
 
-export function setLayout(next: Layout) {
-  layout = next
-  listeners.forEach((listener) => listener())
-  void storage.set(LAYOUT_KEY, next)
-}
-
 /** Saves the custom theme on this device. `null` goes back to Light, System or Dark. */
 export function setCustomTheme(theme: CustomTheme | null) {
   customTheme = theme
@@ -90,27 +77,16 @@ export function setCustomTheme(theme: CustomTheme | null) {
 /** Reads the stored choices once at startup. */
 export async function loadAppearance(): Promise<void> {
   const read = (key: string) => storage.get(key).catch(() => null)
-  const [scheme, style, storedLayout, storedTheme] = await Promise.all([read(SCHEME_KEY), read(STYLE_KEY), read(LAYOUT_KEY), read(CUSTOM_THEME_KEY)])
+  const [scheme, style, storedTheme] = await Promise.all([read(SCHEME_KEY), read(STYLE_KEY), read(CUSTOM_THEME_KEY)])
   if (scheme === 'light' || scheme === 'dark') setSchemePreference(scheme)
   if (style === 'flat') setButtonStyle(style)
-  if (storedLayout === 'classic') setLayout(storedLayout)
   const theme = storedTheme ? parseCustomTheme(storedTheme) : null
   if (theme) setCustomTheme(theme)
 }
 
-export function useLayout(): Layout {
-  return useSyncExternalStore(subscribe, () => layout)
-}
-
-/** The stored custom theme, whatever the layout. */
+/** The stored custom theme: it colours the whole app. */
 export function useCustomTheme(): CustomTheme | null {
   return useSyncExternalStore(subscribe, () => customTheme)
-}
-
-/** The custom theme that colours the whole app: only in the new UI. */
-export function useAppCustomTheme(): CustomTheme | null {
-  const theme = useCustomTheme()
-  return useLayout() === 'new' ? theme : null
 }
 
 /** The colours of a part of the screen (`ColorScope`): the whole app, the drawer, or chat. */
@@ -125,11 +101,11 @@ export function useButtonStyle(): ButtonStyle {
   return useSyncExternalStore(subscribe, () => buttonStyle)
 }
 
-/** The app's scheme: a custom theme in the new UI decides it from its message colour, otherwise the chosen one. */
+/** The app's scheme: a custom theme decides it from its message colour, otherwise the chosen one. */
 export function useAppScheme(): Scheme {
   const system = useColorScheme()
   const chosen = useSyncExternalStore(subscribe, () => preference)
-  const custom = useAppCustomTheme()
+  const custom = useCustomTheme()
   if (custom) return customThemeScheme(custom)
   return chosen ?? (system === 'dark' ? 'dark' : 'light')
 }

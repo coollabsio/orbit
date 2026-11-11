@@ -27,7 +27,7 @@ use utoipa::ToSchema;
 use super::page_mentions::notify_new_mentions;
 use super::pages::{
     PageError, PageRecord, PageRepository, check_version, content_text, page_by_id_in_tx,
-    page_in_tx, parse_id, user_in_tx, visible,
+    page_in_tx, parse_id, sanitize_page_blocks, user_in_tx, visible,
 };
 use super::tasks::{record_mutation, require_access, require_access_tx};
 use crate::audit::{self, AuditOutcome};
@@ -234,6 +234,8 @@ impl PageRepository {
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<PageRecord, PageError> {
+        // Someone who cannot see the page must not load its document into memory.
+        self.get_visible(workspace_id, page_id, actor_id).await?;
         // The live document's latest edits are projected first, so the `restore` version holds
         // them; the room stays locked until the replacement is broadcast.
         let mut collab = CollabHub::of(&self.database)
@@ -242,7 +244,8 @@ impl PageRepository {
         let mut tx = self.database.immediate_transaction().await?;
         require_access_tx(&mut tx, workspace_id, actor_id).await?;
         let current = page_in_tx(&mut tx, workspace_id, page_id, actor_id, false).await?;
-        let version = version_in_tx(&mut tx, workspace_id, page_id, version_id).await?;
+        let mut version = version_in_tx(&mut tx, workspace_id, page_id, version_id).await?;
+        version.content = sanitize_page_blocks(&version.content, workspace_id, page_id);
         if current.locked_at.is_some() {
             return Err(PageError::Locked);
         }
@@ -357,8 +360,10 @@ pub async fn replace_content(
 /// as `content_json` / `content_text`. Applies the history rule of edits (the previous state
 /// becomes an `auto` version when the newest one is 10 minutes old), sets `updated_by` (the last
 /// editor, when known) and `updated_at`, and does not bump `pages.version` (the metadata
-/// concurrency token). With `audit`, records `page.updated` (audit + realtime outbox); the hub
-/// asks for that at most once per page per 10 minutes. Returns whether the content changed.
+/// concurrency token). `updated_at` always moves forward, also within one millisecond, so the
+/// page's `revision` changes with every projected edit. With `audit`, records `page.updated`
+/// (audit + realtime outbox); the hub asks for that at most once per page per 10 minutes.
+/// Returns whether the content changed.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn project_collab_content(
     tx: &mut Transaction<'_, Any>,
@@ -378,7 +383,7 @@ pub(crate) async fn project_collab_content(
     snapshot_before_edit(tx, &current, now).await?;
     sqlx::query(
         "UPDATE pages SET content_json = $1, content_text = $2, updated_by = COALESCE($3, updated_by), \
-         updated_at = $4 WHERE id = $5",
+         updated_at = CASE WHEN updated_at < $4 THEN $4 ELSE updated_at + 1 END WHERE id = $5",
     )
     .bind(serde_json::to_string(content).map_err(|_| PageError::Corrupt)?)
     .bind(content_text(content))

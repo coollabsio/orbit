@@ -1,8 +1,9 @@
-import { expect, test } from 'bun:test'
+import { describe, expect, it, test } from 'bun:test'
 
 import {
   buildMessageRows,
   channelNameFinal,
+  mentionParts,
   channelNameInput,
   chatSections,
   chatBadge,
@@ -19,6 +20,8 @@ import {
   messageablePeople,
   type MessagePages,
   pickablePeople,
+  addablePeople,
+  hasGuests,
   quickReactions,
   removeMessage,
   searchEmoji,
@@ -207,12 +210,26 @@ test('channel names are typed lowercase with hyphens, and sent without a trailin
 
 test('a new message offers yourself first, then the others by name, without suspended people', () => {
   const members = [member('zoe', 'Zoe'), member('me', 'Orbit Dev'), member('ada', 'Ada'), member('old', 'Old', { suspended_at: '2026-01-01T00:00:00Z' })]
-  expect(messageablePeople(members, 'me')).toEqual([
+  expect(messageablePeople(members, [], 'me')).toEqual([
     { id: 'me', name: 'Orbit Dev (you)' },
     { id: 'ada', name: 'Ada' },
     { id: 'zoe', name: 'Zoe' },
   ])
   expect(pickablePeople(members, 'me', ['zoe'])).toEqual([{ id: 'ada', name: 'Ada' }])
+})
+
+test('a new message offers a guest only when it shares an open channel with you, as the server requires', () => {
+  const members = [member('me', 'Me'), member('ada', 'Ada'), member('gus', 'Gus', { role: 'guest' }), member('gil', 'Gil', { role: 'guest' }), member('gia', 'Gia', { role: 'guest' })]
+  const conversations = [
+    conversation('design', { kind: 'private', member_ids: ['me', 'gus'] }),
+    conversation('old', { kind: 'private', archived: true, member_ids: ['me', 'gia'] }),
+    conversation('dm', { kind: 'dm', member_ids: ['me', 'gia'] }),
+    conversation('other', { kind: 'private', member_ids: ['ada', 'gil'] }),
+  ]
+  expect(messageablePeople(members, conversations, 'me').map((person) => person.id)).toEqual(['me', 'ada', 'gus'])
+  // a guest reaches only the people of its channels, members too
+  const asGuest = [member('gus', 'Gus', { role: 'guest' }), member('me', 'Me'), member('ada', 'Ada')]
+  expect(messageablePeople(asGuest, conversations, 'gus').map((person) => person.id)).toEqual(['gus', 'me'])
 })
 
 // ---- reactions
@@ -326,4 +343,41 @@ test('emoji groups come from emojibase in order, without components or newer emo
 
 test('file sizes read like the web', () => {
   expect([fileSize(512), fileSize(12_800), fileSize(3_565_158)]).toEqual(['512 B', '13 KB', '3.4 MB'])
+})
+
+describe('mentionParts', () => {
+  const people = [
+    { id: 'u1', name: 'Ada' },
+    { id: 'u2', name: 'Ada Lovelace' },
+  ]
+  const channels = [{ id: 'c1', name: 'general' }]
+
+  it('marks people, channels, @here and @channel; the longest name wins', () => {
+    expect(mentionParts('hi @Ada Lovelace, see #general @here!', people, channels)).toEqual([
+      { text: 'hi ', mention: false },
+      { text: '@Ada Lovelace', mention: true },
+      { text: ', see ', mention: false },
+      { text: '#general', mention: true },
+      { text: ' ', mention: false },
+      { text: '@here', mention: true },
+      { text: '!', mention: false },
+    ])
+  })
+
+  it('leaves unknown names, emails and partial words alone', () => {
+    expect(mentionParts('mail ada@x.io or @Adam or @nobody', people, channels)).toEqual([{ text: 'mail ada@x.io or @Adam or @nobody', mention: false }])
+  })
+})
+
+test('"Add people" never offers a guest for a public channel, and a channel with one has guests', () => {
+  const people = [
+    { user_id: 'me', display_name: 'Me', role: 'member' },
+    { user_id: 'gus', display_name: 'Gus', role: 'guest' },
+    { user_id: 'ann', display_name: 'Ann', role: 'member' },
+  ] as unknown as MemberRecord[]
+  expect(addablePeople({ kind: 'public', member_ids: ['me'] }, people, 'me')).toEqual([{ id: 'ann', name: 'Ann' }])
+  expect(addablePeople({ kind: 'private', member_ids: ['me'] }, people, 'me')).toEqual([{ id: 'ann', name: 'Ann' }, { id: 'gus', name: 'Gus' }])
+  expect(hasGuests({ kind: 'private', member_ids: ['me', 'gus'] }, people)).toBe(true)
+  expect(hasGuests({ kind: 'private', member_ids: ['me', 'ann'] }, people)).toBe(false)
+  expect(hasGuests({ kind: 'dm', member_ids: ['me', 'gus'] }, people)).toBe(false)
 })

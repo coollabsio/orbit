@@ -5,6 +5,16 @@ import {
   archiveChatChannel,
   createChatCategory,
   createChatChannel,
+  clickChatAction,
+  createChatWebhook,
+  getChatWebhookSigningSecret,
+  listChatWebhookDeliveries,
+  rotateChatWebhookSigningSecret,
+  setChatWebhookInteractivity,
+  deleteChatWebhook,
+  listChatWebhooks,
+  rotateChatWebhook,
+  updateChatWebhook,
   deleteChatCategory,
   deleteChatMessage,
   editChatMessage,
@@ -58,6 +68,8 @@ import {
   toState,
   toThreadPage,
   toThreadState,
+  toDelivery,
+  toWebhook,
 } from './wire'
 
 type ApiClient = ReturnType<typeof createApiClient>
@@ -308,6 +320,43 @@ export function createHttpChatClient(options: HttpChatClientOptions): ChatClient
     },
     async editMessage(messageId, body) {
       return toMessage((await write(editChatMessage({ ...at({ message_id: messageId }), body: { body } }))).result)
+    },
+    async listWebhooks(conversationId) {
+      return (await call(listChatWebhooks(at({ conversation_id: conversationId })))).map(toWebhook)
+    },
+    async createWebhook(conversationId, input) {
+      const body = { name: input.name, icon_url: input.iconUrl || null }
+      const created = await call(createChatWebhook({ ...at({ conversation_id: conversationId }), body }))
+      return { webhook: toWebhook(created.webhook), url: created.url }
+    },
+    async updateWebhook(conversationId, webhookId, input) {
+      const body = { name: input.name, icon_url: input.iconUrl || null }
+      return toWebhook(await call(updateChatWebhook({ ...at({ conversation_id: conversationId, webhook_id: webhookId }), body })))
+    },
+    async rotateWebhook(conversationId, webhookId) {
+      const rotated = await call(rotateChatWebhook(at({ conversation_id: conversationId, webhook_id: webhookId })))
+      return { webhook: toWebhook(rotated.webhook), url: rotated.url }
+    },
+    async deleteWebhook(conversationId, webhookId) {
+      try {
+        await deleteChatWebhook(at({ conversation_id: conversationId, webhook_id: webhookId }))
+      } catch (error) {
+        throw toChatError(error)
+      }
+    },
+    async setWebhookInteractivity(conversationId, webhookId, requestUrl) {
+      const body = { request_url: requestUrl }
+      return toWebhook(await call(setChatWebhookInteractivity({ ...at({ conversation_id: conversationId, webhook_id: webhookId }), body })))
+    },
+    async webhookSigningSecret(conversationId, webhookId, rotate) {
+      const ids = at({ conversation_id: conversationId, webhook_id: webhookId })
+      return (await call(rotate ? rotateChatWebhookSigningSecret(ids) : getChatWebhookSigningSecret(ids))).signing_secret
+    },
+    async listWebhookDeliveries(conversationId, webhookId) {
+      return (await call(listChatWebhookDeliveries(at({ conversation_id: conversationId, webhook_id: webhookId })))).map(toDelivery)
+    },
+    async clickAction(messageId, blockId, actionId) {
+      await call(clickChatAction({ ...at({ message_id: messageId }), body: { block_id: blockId, action_id: actionId } }))
     },
     async deleteMessage(messageId) {
       await write(deleteChatMessage(at({ message_id: messageId })))

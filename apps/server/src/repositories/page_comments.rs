@@ -23,7 +23,7 @@ use utoipa::ToSchema;
 
 use super::pages::visible;
 use crate::audit::{self, AuditOutcome};
-use crate::collab::sanitize::normalize_link_href;
+use crate::collab::sanitize::{normalize_link_href, trim_comment_blocks};
 
 /// Blocks in one comment.
 const MAX_BLOCKS: usize = 50;
@@ -183,7 +183,7 @@ impl CommentBody {
         if mentions.len() > MAX_MENTIONS {
             return Err(PageCommentError::Invalid { field: "mentions" });
         }
-        let blocks = clean;
+        let blocks = trim_comment_blocks(clean);
         if serde_json::to_vec(&blocks).map_or(usize::MAX, |bytes| bytes.len()) > MAX_BODY_BYTES {
             return Err(invalid());
         }
@@ -633,6 +633,7 @@ async fn visible_page(
         "SELECT pages.owner_id AS owner_id FROM pages \
          JOIN workspaces ON workspaces.id = pages.workspace_id \
          JOIN memberships ON memberships.workspace_id = pages.workspace_id AND memberships.user_id = $1 \
+         AND memberships.role <> 'guest' \
          WHERE pages.id = $2 AND pages.workspace_id = $3 AND pages.deleted_at IS NULL \
          AND workspaces.deleted_at IS NULL AND {visible}",
         visible = visible(4)
@@ -742,7 +743,8 @@ async fn can_see(
         }
         let Flag(member) = sqlx::query_scalar(
             "SELECT EXISTS(SELECT 1 FROM memberships JOIN users ON users.id = memberships.user_id \
-             WHERE memberships.workspace_id = $1 AND memberships.user_id = $2 AND users.suspended_at IS NULL)",
+             WHERE memberships.workspace_id = $1 AND memberships.user_id = $2 AND memberships.role <> 'guest' \
+             AND users.suspended_at IS NULL)",
         )
         .bind(page.workspace_id.to_string())
         .bind(user_id.to_string())

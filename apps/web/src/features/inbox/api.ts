@@ -34,8 +34,10 @@ export function useNotifications(workspaceId: string, unread = false) {
 }
 
 /** Whether the inbox has an unread notification: one row is enough to know. */
-export function useHasUnreadNotifications(workspaceId: string) {
+/** `enabled` is off for a guest: it has no Activity. */
+export function useHasUnreadNotifications(workspaceId: string, enabled = true) {
   return useQuery({
+    enabled,
     // under the list's key, so what refreshes the inbox refreshes this
     queryKey: [...queryKeys.notifications(workspaceId, true), 'any'] as const,
     queryFn: async () => {
@@ -83,8 +85,20 @@ export function useMarkAllNotificationsRead(workspaceId: string) {
   })
 }
 
-/** Where a notification leads: the task, the page with the comment thread open, the page at the mention, or the chat message. */
+const IMPORTS: Record<string, { name: string; page: string }> = {
+  asana: { name: 'Asana', page: '/tasks-import' },
+  linear: { name: 'Linear', page: '/tasks-import/linear' },
+  trello: { name: 'Trello', page: '/tasks-import/trello' },
+  notion: { name: 'Notion', page: '/docs/import' },
+  obsidian: { name: 'Obsidian', page: '/docs/import/obsidian' },
+}
+
+/** Where a notification leads: the task, the page with the comment thread open, the page at the mention, the chat message, or the import. */
 export function notificationTarget(notification: NotificationRecord): string | null {
+  if (notification.kind === 'import_finished') {
+    const source = IMPORTS[notification.import_source ?? '']
+    return source && notification.import_id ? `${source.page}/${notification.import_id}` : null
+  }
   if (notification.kind === 'chat_mentioned' && notification.chat_conversation_id) {
     const message = notification.chat_message_id ? `?m=${encodeURIComponent(notification.chat_message_id)}` : ''
     return `/chat/${notification.chat_conversation_id}${message}`
@@ -109,6 +123,12 @@ export function isMention(notification: NotificationRecord): boolean {
 }
 
 export function notificationCopy(notification: NotificationRecord, pageTitle?: string, actorName?: string): { title: string; body: string } {
+  if (notification.kind === 'import_finished') {
+    const name = IMPORTS[notification.import_source ?? '']?.name ?? 'An'
+    return notification.import_status === 'failed'
+      ? { title: `${name} import failed`, body: 'Open the import to see what happened.' }
+      : { title: `${name} import complete`, body: 'Open the import to see what was imported.' }
+  }
   if (notification.kind === 'chat_mentioned') {
     return { title: `${actorName ?? 'Someone'} mentioned you in chat`, body: 'Open the conversation to see the message.' }
   }

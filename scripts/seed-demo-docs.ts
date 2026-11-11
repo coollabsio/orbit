@@ -8,10 +8,10 @@
 //   SEED_REFRESH=1 ...   also rewrites content/icon of the seeded pages that already exist (covers are kept)
 //   SEED_REGEN_IMAGES=1  with SEED_REFRESH, uploads freshly generated covers and images again
 //
-// Images are rendered with `sharp`, resolved from marketing/launch-video/node_modules (or the current directory).
+// Images are SVGs rendered by headless Chromium (Playwright from the root node_modules).
 
 import { createRequire } from 'node:module'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 
 const BASE = process.env.ORBIT_URL ?? `http://127.0.0.1:${process.env.ORBIT_DEV_API_PORT ?? 8080}`
 // Development seed accounts (see `orbit seed`).
@@ -23,17 +23,17 @@ const REGEN_IMAGES = process.env.SEED_REGEN_IMAGES === '1'
 
 type Who = 'dev' | 'member'
 
-// ---------- sharp ----------
-function loadSharp() {
-  const roots = [resolve(import.meta.dir, '../marketing/launch-video/package.json'), join(process.cwd(), 'package.json')]
-  for (const root of roots) {
-    try {
-      return createRequire(root)('sharp')
-    } catch {}
-  }
-  throw new Error('sharp not found: run `bun install` in marketing/launch-video')
+// ---------- rasterize ----------
+type Browser = { newPage(options: object): Promise<any>; close(): Promise<void> }
+let browser: Browser | undefined
+async function rasterize(svg: string, width: number, height: number, type: 'jpeg' | 'png'): Promise<Uint8Array> {
+  browser ??= (await createRequire(import.meta.url)('playwright').chromium.launch()) as Browser
+  const page = await browser.newPage({ viewport: { width, height } })
+  await page.setContent(`<body style="margin:0">${svg}</body>`)
+  const image = await page.screenshot(type === 'jpeg' ? { type, quality: 88 } : { type, omitBackground: true })
+  await page.close()
+  return new Uint8Array(image)
 }
-const sharp = loadSharp()
 
 // ---------- images ----------
 type Blob = { x: number; y: number; rx: number; ry: number; color: string; opacity: number }
@@ -115,7 +115,7 @@ async function coverJpeg(name: keyof typeof COVERS): Promise<Uint8Array> {
   <rect width="${W}" height="${H}" filter="url(#grain)" opacity="0.06"/>
   <rect width="${W}" height="${H}" fill="url(#fade)"/>
 </svg>`
-  return new Uint8Array(await sharp(Buffer.from(svg)).jpeg({ quality: 88, mozjpeg: true }).toBuffer())
+  return rasterize(svg, W, H, 'jpeg')
 }
 
 async function architecturePng(): Promise<Uint8Array> {
@@ -162,7 +162,7 @@ async function architecturePng(): Promise<Uint8Array> {
   ${arrow(600, 400, 400, 578, 'events', '#8b5cf6', 470, 500, true)}
   ${arrow(260, 578, 260, 442, 'invalidate', '#38bdf8', 260, 512, true)}
 </svg>`
-  return new Uint8Array(await sharp(Buffer.from(svg)).png({ compressionLevel: 9 }).toBuffer())
+  return rasterize(svg, W, H, 'png')
 }
 
 // `SEED_PREVIEW_IMAGES=/tmp/dir` only writes the generated images there (no API calls).
@@ -171,6 +171,7 @@ if (process.env.SEED_PREVIEW_IMAGES) {
   for (const name of Object.keys(COVERS)) await Bun.write(join(dir, `cover-${name}.jpg`), await coverJpeg(name))
   await Bun.write(join(dir, 'architecture.png'), await architecturePng())
   console.log(`images written to ${dir}`)
+  await browser?.close()
   process.exit(0)
 }
 
@@ -834,4 +835,5 @@ for (const title of FAVORITES) {
   console.log(`★ favorite ${title}`)
 }
 
+await browser?.close()
 console.log(`done: ${fresh.size} new page(s), ${written} page(s) written`)

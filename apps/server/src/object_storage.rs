@@ -38,7 +38,16 @@ pub fn bucket(
     secret_access_key: String,
     owner: Owner,
 ) -> Result<S3Bucket, String> {
-    let config = S3Config {
+    let config = config(s3, secret_access_key);
+    match owner {
+        Owner::Installation => S3Bucket::new(config),
+        Owner::Workspace => S3Bucket::new_public(config),
+    }
+    .map_err(|error| error.to_string())
+}
+
+fn config(s3: &S3Settings, secret_access_key: String) -> S3Config {
+    S3Config {
         endpoint: s3.endpoint.clone(),
         region: s3.region.clone(),
         bucket: s3.bucket.clone(),
@@ -46,12 +55,12 @@ pub fn bucket(
         access_key_id: s3.access_key_id.clone(),
         secret_access_key,
         path_style: s3.path_style,
-    };
-    match owner {
-        Owner::Installation => S3Bucket::new(config),
-        Owner::Workspace => S3Bucket::new_public(config),
     }
-    .map_err(|error| error.to_string())
+}
+
+/// Whether the two buckets can address the same objects. They must not: the mover would treat one object as two.
+pub fn overlap(left: &S3Settings, right: &S3Settings) -> bool {
+    config(left, String::new()).overlaps(&config(right, String::new()))
 }
 
 /// The saved bucket, with its secret decrypted under the app key.
@@ -235,7 +244,8 @@ async fn forget_drained_buckets(
 ) -> Result<(), String> {
     let repository = WorkspaceStorageRepository::new(database.clone());
     let mut forgot = false;
-    for (workspace_id, own) in storage.current().workspace_buckets {
+    let state = storage.current();
+    for (workspace_id, own) in state.workspace_buckets {
         // Not checked since the removal yet, or files still wait to move back.
         let Some(status) = store.workspace_status(&workspace_id) else {
             continue;
@@ -243,11 +253,17 @@ async fn forget_drained_buckets(
         if own.active || status.error.is_some() || status.remaining > 0 {
             continue;
         }
-        let empty = !own
+        // At the installation's location, its files are the installation's files.
+        let shared = state
             .bucket
-            .any(&format!("blobs/{workspace_id}/"))
-            .await
-            .map_err(|error| error.to_string())?;
+            .as_ref()
+            .is_some_and(|bucket| bucket.config().same_location(own.bucket.config()));
+        let empty = shared
+            || !own
+                .bucket
+                .any(&format!("blobs/{workspace_id}/"))
+                .await
+                .map_err(|error| error.to_string())?;
         if empty {
             forgot |= repository
                 .forget_drained(&workspace_id)

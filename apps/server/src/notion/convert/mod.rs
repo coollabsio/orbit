@@ -41,6 +41,11 @@ pub trait Resolver {
     fn page_title(&self, _notion_id: &str) -> Option<String> {
         None
     }
+    /// Whether a Notion database shows inline in its parent page (Notion's `is_inline`).
+    /// `false` when unknown: the database then shows as a page link, which hides nothing.
+    fn database_is_inline(&self, _notion_id: &str) -> bool {
+        false
+    }
     /// A display name for a Notion user id (people properties and mentions without a name).
     fn user_name(&self, _user_id: &str) -> Option<String> {
         None
@@ -65,6 +70,8 @@ pub struct MapResolver {
     pub pages: HashMap<String, String>,
     pub files: HashMap<String, ResolvedFile>,
     pub titles: HashMap<String, String>,
+    /// Notion's `is_inline` by Notion database id.
+    pub inline_databases: HashMap<String, bool>,
     pub users: HashMap<String, String>,
     /// Orbit members by lowercase email: `(user id, display name)`.
     pub members: HashMap<String, (String, String)>,
@@ -81,6 +88,13 @@ impl Resolver for MapResolver {
 
     fn page_title(&self, notion_id: &str) -> Option<String> {
         self.titles.get(notion_id).cloned()
+    }
+
+    fn database_is_inline(&self, notion_id: &str) -> bool {
+        self.inline_databases
+            .get(notion_id)
+            .copied()
+            .unwrap_or(false)
     }
 
     fn user_name(&self, user_id: &str) -> Option<String> {
@@ -135,12 +149,16 @@ pub struct ConvertOptions {
     /// Cut top-level blocks (and add a note) once the serialized content would exceed this.
     /// Default 900 KB, below the 1 MiB page body limit.
     pub max_content_bytes: Option<usize>,
+    /// A database row starts with its properties as a table. Off for rows imported into an
+    /// Orbit database, which hold the values themselves.
+    pub row_properties: bool,
 }
 
 impl Default for ConvertOptions {
     fn default() -> Self {
         Self {
             max_content_bytes: Some(900 * 1024),
+            row_properties: true,
         }
     }
 }
@@ -230,18 +248,21 @@ pub enum PageCover {
     File(NotionFileRef),
 }
 
-/// Converts a page. Database rows (data source parent) get their properties as a table first.
-/// Content larger than `max_content_bytes` is cut at a top-level block with a note.
+/// Converts a page. Database rows (data source parent) get their properties as a table first
+/// (unless `row_properties` is off). Content larger than `max_content_bytes` is cut at a
+/// top-level block with a note.
 pub fn convert_page(
     page: &NotionPage,
     blocks: &[BlockNode],
     ctx: &mut ConvertContext<'_>,
 ) -> ConvertedPage {
     let mut content = Vec::new();
-    if matches!(
-        page.parent,
-        Some(Parent::DataSourceId { .. } | Parent::DatabaseId { .. })
-    ) && let Some(table) = database_row_properties_table(page, ctx)
+    if ctx.options.row_properties
+        && matches!(
+            page.parent,
+            Some(Parent::DataSourceId { .. } | Parent::DatabaseId { .. })
+        )
+        && let Some(table) = database_row_properties_table(page, ctx)
     {
         content.push(table);
     }
@@ -458,11 +479,20 @@ fn convert_node(node: &BlockNode, ctx: &mut ConvertContext<'_>, out: &mut Vec<Va
         }
         "child_page" => {
             let title = str_at(data, &["title"]).unwrap_or_default().to_owned();
-            page_reference(&block.id, &title, ctx, out);
+            page_reference(&block.id, &title, PageBlock::Page, ctx, out);
         }
+        // Notion uses this block for inline and full-page databases alike. Both are imported as
+        // a database sub-page; only an inline one shows its views here.
         "child_database" => {
             let title = str_at(data, &["title"]).unwrap_or_default().to_owned();
-            page_reference(&block.id, &title, ctx, out);
+            let inline =
+                normalize_id(&block.id).is_some_and(|id| ctx.resolver.database_is_inline(&id));
+            let kind = if inline {
+                PageBlock::Database
+            } else {
+                PageBlock::Page
+            };
+            page_reference(&block.id, &title, kind, ctx, out);
         }
         "link_to_page" => {
             let target = str_at(data, &["type"])
@@ -471,7 +501,7 @@ fn convert_node(node: &BlockNode, ctx: &mut ConvertContext<'_>, out: &mut Vec<Va
             let title = normalize_id(target)
                 .and_then(|id| ctx.resolver.page_title(&id))
                 .unwrap_or_default();
-            page_reference(target, &title, ctx, out);
+            page_reference(target, &title, PageBlock::Page, ctx, out);
         }
         "image" | "file" | "pdf" | "video" | "audio" => media(node, ctx, out),
         "bookmark" | "link_preview" => {
@@ -875,10 +905,20 @@ fn link_paragraph(url: &str, data: &Value, ctx: &mut ConvertContext<'_>, out: &m
     ));
 }
 
-/// child_page/child_database/link_to_page → `page` block when imported, else a link paragraph.
+/// The editor block that shows an imported page or database.
+#[derive(Clone, Copy)]
+enum PageBlock {
+    Page,
+    /// A `database` block of the database's own views (`linkId` empty).
+    Database,
+}
+
+/// child_page/child_database/link_to_page → `page` or `database` block when imported, else a
+/// link paragraph.
 fn page_reference(
     notion_id: &str,
     title: &str,
+    kind: PageBlock,
     ctx: &mut ConvertContext<'_>,
     out: &mut Vec<Value>,
 ) {
@@ -888,8 +928,18 @@ fn page_reference(
     };
     if let Some(orbit_id) = ctx.resolver.page_link(&id) {
         let mut props = Map::new();
-        props.insert("pageId".into(), json!(orbit_id));
-        out.push(make_block(ctx, "page", props, None, Vec::new()));
+        let block = match kind {
+            PageBlock::Page => {
+                props.insert("pageId".into(), json!(orbit_id));
+                "page"
+            }
+            PageBlock::Database => {
+                props.insert("databaseId".into(), json!(orbit_id));
+                props.insert("linkId".into(), json!(""));
+                "database"
+            }
+        };
+        out.push(make_block(ctx, block, props, None, Vec::new()));
         return;
     }
     ctx.report.unresolved_page_links += 1;
@@ -1003,7 +1053,7 @@ fn non_empty_title(title: &str) -> String {
     }
 }
 
-const TRUNCATION_NOTE: &str =
+pub(crate) const TRUNCATION_NOTE: &str =
     "The rest of this page was not imported because it is larger than Orbit's page size limit.";
 
 /// Keeps whole top-level blocks while the serialized content fits `max_content_bytes`.
@@ -1011,12 +1061,27 @@ fn truncate(content: &mut Vec<Value>, ctx: &mut ConvertContext<'_>) {
     let Some(max) = ctx.options.max_content_bytes else {
         return;
     };
+    let cut = cut_to_size(content, max);
+    if cut == 0 {
+        return;
+    }
+    ctx.report.truncated_blocks += u32::try_from(cut).unwrap_or(u32::MAX);
+    let mut styles = Map::new();
+    styles.insert("italic".into(), Value::Bool(true));
+    let note = items(vec![text(TRUNCATION_NOTE, styles)]);
+    let props = default_props(&Value::Null);
+    content.push(make_block(ctx, "paragraph", props, note, Vec::new()));
+}
+
+/// Drops top-level blocks from the end until the serialized content fits `max` bytes with room
+/// (1 KB) for a note; returns how many were dropped (0 when it already fits).
+pub(crate) fn cut_to_size(content: &mut Vec<Value>, max: usize) -> usize {
     let sizes: Vec<usize> = content
         .iter()
         .map(|block| serde_json::to_vec(block).map_or(0, |bytes| bytes.len() + 1))
         .collect();
     if sizes.iter().sum::<usize>() + 2 <= max {
-        return;
+        return 0;
     }
     let budget = max.saturating_sub(1024);
     let mut total = 2;
@@ -1028,13 +1093,9 @@ fn truncate(content: &mut Vec<Value>, ctx: &mut ConvertContext<'_>) {
         total += size;
         keep += 1;
     }
-    ctx.report.truncated_blocks += u32::try_from(content.len() - keep).unwrap_or(u32::MAX);
+    let cut = content.len() - keep;
     content.truncate(keep);
-    let mut styles = Map::new();
-    styles.insert("italic".into(), Value::Bool(true));
-    let note = items(vec![text(TRUNCATION_NOTE, styles)]);
-    let props = default_props(&Value::Null);
-    content.push(make_block(ctx, "paragraph", props, note, Vec::new()));
+    cut
 }
 
 #[cfg(test)]
@@ -1056,6 +1117,7 @@ mod tests {
             })
             .with_options(ConvertOptions {
                 max_content_bytes: Some(2_000),
+                ..ConvertOptions::default()
             });
         let long = "x".repeat(300);
         let blocks: Vec<BlockNode> = (0..20)

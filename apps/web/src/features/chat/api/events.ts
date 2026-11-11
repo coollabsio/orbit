@@ -372,6 +372,11 @@ export function applyChatEvent(queryClient: QueryClient, workspaceId: string, ev
     case 'stickers.changed':
       void queryClient.invalidateQueries({ queryKey: queryKeys.customStickers(workspaceId) })
       break
+    case 'message.ephemeral':
+      queryClient.setQueryData<Message[]>(chatKeys.ephemeral(workspaceId, event.message.conversationId), (old = []) =>
+        old.some((message) => message.id === event.message.id) ? old : [...old, event.message],
+      )
+      break
     case 'resync':
       void queryClient.invalidateQueries({ queryKey: chatKeys.all(workspaceId) })
       // the custom emoji and stickers are the workspace's (outside the chat prefix), and their events may be among the missed ones

@@ -6,27 +6,19 @@ import { ACCOUNT_NAV, SettingsCard, SettingsShell } from '../../../components/se
 import { CUSTOM_THEME_PRESETS, serializeCustomTheme } from '../../../data/custom-theme'
 import {
   type ButtonStyle,
-  type Layout,
   alpha,
   cssColors,
   palettes,
   type Scheme,
   setButtonStyle,
   setCustomTheme,
-  setLayout,
   setSchemePreference,
   useButtonStyle,
   useCustomTheme,
-  useLayout,
   useSchemePreference,
   useTheme,
 } from '../../../theme'
 import { Icon, type IconName, Text } from '../../../ui'
-
-const LAYOUTS: readonly { value: Layout; label: string; description: string }[] = [
-  { value: 'classic', label: 'Classic', description: 'The sidebar always shows the app links. Settings, Docs and Chat have their own list beside the content. The custom theme colors chat.' },
-  { value: 'new', label: 'New UI', description: 'The sidebar changes with the page: settings links, the page tree and conversations, with Back. The custom theme colors the whole app.' },
-]
 
 const THEMES: readonly { value: Scheme | 'system'; label: string; description: string }[] = [
   { value: 'light', label: 'Light', description: 'Bright surfaces and dark text.' },
@@ -41,12 +33,9 @@ const STYLES: readonly { value: ButtonStyle; label: string; description: string 
 
 /** The web's Profile → Appearance: how Orbit looks on this device. Navigation style (Floating) is desktop-only. */
 export default function AppearanceScreen() {
-  const layout = useLayout()
   const schemePreference = useSchemePreference()
   const buttonStyle = useButtonStyle()
   const customTheme = useCustomTheme()
-  // in the new UI the custom theme replaces the colour theme; in the classic layout it colours chat on top of it
-  const newUi = layout === 'new'
   const [customThemeOpen, setCustomThemeOpen] = useState(false)
   const customThemeName = customTheme
     ? (CUSTOM_THEME_PRESETS.find((preset) => serializeCustomTheme(preset.theme) === serializeCustomTheme(customTheme))?.name ?? 'Your colors')
@@ -54,45 +43,32 @@ export default function AppearanceScreen() {
 
   return (
     <SettingsShell title="Account settings" nav={ACCOUNT_NAV}>
-      <SettingsCard title="Layout" description="Choose the classic layout or the new UI.">
-        <View className="gap-3">
-          {LAYOUTS.map((option) => (
-            <AppearanceOption key={option.value} label={option.label} description={option.description} selected={layout === option.value} onPress={() => setLayout(option.value)}>
-              <LayoutPreview contextual={option.value === 'new'} />
-            </AppearanceOption>
-          ))}
-        </View>
-      </SettingsCard>
-
       <SettingsCard title="Color theme" description="Choose the color scheme used on this device.">
-        <View className="flex-row flex-wrap -m-1.5">
+        {/* the web's `grid gap-3`: one column at phone width */}
+        <View className="gap-3">
           {THEMES.map((option) => (
-            <View key={option.value} className="w-[50%] p-1.5">
-              <AppearanceOption
-                label={option.label}
-                description={option.description}
-                selected={!(newUi && customTheme) && schemePreference === option.value}
-                onPress={() => {
-                  if (newUi) setCustomTheme(null)
-                  setSchemePreference(option.value === 'system' ? null : option.value)
-                }}
-              >
-                <SchemePreview scheme={option.value} />
-              </AppearanceOption>
-            </View>
-          ))}
-          {/* the custom theme opens its editor. New UI: it is a theme of its own, and picking one above turns it off.
-              Classic: it colours chat on top of the theme above, so it is never the chosen one */}
-          <View className="w-[50%] p-1.5">
             <AppearanceOption
-              label={customTheme ? `Custom · ${customThemeName}` : 'Custom'}
-              description={newUi ? 'Your own colors for the whole app. Pick a preset or your own.' : 'Your own chat colors. Pick a preset or your own.'}
-              selected={newUi ? Boolean(customTheme) : undefined}
-              onPress={() => setCustomThemeOpen(true)}
+              key={option.value}
+              label={option.label}
+              description={option.description}
+              selected={!customTheme && schemePreference === option.value}
+              onPress={() => {
+                setCustomTheme(null)
+                setSchemePreference(option.value === 'system' ? null : option.value)
+              }}
             >
-              <CustomThemeSwatch theme={customTheme} className="h-12 w-[70%]" />
+              <SchemePreview scheme={option.value} />
             </AppearanceOption>
-          </View>
+          ))}
+          {/* the custom theme opens its editor: it is a theme of its own, and picking one above turns it off */}
+          <AppearanceOption
+            label={customTheme ? `Custom · ${customThemeName}` : 'Custom'}
+            description="Your own colors for the whole app. Pick a preset or your own."
+            selected={Boolean(customTheme)}
+            onPress={() => setCustomThemeOpen(true)}
+          >
+            <CustomThemeSwatch theme={customTheme} className="h-12 w-[70%]" />
+          </AppearanceOption>
         </View>
       </SettingsCard>
 
@@ -138,10 +114,10 @@ function AppearanceOption({ label, description, selected, onPress, children }: {
   )
 }
 
-/** A bar of placeholder text; the first one of a list is the open row. */
-function Bar({ active = false, className = '' }: { active?: boolean; className?: string }) {
+/** A bar of placeholder text. */
+function Bar({ className = '' }: { className?: string }) {
   const { colors } = useTheme()
-  return <View className={`h-1.5 rounded-full ${className}`} style={{ backgroundColor: alpha(active ? colors.primary : colors.mutedForeground, active ? 0.5 : 0.3) }} />
+  return <View className={`h-1.5 rounded-full ${className}`} style={{ backgroundColor: alpha(colors.mutedForeground, 0.3) }} />
 }
 
 /** An icon on a raised tile (3D, the web's sidebar tile at small size) or on its own (Flat). */
@@ -154,34 +130,6 @@ function IconTile({ icon, tile = true, raised = false }: { icon: IconName; tile?
       style={raised ? { boxShadow: `0 2px 0 ${alpha(scheme === 'dark' ? cssColors.white : cssColors.black, scheme === 'dark' ? 0.12 : 0.22)}` } : undefined}
     >
       <Icon name={icon} size={12} color={colors.mutedForeground} />
-    </View>
-  )
-}
-
-/** The sidebar: app icons, or Back and the page's list; classic adds a second list column. */
-function LayoutPreview({ contextual }: { contextual: boolean }) {
-  const { colors } = useTheme()
-  return (
-    <View className="flex-1 self-stretch flex-row">
-      <View className="w-14 gap-1.5 border-r border-border bg-background px-2 py-2">
-        {contextual ? (
-          <>
-            <View className="h-3 flex-row items-center gap-1">
-              <Icon name="chevronLeft" size={10} color={colors.mutedForeground} />
-              <Bar className="h-1 flex-1" />
-            </View>
-            {[0, 1, 2].map((index) => <Bar key={index} active={index === 0} />)}
-          </>
-        ) : (
-          (['user', 'settings'] as const).map((icon) => <IconTile key={icon} icon={icon} raised />)
-        )}
-      </View>
-      {contextual ? null : (
-        <View className="w-12 gap-1.5 border-r border-border px-2 py-2">
-          {[0, 1, 2].map((index) => <Bar key={index} active={index === 0} />)}
-        </View>
-      )}
-      <View className="flex-1 bg-background" />
     </View>
   )
 }

@@ -2,6 +2,7 @@
 //! they are active now, or else a Web Push message to every browser they subscribed with.
 //!
 //! - [`webpush`]: the encryption and the VAPID header.
+//! - [`apns`]: native iOS pushes through Apple's push service, when the server has a key.
 //! - [`PushService`]: who is notified (their preferences, "do not disturb"), and where.
 //!
 //! Chat messages are notified when they are sent ([`PushService::chat_message`]). Inbox
@@ -12,6 +13,7 @@
 //! ones that wait. A notification is worth little minutes later, and the unread counts and
 //! the Inbox show what was missed, so pushes are not kept in the job queue.
 
+pub mod apns;
 pub mod webpush;
 
 use std::collections::HashMap;
@@ -31,6 +33,7 @@ use utoipa::ToSchema;
 use crate::auth_routes::avatar_url;
 use crate::live::LiveHub;
 use crate::repositories::chat::MessageRecord;
+use apns::{ApnsDevice, ApnsEnvironment, ApnsSender};
 
 /// The hosts of the push services of the browser vendors. A subscription names the URL the
 /// server sends to, so it must not be able to name any other host.
@@ -47,7 +50,7 @@ const SEND_TIMEOUT: Duration = Duration::from_secs(10);
 const INBOX_INTERVAL: Duration = Duration::from_secs(2);
 const TITLE_CHARS: usize = 120;
 const BODY_CHARS: usize = 180;
-/// The browsers one user gets pushes on. The oldest go when another subscribes.
+/// The browsers one user gets pushes on, and the phones. The oldest go when another subscribes.
 const MAX_SUBSCRIPTIONS: i64 = 20;
 /// Pushes to a subscription that may fail in a row before it is removed.
 const MAX_FAILURES: i64 = 5;
@@ -153,6 +156,17 @@ pub struct PushSubscriptionRecord {
     /// The URL of the browser's `PushSubscription`; a browser finds its own row by it.
     pub endpoint: String,
     pub label: String,
+    #[schema(value_type = String, format = DateTime)]
+    pub created_at: TimestampMillis,
+}
+
+/// A phone the user gets pushes on through APNs.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct ApnsDeviceRecord {
+    #[schema(value_type = String)]
+    pub id: Id,
+    pub label: String,
+    pub environment: ApnsEnvironment,
     #[schema(value_type = String, format = DateTime)]
     pub created_at: TimestampMillis,
 }
@@ -287,6 +301,8 @@ struct Inner {
     sender: Arc<dyn PushSender>,
     key: OnceCell<SecretKey>,
     subject: OnceLock<String>,
+    /// Set when the server has an APNs key (or a test set a fake one).
+    apns: OnceLock<Arc<dyn ApnsSender>>,
 }
 
 #[derive(Clone)]
@@ -315,6 +331,7 @@ impl PushService {
             sender: sender(),
             key: OnceCell::new(),
             subject: OnceLock::new(),
+            apns: OnceLock::new(),
         });
         Self {
             database: database.clone(),
@@ -328,6 +345,17 @@ impl PushService {
         if origin.starts_with("https://") {
             let _ = self.inner.subject.set(origin.to_owned());
         }
+    }
+
+    /// Sends native iOS pushes through this sender from now on; the first one set stays.
+    pub fn set_apns_sender(&self, sender: Arc<dyn ApnsSender>) {
+        let _ = self.inner.apns.set(sender);
+    }
+
+    /// Whether this server can push to iPhones.
+    #[must_use]
+    pub fn apns_enabled(&self) -> bool {
+        self.inner.apns.get().is_some()
     }
 
     async fn vapid(&self) -> Result<Vapid, sqlx::Error> {
@@ -456,6 +484,86 @@ impl PushService {
         Ok(())
     }
 
+    pub async fn apns_devices(&self, user_id: Id) -> Result<Vec<ApnsDeviceRecord>, sqlx::Error> {
+        let rows = sqlx::query(
+            "SELECT id, label, environment, created_at FROM apns_devices WHERE user_id = $1 \
+             ORDER BY id",
+        )
+        .bind(user_id.to_string())
+        .fetch_all(self.database.pool())
+        .await?;
+        rows.into_iter()
+            .map(|row| {
+                Ok(ApnsDeviceRecord {
+                    id: decode_id(&row.get::<String, _>("id"))?,
+                    label: row.get("label"),
+                    environment: ApnsEnvironment::parse(&row.get::<String, _>("environment"))
+                        .unwrap_or(ApnsEnvironment::Production),
+                    created_at: TimestampMillis::from_millis(row.get("created_at")),
+                })
+            })
+            .collect()
+    }
+
+    /// Stores a phone's device token for the user and the session. A phone has one token: its
+    /// row moves to whoever registers it last. A user keeps the newest [`MAX_SUBSCRIPTIONS`]
+    /// phones only. Callers check the token first ([`apns::parse_token`]).
+    pub async fn register_apns(
+        &self,
+        user_id: Id,
+        session_id: Id,
+        token: &str,
+        environment: ApnsEnvironment,
+        label: &str,
+        now: TimestampMillis,
+    ) -> Result<ApnsDeviceRecord, sqlx::Error> {
+        let mut tx = self.database.pool().begin().await?;
+        let row = sqlx::query(
+            "INSERT INTO apns_devices (id, user_id, session_id, token, environment, label, created_at) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (token) DO UPDATE SET \
+             user_id = excluded.user_id, session_id = excluded.session_id, \
+             environment = excluded.environment, label = excluded.label RETURNING id, created_at",
+        )
+        .bind(Id::new_v7().to_string())
+        .bind(user_id.to_string())
+        .bind(session_id.to_string())
+        .bind(token)
+        .bind(environment.as_str())
+        .bind(label)
+        .bind(now.as_millis())
+        .fetch_one(&mut *tx)
+        .await?;
+        let id: String = row.get("id");
+        // The oldest ones above the limit go; never the one that registered now.
+        sqlx::query(
+            "DELETE FROM apns_devices WHERE user_id = $1 AND id NOT IN ( \
+             SELECT id FROM apns_devices WHERE user_id = $1 \
+             ORDER BY id = $2 DESC, created_at DESC, id DESC LIMIT $3)",
+        )
+        .bind(user_id.to_string())
+        .bind(&id)
+        .bind(MAX_SUBSCRIPTIONS)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(ApnsDeviceRecord {
+            id: decode_id(&id)?,
+            label: label.to_owned(),
+            environment,
+            created_at: TimestampMillis::from_millis(row.get("created_at")),
+        })
+    }
+
+    /// Removes one of the user's phones; nothing happens when it is not theirs.
+    pub async fn unregister_apns(&self, user_id: Id, id: &str) -> Result<(), sqlx::Error> {
+        sqlx::query("DELETE FROM apns_devices WHERE id = $1 AND user_id = $2")
+            .bind(id)
+            .bind(user_id.to_string())
+            .execute(self.database.pool())
+            .await?;
+        Ok(())
+    }
+
     pub async fn prefs(&self, user_id: Id) -> Result<NotificationPrefs, sqlx::Error> {
         let row = sqlx::query(
             "SELECT direct_messages, chat_mentions, thread_replies, channel_messages, task_assigned, \
@@ -524,7 +632,7 @@ impl PushService {
     }
 
     /// Notifies a user. The tabs they are at get a signal and show it themselves, and nothing
-    /// is pushed. Without such a tab, every browser they subscribed with gets a push.
+    /// is pushed. Without such a tab, every browser and phone they subscribed with gets a push.
     pub async fn notify(
         &self,
         user_id: Id,
@@ -544,15 +652,88 @@ impl PushService {
         self.deliver(user_id, notice).await.map(|_| ())
     }
 
-    /// Pushes to every browser of the user whose session is still good; returns how many took
-    /// it. A subscription that the browser ended is removed.
+    /// Pushes to every browser and phone of the user whose session is still good; returns how
+    /// many took it. A subscription that the browser ended, or a phone token APNs no longer
+    /// takes, is removed.
     pub async fn push(&self, user_id: Id, notice: &Notice) -> Result<usize, sqlx::Error> {
         self.deliver(user_id, &notice.clamped()).await
     }
 
-    /// [`Self::push`] of a notice that was clamped. The browsers get it at the same time: a
-    /// user has [`MAX_SUBSCRIPTIONS`] at most.
+    /// [`Self::push`] of a notice that was clamped. The browsers and the phones get it at the
+    /// same time: a user has [`MAX_SUBSCRIPTIONS`] of each at most.
     async fn deliver(&self, user_id: Id, notice: &Notice) -> Result<usize, sqlx::Error> {
+        let (browsers, phones) = tokio::join!(
+            self.deliver_web(user_id, notice),
+            self.deliver_apns(user_id, notice)
+        );
+        Ok(browsers? + phones?)
+    }
+
+    async fn deliver_apns(&self, user_id: Id, notice: &Notice) -> Result<usize, sqlx::Error> {
+        let Some(sender) = self.inner.apns.get() else {
+            return Ok(0);
+        };
+        let now = TimestampMillis::now().as_millis();
+        let rows = sqlx::query(
+            "SELECT devices.id, devices.token, devices.environment FROM apns_devices AS devices \
+             JOIN sessions ON sessions.id = devices.session_id \
+             WHERE devices.user_id = $1 AND sessions.revoked_at IS NULL \
+             AND sessions.idle_expires_at > $2 AND sessions.absolute_expires_at > $3",
+        )
+        .bind(user_id.to_string())
+        .bind(now)
+        .bind(now)
+        .fetch_all(self.database.pool())
+        .await?;
+        if rows.is_empty() {
+            return Ok(0);
+        }
+        let message = apns::message(notice);
+        if message.payload.len() > apns::MAX_PAYLOAD_BYTES {
+            tracing::warn!(
+                bytes = message.payload.len(),
+                "APNs push not sent: the notice is too large"
+            );
+            return Ok(0);
+        }
+        let sends = rows.into_iter().filter_map(|row| {
+            let device = ApnsDevice {
+                id: row.get::<String, _>("id").parse().ok()?,
+                token: row.get("token"),
+                environment: ApnsEnvironment::parse(&row.get::<String, _>("environment"))?,
+            };
+            let (sender, message) = (Arc::clone(sender), message.clone());
+            Some(async move {
+                let id = device.id;
+                let mut result = sender.send(device.clone(), message.clone()).await;
+                // A busy APNs (or an expired provider token) gets the push once more.
+                if matches!(result, Err(SendError::Busy(_))) {
+                    tokio::time::sleep(RETRY_AFTER).await;
+                    result = sender.send(device, message).await;
+                }
+                (id, result)
+            })
+        });
+        let mut sent = 0;
+        for (id, result) in futures_util::future::join_all(sends).await {
+            match result {
+                Ok(()) => sent += 1,
+                Err(SendError::Gone) => {
+                    sqlx::query("DELETE FROM apns_devices WHERE id = $1")
+                        .bind(id.to_string())
+                        .execute(self.database.pool())
+                        .await?;
+                }
+                // A refusal here is mostly the server's (its key, its topic): the phone stays.
+                Err(SendError::Failed(reason) | SendError::Busy(reason)) => {
+                    tracing::warn!(reason, "APNs push not sent");
+                }
+            }
+        }
+        Ok(sent)
+    }
+
+    async fn deliver_web(&self, user_id: Id, notice: &Notice) -> Result<usize, sqlx::Error> {
         let now = TimestampMillis::now().as_millis();
         let rows = sqlx::query(
             "SELECT push.id, push.endpoint, push.p256dh, push.auth FROM push_subscriptions AS push \
@@ -670,7 +851,10 @@ impl PushService {
             return Ok(());
         };
         let dm = conversation.get::<String, _>("kind") == "dm";
-        let author: String = conversation.get("author");
+        // An integration's message names the integration, and its creator gets the push too.
+        let bot = message.bot.as_ref();
+        let author: String = bot.map_or_else(|| conversation.get("author"), |bot| bot.name.clone());
+        let sender = bot.map_or(message.author_id, |bot| bot.webhook_id);
         let workspace_id: String = conversation.get("workspace_id");
         let thread_only = message.thread_root_id.is_some() && !message.also_in_channel;
         let members = sqlx::query(
@@ -679,13 +863,15 @@ impl PushService {
                WHERE mentions.message_id = $1 AND mentions.user_id = members.user_id) AS mentioned, \
              EXISTS (SELECT 1 FROM chat_thread_members AS threads \
                WHERE threads.root_id = $2 AND threads.user_id = members.user_id \
-               AND threads.following = 1) AS following \
+               AND threads.following = 1) AS following, \
+             EXISTS (SELECT 1 FROM memberships WHERE memberships.workspace_id = members.workspace_id \
+               AND memberships.user_id = members.user_id AND memberships.role = 'guest') AS guest \
              FROM chat_members AS members WHERE members.conversation_id = $3 AND members.user_id <> $4",
         )
         .bind(message.id.to_string())
         .bind(message.thread_root_id.map(|id| id.to_string()))
         .bind(message.conversation_id.to_string())
-        .bind(message.author_id.to_string())
+        .bind(sender.to_string())
         .fetch_all(self.database.pool())
         .await?;
         if members.is_empty() {
@@ -710,9 +896,21 @@ impl PushService {
             url: url.clone(),
             tag: format!("chat:{}", message.conversation_id),
             sound: kind.sound(),
-            icon: avatar_url(message.author_id, conversation.get("avatar_updated_at")),
+            icon: if bot.is_some() {
+                None
+            } else {
+                avatar_url(message.author_id, conversation.get("avatar_updated_at"))
+            },
         };
-        let body = self.readable(message, &workspace_id).await?;
+        let body = self.readable(message, &workspace_id, true).await?;
+        // A guest does not see public channels, so their names stay out of its notifications.
+        let guest_body = if message.body.contains("<#")
+            && members.iter().any(|member| member.get::<bool, _>("guest"))
+        {
+            self.readable(message, &workspace_id, false).await?
+        } else {
+            body.clone()
+        };
         let mut notices = Vec::new();
         for member in &members {
             let Ok(user_id) = member.get::<String, _>("user_id").parse::<Id>() else {
@@ -729,7 +927,11 @@ impl PushService {
             });
             if let Some(kind) = kind {
                 let notice = Notice {
-                    body: body.clone(),
+                    body: if member.get::<bool, _>("guest") {
+                        guest_body.clone()
+                    } else {
+                        body.clone()
+                    },
                     ..notice(kind)
                 };
                 notices.push((user_id, kind, notice));
@@ -749,12 +951,14 @@ impl PushService {
 
     /// The body of a message as a notification shows it: names for the mention tokens, one
     /// line, short. A user token gets the name of a member the message mentions, and a channel
-    /// token the name of a public channel of the message's workspace. Nothing else is looked
-    /// up, so the text cannot name what its author may not see.
+    /// token the name of a public channel of the message's workspace when `public_names` is set
+    /// (not for a guest). Nothing else is looked up, so the text cannot name what its author may
+    /// not see.
     async fn readable(
         &self,
         message: &MessageRecord,
         workspace_id: &str,
+        public_names: bool,
     ) -> Result<String, sqlx::Error> {
         let mentioned: HashMap<String, String> = if message.body.contains("<@") {
             sqlx::query(
@@ -788,7 +992,10 @@ impl PushService {
                     text.push_str(mentioned.get(id).map_or("someone", String::as_str));
                 }
                 Some(("#", id)) => {
-                    if !channels.contains_key(id) && channels.len() < CHANNEL_LOOKUPS {
+                    if public_names
+                        && !channels.contains_key(id)
+                        && channels.len() < CHANNEL_LOOKUPS
+                    {
                         let name: Option<String> = sqlx::query_scalar(
                             "SELECT name FROM chat_conversations \
                              WHERE id = $1 AND workspace_id = $2 AND kind = 'public'",
@@ -942,6 +1149,11 @@ struct ChatAudience<'a> {
 }
 
 /// The kind of event a chat message is for a member; `None` when it does not notify them.
+fn decode_id(id: &str) -> Result<Id, sqlx::Error> {
+    id.parse()
+        .map_err(|error| sqlx::Error::Decode(Box::new(error)))
+}
+
 fn chat_kind(audience: ChatAudience<'_>) -> Option<PushKind> {
     match audience {
         ChatAudience {

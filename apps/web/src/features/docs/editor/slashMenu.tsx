@@ -1,7 +1,7 @@
 import { filterSuggestionItems, insertOrUpdateBlockForSlashMenu } from '@blocknote/core/extensions'
 import { getDefaultReactSlashMenuItems, type DefaultReactSuggestionItem } from '@blocknote/react'
-import { DocumentText, Hierarchy, LampOn, Link2 } from 'reicon-react'
-import { MERMAID_LANGUAGE } from '@orbit/editor/codeLanguages'
+import { DocumentText, Grid, Hierarchy, LampOn, Link2, Math as MathIcon } from 'reicon-react'
+import { MATH_LANGUAGE, MERMAID_LANGUAGE } from '@orbit/editor/codeLanguages'
 import { CALLOUT_DEFAULT_BACKGROUND } from '@orbit/editor/schema'
 import type { PageEditorInstance } from '@orbit/editor/schema'
 
@@ -10,11 +10,44 @@ export const PAGE_ITEMS_GROUP = 'Basic blocks'
 
 export interface PageSlashActions {
   onSubpage: () => void
+  /** A database as a sub-page, linked from the current block, then opened. */
+  onDatabase: () => void
+  /** A database as a sub-page, shown in the page (an inline database block). Absent: not offered. */
+  onInlineDatabase?: () => void
+  /** A database picker, then a linked view block of it. Absent: not offered. */
+  onLinkedView?: () => void
   onLinkPage: () => void
 }
 
-/** "Sub-page" and "Link a page" — titles, subtexts and aliases ported from the old docs slash menu. */
+/**
+ * "Sub-page", the database items and "Link a page" (the first and last ported from the old docs slash menu).
+ * "Database – inline" and "Linked view of database" need a docs page to load databases in.
+ */
 export function pageSlashItems(actions: PageSlashActions): DefaultReactSuggestionItem[] {
+  const inline: DefaultReactSuggestionItem[] = actions.onInlineDatabase
+    ? [
+        {
+          title: 'Database – inline',
+          subtext: 'Add a database in this page',
+          aliases: ['database', 'inline', 'table', 'db'],
+          group: PAGE_ITEMS_GROUP,
+          icon: <Grid className="size-[18px]" />,
+          onItemClick: actions.onInlineDatabase,
+        },
+      ]
+    : []
+  const linked: DefaultReactSuggestionItem[] = actions.onLinkedView
+    ? [
+        {
+          title: 'Linked view of database',
+          subtext: 'Show an existing database with its own views',
+          aliases: ['linked', 'database', 'view', 'db'],
+          group: PAGE_ITEMS_GROUP,
+          icon: <Grid className="size-[18px]" />,
+          onItemClick: actions.onLinkedView,
+        },
+      ]
+    : []
   return [
     {
       title: 'Sub-page',
@@ -24,6 +57,16 @@ export function pageSlashItems(actions: PageSlashActions): DefaultReactSuggestio
       icon: <DocumentText className="size-[18px]" />,
       onItemClick: actions.onSubpage,
     },
+    {
+      title: 'Database – full page',
+      subtext: 'Create a database under this page',
+      aliases: ['database', 'table', 'db'],
+      group: PAGE_ITEMS_GROUP,
+      icon: <Grid className="size-[18px]" />,
+      onItemClick: actions.onDatabase,
+    },
+    ...inline,
+    ...linked,
     {
       title: 'Link a page',
       subtext: 'Insert a link to an existing page',
@@ -69,6 +112,38 @@ export function mermaidSlashItem(editor: PageEditorInstance): DefaultReactSugges
   }
 }
 
+/** "Math" (Basic blocks): a code block with the language `latex`, which shows the formula. */
+export function mathSlashItem(editor: PageEditorInstance): DefaultReactSuggestionItem {
+  return {
+    title: 'Math',
+    subtext: 'Write a formula',
+    aliases: ['math', 'latex', 'tex', 'equation', 'formula', 'katex'],
+    group: PAGE_ITEMS_GROUP,
+    icon: <MathIcon className="size-[18px]" />,
+    onItemClick: () => {
+      insertOrUpdateBlockForSlashMenu(editor, {
+        type: 'codeBlock',
+        props: { language: MATH_LANGUAGE },
+        content: 'e^{i\\pi} + 1 = 0',
+      })
+    },
+  }
+}
+
+/** "Inline math" (Basic blocks): a formula in the current sentence. */
+export function inlineMathSlashItem(editor: PageEditorInstance): DefaultReactSuggestionItem {
+  return {
+    title: 'Inline math',
+    subtext: 'Formula inside a sentence',
+    aliases: ['inline', 'inline math', 'inline equation'],
+    group: PAGE_ITEMS_GROUP,
+    icon: <MathIcon className="size-[18px]" />,
+    onItemClick: () => {
+      editor.insertInlineContent([{ type: 'math', props: { latex: '' } }])
+    },
+  }
+}
+
 /** Inserts `item` right after the default item with `key` (e.g. Callout after Quote), else at the group start. */
 export function insertAfterKey<T extends { group?: string; key?: string }>(items: readonly T[], key: string, item: T): T[] {
   const index = items.findIndex((candidate) => candidate.key === key && candidate.group === item.group)
@@ -107,18 +182,25 @@ export function preferTitleMatches<T extends { title: string; group?: string }>(
 
 /**
  * Slash menu items for the page editor: BlockNote's defaults (already limited to block types present in the
- * schema, so video/audio are gone while Image and File stay), Callout after Quote, Mermaid after Code Block, plus the page items,
- * filtered by the typed query.
+ * schema, so video/audio are gone while Image and File stay), Callout after Quote, Mermaid and Math after Code Block,
+ * plus the page items, filtered by the typed query.
  */
+function withCodePictures(editor: PageEditorInstance, items: DefaultReactSuggestionItem[]) {
+  const withMermaid = insertAfterKey(items, 'code_block', mermaidSlashItem(editor))
+  const index = withMermaid.findIndex((item) => item.title === 'Mermaid diagram')
+  const math = [mathSlashItem(editor), inlineMathSlashItem(editor)]
+  if (index === -1) return mergeSlashItems(withMermaid, math)
+  return [...withMermaid.slice(0, index + 1), ...math, ...withMermaid.slice(index + 1)]
+}
+
 export function getPageSlashMenuItems(editor: PageEditorInstance, actions: PageSlashActions, query: string): DefaultReactSuggestionItem[] {
   const defaults = insertAfterKey(getDefaultReactSlashMenuItems(editor), 'quote', calloutSlashItem(editor))
-  const merged = mergeSlashItems(insertAfterKey(defaults, 'code_block', mermaidSlashItem(editor)), pageSlashItems(actions))
+  const merged = mergeSlashItems(withCodePictures(editor, defaults), pageSlashItems(actions))
   return preferTitleMatches(filterSuggestionItems(merged, query), query)
 }
 
 /** Slash menu items for task descriptions and comments: the page items without Sub-page and Link a page. */
 export function getTaskSlashMenuItems(editor: PageEditorInstance, query: string): DefaultReactSuggestionItem[] {
   const defaults = insertAfterKey(getDefaultReactSlashMenuItems(editor), 'quote', calloutSlashItem(editor))
-  const merged = insertAfterKey(defaults, 'code_block', mermaidSlashItem(editor))
-  return preferTitleMatches(filterSuggestionItems(merged, query), query)
+  return preferTitleMatches(filterSuggestionItems(withCodePictures(editor, defaults), query), query)
 }

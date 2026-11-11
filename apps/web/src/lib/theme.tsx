@@ -9,7 +9,6 @@ function storedAppearance(): Appearance {
     theme: theme === 'light' || theme === 'system' ? theme : 'dark',
     style: localStorage.getItem('orbit:style') === 'flat' ? 'flat' : '3d',
     navStyle: localStorage.getItem('orbit:nav-style') === 'floating' ? 'floating' : 'default',
-    layout: localStorage.getItem('orbit:layout') === 'classic' ? 'classic' : 'new',
   }
 }
 
@@ -24,11 +23,8 @@ function subscribeSystemTheme(listener: () => void) {
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [appearance, setStored] = useState<Appearance>(storedAppearance)
   const systemTheme = useSyncExternalStore<Theme>(subscribeSystemTheme, () => (darkQuery().matches ? 'dark' : 'light'))
-  // In the new UI, Account settings → Appearance → Custom replaces the chosen theme: its message colour decides dark or
-  // light. In the classic layout it colours chat only (the chat page sets it there).
-  const newUi = appearance.layout === 'new'
-  const storedCustomTheme = useCustomTheme()
-  const customTheme = newUi ? storedCustomTheme : null
+  // Account settings → Appearance → Custom replaces the chosen theme: its message colour decides dark or light.
+  const customTheme = useCustomTheme()
   const theme = customTheme ? customThemeScheme(customTheme) : appearance.theme === 'system' ? systemTheme : appearance.theme
 
   useEffect(() => {
@@ -36,11 +32,9 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     root.classList.toggle('dark', theme === 'dark')
     root.toggleAttribute('data-flat', appearance.style === 'flat')
     root.toggleAttribute('data-floating', appearance.navStyle === 'floating')
-    root.toggleAttribute('data-new-ui', appearance.layout === 'new')
     localStorage.setItem('theme', appearance.theme)
     localStorage.setItem('orbit:style', appearance.style)
     localStorage.setItem('orbit:nav-style', appearance.navStyle)
-    localStorage.setItem('orbit:layout', appearance.layout)
   }, [theme, appearance])
 
   useEffect(() => {
@@ -58,9 +52,9 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   const toggleTheme = useCallback(() => {
-    if (newUi) setCustomTheme(null)
+    setCustomTheme(null)
     setAppearance({ theme: theme === 'dark' ? 'light' : 'dark' })
-  }, [theme, newUi, setAppearance])
+  }, [theme, setAppearance])
 
   return <ThemeContext value={{ theme, appearance, setAppearance, toggleTheme }}>{children}</ThemeContext>
 }

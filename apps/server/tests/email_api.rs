@@ -192,7 +192,7 @@ async fn only_the_root_user_saves_mail_settings_and_the_password_is_encrypted() 
     assert_eq!(body["code"], "email_not_configured");
     assert_eq!(
         call(app, "GET", "/api/v1/auth/options", None, None).await.1,
-        json!({"registration_open": false, "email_enabled": false, "passkeys_enabled": false, "billing_enabled": false, "providers": [], "provider_registration_open": false})
+        json!({"registration_open": false, "email_enabled": false, "passkeys_enabled": false, "billing_enabled": false, "providers": [], "provider_registration_open": false, "version": env!("CARGO_PKG_VERSION")})
     );
 
     let (status, body) = call(
@@ -241,7 +241,7 @@ async fn only_the_root_user_saves_mail_settings_and_the_password_is_encrypted() 
     assert_eq!(body["registration_open"], true);
     assert_eq!(
         call(app, "GET", "/api/v1/auth/options", None, None).await.1,
-        json!({"registration_open": true, "email_enabled": true, "passkeys_enabled": false, "billing_enabled": false, "providers": [], "provider_registration_open": false})
+        json!({"registration_open": true, "email_enabled": true, "passkeys_enabled": false, "billing_enabled": false, "providers": [], "provider_registration_open": false, "version": env!("CARGO_PKG_VERSION")})
     );
 
     // Removing the mail server closes registration.
@@ -420,6 +420,55 @@ async fn a_password_reset_answers_before_the_account_work_so_timing_reveals_no_a
     let emails = sent(&outbox, 1).await;
     assert_eq!(emails.len(), 1);
     assert_eq!(emails[0].to, "root@example.com");
+}
+
+#[tokio::test]
+async fn a_registration_request_answers_before_the_link_work_so_timing_reveals_no_account() {
+    let fixture = fixture().await;
+    let (mailer, outbox) = Mailer::recording(fixture.identity.database().clone(), ORIGIN);
+    let app = router(&fixture.identity, Some(mailer));
+    let root = Some(fixture.root_cookie.as_str());
+    call(
+        &app,
+        "PUT",
+        "/api/v1/admin/settings/smtp",
+        root,
+        Some(smtp_body()),
+    )
+    .await;
+    call(
+        &app,
+        "PUT",
+        "/api/v1/admin/settings/registration",
+        root,
+        Some(json!({"open": true})),
+    )
+    .await;
+    // Another writer holds the database: the link cannot be stored yet, but the answer comes anyway.
+    let writer = fixture
+        .identity
+        .database()
+        .immediate_transaction()
+        .await
+        .unwrap();
+    let answer = tokio::time::timeout(
+        Duration::from_secs(5),
+        call(
+            &app,
+            "POST",
+            "/api/v1/auth/register/request",
+            None,
+            Some(json!({"email": "fresh@example.com"})),
+        ),
+    )
+    .await
+    .expect("the answer does not wait for the registration link");
+    assert_eq!(answer.0, StatusCode::ACCEPTED);
+    assert!(outbox.lock().unwrap().is_empty());
+    writer.rollback().await.unwrap();
+    let emails = sent(&outbox, 1).await;
+    assert_eq!(emails.len(), 1);
+    assert_eq!(emails[0].to, "fresh@example.com");
 }
 
 #[tokio::test]

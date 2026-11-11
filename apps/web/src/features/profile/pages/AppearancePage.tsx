@@ -1,8 +1,16 @@
 import { useState, type ReactNode } from 'react'
-import { ChevronDown, Setting2 as Settings, TickCircle, User } from 'reicon-react'
+import { Setting2 as Settings, TickCircle, User } from 'reicon-react'
 import { cn } from 'cn'
 import { SettingsCard } from '@/components/common/SettingsCard'
-import { CUSTOM_THEME_PRESETS, serializeCustomTheme, setCustomTheme, useCustomTheme } from '@/lib/customTheme'
+import {
+  APP_SECTIONS,
+  DEFAULT_APP_LOOKS,
+  setAppLook,
+  setCustomTheme,
+  themeName,
+  useCustomThemeChoice,
+  type AppSection,
+} from '@/lib/customTheme'
 import { CustomThemeDialog, CustomThemeSwatch } from '@/features/profile/components/CustomThemeDialog'
 import { useTheme, type Appearance } from '@/lib/themeContext'
 
@@ -12,10 +20,7 @@ const THEMES: { value: Appearance['theme']; label: string; description: string; 
   { value: 'dark', label: 'Dark', description: 'Dark surfaces and soft contrast.', preview: 'bg-[#181818]' },
 ]
 
-const LAYOUTS: { value: Appearance['layout']; label: string; description: string }[] = [
-  { value: 'classic', label: 'Classic', description: 'The sidebar always shows the app links. Settings, Docs and Chat have their own list beside the content. The custom theme colors chat.' },
-  { value: 'new', label: 'New UI', description: 'The sidebar changes with the page: settings links, the page tree and conversations, with Back. The custom theme colors the whole app.' },
-]
+const SECTION_LABELS: Record<AppSection, string> = { docs: 'Docs', chat: 'Chat', tasks: 'Tasks' }
 
 const NAV_STYLES: { value: Appearance['navStyle']; label: string; description: string }[] = [
   { value: 'default', label: 'Default', description: 'The sidebar and the content run edge to edge.' },
@@ -30,66 +35,24 @@ const STYLES: { value: Appearance['style']; label: string; description: string }
 /** Coolify's Profile → Appearance: how Orbit looks in this browser. */
 export function AppearancePage() {
   const { appearance, setAppearance } = useTheme()
-  const customTheme = useCustomTheme()
-  // in the new UI the custom theme replaces the colour theme; in the classic layout it colours chat on top of it
-  const newUi = appearance.layout === 'new'
-  const [customThemeOpen, setCustomThemeOpen] = useState(false)
-  const customThemeName = customTheme
-    ? (CUSTOM_THEME_PRESETS.find((preset) => serializeCustomTheme(preset.theme) === serializeCustomTheme(customTheme))?.name ?? 'Your colors')
-    : null
+  const choice = useCustomThemeChoice()
+  const appLooks = choice && 'apps' in choice ? choice.apps : null
+  const customTheme = choice && !appLooks ? choice : null
+  // the colour editor: for the whole app (Custom), or for one part of it (Per app)
+  const [editing, setEditing] = useState<'all' | AppSection | null>(null)
 
   return (
     <>
-      <SettingsCard title="Layout" description="Choose the classic layout or the new UI.">
-        <div className="grid gap-3 sm:grid-cols-2">
-          {LAYOUTS.map((option) => {
-            const contextual = option.value === 'new'
-            return (
-              <AppearanceOption
-                key={option.value}
-                label={option.label}
-                description={option.description}
-                selected={appearance.layout === option.value}
-                onClick={() => setAppearance({ layout: option.value })}
-                previewClassName="items-stretch justify-start"
-              >
-                {/* the sidebar: app icons, or Back and the page's list; classic adds a second list column */}
-                <span className="flex w-14 flex-col gap-1.5 border-r bg-background px-2 py-2">
-                  {contextual ? (
-                    <>
-                      <span className="flex h-3 items-center gap-1 text-muted-foreground"><ChevronDown className="size-2.5 rotate-90" /><span className="h-1 flex-1 rounded-full bg-muted-foreground/30" /></span>
-                      {[0, 1, 2].map((index) => <span key={index} className={cn('h-1.5 rounded-full bg-muted-foreground/25', index === 0 && 'bg-primary/50')} />)}
-                    </>
-                  ) : (
-                    [User, Settings].map((Icon, index) => (
-                      <span key={index} className="flex size-5 items-center justify-center rounded-md border bg-muted/50 text-muted-foreground">
-                        <Icon className="size-3" />
-                      </span>
-                    ))
-                  )}
-                </span>
-                {contextual ? null : (
-                  <span className="flex w-12 flex-col gap-1.5 border-r px-2 py-2">
-                    {[0, 1, 2].map((index) => <span key={index} className={cn('h-1.5 rounded-full bg-muted-foreground/25', index === 0 && 'bg-primary/50')} />)}
-                  </span>
-                )}
-                <span className="flex-1 bg-background" />
-              </AppearanceOption>
-            )
-          })}
-        </div>
-      </SettingsCard>
-
       <SettingsCard title="Color theme" description="Choose the color scheme used in this browser.">
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
           {THEMES.map((option) => (
             <AppearanceOption
               key={option.value}
               label={option.label}
               description={option.description}
-              selected={!(newUi && customTheme) && appearance.theme === option.value}
+              selected={!choice && appearance.theme === option.value}
               onClick={() => {
-                if (newUi) setCustomTheme(null)
+                setCustomTheme(null)
                 setAppearance({ theme: option.value })
               }}
               previewClassName={option.preview}
@@ -97,19 +60,49 @@ export function AppearancePage() {
               <span className="h-8 w-20 rounded-md border border-black/10 bg-neutral-100/80 shadow-sm dark:border-white/10 dark:bg-black/20" />
             </AppearanceOption>
           ))}
-          {/* the custom theme opens its editor. New UI: it is a theme of its own, and picking one above turns it off.
-              Classic: it colours chat on top of the theme above, so it is never the chosen one */}
+          {/* the custom theme opens its editor: it is a theme of its own, and picking one above turns it off */}
           <AppearanceOption
-            label={customTheme ? `Custom · ${customThemeName}` : 'Custom'}
-            description={newUi ? 'Your own colors for the whole app. Pick a preset or your own.' : 'Your own chat colors. Pick a preset or your own.'}
-            selected={newUi ? Boolean(customTheme) : undefined}
+            label={customTheme ? `Custom · ${themeName(customTheme)}` : 'Custom'}
+            description="Your own colors for the whole app. Pick a preset or your own."
+            selected={Boolean(customTheme)}
             aria-haspopup="dialog"
-            onClick={() => setCustomThemeOpen(true)}
+            onClick={() => setEditing('all')}
           >
             <CustomThemeSwatch theme={customTheme} className="h-12 w-24" />
           </AppearanceOption>
+          <AppearanceOption
+            label="Per app"
+            description="Different colors for docs, chat and tasks. Starts as Notion, Slack and Linear."
+            selected={Boolean(appLooks)}
+            onClick={() => {
+              if (!appLooks) setCustomTheme({ apps: DEFAULT_APP_LOOKS })
+            }}
+            previewClassName="gap-1.5"
+          >
+            {APP_SECTIONS.map((section) => (
+              <CustomThemeSwatch key={section} theme={(appLooks ?? DEFAULT_APP_LOOKS)[section]} className="h-10 w-9" />
+            ))}
+          </AppearanceOption>
         </div>
       </SettingsCard>
+
+      {appLooks ? (
+        <SettingsCard title="Per app colors" description="Pick the colors of each part of Orbit. Orbit uses your Light, System or Dark theme, as set above.">
+          <div className="grid gap-3 sm:grid-cols-3">
+            {APP_SECTIONS.map((section) => (
+              <AppearanceOption
+                key={section}
+                label={SECTION_LABELS[section]}
+                description={themeName(appLooks[section])}
+                aria-haspopup="dialog"
+                onClick={() => setEditing(section)}
+              >
+                <CustomThemeSwatch theme={appLooks[section]} className="h-12 w-24" />
+              </AppearanceOption>
+            ))}
+          </div>
+        </SettingsCard>
+      ) : null}
 
       <SettingsCard title="Navigation style" description="Choose how the sidebar and the content sit on the page.">
         <div className="grid gap-3 sm:grid-cols-2">
@@ -122,7 +115,7 @@ export function AppearancePage() {
                 description={option.description}
                 selected={appearance.navStyle === option.value}
                 onClick={() => setAppearance({ navStyle: option.value })}
-                previewClassName={cn('items-stretch justify-start', floating && 'gap-1.5 bg-[radial-gradient(circle,rgb(0_0_0/0.13)_1px,transparent_1.3px)] bg-size-[10px_10px] p-1.5 dark:bg-[radial-gradient(circle,rgb(255_255_255/0.09)_1px,transparent_1.3px)]')}
+                previewClassName={cn('items-stretch justify-start', floating && 'gap-1.5 p-1.5')}
               >
                 <span className={cn('flex flex-col items-center gap-1.5 bg-background px-2 py-2', floating ? 'rounded-lg border' : 'border-r')}>
                   {[User, Settings].map((Icon, index) => (
@@ -165,7 +158,25 @@ export function AppearancePage() {
         </div>
       </SettingsCard>
 
-      {customThemeOpen ? <CustomThemeDialog open onOpenChange={setCustomThemeOpen} /> : null}
+      {editing === 'all' ? (
+        <CustomThemeDialog
+          open
+          onOpenChange={(open) => !open && setEditing(null)}
+          title="Custom theme"
+          description="Colours of the whole app, in place of Light, System or Dark. Only you see them, and text stays readable on every colour."
+          value={customTheme}
+          onSave={setCustomTheme}
+        />
+      ) : editing ? (
+        <CustomThemeDialog
+          open
+          onOpenChange={(open) => !open && setEditing(null)}
+          title={`${SECTION_LABELS[editing]} colours`}
+          description={`Colours of ${SECTION_LABELS[editing].toLowerCase()} pages. Orbit uses your Light, System or Dark theme. Only you see them.`}
+          value={appLooks?.[editing] ?? null}
+          onSave={(theme) => setAppLook(editing, theme)}
+        />
+      ) : null}
     </>
   )
 }

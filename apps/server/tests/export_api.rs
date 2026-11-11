@@ -355,7 +355,7 @@ async fn exports_a_subtree_as_markdown_folders_with_assets_and_relative_links() 
                 {"type": "page", "props": {"pageId": trashed}},
                 paragraph_link(&format!("/docs/{deep}"), "deep"),
                 paragraph_link(&format!("/docs/{outside}"), "out"),
-                paragraph_link(&other_file, "their file"),
+                {"type": "file", "props": {"url": other_file, "name": "their file"}},
                 paragraph_link("https://example.com/x", "web"),
             ]),
         )

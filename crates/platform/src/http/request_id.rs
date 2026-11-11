@@ -24,7 +24,7 @@ impl RequestId {
             && value.len() <= MAX_REQUEST_ID_BYTES
             && value
                 .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || b"-._:".contains(&byte));
+                .all(|byte| byte.is_ascii_alphanumeric() || b"-._:/".contains(&byte));
         valid.then(|| Self(value.to_owned()))
     }
 }

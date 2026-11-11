@@ -1,17 +1,16 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { type Href, router } from 'expo-router'
 import { useState } from 'react'
-import { Alert, FlatList, Pressable, RefreshControl, View } from 'react-native'
+import { Alert, FlatList, Pressable, View } from 'react-native'
 
-import { MenuButton } from '../../components/Drawer'
 import { relativeTime } from '../../data/format'
 import { isMention, notificationCopy, notificationTarget } from '../../data/inbox'
 import * as api from '../../data/orbit'
 import { useOrbit } from '../../orbit-context'
 import { useNotifications, usePages, usePeople } from '../../queries'
 import { errorMessage } from '../../session-context'
+import { Button, CountBadge, EmptyState, ErrorView, HeaderTitle, Icon, LoadingView, PaneHeader, PullRefresh, SafeAreaView, Text } from '../../ui'
 import { useTheme } from '../../theme'
-import { Button, CountBadge, EmptyState, ErrorView, HeaderTitle, LoadingView, PaneHeader, SafeAreaView, Text } from '../../ui'
 
 type Tab = 'all' | 'unread' | 'mentions'
 const TABS: { value: Tab; label: string }[] = [
@@ -24,10 +23,10 @@ const TABS: { value: Tab; label: string }[] = [
 export default function ActivityScreen() {
   const { client, workspaceId } = useOrbit()
   const queryClient = useQueryClient()
-  const { colors } = useTheme()
   const [tab, setTab] = useState<Tab>('all')
   const notifications = useNotifications()
   const people = usePeople()
+  const { colors } = useTheme()
   const pages = usePages()
   // both the list and the unread list live under this prefix
   const refreshInbox = () => queryClient.invalidateQueries({ queryKey: ['notifications', workspaceId] })
@@ -46,9 +45,8 @@ export default function ActivityScreen() {
   const items = all.filter((item) => (tab === 'unread' ? !item.read_at : tab === 'mentions' ? isMention(item) : true))
 
   return (
-    <SafeAreaView edges={['top', 'left', 'right']} className="flex-1 bg-background">
-      <PaneHeader className="px-3">
-        <MenuButton />
+    <SafeAreaView edges={['left', 'right']} className="flex-1 bg-background">
+      <PaneHeader className="min-h-12 px-3">
         <HeaderTitle>Activity</HeaderTitle>
         {unreadCount > 0 ? <CountBadge count={unreadCount} /> : null}
         <View className="flex-1" />
@@ -82,7 +80,7 @@ export default function ActivityScreen() {
           data={items}
           keyExtractor={(item) => item.id}
           contentContainerClassName={items.length === 0 ? 'grow' : undefined}
-          refreshControl={<RefreshControl refreshing={notifications.isRefetching} onRefresh={() => void notifications.refetch()} tintColor={colors.mutedForeground} />}
+          refreshControl={<PullRefresh onRefresh={() => notifications.refetch()} />}
           ListEmptyComponent={<EmptyState icon="inbox" title="You're all caught up" description="Assignments and mentions appear here." />}
           renderItem={({ item }) => {
             const actor = people.find((person) => person.id === item.actor_user_id)
@@ -102,14 +100,19 @@ export default function ActivityScreen() {
               >
                 <View className="w-2 items-center">{unread ? <View accessibilityLabel="Unread" className="size-2 rounded-full bg-primary" /> : null}</View>
                 <View className="size-7 rounded-full items-center justify-center bg-muted">
-                  <Text className="text-[14px] leading-[20px] text-muted-foreground">{(actor?.name ?? '?').charAt(0).toUpperCase()}</Text>
+                  {/* an import notice is the user's own: the import glyph, not their initial */}
+                  {item.import_id ? (
+                    <Icon name="import" size={16} color={colors.mutedForeground} />
+                  ) : (
+                    <Text className="text-[14px] leading-[20px] text-muted-foreground">{(actor?.name ?? '?').charAt(0).toUpperCase()}</Text>
+                  )}
                 </View>
                 <View className="flex-1 min-w-0 gap-0.5">
                   <Text numberOfLines={1} className={`text-[13px] leading-[18.5px] ${unread ? 'font-noto-semibold' : ''}`}>
                     {copy.title}
                   </Text>
                   <Text numberOfLines={1} className="text-[12px] leading-[16px] text-muted-foreground/70">
-                    {actor ? `${actor.name} · ${copy.body}` : copy.body}
+                    {actor && !item.import_id ? `${actor.name} · ${copy.body}` : copy.body}
                   </Text>
                 </View>
                 <Text className="text-[12px] leading-[16px] text-muted-foreground/70">{relativeTime(item.created_at)}</Text>

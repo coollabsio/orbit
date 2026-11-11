@@ -4,8 +4,8 @@ use std::time::Duration;
 
 use orbit_domain::{Actor, MembershipDenied, Permission, Policy, WorkspaceDefaults, WorkspaceRole};
 use orbit_platform::{
-    AttachmentMutationCoordinator, BLOB_REFERENCE_COUNT, BlobStore, BlobStoreError, Database, Id,
-    IssuedSession, Job, JobError, JobKind, JobKindRegistrationError, JobStore, LocalBlobStore,
+    AttachmentMutationCoordinator, BLOB_REFERENCE_COUNT, BlobStore, BlobStoreError, Database, Flag,
+    Id, IssuedSession, Job, JobError, JobKind, JobKindRegistrationError, JobStore, LocalBlobStore,
     RecurringSchedule, Row, ScheduleError, Scheduler, TimestampMillis, UploadError, UploadService,
     WORKSPACE_STORAGE_USED, Worker, WorkerConfig, WorkerError, generate_opaque_token,
     normalize_email,
@@ -13,21 +13,28 @@ use orbit_platform::{
 use serde::Serialize;
 use serde_json::json;
 use sha2::{Digest, Sha256};
-use sqlx::{Any, Transaction};
+use sqlx::{Any, AnyConnection, Transaction};
 use thiserror::Error;
+use tokio::sync::OwnedMutexGuard;
 use tokio_util::sync::CancellationToken;
 use utoipa::ToSchema;
 
-use super::chat::join_public_channels;
+use super::billing::{TrialCapacityError, TrialLimitReached, ensure_trial_capacity};
+use super::chat::{
+    ChatError, Emitted, MAX_GUEST_CHANNELS, join_invited_channels, join_public_channels,
+    require_guest_channels,
+};
 use super::membership;
 use super::page_versions;
-use super::task_relations;
 use super::tasks::TaskError;
 use super::teamspaces::insert_default_teamspace;
 use crate::audit::{self, AuditEvent, AuditOutcome};
+use crate::billing::TrialLimit;
+use crate::live::LiveHub;
 
 const INVITATION_LIFETIME_MILLIS: i64 = 7 * 24 * 60 * 60 * 1_000;
 const WORKSPACE_TRASH_RETENTION_MILLIS: i64 = 30 * 24 * 60 * 60 * 1_000;
+const SESSION_IDLE_RETENTION_MILLIS: i64 = 30 * 24 * 60 * 60 * 1_000;
 const AUDIT_RETENTION_MILLIS: i64 = 365 * 24 * 60 * 60 * 1_000;
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
@@ -119,6 +126,8 @@ pub struct InvitationRecord {
 pub struct InvitationPreview {
     pub email: String,
     pub workspace_name: String,
+    /// The private channels a guest invitation adds the guest to; empty for other roles.
+    pub channels: Vec<String>,
 }
 
 #[derive(Clone, Eq, PartialEq)]
@@ -251,14 +260,29 @@ pub enum WorkspaceError {
     RegistrationRequiresSignIn,
     #[error("workspace operation conflicts with current state")]
     Conflict,
+    /// A guest invitation needs open private channels that the inviter manages; other roles
+    /// take none.
+    #[error("the invitation's channels are invalid")]
+    GuestChannels,
     #[error("stale version; current version is {current_version}")]
     VersionConflict { current_version: u64 },
     #[error("the account already owns {limit} workspaces, the most the instance allows")]
     OwnedWorkspaceLimit { limit: u32 },
+    #[error("trial limit reached")]
+    TrialLimit(TrialLimitReached),
     #[error("workspace repository is unavailable")]
     Unavailable(#[from] sqlx::Error),
     #[error("workspace attachment storage is unavailable")]
     Storage(#[from] BlobStoreError),
+}
+
+impl From<TrialCapacityError> for WorkspaceError {
+    fn from(error: TrialCapacityError) -> Self {
+        match error {
+            TrialCapacityError::Reached(reached) => Self::TrialLimit(reached),
+            TrialCapacityError::Database(error) => Self::Unavailable(error),
+        }
+    }
 }
 
 #[derive(Debug, Error)]
@@ -434,6 +458,9 @@ impl WorkspaceRepository {
         file_offset: u32,
     ) -> Result<WorkspaceStorage, WorkspaceError> {
         let workspace = self.get(workspace_id, actor_id).await?;
+        if workspace.role == WorkspaceRole::Guest {
+            return Err(WorkspaceError::NotFound);
+        }
         let row = sqlx::query(sqlx::AssertSqlSafe(format!(
             "SELECT ({WORKSPACE_STORAGE_USED}) AS used, workspace_storage_quota_bytes AS quota, \
              (SELECT COUNT(*) FROM attachment_blobs WHERE workspace_id = $1 AND deleted_at IS NULL) AS files \
@@ -633,6 +660,8 @@ impl WorkspaceRepository {
         })
     }
 
+    /// The workspace's members. A guest gets itself and the people it shares a conversation
+    /// with, without their email address.
     pub async fn members(
         &self,
         workspace_id: Id,
@@ -640,7 +669,7 @@ impl WorkspaceRepository {
         cursor: Option<Id>,
         limit: usize,
     ) -> Result<(Vec<MemberRecord>, Option<Id>), WorkspaceError> {
-        let actor = require_actor(self.database.pool(), workspace_id, actor_id).await?;
+        let actor = require_chat_actor(self.database.pool(), workspace_id, actor_id).await?;
         let rows = sqlx::query(
             "SELECT memberships.id, memberships.user_id, memberships.role, memberships.version, \
              memberships.created_at, users.email, users.display_name, users.suspended_at, \
@@ -649,12 +678,20 @@ impl WorkspaceRepository {
              JOIN users ON users.id = memberships.user_id \
              LEFT JOIN user_avatars ON user_avatars.user_id = memberships.user_id \
              WHERE memberships.workspace_id = $1 \
-             AND ($2 IS NULL OR memberships.id > $3) ORDER BY memberships.id LIMIT $4",
+             AND ($2 IS NULL OR memberships.id > $3) \
+             AND ($5 = 0 OR memberships.user_id = $6 OR EXISTS ( \
+                 SELECT 1 FROM chat_members own JOIN chat_members theirs \
+                 ON theirs.conversation_id = own.conversation_id \
+                 WHERE own.workspace_id = $1 AND own.user_id = $6 \
+                 AND theirs.user_id = memberships.user_id)) \
+             ORDER BY memberships.id LIMIT $4",
         )
         .bind(workspace_id.to_string())
         .bind(cursor.map(|id| id.to_string()))
         .bind(cursor.map(|id| id.to_string()))
         .bind(page_size(limit).saturating_add(1) as i64)
+        .bind(i64::from(actor.is_guest()))
+        .bind(actor_id.to_string())
         .fetch_all(self.database.pool())
         .await?;
         let transfer_available = !crate::repositories::billing::enabled(&self.database);
@@ -670,7 +707,9 @@ impl WorkspaceRepository {
         actor_id: Id,
         user_id: Id,
     ) -> Result<MemberProfile, WorkspaceError> {
-        require_actor(self.database.pool(), workspace_id, actor_id).await?;
+        let mut connection = self.database.pool().acquire().await?;
+        let actor = require_chat_actor(&mut *connection, workspace_id, actor_id).await?;
+        require_visible(&mut connection, workspace_id, actor, user_id).await?;
         let row = sqlx::query(
             "SELECT users.title, users.pronouns, users.timezone, users.bio, users.phone, \
              user_notes.body AS note \
@@ -681,7 +720,7 @@ impl WorkspaceRepository {
         .bind(actor_id.to_string())
         .bind(workspace_id.to_string())
         .bind(user_id.to_string())
-        .fetch_optional(self.database.pool())
+        .fetch_optional(&mut *connection)
         .await?
         .ok_or(WorkspaceError::NotFound)?;
         Ok(MemberProfile {
@@ -706,8 +745,9 @@ impl WorkspaceRepository {
         now: TimestampMillis,
     ) -> Result<(), WorkspaceError> {
         let mut transaction = self.database.immediate_transaction().await?;
-        require_actor(&mut *transaction, workspace_id, actor_id).await?;
-        require_actor(&mut *transaction, workspace_id, user_id).await?;
+        let actor = require_chat_actor(&mut *transaction, workspace_id, actor_id).await?;
+        require_chat_actor(&mut *transaction, workspace_id, user_id).await?;
+        require_visible(&mut transaction, workspace_id, actor, user_id).await?;
         if body.is_empty() {
             sqlx::query("DELETE FROM user_notes WHERE author_id = $1 AND subject_id = $2")
                 .bind(actor_id.to_string())
@@ -758,16 +798,27 @@ impl WorkspaceRepository {
     }
 
     #[allow(clippy::too_many_arguments)]
+    /// Invites `email` with `role`. A guest invitation names the private channels the guest
+    /// joins (`conversation_ids`); other roles name none.
     pub async fn invite(
         &self,
         workspace_id: Id,
         actor_id: Id,
         email: String,
         role: WorkspaceRole,
+        conversation_ids: &[Id],
         delivery: InvitationDelivery,
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<IssuedInvitation, WorkspaceError> {
+        let mut conversation_ids = conversation_ids.to_vec();
+        conversation_ids.sort_unstable();
+        conversation_ids.dedup();
+        if (role == WorkspaceRole::Guest) == conversation_ids.is_empty()
+            || conversation_ids.len() > MAX_GUEST_CHANNELS
+        {
+            return Err(WorkspaceError::GuestChannels);
+        }
         let id = Id::new_v7();
         let token = generate_opaque_token();
         let normalized_email = normalize_email(&email);
@@ -809,6 +860,11 @@ impl WorkspaceRepository {
         if already_member {
             return Err(WorkspaceError::Conflict);
         }
+        if role == WorkspaceRole::Guest {
+            require_guest_channels(&mut transaction, workspace_id, actor, &conversation_ids)
+                .await
+                .map_err(from_chat)?;
+        }
         sqlx::query(
             "UPDATE workspace_invitations SET replaced_at = $1 WHERE workspace_id = $2 \
              AND normalized_email = $3 AND accepted_at IS NULL AND revoked_at IS NULL AND replaced_at IS NULL",
@@ -834,6 +890,16 @@ impl WorkspaceRepository {
         .bind(now.as_millis())
         .execute(&mut *transaction)
         .await?;
+        for conversation_id in &conversation_ids {
+            sqlx::query(
+                "INSERT INTO workspace_invitation_conversations (invitation_id, conversation_id) \
+                 VALUES ($1, $2)",
+            )
+            .bind(id.to_string())
+            .bind(conversation_id.to_string())
+            .execute(&mut *transaction)
+            .await?;
+        }
         audit::record(
             &mut transaction,
             workspace_id,
@@ -931,6 +997,25 @@ impl WorkspaceRepository {
         Ok(())
     }
 
+    /// The live socket's write lock of the invitation's workspace (none for an unknown token),
+    /// held from before an acceptance's transaction until its chat events are out, as
+    /// `ChatState::publish` does, so the events go out in commit order.
+    async fn invitation_write_lock(
+        &self,
+        hash: &[u8],
+    ) -> Result<Option<OwnedMutexGuard<()>>, WorkspaceError> {
+        let workspace_id: Option<String> = sqlx::query_scalar(
+            "SELECT workspace_id FROM workspace_invitations WHERE token_hash = $1",
+        )
+        .bind(hash.to_vec())
+        .fetch_optional(self.database.pool())
+        .await?;
+        Ok(match workspace_id {
+            Some(id) => Some(LiveHub::of(&self.database).write_lock(parse_id(id)?).await),
+            None => None,
+        })
+    }
+
     pub async fn accept_invitation(
         &self,
         token: &str,
@@ -940,6 +1025,7 @@ impl WorkspaceRepository {
         now: TimestampMillis,
     ) -> Result<AcceptanceRecord, WorkspaceError> {
         let hash = token_hash(token);
+        let _order = self.invitation_write_lock(&hash).await?;
         let mut transaction = self.database.immediate_transaction().await?;
         let row = sqlx::query(
             "SELECT id, workspace_id, normalized_email, role, delivery, expires_at, accepted_at, \
@@ -1013,6 +1099,7 @@ impl WorkspaceRepository {
         .bind(user_id.to_string())
         .fetch_optional(&mut *transaction)
         .await?;
+        let mut chat_events = Vec::new();
         let (membership_id, created) = if let Some(id) = existing {
             (parse_id(id)?, false)
         } else {
@@ -1030,6 +1117,10 @@ impl WorkspaceRepository {
             .execute(&mut *transaction)
             .await?;
             join_public_channels(&mut transaction, workspace_id, user_id, now).await?;
+            chat_events =
+                join_invited_channels(&mut transaction, workspace_id, invitation_id, user_id, now)
+                    .await
+                    .map_err(from_chat)?;
             (id, true)
         };
         sqlx::query(
@@ -1064,6 +1155,7 @@ impl WorkspaceRepository {
         )
         .await?;
         transaction.commit().await?;
+        publish_chat(&self.database, workspace_id, &chat_events).await;
         Ok(AcceptanceRecord {
             workspace_id,
             membership_id,
@@ -1193,6 +1285,10 @@ impl WorkspaceRepository {
         .execute(&mut *transaction)
         .await?;
         join_public_channels(&mut transaction, workspace_id, user_id, now).await?;
+        let chat_events =
+            join_invited_channels(&mut transaction, workspace_id, invitation_id, user_id, now)
+                .await
+                .map_err(from_chat)?;
         sqlx::query(
             "UPDATE workspace_invitations SET accepted_at = $1 WHERE id = $2 AND workspace_id = $3",
         )
@@ -1228,6 +1324,7 @@ impl WorkspaceRepository {
         )
         .await?;
         transaction.commit().await?;
+        publish_chat(&self.database, workspace_id, &chat_events).await;
         Ok(RegisteredAcceptance {
             acceptance: AcceptanceRecord {
                 workspace_id,
@@ -1250,7 +1347,7 @@ impl WorkspaceRepository {
         now: TimestampMillis,
     ) -> Result<InvitationPreview, WorkspaceError> {
         let row = sqlx::query(
-            "SELECT invitations.email, workspaces.name AS workspace_name \
+            "SELECT invitations.id, invitations.email, workspaces.name AS workspace_name \
              FROM workspace_invitations AS invitations \
              JOIN workspaces ON workspaces.id = invitations.workspace_id \
              WHERE invitations.token_hash = $1 AND invitations.expires_at > $2 \
@@ -1262,9 +1359,19 @@ impl WorkspaceRepository {
         .fetch_optional(self.database.pool())
         .await?
         .ok_or(WorkspaceError::InvalidInvitation)?;
+        let channels = sqlx::query_scalar(
+            "SELECT c.name FROM workspace_invitation_conversations i \
+             JOIN chat_conversations c ON c.id = i.conversation_id \
+             WHERE i.invitation_id = $1 AND c.kind = 'private' AND c.archived_at IS NULL \
+             ORDER BY c.name",
+        )
+        .bind(row.get::<String, _>("id"))
+        .fetch_all(self.database.pool())
+        .await?;
         Ok(InvitationPreview {
             email: row.get("email"),
             workspace_name: row.get("workspace_name"),
+            channels,
         })
     }
 
@@ -1387,8 +1494,8 @@ impl WorkspaceRepository {
         // The actor's own rule is checked against an ordinary member first, so a caller who may
         // not change roles learns nothing about the target, and the denial is audited even for
         // an unknown membership. The real target is then checked after the version.
-        let denied = match actor.change_member_role(WorkspaceRole::Member, role) {
-            Err(denied) => Some(denied),
+        let checked = match actor.change_member_role(WorkspaceRole::Member, role) {
+            Err(denied) => Err(denied),
             Ok(()) => {
                 let target =
                     target_membership(&mut transaction, workspace_id, membership_id).await?;
@@ -1397,33 +1504,48 @@ impl WorkspaceRepository {
                         current_version: target.version,
                     });
                 }
-                actor.change_member_role(target.role, role).err()
+                actor.change_member_role(target.role, role).map(|()| target)
             }
         };
-        if let Some(denied) = denied {
-            let reason = match denied {
-                MembershipDenied::RoleForbidden => "role_forbidden",
-                MembershipDenied::OwnerProtected => "owner_protected",
-                MembershipDenied::TransferRequired if role == WorkspaceRole::Owner => {
-                    "ownership_transfer_required"
-                }
-                MembershipDenied::TransferRequired => "owner_protected",
-            };
-            audit::record(
+        let target = match checked {
+            Ok(target) => target,
+            Err(denied) => {
+                let reason = match denied {
+                    MembershipDenied::RoleForbidden => "role_forbidden",
+                    MembershipDenied::OwnerProtected => "owner_protected",
+                    MembershipDenied::TransferRequired if role == WorkspaceRole::Owner => {
+                        "ownership_transfer_required"
+                    }
+                    MembershipDenied::TransferRequired => "owner_protected",
+                    MembershipDenied::GuestDowngrade => "guest_downgrade",
+                };
+                audit::record(
+                    &mut transaction,
+                    workspace_id,
+                    Some(actor_id),
+                    "membership.change_denied",
+                    AuditOutcome::Failure,
+                    "membership",
+                    Some(membership_id),
+                    request_id,
+                    json!({"reason": reason}),
+                    now,
+                )
+                .await?;
+                transaction.commit().await?;
+                return Err(denied.into());
+            }
+        };
+        // Guests do not count as members, so a guest who becomes a member takes a trial seat.
+        if target.role == WorkspaceRole::Guest && role != WorkspaceRole::Guest {
+            ensure_trial_capacity(
+                &self.database,
                 &mut transaction,
                 workspace_id,
-                Some(actor_id),
-                "membership.change_denied",
-                AuditOutcome::Failure,
-                "membership",
-                Some(membership_id),
-                request_id,
-                json!({"reason": reason}),
-                now,
+                TrialLimit::Members,
+                1,
             )
             .await?;
-            transaction.commit().await?;
-            return Err(denied.into());
         }
         sqlx::query(
             "UPDATE memberships SET role = $1, version = version + 1, updated_at = $2 \
@@ -1436,6 +1558,9 @@ impl WorkspaceRepository {
         .bind(expected_version as i64)
         .execute(&mut *transaction)
         .await?;
+        // A guest who becomes a member joins #general and every public channel. Every other
+        // member is in them already, so for them this changes nothing.
+        join_public_channels(&mut transaction, workspace_id, target.user_id, now).await?;
         audit::record(
             &mut transaction,
             workspace_id,
@@ -1488,7 +1613,8 @@ impl WorkspaceRepository {
         now: TimestampMillis,
     ) -> Result<(), WorkspaceError> {
         let mut transaction = self.database.immediate_transaction().await?;
-        let actor = require_actor(&mut *transaction, workspace_id, actor_id).await?;
+        // A guest may leave too; the policy lets it remove nobody else.
+        let actor = require_chat_actor(&mut *transaction, workspace_id, actor_id).await?;
         let target = target_membership(&mut transaction, workspace_id, membership_id).await?;
         if target.version != expected_version {
             return Err(WorkspaceError::VersionConflict {
@@ -1533,6 +1659,26 @@ impl WorkspaceRepository {
             .bind(expected_version as i64)
             .execute(&mut *transaction)
             .await?;
+        // A removed member's own credentials end here, so they do not work again if the person rejoins.
+        // Service-account tokens belong to the workspace and stay.
+        sqlx::query(
+            "UPDATE api_tokens SET revoked_at = $1 WHERE workspace_id = $2 AND created_by = $3 \
+             AND service_account_id IS NULL AND revoked_at IS NULL",
+        )
+        .bind(now.as_millis())
+        .bind(workspace_id.to_string())
+        .bind(target.user_id.to_string())
+        .execute(&mut *transaction)
+        .await?;
+        sqlx::query(
+            "UPDATE oauth_grants SET revoked_at = $1 WHERE workspace_id = $2 AND user_id = $3 \
+             AND revoked_at IS NULL",
+        )
+        .bind(now.as_millis())
+        .bind(workspace_id.to_string())
+        .bind(target.user_id.to_string())
+        .execute(&mut *transaction)
+        .await?;
         crate::workspace_export::expire_for_user(
             &mut transaction,
             Some(workspace_id),
@@ -1957,6 +2103,14 @@ impl WorkspaceRepository {
             .bind(now.as_millis().saturating_sub(24 * 60 * 60 * 1000))
             .execute(&mut *transaction)
             .await?;
+        // Sessions not used for 30 days, revoked or not. Their push subscriptions cascade.
+        sqlx::query("DELETE FROM sessions WHERE last_activity_at <= $1")
+            .bind(
+                now.as_millis()
+                    .saturating_sub(SESSION_IDLE_RETENTION_MILLIS),
+            )
+            .execute(&mut *transaction)
+            .await?;
         let expired = sqlx::query_scalar::<_, String>(
             "SELECT id FROM workspaces WHERE deleted_at IS NOT NULL AND deleted_at <= $1 \
              ORDER BY deleted_at, id",
@@ -1988,56 +2142,15 @@ impl WorkspaceRepository {
         .fetch_all(&mut *transaction)
         .await?;
         for task_id in task_ids {
-            let blobs = sqlx::query(
-                "SELECT DISTINCT attachment_blobs.id, attachment_blobs.storage_key \
-                 FROM attachment_references JOIN attachment_blobs ON attachment_blobs.id = attachment_references.blob_id \
-                 WHERE attachment_references.task_id = $1",
-            )
-            .bind(&task_id)
-            .fetch_all(&mut *transaction)
-            .await?;
-            attachment_references_purged +=
-                sqlx::query("DELETE FROM attachment_references WHERE task_id = $1")
-                    .bind(&task_id)
-                    .execute(&mut *transaction)
-                    .await?
-                    .rows_affected();
-            task_relations::release_duplicates_in_tx(&mut transaction, &task_id, now)
-                .await
-                .map_err(|error| match error {
-                    TaskError::Unavailable(error) => WorkspaceError::Unavailable(error),
-                    _ => WorkspaceError::Conflict,
-                })?;
-            sqlx::query("DELETE FROM tasks WHERE id = $1")
-                .bind(&task_id)
-                .execute(&mut *transaction)
-                .await?;
-            for blob in blobs {
-                let blob_id: String = blob.get("id");
-                let references: i64 = sqlx::query_scalar(BLOB_REFERENCE_COUNT)
-                    .bind(&blob_id)
-                    .bind(&blob_id)
-                    .fetch_one(&mut *transaction)
-                    .await?;
-                if references == 0 {
-                    sqlx::query(
-                        "INSERT INTO attachment_file_deletions \
-                         (id, path_kind, path, created_at) VALUES ($1, 'blob', $2, $3) \
-                         ON CONFLICT DO NOTHING",
-                    )
-                    .bind(Id::new_v7().to_string())
-                    .bind(blob.get::<String, _>("storage_key"))
-                    .bind(now.as_millis())
-                    .execute(&mut *transaction)
-                    .await?;
-                    attachment_blobs_purged +=
-                        sqlx::query("DELETE FROM attachment_blobs WHERE id = $1")
-                            .bind(blob_id)
-                            .execute(&mut *transaction)
-                            .await?
-                            .rows_affected();
-                }
-            }
+            let (references, blobs) =
+                super::tasks::purge_task_in_tx(&mut transaction, &task_id, now)
+                    .await
+                    .map_err(|error| match error {
+                        TaskError::Unavailable(error) => WorkspaceError::Unavailable(error),
+                        _ => WorkspaceError::Conflict,
+                    })?;
+            attachment_references_purged += references;
+            attachment_blobs_purged += blobs;
         }
         // A trashed subtree shares one deleted_at, so it expires together; pages.parent_id is
         // ON DELETE SET NULL, so the delete order inside the batch does not matter.
@@ -2053,16 +2166,24 @@ impl WorkspaceRepository {
         .await?;
         // Page history: all of the last 30 days, then one per day up to a year, newest 20 always.
         page_versions::thin_versions(&mut transaction, now).await?;
-        sqlx::query(
-            "DELETE FROM projects WHERE deleted_at <= $1 AND workspace_id IN \
-             (SELECT id FROM workspaces WHERE deleted_at IS NULL)",
-        )
-        .bind(
-            now.as_millis()
-                .saturating_sub(WORKSPACE_TRASH_RETENTION_MILLIS),
-        )
-        .execute(&mut *transaction)
-        .await?;
+        let expired_projects = "SELECT id FROM projects WHERE deleted_at <= $1 AND workspace_id IN \
+             (SELECT id FROM workspaces WHERE deleted_at IS NULL)";
+        // API token grants hold their projects with ON DELETE RESTRICT.
+        for sql in [
+            format!("DELETE FROM api_token_projects WHERE project_id IN ({expired_projects})"),
+            format!(
+                "UPDATE api_tokens SET project_id = NULL WHERE project_id IN ({expired_projects})"
+            ),
+            format!("DELETE FROM projects WHERE id IN ({expired_projects})"),
+        ] {
+            sqlx::query(sqlx::AssertSqlSafe(sql))
+                .bind(
+                    now.as_millis()
+                        .saturating_sub(WORKSPACE_TRASH_RETENTION_MILLIS),
+                )
+                .execute(&mut *transaction)
+                .await?;
+        }
         for workspace_id in expired {
             let blob_rows =
                 sqlx::query("SELECT id, storage_key FROM attachment_blobs WHERE workspace_id = $1")
@@ -2387,7 +2508,12 @@ fn member_from_row(
     Ok(MemberRecord {
         id: parse_id(row.get("id"))?,
         user_id,
-        email: row.get("email"),
+        // A guest does not learn the addresses of the people in its channels.
+        email: if actor.is_guest() && user_id != actor.user_id {
+            String::new()
+        } else {
+            row.get("email")
+        },
         display_name: row.get("display_name"),
         avatar_url: crate::auth_routes::avatar_url(user_id, row.get("avatar_updated_at")),
         role,
@@ -2447,6 +2573,47 @@ where
         .ok_or(WorkspaceError::NotFound)
 }
 
+/// As `require_actor`, but guests too: for the people directory, which filters for them.
+async fn require_chat_actor<'e, E>(
+    executor: E,
+    workspace_id: Id,
+    actor_id: Id,
+) -> Result<Actor, WorkspaceError>
+where
+    E: sqlx::Executor<'e, Database = Any>,
+{
+    membership::chat_actor(executor, workspace_id, actor_id)
+        .await?
+        .ok_or(WorkspaceError::NotFound)
+}
+
+/// A guest sees itself and the people it shares a conversation with; nobody else exists for it.
+async fn require_visible(
+    connection: &mut AnyConnection,
+    workspace_id: Id,
+    actor: Actor,
+    user_id: Id,
+) -> Result<(), WorkspaceError> {
+    if !actor.is_guest() || actor.user_id == user_id {
+        return Ok(());
+    }
+    let Flag(shared) = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM chat_members own JOIN chat_members theirs \
+         ON theirs.conversation_id = own.conversation_id \
+         WHERE own.workspace_id = $1 AND own.user_id = $2 AND theirs.user_id = $3)",
+    )
+    .bind(workspace_id.to_string())
+    .bind(actor.user_id.to_string())
+    .bind(user_id.to_string())
+    .fetch_one(&mut *connection)
+    .await?;
+    if shared {
+        Ok(())
+    } else {
+        Err(WorkspaceError::NotFound)
+    }
+}
+
 pub(super) async fn require_permission(
     transaction: &mut Transaction<'_, Any>,
     workspace_id: Id,
@@ -2462,11 +2629,34 @@ pub(super) async fn require_permission(
     Ok(())
 }
 
+/// Sends the chat events of a committed acceptance to the live sockets. A failure only costs
+/// the sockets a resync, as in `ChatState::publish`.
+async fn publish_chat(database: &Database, workspace_id: Id, events: &[Emitted]) {
+    if events.is_empty() {
+        return;
+    }
+    let events: Vec<_> = events.iter().map(Emitted::live).collect();
+    if let Err(error) = LiveHub::of(database).publish(workspace_id, &events).await {
+        tracing::warn!(error = %error, "chat events of an accepted invitation");
+    }
+}
+
+fn from_chat(error: ChatError) -> WorkspaceError {
+    match error {
+        ChatError::Invalid { .. } | ChatError::NotFound => WorkspaceError::GuestChannels,
+        ChatError::Forbidden(_) => WorkspaceError::Forbidden,
+        ChatError::Unavailable(error) => WorkspaceError::Unavailable(error),
+        _ => WorkspaceError::Conflict,
+    }
+}
+
 impl From<MembershipDenied> for WorkspaceError {
     fn from(denied: MembershipDenied) -> Self {
         match denied {
             MembershipDenied::TransferRequired => Self::TransferRequired,
-            MembershipDenied::RoleForbidden | MembershipDenied::OwnerProtected => Self::Forbidden,
+            MembershipDenied::RoleForbidden
+            | MembershipDenied::OwnerProtected
+            | MembershipDenied::GuestDowngrade => Self::Forbidden,
         }
     }
 }

@@ -1,0 +1,29 @@
+{
+  "title": "Launch plan",
+  "title_column": 0,
+  "private": false,
+  "columns": [
+    { "name": "Name", "target": "skip" },
+    { "name": "Status", "target": { "new": "status" } },
+    { "name": "Team", "target": { "new": "select" } },
+    { "name": "Priority", "target": { "new": "select" } },
+    { "name": "Tags", "target": { "new": "multi_select" } },
+    { "name": "Start", "target": { "new": "date" } },
+    { "name": "Due", "target": { "new": "date" } },
+    { "name": "Budget", "target": { "new": "number" } },
+    { "name": "Approved", "target": { "new": "checkbox" } },
+    { "name": "Link", "target": { "new": "url" } }
+  ],
+  "rows": [
+    ["Launch Orbit Cloud EU region", "In progress", "Platform", "High", "Infra, Launch", "2026-11-02", "2026-11-20", "12000", "true", "https://orbit.so"],
+    ["Docs databases announcement", "Done", "Marketing", "High", "Launch, Blog", "2026-11-03", "2026-11-10", "1500", "true", "https://orbit.so/blog"],
+    ["Mobile push notifications", "In progress", "Mobile", "Medium", "iOS, Launch", "2026-11-05", "2026-11-18", "4000", "true", ""],
+    ["Notion import polish", "Not started", "Product", "Medium", "Import", "2026-11-16", "2026-11-27", "2500", "false", ""],
+    ["Pricing page refresh", "In progress", "Marketing", "Low", "Web", "2026-11-09", "2026-11-14", "800", "true", "https://orbit.so/pricing"],
+    ["Customer interviews round 3", "Not started", "Product", "High", "Research", "2026-11-17", "2026-11-24", "600", "false", ""],
+    ["Postgres backup drills", "Done", "Platform", "High", "Infra", "2026-11-01", "2026-11-06", "0", "true", ""],
+    ["Webinar: Orbit for agencies", "Not started", "Marketing", "Medium", "Event", "2026-11-23", "2026-11-26", "1200", "false", ""],
+    ["Guest access for clients", "Done", "Product", "High", "Security", "2026-11-02", "2026-11-09", "2000", "true", ""],
+    ["Android beta", "Not started", "Mobile", "Low", "Android", "2026-11-25", "2026-12-10", "3000", "false", ""]
+  ]
+}

@@ -1,3 +1,4 @@
+import type { MessageBlock } from '@orbit/api/generated/types.gen'
 import type { PresenceEntry } from '@/features/realtime/presence'
 
 /** Ids are opaque strings; message ids sort by creation time. Times are integer milliseconds. */
@@ -105,6 +106,8 @@ export interface ReplyQuote {
   body: string
   /** The quoted message has a sticker. Missing on a row cached before stickers existed. */
   sticker?: boolean
+  /** Set when an integration posted the quoted message: shown as its author. */
+  botName?: string | null
 }
 
 /** Where a forwarded message was copied from. The original may be gone, or in a conversation the reader cannot open. */
@@ -113,6 +116,49 @@ export interface ForwardOrigin {
   conversationId: string
   authorId: string
   /** When the original message was sent. */
+  createdAt: number
+  /** Set when an integration posted the original: shown as its author. */
+  botName?: string | null
+}
+
+/**
+ * The integration (an incoming webhook) that posted a message. `authorId` of such a message is the member who set the
+ * integration up; the message shows this name and icon, is never that member's own, and cannot be edited.
+ */
+export interface MessageBot {
+  webhookId: string
+  name: string
+  /** An https image; `null` shows the default bot avatar. */
+  iconUrl: string | null
+  /** An emoji name (`ghost`) shown as the avatar in place of `iconUrl`. Missing on a row cached before it existed. */
+  iconEmoji?: string | null
+  /** Its buttons without a URL send clicks to the integration. Missing on a row cached before it existed. */
+  interactive?: boolean
+}
+
+/** An incoming webhook of a channel. Its URL (with the secret) is only in the answer that made or rotated it. */
+export interface ChannelWebhook {
+  id: string
+  conversationId: string
+  name: string
+  iconUrl: string | null
+  createdBy: string
+  createdAt: number
+  rotatedAt: number | null
+  lastUsedAt: number | null
+  /** Where clicks on its buttons go; `null` when they are off. */
+  requestUrl: string | null
+}
+
+/** One click that Orbit sent to a webhook's request URL. */
+export interface WebhookDelivery {
+  id: string
+  actionId: string
+  /** The HTTP status of the answer; `null` when there was none. */
+  status: number | null
+  /** Why there was no good answer: `timeout`, `unreachable`, `blocked_address`, … */
+  error: string | null
+  durationMs: number
   createdAt: number
 }
 
@@ -162,6 +208,13 @@ export interface Message {
   lastReplyAt: number | null
   replyUserIds: string[]
   lastReply: ReplyPreview | null
+  /** Set when an integration posted the message. Missing on a row cached before integrations existed. */
+  bot?: MessageBot | null
+  /**
+   * Layout blocks of an integration's message (Slack Block Kit shape), shown in place of `body`; `body` is then their
+   * plain text for previews, quotes and search. Missing on a row cached before blocks existed.
+   */
+  blocks?: MessageBlock[] | null
   /** Client only: set on a message that the server has not confirmed. */
   sendState?: 'sending' | 'failed'
 }
@@ -257,6 +310,8 @@ export type ChatEvent =
   | { type: 'emoji.changed' }
   /** A sticker of the workspace was added or deleted: fetch the list again. */
   | { type: 'stickers.changed' }
+  /** An integration's reply that only the current user sees, until the page reloads. It is not stored. */
+  | { type: 'message.ephemeral'; message: Message }
   | { type: 'connection'; status: ConnectionStatus }
   /** The client missed events: refetch every chat query. */
   | { type: 'resync' }

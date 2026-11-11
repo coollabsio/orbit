@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useAuthOptions, useCurrentUser } from '@/features/auth/api'
 import { useInstanceSettings, useRemoveSmtp, useSaveSmtp, useSendTestEmail } from '@/features/admin/api'
 import { FieldGrid, RequiredMark } from '@/features/settings/components/SettingsParts'
+import { LoadingText } from '@/components/ui/spinner'
 
 // `items` lets Select.Value render the option label instead of the raw value.
 const SECURITY_OPTIONS: { value: SmtpSecurity; label: string }[] = [
@@ -28,7 +29,7 @@ function problemText(error: unknown, fallback: string) {
 /** The mail server for invitations, sign-up and password reset. */
 export function AdminEmailPage() {
   const settings = useInstanceSettings()
-  if (settings.isPending) return <SettingsCard title="Email"><p role="status">Loading settings…</p></SettingsCard>
+  if (settings.isPending) return <SettingsCard title="Email"><p><LoadingText>Loading settings…</LoadingText></p></SettingsCard>
   if (settings.isError) return <SettingsCard title="Email"><p role="alert">Settings could not be loaded. <Button variant="ghost" onClick={() => void settings.refetch()}>Retry</Button></p></SettingsCard>
   const smtp = settings.data.smtp ?? null
   // Remount on save so the form shows what the server stored.

@@ -10,18 +10,28 @@ import {
   deleteLabel,
   deleteTaskAttachment,
   deleteTaskRelation,
+  emptyTaskTrash,
+  getTrashedProject,
+  getTrashedTask,
   listCommentAttachments,
+  listProjectTrash,
   listTaskAttachments,
   listTaskRelations,
   listTasks,
+  listTaskTrash,
+  listTrashedProjectTasks,
+  purgeProject,
+  purgeTask,
+  restoreProject,
+  restoreTask,
   uploadTaskAttachments,
 } from '@orbit/api/generated/sdk.gen'
-import type { AttachmentRecord, CreateTaskBody, NewTaskRelationType, TaskRelationRecord } from '@orbit/api/generated/types.gen'
+import type { AttachmentRecord, CreateTaskBody, NewTaskRelationType, TaskRelationRecord, TrashedProject, TrashedTask } from '@orbit/api/generated/types.gen'
 
-import type { LabelRecord, OrbitClient, TaskRecord } from './orbit'
+import type { LabelRecord, OrbitClient, ProjectRecord, TaskRecord } from './orbit'
 import type { PickedFile } from './tasks'
 
-export type { AttachmentRecord, CreateTaskBody, NewTaskRelationType, TaskRelationRecord }
+export type { AttachmentRecord, CreateTaskBody, NewTaskRelationType, TaskRelationRecord, TrashedProject, TrashedTask }
 
 const task = (client: OrbitClient, workspaceId: string, taskId: string) => ({ client, path: { workspace_id: workspaceId, task_id: taskId }, throwOnError: true as const })
 
@@ -139,4 +149,52 @@ export async function uploadInline(client: OrbitClient, workspaceId: string, tas
 
 export async function removeAttachment(client: OrbitClient, workspaceId: string, taskId: string, attachmentId: string): Promise<void> {
   await deleteTaskAttachment({ client, path: { workspace_id: workspaceId, task_id: taskId, attachment_id: attachmentId }, throwOnError: true })
+}
+
+/** Projects in the trash, newest first. Their tasks are hidden with them. */
+export function projectTrash(client: OrbitClient, workspaceId: string): Promise<ProjectRecord[]> {
+  return allPages(async (cursor) => (await listProjectTrash({ client, path: { workspace_id: workspaceId }, query: { limit: 100, cursor }, throwOnError: true })).data)
+}
+
+/** Tasks in the trash of live projects, newest first. */
+export function taskTrash(client: OrbitClient, workspaceId: string): Promise<TaskRecord[]> {
+  return allPages(async (cursor) => (await listTaskTrash({ client, path: { workspace_id: workspaceId }, query: { limit: 100, cursor }, throwOnError: true })).data)
+}
+
+export async function restoreTrashedProject(client: OrbitClient, workspaceId: string, project: Pick<ProjectRecord, 'id' | 'version'>): Promise<ProjectRecord> {
+  return (await restoreProject({ client, path: { workspace_id: workspaceId, project_id: project.id }, body: { expected_version: project.version }, throwOnError: true })).data
+}
+
+export async function restoreTrashedTask(client: OrbitClient, workspaceId: string, item: Pick<TaskRecord, 'id' | 'version'>): Promise<TaskRecord> {
+  return (await restoreTask({ ...task(client, workspaceId, item.id), body: { expected_version: item.version } })).data
+}
+
+/** Deletes a trashed project forever with all its tasks. */
+export async function purgeTrashedProject(client: OrbitClient, workspaceId: string, projectId: string): Promise<void> {
+  await purgeProject({ client, path: { workspace_id: workspaceId, project_id: projectId }, throwOnError: true })
+}
+
+/** Deletes forever every trashed task and every trashed project with its tasks. */
+export async function emptyTrash(client: OrbitClient, workspaceId: string): Promise<{ purged_tasks: number; purged_projects: number }> {
+  return (await emptyTaskTrash({ client, path: { workspace_id: workspaceId }, throwOnError: true })).data
+}
+
+/** A task the trash shows (trashed, or in a trashed project) with its status, labels and who trashed it. */
+export async function trashedTask(client: OrbitClient, workspaceId: string, taskId: string): Promise<TrashedTask> {
+  return (await getTrashedTask(task(client, workspaceId, taskId))).data
+}
+
+/** A trashed project with its statuses and who trashed it. */
+export async function trashedProject(client: OrbitClient, workspaceId: string, projectId: string): Promise<TrashedProject> {
+  return (await getTrashedProject({ client, path: { workspace_id: workspaceId, project_id: projectId }, throwOnError: true })).data
+}
+
+/** Every task of a trashed project, by number. */
+export function trashedProjectTasks(client: OrbitClient, workspaceId: string, projectId: string): Promise<TaskRecord[]> {
+  return allPages(async (cursor) => (await listTrashedProjectTasks({ client, path: { workspace_id: workspaceId, project_id: projectId }, query: { limit: 100, cursor }, throwOnError: true })).data)
+}
+
+/** Deletes a trashed task forever with the sub-issues trashed with it. */
+export async function purgeTrashedTask(client: OrbitClient, workspaceId: string, taskId: string): Promise<void> {
+  await purgeTask(task(client, workspaceId, taskId))
 }

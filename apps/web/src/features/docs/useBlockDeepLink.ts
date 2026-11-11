@@ -13,9 +13,10 @@ export function findBlockElement(root: ParentNode, blockId: string): HTMLElement
   return root.querySelector<HTMLElement>(`[data-node-type="blockContainer"][data-id="${escaped}"]`)
 }
 
-export function useBlockDeepLink(pageId: string) {
+/** `pageId` is `null` for an editor that owns no body (a database page): it ignores the parameter. */
+export function useBlockDeepLink(pageId: string | null) {
   const [searchParams, setSearchParams] = useSearchParams()
-  const blockId = searchParams.get('block')
+  const blockId = pageId === null ? null : searchParams.get('block')
   useEffect(() => {
     if (!blockId) return
     let done = false
@@ -25,6 +26,8 @@ export function useBlockDeepLink(pageId: string) {
         (current) => {
           const next = new URLSearchParams(current)
           next.delete('block')
+          // A linked view block's view link (`&view=`): its block read the view when it mounted.
+          next.delete('view')
           return next
         },
         { replace: true },

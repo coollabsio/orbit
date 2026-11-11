@@ -15,7 +15,8 @@ use super::{
     ConversationStateRecord, Events, MEMBER_COLUMNS, MessageRecord, NotifyLevel, Recipients,
     ThreadMember, ThreadStateRecord, Written, conversation_from_row, current_state, finish,
     id_list, in_ids, load_access, load_actor, load_message, load_message_access,
-    load_thread_member, member_from_row, member_ids, parse_id, parse_optional_id,
+    load_thread_member, member_from_row, member_ids, parse_id, parse_optional_id, public_for,
+    reachable_dm,
 };
 
 /// Cursors that one `restore_read` call may put back.
@@ -66,7 +67,8 @@ impl ChatRepository {
         sqlx::query(sqlx::AssertSqlSafe(format!(
             "SELECT {CONVERSATION_COLUMNS}, {MEMBER_COLUMNS} FROM chat_members m \
              JOIN chat_conversations c ON c.id = m.conversation_id \
-             WHERE m.workspace_id = $1 AND m.user_id = $2 AND c.archived_at IS NULL"
+             WHERE m.workspace_id = $1 AND m.user_id = $2 AND c.archived_at IS NULL AND {}",
+            reachable_dm()
         )))
         .bind(workspace_id.to_string())
         .bind(actor_id.to_string())
@@ -251,7 +253,8 @@ impl ChatRepository {
             "SELECT {CONVERSATION_COLUMNS}, {MEMBER_COLUMNS} FROM chat_members m \
              JOIN chat_conversations c ON c.id = m.conversation_id \
              WHERE m.workspace_id = $1 AND m.user_id = $2 AND c.archived_at IS NULL \
-             AND c.message_count > m.read_count"
+             AND c.message_count > m.read_count AND {}",
+            reachable_dm()
         )))
         .bind(workspace_id.to_string())
         .bind(actor_id.to_string())
@@ -469,10 +472,13 @@ impl ChatRepository {
              AND user_id {} \
              AND EXISTS (SELECT 1 FROM chat_conversations c \
                          WHERE c.id = chat_thread_members.conversation_id \
-                           AND (c.kind = 'public' OR EXISTS ( \
+                           AND ({} OR EXISTS ( \
                                SELECT 1 FROM chat_members m WHERE m.conversation_id = c.id \
-                                 AND m.user_id = chat_thread_members.user_id)))",
-            in_ids(&*conn, 2)
+                                 AND m.user_id = chat_thread_members.user_id)) \
+                           AND {})",
+            in_ids(&*conn, 2),
+            public_for("chat_thread_members.user_id"),
+            reachable_dm()
         )))
         .bind(root_id.to_string())
         .bind(id_list(user_ids.iter().copied()))
@@ -551,7 +557,7 @@ pub(super) fn unread_count_sql(bounded: bool) -> String {
         "SELECT COUNT(*) AS unread, CAST(COALESCE(SUM(CASE WHEN m.mention_channel <> 0 OR m.mention_here <> 0 THEN 1 ELSE 0 END), 0) AS BIGINT) AS broadcasts \
          FROM chat_messages m WHERE m.conversation_id = $1 \
          AND (m.thread_root_id IS NULL OR m.also_in_channel = 1) AND m.kind = 'message' \
-         AND m.deleted_at IS NULL AND m.author_id <> $2 {after}"
+         AND m.deleted_at IS NULL AND (m.author_id <> $2 OR m.webhook_id IS NOT NULL) {after}"
     )
 }
 

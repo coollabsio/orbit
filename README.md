@@ -1,70 +1,50 @@
 # Orbit
 
-> PRETTY ALPHA, DO NOT USE IT IN PROD.
+A self-hosted workspace for teams: tasks, docs, chat, and mail in one app on
+your own server. AI clients connect over MCP and get the full context of your
+workspace without your data leaving your server.
 
-Orbit is a self-hosted workspace for teams. It puts tasks, documents, and team
-chat (and soon mail) in one application, so your team's work stays in one place
-and on your own server. The goal is an AI assistant that has the full context of every
-part of the workspace. Because Orbit runs on your server, the AI reads your data
-there, not in someone else's cloud.
+## Features
 
-## What is in Orbit
-
-- **Tasks**: projects with their own workflows, list and board views, sub-issues,
-  labels, comments, attachments, saved views, and GitHub sync.
-- **Docs**: a page tree with a rich editor, search, and trash.
+- **Tasks**: projects with custom workflows, list, board and timeline views,
+  sub-issues, labels, saved views, trash, GitHub sync, and Asana, Linear and Trello import.
+- **Docs**: page tree with live collaborative editing, version history, search,
+  and Notion import.
 - **Chat**: channels, direct messages, threads, files, and search.
-- **Mail**: a shared mail client. Work in progress; it uses mock data for now.
-- **AI assistant**: planned. Today, AI clients can read tasks through the
-  [MCP server](docs/mcp.md).
-- **Administration**: workspaces, members, invitations, roles, sessions, API
-  tokens, audit records, and instance settings.
+- **Mail**: shared mail client (in progress, mock data).
+- **AI**: [MCP server](docs/mcp.md) with OAuth. Read and write tasks and docs,
+  read chat. Set it up in **Account settings → Agentic**.
+- **Admin**: workspaces, members, roles, API tokens, audit log, email, rate
+  limits, storage, and workspace export.
+- **Backups**: scheduled, verified backups to S3, with restore of single pages
+  or tasks.
+- **Mobile**: iOS and Android app (`apps/mobile`). Saved views, timeline, tasks
+  trash, GitHub settings, export, API tokens, and Notion, Asana, Linear and Trello import are web-only.
 
-### Web-only features
+## How it works
 
-The iOS and Android app (`apps/mobile`) does not have these features yet. Use
-the web app for them:
+One binary. A Rust server serves the API and the embedded React app. Data is in
+SQLite (default) or Postgres, files on local disk or S3. Put a reverse proxy in
+front for HTTPS. Docker image: `ghcr.io/coollabsio/orbit:latest`.
 
-- Saved views
-- Timeline
-- Tasks trash
-- GitHub integration settings
-- Workspace export
-- API tokens
-- Notion import
+## Development
 
-## License
-
-Orbit is licensed under the [Apache License 2.0](LICENSE).
-
-## Technical details
-
-### How it works
-
-Orbit is one binary. A Rust server serves the API and the embedded React web
-application from one HTTP listener. Data is kept in SQLite (default) or
-Postgres. Attachments can be kept on local disk or in S3-compatible storage.
-Orbit can make scheduled, verified backups. Put a reverse proxy in front of Orbit for HTTPS.
-
-### Development
-
-You need Rust 1.97.1, Bun 1.4.4 or later, and [Just](https://just.systems/).
+Needs Rust 1.97.1, Bun 1.4.4+, and [Just](https://just.systems/).
 
 ```bash
 just setup
-just dev
+just dev   # http://127.0.0.1:8888
 ```
 
-Open <http://127.0.0.1:8888>. Run `just test` for the test suites or `just
-check` for all project checks.
+`just test` runs the tests, `just check` runs all checks.
 
-### Connect an AI client
-
-Orbit has a read-only MCP endpoint at `/mcp` with built-in OAuth. To connect
-Claude, Codex, or Grok, see [docs/mcp.md](docs/mcp.md).
-
-### Documentation
+## Docs
 
 - [Deployment and operations](docs/operations.md)
 - [MCP server and client setup](docs/mcp.md)
 - [GitHub integration](docs/github.md)
+- [Chat incoming webhooks](docs/chat-webhooks.md)
+
+## License
+
+[Apache 2.0](LICENSE)

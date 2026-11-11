@@ -3,7 +3,7 @@ import { ApiProblem } from '@orbit/api/problem'
 import { useMemo, useState, type ComponentProps } from 'react'
 import { cva, type VariantProps } from 'class-variance-authority'
 import { confirmAction } from '@/components/common/confirmAction'
-import { ArrowRight, Notification as Bell, Copy, Add as Plus, Search4 as Search, People as Users, Xmark as X } from 'reicon-react'
+import { Notification as Bell, Copy, Add as Plus, Search4 as Search, People as Users, Xmark as X } from 'reicon-react'
 import { cn } from 'cn'
 import { EmptyState } from '@/components/common/EmptyState'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
@@ -12,6 +12,7 @@ import { presenceOf, usePresence } from '@/features/realtime/presence'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Tip } from '@/components/common/Tip'
+import { ListPager, usePagedList } from '@/components/common/ListPager'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
@@ -27,14 +28,15 @@ import { FieldGrid, RequiredMark } from '@/features/settings/components/Settings
 import { useSlowPending } from '@/lib/useDebouncedValue'
 import { ProfileTrigger } from '@/components/common/ProfileTrigger'
 import { loadFailed } from '@/lib/connection'
+import { LoadingText } from '@/components/ui/spinner'
+import { GuestBadge } from '@/components/common/GuestBadge'
+import { GuestChannelsField } from '@/features/settings/components/GuestChannelsField'
+import { INVITABLE_ROLES, invitationRequest, type InvitableRole } from '@/features/settings/lib/invitation'
 
 type Role = User['role']
 type Sort = 'name_asc' | 'name_desc' | 'email_asc' | 'role'
 
-const ROLES: Role[] = ['Owner', 'Admin', 'Member']
-const PAGE_SIZES = [10, 25, 50, 100]
-// Owner is never a choice: that role only moves through an ownership transfer.
-const INVITABLE_ROLES = ['Admin', 'Member'] as const
+const ROLES: Role[] = ['Owner', 'Admin', 'Member', 'Guest']
 // `items` lets Select.Value render the option label instead of the raw value.
 const ROLE_FILTER_OPTIONS = [{ value: 'all', label: 'All roles' }, ...ROLES.map((role) => ({ value: role, label: role }))]
 const SORT_OPTIONS: { value: Sort; label: string }[] = [
@@ -43,7 +45,6 @@ const SORT_OPTIONS: { value: Sort; label: string }[] = [
   { value: 'email_asc', label: 'Email A–Z' },
   { value: 'role', label: 'Role' },
 ]
-const PAGE_SIZE_OPTIONS = PAGE_SIZES.map((size) => ({ value: String(size), label: String(size) }))
 const INVITE_ROLE_OPTIONS = INVITABLE_ROLES.map((role) => ({ value: role, label: role }))
 const EMPTY_USERS: User[] = []
 
@@ -71,12 +72,13 @@ export function MembersPage() {
   const [search, setSearch] = useState('')
   const [roleFilter, setRoleFilter] = useState<'all' | Role>('all')
   const [sortBy, setSortBy] = useState<Sort>('name_asc')
-  const [page, setPage] = useState(1)
-  const [perPage, setPerPage] = useState(10)
 
   const [inviteEmail, setInviteEmail] = useState('')
-  const [inviteRole, setInviteRole] = useState<(typeof INVITABLE_ROLES)[number]>('Member')
-  const [inviteLink, setInviteLink] = useState<string | null>(null)
+  const [inviteRole, setInviteRole] = useState<InvitableRole>('Member')
+  const [inviteChannels, setInviteChannels] = useState<string[]>([])
+  const [inviteProblem, setInviteProblem] = useState<string | null>(null)
+  // The role is the one the link was issued with, not the role picked since.
+  const [inviteLink, setInviteLink] = useState<{ url: string; role: InvitableRole } | null>(null)
   const [copied, setCopied] = useState(false)
   const [copyError, setCopyError] = useState(false)
 
@@ -95,23 +97,22 @@ export function MembersPage() {
       return a.name.localeCompare(b.name)
     })
   }, [users, search, roleFilter, sortBy])
+  const { visible, pager, resetPage } = usePagedList(filtered)
 
-  if (membersQuery.isPending) return <SettingsCard title="Members"><p>Loading workspace members…</p></SettingsCard>
+  if (membersQuery.isPending) return <SettingsCard title="Members"><p><LoadingText>Loading workspace members…</LoadingText></p></SettingsCard>
   if (loadFailed(membersQuery)) return <SettingsCard title="Members"><p role="alert">Workspace members could not be loaded. No mock data was substituted.</p></SettingsCard>
-
-  const lastPage = Math.max(1, Math.ceil(filtered.length / perPage))
-  const currentPage = Math.min(page, lastPage)
-  const firstRow = filtered.length === 0 ? 0 : (currentPage - 1) * perPage + 1
-  const lastRow = Math.min(currentPage * perPage, filtered.length)
-  const visible = filtered.slice((currentPage - 1) * perPage, currentPage * perPage)
 
   const generateLink = async (e: React.FormEvent) => {
     e.preventDefault()
     const email = inviteEmail.trim()
     if (!email) return
+    const role = inviteRole
+    const request = invitationRequest(email, role, inviteChannels, 'manual')
+    setInviteProblem('problem' in request ? request.problem : null)
+    if ('problem' in request) return
     try {
-      const response = await createInvitation.mutateAsync({ email, role: inviteRole.toLowerCase() as 'admin' | 'member', delivery: 'manual' })
-      setInviteLink(response.url ?? null)
+      const response = await createInvitation.mutateAsync(request.body)
+      setInviteLink(response.url ? { url: response.url, role } : null)
       setCopied(false)
     } catch {
       // Mutation feedback remains visible in the form.
@@ -121,8 +122,11 @@ export function MembersPage() {
   const emailInvitation = async () => {
     const email = inviteEmail.trim()
     if (!email) return
+    const request = invitationRequest(email, inviteRole, inviteChannels, 'smtp')
+    setInviteProblem('problem' in request ? request.problem : null)
+    if ('problem' in request) return
     try {
-      await createInvitation.mutateAsync({ email, role: inviteRole.toLowerCase() as 'admin' | 'member', delivery: 'smtp' })
+      await createInvitation.mutateAsync(request.body)
       setInviteLink(null)
       setInviteEmail('')
       toast(`Invitation sent to ${email}`)
@@ -134,7 +138,7 @@ export function MembersPage() {
   const copyLink = async () => {
     if (!inviteLink) return
     try {
-      await navigator.clipboard.writeText(inviteLink)
+      await navigator.clipboard.writeText(inviteLink.url)
       setCopied(true)
       setCopyError(false)
       toast('Invitation link copied')
@@ -161,7 +165,7 @@ export function MembersPage() {
               value={search}
               onChange={(e) => {
                 setSearch(e.target.value)
-                setPage(1)
+                resetPage()
               }}
             />
             {search ? (
@@ -172,7 +176,7 @@ export function MembersPage() {
                   aria-label="Clear search"
                   onClick={() => {
                     setSearch('')
-                    setPage(1)
+                    resetPage()
                   }}
                 >
                   <X className="size-3" />
@@ -186,7 +190,7 @@ export function MembersPage() {
               value={roleFilter}
               onValueChange={(value) => {
                 setRoleFilter(value as 'all' | Role)
-                setPage(1)
+                resetPage()
               }}
             >
               <SelectTrigger aria-label="Filter by role" className="w-36 max-[899px]:w-full">
@@ -201,7 +205,7 @@ export function MembersPage() {
               value={sortBy}
               onValueChange={(value) => {
                 setSortBy(value as Sort)
-                setPage(1)
+                resetPage()
               }}
             >
               <SelectTrigger aria-label="Sort members" className="w-40 max-[899px]:w-full">
@@ -243,7 +247,7 @@ export function MembersPage() {
                   </div>
                   <div className="truncate text-xs text-muted-foreground">{user.email}</div>
                   <div>
-                    <Badge variant="secondary">{user.role}</Badge>
+                    {user.role === 'Guest' ? <GuestBadge className="h-5 text-xs" /> : <Badge variant="secondary">{user.role}</Badge>}
                   </div>
                   <div className="flex justify-end">
                     {/* Your own row has no menu; the abilities themselves come from the server. */}
@@ -255,10 +259,16 @@ export function MembersPage() {
                           Manage
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-auto min-w-52">
-                          {(user.can.changeRole ? INVITABLE_ROLES : []).filter((role) => role !== user.role).map((role) => (
+                          {/* a guest becomes a member (and joins the public channels); nobody becomes a guest */}
+                          {user.can.changeRole && user.role === 'Guest' ? (
+                            <DropdownMenuItem onClick={() => changeRole.mutate({ membershipId: user.membershipId, version: user.version, role: 'member' })}>
+                              Convert to member
+                            </DropdownMenuItem>
+                          ) : null}
+                          {(user.can.changeRole && user.role !== 'Guest' ? (['Admin', 'Member'] as const) : []).filter((role) => role !== user.role).map((role) => (
                             <DropdownMenuItem
                               key={role}
-                              onClick={() => changeRole.mutate({ membershipId: user.membershipId, version: user.version, role: role.toLowerCase() as 'admin' | 'member' })}
+                              onClick={() => changeRole.mutate({ membershipId: user.membershipId, version: user.version, role: role === 'Admin' ? 'admin' : 'member' })}
                             >
                               Make {role.toLowerCase()}
                             </DropdownMenuItem>
@@ -290,54 +300,7 @@ export function MembersPage() {
                 </MemberRow>
               ))}
             </MemberTable>
-            <footer className="flex min-h-11 items-center justify-between border-t px-4 text-[11px] text-muted-foreground/70">
-              <div className="inline-flex h-7 items-center gap-3 whitespace-nowrap tabular-nums">
-                <span>
-                  {firstRow}-{lastRow} of {filtered.length}
-                </span>
-                <Select
-                  items={PAGE_SIZE_OPTIONS}
-                  value={String(perPage)}
-                  onValueChange={(value) => {
-                    setPerPage(Number(value))
-                    setPage(1)
-                  }}
-                >
-                  <SelectTrigger aria-label="Items per page" size="sm" className="w-16 px-2">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {PAGE_SIZE_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="flex items-center gap-1">
-                <Tip label="Previous page">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="icon-sm"
-                    aria-label="Previous page"
-                    disabled={currentPage <= 1}
-                    onClick={() => setPage(currentPage - 1)}
-                  >
-                    <ArrowRight className="size-3.5 rotate-180" />
-                  </Button>
-                </Tip>
-                <Tip label="Next page">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="icon-sm"
-                    aria-label="Next page"
-                    disabled={currentPage >= lastPage}
-                    onClick={() => setPage(currentPage + 1)}
-                  >
-                    <ArrowRight className="size-3.5" />
-                  </Button>
-                </Tip>
-              </div>
-            </footer>
+            <ListPager {...pager} />
           </>
         ) : (
           <div className="p-4">
@@ -363,7 +326,7 @@ export function MembersPage() {
             actions={
               <>
                 <Tip label={emailEnabled ? 'Email the invitation link' : 'Email delivery is not configured'}>
-                  <Button type="button" variant="outline" disabled={!emailEnabled || createInvitation.isPending} onClick={() => void emailInvitation()}>
+                  <Button type="button" variant="outline" disabled={!emailEnabled || createInvitation.isPending} onClick={(event) => { if (event.currentTarget.form?.reportValidity()) void emailInvitation() }}>
                     <Bell className="size-3.5" />
                     Send email
                   </Button>
@@ -393,7 +356,7 @@ export function MembersPage() {
                 <FieldLabel htmlFor="invite-role">
                   Role
                 </FieldLabel>
-                <Select items={INVITE_ROLE_OPTIONS} value={inviteRole} onValueChange={(value) => setInviteRole(value as (typeof INVITABLE_ROLES)[number])}>
+                <Select items={INVITE_ROLE_OPTIONS} value={inviteRole} onValueChange={(value) => setInviteRole(value as InvitableRole)}>
                   <SelectTrigger id="invite-role">
                     <SelectValue />
                   </SelectTrigger>
@@ -403,13 +366,15 @@ export function MembersPage() {
                 </Select>
               </Field>
             </FieldGrid>
+            {inviteRole === 'Guest' ? <GuestChannelsField value={inviteChannels} onChange={setInviteChannels} /> : null}
+            {inviteProblem ? <p role="alert" className="mt-2 text-destructive">{inviteProblem}</p> : null}
             {inviteLink ? (
               <div className="mt-4 flex items-end gap-2">
                 <Field>
                   <FieldLabel htmlFor="invite-link">
-                    Invitation link ({inviteRole})
+                    Invitation link ({inviteLink.role})
                   </FieldLabel>
-                  <Input id="invite-link" value={inviteLink} readOnly />
+                  <Input id="invite-link" value={inviteLink.url} readOnly />
                 </Field>
                 <Button type="button" variant="outline" onClick={copyLink}>
                   <Copy className="size-3.5" />
@@ -423,10 +388,10 @@ export function MembersPage() {
         </form>
       ) : null}
 
-      {canManage && invitations.isPending ? <SettingsCard title="Pending invitations"><p role="status">Loading invitations…</p></SettingsCard> : null}
+      {canManage && invitations.isPending ? <SettingsCard title="Pending invitations"><p><LoadingText>Loading invitations…</LoadingText></p></SettingsCard> : null}
       {canManage && invitations.isError ? <SettingsCard title="Pending invitations"><p role="alert">Invitations could not be loaded. <Button variant="ghost" onClick={() => void invitations.refetch()}>Retry</Button></p></SettingsCard> : null}
       {canManage && pendingInvitations.length > 0 ? (
-        <SettingsCard title="Pending invitations" description="Invitation links that have not been accepted." flush>
+        <SettingsCard title="Pending invitations" flush>
           <MemberTable>
             {pendingInvitations.map((invitation) => <MemberRow key={invitation.id}>
               <span className="truncate">{invitation.email}</span><span className="text-xs text-muted-foreground">Expires {new Date(invitation.expires_at).toLocaleDateString()}</span><Badge variant="secondary">{invitation.role}</Badge>

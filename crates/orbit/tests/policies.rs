@@ -91,8 +91,11 @@ fn admin_holds_every_permission_except_the_owner_only_ones() {
 }
 
 #[test]
-fn member_holds_no_role_permission() {
-    assert_eq!(Policy::permissions(WorkspaceRole::Member), []);
+fn member_holds_only_the_personal_export() {
+    assert_eq!(
+        Policy::permissions(WorkspaceRole::Member),
+        [Permission::WorkspaceExportPersonal]
+    );
 }
 
 #[test]
@@ -101,10 +104,11 @@ fn roles_round_trip_through_their_stored_names() {
         WorkspaceRole::Owner,
         WorkspaceRole::Admin,
         WorkspaceRole::Member,
+        WorkspaceRole::Guest,
     ] {
         assert_eq!(WorkspaceRole::parse(role.as_str()), Some(role));
     }
-    assert_eq!(WorkspaceRole::parse("guest"), None);
+    assert_eq!(WorkspaceRole::parse("visitor"), None);
 }
 
 #[test]
@@ -113,11 +117,16 @@ fn only_the_author_edits_a_comment_and_managers_may_also_delete_it() {
     let other = actor(WorkspaceRole::Member);
     let admin = actor(WorkspaceRole::Admin);
 
-    assert!(author.can_edit_comment(author.user_id));
-    assert!(!admin.can_edit_comment(author.user_id));
-    assert!(author.can_delete_comment(author.user_id));
-    assert!(admin.can_delete_comment(author.user_id));
-    assert!(!other.can_delete_comment(author.user_id));
+    assert!(author.can_edit_comment(Some(author.user_id)));
+    assert!(!admin.can_edit_comment(Some(author.user_id)));
+    assert!(author.can_delete_comment(Some(author.user_id)));
+    assert!(admin.can_delete_comment(Some(author.user_id)));
+    assert!(!other.can_delete_comment(Some(author.user_id)));
+    // A service account's comment: nobody edits it as its author; moderators delete it.
+    assert!(!author.can_edit_comment(None));
+    assert!(!admin.can_edit_comment(None));
+    assert!(admin.can_delete_comment(None));
+    assert!(!other.can_delete_comment(None));
 }
 
 #[test]
@@ -204,6 +213,47 @@ fn members_leave_but_do_not_remove_or_invite_others() {
     assert_eq!(
         actor(WorkspaceRole::Admin).invite(WorkspaceRole::Admin),
         Ok(())
+    );
+}
+
+#[test]
+fn guests_hold_no_permission_and_only_managers_invite_them() {
+    assert_eq!(Policy::permissions(WorkspaceRole::Guest), []);
+    assert!(actor(WorkspaceRole::Guest).is_guest());
+    assert!(!actor(WorkspaceRole::Member).is_guest());
+    assert_eq!(
+        actor(WorkspaceRole::Admin).invite(WorkspaceRole::Guest),
+        Ok(())
+    );
+    assert_eq!(
+        actor(WorkspaceRole::Member).invite(WorkspaceRole::Guest),
+        Err(MembershipDenied::RoleForbidden)
+    );
+    assert_eq!(
+        actor(WorkspaceRole::Guest).invite(WorkspaceRole::Guest),
+        Err(MembershipDenied::RoleForbidden)
+    );
+}
+
+#[test]
+fn a_guest_becomes_a_member_but_nobody_becomes_a_guest() {
+    let admin = actor(WorkspaceRole::Admin);
+
+    assert_eq!(
+        admin.change_member_role(WorkspaceRole::Guest, WorkspaceRole::Member),
+        Ok(())
+    );
+    assert_eq!(
+        admin.change_member_role(WorkspaceRole::Member, WorkspaceRole::Guest),
+        Err(MembershipDenied::GuestDowngrade)
+    );
+    assert_eq!(
+        admin.change_member_role(WorkspaceRole::Admin, WorkspaceRole::Guest),
+        Err(MembershipDenied::GuestDowngrade)
+    );
+    assert_eq!(
+        actor(WorkspaceRole::Guest).change_member_role(WorkspaceRole::Guest, WorkspaceRole::Member),
+        Err(MembershipDenied::RoleForbidden)
     );
 }
 

@@ -2,9 +2,13 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/noto-sans";
+/* KaTeX draws a Math code block. The rules stay in this file so production CSP (style-src 'self') keeps them. */
+@import "katex/dist/katex.min.css";
 
 /* BlockNote's shadcn menus use Tailwind classes from its compiled bundle; scan it so they get generated. */
 @source "../node_modules/@blocknote/shadcn";
+/* File players live in packages/editor (text, PDF, audio, video). */
+@source "../../../packages/editor/src";
 
 /* `.light` inside `.dark` (the custom theme on a light sidebar) switches the dark styles off again */
 @custom-variant dark (&:is(.dark *):not(:where(.light *)));
@@ -12,8 +16,6 @@
 /* Account settings → Appearance (lib/theme.tsx): Style → Flat, and Navigation style → Floating */
 @custom-variant flat (&:where([data-flat] *));
 @custom-variant floating (&:where([data-floating] *));
-/* Account settings → Appearance → Layout → New UI. `:is`, so `new-ui:dark:` beats a plain `dark:` */
-@custom-variant new-ui (&:is([data-new-ui] *));
 
 /* hover-only affordances (e.g. relation × buttons): real hover and a fine pointer; touch keeps them visible */
 @custom-variant hover-fine {
@@ -102,7 +104,8 @@
     --sidebar-foreground: oklch(0.145 0 0);
     --sidebar-primary: oklch(0.659 0.216 358.989);
     --sidebar-primary-foreground: oklch(1 0 0);
-    --sidebar-accent: oklch(0.97 0 0);
+    /* the selected row in a side list: the sidebar colour, a bit darker (lighter in dark mode) */
+    --sidebar-accent: color-mix(in oklch, var(--sidebar), black 6%);
     --sidebar-accent-foreground: oklch(0.205 0 0);
     --sidebar-border: oklch(0.922 0 0);
     --sidebar-ring: oklch(0.708 0 0);
@@ -146,7 +149,7 @@
     --sidebar-foreground: oklch(0.985 0 0);
     --sidebar-primary: oklch(0.659 0.216 358.989);
     --sidebar-primary-foreground: oklch(1 0 0);
-    --sidebar-accent: oklch(0.269 0 0);
+    --sidebar-accent: color-mix(in oklch, var(--sidebar), white 9%);
     --sidebar-accent-foreground: oklch(0.985 0 0);
     --sidebar-border: oklch(1 0 0 / 10%);
     --sidebar-ring: oklch(0.556 0 0);
@@ -159,15 +162,6 @@
     --sidebar-nav-active: oklch(0.9612 0 0);
     --sidebar-nav-muted: oklch(0.58 0.04 359);
     --sidebar-popover: color-mix(in oklab, var(--primary) 10%, oklch(0.2002 0 0));
-}
-
-/* New UI: the selected row in a side list is the sidebar colour, a bit darker (lighter in dark mode) */
-:root[data-new-ui] {
-    --sidebar-accent: color-mix(in oklch, var(--sidebar), black 6%);
-}
-
-:root.dark[data-new-ui] {
-    --sidebar-accent: color-mix(in oklch, var(--sidebar), white 9%);
 }
 
 @layer base {
@@ -470,6 +464,49 @@
 }
 
 /*
+ * Doc headings. BlockNote's defaults are 3em / 2em / 1.3em (48px / 32px / 21px on the 16px editor).
+ * Notion's page headings are about 30px / 24px / 20px, so h1 and h2 come down to that scale and h3 moves a little.
+ * h4 stays at 1em (16px): it is already the same size as the text. --prev-level is the size BlockNote
+ * animates from when a heading level changes. The page-editor slot outranks BlockNote's stylesheet.
+ */
+[data-slot='page-editor'] [data-content-type='heading'] {
+  --level: 1.875em;
+}
+[data-slot='page-editor'] [data-content-type='heading'][data-level='2'] {
+  --level: 1.5em;
+}
+[data-slot='page-editor'] [data-content-type='heading'][data-level='3'] {
+  --level: 1.25em;
+}
+[data-slot='page-editor'] [data-prev-level='1'] {
+  --prev-level: 1.875em;
+}
+[data-slot='page-editor'] [data-prev-level='2'] {
+  --prev-level: 1.5em;
+}
+[data-slot='page-editor'] [data-prev-level='3'] {
+  --prev-level: 1.25em;
+}
+
+/*
+ * Images keep their real size, and shrink only when they are wider than the column.
+ * BlockNote sets `width: 100%` on the picture, so a 1px image becomes a column-wide square.
+ * A width the user set is `previewWidth` (`width: Npx` on the wrapper); that picture still fills its box.
+ * The page-editor slot outranks BlockNote's stylesheet, which loads later.
+ */
+[data-slot='page-editor'] [data-content-type='image'] .bn-file-block-content-wrapper {
+  max-width: 100%;
+}
+[data-slot='page-editor'] [data-content-type='image'] .bn-visual-media {
+  width: auto;
+  max-width: 100%;
+  height: auto;
+}
+[data-slot='page-editor'] [data-content-type='image'] .bn-file-block-content-wrapper[style*='px'] .bn-visual-media {
+  width: 100%;
+}
+
+/*
  * Co-editing. Carets (collab/cursor.ts): BlockNote's flag, made a little larger and rounder; it shows while the person
  * types or moves and on hover. Block markers (collab/blockPresence.ts): initials in the right margin of the block each
  * other person is in, in their cursor color. The page scroller pads the text column by only 24px, so the marker hangs
@@ -614,4 +651,24 @@ html .bn-mobile-formatting-toolbar {
   transform-origin: left top;
   padding-top: env(safe-area-inset-top, 0px);
   padding-bottom: 0;
+}
+
+/* Blocks with their own UI (`data-editor-isolated`, the database block) render app components inside the editor.
+   BlockNote's unlayered `.bn-shadcn svg:not([class*=size-]) { width: revert }` and `.bn-shadcn .bn-editor a` outrank
+   the components' Tailwind sizes and colors there, so icons grow to their 24px attribute. `revert-layer` in this
+   unlayered rule drops every unlayered value, so the components' utilities apply as they do outside the editor. */
+.bn-shadcn [data-editor-isolated] svg:not([class*='size-']) {
+  width: revert-layer;
+  height: revert-layer;
+}
+.bn-shadcn .bn-editor [data-editor-isolated] a {
+  color: revert-layer;
+  text-decoration: revert-layer;
+}
+/* `.bn-default-styles :is(p, h1…h6, li) { font-size: inherit; margin: 0; padding: 0 }` would also strip the padding of
+   a list line or a form question card and the size of a form or calendar heading. */
+.bn-default-styles [data-editor-isolated] :is(p, h1, h2, h3, h4, h5, h6, li) {
+  font-size: revert-layer;
+  margin: revert-layer;
+  padding: revert-layer;
 }

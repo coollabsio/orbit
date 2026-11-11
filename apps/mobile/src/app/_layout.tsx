@@ -11,11 +11,12 @@ import { useFonts } from 'expo-font'
 import { useEffect, useState } from 'react'
 import { AppState, View } from 'react-native'
 
+import { NoWorkspace } from '../components/NoWorkspace'
 import { OrbitProvider } from '../orbit-context'
 import { SessionProvider, useSession } from '../session-context'
 import { fonts, loadAppearance, palettes, type Theme, useTheme } from '../theme'
 import { AppColorScope, useAppPalette } from '../theme/ColorScope'
-import { Button, EmptyState } from '../ui'
+import { Button, EmptyState, OrbitLoader, Text } from '../ui'
 
 void SplashScreen.preventAutoHideAsync()
 
@@ -73,7 +74,7 @@ export default function RootLayout() {
 
 function RootNavigator({ fontsReady }: { fontsReady: boolean }) {
   const { state } = useSession()
-  // the root is above `AppColorScope`, so it reads the app's colours itself (custom theme in the new UI)
+  // the root is above `AppColorScope`, so it reads the app's colours itself (with the custom theme)
   const palette = useAppPalette()
   const theme = { ...useTheme(), scheme: palette.scheme, colors: { ...palettes[palette.scheme], ...palette.colors } }
   const [schemeLoaded, setSchemeLoaded] = useState(false)
@@ -108,7 +109,8 @@ function RootNavigator({ fontsReady }: { fontsReady: boolean }) {
       }}
     >
       <Stack.Protected guard={signedIn}>
-        <Stack.Screen name="(tabs)" />
+        {/* signing in or out swaps the whole app: no push animation */}
+        <Stack.Screen name="(tabs)" options={{ animation: 'none' }} />
         <Stack.Screen name="chat/[id]" />
         <Stack.Screen name="chat/[id]/members" />
         <Stack.Screen name="chat/[id]/search" />
@@ -121,7 +123,7 @@ function RootNavigator({ fontsReady }: { fontsReady: boolean }) {
         <Stack.Screen name="chat/browse" />
       </Stack.Protected>
       <Stack.Protected guard={!signedIn}>
-        <Stack.Screen name="sign-in" />
+        <Stack.Screen name="sign-in" options={{ animation: 'none' }} />
       </Stack.Protected>
     </Stack>
   )
@@ -130,7 +132,7 @@ function RootNavigator({ fontsReady }: { fontsReady: boolean }) {
     <AppColorScope>
       <ThemeProvider value={navigationTheme(theme)}>
         <StatusBar style={theme.scheme === 'dark' ? 'light' : 'dark'} />
-        {state.status === 'offline' ? <SessionOffline server={state.session.server} /> : signedIn ? <OrbitProvider>{stack}</OrbitProvider> : stack}
+        {state.status === 'offline' ? <SessionOffline server={state.session.server} /> : signedIn ? <OrbitProvider noWorkspace={<NoWorkspace />}>{stack}</OrbitProvider> : stack}
       </ThemeProvider>
     </AppColorScope>
   )
@@ -141,21 +143,24 @@ function SessionOffline({ server }: { server: string }) {
   const { retry, signOut } = useSession()
   const [retrying, setRetrying] = useState(false)
   return (
-    <View className="flex-1 bg-background">
-      <EmptyState
-        icon="danger"
-        title="Orbit is unavailable"
-        description={`${server.replace(/^https?:\/\//, '')} could not verify this session. Check your connection and retry.`}
-        action={
-          <View className="items-center gap-2">
-            <Button label="Retry" loading={retrying} onPress={() => {
-              setRetrying(true)
-              void retry().finally(() => setRetrying(false))
-            }} />
-            <Button label="Sign out" variant="ghost" muted onPress={() => void signOut()} />
-          </View>
-        }
-      />
+    // the web's `OrbitUnavailable`: the pixel "O" loader, why, and Retry
+    <View className="flex-1 items-center justify-center bg-background p-6">
+      <View accessibilityRole="alert" className="max-w-[384px] items-center gap-4">
+        <OrbitLoader />
+        <View className="items-center gap-1.5">
+          <Text className="text-center font-noto-semibold text-[18px] leading-[28px]">Orbit is unavailable</Text>
+          <Text className="text-center text-[14px] leading-[22.4px] text-muted-foreground">
+            {`${server.replace(/^https?:\/\//, '')} could not verify this session. Check your connection and retry.`}
+          </Text>
+        </View>
+        <View className="items-center gap-2">
+          <Button label="Retry" loading={retrying} onPress={() => {
+            setRetrying(true)
+            void retry().finally(() => setRetrying(false))
+          }} />
+          <Button label="Sign out" variant="ghost" muted onPress={() => void signOut()} />
+        </View>
+      </View>
     </View>
   )
 }

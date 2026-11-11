@@ -12,6 +12,10 @@ import { ProjectSettingsPage } from '@/features/tasks/pages/ProjectSettingsPage'
 import { TasksPage } from '@/features/tasks/pages/TasksPage'
 import { HomePage } from '@/features/home/pages/HomePage'
 import { TaskTrashPage } from '@/features/tasks/pages/TaskTrashPage'
+import { TrashedProjectPage, TrashedTaskPage } from '@/features/tasks/pages/TaskTrashPreviewPage'
+import { AsanaImportPage } from '@/features/tasks/pages/AsanaImportPage'
+import { LinearImportPage } from '@/features/tasks/pages/LinearImportPage'
+import { TrelloImportPage } from '@/features/tasks/pages/TrelloImportPage'
 import { DocsPage } from '@/features/docs/pages/DocsPage'
 import { AccountLayout, AdminLayout, SettingsLayout } from '@/features/settings/pages/SettingsLayout'
 import { AdminAuditPage } from '@/features/admin/pages/AdminAuditPage'
@@ -29,6 +33,8 @@ import { GithubPage } from '@/features/settings/pages/GithubPage'
 import { EmojiPage } from '@/features/settings/pages/EmojiPage'
 import { DangerZonePage } from '@/features/settings/pages/DangerZonePage'
 import { ExportPage } from '@/features/settings/pages/ExportPage'
+import { ImportPage } from '@/features/settings/pages/ImportPage'
+import { OrbitImportPage } from '@/features/settings/pages/OrbitImportPage'
 import { BillingPage } from '@/features/settings/pages/BillingPage'
 import { MembersPage } from '@/features/settings/pages/MembersPage'
 import { SecurityPage } from '@/features/settings/pages/SecurityPage'
@@ -60,6 +66,7 @@ import { RegisterPage } from '@/features/auth/pages/RegisterPage'
 import { SetupPage } from '@/features/auth/pages/SetupPage'
 import { OnboardingPage } from '@/features/onboarding/OnboardingPage'
 import { WorkspaceProvider } from '@/features/workspaces/WorkspaceProvider'
+import { GuestWorkspaceGate } from '@/features/workspaces/GuestWorkspaceGate'
 import { ViewsPage } from '@/features/views/ViewsPage'
 
 /** Hands the router's navigate function to non-component code (markdown links). */
@@ -101,81 +108,97 @@ export default function App() {
           <Route path="onboarding" element={<OnboardingPage />} />
           <Route element={<WorkspaceProvider><Outlet /></WorkspaceProvider>}>
             <Route element={<AppShell />}>
-              <Route index element={<HomePage />} />
-              <Route path="tasks" element={<TasksPage />} />
-              <Route path="tasks/projects/:projectId/settings" element={<ProjectSettingsPage />} />
-              <Route path="tasks/:taskId" element={<TasksPage />} />
-              <Route path="tasks-trash" element={<TaskTrashPage />} />
-              <Route path="views" element={<ViewsPage />} />
-              <Route path="views/:viewId" element={<TasksPage />} />
-              <Route path="views/:viewId/:taskId" element={<TasksPage />} />
-              <Route path="docs/trash" element={<DocsPage view="trash" />} />
-              <Route path="docs/import/:importId?" element={<DocsPage view="import" />} />
-              <Route path="docs/:pageId?" element={<DocsPage />} />
-              <Route path="mail/*" element={<MailPage />} />
-              {chatEnabled ? (
-                <>
-                  <Route path="chat" element={<ChatPage />} />
-                  <Route path="chat/unreads" element={<ChatPage />} />
-                  <Route path="chat/threads" element={<ChatPage />} />
-                  <Route path="chat/:conversationId" element={<ChatPage />} />
-                  <Route path="chat/:conversationId/thread/:messageId" element={<ChatPage />} />
-                </>
-              ) : (
-                <Route path="chat/*" element={<Navigate to="/tasks" replace />} />
-              )}
-              <Route path="dm/*" element={<Navigate to={chatEnabled ? '/chat' : '/tasks'} replace />} />
-              <Route path="activity" element={<InboxPage />} />
-              <Route path="inbox" element={<MovedTo path="/activity" />} />
-              <Route path="profile" element={<AccountLayout />}>
-                <Route index element={<ProfilePage />} />
-                <Route path="appearance" element={<AppearancePage />} />
-                <Route path="notifications" element={<NotificationsPage />} />
-                <Route path="security" element={<SecurityPage />} />
-                <Route path="sessions" element={<SessionsPage />} />
-                <Route path="agentic" element={<AgenticPage />} />
-                <Route path="shortcuts" element={<ShortcutsPage />} />
-                <Route path="storage" element={<StoragePage />} />
+              <Route element={<GuestWorkspaceGate />}>
+                <Route index element={<HomePage />} />
+                <Route path="tasks" element={<TasksPage />} />
+                <Route path="tasks/projects/:projectId/settings" element={<ProjectSettingsPage />} />
+                <Route path="tasks/:taskId" element={<TasksPage />} />
+                <Route path="tasks-trash" element={<TaskTrashPage />} />
+                <Route path="tasks-trash/task/:taskId" element={<TrashedTaskPage />} />
+                <Route path="tasks-trash/project/:projectId" element={<TrashedProjectPage />} />
+                <Route path="tasks-import/:importId?" element={<AsanaImportPage />} />
+                <Route path="tasks-import/linear/:importId?" element={<LinearImportPage />} />
+                <Route path="tasks-import/trello/:importId?" element={<TrelloImportPage />} />
+                <Route path="views" element={<ViewsPage />} />
+                <Route path="views/:viewId" element={<TasksPage />} />
+                <Route path="views/:viewId/:taskId" element={<TasksPage />} />
+                <Route path="docs/trash" element={<DocsPage view="trash" />} />
+                <Route path="docs/trash/:pageId" element={<DocsPage view="trash" />} />
+                <Route path="docs/import/csv" element={<DocsPage view="csv-import" />} />
+                <Route path="docs/import/obsidian/:importId?" element={<DocsPage view="obsidian-import" />} />
+                <Route path="docs/import/:importId?" element={<DocsPage view="import" />} />
+                <Route path="docs/:pageId/form/:viewId" element={<DocsPage view="form" />} />
+                <Route path="docs/:pageId?" element={<DocsPage />} />
+                <Route path="mail/*" element={<MailPage />} />
+                {chatEnabled ? (
+                  <>
+                    <Route path="chat" element={<ChatPage />} />
+                    <Route path="chat/unreads" element={<ChatPage />} />
+                    <Route path="chat/threads" element={<ChatPage />} />
+                    <Route path="chat/:conversationId" element={<ChatPage />} />
+                    <Route path="chat/:conversationId/thread/:messageId" element={<ChatPage />} />
+                  </>
+                ) : (
+                  <Route path="chat/*" element={<Navigate to="/tasks" replace />} />
+                )}
+                <Route path="dm/*" element={<Navigate to={chatEnabled ? '/chat' : '/tasks'} replace />} />
+                <Route path="activity" element={<InboxPage />} />
+                <Route path="inbox" element={<MovedTo path="/activity" />} />
+                <Route path="profile" element={<AccountLayout />}>
+                  <Route index element={<ProfilePage />} />
+                  <Route path="general" element={<ProfilePage />} />
+                  <Route path="appearance" element={<AppearancePage />} />
+                  <Route path="notifications" element={<NotificationsPage />} />
+                  <Route path="security" element={<SecurityPage />} />
+                  <Route path="sessions" element={<SessionsPage />} />
+                  <Route path="agentic" element={<AgenticPage />} />
+                  <Route path="shortcuts" element={<ShortcutsPage />} />
+                  <Route path="storage" element={<StoragePage />} />
+                </Route>
+                <Route path="admin" element={<AdminLayout />}>
+                  <Route index element={<AdminSettingsPage />} />
+                  <Route path="general" element={<AdminSettingsPage />} />
+                  <Route path="users" element={<AdminUsersPage />} />
+                  <Route path="email" element={<AdminEmailPage />} />
+                  <Route path="sign-in-providers" element={<AdminSignInProvidersPage />} />
+                  <Route path="limits" element={<AdminLimitsPage />} />
+                  <Route path="audit" element={<AdminAuditPage />} />
+                  <Route path="storage" element={<AdminStoragePage />} />
+                  <Route path="backups" element={<AdminBackupsPage />} />
+                  <Route path="jobs" element={<AdminJobsPage />} />
+                  <Route path="mail" element={<AdminMailPage />} />
+                </Route>
+                <Route path="settings" element={<SettingsLayout />}>
+                  <Route index element={<GeneralPage />} />
+                  <Route path="general" element={<GeneralPage />} />
+                  {/* labels belong to a project now: each project's settings has them */}
+                  <Route path="labels" element={<Navigate to="/tasks" replace />} />
+                  <Route path="emoji" element={<EmojiPage />} />
+                  <Route path="stickers" element={<StickersPage />} />
+                  <Route path="github" element={<GithubPage />} />
+                  <Route path="agentic" element={<AgenticPage />} />
+                  <Route path="billing" element={<BillingPage />} />
+                  <Route path="import" element={<ImportPage />} />
+                  <Route path="import/orbit/:importId?" element={<OrbitImportPage />} />
+                  <Route path="export" element={<ExportPage />} />
+                  <Route path="danger-zone" element={<DangerZonePage />} />
+                  <Route path="members" element={<MembersPage />} />
+                  <Route path="invitations" element={<Navigate to="/settings/members" replace />} />
+                  {/* these moved to the account settings; old links and bookmarks still work */}
+                  <Route path="sessions" element={<MovedTo path="/profile/sessions" />} />
+                  <Route path="shortcuts" element={<MovedTo path="/profile/shortcuts" />} />
+                  <Route path="notifications" element={<MovedTo path="/profile/notifications" />} />
+                  <Route path="api-tokens" element={<ApiTokensPage />} />
+                  <Route path="mail" element={<Navigate to="/settings/mail/domains" replace />} />
+                  <Route path="mail/domains" element={<MailDomainsPage />} />
+                  <Route path="mail/providers" element={<MailProvidersPage />} />
+                  <Route path="mail/mailboxes" element={<MailMailboxesPage />} />
+                  <Route path="mail/labels" element={<MailLabelsPage />} />
+                  <Route path="mail/failed" element={<FailedMailPage />} />
+                  <Route path="file-storage" element={<FileStoragePage />} />
+                </Route>
+                <Route path="*" element={<Navigate to="/tasks" replace />} />
               </Route>
-              <Route path="admin" element={<AdminLayout />}>
-                <Route index element={<AdminSettingsPage />} />
-                <Route path="users" element={<AdminUsersPage />} />
-                <Route path="email" element={<AdminEmailPage />} />
-                <Route path="sign-in-providers" element={<AdminSignInProvidersPage />} />
-                <Route path="limits" element={<AdminLimitsPage />} />
-                <Route path="audit" element={<AdminAuditPage />} />
-                <Route path="storage" element={<AdminStoragePage />} />
-                <Route path="backups" element={<AdminBackupsPage />} />
-                <Route path="jobs" element={<AdminJobsPage />} />
-                <Route path="mail" element={<AdminMailPage />} />
-              </Route>
-              <Route path="settings" element={<SettingsLayout />}>
-                <Route index element={<GeneralPage />} />
-                {/* labels belong to a project now: each project's settings has them */}
-                <Route path="labels" element={<Navigate to="/tasks" replace />} />
-                <Route path="emoji" element={<EmojiPage />} />
-                <Route path="stickers" element={<StickersPage />} />
-                <Route path="github" element={<GithubPage />} />
-                <Route path="agentic" element={<AgenticPage />} />
-                <Route path="billing" element={<BillingPage />} />
-                <Route path="export" element={<ExportPage />} />
-                <Route path="danger-zone" element={<DangerZonePage />} />
-                <Route path="members" element={<MembersPage />} />
-                <Route path="invitations" element={<Navigate to="/settings/members" replace />} />
-                {/* these moved to the account settings; old links and bookmarks still work */}
-                <Route path="sessions" element={<MovedTo path="/profile/sessions" />} />
-                <Route path="shortcuts" element={<MovedTo path="/profile/shortcuts" />} />
-                <Route path="notifications" element={<MovedTo path="/profile/notifications" />} />
-                <Route path="api-tokens" element={<ApiTokensPage />} />
-                <Route path="mail" element={<Navigate to="/settings/mail/domains" replace />} />
-                <Route path="mail/domains" element={<MailDomainsPage />} />
-                <Route path="mail/providers" element={<MailProvidersPage />} />
-                <Route path="mail/mailboxes" element={<MailMailboxesPage />} />
-                <Route path="mail/labels" element={<MailLabelsPage />} />
-                <Route path="mail/failed" element={<FailedMailPage />} />
-                <Route path="file-storage" element={<FileStoragePage />} />
-              </Route>
-              <Route path="*" element={<Navigate to="/tasks" replace />} />
             </Route>
           </Route>
         </Route>

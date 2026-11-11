@@ -1,5 +1,5 @@
 // Page options in the docs editor: full width, lock (read-only rendering, live lock over the collab socket), the
-// "Edited … by …" header label, and the recent-page visit.
+// "Last edited by …" in the page menu, and the recent-page visit.
 import { afterEach, beforeAll, expect, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, fireEvent, render, waitFor, within } from '@testing-library/react'
@@ -30,7 +30,7 @@ afterEach(() => {
 
 const MINUTE = 60_000
 const summary = (id: string, title = id): PageSummary => ({
-  id, parent_id: null, teamspace_id: 'teamspace-1', private: false, position: 0, title, icon: null, version: 1,
+  id, parent_id: null, teamspace_id: 'teamspace-1', private: false, kind: 'page', position: 0, title, icon: null, version: 1,
   updated_at: '2026-09-25T10:00:00Z',
 })
 const teamspaces: Teamspace[] = [{
@@ -39,7 +39,7 @@ const teamspaces: Teamspace[] = [{
 }]
 const mia = { id: 'user-2', display_name: 'Mia Member' }
 const page = (patch: Partial<Page> = {}): Page => ({
-  ...summary('first', 'Plan'), workspace_id: 'workspace-1', cover_url: null, cover_position: null,
+  ...summary('first', 'Plan'), database_id: null, workspace_id: 'workspace-1', cover_url: null, cover_position: null,
   content: [{ id: 'b1', type: 'paragraph', props: {}, content: [{ type: 'text', text: 'Body text', styles: {} }], children: [] }],
   creator_id: 'user-1', updated_by: 'user-2', created_at: '2026-09-25T10:00:00Z', deleted_at: null, collab_epoch: 'epoch-1',
   updated_at: new Date(Date.now() - 5 * MINUTE).toISOString(),
@@ -135,8 +135,9 @@ test('the Full width toggle saves with expected_version and widens the column', 
   await waitFor(() => expect(calls.some((call) => call.method === 'PATCH')).toBeTrue())
   expect(calls.find((call) => call.method === 'PATCH')?.body).toEqual({ full_width: true, expected_version: 1 })
   await waitFor(() => expect(view.container.querySelector('[data-full-width]')).toBeTruthy())
-  // The label still names the last editor: layout is not an edit.
-  expect(view.container.querySelector('[data-last-edited]')?.textContent).toBe('Edited 5 minutes ago by Mia Member')
+  // The menu still names the last editor: layout is not an edit.
+  if (!view.baseElement.querySelector('[data-last-edited]')) openMenu(view)
+  expect((await view.findByText('Last edited by Mia Member')).textContent).toBe('Last edited by Mia Member')
 })
 
 test('Lock page locks it: read-only editor, title and icon, a badge with Unlock', async () => {
@@ -179,12 +180,13 @@ test('a page locked by someone else opens read-only; the lock arriving live turn
   expect(await view.findByRole('menuitem', { name: 'Unlock page' })).toBeTruthy()
 })
 
-test('"Edited … by …" names the last editor and follows live edits of collaborators', async () => {
+test('"Last edited by …" names the last editor and follows live edits of collaborators', async () => {
   const ref = { current: page() }
   const { view, collab } = setup(ref)
   await editorEditable(view, true)
-  const label = () => view.container.querySelector('[data-last-edited]')?.textContent
-  expect(label()).toBe('Edited 5 minutes ago by Mia Member')
+  openMenu(view)
+  const label = () => view.baseElement.querySelector('[data-last-edited]')?.textContent
+  await waitFor(() => expect(label()).toBe('Last edited by Mia Member'))
 
   // Someone else types: attributed through their awareness user.
   const { doc, provider } = collab.last()
@@ -204,14 +206,14 @@ test('"Edited … by …" names the last editor and follows live edits of collab
   }
   firstText(peerDoc.getXmlFragment('prosemirror'))!.insert(0, 'x')
   act(() => Y.applyUpdate(doc, Y.encodeStateAsUpdate(peerDoc, before), provider))
-  await waitFor(() => expect(label()).toBe('Edited just now by Sam Peer'))
+  await waitFor(() => expect(label()).toBe('Last edited by Sam Peer'))
   peer.destroy()
   peerDoc.destroy()
 
   // A page refetch with our own newer edit reads "by you".
   ref.current = { ...ref.current, updated_by_user: { id: 'user-1', display_name: 'Ada Owner' }, updated_by: 'user-1', updated_at: new Date(Date.now() + 1000).toISOString() }
   act(() => collab.last().provider.drop(4409))
-  await waitFor(() => expect(label()).toBe('Edited just now by you'))
+  await waitFor(() => expect(label()).toBe('Last edited by you'))
 })
 
 test('opening a page records one visit after a short dwell', async () => {

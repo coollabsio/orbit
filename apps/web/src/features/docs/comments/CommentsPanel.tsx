@@ -3,6 +3,7 @@ import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Tip } from '@/components/common/Tip'
+import { LoadingText } from '@/components/ui/spinner'
 
 export type CommentsFilter = 'open' | 'resolved'
 
@@ -73,7 +74,7 @@ export function CommentsPanel({
               <CommentIcon className="size-[18px]" aria-hidden="true" />
             </span>
             {loading ? (
-              <p className="text-[13px] text-muted-foreground">Loading comments…</p>
+              <p className="text-[13px] text-muted-foreground"><LoadingText>Loading comments…</LoadingText></p>
             ) : filter === 'open' ? (
               <>
                 <p className="text-[13px] font-medium text-foreground">No open comments</p>

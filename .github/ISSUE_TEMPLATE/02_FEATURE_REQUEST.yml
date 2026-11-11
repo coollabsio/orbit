@@ -1,0 +1,49 @@
+name: 💡 Feature Request
+description: "Suggest a new feature for Orbit."
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        > [!NOTE]
+        > Please search [existing issues](https://github.com/coollabsio/orbit/issues?q=is%3Aissue) (including closed ones) before you submit a request.
+
+  - type: textarea
+    attributes:
+      label: Problem
+      description: What problem do you want to solve? Why is it important to you?
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: Proposed Solution
+      description: Describe how the feature should work.
+    validations:
+      required: true
+
+  - type: dropdown
+    attributes:
+      label: Area
+      options:
+        - "Tasks"
+        - "Docs"
+        - "Mail"
+        - "Chat"
+        - "AI / MCP"
+        - "Public API"
+        - "Admin / Operations"
+        - "Other"
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: Alternatives
+      description: Other solutions or workarounds you tried.
+
+  - type: textarea
+    attributes:
+      label: Additional Information
+      description: Mockups, screenshots, or links to similar features in other tools.
