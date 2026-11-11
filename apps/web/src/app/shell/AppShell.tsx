@@ -33,7 +33,7 @@ import { ReadOnlyBanner } from './ReadOnlyBanner'
 import { SidebarNav } from './SidebarNav'
 import { Topbar } from './Topbar'
 import { UserMenu } from './UserMenu'
-import { SidebarResizeHandle, usePageListWidth } from './pageListWidth'
+import { NAV_WIDTH, PAGE_LIST_WIDTH, SidebarResizeHandle, useSidebarWidth } from './pageListWidth'
 import { MobileDock } from './MobileDock'
 import { DonationReminder } from './DonationReminder'
 import { ProfilePopoverProvider } from './ProfilePopover'
@@ -100,8 +100,12 @@ function Shell() {
     setDrawerOpen(false)
   }
   const hostsList = desktop && !sidebarCollapsed && hostsPageList(pathname)
-  // a long page tree needs room: the sidebar that holds it can be dragged wider
-  const [pageListWidth, setPageListWidth] = usePageListWidth()
+  // the expanded desktop sidebar can be dragged wider; a page tree or chat list keeps its own width
+  const resizable = desktop && !sidebarCollapsed
+  const widthRange = hostsList ? PAGE_LIST_WIDTH : NAV_WIDTH
+  const [pageListWidth, setPageListWidth] = useSidebarWidth(PAGE_LIST_WIDTH)
+  const [navWidth, setNavWidth] = useSidebarWidth(NAV_WIDTH)
+  const [sidebarWidth, setSidebarWidth] = hostsList ? [pageListWidth, setPageListWidth] : [navWidth, setNavWidth]
   const [resizing, setResizing] = useState(false)
   const [pageListSlot, setPageListSlot] = useState<HTMLElement | null>(null)
   // Account settings → Appearance → Custom colours the sidebar too, not only chat
@@ -161,13 +165,13 @@ function Shell() {
         className={cn(
           sidebarTheme.scheme,
           'relative flex shrink-0 flex-col overflow-hidden border-r border-sidebar-edge bg-sidebar bg-linear-to-b from-sidebar-wash to-transparent to-[520px] px-3 text-sidebar-foreground transition-[width,padding] duration-200 ease-out max-[899px]:hidden floating:rounded-lg floating:border',
-          sidebarCollapsed ? 'w-16' : !hostsList && 'w-56',
+          sidebarCollapsed ? 'w-16' : !resizable && 'w-56',
           resizing && 'transition-none select-none',
         )}
         data-collapsed={sidebarCollapsed || undefined}
-        style={hostsList ? { ...sidebarTheme.style, width: pageListWidth } : sidebarTheme.style}
+        style={resizable ? { ...sidebarTheme.style, width: sidebarWidth } : sidebarTheme.style}
       >
-        {hostsList && <SidebarResizeHandle width={pageListWidth} onResize={setPageListWidth} onDragging={setResizing} />}
+        {resizable && <SidebarResizeHandle width={sidebarWidth} range={widthRange} onResize={setSidebarWidth} onDragging={setResizing} />}
         <MenuSurfaceContext value={menuSurface}>
           <div
             className={cn(

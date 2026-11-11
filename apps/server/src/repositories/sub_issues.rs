@@ -9,6 +9,7 @@ use serde_json::json;
 use sqlx::{Any, AnyPool, Transaction};
 use utoipa::ToSchema;
 
+use super::project_access::ProjectScope;
 use super::tasks::{TaskError, TaskRef, parse_id};
 use crate::audit::{self, AuditOutcome};
 
@@ -16,38 +17,51 @@ use crate::audit::{self, AuditOutcome};
 /// only keeps a corrupt database from looping.
 const MAX_DEPTH: i64 = 1_000;
 
-/// A task's parent is visible when it is live and its project is too. The rule behind the
+/// A task's parent is visible when it is live, its project is too and the reader sees that
+/// project. The rule behind the
 /// `parent` field, the `ancestors` walk and the `hidden` sub-issue display; `parent` and
 /// `parent_project` are the aliases it expects.
 const VISIBLE_PARENT_FROM: &str =
     "tasks AS parent JOIN projects AS parent_project ON parent_project.id = parent.project_id";
-const VISIBLE_PARENT_WHERE: &str =
-    "parent.deleted_at IS NULL AND parent_project.deleted_at IS NULL";
+fn visible_parent_where(scope: ProjectScope) -> String {
+    format!(
+        "parent.deleted_at IS NULL AND parent_project.deleted_at IS NULL AND {}",
+        scope.project("parent.project_id")
+    )
+}
 
 /// Correlated subquery rendering the visible parent `parent_id_sql` as a `TaskRef` JSON object,
 /// or NULL when there is none or it (or its project) is in the trash.
-pub(super) fn parent_subquery(backend: Backend, parent_id_sql: &str) -> String {
+pub(super) fn parent_subquery(
+    backend: Backend,
+    scope: ProjectScope,
+    parent_id_sql: &str,
+) -> String {
+    let visible = visible_parent_where(scope);
     let (open, close) = super::tasks::json_object_sql(backend);
     format!(
         "(SELECT {open}'id', parent.id, 'project_id', parent.project_id, \
          'project_key', parent_project.project_key, 'number', parent.number, 'title', parent.title{close} \
-         FROM {VISIBLE_PARENT_FROM} WHERE parent.id = {parent_id_sql} AND {VISIBLE_PARENT_WHERE})"
+         FROM {VISIBLE_PARENT_FROM} WHERE parent.id = {parent_id_sql} AND {visible})"
     )
 }
 
 /// Condition true when `parent_id_sql` names a visible parent (false for NULL).
-pub(super) fn has_visible_parent_sql(parent_id_sql: &str) -> String {
+pub(super) fn has_visible_parent_sql(scope: ProjectScope, parent_id_sql: &str) -> String {
+    let visible = visible_parent_where(scope);
     format!(
         "EXISTS (SELECT 1 FROM {VISIBLE_PARENT_FROM} \
-         WHERE parent.id = {parent_id_sql} AND {VISIBLE_PARENT_WHERE})"
+         WHERE parent.id = {parent_id_sql} AND {visible})"
     )
 }
 
 /// `task_id` is `None` for a task being created (it cannot be anyone's ancestor yet).
 /// Self-parent and any parent that has `task_id` among its ancestors are `ParentCycle`; a parent
-/// that is missing, in another workspace, in the trash or in a trashed project is `ParentInvalid`.
+/// that is missing, in another workspace, in the trash, in a trashed project or in a project out
+/// of `scope` is `ParentInvalid`.
 pub(super) async fn validate_parent_in_tx(
     tx: &mut Transaction<'_, Any>,
+    scope: ProjectScope,
     workspace_id: Id,
     task_id: Option<Id>,
     parent_id: Id,
@@ -55,11 +69,12 @@ pub(super) async fn validate_parent_in_tx(
     if task_id == Some(parent_id) {
         return Err(TaskError::ParentCycle);
     }
-    let Flag(live) = sqlx::query_scalar(
+    let Flag(live) = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         "SELECT EXISTS (SELECT 1 FROM tasks JOIN projects ON projects.id = tasks.project_id \
          WHERE tasks.id = $1 AND tasks.workspace_id = $2 AND tasks.deleted_at IS NULL \
-         AND projects.deleted_at IS NULL)",
-    )
+         AND projects.deleted_at IS NULL AND {})",
+        scope.project("tasks.project_id")
+    )))
     .bind(parent_id.to_string())
     .bind(workspace_id.to_string())
     .fetch_one(&mut **tx)
@@ -91,16 +106,21 @@ pub(super) async fn validate_parent_in_tx(
 
 /// Visible ancestors of `task_id`, root first (`GET /tasks/{id}`). The walk stops at the first
 /// hidden ancestor, as the `parent` field does, so the chain always ends at the task's parent.
-pub(super) async fn ancestors(pool: &AnyPool, task_id: Id) -> Result<Vec<TaskRef>, TaskError> {
+pub(super) async fn ancestors(
+    pool: &AnyPool,
+    scope: ProjectScope,
+    task_id: Id,
+) -> Result<Vec<TaskRef>, TaskError> {
+    let visible = visible_parent_where(scope);
     let sql = format!(
         "WITH RECURSIVE chain(id, project_id, project_key, number, title, parent_task_id, depth) AS ( \
              SELECT parent.id, parent.project_id, parent_project.project_key, parent.number, parent.title, \
              parent.parent_task_id, 1 FROM tasks AS child, {VISIBLE_PARENT_FROM} \
-             WHERE child.id = $1 AND parent.id = child.parent_task_id AND {VISIBLE_PARENT_WHERE} \
+             WHERE child.id = $1 AND parent.id = child.parent_task_id AND {visible} \
              UNION ALL \
              SELECT parent.id, parent.project_id, parent_project.project_key, parent.number, parent.title, \
              parent.parent_task_id, chain.depth + 1 FROM chain, {VISIBLE_PARENT_FROM} \
-             WHERE parent.id = chain.parent_task_id AND {VISIBLE_PARENT_WHERE} AND chain.depth < $2 \
+             WHERE parent.id = chain.parent_task_id AND {visible} AND chain.depth < $2 \
          ) \
          SELECT id, project_id, project_key, number, title FROM chain ORDER BY depth DESC"
     );

@@ -139,7 +139,7 @@ async fn postgres_restore_replaces_the_database_and_attachments() {
     assert_eq!(initialized, 1);
     let migrations: i64 = fixture
         .database
-        .scalar("SELECT COUNT(*) FROM schema_migrations WHERE version = 94")
+        .scalar("SELECT COUNT(*) FROM schema_migrations WHERE version = 95")
         .await
         .unwrap();
     assert_eq!(migrations, 1);
@@ -246,7 +246,7 @@ async fn snapshot_manifest_checksums_the_database_and_attachment() {
     let snapshot = fixture.service.create(&fixture.database).await.unwrap();
 
     assert_eq!(snapshot.manifest.kind, BackupKind::Snapshot);
-    assert_eq!(snapshot.manifest.schema_version, 94);
+    assert_eq!(snapshot.manifest.schema_version, 95);
     assert_eq!(
         snapshot.manifest.application_version,
         env!("CARGO_PKG_VERSION")

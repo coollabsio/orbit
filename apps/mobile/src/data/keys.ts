@@ -13,6 +13,7 @@ export const keys = {
   projects: (workspaceId: string) => ['projects', workspaceId] as const,
   statuses: (workspaceId: string) => ['statuses', workspaceId] as const,
   members: (workspaceId: string) => ['members', workspaceId] as const,
+  projectMembers: (workspaceId: string, projectId: string) => ['project-members', workspaceId, projectId] as const,
   labels: (workspaceId: string) => ['labels', workspaceId] as const,
   conversations: (workspaceId: string) => ['conversations', workspaceId] as const,
   chatCategories: (workspaceId: string) => ['chat-categories', workspaceId] as const,

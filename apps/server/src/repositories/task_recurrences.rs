@@ -19,6 +19,7 @@ pub use schedule::{Frequency, RecurrenceBase};
 use schedule::{Schedule, WeekdaySet, next_due};
 
 use super::billing::{TrialCapacityError, ensure_trial_capacity};
+use super::project_access::{self, ProjectScope};
 use super::sub_issues::AutomationActor;
 use super::tasks::{
     CreateTask, NotificationRequest, TaskError, insert_task_rows_in_tx, notify_users, parse_id,
@@ -311,7 +312,8 @@ pub(super) async fn spawn_next_in_tx(
             timezone: TimeZone::get(&row.get::<String, _>("timezone")).unwrap_or(TimeZone::UTC),
         };
         let closed_id = parse_id(row.get("id"))?;
-        let closed = task_in_tx(tx, actor.workspace_id, closed_id, false).await?;
+        let closed =
+            task_in_tx(tx, ProjectScope::All, actor.workspace_id, closed_id, false).await?;
         let Some(completed_at) = Timestamp::from_millisecond(row.get("completed_at")).ok() else {
             continue;
         };
@@ -355,7 +357,10 @@ pub(super) async fn spawn_next_in_tx(
             .bind(id.to_string())
             .fetch_one(&mut **tx)
             .await?;
-            if assignable == 1 {
+            // Nobody is assigned to a task of a project they do not see.
+            if assignable == 1
+                && project_access::user_sees_project(&mut **tx, closed.project_id, *id).await?
+            {
                 assignee_ids.push(*id);
             }
         }

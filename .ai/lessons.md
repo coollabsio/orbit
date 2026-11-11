@@ -36,6 +36,9 @@
   (SQLite 3.43+); then `DELETE … WHERE rowid = …` works and reads the same as on the Postgres twin table
   (`mail_search`, 2026-10-23).
 
+## Project visibility
+- Projects can be private (#37). Every new query that reads projects, tasks or anything inside them (comments, labels, files, notifications, counts or titles of related tasks) must filter with `repositories/project_access.rs` (`ProjectScope::of(actor)`, or `user_sees_*_sql` for other users), never with `workspace_id` alone. Server-side work (integrations, automation) uses `ProjectScope::All` on purpose.
+
 ## Untrusted nested input
 - Any recursive walk over user content (markdown, Yjs XML/updates, JSON) needs a depth cap or an explicit stack: a stack overflow aborts the whole server process, not one request. yrs itself recurses on decode and delete, so `blocknote::update_too_deep` checks each update before yrs reads it (2026-10-31).
 

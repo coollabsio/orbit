@@ -260,6 +260,7 @@ async fn database_github_app_routes_issues_without_orbit_tokens() {
             "Platform".to_owned(),
             "PLAT".to_owned(),
             "#7c3aed".to_owned(),
+            false,
             "create-project",
             TimestampMillis::now(),
         )
@@ -1461,6 +1462,7 @@ async fn discord_events_select_one_project_allowed_by_a_multi_project_token() {
             "Platform".to_owned(),
             "PLAT".to_owned(),
             "#7c3aed".to_owned(),
+            false,
             "create-project",
             TimestampMillis::now(),
         )

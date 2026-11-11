@@ -163,6 +163,7 @@ Core files: `apps/server/src/repositories/sub_issues.rs` (parent checks, tree wa
 - Categories are Unstarted, Started, Completed, Cancelled.
 - Project settings can add, edit, delete, and reorder statuses inside a category.
 - General project settings use a local draft and bottom unsaved-changes bar.
+- Access (#37, migration 0093): a project is Workspace (every non-guest member) or Private (members listed in `project_members`, plus workspace owners and admins, who are not listed). Project settings → Access switches it and adds or removes people (anyone who sees the project may; creating or making it private lists the actor). The rule is `Policy::can_see_project`; `repositories/project_access.rs` is its only SQL form (`ProjectScope`, `user_sees_project_sql`). An unseen project and everything in it (tasks, comments, labels, statuses, files, relations, parent/duplicate data, inbox, push, collab, API tokens, OAuth/MCP grants) answers like a missing one. Assigning someone who cannot see the project is 422; web and mobile assignee and mention pickers offer only people who see it. Private projects show a lock (sidebar/drawer, pickers). Known gaps: the `blocked` flag and activity metadata can still reflect a private related task; existing assignees keep their assignment after losing access.
 
 ## Docs
 
@@ -603,7 +604,7 @@ MessageItem,MailHtmlFrame,SafetyBanner,MailSearch}.tsx`), settings in `features/
 Design: `docs/superpowers/specs/2026-10-23-mail-slice-1-design.md` (local file). Operator guide:
 `docs/operations.md#mail`.
 
-Slice 1 receives and reads mail; it does not send. Server (migration 0094):
+Slice 1 receives and reads mail; it does not send. Server (migration 0095):
 
 - Provider intake (`mail_delivery.rs`, `mail_routes/{inbound,providers}.rs`, `crates/mail/src/inbound/`): Cloudflare,
   Postmark, Mailgun, Resend and SES post to `/api/v1/mail/inbound/{kind}/{id}`; instance and workspace providers

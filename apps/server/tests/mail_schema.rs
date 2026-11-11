@@ -1,4 +1,4 @@
-//! Migration 0094 (mail): constraints, blob references and the workspace purge, on SQLite and
+//! Migration 0095 (mail): constraints, blob references and the workspace purge, on SQLite and
 //! Postgres.
 
 use std::sync::Arc;
@@ -256,13 +256,13 @@ impl Fixture {
 }
 
 #[tokio::test]
-async fn schema_0094_applies_and_constraints_hold() {
+async fn schema_0095_applies_and_constraints_hold() {
     let fixture = Fixture::new().await;
     assert_eq!(
         fixture
             .count("SELECT MAX(version) FROM schema_migrations")
             .await,
-        94
+        95
     );
 
     // A domain name has one owner on the instance, whatever its case.
