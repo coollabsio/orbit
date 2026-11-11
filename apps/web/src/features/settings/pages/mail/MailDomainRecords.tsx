@@ -1,21 +1,10 @@
 import { Copy } from 'reicon-react'
-import type { MailDnsRecord, MailDnsRecordKind } from '@orbit/api/generated/types.gen'
+import type { MailDnsRecord } from '@orbit/api/generated/types.gen'
 import { Tip } from '@/components/common/Tip'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { copyText } from './mailSettingsLib'
-
-const KIND_LABELS: Record<MailDnsRecordKind, string> = {
-  verify: 'Verification',
-  mx: 'Mail server',
-  dkim: 'DKIM',
-  spf: 'SPF',
-  dmarc: 'DMARC',
-}
-
-/** Mail reaches the workspace only with these; DKIM, SPF and DMARC are for sending (a later release) and reputation. */
-const REQUIRED: ReadonlySet<MailDnsRecordKind> = new Set(['verify', 'mx'])
+import { copyText, KIND_LABELS, REQUIRED } from './mailSettingsLib'
 
 /** The badge of a record from the last check: OK, or what is missing and how much it matters. */
 function recordBadge(record: MailDnsRecord, checked: boolean): { label: string; variant: 'secondary' | 'destructive' | 'outline'; hint: string } {

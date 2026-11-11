@@ -115,6 +115,16 @@ function MailboxRow({ mailbox, domains, members, open, onToggle }: { mailbox: Ma
             <span className="truncate text-[13px] font-medium text-foreground">{mailbox.name}</span>
             <Badge variant="outline">{mailbox.kind === 'personal' ? 'Personal' : 'Shared'}</Badge>
             {mailbox.status === 'suspended' ? <Badge variant="destructive">Suspended</Badge> : null}
+            {domains.filter((domain) => domain.catch_all_mailbox_id === mailbox.id).map((domain) => (
+              <Badge
+                key={domain.id}
+                variant="secondary"
+                title={`Gets mail for addresses of ${domain.name} that no mailbox has. Change it in Domains.`}
+                render={<Link to="/settings/mail/domains" />}
+              >
+                Catch-all · {domain.name}
+              </Badge>
+            ))}
           </span>
           <span className="truncate text-xs text-muted-foreground">
             {primary?.address ?? 'No address'} · {who}{aliases > 0 ? ` · ${count(aliases, 'alias', 'aliases')}` : ''}

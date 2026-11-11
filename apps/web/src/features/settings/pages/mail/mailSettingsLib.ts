@@ -1,5 +1,5 @@
 import { toast } from 'sonner'
-import type { MailProviderKind, MailProviderView } from '@orbit/api/generated/types.gen'
+import type { MailDnsRecordKind, MailDomain, MailProviderKind, MailProviderView } from '@orbit/api/generated/types.gen'
 import { ApiProblem } from '@orbit/api/problem'
 import { fullDate, relativeTime, timeOfDay } from '@/lib/format'
 
@@ -49,4 +49,42 @@ export function routeOptions(providers: MailProviderView[]) {
     { value: DIRECT, label: 'Directly (MX to this server)' },
     ...providers.map((provider) => ({ value: provider.id, label: `${provider.name} (${PROVIDER_LABELS[provider.kind]})` })),
   ]
+}
+
+export const KIND_LABELS: Record<MailDnsRecordKind, string> = {
+  verify: 'Verification',
+  mx: 'Mail server',
+  dkim: 'DKIM',
+  spf: 'SPF',
+  dmarc: 'DMARC',
+}
+
+/** Mail reaches the workspace only with these; DKIM, SPF and DMARC are for sending (a later release) and reputation. */
+export const REQUIRED: ReadonlySet<MailDnsRecordKind> = new Set(['verify', 'mx'])
+
+export interface DomainHealth {
+  label: string
+  variant: 'secondary' | 'outline' | 'destructive'
+  hint: string
+}
+
+/** One badge for a domain: its status, and for a verified domain whether its DNS records are all in place. */
+export function domainHealth(domain: Pick<MailDomain, 'status' | 'records'>): DomainHealth {
+  switch (domain.status) {
+    case 'pending':
+      return { label: 'Pending', variant: 'outline', hint: 'Publish the verification record, then click Check now.' }
+    case 'suspended':
+      return { label: 'Suspended', variant: 'destructive', hint: 'The verification record is gone. Mail is accepted only during the grace period.' }
+    case 'disabled':
+      return { label: 'Disabled', variant: 'outline', hint: 'Mail for this domain is refused.' }
+    case 'verified': {
+      const bad = domain.records.filter((record) => record.status.status === 'missing' || record.status.status === 'wrong')
+      const names = (required: boolean) => bad.filter((record) => REQUIRED.has(record.kind) === required).map((record) => KIND_LABELS[record.kind])
+      const required = names(true)
+      const recommended = names(false)
+      if (required.length > 0) return { label: 'Action needed', variant: 'destructive', hint: `Missing or wrong: ${required.join(', ')}. Mail cannot arrive without it.` }
+      if (recommended.length > 0) return { label: 'Incomplete', variant: 'outline', hint: `Verified. Recommended records missing or wrong: ${recommended.join(', ')}.` }
+      return { label: 'Healthy', variant: 'secondary', hint: 'Verified, and all DNS records are in place.' }
+    }
+  }
 }

@@ -2,10 +2,12 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Danger, Global, Refresh } from 'reicon-react'
-import type { MailDomain, MailDomainStatus, MailMailbox, MailProviderView } from '@orbit/api/generated/types.gen'
+import { ChevronRight, Danger, Global, Refresh } from 'reicon-react'
+import { cn } from 'cn'
+import type { MailDomain, MailMailbox, MailProviderView } from '@orbit/api/generated/types.gen'
 import { confirmAction } from '@/components/common/confirmAction'
 import { EmptyState } from '@/components/common/EmptyState'
+import { InfoTip } from '@/components/common/InfoTip'
 import { SettingsCard } from '@/components/common/SettingsCard'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -23,19 +25,12 @@ import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { shortDate } from '@/lib/format'
 import { DomainRouteRow, RouteSelect } from './DomainRoute'
 import { MailDomainRecords } from './MailDomainRecords'
-import { count, dateTime, DIRECT, isDomainsDisabled, mailProblem, since } from './mailSettingsLib'
+import { count, dateTime, DIRECT, domainHealth, isDomainsDisabled, mailProblem, since } from './mailSettingsLib'
 
 /** **Check now** reads the domain this often until the check job has run, for at most `CHECK_WAIT_MS`. */
 const CHECK_POLL_MS = 2000
 const CHECK_WAIT_MS = 30_000
 const NO_CATCH_ALL = 'none'
-
-const STATUS_BADGES: Record<MailDomainStatus, { label: string; variant: 'secondary' | 'outline' | 'destructive' }> = {
-  pending: { label: 'Pending', variant: 'outline' },
-  verified: { label: 'Verified', variant: 'secondary' },
-  suspended: { label: 'Suspended', variant: 'destructive' },
-  disabled: { label: 'Disabled', variant: 'outline' },
-}
 
 /** Shown to members without `mail.manage`; the server refuses them too. */
 export function MailManagersOnly({ title }: { title: string }) {
@@ -128,6 +123,7 @@ function DomainCard({ listed, mailboxes, providers }: { listed: MailDomain; mail
   const setCatchAll = useSetCatchAll()
   const setEnabled = useSetDomainEnabled()
   const remove = useDeleteDomain()
+  const [open, setOpen] = useState(false)
   /** While a check runs: when it was asked for, the `checked_at` before it and when to stop waiting. */
   const [checking, setChecking] = useState<{ startedAt: number; checkedAt: string | null; until: number } | null>(null)
   // polls until `checked_at` changes or the wait ends; a copy cached by an earlier check does not count
@@ -184,7 +180,7 @@ function DomainCard({ listed, mailboxes, providers }: { listed: MailDomain; mail
     })
   }
 
-  const badge = STATUS_BADGES[domain.status]
+  const health = domainHealth(domain)
   const verify = domain.records.find((record) => record.kind === 'verify')
   const catchAllOptions = [
     { value: NO_CATCH_ALL, label: 'None: refuse unknown addresses' },
@@ -193,75 +189,86 @@ function DomainCard({ listed, mailboxes, providers }: { listed: MailDomain; mail
   const catchAll = domain.catch_all_mailbox_id ?? NO_CATCH_ALL
 
   return (
-    <SettingsCard
-      title={domain.name}
-      description={statusText(domain)}
-      actions={(
-        <>
-          <Badge variant={badge.variant}>{badge.label}</Badge>
-          <Button type="button" variant="outline" disabled={check.isPending || waiting} onClick={checkNow}>
-            <Refresh />
-            {waiting ? 'Checking…' : 'Check now'}
-          </Button>
-          <Button type="button" variant="ghost" className="text-destructive" disabled={remove.isPending} onClick={() => void removeDomain()}>Remove</Button>
-        </>
-      )}
-      flush
-    >
-      <div className="flex flex-col divide-y">
-        {domain.status === 'suspended' ? (
-          <div className="p-3">
-            <Alert variant="destructive">
-              <Danger />
-              <AlertTitle>The verification record is gone</AlertTitle>
-              <AlertDescription>
-                {verify?.status.status === 'wrong' ? `The TXT record at ${verify.name} has another value. ` : `The TXT record at ${verify?.name ?? `_orbit-verify.${domain.name}`} was not found. `}
-                {domain.grace_ends_at ? `Orbit receives mail for ${domain.name} until ${dateTime(domain.grace_ends_at)}, then refuses it. ` : null}
-                Publish the record again, then click Check now.
-              </AlertDescription>
-            </Alert>
+    <section className="m-0 flex w-full min-w-0 flex-col rounded-lg bg-card shadow-[0_0_0_1px_var(--border)]">
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={`mail-domain-${domain.id}`}
+        onClick={() => setOpen((value) => !value)}
+        className={cn('flex min-h-12 w-full items-center gap-2 py-2 pr-3 pl-3 text-left text-sm font-medium text-foreground hover:bg-muted/40', open ? 'rounded-t-lg' : 'rounded-lg')}
+      >
+        <ChevronRight aria-hidden className={cn('size-4 shrink-0 text-muted-foreground transition-transform duration-[120ms]', open && 'rotate-90')} />
+        <span className="min-w-0 flex-1 truncate">{domain.name}</span>
+        <Badge variant={health.variant} title={health.hint}>{health.label}</Badge>
+      </button>
+      {open ? (
+        <div id={`mail-domain-${domain.id}`} className="relative min-w-0 overflow-hidden rounded-b-lg border-t bg-background">
+          <div className="flex flex-col divide-y">
+            <SettingsRow className="flex-nowrap">
+              <span className="min-w-0 flex-1 text-xs text-muted-foreground">{statusText(domain)}</span>
+              <div className="flex shrink-0 items-center gap-2">
+                <Button type="button" variant="outline" disabled={check.isPending || waiting} onClick={checkNow}>
+                  <Refresh />
+                  {waiting ? 'Checking…' : 'Check now'}
+                </Button>
+                <Button type="button" variant="ghost" className="text-destructive" disabled={remove.isPending} onClick={() => void removeDomain()}>Remove</Button>
+              </div>
+            </SettingsRow>
+            {domain.status === 'suspended' ? (
+              <div className="p-3">
+                <Alert variant="destructive">
+                  <Danger />
+                  <AlertTitle>The verification record is gone</AlertTitle>
+                  <AlertDescription>
+                    {verify?.status.status === 'wrong' ? `The TXT record at ${verify.name} has another value. ` : `The TXT record at ${verify?.name ?? `_orbit-verify.${domain.name}`} was not found. `}
+                    {domain.grace_ends_at ? `Orbit receives mail for ${domain.name} until ${dateTime(domain.grace_ends_at)}, then refuses it. ` : null}
+                    Publish the record again, then click Check now.
+                  </AlertDescription>
+                </Alert>
+              </div>
+            ) : null}
+            {providers.length > 0 || domain.provider ? <DomainRouteRow domain={domain} providers={providers} /> : null}
+            <SettingsRow className="flex-nowrap">
+              <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[13px] font-medium text-foreground">
+                Mail on
+                <InfoTip text={`Off: Orbit refuses all mail for ${domain.name}. Mailboxes and their mail stay.`} />
+              </span>
+              <Switch
+                aria-label={`Receive mail for ${domain.name}`}
+                checked={domain.status !== 'disabled'}
+                disabled={setEnabled.isPending}
+                onCheckedChange={(enabled: boolean) => setEnabled.mutate({ domainId: domain.id, enabled }, {
+                  onError: (error) => toast.error(mailProblem(error, 'The domain could not be changed.')),
+                })}
+              />
+            </SettingsRow>
+            <SettingsRow className="flex-nowrap">
+              <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[13px] font-medium text-foreground">
+                Catch-all
+                <InfoTip text={`The mailbox that gets mail for addresses of ${domain.name} that no mailbox has.`} />
+              </span>
+              <Select
+                items={catchAllOptions}
+                value={catchAll}
+                disabled={setCatchAll.isPending}
+                onValueChange={(value) => setCatchAll.mutate({ domainId: domain.id, mailboxId: value === NO_CATCH_ALL ? null : (value as string) }, {
+                  onSuccess: () => toast('Catch-all saved'),
+                  onError: (error) => toast.error(mailProblem(error, 'The catch-all could not be saved.')),
+                })}
+              >
+                <SelectTrigger aria-label={`Catch-all for ${domain.name}`} className="w-80 max-w-[55vw]"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {catchAllOptions.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </SettingsRow>
+            <div className="px-2 py-1">
+              <MailDomainRecords records={domain.records} checked={Boolean(domain.checked_at)} />
+            </div>
           </div>
-        ) : null}
-        {providers.length > 0 || domain.provider ? <DomainRouteRow domain={domain} providers={providers} /> : null}
-        <SettingsRow className="flex-nowrap">
-          <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-[13px]">
-            <span className="font-medium text-foreground">Mail on</span>
-            <span className="text-xs text-muted-foreground">Off: Orbit refuses all mail for {domain.name}. Mailboxes and their mail stay.</span>
-          </div>
-          <Switch
-            aria-label={`Receive mail for ${domain.name}`}
-            checked={domain.status !== 'disabled'}
-            disabled={setEnabled.isPending}
-            onCheckedChange={(enabled: boolean) => setEnabled.mutate({ domainId: domain.id, enabled }, {
-              onError: (error) => toast.error(mailProblem(error, 'The domain could not be changed.')),
-            })}
-          />
-        </SettingsRow>
-        <SettingsRow className="flex-nowrap">
-          <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-[13px]">
-            <span className="font-medium text-foreground">Catch-all</span>
-            <span className="text-xs text-muted-foreground">The mailbox that gets mail for addresses of {domain.name} that no mailbox has.</span>
-          </div>
-          <Select
-            items={catchAllOptions}
-            value={catchAll}
-            disabled={setCatchAll.isPending}
-            onValueChange={(value) => setCatchAll.mutate({ domainId: domain.id, mailboxId: value === NO_CATCH_ALL ? null : (value as string) }, {
-              onSuccess: () => toast('Catch-all saved'),
-              onError: (error) => toast.error(mailProblem(error, 'The catch-all could not be saved.')),
-            })}
-          >
-            <SelectTrigger aria-label={`Catch-all for ${domain.name}`} className="w-64 max-w-[45vw]"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {catchAllOptions.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </SettingsRow>
-        <div className="px-2 py-1">
-          <MailDomainRecords records={domain.records} checked={Boolean(domain.checked_at)} />
         </div>
-      </div>
-    </SettingsCard>
+      ) : null}
+    </section>
   )
 }
 
