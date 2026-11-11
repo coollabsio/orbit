@@ -37,6 +37,7 @@ import { OrbitImportPage } from '@/features/settings/pages/OrbitImportPage'
 import { BillingPage } from '@/features/settings/pages/BillingPage'
 import { MembersPage } from '@/features/settings/pages/MembersPage'
 import { SecurityPage } from '@/features/settings/pages/SecurityPage'
+import { GithubAccountPage } from '@/features/settings/pages/GithubAccountPage'
 import { SessionsPage } from '@/features/settings/pages/SessionsPage'
 import { AgenticPage } from '@/features/settings/pages/AgenticPage'
 import { ShortcutsPage } from '@/features/settings/pages/ShortcutsPage'
@@ -143,6 +144,7 @@ export default function App() {
                   <Route path="appearance" element={<AppearancePage />} />
                   <Route path="notifications" element={<NotificationsPage />} />
                   <Route path="security" element={<SecurityPage />} />
+                  <Route path="github" element={<GithubAccountPage />} />
                   <Route path="sessions" element={<SessionsPage />} />
                   <Route path="agentic" element={<AgenticPage />} />
                   <Route path="shortcuts" element={<ShortcutsPage />} />

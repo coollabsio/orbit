@@ -112,3 +112,10 @@ test('registration can be retried after a pending-registration error', async () 
   expect(requests).toBe(2)
   expect(view.queryByRole('alert')).toBeNull()
 })
+
+test('an app from before PR review offers managers to re-create it', async () => {
+  globalThis.fetch = (async () => Response.json({ app_slug: 'orbit-test', install_url: null, repositories: [], can_manage: true, key_configured: true, needs_recreate: true })) as unknown as typeof fetch
+  const view = renderPage()
+  expect(await view.findByRole('button', { name: 'Re-create GitHub App' })).toBeTruthy()
+  expect(view.getByText(/Re-create it to review pull requests in Orbit/)).toBeTruthy()
+})
