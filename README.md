@@ -27,6 +27,11 @@ One binary. A Rust server serves the API and the embedded React app. Data is in
 SQLite (default) or Postgres, files on local disk or S3. Put a reverse proxy in
 front for HTTPS. Docker image: `ghcr.io/coollabsio/orbit:latest`.
 
+Set instance settings (mail server, S3 storage, Google and GitHub sign-in, open
+registration, automatic backups) in Admin, or with `ORBIT_*` environment
+variables for declarative deployments such as Kubernetes. A setting from a
+variable is read-only in Admin. See [Deployment and operations](docs/operations.md).
+
 ## Development
 
 Needs Rust 1.97.1, Bun 1.4.4+, and [Just](https://just.systems/).

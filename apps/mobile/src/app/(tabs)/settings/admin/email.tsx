@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { View } from 'react-native'
 
 import { ConfirmDialog, type ConfirmRequest } from '../../../../components/settings/Dialog'
-import { AdminShell, FieldLabel, Note, Select, SettingsCard } from '../../../../components/settings/Shell'
+import { AdminShell, FieldLabel, Note, Select, SetByEnvironment, SettingsCard } from '../../../../components/settings/Shell'
 import { SMTP_DEFAULT_PORT, smtpBody, smtpDraft, type SmtpView } from '../../../../data/admin-api'
 import { useAuthOptions } from '../../../../hooks/account'
 import { useInstanceSettings, useRemoveSmtp, useSaveSmtp, useSendTestEmail } from '../../../../hooks/admin'
@@ -31,12 +31,12 @@ export default function AdminEmailScreen() {
           </View>
         </SettingsCard>
       ) : null}
-      {settings.data ? <EmailCard smtp={settings.data.smtp ?? null} /> : null}
+      {settings.data ? <EmailCard smtp={settings.data.smtp ?? null} locked={settings.data.environment.smtp} /> : null}
     </AdminShell>
   )
 }
 
-function EmailCard({ smtp }: { smtp: SmtpView | null }) {
+function EmailCard({ smtp, locked }: { smtp: SmtpView | null; locked: boolean }) {
   const { user } = useOrbit()
   // Orbit Cloud always needs a mail server: it can be replaced, not removed.
   const cloud = useAuthOptions().data?.billing_enabled ?? false
@@ -66,7 +66,7 @@ function EmailCard({ smtp }: { smtp: SmtpView | null }) {
               <Button
                 label="Remove"
                 variant="destructive"
-                disabled={remove.isPending}
+                disabled={locked || remove.isPending}
                 onPress={() =>
                   setConfirm({
                     title: 'Remove the mail server?',
@@ -83,36 +83,39 @@ function EmailCard({ smtp }: { smtp: SmtpView | null }) {
       }
     >
       <View className="gap-4">
-        <Input label="Host" required placeholder="smtp.example.com" value={draft.host} onChangeText={set('host')} autoCapitalize="none" autoCorrect={false} keyboardType="url" />
+        <Input label="Host" required placeholder="smtp.example.com" editable={!locked} value={draft.host} onChangeText={set('host')} autoCapitalize="none" autoCorrect={false} keyboardType="url" />
         <View className="gap-2">
           <FieldLabel>Encryption</FieldLabel>
           <Select
             label="Encryption"
             value={draft.security}
+            disabled={locked}
             options={SECURITY_OPTIONS}
             onChange={(security) => edit({ security, port: String(SMTP_DEFAULT_PORT[security]) })}
           />
         </View>
-        <Input label="Port" required keyboardType="number-pad" value={draft.port} onChangeText={set('port')} />
-        <Input label="Username" value={draft.username} onChangeText={set('username')} autoCapitalize="none" autoCorrect={false} autoComplete="off" />
+        <Input label="Port" required keyboardType="number-pad" editable={!locked} value={draft.port} onChangeText={set('port')} />
+        <Input label="Username" editable={!locked} value={draft.username} onChangeText={set('username')} autoCapitalize="none" autoCorrect={false} autoComplete="off" />
         <Input
           label="Password"
           secureTextEntry
           autoComplete="new-password"
           placeholder={smtp?.password_set ? 'Saved. Leave empty to keep it.' : undefined}
+          editable={!locked}
           value={draft.password}
           onChangeText={set('password')}
         />
-        <Input label="From address" required placeholder="orbit@example.com" keyboardType="email-address" autoCapitalize="none" autoCorrect={false} value={draft.from_address} onChangeText={set('from_address')} />
-        <Input label="From name" placeholder="Orbit" value={draft.from_name} onChangeText={set('from_name')} />
+        <Input label="From address" required placeholder="orbit@example.com" keyboardType="email-address" autoCapitalize="none" autoCorrect={false} editable={!locked} value={draft.from_address} onChangeText={set('from_address')} />
+        <Input label="From name" placeholder="Orbit" editable={!locked} value={draft.from_name} onChangeText={set('from_name')} />
+        {locked ? <SetByEnvironment variable="ORBIT_SMTP_*" /> : null}
         {save.isError ? <Note error>{errorMessage(save.error)}</Note> : null}
         {remove.isError ? <Note error>{errorMessage(remove.error)}</Note> : null}
         {test.isError ? <Note error>{errorMessage(test.error)}</Note> : null}
         {test.isSuccess ? <Note>Test email sent to {user.email}.</Note> : null}
         {save.isSuccess ? <Note>Mail settings saved.</Note> : null}
         <View className="flex-row items-center justify-end gap-3">
-          {cloud && smtp ? <Text className="flex-1 text-[12px] leading-[16px] text-muted-foreground">Orbit Cloud needs a mail server. Save a different one instead.</Text> : null}
-          <Button label={save.isPending ? 'Saving…' : 'Save mail settings'} disabled={save.isPending || !ready} onPress={() => save.mutate(smtpBody(draft), stored)} />
+          {cloud && smtp && !locked ? <Text className="flex-1 text-[12px] leading-[16px] text-muted-foreground">Orbit Cloud needs a mail server. Save a different one instead.</Text> : null}
+          <Button label={save.isPending ? 'Saving…' : 'Save mail settings'} disabled={locked || save.isPending || !ready} onPress={() => save.mutate(smtpBody(draft), stored)} />
         </View>
       </View>
       <ConfirmDialog request={confirm} onClose={() => setConfirm(null)} />

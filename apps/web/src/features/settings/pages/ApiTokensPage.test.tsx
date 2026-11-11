@@ -135,3 +135,36 @@ test('an expired token is marked as expired', async () => {
   expect(within(newRow).queryAllByText('Expired').length).toBe(0)
   expect(within(newRow).getAllByText(/ · expires /).length).toBe(1)
 })
+
+test('import mode adds tasks:import to a Tasks write token and drops it when Tasks goes back to Read', async () => {
+  const requests: Request[] = []
+  globalThis.fetch = mock(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const request = new Request(input, init)
+    requests.push(request)
+    if (request.method === 'POST') return Response.json({ id: 'token-1', name: 'Importer', project_ids: [], all_projects: true, token_prefix: 'orb_12345678', scopes: ['tasks:read', 'tasks:write', 'tasks:import'], created_at: '2026-11-09T10:00:00Z', last_used_at: null, token: 'orb_123456789-secret' }, { status: 201 })
+    if (request.url.includes('/projects')) return Response.json({ items: [{ id: 'project-1', workspace_id: 'workspace-1', name: 'Support', project_key: 'SUP', color: '#ffffff', version: 0 }], next_cursor: null })
+    return Response.json([])
+  }) as unknown as typeof fetch
+  const view = renderPage('admin')
+  await waitFor(() => expect(view.getByRole('checkbox', { name: 'Support' })).toBeTruthy())
+  const tasks = within(view.getByRole('group', { name: 'Tasks' }))
+  expect(view.queryByRole('checkbox', { name: /Import mode/ })).toBeNull()
+  await userEvent.click(tasks.getByRole('button', { name: 'Write' }))
+  await userEvent.click(view.getByRole('checkbox', { name: /Import mode/ }))
+  expect(view.getByRole('checkbox', { name: /Import mode/ }).getAttribute('aria-checked')).toBe('true')
+  await userEvent.click(view.getByRole('checkbox', { name: 'All projects, including future ones' }))
+  await userEvent.type(view.getByPlaceholderText('Discord bot'), 'Importer')
+  await userEvent.click(view.getByRole('button', { name: 'Create token' }))
+  await view.findByText('orb_123456789-secret')
+  const scopes = ((await requests.find((request) => request.method === 'POST')!.json()) as { scopes: string[] }).scopes
+  expect(scopes).toContain('tasks:write')
+  expect(scopes).toContain('tasks:import')
+
+  await userEvent.click(tasks.getByRole('button', { name: 'Read' }))
+  expect(view.queryByRole('checkbox', { name: /Import mode/ })).toBeNull()
+  await userEvent.type(view.getByPlaceholderText('Discord bot'), 'Reader')
+  await userEvent.click(view.getByRole('button', { name: 'Create token' }))
+  await waitFor(() => expect(requests.filter((request) => request.method === 'POST')).toHaveLength(2))
+  const second = ((await requests.filter((request) => request.method === 'POST')[1]!.json()) as { scopes: string[] }).scopes
+  expect(second).toEqual(['tasks:read'])
+})

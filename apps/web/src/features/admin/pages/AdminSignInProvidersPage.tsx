@@ -11,13 +11,14 @@ import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { PasswordInput } from '@/components/ui/password-input'
 import { useInstanceSettings, useRemoveSignInProvider, useSaveSignInProvider } from '@/features/admin/api'
+import { SetByEnvironment } from '@/features/admin/components/SetByEnvironment'
 import { PROVIDER_NAMES } from '@/features/auth/providerSignIn'
 import { FieldGrid, RequiredMark } from '@/features/settings/components/SettingsParts'
 import { LoadingText } from '@/components/ui/spinner'
 
-const PROVIDERS: { provider: Provider; description: string }[] = [
-  { provider: 'google', description: 'Create a client of type "Web application" in Google Cloud Console (APIs & Services → Credentials) and add the callback URL as an authorized redirect URI.' },
-  { provider: 'github', description: 'Register an app in GitHub (Settings → Developer settings → OAuth Apps) with the callback URL as its authorization callback URL.' },
+const PROVIDERS: { provider: Provider; variable: string; description: string }[] = [
+  { provider: 'google', variable: 'ORBIT_GOOGLE_*', description: 'Create a client of type "Web application" in Google Cloud Console (APIs & Services → Credentials) and add the callback URL as an authorized redirect URI.' },
+  { provider: 'github', variable: 'ORBIT_GITHUB_*', description: 'Register an app in GitHub (Settings → Developer settings → OAuth Apps) with the callback URL as its authorization callback URL.' },
 ]
 
 function problemText(error: unknown, fallback: string) {
@@ -31,16 +32,19 @@ export function AdminSignInProvidersPage() {
   if (settings.isError) return <SettingsCard title="Sign-in providers"><p role="alert">Settings could not be loaded. <Button variant="ghost" onClick={() => void settings.refetch()}>Retry</Button></p></SettingsCard>
   return (
     <>
-      {PROVIDERS.map(({ provider, description }) => {
+      {PROVIDERS.map(({ provider, variable, description }) => {
         const saved = settings.data.sign_in_providers.find((item) => item.provider === provider) ?? null
+        const lockedBy = settings.data.environment.sign_in_providers.includes(provider) ? variable : null
         // Remount on save so the form shows what the server stored.
-        return <ProviderCard key={`${provider}:${JSON.stringify(saved)}`} provider={provider} description={description} saved={saved} />
+        return <ProviderCard key={`${provider}:${JSON.stringify(saved)}`} provider={provider} description={description} saved={saved} lockedBy={lockedBy} />
       })}
     </>
   )
 }
 
-function ProviderCard({ provider, description, saved }: { provider: Provider; description: string; saved: SignInProviderView | null }) {
+/** `lockedBy`: the environment variables that set this provider. */
+function ProviderCard({ provider, description, saved, lockedBy }: { provider: Provider; description: string; saved: SignInProviderView | null; lockedBy: string | null }) {
+  const locked = lockedBy != null
   const save = useSaveSignInProvider()
   const remove = useRemoveSignInProvider()
   const [clientId, setClientId] = useState(saved?.client_id ?? '')
@@ -87,16 +91,17 @@ function ProviderCard({ provider, description, saved }: { provider: Provider; de
           </Field>
           <Field>
             <FieldLabel htmlFor={`${id}-client-id`}>Client ID <RequiredMark /></FieldLabel>
-            <Input id={`${id}-client-id`} required autoComplete="off" spellCheck={false} value={clientId} onChange={(event) => setClientId(event.target.value)} />
+            <Input id={`${id}-client-id`} required autoComplete="off" spellCheck={false} disabled={locked} value={clientId} onChange={(event) => setClientId(event.target.value)} />
           </Field>
           <Field>
             <FieldLabel htmlFor={`${id}-secret`}>Client secret {saved?.secret_set ? null : <RequiredMark />} <InfoTip text="Stored encrypted." /></FieldLabel>
-            <PasswordInput id={`${id}-secret`} autoComplete="new-password" required={!saved?.secret_set} placeholder={saved?.secret_set ? 'Saved. Leave empty to keep it.' : ''} value={secret} onChange={(event) => setSecret(event.target.value)} />
+            <PasswordInput id={`${id}-secret`} autoComplete="new-password" required={!saved?.secret_set} placeholder={saved?.secret_set ? 'Saved. Leave empty to keep it.' : ''} disabled={locked} value={secret} onChange={(event) => setSecret(event.target.value)} />
           </Field>
         </FieldGrid>
         <div className="mt-4 flex items-center justify-end gap-2">
-          {saved ? <Button type="button" variant="ghost" className="text-destructive" disabled={remove.isPending} onClick={() => void removeProvider()}>Remove</Button> : null}
-          <Button type="submit" disabled={save.isPending}>{save.isPending ? 'Saving…' : `Save ${name}`}</Button>
+          {lockedBy ? <SetByEnvironment variable={lockedBy} className="mr-auto" /> : null}
+          {saved ? <Button type="button" variant="ghost" className="text-destructive" disabled={locked || remove.isPending} onClick={() => void removeProvider()}>Remove</Button> : null}
+          <Button type="submit" disabled={locked || save.isPending}>{save.isPending ? 'Saving…' : `Save ${name}`}</Button>
         </div>
       </SettingsCard>
     </form>

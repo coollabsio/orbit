@@ -154,7 +154,7 @@ export function SettingsCard({ title, description, actions, flush = false, dange
 }
 
 /** The web `Select` (its 32px trigger, or the 28px `sm` one): the current choice and a chevron; the choices open in a `PickerSheet`. */
-export function Select<T extends string>({ value, options, onChange, label, size = 'default' }: { value: T; options: readonly { value: T; label: string }[]; onChange: (value: T) => void; label: string; size?: 'default' | 'sm' }) {
+export function Select<T extends string>({ value, options, onChange, label, size = 'default', disabled = false }: { value: T; options: readonly { value: T; label: string }[]; onChange: (value: T) => void; label: string; size?: 'default' | 'sm'; disabled?: boolean }) {
   const { colors } = useTheme()
   const [open, setOpen] = useState(false)
   return (
@@ -162,8 +162,10 @@ export function Select<T extends string>({ value, options, onChange, label, size
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={label}
+        accessibilityState={{ disabled }}
+        disabled={disabled}
         onPress={() => setOpen(true)}
-        className={`flex-row items-center justify-between gap-1.5 border border-input pr-2 pl-2.5 dark:bg-input/30 active:bg-input/50 ${size === 'sm' ? 'h-7 rounded-md' : 'h-8 rounded-lg'}`}
+        className={`flex-row items-center justify-between gap-1.5 border border-input pr-2 pl-2.5 dark:bg-input/30 active:bg-input/50 ${size === 'sm' ? 'h-7 rounded-md' : 'h-8 rounded-lg'} ${disabled ? 'opacity-50' : ''}`}
       >
         <Text numberOfLines={1} className={`shrink text-foreground ${size === 'sm' ? 'text-[13px]' : 'text-[14px]'}`}>
           {options.find((option) => option.value === value)?.label}
@@ -281,10 +283,10 @@ export function Toggle({ value, label, onChange, disabled }: { value: boolean; l
 }
 
 /** A choice between a few options in one row (the web's small `Select`s). */
-export function Segmented<T extends string>({ value, options, onChange, label }: { value: T; options: readonly { value: T; label: string }[]; onChange: (value: T) => void; label: string }) {
+export function Segmented<T extends string>({ value, options, onChange, label, disabled = false }: { value: T; options: readonly { value: T; label: string }[]; onChange: (value: T) => void; label: string; disabled?: boolean }) {
   const { colors } = useTheme()
   return (
-    <View accessibilityRole="radiogroup" accessibilityLabel={label} className="flex-row p-0.5 gap-0.5 rounded-lg bg-muted">
+    <View accessibilityRole="radiogroup" accessibilityLabel={label} className={`flex-row p-0.5 gap-0.5 rounded-lg bg-muted ${disabled ? 'opacity-50' : ''}`}>
       {options.map((option) => {
         const selected = option.value === value
         return (
@@ -292,7 +294,8 @@ export function Segmented<T extends string>({ value, options, onChange, label }:
             key={option.value}
             accessibilityRole="radio"
             accessibilityLabel={option.label}
-            accessibilityState={{ selected }}
+            accessibilityState={{ selected, disabled }}
+            disabled={disabled}
             onPress={() => onChange(option.value)}
             className={`flex-1 h-7 items-center justify-center rounded-md ${selected ? 'bg-background' : ''}`} style={{ boxShadow: selected ? `0 1px 2px ${alpha(colors.foreground, 0.12)}` : undefined }}
           >
@@ -301,6 +304,15 @@ export function Segmented<T extends string>({ value, options, onChange, label }:
         )
       })}
     </View>
+  )
+}
+
+/** The web's `SetByEnvironment`: the note on a setting that an `ORBIT_*` environment variable sets. */
+export function SetByEnvironment({ variable }: { variable: string }) {
+  return (
+    <OptionHint>
+      Set by <Text className="font-mono text-[12px] leading-[17px] text-muted-foreground">{variable}</Text> on the server. Change the environment variable and restart Orbit.
+    </OptionHint>
   )
 }
 

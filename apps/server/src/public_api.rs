@@ -10,7 +10,7 @@ use axum::http::request::Parts;
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, patch, post};
+use axum::routing::{delete, get, patch, post};
 use axum::{Json, Router};
 use orbit_platform::{Id, Problem, RequestId, TimestampMillis};
 use serde::{Deserialize, Serialize};
@@ -26,13 +26,13 @@ use crate::repositories::pages::PageSummary;
 use crate::repositories::pages::{PageError, PageRepository};
 use crate::repositories::task_recurrences::TaskRecurrence;
 use crate::repositories::tasks::{
-    CommentRecord, LabelRecord, MilestoneRecord, ProjectRecord, SortOrder, StatusRecord, TaskError,
-    TaskRepository, TaskSort,
+    CommentRecord, ImportedComment, ImportedTask, LabelRecord, MilestoneRecord, ProjectRecord,
+    SortOrder, StatusRecord, TaskError, TaskRepository, TaskSort,
 };
 use crate::token_api::{
-    AssigneeFilter, CycleRelative, CycleView, DOC_TOO_LARGE_DETAIL, DocPatch, DocView, Me,
-    MemberView, Named, NewDoc, NewTask, TaskPatch, TaskQuery, TaskView, TokenApi, TokenApiError,
-    parse_cycle_filter, parse_milestone_filter,
+    AssigneeFilter, CommentImport, CycleRelative, CycleView, DOC_TOO_LARGE_DETAIL, DocPatch,
+    DocView, Me, MemberView, Named, NewComment, NewDoc, NewTask, TaskPatch, TaskQuery, TaskView,
+    TokenApi, TokenApiError, Written, parse_cycle_filter, parse_milestone_filter,
 };
 use crate::workspace_export::{
     ExportError, ExportMode, WorkspaceExport, WorkspaceExportService, WorkspaceExportStatus,
@@ -80,8 +80,23 @@ pub fn router(state: PublicApiState) -> Router {
     // name the token's only workspace.
     let workspace = Router::new()
         .route("/projects", get(projects).post(create_project))
-        .route("/projects/{project_id}/statuses", get(statuses))
-        .route("/projects/{project_id}/labels", get(labels))
+        .route("/projects/{project_id}", patch(setup::update_project))
+        .route(
+            "/projects/{project_id}/statuses",
+            get(statuses).post(setup::create_status),
+        )
+        .route(
+            "/projects/{project_id}/statuses/{status_id}",
+            patch(setup::update_status),
+        )
+        .route(
+            "/projects/{project_id}/labels",
+            get(labels).post(setup::create_label),
+        )
+        .route(
+            "/projects/{project_id}/labels/{label_id}",
+            patch(setup::update_label),
+        )
         .route("/projects/{project_id}/milestones", get(milestones))
         .route("/projects/{project_id}/cycles", get(cycles))
         .route("/members", get(members))
@@ -91,6 +106,14 @@ pub fn router(state: PublicApiState) -> Router {
             get(get_task).patch(update_task).delete(delete_task),
         )
         .route("/tasks/{task}/comments", get(comments).post(create_comment))
+        .route(
+            "/tasks/{task}/relations",
+            get(relations::relations).post(relations::create_relation),
+        )
+        .route(
+            "/tasks/{task}/relations/{relation_id}",
+            delete(relations::delete_relation),
+        )
         .route("/docs", get(docs).post(create_doc))
         .route("/docs/{page_id}", get(doc).patch(update_doc))
         .route("/docs/{page_id}/database", get(databases::database))
@@ -223,6 +246,24 @@ impl Responder {
         }
     }
 
+    /// 201 for a new item, 200 for the item that an earlier write with its `external_id` made.
+    fn written<T, U: Serialize + From<T>>(
+        &self,
+        result: Result<Written<T>, TokenApiError>,
+    ) -> Response {
+        match result {
+            Ok(Written { value, created }) => {
+                let status = if created {
+                    StatusCode::CREATED
+                } else {
+                    StatusCode::OK
+                };
+                (status, Json(U::from(value))).into_response()
+            }
+            Err(error) => self.error(error),
+        }
+    }
+
     fn problem(&self, status: StatusCode, code: &str, title: &str, detail: &str) -> Problem {
         Problem {
             type_uri: format!("https://docs.orbit.dev/problems/{code}"),
@@ -302,6 +343,12 @@ impl Responder {
                 "workspace_action_forbidden",
                 "Workspace action forbidden",
                 "Only workspace owners and administrators may delete tasks forever.",
+            ),
+            TokenApiError::ImportForbidden => self.problem(
+                StatusCode::FORBIDDEN,
+                "workspace_action_forbidden",
+                "Workspace action forbidden",
+                "A tasks:import token writes only while its creator is a workspace owner or admin.",
             ),
             TokenApiError::Internal => Problem::internal(&self.request_id, &self.instance),
             TokenApiError::Task(error) => self.task_problem(error),
@@ -695,6 +742,9 @@ pub(crate) struct CommentOut {
     body: String,
     #[schema(value_type = Option<String>, required = true)]
     parent_id: Option<Id>,
+    /// The source tool's ID of an imported comment (`tasks:import`); `null` otherwise.
+    #[schema(required = true)]
+    external_id: Option<String>,
     version: u64,
     #[schema(value_type = String, format = DateTime)]
     created_at: TimestampMillis,
@@ -714,6 +764,7 @@ impl From<CommentRecord> for CommentOut {
             }),
             body: c.body,
             parent_id: c.parent_id,
+            external_id: c.external_id,
             version: c.version,
             created_at: c.created_at,
             updated_at: c.updated_at,
@@ -810,6 +861,25 @@ struct CreateTaskBody {
     /// Points, 0 to 1000.
     #[schema(minimum = 0, maximum = 1000)]
     estimate: Option<i64>,
+    /// `tasks:import`: the source tool's ID, unique in the workspace. A second create with the
+    /// same ID answers `200` with the task that the first one made (unchanged), so a restarted
+    /// import does not make duplicates. Up to 200 characters.
+    external_id: Option<String>,
+    /// `tasks:import`: the task number, free in the project (`409` otherwise), so `ENG-166`
+    /// stays `ENG-166`. Later tasks are numbered after the highest number.
+    number: Option<i64>,
+    /// `tasks:import`: the original creation time.
+    #[schema(value_type = Option<String>, format = DateTime)]
+    created_at: Option<TimestampMillis>,
+    /// `tasks:import`: the original update time; needs `created_at` and is not before it.
+    #[schema(value_type = Option<String>, format = DateTime)]
+    updated_at: Option<TimestampMillis>,
+    /// `tasks:import`: when the task was done; kept when its status is completed or cancelled.
+    #[schema(value_type = Option<String>, format = DateTime)]
+    completed_at: Option<TimestampMillis>,
+    /// `tasks:import`: the member shown as the creator (not a guest).
+    #[schema(value_type = Option<String>)]
+    creator_id: Option<Id>,
 }
 
 fn default_priority() -> String {
@@ -866,6 +936,10 @@ struct UpdateTaskBody {
     #[serde(default, deserialize_with = "present")]
     #[schema(value_type = Option<i64>, minimum = 0, maximum = 1000)]
     estimate: Option<Option<i64>>,
+    /// A task in an approved project (a UUID or an identifier such as `ENG-12`) marks this task
+    /// as its duplicate and moves it to the Duplicate status; `null` unmarks it.
+    #[serde(default, deserialize_with = "present")]
+    duplicate_of_id: Option<Option<String>>,
 }
 
 /// A field that is present, `null` included: `null` clears the value, a missing field keeps it.
@@ -894,6 +968,24 @@ struct CreateProjectBody {
 struct CommentBody {
     /// Markdown, 1 to 100,000 bytes in UTF-8, not only spaces.
     body: String,
+    /// A comment of the same task: the new comment is its reply.
+    #[schema(value_type = Option<String>)]
+    parent_id: Option<Id>,
+    /// `tasks:import`: the source tool's ID, unique in the workspace. A second create with the
+    /// same ID answers `200` with the comment that the first one made. Up to 200 characters.
+    external_id: Option<String>,
+    /// `tasks:import`: the member shown as the author (not a guest).
+    #[schema(value_type = Option<String>)]
+    author_id: Option<Id>,
+    /// `tasks:import`: an author who is not a member; shown in bold on the first line, as the
+    /// built-in importers do. Not with `author_id`. Up to 200 characters.
+    author_name: Option<String>,
+    /// `tasks:import`: the original creation time.
+    #[schema(value_type = Option<String>, format = DateTime)]
+    created_at: Option<TimestampMillis>,
+    /// `tasks:import`: the original update time; needs `created_at` and is not before it.
+    #[schema(value_type = Option<String>, format = DateTime)]
+    updated_at: Option<TimestampMillis>,
 }
 
 /// Without `parent_id`, `teamspace_id` or `private`, the doc goes to the root of the default
@@ -984,6 +1076,8 @@ macro_rules! path_id {
 }
 
 pub(crate) mod databases;
+pub(crate) mod relations;
+pub(crate) mod setup;
 
 #[utoipa::path(
     get,
@@ -1316,7 +1410,10 @@ async fn get_task(
     summary = "Create a task",
     params(("workspace_id" = String, Path, description = "The token's workspace, from `GET /me`.")),
     request_body = CreateTaskBody,
-    responses((status = 201, description = "The new task", body = TaskView)),
+    responses(
+        (status = 201, description = "The new task", body = TaskView),
+        (status = 200, description = "`tasks:import`: the task that an earlier create with the same `external_id` made", body = TaskView),
+    ),
     security(("bearerAuth" = []))
 )]
 async fn create_task(
@@ -1344,11 +1441,25 @@ async fn create_task(
             milestone_id: body.milestone_id,
             cycle_id: body.cycle_id,
             estimate: body.estimate,
+            import: (body.external_id.is_some()
+                || body.number.is_some()
+                || body.created_at.is_some()
+                || body.updated_at.is_some()
+                || body.completed_at.is_some()
+                || body.creator_id.is_some())
+            .then_some(ImportedTask {
+                completed_at: body.completed_at,
+                created_at: body.created_at,
+                updated_at: body.updated_at,
+                number: body.number,
+                creator_id: body.creator_id,
+                external_id: body.external_id,
+            }),
         })
         .await
     }
     .await;
-    ctx.reply(StatusCode::CREATED, result)
+    ctx.written::<_, TaskView>(result)
 }
 
 #[utoipa::path(
@@ -1391,6 +1502,10 @@ async fn update_task(
             milestone_id: body.milestone_id,
             cycle_id: body.cycle_id,
             estimate: body.estimate,
+            duplicate_of_id: match body.duplicate_of_id {
+                Some(original) => Some(api.optional_task_id(original.as_deref()).await?),
+                None => None,
+            },
         };
         api.update_task(&task, body.expected_version, patch).await
     }
@@ -1593,7 +1708,10 @@ async fn comments(
     summary = "Comment on a task",
     params(("workspace_id" = String, Path, description = "The token's workspace, from `GET /me`."), ("task" = String, Path, description = "A task UUID or identifier such as `ENG-12` (any letter case).")),
     request_body = CommentBody,
-    responses((status = 201, description = "The new comment", body = CommentOut)),
+    responses(
+        (status = 201, description = "The new comment", body = CommentOut),
+        (status = 200, description = "`tasks:import`: the comment that an earlier create with the same `external_id` made", body = CommentOut),
+    ),
     security(("bearerAuth" = []))
 )]
 async fn create_comment(
@@ -1608,12 +1726,30 @@ async fn create_comment(
             .api
             .authorize(&ctx.principal, ApiTokenScope::TasksWrite, &ctx.request_id)
             .await?;
-        api.create_comment(&task, body.body)
-            .await
-            .map(CommentOut::from)
+        let source = ImportedComment {
+            author_id: body.author_id,
+            created_at: body.created_at,
+            updated_at: body.updated_at,
+            external_id: body.external_id,
+        };
+        let import = (source.author_id.is_some()
+            || source.created_at.is_some()
+            || source.updated_at.is_some()
+            || source.external_id.is_some()
+            || body.author_name.is_some())
+        .then_some(CommentImport {
+            source,
+            author_name: body.author_name,
+        });
+        let comment = NewComment {
+            body: body.body,
+            parent_id: body.parent_id,
+            import,
+        };
+        api.create_comment(&task, comment).await
     }
     .await;
-    ctx.reply(StatusCode::CREATED, result)
+    ctx.written::<_, CommentOut>(result)
 }
 
 #[derive(Deserialize, ToSchema)]

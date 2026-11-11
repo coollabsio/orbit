@@ -31,8 +31,8 @@ use crate::repositories::pages::PageError;
 use crate::repositories::task_recurrences::TaskRecurrence;
 use crate::repositories::tasks::{TaskError, TaskRepository};
 use crate::token_api::{
-    DOC_TOO_LARGE_DETAIL, DocPatch, NewDoc, NewTask, TaskPatch, TaskQuery, TokenApi, TokenApiError,
-    parse_cycle_filter, parse_milestone_filter,
+    DOC_TOO_LARGE_DETAIL, DocPatch, NewComment, NewDoc, NewTask, TaskPatch, TaskQuery, TokenApi,
+    TokenApiError, parse_cycle_filter, parse_milestone_filter,
 };
 
 mod databases;
@@ -615,11 +615,12 @@ impl TaskTools {
                         milestone_id,
                         cycle_id,
                         estimate: a.estimate,
+                        import: None,
                     })
                     .await
                 }
                 .await
-                .map(|task| json!(task))
+                .map(|task| json!(task.value))
             }
             "update_task" => {
                 let a: UpdateArgs = arguments(&request)?;
@@ -765,9 +766,14 @@ impl TaskTools {
             }
             "create_comment" => {
                 let a: CreateCommentArgs = arguments(&request)?;
-                api.create_comment(&a.task_id, a.body)
+                let comment = NewComment {
+                    body: a.body,
+                    parent_id: None,
+                    import: None,
+                };
+                api.create_comment(&a.task_id, comment)
                     .await
-                    .map(|comment| json!(CommentOut::from(comment)))
+                    .map(|comment| json!(CommentOut::from(comment.value)))
             }
             "create_project" => {
                 let a: CreateProjectArgs = arguments(&request)?;
@@ -837,6 +843,9 @@ fn tool_error(error: TokenApiError) -> Result<CallToolResult, ErrorData> {
         ),
         TokenApiError::PurgeForbidden => {
             text("Only workspace owners and administrators may delete tasks forever")
+        }
+        TokenApiError::ImportForbidden => {
+            text("Import writes need a token of a workspace owner or administrator")
         }
         TokenApiError::Task(error) => text(match error {
             TaskError::NotFound | TaskError::Forbidden => "Task resource is not available",

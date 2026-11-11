@@ -22,8 +22,8 @@ use super::billing::{TrialCapacityError, ensure_trial_capacity};
 use super::project_access::{self, ProjectScope};
 use super::sub_issues::AutomationActor;
 use super::tasks::{
-    CreateTask, NotificationRequest, TaskError, insert_task_rows_in_tx, notify_users, parse_id,
-    task_in_tx,
+    CreateTask, ImportedTask, NotificationRequest, TaskError, insert_task_rows_in_tx, notify_users,
+    parse_id, task_in_tx,
 };
 use crate::audit::{self, AuditOutcome};
 use crate::billing::TrialLimit;
@@ -391,7 +391,7 @@ pub(super) async fn spawn_next_in_tx(
             actor.actor_id,
             actor.service_account.map(|(id, _)| id),
             &input,
-            None,
+            &ImportedTask::default(),
             Some(&row.get::<String, _>("recurrence_id")),
             actor.now,
         )

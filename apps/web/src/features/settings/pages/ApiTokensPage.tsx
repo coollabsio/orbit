@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Field, FieldContent, FieldLabel, FieldTitle } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { relativeTime, shortDate } from '@/lib/format'
 import { useCan } from '@/features/workspaces/permissions'
@@ -137,7 +138,13 @@ export function ApiTokensPage() {
           </Field>
         </FieldLabel>
         <div className="min-[900px]:col-span-2">
-          <AccessPicker id="api-token-access" resources={tokenResources(serviceAccount, taskScope ? <ProjectPicker id="api-token-projects" projects={projects} selected={projectIds} onChange={setProjectIds} all={allProjects} onAllChange={setAllProjects} empty={projectsQuery.isPending ? 'Loading projects…' : projects.length ? undefined : 'This workspace has no active projects.'} /> : null)} scopes={scopes} onChange={setScopes} />
+          <AccessPicker id="api-token-access" resources={tokenResources(serviceAccount, taskScope ? <>
+            <ProjectPicker id="api-token-projects" projects={projects} selected={projectIds} onChange={setProjectIds} all={allProjects} onAllChange={setAllProjects} empty={projectsQuery.isPending ? 'Loading projects…' : projects.length ? undefined : 'This workspace has no active projects.'} />
+            {scopes.includes('tasks:write') ? <Label className="mt-3 flex items-start gap-2">
+              <Checkbox className="mt-0.5" checked={scopes.includes('tasks:import')} onCheckedChange={(checked) => setScopes(checked ? [...scopes, 'tasks:import'] : scopes.filter((scope) => scope !== 'tasks:import'))} />
+              <span className="grid gap-0.5">Import mode<span className="text-xs font-normal text-muted-foreground">Keeps original dates, numbers and authors. Sends no notifications.</span></span>
+            </Label> : null}
+          </> : null)} scopes={scopes} onChange={(next) => setScopes(next.includes('tasks:write') ? next : next.filter((scope) => scope !== 'tasks:import'))} />
         </div>
         </> : null}
         <Button className="justify-self-start" type="submit" disabled={createToken.isPending || !ready}>Create token</Button>

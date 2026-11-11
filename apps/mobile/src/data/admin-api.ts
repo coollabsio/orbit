@@ -42,6 +42,7 @@ import type {
   BackupSchedule,
   BackupSummary,
   CompressionStatus,
+  EnvironmentView,
   InstanceSettingsView,
   JobLimitsBody,
   JobLimitView,
@@ -62,7 +63,7 @@ import type {
 import { formatBytes } from './account-api'
 import type { OrbitClient } from './orbit'
 
-export type { AdminUser, AdminUserSummary, BackupItem, BackupItemKind, BackupSchedule, BackupSummary, BackupWorkspace, CompressionStatus, InstanceSettingsView, JobLimitView, LimitsView, RecoveryLink, RestoredItem, S3View, SmtpSecurity, SmtpView, StorageView }
+export type { AdminUser, AdminUserSummary, BackupItem, BackupItemKind, BackupSchedule, BackupSummary, BackupWorkspace, CompressionStatus, EnvironmentView, InstanceSettingsView, JobLimitView, LimitsView, RecoveryLink, RestoredItem, S3View, SmtpSecurity, SmtpView, StorageView }
 export type AuditEvent = PageAuditEvent['items'][number]
 
 export interface Page<T> {
