@@ -116,7 +116,7 @@ test('the owner of a trial workspace sees when it ends and its usage, and can ch
   const view = renderPage('owner')
 
   await waitFor(() => expect(view.getByText('Trial')).toBeTruthy())
-  expect(view.getByText(/A new workspace starts with a 14-day trial\. Without an active plan after it/)).toBeTruthy()
+  expect(view.getByText(/Your account has one 14-day trial: it starts with your first workspace/)).toBeTruthy()
   expect(view.getByText('Sun, Mar 17, 2030')).toBeTruthy()
   expect(view.getAllByRole('listitem').map((item) => item.textContent)).toEqual(['12 of 50 tasks', '3 of 20 pages', '1 of 3 members'])
   expect(view.getAllByRole('button').map((button) => button.textContent)).toEqual(['Choose monthly', 'Choose annual', 'Choose monthly', 'Choose annual'])

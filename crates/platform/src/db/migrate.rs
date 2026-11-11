@@ -625,6 +625,11 @@ impl MigrationRunner {
                     include_str!("../../../../apps/server/migrations/0095_chat_webhook_events.sql"),
                     false,
                 ),
+                Migration::new(
+                    96,
+                    include_str!("../../../../apps/server/migrations/0096_owner_trials.sql"),
+                    false,
+                ),
             ],
         );
         runner.postgres = vec![
@@ -926,6 +931,11 @@ impl MigrationRunner {
                 include_str!(
                     "../../../../apps/server/migrations/postgres/0095_chat_webhook_events.sql"
                 ),
+                false,
+            ),
+            Migration::new(
+                96,
+                include_str!("../../../../apps/server/migrations/postgres/0096_owner_trials.sql"),
                 false,
             ),
         ];

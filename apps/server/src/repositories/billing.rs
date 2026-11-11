@@ -7,13 +7,13 @@ use sqlx::{Any, Transaction};
 use crate::audit::{self, AuditOutcome};
 use crate::billing::{SubscriptionStatus, TrialLimit, WorkspaceAccess, access, grants_access};
 
-/// A workspace's billing row as stored, with the workspace's creation time (its trial start).
+/// A workspace's billing row as stored, with its trial start (the owner's, see [`crate::billing::access`]).
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct WorkspaceSubscription {
     /// The root user's first workspace, which needs no subscription.
     pub exempt: bool,
-    /// Unix milliseconds.
-    pub workspace_created_at: i64,
+    /// When the trial started, copied from the creator's account (Unix milliseconds).
+    pub trial_started_at: i64,
     pub stripe_customer_id: Option<String>,
     pub plan: Option<String>,
     /// `None` without a subscription, or for a status this server does not know.
@@ -29,7 +29,7 @@ impl WorkspaceSubscription {
         access(
             self.exempt,
             self.status,
-            self.workspace_created_at,
+            self.trial_started_at,
             now.as_millis(),
             trial.millis(),
         )
@@ -38,7 +38,7 @@ impl WorkspaceSubscription {
     /// When the trial ends (or ended), Unix milliseconds.
     #[must_use]
     pub fn trial_ends_at(&self, trial: &TrialConfig) -> i64 {
-        self.workspace_created_at.saturating_add(trial.millis())
+        self.trial_started_at.saturating_add(trial.millis())
     }
 }
 
@@ -123,7 +123,7 @@ pub async fn trial_counts(database: &Database) -> Result<Option<TrialCounts>, sq
         return Ok(None);
     };
     let rows = sqlx::query(
-        "SELECT workspaces.created_at, workspaces.billing_exempt, s.status FROM workspaces \
+        "SELECT workspaces.trial_started_at, workspaces.billing_exempt, s.status FROM workspaces \
          LEFT JOIN workspace_subscriptions s ON s.workspace_id = workspaces.id \
          WHERE workspaces.deleted_at IS NULL",
     )
@@ -139,7 +139,7 @@ pub async fn trial_counts(database: &Database) -> Result<Option<TrialCounts>, sq
         match access(
             row.get("billing_exempt"),
             status,
-            row.get("created_at"),
+            row.get("trial_started_at"),
             now,
             billing.0.millis(),
         ) {
@@ -175,7 +175,7 @@ async fn subscription_in<'e>(
     workspace_id: Id,
 ) -> Result<WorkspaceSubscription, sqlx::Error> {
     let row = sqlx::query(
-        "SELECT workspaces.created_at, workspaces.billing_exempt, s.stripe_customer_id, s.plan, s.status, \
+        "SELECT workspaces.trial_started_at, workspaces.billing_exempt, s.stripe_customer_id, s.plan, s.status, \
          s.cancel_at_period_end, s.current_period_end FROM workspaces \
          LEFT JOIN workspace_subscriptions s ON s.workspace_id = workspaces.id \
          WHERE workspaces.id = $1",
@@ -186,7 +186,7 @@ async fn subscription_in<'e>(
     Ok(row.map_or_else(WorkspaceSubscription::default, |row| {
         WorkspaceSubscription {
             exempt: row.get("billing_exempt"),
-            workspace_created_at: row.get("created_at"),
+            trial_started_at: row.get("trial_started_at"),
             stripe_customer_id: row.get("stripe_customer_id"),
             plan: row.get("plan"),
             status: row
