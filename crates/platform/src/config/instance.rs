@@ -210,7 +210,7 @@ impl InstanceConfig {
         let config = Self {
             registration_open: values.flag(OPEN_REGISTRATION)?,
             backup_schedule: values
-                .text(AUTOMATIC_BACKUPS)
+                .policy(AUTOMATIC_BACKUPS)
                 .map(|value| {
                     BackupSchedule::parse(&value)
                         .ok_or_else(|| invalid(AUTOMATIC_BACKUPS, "must be off, hourly or daily"))
@@ -301,6 +301,11 @@ impl Values<'_> {
             .filter(|value| !value.is_empty())
     }
 
+    /// Trimmed; an empty value stays set, so its parser rejects it instead of keeping the saved value.
+    fn policy(&self, key: &str) -> Option<String> {
+        self.0.get(key).map(|value| value.trim().to_owned())
+    }
+
     /// `KEY`, or the contents of the file in `KEY_FILE`.
     fn secret(&self, key: &str) -> Result<Option<String>, ConfigError> {
         let file_key = format!("{key}_FILE");
@@ -316,7 +321,7 @@ impl Values<'_> {
     }
 
     fn flag(&self, key: &'static str) -> Result<Option<bool>, ConfigError> {
-        self.text(key)
+        self.policy(key)
             .map(|value| match value.to_ascii_lowercase().as_str() {
                 "true" | "1" => Ok(true),
                 "false" | "0" => Ok(false),
@@ -600,6 +605,13 @@ mod tests {
             (config.registration_open, config.backup_schedule),
             (Some(true), Some(BackupSchedule::Daily))
         );
+    }
+
+    #[test]
+    fn an_empty_flag_or_schedule_is_an_error() {
+        for key in [OPEN_REGISTRATION, AUTOMATIC_BACKUPS, S3_ATTACHMENTS, S3_BACKUPS] {
+            assert_eq!(invalid_key(parse(&[(key, " ")])), key);
+        }
     }
 
     #[test]
