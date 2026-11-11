@@ -27,8 +27,18 @@ export function pushRoute(url: string): string | null {
       const thread = second === 'thread' && third ? third : threadParam && decodeURIComponent(threadParam)
       return thread ? `/chat/thread/${thread}` : `/chat/${first}`
     }
-    case 'tasks':
-      return first && first !== 'projects' ? `/tasks/${first}` : '/tasks'
+    case 'tasks': {
+      // `/tasks/pulls/<owner>/<repo>/<number>[?comment=<id>]`: a pull request (from a review notification)
+      if (first === 'pulls') {
+        const fourth = parts[4]
+        if (!second || !third || !fourth || !/^\d+$/.test(fourth)) return '/tasks'
+        const comment = /(?:^|&)comment=(\d+)/.exec(match?.[2] ?? '')?.[1]
+        const base = `/tasks/pulls/${encodeURIComponent(second)}/${encodeURIComponent(third)}/${fourth}`
+        return comment ? `${base}?comment=${comment}` : base
+      }
+      if (first === 'projects') return second && third === 'pulls' ? `/tasks/project/${encodeURIComponent(second)}/pulls` : '/tasks'
+      return first ? `/tasks/${first}` : '/tasks'
+    }
     case 'views':
       return second ? `/tasks/${second}` : '/tasks'
     case 'docs':

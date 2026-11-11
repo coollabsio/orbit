@@ -187,3 +187,7 @@
 - Expo DOM components render in a web view whose `#root` is a flex row: give the component's root `flex: 1`, or it is
   only as wide as its content. The Expo web target renders the component inline, so the preview does not show this;
   check the exported bundle (`expo export --platform ios`, `www.bundle/*.html`) with a fake `window.ReactNativeWebView`.
+- A DOM component whose code uses dynamic `import()` (Pierre Diffs, Shiki) breaks `expo export` with bundle splitting:
+  "Asset not found: _expo/static/js/web/__common-….js". `apps/mobile/metro.config.js` sets `EXPO_NO_BUNDLE_SPLITTING`
+  so every Expo command makes one bundle for each DOM component; keep it. A stale shared Metro cache gives a different
+  error (the DOM entry points at another checkout's path): run the export once with `--clear`.

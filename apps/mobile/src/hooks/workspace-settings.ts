@@ -28,9 +28,9 @@ export function useBillingLinks() {
   return { checkout, portal }
 }
 
-export function useGithubSettings() {
+export function useGithubSettings(enabled = true) {
   const { client, workspaceId } = useOrbit()
-  return useQuery({ queryKey: api.workspaceSettingsKeys.github(workspaceId), queryFn: () => api.githubSettings(client, workspaceId) })
+  return useQuery({ enabled, queryKey: api.workspaceSettingsKeys.github(workspaceId), queryFn: () => api.githubSettings(client, workspaceId) })
 }
 
 export function useApiTokens(enabled: boolean) {

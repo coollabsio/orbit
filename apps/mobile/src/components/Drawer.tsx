@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg'
 
 import { useAuthOptions } from '../hooks/account'
+import { useGithubSettings } from '../hooks/workspace-settings'
 import { useOrbit } from '../orbit-context'
 import { useChatBadge, useProjects } from '../queries'
 import { splitAlpha } from '../data/color'
@@ -297,6 +298,7 @@ function DrawerPanel({ mounted, width, onClose }: { mounted: boolean; width: num
  */
 function TasksArea({ view, project, onTasks, onBack, go }: { view?: string; project?: string; onTasks: boolean; onBack: () => void; go: (href: Href) => void }) {
   const projects = useProjects().data ?? []
+  const connected = useGithubSettings(projects.length > 0).data?.connected_projects ?? []
   const [creating, setCreating] = useState(false)
   const current = { view, project }
   const row = (link: NavLink) => <NavRow key={String(link.href)} link={link} onPress={() => go(link.href)} />
@@ -313,6 +315,8 @@ function TasksArea({ view, project, onTasks, onBack, go }: { view?: string; proj
           <Section label="Projects" />
           {row({ label: 'All projects', icon: 'folder', href: tasksHref(current, { project: null }), active: onTasks && !project })}
           {projects.map((item) => row({ label: item.name, icon: 'folder', color: item.color, locked: item.private, href: tasksHref(current, { project: item.id }), active: onTasks && project === item.id }))}
+          {/* the open project's pull requests, when it has a GitHub repository (the web's hover link on the project) */}
+          {project && connected.includes(project) ? row({ label: 'Pull requests', icon: 'code', href: `/tasks/project/${project}/pulls`, active: false }) : null}
         </>
       ) : <Section label="Projects" />}
       <NavRow link={{ label: 'New project', icon: 'plus', href: '/tasks', active: false }} onPress={() => setCreating(true)} />
