@@ -38,7 +38,7 @@ export function BotAvatar({ bot, size = 24 }: { bot: Pick<MessageBot, 'name' | '
 /** "APP" after an integration's name, as Slack marks bots. */
 export function BotBadge() {
   return (
-    <span data-slot="bot-badge" className="shrink-0 rounded-sm bg-muted px-1 py-px text-[10px] leading-4 font-semibold tracking-wide text-muted-foreground uppercase">
+    <span data-slot="bot-badge" className="shrink-0 rounded-sm bg-muted px-1 py-px text-[0.625rem] leading-4 font-semibold tracking-wide text-muted-foreground uppercase">
       App
     </span>
   )

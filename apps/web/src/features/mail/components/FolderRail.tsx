@@ -43,7 +43,7 @@ export function FolderRail({ folders, threads, activeFolderId }: FolderRailProps
         key={folder.id}
         type="button"
         variant="ghost"
-        className="w-full min-w-0 justify-start gap-2.5 text-[13px] data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground data-drop-over:bg-primary/10 data-drop-over:text-primary"
+        className="w-full min-w-0 justify-start gap-2.5 text-[0.8125rem] data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground data-drop-over:bg-primary/10 data-drop-over:text-primary"
         data-active={folder.id === activeFolderId || undefined}
         data-drop-over={dropFolderId === folder.id || undefined}
         onClick={() => navigate(`/mail?folder=${folder.id}`)}
@@ -66,7 +66,7 @@ export function FolderRail({ folders, threads, activeFolderId }: FolderRailProps
         <Icon className="opacity-90" />
         <span className="min-w-0 flex-1 truncate text-left">{folder.name}</span>
         {unread > 0 ? (
-          <Badge className="h-4 min-w-4 px-1 text-[10px] tabular-nums">
+          <Badge className="h-4 min-w-4 px-1 text-[0.625rem] tabular-nums">
             {unread}
           </Badge>
         ) : null}
@@ -82,7 +82,7 @@ export function FolderRail({ folders, threads, activeFolderId }: FolderRailProps
       <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto p-2">
         {system.map(row)}
         <div className="mt-3 flex items-center pr-0.5">
-          <span className="px-2.5 py-1 text-[11px] font-medium text-sidebar-foreground/60 select-none">
+          <span className="px-2.5 py-1 text-[0.6875rem] font-medium text-sidebar-foreground/60 select-none">
             Custom folders
           </span>
           <span className="flex-1" />
@@ -102,7 +102,7 @@ export function FolderRail({ folders, threads, activeFolderId }: FolderRailProps
         {custom.map(row)}
         {adding ? (
           <Input
-            className="mt-0.5 h-7 text-[13px] md:text-[13px]"
+            className="mt-0.5 h-7 text-[0.8125rem] md:text-[0.8125rem]"
             autoFocus
             placeholder="Folder name"
             aria-label="New folder name"

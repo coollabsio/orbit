@@ -13,7 +13,7 @@ export function CurrentPassword({ hasPassword, value, onChange, error, fallback,
   const message = error ? (error instanceof ApiProblem ? error.detail : fallback) : null
   if (!hasPassword) {
     if (error instanceof ApiProblem && error.code === 'reauthentication_required') return <ConfirmWithProvider returnTo={returnTo} />
-    return message ? <p role="alert" className="text-[13px] text-destructive">{message}</p> : null
+    return message ? <p role="alert" className="text-[0.8125rem] text-destructive">{message}</p> : null
   }
   return (
     <Field data-invalid={message ? true : undefined}>

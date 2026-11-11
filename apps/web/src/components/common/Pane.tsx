@@ -17,7 +17,7 @@ function PaneHeader({ className, ...props }: ComponentProps<'div'>) {
 function PaneTitle({ className, render, ...props }: useRender.ComponentProps<'span'>) {
   return useRender({
     defaultTagName: 'span',
-    props: mergeProps<'span'>({ className: cn('truncate text-[13px] font-semibold text-foreground', className) }, props),
+    props: mergeProps<'span'>({ className: cn('truncate text-[0.8125rem] font-semibold text-foreground', className) }, props),
     render,
     state: { slot: 'pane-title' },
   })

@@ -131,7 +131,7 @@ function RecentImports({ imports }: { imports: AsanaImport[] | undefined }) {
           <Link
             key={item.id}
             to={`/tasks-import/${item.id}`}
-            className="flex min-h-10 min-w-0 items-center gap-3 border-b border-border px-1 py-1.5 text-[13px] transition-colors duration-150 ease-out hover:bg-sidebar-accent/50"
+            className="flex min-h-10 min-w-0 items-center gap-3 border-b border-border px-1 py-1.5 text-[0.8125rem] transition-colors duration-150 ease-out hover:bg-sidebar-accent/50"
           >
             <span className="min-w-0 flex-1 truncate text-foreground">{item.asana_user_name || 'Asana'}</span>
             {item.progress.total > 0 ? (
@@ -258,7 +258,7 @@ function ProjectChooser({ workspaceId, item, tree }: { workspaceId: string; item
             onChange={(event) => setQuery(event.target.value)}
           />
         </InputGroup>
-        <div className="flex items-center gap-2 text-[13px] text-foreground">
+        <div className="flex items-center gap-2 text-[0.8125rem] text-foreground">
           <Checkbox
             aria-label="Select all projects"
             checked={all.checked}
@@ -297,7 +297,7 @@ function ProjectChooser({ workspaceId, item, tree }: { workspaceId: string; item
                     {group.projects.map((project) => (
                       <div
                         key={project.gid}
-                        className="flex h-8 items-center gap-2 rounded-md pr-2 pl-8 text-[13px] text-foreground transition-colors duration-150 ease-out hover:bg-sidebar-accent/50"
+                        className="flex h-8 items-center gap-2 rounded-md pr-2 pl-8 text-[0.8125rem] text-foreground transition-colors duration-150 ease-out hover:bg-sidebar-accent/50"
                       >
                         <Checkbox
                           aria-label={`Select ${project.name}`}
@@ -470,7 +470,7 @@ function ResultStep({ workspaceId, item }: { workspaceId: string; item: AsanaImp
                   <li key={id} className="border-b border-border">
                     <Link
                       to={`/tasks?project=${id}`}
-                      className="flex h-9 items-center gap-2 px-1 text-[13px] text-foreground transition-colors duration-150 ease-out hover:bg-sidebar-accent/50"
+                      className="flex h-9 items-center gap-2 px-1 text-[0.8125rem] text-foreground transition-colors duration-150 ease-out hover:bg-sidebar-accent/50"
                     >
                       <span className="mx-[3px] size-2 shrink-0 rounded-[2px]" style={{ background: project?.color }} />
                       <span className="truncate">{project?.name ?? 'Imported project'}</span>
@@ -497,7 +497,7 @@ function ResultStep({ workspaceId, item }: { workspaceId: string; item: AsanaImp
             <ul className="flex flex-col border-t border-border">
               {report.failures.map((failure) => (
                 <li key={`${failure.kind}-${failure.asana_gid}`} className="flex flex-col gap-0.5 border-b border-border px-1 py-2">
-                  <span className="text-[13px] text-foreground">
+                  <span className="text-[0.8125rem] text-foreground">
                     {failure.title.trim() ? failure.title : 'Untitled'}
                     {failure.kind === 'project' ? <span className="text-muted-foreground"> (project)</span> : null}
                   </span>

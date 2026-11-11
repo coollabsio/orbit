@@ -31,7 +31,7 @@ export function NotificationRow({ notification, rows, onOpen }: { notification: 
         </span>
         <span aria-hidden="true" className="size-7 shrink-0" />
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span className="truncate text-[13px] text-foreground data-unread:font-semibold" data-unread={unread || undefined}>
+          <span className="truncate text-[0.8125rem] text-foreground data-unread:font-semibold" data-unread={unread || undefined}>
             {copy.title}
           </span>
           <span className="truncate text-xs text-muted-foreground/70">{actor && !notification.import_id ? `${actor.name} · ${copy.body}` : copy.body}</span>

@@ -27,7 +27,7 @@ function RequestRegistration() {
       <AuthCard className="grid gap-4">
         <h1 className="text-xl font-semibold">Create your account</h1>
         <div className="grid gap-3"><ProviderButtons providers={providers} /></div>
-        <p className="text-center text-[13px] text-muted-foreground"><Link to="/login">Already have an account? Sign in</Link></p>
+        <p className="text-center text-[0.8125rem] text-muted-foreground"><Link to="/login">Already have an account? Sign in</Link></p>
       </AuthCard>
     )
   }

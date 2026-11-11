@@ -367,7 +367,7 @@ export function ChatSidebar() {
 
       <nav aria-label="Conversations" className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-2 pt-3">
         {conversations.isError ? (
-          <div className="flex flex-col items-start gap-2 px-2 text-[13px] text-muted-foreground" role="alert">
+          <div className="flex flex-col items-start gap-2 px-2 text-[0.8125rem] text-muted-foreground" role="alert">
             Could not load your conversations.
             <Button type="button" variant="outline" size="sm" onClick={() => void conversations.refetch()}>
               Try again

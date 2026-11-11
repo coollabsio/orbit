@@ -55,7 +55,7 @@ function SettingsShell({ area }: { area: SettingsAreaName }) {
             </Link>
           ) : null}
           <Icon className="size-[15px] shrink-0" />
-          <span className="truncate text-[13px] font-semibold">{title}</span>
+          <span className="truncate text-[0.8125rem] font-semibold">{title}</span>
           {page ? (
             <>
               <span aria-hidden>/</span>

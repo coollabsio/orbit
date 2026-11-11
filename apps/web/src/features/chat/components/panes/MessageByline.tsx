@@ -24,7 +24,7 @@ export function MessageByline({ message, members, children, profile = false }: M
   const author = members.find((member) => member.id === message.authorId)
   const bot = message.bot ?? null
   return (
-    <span data-slot="message-byline" className="flex min-w-0 items-center gap-1.5 text-[13px]">
+    <span data-slot="message-byline" className="flex min-w-0 items-center gap-1.5 text-[0.8125rem]">
       {bot ? (
         <>
           <span className="flex shrink-0">

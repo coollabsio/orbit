@@ -32,8 +32,8 @@ export function ConfirmEmailPage() {
     return (
       <AuthCard>
         <h1 className="mb-1 text-xl font-semibold">Your email is changed</h1>
-        <p className="text-[13px] leading-[1.6] text-muted-foreground">You now sign in with {confirm.data}. Your other devices are signed out.</p>
-        <p className="mt-4 text-[13px]"><Link to="/" className="font-medium text-foreground">Continue to Orbit</Link></p>
+        <p className="text-[0.8125rem] leading-[1.6] text-muted-foreground">You now sign in with {confirm.data}. Your other devices are signed out.</p>
+        <p className="mt-4 text-[0.8125rem]"><Link to="/" className="font-medium text-foreground">Continue to Orbit</Link></p>
       </AuthCard>
     )
   }
@@ -42,8 +42,8 @@ export function ConfirmEmailPage() {
     return (
       <AuthCard>
         <h1 className="mb-1 text-xl font-semibold">{(problem && ERROR_TITLES[problem.code]) ?? 'Your email is not changed'}</h1>
-        <p role="alert" className="text-[13px] leading-[1.6] text-muted-foreground">{problem ? problem.detail : 'The server could not change the email. Try opening the link again.'}</p>
-        <p className="mt-4 text-[13px]"><Link to="/profile" className="font-medium text-foreground">Go to your account settings</Link></p>
+        <p role="alert" className="text-[0.8125rem] leading-[1.6] text-muted-foreground">{problem ? problem.detail : 'The server could not change the email. Try opening the link again.'}</p>
+        <p className="mt-4 text-[0.8125rem]"><Link to="/profile" className="font-medium text-foreground">Go to your account settings</Link></p>
       </AuthCard>
     )
   }

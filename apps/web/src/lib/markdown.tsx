@@ -418,7 +418,7 @@ export function renderMarkdownBlocks(text: string, keyPrefix: string, mentionTok
         : separator[index].endsWith(':') ? 'right' : 'left'
       blocks.push(
         <div key={`${keyPrefix}-table-${start}`} className="my-2 max-w-full overflow-x-auto">
-          <table className="min-w-full border-collapse text-[13px]">
+          <table className="min-w-full border-collapse text-[0.8125rem]">
             <thead><tr>{headers.map((cell, index) => <th key={index} data-align={align(index)} className="border-b border-border px-3 py-1.5 text-left font-semibold data-[align=center]:text-center data-[align=right]:text-right">{renderMarkdownText(cell, `${keyPrefix}-th-${start}-${index}`, mentionTokens, options)}</th>)}</tr></thead>
             <tbody>{rows.map((row, rowIndex) => <tr key={rowIndex}>{headers.map((_, index) => <td key={index} data-align={align(index)} className="border-b border-border/50 px-3 py-1.5 text-left align-top data-[align=center]:text-center data-[align=right]:text-right">{renderMarkdownText(row[index] || '', `${keyPrefix}-td-${start}-${rowIndex}-${index}`, mentionTokens, options)}</td>)}</tr>)}</tbody>
           </table>

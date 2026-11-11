@@ -3,7 +3,7 @@ import { cva } from 'class-variance-authority'
 import { cn } from 'cn'
 import type { OptionColor } from '@orbit/database/types'
 
-const pillVariants = cva('inline-flex h-5 min-w-0 shrink-0 items-center gap-1.5 rounded-[4px] px-1.5 text-[13px] leading-5 whitespace-nowrap', {
+const pillVariants = cva('inline-flex h-5 min-w-0 shrink-0 items-center gap-1.5 rounded-[4px] px-1.5 text-[0.8125rem] leading-5 whitespace-nowrap', {
   variants: {
     color: {
       default: 'bg-foreground/[0.07] text-foreground',

@@ -122,12 +122,12 @@ export function TaskRow({ task, statuses, labels, users, assignees, project, pro
       {has('status') ? <StatusPicker task={task} statuses={statuses} onRequestDuplicate={() => onRequestDuplicate(task)} /> : null}
       {!has('id') && task.blocked ? <BlockedIndicator /> : null}
       {showParent && task.parent ? (
-        <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[13px]">
+        <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[0.8125rem]">
           <Tip label={`Open ${refIdentifier(task.parent)}`}>
             <Button
               type="button"
               variant="link"
-              className="h-auto max-w-[40%] shrink justify-start p-0 text-[13px] font-normal text-muted-foreground hover:text-foreground"
+              className="h-auto max-w-[40%] shrink justify-start p-0 text-[0.8125rem] font-normal text-muted-foreground hover:text-foreground"
               onClick={(event) => {
                 event.stopPropagation()
                 onOpen(task.parent!.id)
@@ -140,7 +140,7 @@ export function TaskRow({ task, statuses, labels, users, assignees, project, pro
           <span className="min-w-0 flex-1 truncate font-medium"><LinkifiedText text={task.title || 'Untitled'} /></span>
         </span>
       ) : (
-        <span className="min-w-0 flex-1 truncate text-[13px] font-medium"><LinkifiedText text={task.title || 'Untitled'} /></span>
+        <span className="min-w-0 flex-1 truncate text-[0.8125rem] font-medium"><LinkifiedText text={task.title || 'Untitled'} /></span>
       )}
       {has('labels') && task.labels.length > 0 ? (
         <span className="flex shrink-0 gap-1 max-[1099px]:hidden">

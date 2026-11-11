@@ -34,7 +34,7 @@ export function MessageItem({ message, expanded, onToggle, onReply, onForward }:
       >
         <UserAvatar user={null} name={message.from.name} size={32} />
         <div className="flex min-w-0 flex-col">
-          <span className="truncate text-[13px] font-semibold text-foreground">{message.from.name}</span>
+          <span className="truncate text-[0.8125rem] font-semibold text-foreground">{message.from.name}</span>
           <span className="truncate text-xs text-muted-foreground/70">{message.from.email}</span>
         </div>
         <span className="flex-1" />
@@ -60,7 +60,7 @@ export function MessageItem({ message, expanded, onToggle, onReply, onForward }:
           </div>
         </div>
       ) : (
-        <div className="mt-1.5 truncate pl-[42px] text-[13px] text-muted-foreground">{firstLine(message.body)}</div>
+        <div className="mt-1.5 truncate pl-[42px] text-[0.8125rem] text-muted-foreground">{firstLine(message.body)}</div>
       )}
     </div>
   )
