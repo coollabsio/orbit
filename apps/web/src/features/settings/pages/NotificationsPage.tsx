@@ -2,9 +2,10 @@ import { toast } from 'sonner'
 import { Monitor, Mobile as Smartphone } from 'reicon-react'
 import type { NotificationPrefs } from '@orbit/api/generated/types.gen'
 import { SettingsCard } from '@/components/common/SettingsCard'
+import { InfoTip } from '@/components/common/InfoTip'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
+import { Field, FieldLabel } from '@/components/ui/field'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { AWAY_MINUTES, useAwayMinutes } from '@/features/realtime/idle'
@@ -163,7 +164,7 @@ function OtherDevices() {
   return (
     <FieldGrid>
       <Field>
-        <FieldLabel htmlFor="away-minutes">Notify my other devices when this window is out of focus for</FieldLabel>
+        <FieldLabel htmlFor="away-minutes" className="items-center gap-1.5">Notify my other devices when this window is out of focus for <InfoTip text="Before that, only this device notifies you. A closed or idle Orbit always notifies your other devices." /></FieldLabel>
         <Select items={AWAY_OPTIONS} value={String(minutes)} onValueChange={(value) => setMinutes(Number(value))}>
           <SelectTrigger id="away-minutes">
             <SelectValue />
@@ -172,7 +173,6 @@ function OtherDevices() {
             {AWAY_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
           </SelectContent>
         </Select>
-        <FieldDescription>Before that, only this device notifies you. A closed or idle Orbit always notifies your other devices.</FieldDescription>
       </Field>
     </FieldGrid>
   )

@@ -1,4 +1,5 @@
 import { Hashtag } from 'reicon-react'
+import { InfoTip } from '@/components/common/InfoTip'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Field, FieldLabel } from '@/components/ui/field'
@@ -14,10 +15,9 @@ export function GuestChannelsField({ value, onChange }: { value: readonly string
   const toggle = (id: string, checked: boolean) => onChange(checked ? [...value, id] : value.filter((item) => item !== id))
   return (
     <Field className="mt-4">
-      <FieldLabel id="guest-channels-label">
-        Channels <RequiredMark />
+      <FieldLabel id="guest-channels-label" className="items-center gap-1.5">
+        Channels <RequiredMark /> <InfoTip text="A guest sees only these private channels and the people in them." />
       </FieldLabel>
-      <p className="text-xs text-muted-foreground">A guest sees only these private channels and the people in them.</p>
       {conversations.isPending ? (
         <p role="status" className="text-xs text-muted-foreground">Loading channels…</p>
       ) : !conversations.data ? (

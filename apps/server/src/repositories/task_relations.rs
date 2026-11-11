@@ -7,6 +7,7 @@ use serde_json::json;
 use sqlx::{Any, Transaction};
 use utoipa::ToSchema;
 
+use super::project_access::ProjectScope;
 use super::tasks::{
     TaskChanges, TaskError, TaskRepository, TaskUpdate, parse_id, record_mutation,
     require_access_tx, task_in_tx, update_task_in_tx,
@@ -135,16 +136,20 @@ pub(super) async fn release_duplicates_in_tx(
     Ok(())
 }
 
-/// The title of a live task (neither it nor its project is in the trash), if it is one.
+/// The title of a live task (neither it nor its project is in the trash) in a project in
+/// `scope`, if it is one.
 pub(super) async fn visible_task_title_in_tx(
     tx: &mut Transaction<'_, Any>,
+    scope: ProjectScope,
     workspace_id: Id,
     task_id: Id,
 ) -> Result<Option<String>, TaskError> {
-    Ok(sqlx::query_scalar(
+    Ok(sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         "SELECT tasks.title FROM tasks JOIN projects ON projects.id = tasks.project_id \
-         WHERE tasks.id = $1 AND tasks.workspace_id = $2 AND tasks.deleted_at IS NULL AND projects.deleted_at IS NULL",
-    )
+         WHERE tasks.id = $1 AND tasks.workspace_id = $2 AND tasks.deleted_at IS NULL \
+         AND projects.deleted_at IS NULL AND {}",
+        scope.project("tasks.project_id")
+    )))
     .bind(task_id.to_string())
     .bind(workspace_id.to_string())
     .fetch_optional(&mut **tx)
@@ -295,6 +300,7 @@ async fn delete_plain_pair_in_tx(
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn mark_duplicate_in_tx(
     tx: &mut Transaction<'_, Any>,
+    scope: ProjectScope,
     workspace_id: Id,
     actor: RelationActor<'_>,
     task_id: Id,
@@ -304,7 +310,7 @@ pub(super) async fn mark_duplicate_in_tx(
     now: TimestampMillis,
 ) -> Result<(), TaskError> {
     if target_id == task_id
-        || visible_task_title_in_tx(tx, workspace_id, target_id)
+        || visible_task_title_in_tx(tx, scope, workspace_id, target_id)
             .await?
             .is_none()
     {
@@ -497,8 +503,15 @@ pub struct TaskRelationRecord {
 }
 
 /// Relations of a viewer task (bind order: viewer, workspace, viewer, viewer). Only relations
-/// whose other task and project are live are returned.
-const RELATION_SELECT: &str = "SELECT task_relations.id, task_relations.type, task_relations.task_id, \
+/// whose other task and project are live, and in `scope`, are returned.
+fn relation_select(scope: ProjectScope) -> String {
+    format!(
+        "{RELATION_COLUMNS} AND {}",
+        scope.project("other.project_id")
+    )
+}
+
+const RELATION_COLUMNS: &str = "SELECT task_relations.id, task_relations.type, task_relations.task_id, \
      task_relations.created_at, other.id AS other_id, other.project_id AS other_project_id, \
      other.number AS other_number, other.title AS other_title, other.status_id AS other_status_id, \
      other.version AS other_version \
@@ -545,11 +558,12 @@ fn relation_from_row(
 
 async fn relation_in_tx(
     tx: &mut Transaction<'_, Any>,
+    scope: ProjectScope,
     workspace_id: Id,
     viewer_id: Id,
     relation_id: Id,
 ) -> Result<TaskRelationRecord, TaskError> {
-    let sql = format!("{RELATION_SELECT} AND task_relations.id = $5");
+    let sql = format!("{} AND task_relations.id = $5", relation_select(scope));
     let row = sqlx::query(sqlx::AssertSqlSafe(sql))
         .bind(viewer_id.to_string())
         .bind(workspace_id.to_string())
@@ -570,8 +584,11 @@ impl TaskRepository {
         actor_id: Id,
     ) -> Result<Vec<TaskRelationRecord>, TaskError> {
         self.get_task(workspace_id, task_id, actor_id).await?;
-        let sql =
-            format!("{RELATION_SELECT} ORDER BY task_relations.created_at, task_relations.id");
+        let scope = self.project_scope(workspace_id, actor_id).await?;
+        let sql = format!(
+            "{} ORDER BY task_relations.created_at, task_relations.id",
+            relation_select(scope)
+        );
         sqlx::query(sqlx::AssertSqlSafe(sql))
             .bind(task_id.to_string())
             .bind(workspace_id.to_string())
@@ -596,15 +613,15 @@ impl TaskRepository {
         now: TimestampMillis,
     ) -> Result<TaskRelationRecord, TaskError> {
         let mut tx = self.database().immediate_transaction().await?;
-        require_access_tx(&mut tx, workspace_id, actor_id).await?;
-        if visible_task_title_in_tx(&mut tx, workspace_id, task_id)
+        let scope = ProjectScope::of(require_access_tx(&mut tx, workspace_id, actor_id).await?);
+        if visible_task_title_in_tx(&mut tx, scope, workspace_id, task_id)
             .await?
             .is_none()
         {
             return Err(TaskError::NotFound);
         }
         if other_id == task_id
-            || visible_task_title_in_tx(&mut tx, workspace_id, other_id)
+            || visible_task_title_in_tx(&mut tx, scope, workspace_id, other_id)
                 .await?
                 .is_none()
         {
@@ -643,7 +660,8 @@ impl TaskRepository {
                 return Err(TaskError::Conflict);
             }
             if existing_type == relation_type && existing_source == source {
-                let record = relation_in_tx(&mut tx, workspace_id, task_id, existing_id).await?;
+                let record =
+                    relation_in_tx(&mut tx, scope, workspace_id, task_id, existing_id).await?;
                 tx.commit().await?;
                 return Ok(record);
             }
@@ -690,7 +708,7 @@ impl TaskRepository {
             now,
         )
         .await?;
-        let record = relation_in_tx(&mut tx, workspace_id, task_id, id).await?;
+        let record = relation_in_tx(&mut tx, scope, workspace_id, task_id, id).await?;
         tx.commit().await?;
         Ok(record)
     }
@@ -707,20 +725,20 @@ impl TaskRepository {
         now: TimestampMillis,
     ) -> Result<(), TaskError> {
         let mut tx = self.database().immediate_transaction().await?;
-        require_access_tx(&mut tx, workspace_id, actor_id).await?;
-        if visible_task_title_in_tx(&mut tx, workspace_id, task_id)
+        let scope = ProjectScope::of(require_access_tx(&mut tx, workspace_id, actor_id).await?);
+        if visible_task_title_in_tx(&mut tx, scope, workspace_id, task_id)
             .await?
             .is_none()
         {
             return Err(TaskError::NotFound);
         }
-        let relation = relation_in_tx(&mut tx, workspace_id, task_id, relation_id).await?;
+        let relation = relation_in_tx(&mut tx, scope, workspace_id, task_id, relation_id).await?;
         let (source, target) = match relation.direction {
             TaskRelationDirection::Outgoing => (task_id, relation.task.id),
             TaskRelationDirection::Incoming => (relation.task.id, task_id),
         };
         if relation.relation_type == TaskRelationType::Duplicate {
-            let duplicate = task_in_tx(&mut tx, workspace_id, source, false).await?;
+            let duplicate = task_in_tx(&mut tx, scope, workspace_id, source, false).await?;
             let update = TaskUpdate {
                 id: source,
                 expected_version: duplicate.version,
@@ -731,6 +749,7 @@ impl TaskRepository {
             };
             update_task_in_tx(
                 &mut tx,
+                scope,
                 workspace_id,
                 actor_id,
                 &update,

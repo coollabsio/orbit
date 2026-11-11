@@ -186,7 +186,7 @@ export function Composer({ state, placeholder, nameOf, alsoSendTo }: { state: Co
     const timer = setTimeout(() => input.current?.focus(), Platform.OS === 'web' ? 0 : 350)
     return () => clearTimeout(timer)
   }, [target])
-  const mention = useMentionField({ text: draft, setText: setDraft, people: state.mentionPeople, channels: state.channels, inputRef: input })
+  const mention = useMentionField({ text: draft, setText: setDraft, people: state.mentionPeople, channels: state.channels, inputRef: input, tasks: true })
 
   const pickImages = async (camera: boolean) => {
     const options: ImagePicker.ImagePickerOptions = { mediaTypes: ['images', 'videos'], allowsMultipleSelection: !camera, selectionLimit: 10, quality: 0.9 }

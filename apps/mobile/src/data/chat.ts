@@ -437,20 +437,54 @@ export interface UnreadConversation {
   state: ConversationStateRecord
 }
 
-/** The groups of the Unreads view, newest activity first. Muted conversations never show here. */
-export function unreadConversations(conversations: readonly ConversationRecord[], states: readonly ConversationStateRecord[], userId: string): UnreadConversation[] {
-  const stateById = new Map(states.map((state) => [state.conversation_id, state]))
-  return conversations
-    .flatMap((conversation) => {
-      const state = stateById.get(conversation.id)
-      return state && conversationBadge(conversation, state, userId).unread ? [{ conversation, state }] : []
-    })
-    .sort((a, b) => byActivity(a.conversation, b.conversation))
+/**
+ * A group of the Unreads view: a conversation's unread messages, or a thread's unread replies. `channel` is the state of
+ * the thread's conversation when that conversation has its own group too.
+ */
+export type UnreadGroup =
+  | ({ kind: 'conversation' } & UnreadConversation)
+  | { kind: 'thread'; conversation: ConversationRecord; thread: FollowedThreadRecord; channel: ConversationStateRecord | null }
+
+/** A reply that was also sent to the channel and that the channel's group shows: its thread group leaves it out. */
+export function inChannelGroup(reply: MessageRecord, channel: ConversationStateRecord | null): boolean {
+  return reply.also_in_channel && channel !== null && (channel.last_read_message_id === null || reply.id > channel.last_read_message_id)
 }
 
-/** The newest unread messages of a group: after the read cursor (ids sort by time), not your own, not system rows. */
-export function unreadMessages(messages: readonly MessageRecord[], state: ConversationStateRecord, userId: string, limit = 5): MessageRecord[] {
-  const cursor = state.last_read_message_id
+const threadActivity = (thread: FollowedThreadRecord) => thread.last_reply?.created_at ?? thread.root.last_reply_at ?? thread.root.created_at
+const groupActivity = (group: UnreadGroup) => (group.kind === 'thread' ? threadActivity(group.thread) : lastActivity(group.conversation))
+
+/**
+ * The groups of the Unreads view, newest activity first: unread conversations, and threads with unread replies (followed
+ * or not, from `unreadThreads`) in conversations you are a member of. Muted and archived conversations never show here,
+ * nor do their threads: the list is checked again against the live states.
+ */
+export function unreadGroups(
+  conversations: readonly ConversationRecord[],
+  states: readonly ConversationStateRecord[],
+  threads: readonly FollowedThreadRecord[],
+  userId: string,
+): UnreadGroup[] {
+  const stateById = new Map(states.map((state) => [state.conversation_id, state]))
+  const conversationGroups = conversations.flatMap((conversation): UnreadGroup[] => {
+    const state = stateById.get(conversation.id)
+    return state && conversationBadge(conversation, state, userId).unread ? [{ kind: 'conversation', conversation, state }] : []
+  })
+  const threadGroups = threads.flatMap((thread): UnreadGroup[] => {
+    if (thread.state.unread_replies === 0) return []
+    const conversation = conversations.find((item) => item.id === thread.conversation_id)
+    const state = stateById.get(thread.conversation_id)
+    if (!conversation || !state || !isVisible(conversation, userId) || state.notify === 'muted') return []
+    const channel = conversationGroups.some((group) => group.conversation.id === conversation.id) ? state : null
+    return [{ kind: 'thread', conversation, thread, channel }]
+  })
+  return [...conversationGroups, ...threadGroups].sort((a, b) => groupActivity(b).localeCompare(groupActivity(a)))
+}
+
+/**
+ * The newest unread messages of a group: after the read cursor (ids sort by time), not your own, not system rows. Takes
+ * a conversation's `last_read_message_id` or a thread's `last_read_reply_id`.
+ */
+export function unreadMessages(messages: readonly MessageRecord[], cursor: string | null, userId: string, limit = 5): MessageRecord[] {
   return messages
     .filter((message) => message.kind === 'message' && !message.deleted && message.author_id !== userId && (cursor === null || message.id > cursor))
     .slice(-limit)

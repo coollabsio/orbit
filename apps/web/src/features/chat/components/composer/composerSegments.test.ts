@@ -12,9 +12,9 @@ test('mentions and emoji are cut out of the text, and the pieces join back to it
   const segments = composerSegments(text, people, channels)
   expect(segments).toEqual([
     { kind: 'text', text: 'Hi ' },
-    { kind: 'mention', text: '@Ann Lee' },
+    { kind: 'mention', ref: 'user:u2', text: '@Ann Lee' },
     { kind: 'text', text: ', see ' },
-    { kind: 'mention', text: '#design' },
+    { kind: 'mention', ref: 'channel:c1', text: '#design' },
     { kind: 'text', text: ' ' },
     { kind: 'emoji', text: '🎉', url: '/assets/twemoji-17.0.3/1f389.svg' },
     { kind: 'text', text: ' now' },
@@ -29,7 +29,7 @@ test('a name that nobody has, a mention inside a word and a mention in code stay
     { kind: 'text', text: '@Ann', marks: ['code'] },
     { kind: 'text', text: '`', marks: ['code', 'marker'] },
     { kind: 'text', text: ' ' },
-    { kind: 'mention', text: '@here' },
+    { kind: 'mention', ref: 'global:here', text: '@here' },
   ])
 })
 
@@ -193,7 +193,7 @@ test('a mention and an emoji inside a format keep their kind and get its marks',
   expect(composerSegments('**hi @Ann Lee 🎉**', people, channels)).toEqual([
     { kind: 'text', text: '**', marks: ['strong', 'marker'] },
     { kind: 'text', text: 'hi ', marks: ['strong'] },
-    { kind: 'mention', text: '@Ann Lee', marks: ['strong'] },
+    { kind: 'mention', ref: 'user:u2', text: '@Ann Lee', marks: ['strong'] },
     { kind: 'text', text: ' ', marks: ['strong'] },
     { kind: 'emoji', text: '🎉', url: '/assets/twemoji-17.0.3/1f389.svg', marks: ['strong'] },
     { kind: 'text', text: '**', marks: ['strong', 'marker'] },
@@ -204,7 +204,7 @@ test('a marker character in the name of a mention starts nothing', () => {
   const named = [{ id: 'c2', name: 'dev_ops' }]
   expect(composerSegments('_a #dev_ops b', people, named)).toEqual([
     { kind: 'text', text: '_a ' },
-    { kind: 'mention', text: '#dev_ops' },
+    { kind: 'mention', ref: 'channel:c2', text: '#dev_ops' },
     { kind: 'text', text: ' b' },
   ])
 })
@@ -278,4 +278,15 @@ describe('completeCodeFence', () => {
     expect(completeCodeFence('````', 4)).toBeNull()
     expect(completeCodeFence('a ```', 5)).toBeNull()
   })
+})
+
+test('a task ID of a project key is a reference to the task; other words, code and mentions stay as they are', () => {
+  const text = 'see ENG-12, UTF-8 and `ENG-3` @Ann'
+  const segments = composerSegments(text, people, channels, ['ENG'])
+  expect(segments.filter((segment) => segment.kind === 'mention')).toEqual([
+    { kind: 'mention', ref: 'task:ENG-12', text: 'ENG-12' },
+    { kind: 'mention', ref: 'user:u1', text: '@Ann' },
+  ])
+  expect(segments.map((segment) => segment.text).join('')).toBe(text)
+  expect(composerSegments('eng-4', people, channels, ['ENG'])).toEqual([{ kind: 'mention', ref: 'task:ENG-4', text: 'eng-4' }])
 })

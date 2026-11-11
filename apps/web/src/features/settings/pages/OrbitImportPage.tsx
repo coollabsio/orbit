@@ -8,6 +8,7 @@ import { CHANNEL_GROUPS, fullSelection, orbitImportName, orbitImportPhaseText } 
 import { ApiProblem } from '@orbit/api/problem'
 import { cn } from 'cn'
 import { SettingsCard } from '@/components/common/SettingsCard'
+import { TitleTip } from '@/components/common/TitleTip'
 import { confirmAction } from '@/components/common/confirmAction'
 import { Badge } from '@/components/ui/badge'
 import { Button, buttonVariants } from '@/components/ui/button'
@@ -107,17 +108,14 @@ function ConnectStep({ workspaceId }: { workspaceId: string }) {
 
   return (
     <>
-      <SettingsCard title={TITLE}>
+      <SettingsCard title={TITLE} description="Copy projects, pages and chats from another Orbit instance into this workspace. Nobody is notified.">
         <div className="flex flex-col gap-4 text-sm">
-          <div className="flex flex-col gap-2 text-muted-foreground">
-            <p>Copy projects, pages and chats from another Orbit instance into this workspace. Nobody is notified.</p>
-            <p>
-              On the other instance, open <span className="font-medium text-foreground">Settings → API tokens</span> and create a token
-              with <span className="font-medium text-foreground">Workspace export</span> (owners and administrators: the whole
-              workspace) or <span className="font-medium text-foreground">Personal export</span> (any member: your private pages,
-              channels and direct messages). Orbit keeps the token encrypted only until the export is downloaded.
-            </p>
-          </div>
+          <p className="text-muted-foreground">
+            On the other instance, open <span className="font-medium text-foreground">Settings → API tokens</span> and create a token
+            with <span className="font-medium text-foreground">Workspace export</span> (owners and administrators: the whole
+            workspace) or <span className="font-medium text-foreground">Personal export</span> (any member: your private pages,
+            channels and direct messages). Orbit keeps the token encrypted only until the export is downloaded.
+          </p>
           <form className="flex flex-col gap-3" onSubmit={(event) => void submit(event)} autoComplete="off">
             <div className="grid gap-1.5">
               <Label htmlFor="orbit-url">Instance address</Label>
@@ -159,12 +157,8 @@ function ConnectStep({ workspaceId }: { workspaceId: string }) {
           </form>
         </div>
       </SettingsCard>
-      <SettingsCard title="Or upload an export">
+      <SettingsCard title="Or upload an export" description="Download an export ZIP on the other instance in Settings → Export and upload it here.">
         <div className="flex flex-col gap-3 text-sm">
-          <p className="text-muted-foreground">
-            Download an export ZIP on the other instance in <span className="font-medium text-foreground">Settings → Export</span> and
-            upload it here.
-          </p>
           {upload ? (
             <div className="flex flex-col gap-2" role="status" aria-live="polite">
               <div className="flex items-center gap-2">
@@ -510,8 +504,11 @@ function ResultStep({ item }: { item: OrbitImport }) {
         ) : null}
         {report && report.unmatched_users.length > 0 ? (
           <section className="flex flex-col gap-2" aria-label="Unmatched people">
-            <h3 className="text-xs font-medium text-muted-foreground">People with no member here</h3>
-            <p className="text-xs text-muted-foreground">No member here has their email, so their tasks are unassigned.</p>
+            <TitleTip
+              title="People with no member here"
+              text="No member here has their email, so their tasks are unassigned."
+              className="text-xs font-medium text-muted-foreground"
+            />
             <ul className="flex flex-col border-t border-border">
               {report.unmatched_users.map((user) => (
                 <li key={user.email ?? user.name} className="flex items-center gap-3 border-b border-border px-1 py-2 text-[0.8125rem]">

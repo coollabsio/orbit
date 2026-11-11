@@ -10,7 +10,7 @@ import { s3Body, s3Draft } from '../../../data/admin-api'
 import { useDeleteStorageFile, useWorkspaceBucket, useWorkspaceBucketWrites, useWorkspaceStorage } from '../../../hooks/account'
 import { useOrbit } from '../../../orbit-context'
 import { errorMessage } from '../../../session-context'
-import { Button, Input, Spinner, Text } from '../../../ui'
+import { Button, Input, Spinner, Text, LabelTip } from '../../../ui'
 
 const TITLE = 'Own bucket'
 const DESCRIPTION =
@@ -108,7 +108,9 @@ function BucketCard({ view }: { view: WorkspaceBucketView }) {
         {/* the web's switch with its label after it */}
         <View className="flex-row items-center gap-2">
           <Toggle label="Path-style URLs" value={draft.path_style} onChange={(path_style) => edit({ path_style })} />
-          <Text className="flex-1 text-[13px] leading-[18px] text-foreground">Path-style URLs (MinIO and some other S3-compatible services)</Text>
+          <View className="flex-1">
+            <LabelTip label="Path-style URLs" text="For MinIO and some other S3-compatible services." className="text-[13px] leading-[18px] text-foreground" />
+          </View>
         </View>
         {save.isError ? <Note error>{errorMessage(save.error)}</Note> : null}
         {remove.isError ? <Note error>{errorMessage(remove.error)}</Note> : null}

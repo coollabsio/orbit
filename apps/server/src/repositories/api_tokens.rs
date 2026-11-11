@@ -6,6 +6,7 @@ use thiserror::Error;
 use utoipa::ToSchema;
 
 use super::membership;
+use super::project_access::user_sees_project_sql;
 use crate::audit::{self, AuditOutcome};
 use crate::workspace_export::ExportMode;
 
@@ -282,7 +283,7 @@ impl ApiTokenRepository {
             return Err(ApiTokenError::NotFound);
         }
         for project_id in &project_ids {
-            require_active_project(&mut transaction, workspace_id, *project_id).await?;
+            require_active_project(&mut transaction, workspace_id, *project_id, actor_id).await?;
         }
         let id = Id::new_v7();
         let (service_account_id, service_account_name) = if service_account {
@@ -360,7 +361,8 @@ impl ApiTokenRepository {
         )
         .await?;
         if all_projects {
-            project_ids = live_projects(&mut *transaction, workspace_id).await?;
+            let viewer = (!service_account).then_some(actor_id);
+            project_ids = live_projects(&mut *transaction, workspace_id, viewer).await?;
         }
         transaction.commit().await?;
         Ok(IssuedApiToken {
@@ -488,12 +490,23 @@ impl ApiTokenRepository {
         if !ApiTokenScope::grants_tasks(scopes) {
             return Ok(Vec::new());
         }
-        if all_projects {
-            return live_projects(self.database.pool(), workspace_id).await;
-        }
-        let values = sqlx::query_scalar::<_, String>(
-            "SELECT api_token_projects.project_id FROM api_token_projects JOIN projects ON projects.id = api_token_projects.project_id WHERE api_token_projects.token_id = $1 AND projects.deleted_at IS NULL ORDER BY projects.created_at, projects.id",
+        // A personal token acts as its creator; a service account sees every project.
+        let viewer = sqlx::query_scalar::<_, Option<String>>(
+            "SELECT CASE WHEN service_account_id IS NULL THEN created_by END FROM api_tokens WHERE id = $1",
         )
+        .bind(token_id.to_string())
+        .fetch_optional(self.database.pool())
+        .await?
+        .flatten()
+        .map(|value| value.parse().map_err(|_| ApiTokenError::InvalidIdentifier))
+        .transpose()?;
+        if all_projects {
+            return live_projects(self.database.pool(), workspace_id, viewer).await;
+        }
+        let values = sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(format!(
+            "SELECT api_token_projects.project_id FROM api_token_projects JOIN projects ON projects.id = api_token_projects.project_id WHERE api_token_projects.token_id = $1 AND projects.deleted_at IS NULL AND {} ORDER BY projects.created_at, projects.id",
+            viewer_sees(viewer)
+        )))
         .bind(token_id.to_string())
         .fetch_all(self.database.pool())
         .await?;
@@ -608,16 +621,20 @@ fn token_viewer(actor: Option<Actor>) -> Result<bool, ApiTokenError> {
     }
 }
 
+/// A live project that `viewer`, who picks it for a token, sees.
 async fn require_active_project(
     transaction: &mut sqlx::Transaction<'_, sqlx::Any>,
     workspace_id: Id,
     project_id: Id,
+    viewer: Id,
 ) -> Result<(), ApiTokenError> {
-    let exists = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM projects WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL",
-    )
+    let exists = sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(format!(
+        "SELECT COUNT(*) FROM projects WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL AND {}",
+        user_sees_project_sql("projects.id", "$3")
+    )))
     .bind(project_id.to_string())
     .bind(workspace_id.to_string())
+    .bind(viewer.to_string())
     .fetch_one(&mut **transaction)
     .await?
         != 0;
@@ -628,18 +645,30 @@ async fn require_active_project(
     }
 }
 
-/// Every live project of a workspace, in creation order. An all-projects token or OAuth grant
-/// uses these, so a project created later is covered and a deleted one is not.
+/// The condition that `viewer`, the member a token or grant acts as, sees `projects`; a service
+/// account (`None`) sees every project.
+fn viewer_sees(viewer: Option<Id>) -> String {
+    match viewer {
+        Some(viewer) => user_sees_project_sql("projects.id", &format!("'{viewer}'")),
+        None => "1 = 1".to_owned(),
+    }
+}
+
+/// Every live project of a workspace that `viewer` sees, in creation order. An all-projects
+/// token or OAuth grant uses these, so a project created later is covered, and a deleted one or
+/// one that became private without the viewer is not.
 pub(crate) async fn live_projects<'e, E>(
     executor: E,
     workspace_id: Id,
+    viewer: Option<Id>,
 ) -> Result<Vec<Id>, ApiTokenError>
 where
     E: sqlx::Executor<'e, Database = sqlx::Any>,
 {
-    sqlx::query_scalar::<_, String>(
-        "SELECT id FROM projects WHERE workspace_id = $1 AND deleted_at IS NULL ORDER BY created_at, id",
-    )
+    sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(format!(
+        "SELECT id FROM projects WHERE workspace_id = $1 AND deleted_at IS NULL AND {} ORDER BY created_at, id",
+        viewer_sees(viewer)
+    )))
     .bind(workspace_id.to_string())
     .fetch_all(executor)
     .await?

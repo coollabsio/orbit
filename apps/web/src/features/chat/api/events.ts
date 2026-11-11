@@ -276,7 +276,7 @@ function changedKeys(workspaceId: string, event: ChatEvent): (readonly unknown[]
     case 'state.changed':
       return [chatKeys.states(workspaceId)]
     case 'thread.changed':
-      return [chatKeys.thread(workspaceId, event.state.rootId), chatKeys.followedThreads(workspaceId)]
+      return [chatKeys.thread(workspaceId, event.state.rootId), chatKeys.followedThreads(workspaceId), chatKeys.unreadThreads(workspaceId)]
     default:
       return []
   }
@@ -289,9 +289,16 @@ function changedKeys(workspaceId: string, event: ChatEvent): (readonly unknown[]
 export function applyChatEvent(queryClient: QueryClient, workspaceId: string, event: ChatEvent) {
   applyAgainAfterFetch(queryClient, workspaceId, event)
   switch (event.type) {
-    case 'message.created':
+    case 'message.created': {
       messageCreated(queryClient, workspaceId, event.message)
+      // A reply in a thread the user does not follow sends no thread state: Unreads asks again. Unreads leaves out
+      // muted conversations, and unmuting asks again (see `state.changed`).
+      const notify = queryClient
+        .getQueryData<ConversationState[]>(chatKeys.states(workspaceId))
+        ?.find((state) => state.conversationId === event.message.conversationId)?.notify
+      if (event.message.threadRootId && notify !== 'muted') void queryClient.invalidateQueries({ queryKey: chatKeys.unreadThreads(workspaceId) })
       break
+    }
     case 'message.updated':
       messageUpdated(queryClient, workspaceId, event.message)
       break
@@ -301,6 +308,7 @@ export function applyChatEvent(queryClient: QueryClient, workspaceId: string, ev
       if (followed?.some((thread) => thread.lastReply?.id === event.messageId)) {
         void queryClient.invalidateQueries({ queryKey: chatKeys.followedThreads(workspaceId) })
       }
+      if (event.threadRootId !== null) void queryClient.invalidateQueries({ queryKey: chatKeys.unreadThreads(workspaceId) })
       patchMessage(queryClient, workspaceId, event, () => null)
       patchQuotes(queryClient, workspaceId, event, null)
       if (event.threadRootId === null) queryClient.removeQueries({ queryKey: chatKeys.thread(workspaceId, event.messageId) })
@@ -319,9 +327,9 @@ export function applyChatEvent(queryClient: QueryClient, workspaceId: string, ev
       queryClient.setQueryData<ConversationState[]>(chatKeys.states(workspaceId), (states) =>
         states?.filter((state) => state.conversationId !== event.conversationId),
       )
-      queryClient.setQueryData<FollowedThread[]>(chatKeys.followedThreads(workspaceId), (threads) =>
-        threads?.filter((thread) => thread.conversationId !== event.conversationId),
-      )
+      for (const key of [chatKeys.followedThreads(workspaceId), chatKeys.unreadThreads(workspaceId)]) {
+        queryClient.setQueryData<FollowedThread[]>(key, (threads) => threads?.filter((thread) => thread.conversationId !== event.conversationId))
+      }
       for (const key of [
         chatKeys.messagesOf(workspaceId, event.conversationId),
         chatKeys.threads(workspaceId, event.conversationId),
@@ -338,17 +346,30 @@ export function applyChatEvent(queryClient: QueryClient, workspaceId: string, ev
     case 'categories.changed':
       queryClient.setQueryData(chatKeys.categories(workspaceId), event.categories)
       break
-    case 'state.changed':
+    case 'state.changed': {
+      const before = queryClient.getQueryData<ConversationState[]>(chatKeys.states(workspaceId))?.find((state) => state.conversationId === event.state.conversationId)
       queryClient.setQueryData<ConversationState[]>(chatKeys.states(workspaceId), (states) =>
         upsertById(states, event.state, (state) => state.conversationId),
       )
+      // Unmuted: the conversation's threads come back to Unreads (muting only hides them).
+      if (before?.notify === 'muted' && event.state.notify !== 'muted') void queryClient.invalidateQueries({ queryKey: chatKeys.unreadThreads(workspaceId) })
       break
+    }
     case 'thread.changed': {
       const { state } = event
       queryClient.setQueryData<ThreadPages>(
         chatKeys.thread(workspaceId, state.rootId),
         (data) => data && { ...data, pages: data.pages.map((page) => ({ ...page, state })) },
       )
+      const unread = queryClient.getQueryData<FollowedThread[]>(chatKeys.unreadThreads(workspaceId))
+      if (unread?.some((thread) => thread.root.id === state.rootId)) {
+        queryClient.setQueryData<FollowedThread[]>(
+          chatKeys.unreadThreads(workspaceId),
+          unread.flatMap((thread) => (thread.root.id !== state.rootId ? [thread] : state.unreadReplies > 0 ? [{ ...thread, state }] : [])),
+        )
+      } else if (unread && state.unreadReplies > 0) {
+        void queryClient.invalidateQueries({ queryKey: chatKeys.unreadThreads(workspaceId) })
+      }
       const followed = queryClient.getQueryData<FollowedThread[]>(chatKeys.followedThreads(workspaceId))
       if (!followed) break
       if (followed.some((thread) => thread.root.id === state.rootId)) {

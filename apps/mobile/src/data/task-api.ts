@@ -11,6 +11,7 @@ import {
   deleteTaskAttachment,
   deleteTaskRelation,
   emptyTaskTrash,
+  getProjectOrder,
   getTrashedProject,
   getTrashedTask,
   listCommentAttachments,
@@ -22,6 +23,7 @@ import {
   listTrashedProjectTasks,
   purgeProject,
   purgeTask,
+  putProjectOrder,
   restoreProject,
   restoreTask,
   uploadTaskAttachments,
@@ -197,4 +199,13 @@ export function trashedProjectTasks(client: OrbitClient, workspaceId: string, pr
 /** Deletes a trashed task forever with the sub-issues trashed with it. */
 export async function purgeTrashedTask(client: OrbitClient, workspaceId: string, taskId: string): Promise<void> {
   await purgeTask(task(client, workspaceId, taskId))
+}
+
+/** The member's own project order (the web's `useProjectOrder`); projects not listed follow by name. */
+export async function projectOrder(client: OrbitClient, workspaceId: string): Promise<string[]> {
+  return (await getProjectOrder({ client, path: { workspace_id: workspaceId }, throwOnError: true })).data.project_ids
+}
+
+export async function saveProjectOrder(client: OrbitClient, workspaceId: string, projectIds: string[]): Promise<void> {
+  await putProjectOrder({ client, path: { workspace_id: workspaceId }, body: { project_ids: projectIds }, throwOnError: true })
 }

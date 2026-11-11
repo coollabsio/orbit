@@ -5,8 +5,9 @@ import { ApiProblem } from '@orbit/api/problem'
 import { confirmAction } from '@/components/common/confirmAction'
 import { EmptyState } from '@/components/common/EmptyState'
 import { SettingsCard } from '@/components/common/SettingsCard'
+import { InfoTip } from '@/components/common/InfoTip'
 import { Button } from '@/components/ui/button'
-import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
+import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { FieldGrid, RequiredMark, SettingsRow } from '@/features/settings/components/SettingsParts'
 import { useMembers } from '@/features/workspaces/api'
@@ -82,7 +83,7 @@ export function StickersPage() {
       <form className="flex flex-col gap-4" onSubmit={(event) => void submit(event)}>
         <FieldGrid>
           <Field>
-            <FieldLabel htmlFor="sticker-file">Image <RequiredMark /></FieldLabel>
+            <div className="flex items-center gap-1.5"><FieldLabel htmlFor="sticker-file">Image <RequiredMark /></FieldLabel><InfoTip text="PNG, JPEG, WebP or GIF, at most 512 KB." /></div>
             <Input
               ref={fileInput}
               id="sticker-file"
@@ -95,12 +96,10 @@ export function StickersPage() {
                 if (chosen) setName(stickerNameFromFile(chosen.name))
               }}
             />
-            <FieldDescription>PNG, JPEG, WebP or GIF, at most 512 KB.</FieldDescription>
           </Field>
           <Field>
-            <FieldLabel htmlFor="sticker-name">Name <RequiredMark /></FieldLabel>
+            <FieldLabel htmlFor="sticker-name" className="items-center gap-1.5">Name <RequiredMark /> <InfoTip text="2 to 30 characters. People find the sticker by this name." /></FieldLabel>
             <Input id="sticker-name" value={name} maxLength={STICKER_NAME_MAX} placeholder="Party Parrot" onChange={(event) => { setName(event.target.value); setProblem(null) }} />
-            <FieldDescription>2 to 30 characters. People find the sticker by this name.</FieldDescription>
           </Field>
         </FieldGrid>
         <div className="flex flex-wrap items-center gap-3">

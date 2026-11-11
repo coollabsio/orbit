@@ -1,19 +1,16 @@
-import { useLocation, useNavigate, useSearchParams } from 'react-router'
-import { Notification as Bell, Import } from 'reicon-react'
-import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { useSearchParams } from 'react-router'
+import { Notification as Bell } from 'reicon-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { relativeTime } from '@/lib/format'
 import { EmptyState } from '@/components/common/EmptyState'
 import { VirtualList } from '@/components/common/VirtualList'
 import { Pane, PaneHeader, PaneTitle } from '@/components/common/Pane'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
-import { useMembers } from '@/features/workspaces/api'
-import { isMention, notificationCopy, notificationTarget, useMarkAllNotificationsRead, useMarkNotificationRead, useNotifications } from '@/features/inbox/api'
-import { usePageTree } from '@/features/docs/api/pages'
+import { isMention, useMarkAllNotificationsRead, useNotifications } from '@/features/inbox/api'
+import { NotificationRow } from '@/features/inbox/components/NotificationRow'
+import { useNotificationRows } from '@/features/inbox/useNotificationRows'
 import { useSlowPending } from '@/lib/useDebouncedValue'
-import { ProfileTrigger } from '@/components/common/ProfileTrigger'
 import { loadFailed } from '@/lib/connection'
 
 const TABS = ['all', 'unread', 'mentions'] as const
@@ -21,8 +18,6 @@ type InboxTab = (typeof TABS)[number]
 
 export function InboxPage() {
   const { workspace } = useWorkspace()
-  const navigate = useNavigate()
-  const location = useLocation()
   // the tab is in the URL: back from a notification's task, the same tab shows at the same scroll position
   const [searchParams, setSearchParams] = useSearchParams()
   const tab = TABS.find((item) => item === searchParams.get('tab')) ?? 'all'
@@ -33,10 +28,7 @@ export function InboxPage() {
   }, { replace: true })
   const allQuery = useNotifications(workspace.id, false)
   const unreadQuery = useNotifications(workspace.id, true)
-  const members = useMembers(workspace.id)
-  const hasPageMentions = (allQuery.data ?? []).some((notification) => notification.page_id)
-  const pageTree = usePageTree(workspace.id, hasPageMentions)
-  const markRead = useMarkNotificationRead(workspace.id)
+  const rows = useNotificationRows(allQuery.data ?? [])
   const markAll = useMarkAllNotificationsRead(workspace.id)
   const marking = useSlowPending(markAll.isPending)
   const items = (allQuery.data ?? []).filter((notification) => {
@@ -44,7 +36,8 @@ export function InboxPage() {
     if (tab === 'mentions') return isMention(notification)
     return true
   })
-  const unreadCount = unreadQuery.data?.length ?? items.filter((notification) => !notification.read_at).length
+  // a row read a moment ago stays in the unread list until it refreshes
+  const unreadCount = (unreadQuery.data ?? allQuery.data ?? []).filter((notification) => !notification.read_at).length
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
@@ -90,58 +83,7 @@ export function InboxPage() {
           </div>
         ) : (
           <VirtualList className="min-h-0 flex-1" count={items.length} rowHeight={56} rowKey={(index) => items[index].id}>
-            {(index) => {
-              const notification = items[index]
-              const actor = members.data?.find((member) => member.id === notification.actor_user_id)
-              const page = notification.page_id ? pageTree.data?.find((item) => item.id === notification.page_id) : undefined
-              const copy = notificationCopy(notification, page?.title, actor?.name)
-              return (
-                // the actor's avatar is beside the row button, not inside it: a button cannot hold another one
-                <div className="relative">
-                <Button
-                  variant="ghost"
-                  className="h-auto min-h-14 w-full min-w-0 justify-start gap-2.5 rounded-none border-x-0 border-t-0 border-b-border px-3 py-1.5 text-left font-normal"
-                  onClick={() => {
-                    if (!notification.read_at) markRead.mutate(notification.id)
-                    const target = notificationTarget(notification)
-                    if (!target) return
-                    if (notification.page_id || notification.chat_conversation_id || notification.import_id) {
-                      navigate(target)
-                      return
-                    }
-                    const params = new URLSearchParams({ redirect: `${location.pathname}${location.search}` })
-                    navigate(`${target}?${params}`)
-                  }}
-                >
-                  <span className="flex w-2 shrink-0 justify-center">
-                    {!notification.read_at ? <span className="size-2 shrink-0 rounded-full bg-primary" /> : null}
-                  </span>
-                  <span aria-hidden="true" className="size-7 shrink-0" />
-                  <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                    <span className="truncate text-[0.8125rem] text-foreground data-unread:font-semibold" data-unread={!notification.read_at || undefined}>
-                      {copy.title}
-                    </span>
-                    <span className="truncate text-xs text-muted-foreground/70">{actor && !notification.import_id ? `${actor.name} · ${copy.body}` : copy.body}</span>
-                  </span>
-                  <span className="shrink-0 text-xs text-muted-foreground/70">
-                    {relativeTime(notification.created_at)}
-                  </span>
-                </Button>
-                {/* over the spacer: 12px padding, the 8px unread column and the 10px gap; an import notice is the user's own */}
-                {notification.import_id ? (
-                  <span aria-hidden="true" className="pointer-events-none absolute top-1/2 left-[30px] flex size-7 -translate-y-1/2 items-center justify-center rounded-full bg-muted">
-                    <Import className="size-4 text-muted-foreground" />
-                  </span>
-                ) : (
-                <ProfileTrigger userId={actor?.id} name={actor?.name ?? 'Unknown'} kind="avatar" className="absolute top-1/2 left-[30px] flex -translate-y-1/2">
-                  <Avatar className="size-7">
-                    <AvatarFallback>{(actor?.name ?? '?').charAt(0).toUpperCase()}</AvatarFallback>
-                  </Avatar>
-                </ProfileTrigger>
-                )}
-                </div>
-              )
-            }}
+            {(index) => <NotificationRow notification={items[index]} rows={rows} />}
           </VirtualList>
         )}
       </Pane>

@@ -56,6 +56,7 @@ pub fn router(
             "/api/v1/workspaces/{workspace_id}/billing/portal",
             post(billing_portal),
         )
+        .route("/api/v1/billing/trial", get(get_account_trial))
         .route(WEBHOOK, post(stripe_webhook))
         .with_state(BillingState {
             billing,
@@ -140,6 +141,44 @@ pub struct BillingCheckoutBody {
 #[derive(Serialize, ToSchema)]
 pub struct BillingRedirect {
     url: String,
+}
+
+/// The caller's trial, which every workspace the caller creates shares.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct AccountTrial {
+    /// How long a trial lasts; 0 when new workspaces have none.
+    days: u32,
+    /// When the trial ends (or ended); `null` when the caller has had no trial, so a new workspace starts one.
+    #[schema(value_type = Option<String>, format = DateTime)]
+    ends_at: Option<TimestampMillis>,
+}
+
+#[utoipa::path(get, path = "/api/v1/billing/trial", responses((status = 200, body = AccountTrial)))]
+pub(crate) async fn get_account_trial(
+    State(state): State<BillingState>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<Json<AccountTrial>, ApiError> {
+    let instance = "/api/v1/billing/trial";
+    let id = request_id.as_ref();
+    let session =
+        authenticate_session(&state.identity, state.cookie_mode, &headers, instance, id).await?;
+    let mut connection = state
+        .billing
+        .database()
+        .pool()
+        .acquire()
+        .await
+        .map_err(|_| internal(instance, id))?;
+    let started = repository::account_trial_start(&mut connection, session.user.id)
+        .await
+        .map_err(|_| internal(instance, id))?;
+    let trial = &state.billing.config().trial;
+    Ok(Json(AccountTrial {
+        days: trial.days,
+        ends_at: started
+            .map(|started| TimestampMillis::from_millis(started.saturating_add(trial.millis()))),
+    }))
 }
 
 #[utoipa::path(

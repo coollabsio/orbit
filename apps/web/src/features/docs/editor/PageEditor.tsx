@@ -43,7 +43,9 @@ import { marginSelectExtension, selectMarginBlock } from '@orbit/editor/marginSe
 import { collabUndoExtension } from '@orbit/editor/collab/undo'
 import { EDITOR_BLOCK_TYPES, markdownToTaskBlocks, pageEditorSchema, TASK_EDITOR_BLOCK_TYPES, taskEditorSchema } from './schema'
 import { getPageSlashMenuItems, getTaskSlashMenuItems } from './slashMenu'
-import { PageMentionMenu } from './MentionMenu'
+import { PageMentionMenu, TaskMenu } from './MentionMenu'
+import { TabCompletesSuggestion } from './TabCompletesSuggestion'
+import { EditorReferencePreview } from './EditorReferencePreview'
 import { PageMentionNamesContext, type PageMentionOptions } from './pageMentions'
 import { BlockSideMenuController } from './BlockSideMenu'
 import { ThemedBlockNoteView } from './ThemedBlockNoteView'
@@ -602,6 +604,9 @@ function PageEditorInner({
           />
           <FormattingToolbarController formattingToolbar={formattingToolbar} />
           <PageMentionMenu editor={editor} options={() => mentionsRef.current} />
+          <TaskMenu editor={editor} />
+          <TabCompletesSuggestion />
+          <EditorReferencePreview />
           {collab && !task ? (
             <MentionNamesContext value={names}>
               <MentionCandidatesContext value={comments?.mentionable ?? []}>

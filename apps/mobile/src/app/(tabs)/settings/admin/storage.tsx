@@ -16,7 +16,7 @@ import {
 } from '../../../../data/admin-api'
 import { useInstanceSettings, useRemoveS3, useSaveS3, useSaveStorageOptions, useStartImageCompression } from '../../../../hooks/admin'
 import { errorMessage } from '../../../../session-context'
-import { Button, Input, Spinner, Text } from '../../../../ui'
+import { Button, Input, LabelTip, Spinner, Text } from '../../../../ui'
 
 /** The web's Admin → Storage: an S3 bucket for attachments and backups, what goes there, and image compression. */
 export default function AdminStorageScreen() {
@@ -85,7 +85,7 @@ function BucketCard({ s3 }: { s3: S3View | null }) {
         {/* the web's switch with its label after it */}
         <View className="flex-row items-center gap-2">
           <Toggle label="Path-style URLs" value={draft.path_style} onChange={(path_style) => edit({ path_style })} />
-          <Text className="flex-1 text-[13px] leading-[18px] text-foreground">Path-style URLs (MinIO and some other S3-compatible services)</Text>
+          <View className="flex-1"><LabelTip label="Path-style URLs" text="For MinIO and some other S3-compatible services." className="text-[13px] leading-[18px] text-foreground" /></View>
         </View>
         {save.isError ? <Note error>{errorMessage(save.error)}</Note> : null}
         {remove.isError ? <Note error>{errorMessage(remove.error)}</Note> : null}
@@ -124,10 +124,8 @@ function UsageCard({ storage }: { storage: StorageView }) {
   return (
     <SettingsCard title="Usage" description="What Orbit keeps in the bucket, and how often it backs up by itself." flush>
       <SettingsRow first>
-        <OptionText title="Attachments in S3">
-          <OptionHint>
-            {ready ? 'On: new files go to the bucket and existing files move there in the background. Off: they move back to this server.' : 'Save a bucket above first.'}
-          </OptionHint>
+        <OptionText title="Attachments in S3" help={ready ? 'On: new files go to the bucket and existing files move there in the background. Off: they move back to this server.' : undefined}>
+          {ready ? null : <OptionHint>Save a bucket above first.</OptionHint>}
           {moving ? (
             <View accessibilityRole="text" className="flex-row items-center gap-1.5">
               {/* the spinner stops when moving failed; Orbit only tries again later */}
@@ -145,15 +143,13 @@ function UsageCard({ storage }: { storage: StorageView }) {
         />
       </SettingsRow>
       <SettingsRow>
-        <OptionText title="Backups in S3">
-          <OptionHint>{ready ? 'On: each new backup is uploaded to the bucket and removed from this server, so a lost server loses no backups.' : 'Save a bucket above first.'}</OptionHint>
+        <OptionText title="Backups in S3" help={ready ? 'On: each new backup is uploaded to the bucket and removed from this server, so a lost server loses no backups.' : undefined}>
+          {ready ? null : <OptionHint>Save a bucket above first.</OptionHint>}
         </OptionText>
         <Toggle label="Backups in S3" value={storage.backups_in_s3} disabled={(!ready && !storage.backups_in_s3) || save.isPending} onChange={(backups_in_s3) => change({ backups_in_s3 })} />
       </SettingsRow>
       <View className="gap-2 border-t border-border px-4 py-3">
-        <OptionText title="Automatic backups">
-          <OptionHint>Orbit keeps the newest backup of each of the last 7 days and 4 weeks.</OptionHint>
-        </OptionText>
+        <OptionText title="Automatic backups" help="Orbit keeps the newest backup of each of the last 7 days and 4 weeks." />
         <Segmented label="Automatic backups" value={storage.backup_schedule} options={BACKUP_SCHEDULE_OPTIONS} onChange={(backup_schedule) => (save.isPending ? undefined : change({ backup_schedule }))} />
       </View>
       {save.isError ? <View className="border-t border-border px-4 py-3"><Note error>{errorMessage(save.error)}</Note></View> : null}
@@ -168,8 +164,7 @@ function ImagesCard({ status }: { status: CompressionStatus }) {
   return (
     <SettingsCard title="Images" description="Large images keep their original size if they were uploaded before Orbit made images smaller on upload." flush>
       <View className="gap-3 px-4 py-3">
-        <OptionText title="Compress images">
-          <OptionHint>Scales JPEG, PNG and WebP images of 512 KB or more to at most 2560 px and saves them as WebP. The originals are replaced; GIFs and other files stay as they are.</OptionHint>
+        <OptionText title="Compress images" help="Scales JPEG, PNG and WebP images of 512 KB or more to at most 2560 px and saves them as WebP. The originals are replaced; GIFs and other files stay as they are.">
           {progress ? <OptionHint>{progress}</OptionHint> : null}
           {status.error ? <OptionHint error>Compression stopped: {status.error}</OptionHint> : null}
           {start.isError ? <OptionHint error>{errorMessage(start.error)}</OptionHint> : null}

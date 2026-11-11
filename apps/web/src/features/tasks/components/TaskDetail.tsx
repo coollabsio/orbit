@@ -3,21 +3,21 @@ import { useEffect, useRef, useState, type ComponentProps, type ReactNode } from
 import { cn } from 'cn'
 import { useQueryClient } from '@tanstack/react-query'
 import { confirmAction } from '@/components/common/confirmAction'
-import { Add as Plus, ArrowLeft, Calendar, Hierarchy2, Link2, Tag, TaskSquare as SquareCheck, User as UserIcon, Xmark as X } from 'reicon-react'
+import { recurrenceLabel } from '@orbit/api/recurrence'
+import { Add as Plus, ArrowLeft, Calendar, Hierarchy2, Link2, Repeat, Tag, TaskSquare as SquareCheck, User as UserIcon, Xmark as X } from 'reicon-react'
 import { Badge } from '@/components/ui/badge'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Tip } from '@/components/common/Tip'
 import { Input } from '@/components/ui/input'
-import { UserAvatar, UserAvatarStack } from '@/components/common/UserAvatar'
+import { UserAvatarStack } from '@/components/common/UserAvatar'
 import { DatePicker } from '@/components/common/DatePicker'
+import { SearchPicker } from '@/components/common/SearchPicker'
+import { personOption, projectOption } from './pickerOptions'
 import { useTaskPickerUpdate } from '@/features/tasks/useTaskPickerUpdate'
 import {
   DropdownMenu,
-  DropdownMenuCheckboxItem,
   DropdownMenuContent,
-  DropdownMenuGroup,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -28,7 +28,7 @@ import { TaskStatusIcon } from './TaskStatusIcon'
 import { dueDateLabel, PRIORITY_LABEL, PRIORITY_ORDER, projectLabels, projectStatuses } from '@/features/tasks/taskMeta'
 import { refIdentifier, type Project, type Task, type TaskViewState } from '@/features/tasks/api/models'
 import { cachedDescendantIds, type PageTaskRecord } from '@/features/tasks/api/optimistic'
-import { useProjects } from '@/features/tasks/api/projects'
+import { useProjectAudience, useProjects } from '@/features/tasks/api/projects'
 import {
   useAddTaskRelation, useCreateTaskComment, useDeleteTask, useDeleteTaskAttachment, useRemoveTaskRelation,
   subIssuesQuery, useSubIssues, useTaskGithubLinks, useTaskRelations, useUpdateTask,
@@ -51,6 +51,7 @@ import { TaskCommentComposer } from './TaskCommentComposer'
 import { LabelPicker, LabelPill } from './TaskLabels'
 import { TaskDescriptionEditor, type TaskDescriptionHandle } from './TaskDescriptionEditor'
 import { TaskTextFields } from './TaskTextFields'
+import { RecurrenceEditor } from './RecurrenceEditor'
 
 interface TaskDetailProps {
   task: Task | undefined
@@ -83,11 +84,13 @@ export function TaskDetail({ task, project, state, onClose, onOpenTask, onOpenPr
   const taskLabels = task ? projectLabels(state.labels, task.projectId).filter((label) => task.labels.includes(label.id)).sort((a, b) => a.name.localeCompare(b.name)) : []
   const moveToProject = useMoveToProject(workspace.id)
   const users = state.users
+  const audience = useProjectAudience(workspace.id, project, users)
   const descriptionRef = useRef<TaskDescriptionHandle>(null)
   // the date panel needs to close itself from Clear, so the popover stays controlled
   const [dueDateOpen, setDueDateOpen] = useState(false)
   // each pick saves and the picker stays open; quick picks queue behind the save in flight
   const saveDueDate = useTaskPickerUpdate(task, 'Due date update failed.')
+  const [repeatOpen, setRepeatOpen] = useState(false)
   const [sourceOpen, setSourceOpen] = useState(false)
   const projects = useProjects(workspace.id).data ?? []
   const relations = useTaskRelations(workspace.id, task?.id).data ?? []
@@ -309,45 +312,32 @@ export function TaskDetail({ task, project, state, onClose, onOpenTask, onOpenPr
                   ))}
                 </DropdownMenuContent>
               </DropdownMenu>
-              {/* Multi-assignee options toggle individually; the checked indicator marks the active ones. */}
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  render={
-                    <PropertyButton>
-                      {assignees.length > 0 ? (
-                        <>
-                          <UserAvatarStack users={assignees} size={16} />
-                          <span className="truncate">{assignees.map((u) => u.name).join(', ')}</span>
-                        </>
-                      ) : (
-                        <>
-                          <UserIcon aria-hidden="true" className="text-muted-foreground" />
-                          Assign
-                        </>
-                      )}
-                    </PropertyButton>
-                  }
-                />
-                <DropdownMenuContent className="w-auto min-w-45">
-                  <DropdownMenuGroup>
-                    <DropdownMenuLabel>Assignees</DropdownMenuLabel>
-                    {users.map((u) => {
-                      const active = task.assigneeIds.includes(u.id)
-                      return (
-                        <DropdownMenuCheckboxItem
-                          key={u.id}
-                          checked={active}
-                          closeOnClick
-                          onCheckedChange={() => updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, assignee_ids: active ? task.assigneeIds.filter((id) => id !== u.id) : [...task.assigneeIds, u.id] } })}
-                        >
-                          <UserAvatar user={u} size={16} />
-                          {u.name}
-                        </DropdownMenuCheckboxItem>
-                      )
-                    })}
-                  </DropdownMenuGroup>
-                </DropdownMenuContent>
-              </DropdownMenu>
+              {/* several assignees; the picker closes after each toggle, like the other properties */}
+              <SearchPicker
+                multiple
+                closeOnSelect
+                label="Assignees"
+                placeholder="Assign to…"
+                emptyText="No people match"
+                options={audience.map(personOption)}
+                selected={task.assigneeIds}
+                onSelect={(id) => updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, assignee_ids: task.assigneeIds.includes(id) ? task.assigneeIds.filter((item) => item !== id) : [...task.assigneeIds, id] } })}
+                trigger={
+                  <PropertyButton>
+                    {assignees.length > 0 ? (
+                      <>
+                        <UserAvatarStack users={assignees} size={16} />
+                        <span className="truncate">{assignees.map((u) => u.name).join(', ')}</span>
+                      </>
+                    ) : (
+                      <>
+                        <UserIcon aria-hidden="true" className="text-muted-foreground" />
+                        Assign
+                      </>
+                    )}
+                  </PropertyButton>
+                }
+              />
               {task.parent ? (
                 <DropdownMenu>
                   <DropdownMenuTrigger render={
@@ -402,34 +392,24 @@ export function TaskDetail({ task, project, state, onClose, onOpenTask, onOpenPr
                   <p className="mt-1 text-xs text-muted-foreground">Synced with GitHub, so it stays in this project.</p>
                 </>
               ) : (
-                <DropdownMenu>
-                  <DropdownMenuTrigger
-                    render={
-                      // the pill is the trigger, like "Add label": a ghost button around a badge reads as two controls
-                      <Button variant="outline" size="xs" className="h-5 max-w-full rounded-full font-medium" aria-label={`Project: ${project?.name ?? 'none'}`}>
-                        {project ? <ColorDot color={project.color} /> : null}
-                        <span className="truncate">{project?.name ?? 'Set project'}</span>
-                      </Button>
-                    }
-                  />
-                  <DropdownMenuContent className="w-auto min-w-52">
-                    <DropdownMenuGroup>
-                      <DropdownMenuLabel>Move to project</DropdownMenuLabel>
-                      {projects.map((item) => (
-                        <DropdownMenuItem
-                          key={item.id}
-                          className="data-selected:bg-accent data-selected:font-medium"
-                          data-selected={item.id === task.projectId || undefined}
-                          onClick={() => moveToProject([task], item)}
-                        >
-                          <ColorDot color={item.color} className="size-2" />
-                          <span className="flex-1 truncate">{item.name}</span>
-                          <span className="text-xs text-muted-foreground tabular-nums">{item.key}</span>
-                        </DropdownMenuItem>
-                      ))}
-                    </DropdownMenuGroup>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                <SearchPicker
+                  label="Move to project"
+                  placeholder="Move to project…"
+                  emptyText="No projects match"
+                  options={projects.map(projectOption)}
+                  selected={[task.projectId]}
+                  onSelect={(id) => {
+                    const target = projects.find((item) => item.id === id)
+                    if (target && id !== task.projectId) moveToProject([task], target)
+                  }}
+                  trigger={
+                    // the pill is the trigger, like "Add label": a ghost button around a badge reads as two controls
+                    <Button variant="outline" size="xs" className="h-5 max-w-full rounded-full font-medium" aria-label={`Project: ${project?.name ?? 'none'}`}>
+                      {project ? <ColorDot color={project.color} /> : null}
+                      <span className="truncate">{project?.name ?? 'Set project'}</span>
+                    </Button>
+                  }
+                />
               )}
             </PropertyGroup>
 
@@ -485,6 +465,33 @@ export function TaskDetail({ task, project, state, onClose, onOpenTask, onOpenPr
                 </PopoverContent>
               </Popover>
             </PropertyGroup>
+
+            <PropertyGroup title="Repeat">
+              <Popover open={repeatOpen} onOpenChange={setRepeatOpen}>
+                <PopoverTrigger
+                  render={
+                    <PropertyButton type="button" aria-label="Repeat" className={task.recurrence ? undefined : 'text-muted-foreground'}>
+                      <Repeat className="size-3.5" aria-hidden="true" />
+                      <span className="truncate">{recurrenceLabel(task.recurrence)}</span>
+                    </PropertyButton>
+                  }
+                />
+                <PopoverContent align="start" side="top" className="w-auto p-3">
+                  <RecurrenceEditor
+                    value={task.recurrence}
+                    onSave={(recurrence) => {
+                      // the due date's queue: a repeat saved right after a date pick does not send a stale version
+                      saveDueDate({ recurrence })
+                      setRepeatOpen(false)
+                    }}
+                    onStop={() => {
+                      saveDueDate({ recurrence: null })
+                      setRepeatOpen(false)
+                    }}
+                  />
+                </PopoverContent>
+              </Popover>
+            </PropertyGroup>
           </aside>
 
           <div className="col-start-1 min-w-0 min-[900px]:mx-auto min-[900px]:w-full min-[900px]:max-w-[840px] min-[900px]:px-10 min-[900px]:pb-12">
@@ -492,7 +499,7 @@ export function TaskDetail({ task, project, state, onClose, onOpenTask, onOpenPr
 
             {/* the rich text comment field: blocks, @mentions, inline files (paste / drop / pick) */}
             <div className="mt-4 max-[899px]:mt-3">
-              <TaskCommentComposer workspaceId={workspace.id} taskId={task.id} pending={createComment.isPending} error={createComment.isError ? 'Comment failed.' : undefined} members={users} onSend={(bodyJson) => createComment.mutateAsync({ bodyJson })} />
+              <TaskCommentComposer workspaceId={workspace.id} taskId={task.id} pending={createComment.isPending} error={createComment.isError ? 'Comment failed.' : undefined} members={audience} onSend={(bodyJson) => createComment.mutateAsync({ bodyJson })} />
             </div>
           </div>
           {picker ? (

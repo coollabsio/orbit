@@ -1,5 +1,6 @@
 import { ProfileTrigger } from '@/components/common/ProfileTrigger'
 import { UserAvatar } from '@/components/common/UserAvatar'
+import { BotAvatar } from './BotAvatar'
 import { extractPreview, wordlessPreview } from '@/lib/messagePreview'
 import { useThreadState } from '../../api/queries'
 import type { Message } from '../../api/types'
@@ -30,7 +31,13 @@ export function ReplySummary({ message }: { message: Message }) {
       className="relative mt-1.5 -ml-1 flex w-fit max-w-full rounded-md py-1 pr-2 pl-1 text-xs text-muted-foreground hover-fine:hover:bg-muted"
     >
       <span className="flex min-w-0 flex-col gap-1 border-l-2 border-border pl-2.5">
-        {reply ? (
+        {reply?.botName ? (
+          <span data-slot="reply-preview" className="flex min-w-0 items-center gap-1.5">
+            <BotAvatar bot={{ name: reply.botName, iconUrl: null, iconEmoji: null }} size={16} />
+            <span className="shrink-0 font-medium text-foreground/90">{reply.botName}</span>
+            <span className="truncate text-[0.8125rem]">{text || wordlessPreview(reply.sticker === true)}</span>
+          </span>
+        ) : reply ? (
           <span data-slot="reply-preview" className="flex min-w-0 items-center gap-1.5">
             <ProfileTrigger userId={author?.id} name={author?.name ?? 'Unknown'} kind="avatar" tabIndex={-1} className="relative z-1 flex shrink-0">
               <UserAvatar user={author} name="?" size={16} />

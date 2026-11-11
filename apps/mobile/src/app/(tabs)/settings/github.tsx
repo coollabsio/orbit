@@ -62,10 +62,9 @@ function Github({ settings, refetch }: { settings: GithubWorkspaceSettings; refe
   }
 
   return (
-    <SettingsCard title="GitHub" description="Manage the GitHub App for this workspace. Connect repositories to projects in each project's settings.">
+    <SettingsCard title="GitHub" description={`Manage the GitHub App for this workspace. Connect repositories to projects in each project's settings. ${settings.app_slug ? "After installation, open a project's settings to select a repository and issue label." : 'Register a GitHub App from Orbit. GitHub will return you to this workspace.'}`}>
       {!settings.app_slug ? (
         <View className="items-start gap-2">
-          <Body muted>Register a GitHub App from Orbit. GitHub will return you to this workspace.</Body>
           {settings.can_manage ? (
             <>
               {Platform.OS === 'web' ? (
@@ -101,7 +100,6 @@ function Github({ settings, refetch }: { settings: GithubWorkspaceSettings; refe
               <Body muted>No repositories installed yet.</Body>
             )}
           </View>
-          <Body muted>After installation, open a project's settings to select a repository and issue label.</Body>
         </View>
       )}
     </SettingsCard>

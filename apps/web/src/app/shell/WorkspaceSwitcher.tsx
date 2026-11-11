@@ -9,6 +9,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Separator } from '@/components/ui/separator'
 import { Tip } from '@/components/common/Tip'
 import { useCreateWorkspace } from '@/features/workspaces/api'
+import { newWorkspaceTrialNote, useAccountTrial } from '@/features/workspaces/billing'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 
 /** The panel is a Popover rather than a DropdownMenu: picking a workspace swaps the
@@ -52,6 +53,7 @@ function WorkspaceMenu({ onSelect, createWorkspace }: { onSelect: () => void; cr
   const { workspace, workspaces, selectWorkspace } = useWorkspace()
   const [creating, setCreating] = useState(false)
   const [name, setName] = useState('')
+  const trialNote = newWorkspaceTrialNote(useAccountTrial().data)
   const active = useRef(true)
   useEffect(() => {
     active.current = true
@@ -75,6 +77,7 @@ function WorkspaceMenu({ onSelect, createWorkspace }: { onSelect: () => void; cr
     <form className="flex w-60 max-w-full flex-col gap-2 p-2" onSubmit={(event) => { event.preventDefault(); void create() }}>
       <Label className="mb-1.5 h-4 gap-1 text-[0.8125rem] leading-4 font-medium text-muted-foreground" htmlFor={inputId}>New workspace</Label>
       <Input id={inputId} autoFocus required value={name} disabled={createWorkspace.isPending} onChange={(event) => setName(event.target.value)} />
+      {trialNote ? <p className="text-xs text-muted-foreground">{trialNote}</p> : null}
       {createWorkspace.isError ? <p role="alert" className="text-xs text-destructive">{createWorkspace.error instanceof ApiProblem ? createWorkspace.error.detail : 'Workspace creation failed. Try again.'}</p> : null}
       <Button type="submit" disabled={!name.trim() || createWorkspace.isPending}>{createWorkspace.isPending ? 'Creating…' : 'Create workspace'}</Button>
       <Button type="button" variant="ghost" disabled={createWorkspace.isPending} onClick={() => { setCreating(false); setName(''); createWorkspace.reset() }}>Cancel</Button>

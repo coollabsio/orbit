@@ -5,9 +5,7 @@ import { cn } from 'cn'
 import { usePageTree } from '@/features/docs/api/pages'
 import { useTeamspaces } from '@/features/docs/api/teamspaces'
 import { pageTitle, spaceKey, spaceLabel } from '@/features/docs/pageTree'
-import { taskFromRecord } from '@/features/tasks/api/models'
-import { useProjectStatuses, useProjects } from '@/features/tasks/api/projects'
-import { useTask, useTaskRouteId } from '@/features/tasks/api/tasks'
+import { useLinkedTask } from '@/features/tasks/useLinkedTask'
 import { AssigneePicker } from '@/features/tasks/components/AssigneePicker'
 import { DueDatePicker } from '@/features/tasks/components/DueDatePicker'
 import { PriorityPicker } from '@/features/tasks/components/PriorityPicker'
@@ -22,22 +20,6 @@ import { useMembers } from '@/features/workspaces/api'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { relativeTime } from '@/lib/format'
 import { taskPath } from '@/lib/taskLinks'
-
-/**
- * The task a link names (by id or identifier), as the reader's own requests return it: `null` while it loads, when the
- * reader cannot see it and when it is in the trash. A card or chip then shows nothing of the task.
- */
-function useLinkedTask(taskRef: string) {
-  const { workspace } = useWorkspace()
-  const { taskId } = useTaskRouteId(workspace.id, taskRef)
-  const record = useTask(workspace.id, taskId).data
-  const projects = useProjects(workspace.id, record !== undefined).data
-  const statuses = useProjectStatuses(workspace.id, record?.project_id).data ?? []
-  if (!record || record.deleted_at) return null
-  const project = projects?.find((candidate) => candidate.id === record.project_id)
-  const task = taskFromRecord(record, project)
-  return { task, projects: projects ?? [], statuses, status: statuses.find((candidate) => candidate.id === task.statusId) }
-}
 
 /** The page a link names: `null` while the page tree loads and when the page is not in the reader's tree. */
 function useLinkedPage(pageId: string) {

@@ -33,6 +33,7 @@ use utoipa::ToSchema;
 use crate::auth_routes::avatar_url;
 use crate::live::LiveHub;
 use crate::repositories::chat::MessageRecord;
+use crate::repositories::project_access::user_sees_project_sql;
 use apns::{ApnsDevice, ApnsEnvironment, ApnsSender};
 
 /// The hosts of the push services of the browser vendors. A subscription names the URL the
@@ -1036,16 +1037,19 @@ impl PushService {
     /// Notifies the recipients of the inbox notifications that were not pushed yet; returns how
     /// many there were. Chat mentions are marked only: [`Self::chat_message`] did them.
     pub async fn push_inbox(&self) -> Result<usize, sqlx::Error> {
-        let rows = sqlx::query(
+        // A task notification whose recipient no longer sees the project is claimed and dropped.
+        let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
             "SELECT notifications.id, notifications.recipient_user_id, notifications.kind, \
              notifications.actor_user_id, user_avatars.updated_at AS avatar_updated_at, \
-             users.display_name AS actor, tasks.title AS task_title, pages.title AS page_title \
+             users.display_name AS actor, tasks.title AS task_title, pages.title AS page_title, \
+             CASE WHEN notifications.task_id IS NULL OR {} THEN 1 ELSE 0 END AS visible \
              FROM notifications JOIN users ON users.id = notifications.actor_user_id \
              LEFT JOIN user_avatars ON user_avatars.user_id = users.id \
              LEFT JOIN tasks ON tasks.id = notifications.task_id \
              LEFT JOIN pages ON pages.id = notifications.page_id \
              WHERE notifications.pushed_at IS NULL ORDER BY notifications.id LIMIT 100",
-        )
+            user_sees_project_sql("tasks.project_id", "notifications.recipient_user_id")
+        )))
         .fetch_all(self.database.pool())
         .await?;
         for row in &rows {
@@ -1060,7 +1064,7 @@ impl PushService {
             .execute(self.database.pool())
             .await?
             .rows_affected();
-            if claimed == 0 {
+            if claimed == 0 || row.get::<i64, _>("visible") == 0 {
                 continue;
             }
             let actor: String = row.get("actor");

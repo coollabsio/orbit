@@ -225,3 +225,26 @@ export function useTrashedProject(projectId: string) {
   })
   return { project, tasks }
 }
+
+/** The member's own project order, saved at once on screen and rolled back on error (the web's `useSetProjectOrder`). */
+export function useProjectOrder() {
+  const { client, workspaceId } = useOrbit()
+  const queryClient = useQueryClient()
+  const key = keys.projectOrder(workspaceId)
+  const order = useQuery({ queryKey: key, queryFn: () => taskApi.projectOrder(client, workspaceId) })
+  const save = useMutation<void, Error, string[], { previous?: string[] }>({
+    mutationFn: (projectIds) => taskApi.saveProjectOrder(client, workspaceId, projectIds),
+    onMutate: async (projectIds) => {
+      await queryClient.cancelQueries({ queryKey: key })
+      const previous = queryClient.getQueryData<string[]>(key)
+      queryClient.setQueryData(key, projectIds)
+      return { previous }
+    },
+    onError: (error, _ids, snapshot) => {
+      queryClient.setQueryData(key, snapshot?.previous)
+      Alert.alert('Could not reorder the projects.', errorMessage(error))
+    },
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: key }),
+  })
+  return { order: order.data ?? [], save }
+}

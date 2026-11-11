@@ -2,6 +2,7 @@ import { toast } from 'sonner'
 import type { BackupSchedule, CompressionStatus, S3View, StorageView } from '@orbit/api/generated/types.gen'
 import { ApiProblem } from '@orbit/api/problem'
 import { confirmAction } from '@/components/common/confirmAction'
+import { InfoTip } from '@/components/common/InfoTip'
 import { SettingsCard } from '@/components/common/SettingsCard'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -96,12 +97,8 @@ function UsageCard({ storage }: { storage: StorageView }) {
       <div className="flex flex-col divide-y">
         <SettingsRow className="flex-nowrap">
           <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-[0.8125rem]">
-            <span className="font-medium text-foreground">Attachments in S3</span>
-            <span className="text-xs text-muted-foreground">
-              {ready
-                ? 'On: new files go to the bucket and existing files move there in the background. Off: they move back to this server.'
-                : 'Save a bucket above first.'}
-            </span>
+            {ready ? <span className="inline-flex items-center gap-1.5 font-medium text-foreground">Attachments in S3 <InfoTip text="On: new files go to the bucket and existing files move there in the background. Off: they move back to this server." /></span> : <span className="font-medium text-foreground">Attachments in S3</span>}
+            {ready ? null : <span className="text-xs text-muted-foreground">Save a bucket above first.</span>}
             {moving ? (
               <span role="status" className="flex items-center gap-1.5 text-xs text-muted-foreground">
                 {/* The spinner stops when moving failed; Orbit only tries again later. */}
@@ -120,12 +117,8 @@ function UsageCard({ storage }: { storage: StorageView }) {
         </SettingsRow>
         <SettingsRow className="flex-nowrap">
           <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-[0.8125rem]">
-            <span className="font-medium text-foreground">Backups in S3</span>
-            <span className="text-xs text-muted-foreground">
-              {ready
-                ? 'On: each new backup is uploaded to the bucket and removed from this server, so a lost server loses no backups.'
-                : 'Save a bucket above first.'}
-            </span>
+            {ready ? <span className="inline-flex items-center gap-1.5 font-medium text-foreground">Backups in S3 <InfoTip text="On: each new backup is uploaded to the bucket and removed from this server, so a lost server loses no backups." /></span> : <span className="font-medium text-foreground">Backups in S3</span>}
+            {ready ? null : <span className="text-xs text-muted-foreground">Save a bucket above first.</span>}
           </div>
           <Switch
             aria-label="Backups in S3"
@@ -136,8 +129,7 @@ function UsageCard({ storage }: { storage: StorageView }) {
         </SettingsRow>
         <SettingsRow className="flex-nowrap">
           <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-[0.8125rem]">
-            <span className="font-medium text-foreground">Automatic backups</span>
-            <span className="text-xs text-muted-foreground">Orbit keeps the newest backup of each of the last 7 days and 4 weeks.</span>
+            <span className="inline-flex items-center gap-1.5 font-medium text-foreground">Automatic backups <InfoTip text="Orbit keeps the newest backup of each of the last 7 days and 4 weeks." /></span>
           </div>
           <Select
             items={SCHEDULE_OPTIONS}
@@ -167,8 +159,7 @@ function ImagesCard({ status }: { status: CompressionStatus }) {
     <SettingsCard title="Images" description="Large images keep their original size if they were uploaded before Orbit made images smaller on upload." flush>
       <SettingsRow className="flex-nowrap">
         <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-[0.8125rem]">
-          <span className="font-medium text-foreground">Compress images</span>
-          <span className="text-xs text-muted-foreground">Scales JPEG, PNG and WebP images of 512 KB or more to at most 2560 px and saves them as WebP. The originals are replaced; GIFs and other files stay as they are.</span>
+          <span className="inline-flex items-center gap-1.5 font-medium text-foreground">Compress images <InfoTip text="Scales JPEG, PNG and WebP images of 512 KB or more to at most 2560 px and saves them as WebP. The originals are replaced; GIFs and other files stay as they are." /></span>
           {status.running ? <LoadingText className="text-xs">Compressing… {done} {done === 1 ? 'file' : 'files'} checked. {summary}</LoadingText> : null}
           {!status.running && done > 0 ? <span role="status" className="text-xs text-muted-foreground">Done. {summary}</span> : null}
           {status.error ? <span role="alert" className="text-xs text-destructive">Compression stopped: {status.error}</span> : null}

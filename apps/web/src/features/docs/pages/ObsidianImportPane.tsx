@@ -9,6 +9,7 @@ import { Button, buttonVariants } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
 import { EmptyState } from '@/components/common/EmptyState'
 import { Pane } from '@/components/common/Pane'
+import { TitleTip } from '@/components/common/TitleTip'
 import { confirmAction } from '@/components/common/confirmAction'
 import { isActiveImport, isFinalImport, isImportInProgress } from '@/features/docs/api/notionImports'
 import {
@@ -75,21 +76,17 @@ function UploadStep({ workspaceId }: { workspaceId: string }) {
       <ImportBody>
         <section className="flex flex-col gap-4 rounded-lg border border-border p-5">
           <div className="flex flex-col gap-2">
-            <h2 className="text-sm font-semibold text-foreground">Upload your vault</h2>
-            <p className="text-sm text-muted-foreground">
-              Zip the vault folder and upload the .zip file. Its folders become pages with their notes inside, and a note
-              named like its folder (<code className="text-[0.8125rem]">Projects/Projects.md</code>) becomes that folder’s page.
-              Images and files that notes link to or embed are attached to those pages.
-            </p>
+            <TitleTip
+              as="h2"
+              title="Upload your vault"
+              text="Zip the vault folder and upload the .zip file. Its folders become pages with their notes inside, and a note named like its folder (Projects/Projects.md) becomes that folder’s page. Images and files that notes link to or embed are attached to those pages. The .obsidian/ settings folder, canvases and CSV files are skipped. You choose which notes to import after the upload."
+              className="text-sm font-semibold text-foreground"
+            />
             <p className="text-sm text-muted-foreground">
               To find the vault folder, open the vault switcher in Obsidian (bottom left) and choose{' '}
               <span className="font-medium text-foreground">Reveal vault in system explorer</span>. Then right-click the folder
               and choose <span className="font-medium text-foreground">Compress</span> (macOS) or{' '}
               <span className="font-medium text-foreground">Compress to ZIP file</span> (Windows).
-            </p>
-            <p className="text-sm text-muted-foreground">
-              The <code className="text-[0.8125rem]">.obsidian/</code> settings folder, canvases and CSV files are skipped. You
-              choose which notes to import after the upload.
             </p>
           </div>
           {upload ? (

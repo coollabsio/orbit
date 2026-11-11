@@ -8,17 +8,18 @@ import type { MentionTarget } from './data/mentions'
 import * as api from './data/orbit'
 import { useOrbit } from './orbit-context'
 
-export function useProjects() {
+export function useProjects(enabled = true) {
   const { client, workspaceId } = useOrbit()
-  return useQuery({ queryKey: keys.projects(workspaceId), queryFn: () => api.projects(client, workspaceId) })
+  return useQuery({ queryKey: keys.projects(workspaceId), queryFn: () => api.projects(client, workspaceId), enabled })
 }
 
 /** The statuses of every project. Reads the project list through the cache, so a refresh of one refreshes both. */
-export function useStatuses() {
+export function useStatuses(enabled = true) {
   const { client, workspaceId } = useOrbit()
   const queryClient = useQueryClient()
   return useQuery({
     queryKey: keys.statuses(workspaceId),
+    enabled,
     queryFn: async () => {
       const projects = await queryClient.ensureQueryData({ queryKey: keys.projects(workspaceId), queryFn: () => api.projects(client, workspaceId) })
       return api.statuses(client, workspaceId, projects.map((project) => project.id))
@@ -40,6 +41,28 @@ export function useLabels() {
 export function useMembers() {
   const { client, workspaceId } = useOrbit()
   return useQuery({ queryKey: keys.members(workspaceId), queryFn: () => api.members(client, workspaceId) })
+}
+
+/**
+ * Who sees the project `projectId`, for assignee and mention pickers: everyone for a workspace project; for a private
+ * one, its listed members plus owners and admins (the server refuses anyone else).
+ */
+export function useSeesProject(projectId: string | null): (userId: string) => boolean {
+  const { client, workspaceId } = useOrbit()
+  const project = useProjects().data?.find((candidate) => candidate.id === projectId)
+  const isPrivate = project?.private === true
+  const members = useMembers().data
+  const listed = useQuery({
+    queryKey: keys.projectMembers(workspaceId, projectId ?? ''),
+    queryFn: () => api.projectMembers(client, workspaceId, projectId ?? ''),
+    enabled: isPrivate,
+  }).data
+  return useMemo(() => {
+    if (!isPrivate) return () => true
+    const allowed = new Set(listed?.map((member) => member.user_id))
+    for (const member of members ?? []) if (member.role === 'owner' || member.role === 'admin') allowed.add(member.user_id)
+    return (userId: string) => allowed.has(userId)
+  }, [isPrivate, listed, members])
 }
 
 /** Members as `{ id, name }` by user id. Empty while they load. */
