@@ -107,10 +107,10 @@ export const PRIORITY_CHOICES: readonly Priority[] = ['urgent', 'high', 'medium'
 export const toggleId = (list: readonly string[], id: string): string[] => (list.includes(id) ? list.filter((item) => item !== id) : [...list, id])
 
 /**
- * The task fields a property write changes. Status, priority, assignees, labels, due date and source show at once
+ * The task fields a property write changes. Status, priority, assignees, labels, due date, repeat and source show at once
  * (optimistic, as on the web); a parent or duplicate change waits for the server, which checks cycles.
  */
-export type TaskPatch = Partial<Pick<TaskRecord, 'status_id' | 'priority' | 'assignee_ids' | 'label_ids' | 'due_at' | 'due_start_at' | 'source_url'>> & {
+export type TaskPatch = Partial<Pick<TaskRecord, 'status_id' | 'priority' | 'assignee_ids' | 'label_ids' | 'due_at' | 'due_start_at' | 'source_url' | 'recurrence'>> & {
   parent_task_id?: string | null
   duplicate_of_id?: string | null
 }

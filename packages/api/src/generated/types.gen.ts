@@ -3078,6 +3078,7 @@ export type ListPublicTask = {
          */
         priority: string;
         project_id: string;
+        recurrence: null | TaskRecurrence;
         status_id: string;
         title: string;
         updated_at: string;
@@ -4681,6 +4682,7 @@ export type PageTaskRecord = {
         position: number;
         priority: string;
         project_id: string;
+        recurrence: null | TaskRecurrence;
         source_url?: string | null;
         status_id: string;
         /**
@@ -5278,6 +5280,7 @@ export type PublicTask = {
      */
     priority: string;
     project_id: string;
+    recurrence: null | TaskRecurrence;
     status_id: string;
     title: string;
     updated_at: string;
@@ -5438,6 +5441,7 @@ export type PublicUpdateTaskBody = {
      * `none`, `low`, `medium`, `high` or `urgent`.
      */
     priority?: string | null;
+    recurrence?: null | TaskRecurrence;
     status_id?: string | null;
     /**
      * 1 to 500 characters.
@@ -6290,6 +6294,7 @@ export type TaskRecord = {
     position: number;
     priority: string;
     project_id: string;
+    recurrence: null | TaskRecurrence;
     source_url?: string | null;
     status_id: string;
     /**
@@ -6309,6 +6314,33 @@ export type TaskRecord = {
     version: number;
     workspace_id: string;
 };
+
+/**
+ * How a task repeats, as clients read and write it. Shared by every occurrence of the series.
+ */
+export type TaskRecurrence = {
+    /**
+     * `due`: a fixed calendar counted from the due date (missed dates are skipped). `completion`:
+     * the next due date is `interval` units after the day the task was completed.
+     */
+    base: TaskRecurrenceBase;
+    frequency: TaskRecurrenceFrequency;
+    /**
+     * Every `interval` days, weeks, months or years (1 to 365).
+     */
+    interval: number;
+    /**
+     * Weekly rules from the due date only: the weekdays it falls on. Empty means the weekday of
+     * the due date the rule was set from.
+     */
+    weekdays: Array<TaskRecurrenceWeekday>;
+};
+
+export type TaskRecurrenceBase = 'due' | 'completion';
+
+export type TaskRecurrenceFrequency = 'daily' | 'weekly' | 'monthly' | 'yearly';
+
+export type TaskRecurrenceWeekday = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun';
 
 /**
  * A task reference small enough to embed; clients build the display identifier
@@ -6386,6 +6418,7 @@ export type TaskUpdateBody = {
     position?: number | null;
     priority?: string | null;
     project_id?: string | null;
+    recurrence?: null | TaskRecurrence;
     source_url?: string | null;
     status_id?: string | null;
     title?: string | null;

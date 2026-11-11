@@ -58519,6 +58519,7 @@
                     "label_ids",
                     "due_start_at",
                     "due_at",
+                    "recurrence",
                     "created_at",
                     "updated_at",
                     "version"
@@ -58572,6 +58573,17 @@
                     },
                     "project_id": {
                       "type": "string"
+                    },
+                    "recurrence": {
+                      "oneOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "$ref": "#/components/schemas/TaskRecurrence",
+                          "description": "How the task repeats; null when it does not. Completing it creates the next occurrence."
+                        }
+                      ]
                     },
                     "status_id": {
                       "type": "string"
@@ -62567,6 +62579,7 @@
                 "position",
                 "assignee_ids",
                 "label_ids",
+                "recurrence",
                 "version",
                 "created_at",
                 "updated_at",
@@ -62711,6 +62724,17 @@
                 },
                 "project_id": {
                   "type": "string"
+                },
+                "recurrence": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TaskRecurrence",
+                      "description": "How the task repeats; null when it does not. Completing it creates the next occurrence."
+                    }
+                  ]
                 },
                 "source_url": {
                   "type": [
@@ -64008,6 +64032,7 @@
               "label_ids",
               "due_start_at",
               "due_at",
+              "recurrence",
               "created_at",
               "updated_at",
               "version"
@@ -64061,6 +64086,17 @@
               },
               "project_id": {
                 "type": "string"
+              },
+              "recurrence": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/TaskRecurrence",
+                    "description": "How the task repeats; null when it does not. Completing it creates the next occurrence."
+                  }
+                ]
               },
               "status_id": {
                 "type": "string"
@@ -64346,6 +64382,17 @@
               "null"
             ],
             "description": "`none`, `low`, `medium`, `high` or `urgent`."
+          },
+          "recurrence": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TaskRecurrence",
+                "description": "Makes the task repeat: completing it creates the next occurrence. Every occurrence of the\nseries shares the rule. `null` stops repeating."
+              }
+            ]
           },
           "status_id": {
             "type": [
@@ -66467,6 +66514,7 @@
           "position",
           "assignee_ids",
           "label_ids",
+          "recurrence",
           "version",
           "created_at",
           "updated_at",
@@ -66612,6 +66660,17 @@
           "project_id": {
             "type": "string"
           },
+          "recurrence": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TaskRecurrence",
+                "description": "How the task repeats; null when it does not. Completing it creates the next occurrence."
+              }
+            ]
+          },
           "source_url": {
             "type": [
               "string",
@@ -66655,6 +66714,68 @@
             "type": "string"
           }
         }
+      },
+      "TaskRecurrence": {
+        "type": "object",
+        "description": "How a task repeats, as clients read and write it. Shared by every occurrence of the series.",
+        "required": [
+          "frequency",
+          "interval",
+          "weekdays",
+          "base"
+        ],
+        "properties": {
+          "base": {
+            "$ref": "#/components/schemas/TaskRecurrenceBase",
+            "description": "`due`: a fixed calendar counted from the due date (missed dates are skipped). `completion`:\nthe next due date is `interval` units after the day the task was completed."
+          },
+          "frequency": {
+            "$ref": "#/components/schemas/TaskRecurrenceFrequency"
+          },
+          "interval": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Every `interval` days, weeks, months or years (1 to 365).",
+            "maximum": 365,
+            "minimum": 1
+          },
+          "weekdays": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskRecurrenceWeekday"
+            },
+            "description": "Weekly rules from the due date only: the weekdays it falls on. Empty means the weekday of\nthe due date the rule was set from."
+          }
+        },
+        "additionalProperties": false
+      },
+      "TaskRecurrenceBase": {
+        "type": "string",
+        "enum": [
+          "due",
+          "completion"
+        ]
+      },
+      "TaskRecurrenceFrequency": {
+        "type": "string",
+        "enum": [
+          "daily",
+          "weekly",
+          "monthly",
+          "yearly"
+        ]
+      },
+      "TaskRecurrenceWeekday": {
+        "type": "string",
+        "enum": [
+          "mon",
+          "tue",
+          "wed",
+          "thu",
+          "fri",
+          "sat",
+          "sun"
+        ]
       },
       "TaskRef": {
         "type": "object",
@@ -66859,6 +66980,17 @@
             "type": [
               "string",
               "null"
+            ]
+          },
+          "recurrence": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TaskRecurrence",
+                "description": "Absent: unchanged. A rule: set or replace how the task's series repeats (every\noccurrence shares it). `null`: stop repeating."
+              }
             ]
           },
           "source_url": {
