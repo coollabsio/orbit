@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 
-import { parseGithubPullUrl, pullPath, threadsOutsideDiff, toGitPatch } from './github'
+import { parseGithubPullUrl, pullPath, threadsOutsideDiff, toCommentTarget, toGitPatch } from './github'
 
 test('reads GitHub pull request URLs', () => {
   expect(parseGithubPullUrl('https://github.com/acme/repo/pull/12')).toEqual({ owner: 'acme', repo: 'repo', number: 12 })
@@ -40,4 +40,13 @@ test('threads the diff cannot show: outdated, file-level, or on a file without a
   const files = [{ path: 'a.ts', patch: '@@' }, { path: 'yarn.lock', patch: null }]
   const threads = [{ id: 1, path: 'a.ts', line: 3 }, { id: 2, path: 'a.ts', line: null }, { id: 3, path: 'yarn.lock', line: 9 }, { id: 4, path: 'gone.ts', line: 1 }]
   expect(threadsOutsideDiff(threads, files).map((thread) => thread.id)).toEqual([2, 3, 4])
+})
+
+test('a Pierre line range becomes GitHub comment coordinates', () => {
+  // one line on the old side
+  expect(toCommentTarget('a.ts', { start: 4, end: 4, side: 'deletions' })).toEqual({ path: 'a.ts', side: 'LEFT', line: 4 })
+  // a range dragged upwards on the new side
+  expect(toCommentTarget('a.ts', { start: 9, end: 5, side: 'additions' })).toEqual({ path: 'a.ts', side: 'RIGHT', line: 9, start_side: 'RIGHT', start_line: 5 })
+  // a range from a deleted line to an added line keeps both sides
+  expect(toCommentTarget('a.ts', { start: 3, end: 6, side: 'deletions', endSide: 'additions' })).toEqual({ path: 'a.ts', side: 'RIGHT', line: 6, start_side: 'LEFT', start_line: 3 })
 })

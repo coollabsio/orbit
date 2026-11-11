@@ -1,20 +1,25 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { forwardRef, useMemo, useRef } from 'react'
-import { PatchDiff, Virtualizer, type FileDiffOptions } from '@pierre/diffs/react'
+import { forwardRef, useCallback, useMemo, useRef, useState } from 'react'
+import { PatchDiff, Virtualizer, type DiffLineAnnotation, type FileDiffOptions } from '@pierre/diffs/react'
 import { getGithubPullContents, getGithubPullMergeBase } from '@orbit/api/generated/sdk.gen'
 import type { GithubPullDetail, GithubPullFile, GithubReviewThread } from '@orbit/api/generated/types.gen'
-import { toGitPatch, type PullRef } from '@orbit/api/github'
+import { toCommentTarget, toGitPatch, type CommentTarget, type PullRef } from '@orbit/api/github'
 import { apiClient } from '@/api/client'
 import { pullKeys } from '@/features/pulls/api'
 import { threadAnnotations } from '@/features/pulls/lib/annotations'
 import { makeDiffFilesLoader } from '@/features/pulls/lib/diffFiles'
+import { CommentComposer } from '@/features/pulls/components/CommentComposer'
 import { ThreadView } from '@/features/pulls/components/ThreadView'
 import type { DiffStyle } from '@/features/pulls/useDiffStyle'
 import { useTheme } from '@/lib/themeContext'
+import { useCommand } from '@/shortcuts/useCommand'
 import '@/features/pulls/pulls.css'
 
 /** The id of a file's section, for scrolling to it. */
 export const fileAnchor = (path: string) => `file-${encodeURIComponent(path)}`
+
+/** What a line of a diff carries: a review thread, or the comment box the member opened there. */
+type Annotation = { thread: GithubReviewThread; composer?: undefined } | { thread?: undefined; composer: CommentTarget }
 
 /** All changed files in one scroll list. Pierre renders only what is on screen, so large pull requests stay fast. */
 export const PullDiffList = forwardRef<HTMLDivElement, {
@@ -50,37 +55,76 @@ export const PullDiffList = forwardRef<HTMLDivElement, {
     })
   }, [pull.base_sha, pull.head_sha, pullRef, queryClient, workspaceId])
 
-  const options = useMemo((): FileDiffOptions<GithubReviewThread, undefined> => ({
+  const canComment = pull.viewer.can_comment
+  // one comment box at a time; the line under the pointer is where M opens it
+  const [composer, setComposer] = useState<CommentTarget | null>(null)
+  const hovered = useRef<CommentTarget | null>(null)
+  const actions = useMemo(() => ({ workspaceId, pullRef }), [workspaceId, pullRef])
+  useCommand('pull.comment', () => { if (hovered.current) setComposer(hovered.current) }, { enabled: canComment })
+  const closeComposer = useCallback(() => setComposer(null), [])
+  const setHovered = useCallback((target: CommentTarget) => { hovered.current = target }, [])
+
+  const options = useMemo((): Omit<FileDiffOptions<Annotation, undefined>, 'onGutterUtilityClick' | 'onLineEnter'> => ({
     diffStyle,
     themeType: theme,
     overflow: 'scroll',
     hunkSeparators: 'line-info',
     loadDiffFiles,
-  }), [diffStyle, theme, loadDiffFiles])
+    enableGutterUtility: canComment,
+  }), [diffStyle, theme, loadDiffFiles, canComment])
 
   return <Virtualizer className="h-full overflow-y-auto" contentClassName="flex flex-col gap-4 p-4">
     <div ref={ref} className="contents">
-      {files.map((file) => <FileSection key={file.path} file={file} pull={pull} threads={threads} options={options} highlightedThread={highlightedThread} />)}
+      {files.map((file) => <FileSection
+        key={file.path}
+        file={file}
+        pull={pull}
+        threads={threads}
+        options={options}
+        highlightedThread={highlightedThread}
+        composer={composer?.path === file.path ? composer : null}
+        onComment={canComment ? setComposer : null}
+        onHover={setHovered}
+        renderComposer={(target) => <CommentComposer workspaceId={workspaceId} pullRef={pullRef} target={target} onDone={closeComposer} />}
+        actions={canComment ? actions : undefined}
+      />)}
     </div>
   </Virtualizer>
 })
 
-function FileSection({ file, pull, threads, options, highlightedThread }: {
+function FileSection({ file, pull, threads, options, highlightedThread, composer, onComment, onHover, renderComposer, actions }: {
   file: GithubPullFile
   pull: GithubPullDetail
   threads: GithubReviewThread[]
-  options: FileDiffOptions<GithubReviewThread, undefined>
+  options: Omit<FileDiffOptions<Annotation, undefined>, 'onGutterUtilityClick' | 'onLineEnter'>
   highlightedThread: string | null
+  composer: CommentTarget | null
+  onComment: ((target: CommentTarget) => void) | null
+  onHover: (target: CommentTarget) => void
+  renderComposer: (target: CommentTarget) => React.ReactNode
+  actions?: { workspaceId: string; pullRef: PullRef }
 }) {
   const patch = useMemo(() => toGitPatch(file), [file])
-  const annotations = useMemo(() => threadAnnotations(threads, file.path), [threads, file.path])
-  const fileOptions = useMemo(() => ({ ...options, collapsed: file.viewed }), [options, file.viewed])
+  const annotations = useMemo(() => {
+    const list: DiffLineAnnotation<Annotation>[] = threadAnnotations(threads, file.path).map((item) => ({ side: item.side, lineNumber: item.lineNumber, metadata: { thread: item.metadata as GithubReviewThread } }))
+    if (composer) list.push({ side: composer.side === 'LEFT' ? 'deletions' : 'additions', lineNumber: composer.line, metadata: { composer } })
+    return list
+  }, [threads, file.path, composer])
+  const path = file.path
+  const fileOptions = useMemo((): FileDiffOptions<Annotation, undefined> => ({
+    ...options,
+    collapsed: file.viewed,
+    onGutterUtilityClick: onComment ? (range) => onComment(toCommentTarget(path, range)) : undefined,
+    onLineEnter: (props) => onHover({ path, side: props.annotationSide === 'deletions' ? 'LEFT' : 'RIGHT', line: props.lineNumber }),
+  }), [options, file.viewed, onComment, onHover, path])
   return <section id={fileAnchor(file.path)} data-file-path={file.path} aria-label={file.path} className="scroll-mt-4 overflow-hidden rounded-lg border">
-    {patch ? <PatchDiff<GithubReviewThread, undefined>
+    {patch ? <PatchDiff<Annotation, undefined>
       patch={patch}
       options={fileOptions}
       lineAnnotations={annotations}
-      renderAnnotation={(annotation) => annotation.metadata ? <ThreadView thread={annotation.metadata} highlighted={annotation.metadata.id === highlightedThread} /> : null}
+      renderAnnotation={(annotation) => annotation.metadata?.composer
+        ? renderComposer(annotation.metadata.composer)
+        : annotation.metadata?.thread ? <ThreadView thread={annotation.metadata.thread} highlighted={annotation.metadata.thread.id === highlightedThread} actions={actions} /> : null}
     /> : <div className="flex flex-wrap items-center gap-2 px-3 py-2.5 text-sm">
       <span className="min-w-0 truncate font-mono text-[13px]">{file.path}</span>
       <span className="text-xs text-muted-foreground">+{file.additions} −{file.deletions}</span>

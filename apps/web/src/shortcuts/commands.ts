@@ -81,6 +81,7 @@ const REGISTRY = [
   { id: 'pull.nextThread', title: 'Go to next comment thread', group: 'Pull requests', keys: 'N', context: 'pull' },
   { id: 'pull.prevThread', title: 'Go to previous comment thread', group: 'Pull requests', keys: 'P', context: 'pull' },
   { id: 'pull.toggleViewed', title: 'Mark file as viewed', group: 'Pull requests', keys: 'V', context: 'pull' },
+  { id: 'pull.comment', title: 'Comment on the line under the pointer', group: 'Pull requests', keys: 'M', context: 'pull' },
 
   { id: 'docs.createPage', title: 'Create page', group: 'Docs', keys: null, context: 'docs' },
   { id: 'docs.history', title: 'Show page history', group: 'Docs', keys: 'Mod+Shift+H', context: 'docs', inInputs: true },

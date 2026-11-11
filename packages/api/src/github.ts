@@ -42,3 +42,21 @@ export function threadsOutsideDiff<T extends { path: string; line?: number | nul
   const shown = new Set(files.filter((file) => file.patch != null).map((file) => file.path))
   return threads.filter((thread) => thread.line == null || !shown.has(thread.path))
 }
+
+/** A line range as the diff renderer reports it: where the drag started and ended, on which side. */
+export type LineRange = { start: number; end: number; side?: 'additions' | 'deletions'; endSide?: 'additions' | 'deletions' }
+
+const githubSide = (side: LineRange['side']): 'LEFT' | 'RIGHT' => (side === 'deletions' ? 'LEFT' : 'RIGHT')
+
+/**
+ * GitHub's coordinates for a comment on `range`: `line`/`side` is the last line, `start_line`/`start_side` the first
+ * (only for more than one line). A drag can go up; across sides the old (deleted) line comes first, as in the diff.
+ */
+export function toCommentTarget(path: string, range: LineRange): CommentTarget {
+  let start = { line: range.start, side: githubSide(range.side) }
+  let end = { line: range.end, side: githubSide(range.endSide ?? range.side) }
+  const swap = start.side === end.side ? start.line > end.line : start.side === 'RIGHT'
+  if (swap) [start, end] = [end, start]
+  if (start.side === end.side && start.line === end.line) return { path, side: end.side, line: end.line }
+  return { path, side: end.side, line: end.line, start_side: start.side, start_line: start.line }
+}

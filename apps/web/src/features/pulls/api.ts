@@ -1,7 +1,7 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { getGithubPull, getGithubPullContents, listGithubProjectPulls, listGithubPullConversation, listGithubPullFiles, listGithubPullThreads, markGithubFileViewed, unmarkGithubFileViewed } from '@orbit/api/generated/sdk.gen'
-import type { GithubPullFile } from '@orbit/api/generated/types.gen'
-import type { PullRef } from '@orbit/api/github'
+import { createGithubReviewComment, deleteGithubPullBranch, deleteGithubReviewComment, discardGithubReview, getGithubPull, getGithubPullContents, listGithubProjectPulls, listGithubPullConversation, listGithubPullFiles, listGithubPullThreads, markGithubFileViewed, mergeGithubPull, replyGithubReviewThread, resolveGithubReviewThread, submitGithubReview, unmarkGithubFileViewed, unresolveGithubReviewThread, updateGithubReviewComment } from '@orbit/api/generated/sdk.gen'
+import type { GithubMergePull, GithubPullFile, GithubPullThreads, GithubReviewComment, GithubReviewThread, GithubSubmitReview } from '@orbit/api/generated/types.gen'
+import type { CommentTarget, PullRef } from '@orbit/api/github'
 import { ApiProblem } from '@orbit/api/problem'
 import { apiClient } from '@/api/client'
 
@@ -88,4 +88,104 @@ export function useSetViewed(workspaceId: string, ref: PullRef) {
 /** The 409 codes that mean "connect GitHub first" (the prompt explains each). */
 export function needsGithubConnection(error: unknown): boolean {
   return error instanceof ApiProblem && error.status === 409 && ['github_not_connected', 'github_reconnect', 'github_app_missing', 'github_app_recreate'].includes(error.code)
+}
+
+/** The thread list with `thread` put in place (new threads go last). */
+function withThread(data: GithubPullThreads | undefined, thread: GithubReviewThread): GithubPullThreads | undefined {
+  if (!data) return data
+  const known = data.threads.some((item) => item.id === thread.id)
+  return { ...data, threads: known ? data.threads.map((item) => item.id === thread.id ? thread : item) : [...data.threads, thread] }
+}
+
+function useThreadsCache(workspaceId: string, ref: PullRef) {
+  const queryClient = useQueryClient()
+  const key = pullKeys.threads(workspaceId, ref)
+  return {
+    put: (thread: GithubReviewThread) => queryClient.setQueryData<GithubPullThreads>(key, (data) => withThread(data, thread)),
+    // the pending count and other threads may have changed on GitHub
+    refresh: () => void queryClient.invalidateQueries({ queryKey: key }),
+  }
+}
+
+/** A comment on a line or a range: `pending` goes into the member's review, `single` is posted now. */
+export function useAddComment(workspaceId: string, ref: PullRef) {
+  const threads = useThreadsCache(workspaceId, ref)
+  return useMutation({
+    mutationFn: async ({ target, body, mode }: { target: CommentTarget; body: string; mode: 'pending' | 'single' }) =>
+      (await createGithubReviewComment({ client: apiClient, path: path(workspaceId, ref), body: { ...target, start_side: target.start_side ?? null, start_line: target.start_line ?? null, body, mode }, throwOnError: true })).data,
+    onSuccess: (thread) => { threads.put(thread); threads.refresh() },
+  })
+}
+
+export function useReply(workspaceId: string, ref: PullRef) {
+  const threads = useThreadsCache(workspaceId, ref)
+  return useMutation({
+    mutationFn: async ({ threadId, body }: { threadId: string; body: string }) =>
+      (await replyGithubReviewThread({ client: apiClient, path: { ...path(workspaceId, ref), thread_id: threadId }, body: { body }, throwOnError: true })).data,
+    onSuccess: () => threads.refresh(),
+  })
+}
+
+export function useEditComment(workspaceId: string, ref: PullRef) {
+  const threads = useThreadsCache(workspaceId, ref)
+  return useMutation({
+    mutationFn: async ({ commentId, body }: { commentId: string; body: string }): Promise<GithubReviewComment> =>
+      (await updateGithubReviewComment({ client: apiClient, path: { ...path(workspaceId, ref), comment_id: commentId }, body: { body }, throwOnError: true })).data,
+    onSuccess: () => threads.refresh(),
+  })
+}
+
+export function useDeleteComment(workspaceId: string, ref: PullRef) {
+  const threads = useThreadsCache(workspaceId, ref)
+  return useMutation({
+    mutationFn: async (commentId: string) => { await deleteGithubReviewComment({ client: apiClient, path: { ...path(workspaceId, ref), comment_id: commentId }, throwOnError: true }) },
+    onSuccess: () => threads.refresh(),
+  })
+}
+
+export function useResolveThread(workspaceId: string, ref: PullRef) {
+  const threads = useThreadsCache(workspaceId, ref)
+  return useMutation({
+    mutationFn: async ({ threadId, resolved }: { threadId: string; resolved: boolean }) => {
+      const options = { client: apiClient, path: { ...path(workspaceId, ref), thread_id: threadId }, throwOnError: true } as const
+      return (await (resolved ? resolveGithubReviewThread(options) : unresolveGithubReviewThread(options))).data
+    },
+    onSuccess: (thread) => threads.put(thread),
+  })
+}
+
+/** Submits the member's review (their pending comments go with it). */
+export function useSubmitReview(workspaceId: string, ref: PullRef) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (review: GithubSubmitReview) => { await submitGithubReview({ client: apiClient, path: path(workspaceId, ref), body: review, throwOnError: true }) },
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: pullKeys.pull(workspaceId, ref) }),
+  })
+}
+
+export function useDiscardReview(workspaceId: string, ref: PullRef) {
+  const threads = useThreadsCache(workspaceId, ref)
+  return useMutation({
+    mutationFn: async () => { await discardGithubReview({ client: apiClient, path: path(workspaceId, ref), throwOnError: true }) },
+    onSuccess: () => threads.refresh(),
+  })
+}
+
+export function useMerge(workspaceId: string, ref: PullRef) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (merge: GithubMergePull) => (await mergeGithubPull({ client: apiClient, path: path(workspaceId, ref), body: merge, throwOnError: true })).data,
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: pullKeys.pull(workspaceId, ref) }),
+  })
+}
+
+export function useDeleteBranch(workspaceId: string, ref: PullRef) {
+  return useMutation({
+    mutationFn: async () => { await deleteGithubPullBranch({ client: apiClient, path: path(workspaceId, ref), throwOnError: true }) },
+  })
+}
+
+/** GitHub's own words when it refuses, or `fallback`. */
+export function githubMessage(error: unknown, fallback: string): string {
+  return error instanceof ApiProblem && error.problem.detail ? error.problem.detail : fallback
 }
