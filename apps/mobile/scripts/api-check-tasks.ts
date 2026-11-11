@@ -89,6 +89,9 @@ try {
       dueAt: due.end,
       dueStartAt: due.start,
       parentId: parent.id,
+      milestoneId: null,
+      cycleId: null,
+      estimate: null,
     }),
   )
   check(

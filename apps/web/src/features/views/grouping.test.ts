@@ -37,6 +37,8 @@ const ctx: GroupContext = {
   members: [member('user-zed', 'Zed'), member('user-bob', 'Bob'), member('user-ann', 'Ann')],
   labels: [label('label-ui', 'UI'), label('label-bug', 'Bug')],
   projects: [project('p1', 'Launch'), project('p2', 'Alpha')],
+  milestones: [],
+  cycles: [],
   currentUserId: 'user-zed',
   showEmpty: false,
 }

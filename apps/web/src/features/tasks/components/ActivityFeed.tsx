@@ -4,7 +4,9 @@ import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import { TaskStatusIcon } from './TaskStatusIcon'
-import type { Task, TaskActivity, TaskViewState } from '@/features/tasks/api/models'
+import type { Cycle, Milestone, Task, TaskActivity, TaskViewState } from '@/features/tasks/api/models'
+import { useCycles } from '@/features/tasks/api/cycles'
+import { useMilestones } from '@/features/tasks/api/milestones'
 import { useCreateTaskComment } from '@/features/tasks/api/tasks'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { activityChangeText, agoLabel, buildFeed, type CommentThread } from '@/features/tasks/tasksLib'
@@ -24,8 +26,8 @@ interface ActivityFeedProps {
  * so a change made after a comment shows below that comment.
  */
 /** Activity sentence; the related task's identifier becomes a link when the feed can open tasks. */
-function ActivityText({ item, state, onOpenTask }: { item: TaskActivity; state: TaskViewState; onOpenTask?: (taskId: string) => void }) {
-  if (item.change) return <>{activityChangeText(item.change, state)}</>
+function ActivityText({ item, state, planning, onOpenTask }: { item: TaskActivity; state: TaskViewState; planning: { milestones: Milestone[]; cycles: Cycle[] }; onOpenTask?: (taskId: string) => void }) {
+  if (item.change) return <>{activityChangeText(item.change, state, planning)}</>
   const related = item.related
   const at = related ? item.text.indexOf(related.identifier) : -1
   if (!related || at === -1 || !onOpenTask) return <>{item.text}</>
@@ -57,6 +59,7 @@ export function ActivityFeed({ task, state, onOpenTask }: ActivityFeedProps) {
   const [unfolded, setUnfolded] = useState<string[]>([])
   const { workspace } = useWorkspace()
   const createComment = useCreateTaskComment(workspace.id, task.id)
+  const planning = { milestones: useMilestones(workspace.id, task.projectId).data ?? [], cycles: useCycles(workspace.id, task.projectId).data ?? [] }
   const userById = (id: string) => state.users.find((u) => u.id === id)
   const feed = buildFeed(task)
 
@@ -88,7 +91,7 @@ export function ActivityFeed({ task, state, onOpenTask }: ActivityFeedProps) {
                 <ProfileTrigger userId={actor?.id} name={actor?.name ?? item.actorName ?? 'Someone'} className="font-medium text-foreground">
                   {item.actorName ?? actor?.name ?? 'Someone'}
                 </ProfileTrigger>{' '}
-                <ActivityText item={item} state={state} onOpenTask={onOpenTask} /> · {agoLabel(item.createdAt)}
+                <ActivityText item={item} state={state} planning={planning} onOpenTask={onOpenTask} /> · {agoLabel(item.createdAt)}
               </span>
             </TimelineRow>
             {hiddenCount > 0 && item.id === runId ? (

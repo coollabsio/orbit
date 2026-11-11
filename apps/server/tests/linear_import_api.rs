@@ -107,7 +107,12 @@ fn eng_issues(base: &str) -> Vec<Value> {
         json!({"id": "l2", "name": "design", "parent": null}),
     ]);
     design["project"] = json!({"name": "Launch"});
-    design["cycle"] = json!({"number": 3, "name": "Sprint 3"});
+    let cycle = json!({"id": "cy3", "number": 3, "name": "Sprint 3",
+        "startsAt": "1970-01-05T00:00:00.000Z", "endsAt": "1970-01-19T00:00:00.000Z"});
+    let milestone = json!({"id": "m1", "name": "Beta", "description": "First beta",
+        "targetDate": "1970-01-21", "project": {"name": "Launch"}});
+    design["cycle"] = cycle.clone();
+    design["projectMilestone"] = milestone.clone();
     design["estimate"] = json!(3);
     design["attachments"] = page(vec![
         json!({"id": "a1", "title": "PR #12", "url": "https://github.com/acme/web/pull/12"}),
@@ -132,9 +137,15 @@ fn eng_issues(base: &str) -> Vec<Value> {
     ship["assignee"] = json!({"id": "u4", "name": "Ghost", "displayName": "ghost", "email": "ghost@elsewhere.example"});
     // The same pair as r1: Orbit keeps one relation per pair.
     ship["relations"] = page(vec![relation("r3", "related", "i1")]);
+    ship["cycle"] = cycle;
+    ship["projectMilestone"] = milestone;
+    ship["estimate"] = json!(2.5);
 
     let mut sub = issue("i3", "ENG-3", "Sub task", "s-todo");
     sub["parent"] = json!({"id": "i1", "identifier": "ENG-1"});
+    // Overlaps cycle 3: the task gets no cycle and the description names it.
+    sub["cycle"] = json!({"id": "cy4", "number": 4, "name": null,
+        "startsAt": "1970-01-10T00:00:00.000Z", "endsAt": "1970-01-24T00:00:00.000Z"});
     // A task duplicates at most one other task.
     sub["relations"] = page(vec![
         relation("r4", "duplicate", "i4"),
@@ -752,7 +763,7 @@ async fn imports_teams_with_states_issues_comments_files_and_relations() {
             "source_url": "https://linear.app/acme/issue/ENG-1",
             "due_at": noon(10), "completed_at": null,
             "description": format!(
-                "Make it **pop**\n\n![shot.png]({})\n\n**Linear**\n\n- Issue: ENG-1\n- Project: Launch\n- Cycle: 3 (Sprint 3)\n- Estimate: 3\n\n**Links**\n\n- [PR \\#12](<https://github.com/acme/web/pull/12>)",
+                "Make it **pop**\n\n![shot.png]({})\n\n**Linear**\n\n- Issue: ENG-1\n- Project: Launch\n\n**Links**\n\n- [PR \\#12](<https://github.com/acme/web/pull/12>)",
                 file_url("shot.png")
             ),
             "assignees": [h.member_id.to_string()], "labels": ["Type/Bug", "design"],
@@ -785,7 +796,62 @@ async fn imports_teams_with_states_issues_comments_files_and_relations() {
             "assignees": [], "labels": [],
         })
     );
+    let pool = h.database.pool().clone();
+    let plan = |task: String| {
+        let pool = pool.clone();
+        async move {
+            let row = sqlx::query(
+            "SELECT task_milestones.name, task_milestones.description, task_milestones.target_at, \
+             task_cycles.number, task_cycles.name AS cycle_name, task_cycles.starts_at, \
+             task_cycles.ends_at, tasks.estimate, tasks.description AS body FROM tasks \
+             LEFT JOIN task_milestones ON task_milestones.id = tasks.milestone_id \
+             LEFT JOIN task_cycles ON task_cycles.id = tasks.cycle_id WHERE tasks.id = $1",
+        )
+        .bind(task)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+            json!([
+                row.get::<Option<String>, _>("name"),
+                row.get::<Option<String>, _>("description"),
+                row.get::<Option<i64>, _>("target_at"),
+                row.get::<Option<i64>, _>("number"),
+                row.get::<Option<String>, _>("cycle_name"),
+                row.get::<Option<i64>, _>("starts_at"),
+                row.get::<Option<i64>, _>("ends_at"),
+                row.get::<Option<i64>, _>("estimate"),
+            ])
+        }
+    };
+    let day = 86_400_000;
+    let planned = json!([
+        "Launch / Beta",
+        "First beta",
+        noon(20),
+        3,
+        "Sprint 3",
+        4 * day,
+        18 * day
+    ]);
+    let mut design_plan = planned.clone();
+    design_plan.as_array_mut().unwrap().push(json!(3));
+    assert_eq!(plan(design.clone()).await, design_plan);
+    let mut ship_plan = planned;
+    ship_plan.as_array_mut().unwrap().push(json!(3));
+    assert_eq!(plan(ship.clone()).await, ship_plan, "2.5 points round to 3");
+    assert_eq!(
+        plan(sub.clone()).await,
+        json!([null, null, null, null, null, null, null, null])
+    );
     let sub_task = h.task(&sub).await;
+    assert!(
+        sub_task["description"]
+            .as_str()
+            .unwrap()
+            .lines()
+            .any(|line| line == "- Cycle: 4"),
+        "an overlapping cycle stays in the description: {sub_task}"
+    );
     assert_eq!(
         (&sub_task["parent"], &sub_task["status"]),
         (&json!(design), &json!("Duplicate")),
@@ -921,6 +987,18 @@ async fn resumes_after_a_restart_without_duplicates() {
         .await,
         2
     );
+    let eng = h.orbit_id(&id, "team", "t-eng").await;
+    for table in ["task_milestones", "task_cycles"] {
+        assert_eq!(
+            h.scalar(
+                &format!("SELECT COUNT(*) FROM {table} WHERE project_id = $1"),
+                &eng
+            )
+            .await,
+            1,
+            "{table} are not duplicated"
+        );
+    }
     assert_eq!(
         h.fake.hits("issues t-ops"),
         2,

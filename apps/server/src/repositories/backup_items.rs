@@ -662,9 +662,10 @@ impl BackupItemRepository {
     }
 
     /// Copies a task of the snapshot as a new task (new number) of its project, which must be
-    /// live. Title "<title> (restored)"; description, priority and due dates as in the snapshot;
-    /// the status and labels of the same names in the live project (else its first status, and
-    /// no such label); assignees who are still members; its own files (not those of comments).
+    /// live. Title "<title> (restored)"; description, priority, due dates and estimate as in the
+    /// snapshot; the status, labels and milestone of the same names in the live project (else its
+    /// first status, and no such label or milestone); its cycle while the project still has it;
+    /// assignees who are still members; its own files (not those of comments).
     /// Comments, relations, sub-tasks and activity are not copied.
     pub async fn restore_task(
         &self,
@@ -693,7 +694,14 @@ impl BackupItemRepository {
             optional_columns(
                 reader,
                 "tasks",
-                &["due_at", "due_start_at", "description_json"],
+                &[
+                    "due_at",
+                    "due_start_at",
+                    "description_json",
+                    "milestone_id",
+                    "cycle_id",
+                    "estimate",
+                ],
             )
             .await?,
         );
@@ -732,6 +740,16 @@ impl BackupItemRepository {
                 .iter()
                 .filter_map(|row| row.get("name").map(str::to_owned))
                 .collect()
+        };
+        let milestone_name = match task.get("milestone_id").map(str::to_owned) {
+            Some(milestone_id) => reader
+                .rows("task_milestones", &["id", "name"], |row| {
+                    row.get("id") == Some(&milestone_id)
+                })
+                .await?
+                .first()
+                .and_then(|row| row.get("name").map(str::to_owned)),
+            None => None,
         };
         let assignees: Vec<String> = reader
             .rows("task_assignees", &["task_id", "user_id"], |row| {
@@ -772,6 +790,12 @@ impl BackupItemRepository {
                 .and_then(|value| value.parse().ok()),
             status_name,
             label_names,
+            milestone_name,
+            cycle_id: task.get("cycle_id").map(str::to_owned),
+            estimate: task
+                .get("estimate")
+                .and_then(|value| value.parse().ok())
+                .filter(|estimate| (0..=1_000).contains(estimate)),
             assignees,
         };
 
@@ -864,6 +888,34 @@ impl BackupItemRepository {
         .filter(|row| wanted_labels.contains(&row.get::<String, _>("name").to_lowercase()))
         .map(|row| row.get("id"))
         .collect();
+        let milestone_id: Option<String> = match &task.milestone_name {
+            Some(name) => {
+                sqlx::query_scalar(
+                    "SELECT id FROM task_milestones WHERE workspace_id = $1 AND project_id = $2 \
+                     AND lower(name) = lower($3) ORDER BY CASE WHEN name = $4 THEN 0 ELSE 1 END, id LIMIT 1",
+                )
+                .bind(workspace_id.to_string())
+                .bind(task.project_id.to_string())
+                .bind(name)
+                .bind(name)
+                .fetch_optional(&mut *tx)
+                .await?
+            }
+            None => None,
+        };
+        let cycle_id: Option<String> = match &task.cycle_id {
+            Some(cycle_id) => {
+                sqlx::query_scalar(
+                    "SELECT id FROM task_cycles WHERE id = $1 AND workspace_id = $2 AND project_id = $3",
+                )
+                .bind(cycle_id)
+                .bind(workspace_id.to_string())
+                .bind(task.project_id.to_string())
+                .fetch_optional(&mut *tx)
+                .await?
+            }
+            None => None,
+        };
         let memberships: HashMap<String, String> =
             // guests have no tasks: a restored task keeps no guest as assignee
             sqlx::query("SELECT id, user_id FROM memberships WHERE workspace_id = $1 AND role <> 'guest'")
@@ -931,8 +983,9 @@ impl BackupItemRepository {
             .filter(|start| task.due_at.is_some_and(|end| *start <= end));
         sqlx::query(
             "INSERT INTO tasks (id, workspace_id, project_id, status_id, title, description, priority, \
-             position, creator_id, due_start_at, due_at, version, created_at, updated_at, description_json) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 0, $12, $13, $14)",
+             position, creator_id, due_start_at, due_at, version, created_at, updated_at, description_json, \
+             milestone_id, cycle_id, estimate) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 0, $12, $13, $14, $15, $16, $17)",
         )
         .bind(new_id.to_string())
         .bind(workspace_id.to_string())
@@ -948,6 +1001,9 @@ impl BackupItemRepository {
         .bind(now.as_millis())
         .bind(now.as_millis())
         .bind(description_json)
+        .bind(milestone_id)
+        .bind(cycle_id)
+        .bind(task.estimate)
         .execute(&mut *tx)
         .await?;
         for user_id in &task.assignees {
@@ -1080,6 +1136,9 @@ struct SnapshotTask {
     due_start_at: Option<i64>,
     status_name: Option<String>,
     label_names: Vec<String>,
+    milestone_name: Option<String>,
+    cycle_id: Option<String>,
+    estimate: Option<i64>,
     assignees: Vec<String>,
 }
 

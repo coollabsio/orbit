@@ -4,7 +4,7 @@ import { cn } from 'cn'
 import { useQueryClient } from '@tanstack/react-query'
 import { confirmAction } from '@/components/common/confirmAction'
 import { recurrenceLabel } from '@orbit/api/recurrence'
-import { Add as Plus, ArrowLeft, Calendar, Hierarchy2, Link2, Repeat, Tag, TaskSquare as SquareCheck, User as UserIcon, Xmark as X } from 'reicon-react'
+import { Add as Plus, ArrowLeft, Calendar, Diamonds, Hierarchy2, Link2, RefreshCircle, Repeat, Tag, TaskSquare as SquareCheck, Triangle, User as UserIcon, Xmark as X } from 'reicon-react'
 import { Badge } from '@/components/ui/badge'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Tip } from '@/components/common/Tip'
@@ -29,6 +29,10 @@ import { dueDateLabel, PRIORITY_LABEL, PRIORITY_ORDER, projectLabels, projectSta
 import { refIdentifier, type Project, type Task, type TaskViewState } from '@/features/tasks/api/models'
 import { cachedDescendantIds, type PageTaskRecord } from '@/features/tasks/api/optimistic'
 import { useProjectAudience, useProjects } from '@/features/tasks/api/projects'
+import { useCycles } from '@/features/tasks/api/cycles'
+import { useMilestones } from '@/features/tasks/api/milestones'
+import { cycleName, estimateLabel } from '@/features/tasks/planningLib'
+import { CyclePicker, EstimatePicker, MilestonePicker } from './PlanningPickers'
 import {
   useAddTaskRelation, useCreateTaskComment, useDeleteTask, useDeleteTaskAttachment, useRemoveTaskRelation,
   subIssuesQuery, useSubIssues, useTaskGithubLinks, useTaskRelations, useUpdateTask,
@@ -93,6 +97,10 @@ export function TaskDetail({ task, project, state, onClose, onOpenTask, onOpenPr
   const [repeatOpen, setRepeatOpen] = useState(false)
   const [sourceOpen, setSourceOpen] = useState(false)
   const projects = useProjects(workspace.id).data ?? []
+  const milestones = useMilestones(workspace.id, task?.projectId).data ?? []
+  const cycles = useCycles(workspace.id, task?.projectId).data ?? []
+  const milestone = task?.milestoneId ? milestones.find((item) => item.id === task.milestoneId) : undefined
+  const cycle = task?.cycleId ? cycles.find((item) => item.id === task.cycleId) : undefined
   const relations = useTaskRelations(workspace.id, task?.id).data ?? []
   const addRelation = useAddTaskRelation(workspace.id, task?.id ?? '')
   const removeRelation = useRemoveTaskRelation(workspace.id, task?.id ?? '')
@@ -335,6 +343,38 @@ export function TaskDetail({ task, project, state, onClose, onOpenTask, onOpenPr
                         Assign
                       </>
                     )}
+                  </PropertyButton>
+                }
+              />
+              <MilestonePicker
+                milestones={milestones}
+                value={task.milestoneId ?? null}
+                onChange={(milestoneId) => updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, milestone_id: milestoneId } })}
+                trigger={
+                  <PropertyButton className={cn('max-w-full', !milestone && 'text-muted-foreground')} aria-label={`Milestone: ${milestone?.name ?? 'none'}`}>
+                    <Diamonds className="size-3.5" aria-hidden="true" />
+                    <span className="truncate">{milestone?.name ?? 'Set milestone'}</span>
+                  </PropertyButton>
+                }
+              />
+              <CyclePicker
+                cycles={cycles}
+                value={task.cycleId ?? null}
+                onChange={(cycleId) => updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, cycle_id: cycleId } })}
+                trigger={
+                  <PropertyButton className={cn('max-w-full', !cycle && 'text-muted-foreground')} aria-label={`Cycle: ${cycle ? cycleName(cycle) : 'none'}`}>
+                    <RefreshCircle className="size-3.5" aria-hidden="true" />
+                    <span className="truncate">{cycle ? cycleName(cycle) : 'Set cycle'}</span>
+                  </PropertyButton>
+                }
+              />
+              <EstimatePicker
+                value={task.estimate ?? null}
+                onChange={(estimate) => updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, estimate } })}
+                trigger={
+                  <PropertyButton className={cn(task.estimate == null && 'text-muted-foreground')} aria-label={`Estimate: ${task.estimate == null ? 'none' : estimateLabel(task.estimate)}`}>
+                    <Triangle className="size-3.5" aria-hidden="true" />
+                    {task.estimate == null ? 'Set estimate' : estimateLabel(task.estimate)}
                   </PropertyButton>
                 }
               />

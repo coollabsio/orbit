@@ -1,5 +1,6 @@
 import { addDays, addMonths, differenceInCalendarDays, eachMonthOfInterval, format, max, min, startOfDay, startOfMonth } from 'date-fns'
-import type { StatusCategory, Task, TaskStatusDef } from '@/features/tasks/api/models'
+import type { Cycle, Milestone, StatusCategory, Task, TaskStatusDef } from '@/features/tasks/api/models'
+import { cycleName, cycleTiming, planningProgress, targetDay } from '@/features/tasks/planningLib'
 import { isClosedCategory } from '@/features/tasks/taskMeta'
 import type { TaskGroup } from '@/features/views/grouping'
 
@@ -92,6 +93,54 @@ export function tickMarks(range: TimeRange, px: number): TickMark[] {
     if (showsDailyTicks(px) || day.getDay() === 1) ticks.push({ x: index * px, label: String(day.getDate()) })
   }
   return ticks
+}
+
+/** A project's milestones and cycles; only a single project's page has them. */
+export interface TimelinePlanning {
+  milestones: Milestone[]
+  cycles: Cycle[]
+}
+
+export interface MilestoneMark {
+  id: string
+  name: string
+  day: number
+  targetAt: string
+  progress: string
+}
+
+export function milestoneMarks(range: TimeRange, milestones: Milestone[]): MilestoneMark[] {
+  return milestones.flatMap((milestone) => milestone.target_at
+    ? [{ id: milestone.id, name: milestone.name, day: dayIndex(range, targetDay(milestone.target_at)), targetAt: milestone.target_at, progress: planningProgress(milestone) }]
+    : [])
+}
+
+export interface CycleBand {
+  id: string
+  /** First day index; `to` is exclusive, like the cycle's `ends_at`. */
+  from: number
+  to: number
+  label: string
+  current: boolean
+}
+
+export function cycleBands(range: TimeRange, cycles: Cycle[], now: Date): CycleBand[] {
+  return cycles.map((cycle) => ({
+    id: cycle.id,
+    from: dayIndex(range, new Date(cycle.starts_at)),
+    to: dayIndex(range, new Date(cycle.ends_at)),
+    label: cycleName(cycle),
+    current: cycleTiming(cycle, now) === 'current',
+  }))
+}
+
+/** Dates the range must reach so every milestone target and cycle is on the track. */
+export function planningDates(planning: TimelinePlanning | null): Date[] {
+  if (!planning) return []
+  return [
+    ...planning.milestones.flatMap((milestone) => (milestone.target_at ? [targetDay(milestone.target_at)] : [])),
+    ...planning.cycles.flatMap((cycle) => [new Date(cycle.starts_at), new Date(cycle.ends_at)]),
+  ]
 }
 
 export const DEFAULT_DUE_HOUR = 9

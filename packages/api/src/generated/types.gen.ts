@@ -716,6 +716,11 @@ export type BulkBody = {
 
 export type BulkItem = {
     assignee_ids?: Array<string> | null;
+    /**
+     * Absent: unchanged (a project move clears it). A cycle id of the task's project: set.
+     * `null`: clear.
+     */
+    cycle_id?: string | null;
     description?: string | null;
     due_at?: string | null;
     due_start_at?: string | null;
@@ -723,9 +728,18 @@ export type BulkItem = {
      * Absent: unchanged. A task id: mark this task as a duplicate of it. `null`: unmark.
      */
     duplicate_of_id?: string | null;
+    /**
+     * Absent: unchanged. Points, 0 to 1000. `null`: clear.
+     */
+    estimate?: number | null;
     expected_version: number;
     id: string;
     label_ids?: Array<string> | null;
+    /**
+     * Absent: unchanged (on a project move, the target project's milestone of the same name,
+     * else none). A milestone id of the task's project: set. `null`: clear.
+     */
+    milestone_id?: string | null;
     /**
      * Absent: unchanged. A task id: make this task its sub-issue. `null`: detach.
      */
@@ -1679,6 +1693,10 @@ export type CreatePageThreadBody = {
 export type CreateTaskBody = {
     assignee_ids?: Array<string>;
     /**
+     * A cycle of `project_id`.
+     */
+    cycle_id?: string | null;
+    /**
      * Markdown. Send `description_json` instead for rich text (not both).
      */
     description?: string;
@@ -1690,7 +1708,15 @@ export type CreateTaskBody = {
     }> | null;
     due_at?: string | null;
     due_start_at?: string | null;
+    /**
+     * Points, 0 to 1000.
+     */
+    estimate?: number | null;
     label_ids?: Array<string>;
+    /**
+     * A milestone of `project_id`.
+     */
+    milestone_id?: string | null;
     /**
      * Create the task as a sub-issue of this task.
      */
@@ -2428,7 +2454,7 @@ export type ExchangeProviderBody = {
  */
 export type ExportMode = 'full' | 'personal';
 
-export type FilterField = 'status' | 'status_category' | 'assignee' | 'creator' | 'label' | 'priority' | 'project' | 'due_date' | 'created_at' | 'updated_at' | 'text' | 'parent' | 'sub_issues';
+export type FilterField = 'status' | 'status_category' | 'assignee' | 'creator' | 'label' | 'priority' | 'project' | 'due_date' | 'created_at' | 'updated_at' | 'text' | 'parent' | 'sub_issues' | 'milestone' | 'cycle' | 'estimate';
 
 /**
  * An AND/OR group. An empty group matches every task.
@@ -2540,7 +2566,7 @@ export type GithubWorkspaceSettings = {
     repositories: Array<GithubRepositoryOption>;
 };
 
-export type GroupBy = 'status' | 'assignee' | 'priority' | 'project' | 'label' | 'none';
+export type GroupBy = 'status' | 'assignee' | 'priority' | 'project' | 'label' | 'milestone' | 'cycle' | 'none';
 
 export type GroupOp = 'and' | 'or';
 
@@ -3064,6 +3090,33 @@ export type ListPublicComment = {
     next_cursor: string | null;
 };
 
+export type ListPublicCycle = {
+    items: Array<{
+        completed_count: number;
+        /**
+         * Exclusive: the next cycle may start at this instant.
+         */
+        ends_at: string;
+        estimate_completed: number;
+        estimate_total: number;
+        id: string;
+        name: string | null;
+        /**
+         * 1 for the project's first cycle.
+         */
+        number: number;
+        project_id: string;
+        relative: null | PublicCycleRelative;
+        starts_at: string;
+        task_count: number;
+        version: number;
+    }>;
+    /**
+     * Send it as `cursor` for the next page; `null` on the last page.
+     */
+    next_cursor: string | null;
+};
+
 export type ListPublicLabel = {
     items: Array<{
         color: string;
@@ -3082,6 +3135,26 @@ export type ListPublicMember = {
     items: Array<{
         display_name: string;
         user_id: string;
+    }>;
+    /**
+     * Send it as `cursor` for the next page; `null` on the last page.
+     */
+    next_cursor: string | null;
+};
+
+export type ListPublicMilestone = {
+    items: Array<{
+        completed_count: number;
+        description: string | null;
+        estimate_completed: number;
+        estimate_total: number;
+        id: string;
+        name: string;
+        position: number;
+        project_id: string;
+        target_at: string | null;
+        task_count: number;
+        version: number;
     }>;
     /**
      * Send it as `cursor` for the next page; `null` on the last page.
@@ -3133,13 +3206,25 @@ export type ListPublicTask = {
         assignee_ids: Array<string>;
         created_at: string;
         /**
+         * A cycle of the task's project; `null` when none.
+         */
+        cycle_id: string | null;
+        /**
          * Markdown.
          */
         description: string;
         due_at: string | null;
         due_start_at: string | null;
+        /**
+         * Points, 0 to 1000; `null` when not estimated.
+         */
+        estimate: number | null;
         id: string;
         label_ids: Array<string>;
+        /**
+         * A milestone of the task's project; `null` when none.
+         */
+        milestone_id: string | null;
         /**
          * With the project key, the task identifier (`ENG-12`).
          */
@@ -4081,7 +4166,7 @@ export type OrbitImportUploadBody = {
     file: Blob | File;
 };
 
-export type OrderBy = 'manual' | 'priority' | 'created' | 'updated' | 'title' | 'due_date';
+export type OrderBy = 'manual' | 'priority' | 'created' | 'updated' | 'title' | 'due_date' | 'estimate';
 
 export type OrderDirection = 'asc' | 'desc';
 
@@ -4709,6 +4794,76 @@ export type PageStatusRecord = {
     next_cursor?: string | null;
 };
 
+export type PageTaskCycle = {
+    items: Array<{
+        /**
+         * Of `task_count`, the tasks in a completed status.
+         */
+        completed_count: number;
+        created_at: string;
+        /**
+         * The end, exclusive: the next cycle may start at this instant.
+         */
+        ends_at: string;
+        /**
+         * The estimates of `completed_count`'s tasks, summed.
+         */
+        estimate_completed: number;
+        /**
+         * The estimates of `task_count`'s tasks, summed.
+         */
+        estimate_total: number;
+        id: string;
+        name: string | null;
+        /**
+         * 1 for the project's first cycle, then one more than the highest so far.
+         */
+        number: number;
+        project_id: string;
+        starts_at: string;
+        /**
+         * Live tasks in the cycle; cancelled and duplicate tasks are not counted.
+         */
+        task_count: number;
+        updated_at: string;
+        version: number;
+        workspace_id: string;
+    }>;
+    next_cursor?: string | null;
+};
+
+export type PageTaskMilestone = {
+    items: Array<{
+        /**
+         * Of `task_count`, the tasks in a completed status.
+         */
+        completed_count: number;
+        created_at: string;
+        description: string | null;
+        /**
+         * The estimates of `completed_count`'s tasks, summed.
+         */
+        estimate_completed: number;
+        /**
+         * The estimates of `task_count`'s tasks, summed.
+         */
+        estimate_total: number;
+        id: string;
+        name: string;
+        position: number;
+        project_id: string;
+        target_at: string | null;
+        /**
+         * Live tasks in the milestone; cancelled and duplicate tasks are not counted.
+         */
+        task_count: number;
+        updated_at: string;
+        version: number;
+        workspace_id: string;
+    }>;
+    next_cursor?: string | null;
+};
+
 export type PageTaskRecord = {
     items: Array<{
         /**
@@ -4728,6 +4883,10 @@ export type PageTaskRecord = {
         creator_id?: string | null;
         creator_service_account_id?: string | null;
         creator_service_account_name?: string | null;
+        /**
+         * A cycle of the task's project; null when none.
+         */
+        cycle_id: string | null;
         deleted_at?: string | null;
         /**
          * Markdown copy of `description_json` (search, MCP, GitHub, API clients).
@@ -4743,8 +4902,16 @@ export type PageTaskRecord = {
         due_at?: string | null;
         due_start_at?: string | null;
         duplicate_of: null | TaskRef;
+        /**
+         * Points, 0 to 1000; null when not estimated.
+         */
+        estimate: number | null;
         id: string;
         label_ids: Array<string>;
+        /**
+         * A milestone of the task's project; null when none.
+         */
+        milestone_id: string | null;
         /**
          * Per-project sequence number: the task's identifier is `{project key}-{number}`, e.g.
          * `ENG-12`. Reassigned when the task moves to another project; never reused.
@@ -5130,6 +5297,10 @@ export type PublicCreateTaskBody = {
      */
     assignee_ids?: Array<string>;
     /**
+     * A cycle of the task's project.
+     */
+    cycle_id?: string | null;
+    /**
      * Markdown, up to 50,000 bytes.
      */
     description?: string;
@@ -5139,9 +5310,17 @@ export type PublicCreateTaskBody = {
      */
     due_start_at?: string | null;
     /**
+     * Points, 0 to 1000.
+     */
+    estimate?: number | null;
+    /**
      * Labels of the task's project.
      */
     label_ids?: Array<string>;
+    /**
+     * A milestone of the task's project.
+     */
+    milestone_id?: string | null;
     /**
      * A task in an approved project: a UUID or an identifier such as `ENG-12`.
      */
@@ -5160,6 +5339,29 @@ export type PublicCreateTaskBody = {
      */
     title: string;
 };
+
+export type PublicCycle = {
+    completed_count: number;
+    /**
+     * Exclusive: the next cycle may start at this instant.
+     */
+    ends_at: string;
+    estimate_completed: number;
+    estimate_total: number;
+    id: string;
+    name: string | null;
+    /**
+     * 1 for the project's first cycle.
+     */
+    number: number;
+    project_id: string;
+    relative: null | PublicCycleRelative;
+    starts_at: string;
+    task_count: number;
+    version: number;
+};
+
+export type PublicCycleRelative = 'current' | 'next' | 'previous';
 
 /**
  * A database's schema: what a query and a row write can name.
@@ -5305,6 +5507,24 @@ export type PublicMember = {
     user_id: string;
 };
 
+/**
+ * The progress counts cover live tasks except cancelled and duplicate ones; `completed_count`
+ * and `estimate_completed` cover those in a `completed` status.
+ */
+export type PublicMilestone = {
+    completed_count: number;
+    description: string | null;
+    estimate_completed: number;
+    estimate_total: number;
+    id: string;
+    name: string;
+    position: number;
+    project_id: string;
+    target_at: string | null;
+    task_count: number;
+    version: number;
+};
+
 export type PublicNamed = {
     id: string;
     name: string;
@@ -5376,13 +5596,25 @@ export type PublicTask = {
     assignee_ids: Array<string>;
     created_at: string;
     /**
+     * A cycle of the task's project; `null` when none.
+     */
+    cycle_id: string | null;
+    /**
      * Markdown.
      */
     description: string;
     due_at: string | null;
     due_start_at: string | null;
+    /**
+     * Points, 0 to 1000; `null` when not estimated.
+     */
+    estimate: number | null;
     id: string;
     label_ids: Array<string>;
+    /**
+     * A milestone of the task's project; `null` when none.
+     */
+    milestone_id: string | null;
     /**
      * With the project key, the task identifier (`ENG-12`).
      */
@@ -5525,6 +5757,10 @@ export type PublicUpdateTaskBody = {
      */
     assignee_ids?: Array<string> | null;
     /**
+     * A cycle of the task's project; `null` clears it.
+     */
+    cycle_id?: string | null;
+    /**
      * Markdown, up to 50,000 bytes.
      */
     description?: string | null;
@@ -5537,6 +5773,10 @@ export type PublicUpdateTaskBody = {
      */
     due_start_at?: string | null;
     /**
+     * Points, 0 to 1000; `null` clears the estimate.
+     */
+    estimate?: number | null;
+    /**
      * The `version` that you read: an opaque number below 2^53. Compare it for equality only.
      */
     expected_version: number;
@@ -5544,6 +5784,10 @@ export type PublicUpdateTaskBody = {
      * Replaces the labels.
      */
     label_ids?: Array<string> | null;
+    /**
+     * A milestone of the task's project; `null` clears it.
+     */
+    milestone_id?: string | null;
     /**
      * A task in an approved project (a UUID or an identifier such as `ENG-12`) makes this task
      * its sub-issue; `null` detaches it.
@@ -6318,6 +6562,117 @@ export type TaskConflict = {
     refresh?: string | null;
 };
 
+export type TaskCycle = {
+    /**
+     * Of `task_count`, the tasks in a completed status.
+     */
+    completed_count: number;
+    created_at: string;
+    /**
+     * The end, exclusive: the next cycle may start at this instant.
+     */
+    ends_at: string;
+    /**
+     * The estimates of `completed_count`'s tasks, summed.
+     */
+    estimate_completed: number;
+    /**
+     * The estimates of `task_count`'s tasks, summed.
+     */
+    estimate_total: number;
+    id: string;
+    name: string | null;
+    /**
+     * 1 for the project's first cycle, then one more than the highest so far.
+     */
+    number: number;
+    project_id: string;
+    starts_at: string;
+    /**
+     * Live tasks in the cycle; cancelled and duplicate tasks are not counted.
+     */
+    task_count: number;
+    updated_at: string;
+    version: number;
+    workspace_id: string;
+};
+
+export type TaskCycleBody = {
+    /**
+     * Exclusive; must be after `starts_at`.
+     */
+    ends_at: string;
+    name?: string | null;
+    starts_at: string;
+};
+
+export type TaskCycleMoveOutcome = {
+    /**
+     * How many tasks moved.
+     */
+    moved: number;
+    /**
+     * The cycle they moved to, with its new counts.
+     */
+    to_cycle: TaskCycle;
+};
+
+/**
+ * Absent fields stay; `null` clears `name`.
+ */
+export type TaskCycleUpdateBody = {
+    ends_at?: string | null;
+    expected_version: number;
+    name?: string | null;
+    starts_at?: string | null;
+};
+
+export type TaskMilestone = {
+    /**
+     * Of `task_count`, the tasks in a completed status.
+     */
+    completed_count: number;
+    created_at: string;
+    description: string | null;
+    /**
+     * The estimates of `completed_count`'s tasks, summed.
+     */
+    estimate_completed: number;
+    /**
+     * The estimates of `task_count`'s tasks, summed.
+     */
+    estimate_total: number;
+    id: string;
+    name: string;
+    position: number;
+    project_id: string;
+    target_at: string | null;
+    /**
+     * Live tasks in the milestone; cancelled and duplicate tasks are not counted.
+     */
+    task_count: number;
+    updated_at: string;
+    version: number;
+    workspace_id: string;
+};
+
+export type TaskMilestoneBody = {
+    description?: string | null;
+    name: string;
+    target_at?: string | null;
+};
+
+/**
+ * Absent fields stay; `null` clears `description` and `target_at`.
+ */
+export type TaskMilestoneUpdateBody = {
+    description?: string | null;
+    expected_version: number;
+    name?: string | null;
+    position?: number | null;
+    target_at?: string | null;
+};
+
 export type TaskProblem = {
     code: string;
     conflict?: null | TaskConflict;
@@ -6335,7 +6690,7 @@ export type TaskProblem = {
     type: string;
 };
 
-export type TaskProperty = 'id' | 'status' | 'assignee' | 'priority' | 'project' | 'due_date' | 'labels' | 'created' | 'updated' | 'sub_issue_progress';
+export type TaskProperty = 'id' | 'status' | 'assignee' | 'priority' | 'project' | 'due_date' | 'labels' | 'created' | 'updated' | 'sub_issue_progress' | 'milestone' | 'cycle' | 'estimate';
 
 export type TaskQueryBody = {
     cursor?: string | null;
@@ -6381,6 +6736,10 @@ export type TaskRecord = {
     creator_id?: string | null;
     creator_service_account_id?: string | null;
     creator_service_account_name?: string | null;
+    /**
+     * A cycle of the task's project; null when none.
+     */
+    cycle_id: string | null;
     deleted_at?: string | null;
     /**
      * Markdown copy of `description_json` (search, MCP, GitHub, API clients).
@@ -6396,8 +6755,16 @@ export type TaskRecord = {
     due_at?: string | null;
     due_start_at?: string | null;
     duplicate_of: null | TaskRef;
+    /**
+     * Points, 0 to 1000; null when not estimated.
+     */
+    estimate: number | null;
     id: string;
     label_ids: Array<string>;
+    /**
+     * A milestone of the task's project; null when none.
+     */
+    milestone_id: string | null;
     /**
      * Per-project sequence number: the task's identifier is `{project key}-{number}`, e.g.
      * `ENG-12`. Reassigned when the task moves to another project; never reused.
@@ -6511,6 +6878,11 @@ export type TaskTrashEmptied = {
 export type TaskUpdateBody = {
     assignee_ids?: Array<string> | null;
     /**
+     * Absent: unchanged (a project move clears it). A cycle id of the task's project: set.
+     * `null`: clear.
+     */
+    cycle_id?: string | null;
+    /**
      * Markdown. Send `description_json` instead for rich text (not both).
      */
     description?: string | null;
@@ -6526,8 +6898,17 @@ export type TaskUpdateBody = {
      * Absent: unchanged. A task id: mark this task as a duplicate of it. `null`: unmark.
      */
     duplicate_of_id?: string | null;
+    /**
+     * Absent: unchanged. Points, 0 to 1000. `null`: clear.
+     */
+    estimate?: number | null;
     expected_version: number;
     label_ids?: Array<string> | null;
+    /**
+     * Absent: unchanged (on a project move, the target project's milestone of the same name,
+     * else none). A milestone id of the task's project: set. `null`: clear.
+     */
+    milestone_id?: string | null;
     /**
      * Absent: unchanged. A task id: make this task its sub-issue. `null`: detach.
      */
@@ -8688,6 +9069,75 @@ export type PublicCreateProjectResponses = {
 
 export type PublicCreateProjectResponse = PublicCreateProjectResponses[keyof PublicCreateProjectResponses];
 
+export type PublicListCyclesData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        /**
+         * The token's workspace, from `GET /me`.
+         */
+        workspace_id: string;
+        project_id: string;
+    };
+    query?: never;
+    url: '/api/public/v1/workspaces/{workspace_id}/projects/{project_id}/cycles';
+};
+
+export type PublicListCyclesErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: Problem;
+    /**
+     * unauthorized
+     */
+    401: Problem;
+    /**
+     * insufficient_scope
+     */
+    403: Problem;
+    /**
+     * not_found
+     */
+    404: Problem;
+    /**
+     * contract_mismatch
+     */
+    409: Problem;
+    /**
+     * request_too_large
+     */
+    413: Problem;
+    /**
+     * rate_limit_exceeded
+     */
+    429: Problem;
+    /**
+     * internal_error
+     */
+    500: Problem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: Problem;
+};
+
+export type PublicListCyclesError = PublicListCyclesErrors[keyof PublicListCyclesErrors];
+
+export type PublicListCyclesResponses = {
+    /**
+     * Every cycle, by start date; `next_cursor` is `null`
+     */
+    200: ListPublicCycle;
+};
+
+export type PublicListCyclesResponse = PublicListCyclesResponses[keyof PublicListCyclesResponses];
+
 export type PublicListLabelsData = {
     body?: never;
     headers?: {
@@ -8765,6 +9215,75 @@ export type PublicListLabelsResponses = {
 };
 
 export type PublicListLabelsResponse = PublicListLabelsResponses[keyof PublicListLabelsResponses];
+
+export type PublicListMilestonesData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        /**
+         * The token's workspace, from `GET /me`.
+         */
+        workspace_id: string;
+        project_id: string;
+    };
+    query?: never;
+    url: '/api/public/v1/workspaces/{workspace_id}/projects/{project_id}/milestones';
+};
+
+export type PublicListMilestonesErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: Problem;
+    /**
+     * unauthorized
+     */
+    401: Problem;
+    /**
+     * insufficient_scope
+     */
+    403: Problem;
+    /**
+     * not_found
+     */
+    404: Problem;
+    /**
+     * contract_mismatch
+     */
+    409: Problem;
+    /**
+     * request_too_large
+     */
+    413: Problem;
+    /**
+     * rate_limit_exceeded
+     */
+    429: Problem;
+    /**
+     * internal_error
+     */
+    500: Problem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: Problem;
+};
+
+export type PublicListMilestonesError = PublicListMilestonesErrors[keyof PublicListMilestonesErrors];
+
+export type PublicListMilestonesResponses = {
+    /**
+     * Every milestone, in order; `next_cursor` is `null`
+     */
+    200: ListPublicMilestone;
+};
+
+export type PublicListMilestonesResponse = PublicListMilestonesResponses[keyof PublicListMilestonesResponses];
 
 export type PublicListStatusesData = {
     body?: never;
@@ -8866,7 +9385,8 @@ export type PublicListTasksData = {
          */
         assignee_id?: string;
         /**
-         * `created_at` (default), `updated_at`, `priority`, `due_date` or `title`.
+         * `created_at` (default), `updated_at`, `priority`, `due_date`, `title` or `estimate`
+         * (tasks without an estimate last).
          */
         sort?: string;
         /**
@@ -8878,6 +9398,15 @@ export type PublicListTasksData = {
          * `none`, `low`, `medium`, `high` or `urgent`.
          */
         priority?: string;
+        /**
+         * A milestone ID, or `none` for tasks without a milestone.
+         */
+        milestone_id?: string;
+        /**
+         * A cycle ID; `current`, `next` or `previous` for that cycle of each task's project; or
+         * `none` for tasks without a cycle.
+         */
+        cycle_id?: string;
         /**
          * Only the direct sub-issues of this task (a UUID or an identifier such as `ENG-12`), which
          * must be in an approved project.
@@ -26029,6 +26558,310 @@ export type UpdateProjectResponses = {
 
 export type UpdateProjectResponse = UpdateProjectResponses[keyof UpdateProjectResponses];
 
+export type ListCyclesData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        project_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/projects/{project_id}/cycles';
+};
+
+export type ListCyclesErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ListCyclesError = ListCyclesErrors[keyof ListCyclesErrors];
+
+export type ListCyclesResponses = {
+    200: PageTaskCycle;
+};
+
+export type ListCyclesResponse = ListCyclesResponses[keyof ListCyclesResponses];
+
+export type CreateCycleData = {
+    body: TaskCycleBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        project_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/projects/{project_id}/cycles';
+};
+
+export type CreateCycleErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, cycle_overlap
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type CreateCycleError = CreateCycleErrors[keyof CreateCycleErrors];
+
+export type CreateCycleResponses = {
+    201: TaskCycle;
+};
+
+export type CreateCycleResponse = CreateCycleResponses[keyof CreateCycleResponses];
+
+export type DeleteCycleData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        project_id: string;
+        cycle_id: string;
+    };
+    query: {
+        expected_version: number;
+    };
+    url: '/api/v1/workspaces/{workspace_id}/projects/{project_id}/cycles/{cycle_id}';
+};
+
+export type DeleteCycleErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, task_conflict, conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type DeleteCycleError = DeleteCycleErrors[keyof DeleteCycleErrors];
+
+export type DeleteCycleResponses = {
+    204: void;
+};
+
+export type DeleteCycleResponse = DeleteCycleResponses[keyof DeleteCycleResponses];
+
+export type UpdateCycleData = {
+    body: TaskCycleUpdateBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        project_id: string;
+        cycle_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/projects/{project_id}/cycles/{cycle_id}';
+};
+
+export type UpdateCycleErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, cycle_overlap, task_conflict, conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type UpdateCycleError = UpdateCycleErrors[keyof UpdateCycleErrors];
+
+export type UpdateCycleResponses = {
+    200: TaskCycle;
+};
+
+export type UpdateCycleResponse = UpdateCycleResponses[keyof UpdateCycleResponses];
+
+export type MoveUnfinishedCycleTasksData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        project_id: string;
+        cycle_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/projects/{project_id}/cycles/{cycle_id}/move-unfinished';
+};
+
+export type MoveUnfinishedCycleTasksErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, no_next_cycle
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type MoveUnfinishedCycleTasksError = MoveUnfinishedCycleTasksErrors[keyof MoveUnfinishedCycleTasksErrors];
+
+export type MoveUnfinishedCycleTasksResponses = {
+    200: TaskCycleMoveOutcome;
+};
+
+export type MoveUnfinishedCycleTasksResponse = MoveUnfinishedCycleTasksResponses[keyof MoveUnfinishedCycleTasksResponses];
+
 export type DeleteGithubProjectConnectionData = {
     body?: never;
     headers?: {
@@ -26634,6 +27467,313 @@ export type RemoveProjectMemberResponses = {
 };
 
 export type RemoveProjectMemberResponse = RemoveProjectMemberResponses[keyof RemoveProjectMemberResponses];
+
+export type ListMilestonesData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        project_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/projects/{project_id}/milestones';
+};
+
+export type ListMilestonesErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ListMilestonesError = ListMilestonesErrors[keyof ListMilestonesErrors];
+
+export type ListMilestonesResponses = {
+    200: PageTaskMilestone;
+};
+
+export type ListMilestonesResponse = ListMilestonesResponses[keyof ListMilestonesResponses];
+
+export type CreateMilestoneData = {
+    body: TaskMilestoneBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        project_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/projects/{project_id}/milestones';
+};
+
+export type CreateMilestoneErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, task_conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type CreateMilestoneError = CreateMilestoneErrors[keyof CreateMilestoneErrors];
+
+export type CreateMilestoneResponses = {
+    201: TaskMilestone;
+};
+
+export type CreateMilestoneResponse = CreateMilestoneResponses[keyof CreateMilestoneResponses];
+
+export type ReorderMilestonesData = {
+    body: ReorderBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        project_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/projects/{project_id}/milestones/reorder';
+};
+
+export type ReorderMilestonesErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, task_conflict, conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ReorderMilestonesError = ReorderMilestonesErrors[keyof ReorderMilestonesErrors];
+
+export type ReorderMilestonesResponses = {
+    200: PageTaskMilestone;
+};
+
+export type ReorderMilestonesResponse = ReorderMilestonesResponses[keyof ReorderMilestonesResponses];
+
+export type DeleteMilestoneData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        project_id: string;
+        milestone_id: string;
+    };
+    query: {
+        expected_version: number;
+    };
+    url: '/api/v1/workspaces/{workspace_id}/projects/{project_id}/milestones/{milestone_id}';
+};
+
+export type DeleteMilestoneErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, task_conflict, conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type DeleteMilestoneError = DeleteMilestoneErrors[keyof DeleteMilestoneErrors];
+
+export type DeleteMilestoneResponses = {
+    204: void;
+};
+
+export type DeleteMilestoneResponse = DeleteMilestoneResponses[keyof DeleteMilestoneResponses];
+
+export type UpdateMilestoneData = {
+    body: TaskMilestoneUpdateBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        project_id: string;
+        milestone_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/projects/{project_id}/milestones/{milestone_id}';
+};
+
+export type UpdateMilestoneErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, task_conflict, conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type UpdateMilestoneError = UpdateMilestoneErrors[keyof UpdateMilestoneErrors];
+
+export type UpdateMilestoneResponses = {
+    200: TaskMilestone;
+};
+
+export type UpdateMilestoneResponse = UpdateMilestoneResponses[keyof UpdateMilestoneResponses];
 
 export type PurgeProjectData = {
     body?: never;

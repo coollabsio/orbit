@@ -1,13 +1,13 @@
 import { useCommand, useShortcutLabel } from '@/shortcuts/useCommand'
 import { useState, type ReactNode } from 'react'
-import { ArrowDown, ArrowUp, Setting4 } from 'reicon-react'
+import { ArrowDown, ArrowUp, Diamonds, Setting4 } from 'reicon-react'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { Tip } from '@/components/common/Tip'
-import { emptyFilter, viewStatesEqual, type DisplayOptions, type GroupBy, type Layout, type OrderBy, type ShowCompleted, type SubIssuesMode, type TaskProperty } from '../viewState'
+import { emptyFilter, PROJECT_GROUPS, TASK_PROPERTIES, viewStatesEqual, type DisplayOptions, type GroupBy, type Layout, type OrderBy, type ShowCompleted, type SubIssuesMode, type TaskProperty } from '../viewState'
 import { GROUP_LABEL, LAYOUTS, TIMELINE_PROPERTIES } from '../displayMeta'
 
 export interface DisplayPopoverProps {
@@ -15,9 +15,11 @@ export interface DisplayPopoverProps {
   /** What "Reset to default" restores: DEFAULT_DISPLAY on pages, the saved display on a view. */
   defaultDisplay: DisplayOptions
   onChange: (patch: Partial<DisplayOptions>) => void
+  /** A single project's page: it also groups by milestone and cycle. */
+  projectPage?: boolean
 }
 
-const GROUP_ORDER: GroupBy[] = ['status', 'assignee', 'priority', 'project', 'label', 'none']
+const GROUP_ORDER: GroupBy[] = ['status', 'assignee', 'priority', 'project', 'label', 'milestone', 'cycle', 'none']
 
 const ORDER_LABEL: Record<OrderBy, string> = {
   manual: 'Manual',
@@ -26,8 +28,9 @@ const ORDER_LABEL: Record<OrderBy, string> = {
   updated: 'Updated',
   title: 'Title',
   due_date: 'Due date',
+  estimate: 'Estimate',
 }
-const ORDER_OPTIONS: OrderBy[] = ['manual', 'priority', 'created', 'updated', 'title', 'due_date']
+const ORDER_OPTIONS: OrderBy[] = ['manual', 'priority', 'created', 'updated', 'title', 'due_date', 'estimate']
 
 const COMPLETED_LABEL: Record<ShowCompleted, string> = { all: 'All', past_week: 'Past week', past_month: 'Past month', none: 'None' }
 const COMPLETED_OPTIONS: ShowCompleted[] = ['all', 'past_week', 'past_month', 'none']
@@ -38,13 +41,15 @@ const PROPERTY_LABEL: Record<TaskProperty, string> = {
   assignee: 'Assignee',
   priority: 'Priority',
   project: 'Project',
+  milestone: 'Milestone',
+  cycle: 'Cycle',
+  estimate: 'Estimate',
   due_date: 'Due date',
   labels: 'Labels',
   created: 'Created',
   updated: 'Updated',
   sub_issue_progress: 'Sub-issue progress',
 }
-const PROPERTY_ORDER: TaskProperty[] = ['id', 'status', 'assignee', 'priority', 'project', 'due_date', 'labels', 'created', 'updated', 'sub_issue_progress']
 
 const SUB_ISSUE_LABEL: Record<SubIssuesMode, string> = { nested: 'Nested', flat: 'Flat', hidden: 'Hidden' }
 const SUB_ISSUE_OPTIONS: SubIssuesMode[] = ['nested', 'flat', 'hidden']
@@ -87,7 +92,7 @@ function OptionSelect<T extends string>({ label, value, items, onChange, describ
 }
 
 /** Header "Display" button. `Shift+V` opens it (never while typing); keyboard opens skip the entrance animation. */
-export function DisplayPopover({ display, defaultDisplay, onChange }: DisplayPopoverProps) {
+export function DisplayPopover({ display, defaultDisplay, onChange, projectPage = false }: DisplayPopoverProps) {
   const [open, setOpen] = useState(false)
   const [instant, setInstant] = useState(false)
   useCommand('view.display', () => {
@@ -103,16 +108,19 @@ export function DisplayPopover({ display, defaultDisplay, onChange }: DisplayPop
   })
   const setGroup = (group_by: GroupBy) =>
     onChange(group_by === 'none' || group_by === display.sub_group_by ? { group_by, sub_group_by: 'none' } : { group_by })
-  const groupItems = GROUP_ORDER.filter((group) => display.layout !== 'board' || group !== 'none').map((group) => ({ value: group, label: GROUP_LABEL[group] }))
-  const subItems = GROUP_ORDER.filter((group) => group !== display.group_by).map((group) => ({
+  const groups = projectPage ? GROUP_ORDER : GROUP_ORDER.filter((group) => !PROJECT_GROUPS.includes(group))
+  const groupItems = groups.filter((group) => display.layout !== 'board' || group !== 'none').map((group) => ({ value: group, label: GROUP_LABEL[group] }))
+  const subItems = groups.filter((group) => group !== display.group_by).map((group) => ({
     value: group,
     label: group === 'none' ? 'No sub-grouping' : GROUP_LABEL[group],
   }))
   const timeline = display.layout === 'timeline'
+  // the milestone view: the project's timeline, one section per milestone, with target markers
+  const milestoneTimeline = timeline && display.group_by === 'milestone'
   const flatOnly = display.layout !== 'list' && display.sub_issues === 'nested'
   const manual = display.order_by === 'manual'
   const ascending = display.order_direction === 'asc'
-  const shownProperties = timeline ? PROPERTY_ORDER.filter((property) => TIMELINE_PROPERTIES.includes(property)) : PROPERTY_ORDER
+  const shownProperties = timeline ? TASK_PROPERTIES.filter((property) => TIMELINE_PROPERTIES.includes(property)) : TASK_PROPERTIES
 
   return (
     <Popover
@@ -150,6 +158,18 @@ export function DisplayPopover({ display, defaultDisplay, onChange }: DisplayPop
               </ToggleGroupItem>
             ))}
           </ToggleGroup>
+          {projectPage && !milestoneTimeline ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="mt-2 w-full justify-start font-normal text-muted-foreground"
+              onClick={() => onChange({ layout: 'timeline', group_by: 'milestone', ...(display.sub_group_by === 'milestone' && { sub_group_by: 'none' }) })}
+            >
+              <Diamonds className="size-3.5" aria-hidden="true" />
+              Milestone timeline
+            </Button>
+          ) : null}
         </div>
         <div className="flex flex-col gap-1 border-t p-3">
           <Row label="Grouping">
@@ -230,7 +250,7 @@ export function DisplayPopover({ display, defaultDisplay, onChange }: DisplayPop
             value={display.properties}
             // a chip hidden on this layout keeps its value
             onValueChange={(value: string[]) =>
-              onChange({ properties: PROPERTY_ORDER.filter((property) => (shownProperties.includes(property) ? value.includes(property) : display.properties.includes(property))) })}
+              onChange({ properties: TASK_PROPERTIES.filter((property) => (shownProperties.includes(property) ? value.includes(property) : display.properties.includes(property))) })}
           >
             {shownProperties.map((property) => (
               <ToggleGroupItem key={property} value={property} className="h-6 min-w-0 px-2 text-xs font-normal text-muted-foreground aria-pressed:text-foreground">

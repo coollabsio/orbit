@@ -14,6 +14,7 @@ const record: TaskRecord = {
   due_at: '2030-01-02T12:30:00.000Z',
   created_at: '2026-09-04T10:00:00Z', updated_at: '2026-09-04T11:00:00Z', duplicate_of: null, blocked: false, version: 7,
   parent: null, parent_task_id: null, sub_issue_count: 0, sub_issue_closed_count: 0, recurrence: null,
+  milestone_id: null, cycle_id: null, estimate: null,
 }
 const comment: CommentRecord = {
   id: 'comment-1', workspace_id: 'workspace-1', task_id: record.id, author_id: 'user-1', author_service_account_id: null, author_service_account_name: null,

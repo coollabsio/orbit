@@ -27,6 +27,8 @@ import { useTeamMembers } from '@/features/workspaces/api'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { useAllStatuses, useProjects } from '@/features/tasks/api/projects'
 import { useLabels } from '@/features/tasks/api/labels'
+import { useProjectsMilestones } from '@/features/tasks/api/milestones'
+import { useProjectsCycles } from '@/features/tasks/api/cycles'
 import { projectLabels } from '@/features/tasks/taskMeta'
 import { taskFromRecord } from '@/features/tasks/api/models'
 import { taskPath, taskSlug } from '@/lib/taskLinks'
@@ -74,7 +76,7 @@ import { useCommand } from '@/shortcuts/useCommand'
 import { useCreateTaskDefaults, useOpenNewTask } from '@/features/tasks/newTask'
 import { rebaseViewSessionEdit, useViewState, type ViewSource } from '@/features/views/useViewState'
 import { validateFilterOnServer } from '@/features/views/validateFilter'
-import { countConditions, DEFAULT_DISPLAY, emptyFilter, isTaskPreset, normalizeViewState, pageKeyFor, type TaskPreset } from '@/features/views/viewState'
+import { countConditions, DEFAULT_DISPLAY, emptyFilter, isTaskPreset, normalizeViewState, pageDisplay, pageKeyFor, type TaskPreset } from '@/features/views/viewState'
 
 const EMPTY_PROJECTS: NonNullable<ReturnType<typeof useProjects>['data']> = []
 const EMPTY_LABELS: NonNullable<ReturnType<typeof useLabels>['data']> = []
@@ -143,7 +145,8 @@ function WorkspaceTasksPage() {
   const preference = useViewPreference(workspace.id, source.kind === 'page' ? source.pageKey : 'all', source.kind === 'page')
   // a saved view that failed to load has no state: never run the task query with defaults in its place
   const viewUnavailable = source.kind === 'view' && !viewState.isLoading && viewState.view === undefined
-  const { display } = viewState.state
+  // milestone and cycle groupings belong to a single project's page
+  const display = pageDisplay(viewState.state.display, projectFilter)
   const layout = display.layout
   const tasksQuery = useTaskQuery(workspace.id, viewState.effective, display, !viewState.isLoading && !viewUnavailable)
   const taskRefs = useFilterTaskRefs(workspace.id, viewState.state.filter)
@@ -192,6 +195,9 @@ function WorkspaceTasksPage() {
   const records = tasksQuery.tasks
   const tasks = useMemo(() => records.map((record) => taskFromRecord(record, projects.find((project) => project.id === record.project_id))), [projects, records])
   const visibleTasks = useMemo(() => quickSearchTasks(tasks, search), [tasks, search])
+  // a project page knows its project's milestones and cycles; other pages load those the loaded tasks name
+  const milestones = useProjectsMilestones(workspace.id, projectFilter ? [projectFilter] : tasks.flatMap((task) => (task.milestoneId ? [task.projectId] : [])))
+  const cycles = useProjectsCycles(workspace.id, projectFilter ? [projectFilter] : tasks.flatMap((task) => (task.cycleId ? [task.projectId] : [])))
   // tasks the activity feed may name: the loaded rows, relations and sub-issues
   const knownNumbers = new Map<string, number>([
     ...records.map((record) => [record.id, record.number] as const),
@@ -211,6 +217,8 @@ function WorkspaceTasksPage() {
     labels,
     projectId: projectFilter,
     projects,
+    milestones,
+    cycles,
     currentUserId: currentUser.data?.id ?? '',
     taskRefs,
   }
@@ -228,6 +236,8 @@ function WorkspaceTasksPage() {
     members: users,
     labels: pageLabels,
     projects: projectFilter ? projects.filter((project) => project.id === projectFilter) : projects,
+    milestones,
+    cycles,
     currentUserId: state.currentUserId,
     showEmpty: display.show_empty_groups,
   }
@@ -438,6 +448,7 @@ function WorkspaceTasksPage() {
               // a view resets to its saved display (normalized like useViewState's dirty base), a page to the default
               defaultDisplay={viewState.view?.state ? normalizeViewState(viewState.view.state).display : DEFAULT_DISPLAY}
               onChange={viewState.setDisplay}
+              projectPage={Boolean(projectFilter)}
             />
             <Tip label={newTaskTitle} side="bottom"><Button aria-label="New task" className="max-[899px]:w-8 max-[899px]:px-0" onClick={() => openNewTask()}><Plus className="size-4" /><span className="max-[899px]:hidden">New task</span></Button></Tip>
           </PaneHeader>
@@ -503,7 +514,7 @@ function WorkspaceTasksPage() {
             ) : (
                 <TaskContextMenu tasks={visibleTasks} users={users} labels={labels} statuses={statusesQuery.data} groupContext={groupContext} currentUserId={currentUser.data?.id ?? ''}>
                   {layout === 'timeline'
-                    ? <TaskTimeline ref={timelineRef} key={workspace.id} tasks={visibleTasks} projects={projects} statuses={statusesQuery.data} users={users} groupBy={display.group_by} properties={display.properties} groupContext={groupContext} pxPerDay={pxPerDay} onZoomChange={setPxPerDay} onOpen={openTask} />
+                    ? <TaskTimeline ref={timelineRef} key={workspace.id} tasks={visibleTasks} projects={projects} statuses={statusesQuery.data} users={users} groupBy={display.group_by} properties={display.properties} groupContext={groupContext} pxPerDay={pxPerDay} onZoomChange={setPxPerDay} onOpen={openTask} planning={projectFilter ? { milestones, cycles } : null} />
                     : layout === 'board'
                     ? <TaskBoard key={`${workspace.id}:${collapseScope}`} tasks={visibleTasks} users={users} labels={labels} statuses={statusesQuery.data} projects={projects} display={display} groupContext={groupContext} collapseScope={collapseScope} activeTaskId={null} onOpen={openTask} />
                     : <TaskList key={`${workspace.id}:${collapseScope}`} tasks={visibleTasks} users={users} labels={labels} statuses={statusesQuery.data} projects={projects} display={display} groupContext={groupContext} collapseScope={collapseScope} onOpen={openTask} onAdd={(values) => openNewTask({ values })} />}

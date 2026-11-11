@@ -8,7 +8,8 @@ import type { Project, Task, TaskStatusDef } from '@/features/tasks/api/models'
 import { pickerTitle } from '@/features/tasks/relationsLib'
 import { useDuplicateActions } from '@/features/tasks/useDuplicateActions'
 import { DisclosureChevron, GroupIcon } from '@/features/views/components/GroupIcon'
-import type { GroupContext, TaskGroup } from '@/features/views/grouping'
+import { estimateTotal, type GroupContext, type TaskGroup } from '@/features/views/grouping'
+import { estimateShortLabel } from '@/features/tasks/planningLib'
 import { boardGrid, canDrag, cellTasks, valuesOf, zoneIdOf, type GroupValues } from '@/features/views/layoutGroups'
 import { useCollapsedGroups } from '@/features/views/useCollapsedGroups'
 import { useGroupDrop } from '@/features/views/useGroupDrop'
@@ -25,7 +26,7 @@ import { SubIssueProgress, completedStatusColor } from './SubIssueProgress'
 import { LabelPill } from './TaskLabels'
 import { NestChip } from './NestChip'
 import { TaskPickerDialog } from './TaskPickerDialog'
-import { DateStamp, ProjectChip } from './TaskPropertyChips'
+import { CycleChip, DateStamp, EstimateChip, MilestoneChip, MilestoneLate, ProjectChip } from './TaskPropertyChips'
 import { DueDatePicker } from './DueDatePicker'
 import { StatusPicker } from './StatusPicker'
 
@@ -129,6 +130,9 @@ export function TaskBoard({ tasks, users, labels, statuses, projects, display, g
   const statusById = new Map(statuses.map((status) => [status.id, status]))
   const projectById = new Map(projects.map((project) => [project.id, project]))
   const labelById = new Map(labels.map((label) => [label.id, label]))
+  const milestoneById = new Map(groupContext.milestones.map((milestone) => [milestone.id, milestone]))
+  const cycleById = new Map(groupContext.cycles.map((cycle) => [cycle.id, cycle]))
+  const milestoneOf = (group: TaskGroup) => (group.field === 'milestone' && group.value ? milestoneById.get(group.value) : undefined)
 
   const renderCard = (task: Task, values: GroupValues) => {
     const assignees = users.filter((user) => task.assigneeIds.includes(user.id))
@@ -139,7 +143,10 @@ export function TaskBoard({ tasks, users, labels, statuses, projects, display, g
     const showDue = has('due_date') && Boolean(task.dueAt) && !setDue
     const showTop = has('status') || has('id') || Boolean(task.blocked) || has('assignee') || setDue || has('priority')
     const showProgress = has('sub_issue_progress') && (task.subIssueCount ?? 0) > 0
-    const showMeta = showProgress || has('project') || showDue || has('created') || has('updated')
+    const milestone = has('milestone') && task.milestoneId ? milestoneById.get(task.milestoneId) : undefined
+    const cycle = has('cycle') && task.cycleId ? cycleById.get(task.cycleId) : undefined
+    const showEstimate = has('estimate') && task.estimate != null
+    const showMeta = showProgress || has('project') || Boolean(milestone) || Boolean(cycle) || showEstimate || showDue || has('created') || has('updated')
     return (
       <article
         data-board-card
@@ -222,6 +229,9 @@ export function TaskBoard({ tasks, users, labels, statuses, projects, display, g
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[0.6875rem] text-muted-foreground/70">
             {showProgress ? <SubIssueProgress closed={task.subIssueClosedCount ?? 0} total={task.subIssueCount ?? 0} color={completedStatusColor(statuses, task.projectId)} /> : null}
             {has('project') ? <ProjectChip project={projectById.get(task.projectId)} /> : null}
+            <MilestoneChip milestone={milestone} />
+            <CycleChip cycle={cycle} />
+            {showEstimate ? <EstimateChip task={task} /> : null}
             {showDue ? <DueDatePicker task={task} status={status} /> : null}
             {has('created') ? <DateStamp property="created" iso={task.createdAt} /> : null}
             {has('updated') ? <DateStamp property="updated" iso={task.updatedAt} /> : null}
@@ -237,7 +247,8 @@ export function TaskBoard({ tasks, users, labels, statuses, projects, display, g
     <header className="flex h-[38px] items-center gap-[7px] px-2.5 text-xs font-semibold text-muted-foreground transition-colors duration-150 group-data-[drop-over]/col:text-primary">
       <GroupIcon group={column} context={groupContext} />
       <span className="truncate">{column.label}</span>
-      <span className="ml-auto font-normal text-muted-foreground/70 tabular-nums">{column.tasks.length}</span>
+      <MilestoneLate milestone={milestoneOf(column)} />
+      <GroupTotals tasks={column.tasks} className="ml-auto" />
     </header>
   )
 
@@ -315,7 +326,8 @@ export function TaskBoard({ tasks, users, labels, statuses, projects, display, g
                 <DisclosureChevron open={open} />
                 <GroupIcon group={lane} context={groupContext} />
                 <span>{lane.label}</span>
-                <span className="font-normal text-muted-foreground/70 tabular-nums">{lane.tasks.length}</span>
+                <MilestoneLate milestone={milestoneOf(lane)} />
+                <GroupTotals tasks={lane.tasks} />
               </Button>
             </div>
             {open ? columns.map((column) => {
@@ -355,6 +367,17 @@ interface BoardZoneProps {
  * A card that renders again only when the board does: a scroll changes the zone's range many times a second, and
  * then only the cards that come into view render (a card with its pickers is costly).
  */
+/** A column or lane header's card count, then the sum of the estimates once a card has one. */
+function GroupTotals({ tasks, className }: { tasks: Task[]; className?: string }) {
+  const points = estimateTotal(tasks)
+  return (
+    <span className={cn('flex items-center gap-2 font-normal whitespace-nowrap text-muted-foreground/70 tabular-nums', className)}>
+      <span>{tasks.length}</span>
+      {points === null ? null : <span title="Total estimate">{estimateShortLabel(points)}</span>}
+    </span>
+  )
+}
+
 const BoardCard = memo(function BoardCard({ task, values, renderCard }: { task: Task; values: GroupValues; renderCard: BoardZoneProps['renderCard'] }) {
   return renderCard(task, values)
 })

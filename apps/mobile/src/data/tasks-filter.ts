@@ -4,14 +4,30 @@
  * No React, so the screen and the chip row share it.
  */
 import { getViewPreference, putViewPreference, queryTasks } from '@orbit/api/generated/sdk.gen'
-import type { TaskQueryBody, ViewState as ApiViewState } from '@orbit/api/generated/types.gen'
+import type { TaskCycle, TaskMilestone, TaskQueryBody, ViewState as ApiViewState } from '@orbit/api/generated/types.gen'
 import { ApiProblem } from '@orbit/api/problem'
 
 import type { IconName } from '../ui/Icon'
 import type { LabelRecord, OrbitClient, ProjectRecord, StatusRecord, TaskRecord } from './orbit'
-import { labelKeyOf, PRIORITY_LABEL, projectLabels, sortStatuses, statusKeyOf, type Priority } from './tasks'
+import { cycleLabel, cyclesForPicker, labelKeyOf, PRIORITY_LABEL, projectLabels, sortMilestones, sortStatuses, statusKeyOf, type Priority } from './tasks'
 
-export type FilterField = 'status' | 'status_category' | 'assignee' | 'creator' | 'label' | 'priority' | 'project' | 'parent' | 'sub_issues' | 'due_date' | 'created_at' | 'updated_at' | 'text'
+export type FilterField =
+  | 'status'
+  | 'status_category'
+  | 'assignee'
+  | 'creator'
+  | 'label'
+  | 'priority'
+  | 'project'
+  | 'parent'
+  | 'sub_issues'
+  | 'milestone'
+  | 'cycle'
+  | 'estimate'
+  | 'due_date'
+  | 'created_at'
+  | 'updated_at'
+  | 'text'
 export type FilterOperator = 'is' | 'is_not' | 'is_empty' | 'is_not_empty' | 'includes_any' | 'includes_all' | 'excludes' | 'before' | 'after' | 'between' | 'contains'
 export type DateValue = { absolute: string } | { relative: 'today' | 'start_of_week' | 'end_of_week'; offset_days?: number }
 export type Condition = { field: FilterField; operator: FilterOperator; value?: unknown }
@@ -119,6 +135,10 @@ export const FIELD_META: Record<FilterField, FieldMeta> = {
   project: { label: 'Project', plural: 'projects', icon: 'folder', kind: 'list', operators: ['is', 'is_not'], defaultOperator: 'is' },
   parent: { label: 'Parent', plural: 'tasks', icon: 'subIssue', kind: 'task', operators: ['is', 'is_not'], defaultOperator: 'is' },
   sub_issues: { label: 'Sub-issues', plural: 'options', icon: 'subIssue', kind: 'list', operators: ['is'], defaultOperator: 'is' },
+  milestone: { label: 'Milestone', plural: 'milestones', icon: 'target', kind: 'list', operators: ['is', 'is_not', 'is_empty', 'is_not_empty'], defaultOperator: 'is' },
+  cycle: { label: 'Cycle', plural: 'cycles', icon: 'refresh', kind: 'list', operators: ['is', 'is_not', 'is_empty', 'is_not_empty'], defaultOperator: 'is' },
+  // the server filters estimates only by presence; the value sheet offers the two choices
+  estimate: { label: 'Estimate', plural: 'estimates', icon: 'chart', kind: 'list', operators: ['is_not_empty', 'is_empty'], defaultOperator: 'is_not_empty' },
   due_date: { label: 'Due date', plural: 'dates', icon: 'calendar', kind: 'date', operators: ['before', 'after', 'between', 'is_empty', 'is_not_empty'], defaultOperator: 'before' },
   created_at: { label: 'Created', plural: 'dates', icon: 'calendarTick', kind: 'date', operators: ['before', 'after'], defaultOperator: 'after' },
   updated_at: { label: 'Updated', plural: 'dates', icon: 'clock', kind: 'date', operators: ['before', 'after'], defaultOperator: 'after' },
@@ -129,7 +149,18 @@ export const FIELD_META: Record<FilterField, FieldMeta> = {
  * The fields the app can add, in the web's order. Parent (a task search) and Text (a typed value) need pickers the
  * app lacks; a chip of theirs from the web still shows and can be removed.
  */
-export const FIELD_ORDER: FilterField[] = ['status', 'status_category', 'assignee', 'creator', 'label', 'priority', 'project', 'sub_issues', 'due_date', 'created_at', 'updated_at']
+export const FIELD_ORDER: FilterField[] = ['status', 'status_category', 'assignee', 'creator', 'label', 'priority', 'project', 'sub_issues', 'milestone', 'cycle', 'estimate', 'due_date', 'created_at', 'updated_at']
+
+/** Milestones and cycles belong to one project, so only a project's page filters by them (as Linear does). */
+const PROJECT_FIELDS: readonly FilterField[] = ['milestone', 'cycle', 'estimate']
+
+export const fieldsFor = (projectId: string | null): FilterField[] => (projectId ? FIELD_ORDER : FIELD_ORDER.filter((field) => !PROJECT_FIELDS.includes(field)))
+
+/** The estimate filter's two choices, shown as values though they are operators. */
+export const ESTIMATE_PRESENCE: readonly { operator: FilterOperator; label: string }[] = [
+  { operator: 'is_not_empty', label: 'Has an estimate' },
+  { operator: 'is_empty', label: 'No estimate' },
+]
 
 /** User conditions per tree: the server allows 50 on the effective tree, and a scope adds up to 4. */
 export const MAX_FILTER_CONDITIONS = 46
@@ -215,6 +246,9 @@ export type FilterOptions = {
   /** A project page lists only this project's labels. */
   projectId: string | null
   projects: readonly ProjectRecord[]
+  /** The project page's milestones and cycles; empty on other pages. */
+  milestones: readonly TaskMilestone[]
+  cycles: readonly TaskCycle[]
   currentUserId: string
 }
 
@@ -264,6 +298,15 @@ export function valueOptions(field: FilterField, options: FilterOptions, mutedCo
       return PRIORITY_ORDER.map((priority) => ({ value: priority, label: PRIORITY_LABEL[priority], glyph: { kind: 'priority', priority } }))
     case 'project':
       return [...options.projects].sort((a, b) => a.name.localeCompare(b.name)).map((project) => ({ value: project.id, label: project.name, glyph: { kind: 'dot', color: project.color } }))
+    case 'milestone':
+      return sortMilestones(options.milestones).map((milestone) => ({ value: milestone.id, label: milestone.name, glyph: { kind: 'icon', icon: 'target' } }))
+    case 'cycle':
+      return [
+        { value: 'current', label: 'Current cycle', glyph: { kind: 'icon', icon: 'refresh' } },
+        { value: 'next', label: 'Next cycle', glyph: { kind: 'icon', icon: 'refresh' } },
+        { value: 'previous', label: 'Previous cycle', glyph: { kind: 'icon', icon: 'refresh' } },
+        ...cyclesForPicker(options.cycles, new Date()).map((cycle): ValueOption => ({ value: cycle.id, label: cycleLabel(cycle), glyph: { kind: 'icon', icon: 'refresh' } })),
+      ]
     case 'sub_issues':
       return [
         { value: 'has', label: 'Has sub-issues', glyph: { kind: 'icon', icon: 'subIssue' } },

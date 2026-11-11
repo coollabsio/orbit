@@ -378,6 +378,10 @@ pub(super) async fn spawn_next_in_tx(
             due_start_at,
             due_at,
             parent_task_id: closed.parent.as_ref().map(|parent| parent.id),
+            milestone_id: closed.milestone_id,
+            // a cycle is a time box: the next occurrence is due later, so it starts without one
+            cycle_id: None,
+            estimate: closed.estimate,
         };
         let next_id = Id::new_v7();
         insert_task_rows_in_tx(

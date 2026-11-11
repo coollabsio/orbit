@@ -3110,6 +3110,150 @@
         ]
       }
     },
+    "/api/public/v1/workspaces/{workspace_id}/projects/{project_id}/cycles": {
+      "get": {
+        "tags": [
+          "public-api"
+        ],
+        "summary": "The cycles of a project",
+        "operationId": "public_list_cycles",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "description": "The token's workspace, from `GET /me`.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Every cycle, by start date; `next_cursor` is `null`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/List_PublicCycle"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthorized",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "insufficient_scope",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limit_exceeded",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/public/v1/workspaces/{workspace_id}/projects/{project_id}/labels": {
       "get": {
         "tags": [
@@ -3178,6 +3322,150 @@
           },
           "400": {
             "description": "invalid_proxy_headers, invalid_request, invalid_cursor",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthorized",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "insufficient_scope",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limit_exceeded",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/public/v1/workspaces/{workspace_id}/projects/{project_id}/milestones": {
+      "get": {
+        "tags": [
+          "public-api"
+        ],
+        "summary": "The milestones of a project",
+        "operationId": "public_list_milestones",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "description": "The token's workspace, from `GET /me`.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Every milestone, in order; `next_cursor` is `null`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/List_PublicMilestone"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3483,7 +3771,7 @@
           {
             "name": "sort",
             "in": "query",
-            "description": "`created_at` (default), `updated_at`, `priority`, `due_date` or `title`.",
+            "description": "`created_at` (default), `updated_at`, `priority`, `due_date`, `title` or `estimate`\n(tasks without an estimate last).",
             "required": false,
             "schema": {
               "type": "string"
@@ -3510,6 +3798,24 @@
             "name": "priority",
             "in": "query",
             "description": "`none`, `low`, `medium`, `high` or `urgent`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "milestone_id",
+            "in": "query",
+            "description": "A milestone ID, or `none` for tasks without a milestone.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cycle_id",
+            "in": "query",
+            "description": "A cycle ID; `current`, `next` or `previous` for that cycle of each task's project; or\n`none` for tasks without a cycle.",
             "required": false,
             "schema": {
               "type": "string"
@@ -42155,6 +42461,723 @@
         ]
       }
     },
+    "/api/v1/workspaces/{workspace_id}/projects/{project_id}/cycles": {
+      "get": {
+        "tags": [
+          "crate::task_routes"
+        ],
+        "operationId": "list_cycles",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_TaskCycle"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "task_resource_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "crate::task_routes"
+        ],
+        "summary": "409 `cycle_overlap` when the dates overlap another cycle of the project.",
+        "operationId": "create_cycle",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskCycleBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskCycle"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "task_resource_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch, cycle_overlap",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/projects/{project_id}/cycles/{cycle_id}": {
+      "delete": {
+        "tags": [
+          "crate::task_routes"
+        ],
+        "summary": "The cycle's tasks stay, without a cycle.",
+        "operationId": "delete_cycle",
+        "parameters": [
+          {
+            "name": "expected_version",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cycle_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "task_resource_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch, task_conflict, conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "crate::task_routes"
+        ],
+        "summary": "409 `cycle_overlap` when the new dates overlap another cycle of the project.",
+        "operationId": "update_cycle",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cycle_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskCycleUpdateBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskCycle"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "task_resource_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch, cycle_overlap, task_conflict, conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/projects/{project_id}/cycles/{cycle_id}/move-unfinished": {
+      "post": {
+        "tags": [
+          "crate::task_routes"
+        ],
+        "summary": "Moves the cycle's tasks that are not completed, cancelled or duplicates to the next cycle by\ndate. 409 `no_next_cycle` when the project has no cycle after this one.",
+        "operationId": "move_unfinished_cycle_tasks",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cycle_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskCycleMoveOutcome"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "task_resource_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch, no_next_cycle",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/workspaces/{workspace_id}/projects/{project_id}/github": {
       "get": {
         "tags": [
@@ -43525,6 +44548,732 @@
           },
           "413": {
             "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/projects/{project_id}/milestones": {
+      "get": {
+        "tags": [
+          "crate::task_routes"
+        ],
+        "operationId": "list_milestones",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_TaskMilestone"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "task_resource_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "crate::task_routes"
+        ],
+        "operationId": "create_milestone",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskMilestoneBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskMilestone"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "task_resource_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch, task_conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/projects/{project_id}/milestones/reorder": {
+      "post": {
+        "tags": [
+          "crate::task_routes"
+        ],
+        "operationId": "reorder_milestones",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReorderBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_TaskMilestone"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "task_resource_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch, task_conflict, conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/projects/{project_id}/milestones/{milestone_id}": {
+      "delete": {
+        "tags": [
+          "crate::task_routes"
+        ],
+        "summary": "The milestone's tasks stay, without a milestone.",
+        "operationId": "delete_milestone",
+        "parameters": [
+          {
+            "name": "expected_version",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "milestone_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "task_resource_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch, task_conflict, conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "crate::task_routes"
+        ],
+        "operationId": "update_milestone",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "milestone_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskMilestoneUpdateBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskMilestone"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "task_resource_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch, task_conflict, conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_failed",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -53692,6 +55441,13 @@
               "type": "string"
             }
           },
+          "cycle_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Absent: unchanged (a project move clears it). A cycle id of the task's project: set.\n`null`: clear."
+          },
           "description": {
             "type": [
               "string",
@@ -53719,6 +55475,14 @@
             ],
             "description": "Absent: unchanged. A task id: mark this task as a duplicate of it. `null`: unmark."
           },
+          "estimate": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Absent: unchanged. Points, 0 to 1000. `null`: clear."
+          },
           "expected_version": {
             "type": "integer",
             "format": "int64",
@@ -53735,6 +55499,13 @@
             "items": {
               "type": "string"
             }
+          },
+          "milestone_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Absent: unchanged (on a project move, the target project's milestone of the same name,\nelse none). A milestone id of the task's project: set. `null`: clear."
           },
           "parent_task_id": {
             "type": [
@@ -56076,6 +57847,13 @@
               "type": "string"
             }
           },
+          "cycle_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A cycle of `project_id`."
+          },
           "description": {
             "type": "string",
             "description": "Markdown. Send `description_json` instead for rich text (not both)."
@@ -56104,11 +57882,26 @@
             ],
             "format": "date-time"
           },
+          "estimate": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Points, 0 to 1000."
+          },
           "label_ids": {
             "type": "array",
             "items": {
               "type": "string"
             }
+          },
+          "milestone_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A milestone of `project_id`."
           },
           "parent_task_id": {
             "type": [
@@ -57791,7 +59584,10 @@
           "updated_at",
           "text",
           "parent",
-          "sub_issues"
+          "sub_issues",
+          "milestone",
+          "cycle",
+          "estimate"
         ]
       },
       "FilterGroup": {
@@ -58121,6 +59917,8 @@
           "priority",
           "project",
           "label",
+          "milestone",
+          "cycle",
           "none"
         ]
       },
@@ -59431,6 +61229,102 @@
           }
         }
       },
+      "List_PublicCycle": {
+        "type": "object",
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "project_id",
+                "number",
+                "name",
+                "starts_at",
+                "ends_at",
+                "relative",
+                "version",
+                "task_count",
+                "completed_count",
+                "estimate_total",
+                "estimate_completed"
+              ],
+              "properties": {
+                "completed_count": {
+                  "type": "integer",
+                  "format": "int64"
+                },
+                "ends_at": {
+                  "type": "string",
+                  "format": "date-time",
+                  "description": "Exclusive: the next cycle may start at this instant."
+                },
+                "estimate_completed": {
+                  "type": "integer",
+                  "format": "int64"
+                },
+                "estimate_total": {
+                  "type": "integer",
+                  "format": "int64"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "number": {
+                  "type": "integer",
+                  "format": "int64",
+                  "description": "1 for the project's first cycle."
+                },
+                "project_id": {
+                  "type": "string"
+                },
+                "relative": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PublicCycleRelative",
+                      "description": "`current`, `next` or `previous` now; `null` for the other cycles."
+                    }
+                  ]
+                },
+                "starts_at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "task_count": {
+                  "type": "integer",
+                  "format": "int64"
+                },
+                "version": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Send it as `cursor` for the next page; `null` on the last page."
+          }
+        }
+      },
       "List_PublicLabel": {
         "type": "object",
         "required": [
@@ -59501,6 +61395,91 @@
                 },
                 "user_id": {
                   "type": "string"
+                }
+              }
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Send it as `cursor` for the next page; `null` on the last page."
+          }
+        }
+      },
+      "List_PublicMilestone": {
+        "type": "object",
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "description": "The progress counts cover live tasks except cancelled and duplicate ones; `completed_count`\nand `estimate_completed` cover those in a `completed` status.",
+              "required": [
+                "id",
+                "project_id",
+                "name",
+                "description",
+                "target_at",
+                "position",
+                "version",
+                "task_count",
+                "completed_count",
+                "estimate_total",
+                "estimate_completed"
+              ],
+              "properties": {
+                "completed_count": {
+                  "type": "integer",
+                  "format": "int64"
+                },
+                "description": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "estimate_completed": {
+                  "type": "integer",
+                  "format": "int64"
+                },
+                "estimate_total": {
+                  "type": "integer",
+                  "format": "int64"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "position": {
+                  "type": "integer",
+                  "format": "int64"
+                },
+                "project_id": {
+                  "type": "string"
+                },
+                "target_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time"
+                },
+                "task_count": {
+                  "type": "integer",
+                  "format": "int64"
+                },
+                "version": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0
                 }
               }
             }
@@ -59661,6 +61640,9 @@
                     "due_start_at",
                     "due_at",
                     "recurrence",
+                    "milestone_id",
+                    "cycle_id",
+                    "estimate",
                     "created_at",
                     "updated_at",
                     "version"
@@ -59675,6 +61657,13 @@
                     "created_at": {
                       "type": "string",
                       "format": "date-time"
+                    },
+                    "cycle_id": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "A cycle of the task's project; `null` when none."
                     },
                     "description": {
                       "type": "string",
@@ -59694,6 +61683,14 @@
                       ],
                       "format": "date-time"
                     },
+                    "estimate": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "format": "int64",
+                      "description": "Points, 0 to 1000; `null` when not estimated."
+                    },
                     "id": {
                       "type": "string"
                     },
@@ -59702,6 +61699,13 @@
                       "items": {
                         "type": "string"
                       }
+                    },
+                    "milestone_id": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "A milestone of the task's project; `null` when none."
                     },
                     "number": {
                       "type": "integer",
@@ -62074,7 +64078,8 @@
           "created",
           "updated",
           "title",
-          "due_date"
+          "due_date",
+          "estimate"
         ]
       },
       "OrderDirection": {
@@ -63701,6 +65706,206 @@
           }
         }
       },
+      "Page_TaskCycle": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "workspace_id",
+                "project_id",
+                "number",
+                "name",
+                "starts_at",
+                "ends_at",
+                "version",
+                "created_at",
+                "updated_at",
+                "task_count",
+                "completed_count",
+                "estimate_total",
+                "estimate_completed"
+              ],
+              "properties": {
+                "completed_count": {
+                  "type": "integer",
+                  "format": "int64",
+                  "description": "Of `task_count`, the tasks in a completed status."
+                },
+                "created_at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "ends_at": {
+                  "type": "string",
+                  "format": "date-time",
+                  "description": "The end, exclusive: the next cycle may start at this instant."
+                },
+                "estimate_completed": {
+                  "type": "integer",
+                  "format": "int64",
+                  "description": "The estimates of `completed_count`'s tasks, summed."
+                },
+                "estimate_total": {
+                  "type": "integer",
+                  "format": "int64",
+                  "description": "The estimates of `task_count`'s tasks, summed."
+                },
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "number": {
+                  "type": "integer",
+                  "format": "int64",
+                  "description": "1 for the project's first cycle, then one more than the highest so far."
+                },
+                "project_id": {
+                  "type": "string"
+                },
+                "starts_at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "task_count": {
+                  "type": "integer",
+                  "format": "int64",
+                  "description": "Live tasks in the cycle; cancelled and duplicate tasks are not counted."
+                },
+                "updated_at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "version": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0
+                },
+                "workspace_id": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "Page_TaskMilestone": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "workspace_id",
+                "project_id",
+                "name",
+                "description",
+                "target_at",
+                "position",
+                "version",
+                "created_at",
+                "updated_at",
+                "task_count",
+                "completed_count",
+                "estimate_total",
+                "estimate_completed"
+              ],
+              "properties": {
+                "completed_count": {
+                  "type": "integer",
+                  "format": "int64",
+                  "description": "Of `task_count`, the tasks in a completed status."
+                },
+                "created_at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "description": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "estimate_completed": {
+                  "type": "integer",
+                  "format": "int64",
+                  "description": "The estimates of `completed_count`'s tasks, summed."
+                },
+                "estimate_total": {
+                  "type": "integer",
+                  "format": "int64",
+                  "description": "The estimates of `task_count`'s tasks, summed."
+                },
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "position": {
+                  "type": "integer",
+                  "format": "int64"
+                },
+                "project_id": {
+                  "type": "string"
+                },
+                "target_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time"
+                },
+                "task_count": {
+                  "type": "integer",
+                  "format": "int64",
+                  "description": "Live tasks in the milestone; cancelled and duplicate tasks are not counted."
+                },
+                "updated_at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "version": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0
+                },
+                "workspace_id": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
       "Page_TaskRecord": {
         "type": "object",
         "required": [
@@ -63726,6 +65931,9 @@
                 "assignee_ids",
                 "label_ids",
                 "recurrence",
+                "milestone_id",
+                "cycle_id",
+                "estimate",
                 "version",
                 "created_at",
                 "updated_at",
@@ -63783,6 +65991,13 @@
                     "null"
                   ]
                 },
+                "cycle_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "A cycle of the task's project; null when none."
+                },
                 "deleted_at": {
                   "type": [
                     "string",
@@ -63829,6 +66044,16 @@
                     }
                   ]
                 },
+                "estimate": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "format": "int64",
+                  "description": "Points, 0 to 1000; null when not estimated.",
+                  "maximum": 1000,
+                  "minimum": 0
+                },
                 "id": {
                   "type": "string"
                 },
@@ -63837,6 +66062,13 @@
                   "items": {
                     "type": "string"
                   }
+                },
+                "milestone_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "A milestone of the task's project; null when none."
                 },
                 "number": {
                   "type": "integer",
@@ -64653,6 +66885,13 @@
             },
             "description": "Members of the workspace."
           },
+          "cycle_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A cycle of the task's project."
+          },
           "description": {
             "type": "string",
             "description": "Markdown, up to 50,000 bytes."
@@ -64672,12 +66911,29 @@
             "format": "date-time",
             "description": "Needs `due_at` and must not be after it."
           },
+          "estimate": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Points, 0 to 1000.",
+            "maximum": 1000,
+            "minimum": 0
+          },
           "label_ids": {
             "type": "array",
             "items": {
               "type": "string"
             },
             "description": "Labels of the task's project."
+          },
+          "milestone_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A milestone of the task's project."
           },
           "parent_task_id": {
             "type": [
@@ -64704,6 +66960,91 @@
           }
         },
         "additionalProperties": false
+      },
+      "PublicCycle": {
+        "type": "object",
+        "required": [
+          "id",
+          "project_id",
+          "number",
+          "name",
+          "starts_at",
+          "ends_at",
+          "relative",
+          "version",
+          "task_count",
+          "completed_count",
+          "estimate_total",
+          "estimate_completed"
+        ],
+        "properties": {
+          "completed_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "ends_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Exclusive: the next cycle may start at this instant."
+          },
+          "estimate_completed": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "estimate_total": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "number": {
+            "type": "integer",
+            "format": "int64",
+            "description": "1 for the project's first cycle."
+          },
+          "project_id": {
+            "type": "string"
+          },
+          "relative": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PublicCycleRelative",
+                "description": "`current`, `next` or `previous` now; `null` for the other cycles."
+              }
+            ]
+          },
+          "starts_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "task_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "PublicCycleRelative": {
+        "type": "string",
+        "enum": [
+          "current",
+          "next",
+          "previous"
+        ]
       },
       "PublicDatabase": {
         "type": "object",
@@ -65077,6 +67418,72 @@
           }
         }
       },
+      "PublicMilestone": {
+        "type": "object",
+        "description": "The progress counts cover live tasks except cancelled and duplicate ones; `completed_count`\nand `estimate_completed` cover those in a `completed` status.",
+        "required": [
+          "id",
+          "project_id",
+          "name",
+          "description",
+          "target_at",
+          "position",
+          "version",
+          "task_count",
+          "completed_count",
+          "estimate_total",
+          "estimate_completed"
+        ],
+        "properties": {
+          "completed_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "estimate_completed": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "estimate_total": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "position": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "project_id": {
+            "type": "string"
+          },
+          "target_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "task_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
       "PublicNamed": {
         "type": "object",
         "required": [
@@ -65245,6 +67652,9 @@
               "due_start_at",
               "due_at",
               "recurrence",
+              "milestone_id",
+              "cycle_id",
+              "estimate",
               "created_at",
               "updated_at",
               "version"
@@ -65259,6 +67669,13 @@
               "created_at": {
                 "type": "string",
                 "format": "date-time"
+              },
+              "cycle_id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "A cycle of the task's project; `null` when none."
               },
               "description": {
                 "type": "string",
@@ -65278,6 +67695,14 @@
                 ],
                 "format": "date-time"
               },
+              "estimate": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int64",
+                "description": "Points, 0 to 1000; `null` when not estimated."
+              },
               "id": {
                 "type": "string"
               },
@@ -65286,6 +67711,13 @@
                 "items": {
                   "type": "string"
                 }
+              },
+              "milestone_id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "A milestone of the task's project; `null` when none."
               },
               "number": {
                 "type": "integer",
@@ -65542,6 +67974,13 @@
             },
             "description": "Replaces the assignees."
           },
+          "cycle_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A cycle of the task's project; `null` clears it."
+          },
           "description": {
             "type": [
               "string",
@@ -65565,6 +68004,16 @@
             "format": "date-time",
             "description": "`null` clears the date."
           },
+          "estimate": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Points, 0 to 1000; `null` clears the estimate.",
+            "maximum": 1000,
+            "minimum": 0
+          },
           "expected_version": {
             "type": "integer",
             "format": "int64",
@@ -65580,6 +68029,13 @@
               "type": "string"
             },
             "description": "Replaces the labels."
+          },
+          "milestone_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A milestone of the task's project; `null` clears it."
           },
           "parent_task_id": {
             "type": [
@@ -67587,6 +70043,316 @@
           }
         }
       },
+      "TaskCycle": {
+        "type": "object",
+        "required": [
+          "id",
+          "workspace_id",
+          "project_id",
+          "number",
+          "name",
+          "starts_at",
+          "ends_at",
+          "version",
+          "created_at",
+          "updated_at",
+          "task_count",
+          "completed_count",
+          "estimate_total",
+          "estimate_completed"
+        ],
+        "properties": {
+          "completed_count": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Of `task_count`, the tasks in a completed status."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "ends_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "The end, exclusive: the next cycle may start at this instant."
+          },
+          "estimate_completed": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The estimates of `completed_count`'s tasks, summed."
+          },
+          "estimate_total": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The estimates of `task_count`'s tasks, summed."
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "number": {
+            "type": "integer",
+            "format": "int64",
+            "description": "1 for the project's first cycle, then one more than the highest so far."
+          },
+          "project_id": {
+            "type": "string"
+          },
+          "starts_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "task_count": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Live tasks in the cycle; cancelled and duplicate tasks are not counted."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "workspace_id": {
+            "type": "string"
+          }
+        }
+      },
+      "TaskCycleBody": {
+        "type": "object",
+        "required": [
+          "starts_at",
+          "ends_at"
+        ],
+        "properties": {
+          "ends_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Exclusive; must be after `starts_at`."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "starts_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": false
+      },
+      "TaskCycleMoveOutcome": {
+        "type": "object",
+        "required": [
+          "moved",
+          "to_cycle"
+        ],
+        "properties": {
+          "moved": {
+            "type": "integer",
+            "format": "int64",
+            "description": "How many tasks moved."
+          },
+          "to_cycle": {
+            "$ref": "#/components/schemas/TaskCycle",
+            "description": "The cycle they moved to, with its new counts."
+          }
+        }
+      },
+      "TaskCycleUpdateBody": {
+        "type": "object",
+        "description": "Absent fields stay; `null` clears `name`.",
+        "required": [
+          "expected_version"
+        ],
+        "properties": {
+          "ends_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "expected_version": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "starts_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": false
+      },
+      "TaskMilestone": {
+        "type": "object",
+        "required": [
+          "id",
+          "workspace_id",
+          "project_id",
+          "name",
+          "description",
+          "target_at",
+          "position",
+          "version",
+          "created_at",
+          "updated_at",
+          "task_count",
+          "completed_count",
+          "estimate_total",
+          "estimate_completed"
+        ],
+        "properties": {
+          "completed_count": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Of `task_count`, the tasks in a completed status."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "estimate_completed": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The estimates of `completed_count`'s tasks, summed."
+          },
+          "estimate_total": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The estimates of `task_count`'s tasks, summed."
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "position": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "project_id": {
+            "type": "string"
+          },
+          "target_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "task_count": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Live tasks in the milestone; cancelled and duplicate tasks are not counted."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "workspace_id": {
+            "type": "string"
+          }
+        }
+      },
+      "TaskMilestoneBody": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "target_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": false
+      },
+      "TaskMilestoneUpdateBody": {
+        "type": "object",
+        "description": "Absent fields stay; `null` clears `description` and `target_at`.",
+        "required": [
+          "expected_version"
+        ],
+        "properties": {
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "expected_version": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "position": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "target_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": false
+      },
       "TaskProblem": {
         "type": "object",
         "required": [
@@ -67664,7 +70430,10 @@
           "labels",
           "created",
           "updated",
-          "sub_issue_progress"
+          "sub_issue_progress",
+          "milestone",
+          "cycle",
+          "estimate"
         ]
       },
       "TaskQueryBody": {
@@ -67735,6 +70504,9 @@
           "assignee_ids",
           "label_ids",
           "recurrence",
+          "milestone_id",
+          "cycle_id",
+          "estimate",
           "version",
           "created_at",
           "updated_at",
@@ -67792,6 +70564,13 @@
               "null"
             ]
           },
+          "cycle_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A cycle of the task's project; null when none."
+          },
           "deleted_at": {
             "type": [
               "string",
@@ -67838,6 +70617,16 @@
               }
             ]
           },
+          "estimate": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Points, 0 to 1000; null when not estimated.",
+            "maximum": 1000,
+            "minimum": 0
+          },
           "id": {
             "type": "string"
           },
@@ -67846,6 +70635,13 @@
             "items": {
               "type": "string"
             }
+          },
+          "milestone_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A milestone of the task's project; null when none."
           },
           "number": {
             "type": "integer",
@@ -68124,6 +70920,13 @@
               "type": "string"
             }
           },
+          "cycle_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Absent: unchanged (a project move clears it). A cycle id of the task's project: set.\n`null`: clear."
+          },
           "description": {
             "type": [
               "string",
@@ -68162,6 +70965,14 @@
             ],
             "description": "Absent: unchanged. A task id: mark this task as a duplicate of it. `null`: unmark."
           },
+          "estimate": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Absent: unchanged. Points, 0 to 1000. `null`: clear."
+          },
           "expected_version": {
             "type": "integer",
             "format": "int64",
@@ -68175,6 +70986,13 @@
             "items": {
               "type": "string"
             }
+          },
+          "milestone_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Absent: unchanged (on a project move, the target project's milestone of the same name,\nelse none). A milestone id of the task's project: set. `null`: clear."
           },
           "parent_task_id": {
             "type": [

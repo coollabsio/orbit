@@ -147,7 +147,7 @@ In the examples below, set the workspace first:
 export ORBIT_WS="$ORBIT_URL/api/public/v1/workspaces/$WORKSPACE_ID"
 ```
 
-### Projects, statuses, labels and members
+### Projects, statuses, labels, milestones, cycles and members
 
 `GET /workspaces/{workspace_id}/projects`. Scope: `tasks:read`. The approved live projects. Item:
 `{id, name, key, color, version, created_at, updated_at}`.
@@ -186,6 +186,26 @@ curl -sS "$ORBIT_WS/projects/$PROJECT_ID/labels" \
   -H "Authorization: Bearer $ORBIT_TOKEN"
 ```
 
+`GET /workspaces/{workspace_id}/projects/{project_id}/milestones`. Scope: `tasks:read`. Every
+milestone of the project in its order, on one page (`next_cursor` is `null`). Item:
+`{id, project_id, name, description, target_at, position, version, task_count, completed_count,
+estimate_total, estimate_completed}`. Use the IDs in `milestone_id`.
+
+`GET /workspaces/{workspace_id}/projects/{project_id}/cycles`. Scope: `tasks:read`. Every cycle of
+the project by start date, on one page. Item: `{id, project_id, number, name, starts_at, ends_at,
+relative, version, task_count, completed_count, estimate_total, estimate_completed}`. A cycle
+covers `starts_at` up to `ends_at`, exclusive. `relative` is `current` (the cycle that runs now),
+`next` (the first that starts after now), `previous` (the last that ended before now) or `null`.
+Use the IDs in `cycle_id`.
+
+The counts cover the live tasks, without cancelled and duplicate tasks. `completed_count` and
+`estimate_completed` cover the tasks in a `completed` status.
+
+```bash
+curl -sS "$ORBIT_WS/projects/$PROJECT_ID/cycles" \
+  -H "Authorization: Bearer $ORBIT_TOKEN"
+```
+
 `GET /workspaces/{workspace_id}/members?cursor&limit`. Scope: `tasks:read`. The
 workspace members, to find assignee IDs. Item: `{user_id, display_name}`. The
 API does not show email addresses or roles.
@@ -204,6 +224,7 @@ A task:
   "title": "Fix login", "description": "Markdown text", "priority": "high",
   "assignee_ids": ["…"], "label_ids": ["…"],
   "due_start_at": null, "due_at": null,
+  "milestone_id": null, "cycle_id": null, "estimate": 3,
   "created_at": "…", "updated_at": "…", "version": 4503599627370495,
   "parent_task_id": null,
   "identifier": "ENG-12",
@@ -214,15 +235,18 @@ A task:
 `identifier` is the project key and the task number. Use it in `{task}` paths.
 `url` is the task's page in the Orbit web app.
 
-`priority` is `none`, `low`, `medium`, `high` or `urgent`.
+`priority` is `none`, `low`, `medium`, `high` or `urgent`. `estimate` is a number of points from
+0 to 1000, or `null`.
 
 `GET /workspaces/{workspace_id}/tasks`. Scope: `tasks:read`. Tasks in the approved projects, newest first,
 including completed tasks and sub-issues. Optional parameters: `project_id`,
 `status_id`, `assignee_id` (a user ID, or `none` for tasks without an
-assignee), `label_id`, `priority`, `parent_task_id` (only the direct sub-issues
+assignee), `label_id`, `priority`, `milestone_id` (a milestone ID, or `none`), `cycle_id` (a
+cycle ID; `current`, `next` or `previous` for that cycle of each task's project; or `none`),
+`parent_task_id` (only the direct sub-issues
 of this task, as a UUID or an identifier such as `ENG-12`; the task must be in an approved project), `q` (text in the title or description, or an
-identifier), `sort` (`created_at`, `updated_at`, `priority`, `due_date` or
-`title`; default `created_at`), `order` (`desc` or `asc`; default `desc`; with
+identifier), `sort` (`created_at`, `updated_at`, `priority`, `due_date`,
+`title` or `estimate`; default `created_at`; tasks without an estimate come last), `order` (`desc` or `asc`; default `desc`; with
 `sort=priority`, `desc` gives `urgent` first and `none` last),
 `cursor` and `limit`. Keep the same parameters when you send `cursor`.
 
@@ -241,10 +265,10 @@ curl -sS "$ORBIT_WS/tasks/ENG-12" -H "Authorization: Bearer $ORBIT_TOKEN"
 `project_id` and `status_id` (required), `title` (required, 1 to 500
 characters), and the optional `description` (Markdown, up to 50,000 bytes),
 `priority` (default `none`), `assignee_ids`, `label_ids`, `parent_task_id`,
-`due_start_at` and `due_at` (RFC 3339 times; `due_start_at` needs `due_at` and
+`milestone_id`, `cycle_id`, `estimate`, `due_start_at` and `due_at` (RFC 3339 times; `due_start_at` needs `due_at` and
 must not be after it).
-The assignees must be members of the workspace. The labels and the status must
-be in the task's project. The parent and all the tasks related to it must be in
+The assignees must be members of the workspace. The labels, the status, the
+milestone and the cycle must be in the task's project. The parent and all the tasks related to it must be in
 approved projects. `parent_task_id` takes a task UUID or an identifier such as `ENG-12`.
 
 ```bash
@@ -256,8 +280,9 @@ curl -sS "$ORBIT_WS/tasks" -H "Authorization: Bearer $ORBIT_TOKEN" \
 `PATCH /workspaces/{workspace_id}/tasks/{task}`. Scope: `tasks:write`. Response: `200` with the task. Body:
 `expected_version` (required, the `version` that you read), and the optional
 `title`, `description`, `status_id`, `priority`, `assignee_ids`, `label_ids`,
-`due_start_at`, `due_at` and `parent_task_id`. A list replaces the old list. A missing field keeps
-its value, `null` clears a due date, and `parent_task_id: null` detaches the task from its
+`due_start_at`, `due_at`, `milestone_id`, `cycle_id`, `estimate` and `parent_task_id`. A list
+replaces the old list. A missing field keeps its value, `null` clears a due date, the milestone,
+the cycle or the estimate, and `parent_task_id: null` detaches the task from its
 parent (a new parent is a task UUID or an identifier such as `ENG-12`). A new parent and all the tasks related to it must be in approved projects. If the task changed after you read it, the
 response is `409`. This includes edits that people make to the description in
 the editor. Read the task again, then try again. All the tasks in the
@@ -637,7 +662,7 @@ Errors are RFC 9457 problem documents (`Content-Type: application/problem+json`)
 | 409 | `task_conflict`, `github_content_read_only`, `github_linked_move` | The change conflicts with the task's current state. |
 | 409 | `export_not_ready` | The export is queued, running or failed, so there is no archive to download yet. |
 | 413 | `doc_too_large` | The doc would have, or already has, more than 4,000 blocks. Nothing changed. |
-| 422 | `validation_failed`, `parent_cycle`, `parent_invalid` | A value is not valid for the workspace or project, for example an unknown assignee or label. `errors` names the field. |
+| 422 | `validation_failed`, `parent_cycle`, `parent_invalid` | A value is not valid for the workspace or project, for example an unknown assignee, label, milestone or cycle, or an estimate above 1000. `errors` names the field. |
 | 423 | `page_locked` | The doc is locked. Unlock it in Orbit to change its title, icon or content. |
 | 429 | `rate_limit_exceeded` | Too many requests. Wait as the `Retry-After` header tells (RFC 9110). Orbit sends a number of seconds. |
 | 500 | `internal_error` | Orbit could not complete the request, for example because the database is unavailable. Try again later. |

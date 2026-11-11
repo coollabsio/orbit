@@ -1,5 +1,5 @@
 //! The task side of an import: teamspaces (matched by name, else created), projects with their
-//! statuses and labels, then the tasks (parents first) with their attachments, comments and
+//! statuses, labels, milestones and cycles, then the tasks (parents first) with their attachments, comments and
 //! relations. Only in a full import.
 
 use std::collections::HashMap;
@@ -17,8 +17,8 @@ use crate::repositories::teamspaces::TeamspaceError;
 use crate::task_import::{
     Attached, Failure, LABEL_COLORS, NewProject, PROJECT_COLORS, attach_once, attachment_url,
     category_color, display_instant, ensure_project, escape_markdown, find_or_create_label,
-    mentions_any, parse_instant_millis, project_key_base, project_statuses, rewrite_links,
-    with_source_details,
+    find_or_create_milestone, mentions_any, parse_instant_millis, project_key_base,
+    project_statuses, rewrite_links, with_source_details,
 };
 
 /// Sub-task levels kept below a root; a deeper task (or a parent cycle) starts a new tree.
@@ -34,6 +34,10 @@ pub(super) struct ProjectContext {
     open_status: Id,
     /// Source label id → label id.
     labels: HashMap<String, Id>,
+    /// Source milestone id → milestone id.
+    milestones: HashMap<String, Id>,
+    /// Source cycle id → cycle id.
+    cycles: HashMap<String, Id>,
 }
 
 /// Lists the live tasks of the selected projects, parents before sub-tasks. Blocking reads.
@@ -124,7 +128,7 @@ fn task_label(key: &str, title: &str) -> String {
     }
 }
 
-/// Teamspaces and projects (with statuses and labels) of the selection.
+/// Teamspaces and projects (with statuses, labels, milestones and cycles) of the selection.
 pub(super) async fn import_structure(
     service: &OrbitImportService,
     run: &mut Run,
@@ -247,7 +251,7 @@ async fn ensure_teamspace(
 }
 
 /// The project under its recorded id, then a status for each source status (same name reused)
-/// and a label for each source label.
+/// and a label, milestone (same name reused) and cycle (same number and dates reused) for each source one.
 async fn ensure_project_structure(
     service: &OrbitImportService,
     run: &mut Run,
@@ -376,10 +380,84 @@ async fn ensure_project_structure(
             .record_link(run, "label", &label.id, label_id)
             .await?;
     }
+    for milestone in &project.milestones {
+        if service
+            .linked(run, "milestone", &milestone.id)
+            .await?
+            .is_some()
+        {
+            continue;
+        }
+        let name = clamp(milestone.name.trim(), 200, 200);
+        if name.is_empty() {
+            continue;
+        }
+        let milestone_id = find_or_create_milestone(
+            service.database(),
+            &service.inner.tasks,
+            run.workspace_id,
+            project_id,
+            run.user_id,
+            &name,
+            milestone
+                .description
+                .as_deref()
+                .map(|text| clamp(text.trim(), 20_000, 20_000))
+                .filter(|text| !text.is_empty()),
+            milestone
+                .target_at
+                .as_deref()
+                .and_then(parse_instant_millis)
+                .map(TimestampMillis::from_millis),
+            &run.request_id,
+        )
+        .await?;
+        service
+            .record_link(run, "milestone", &milestone.id, milestone_id)
+            .await?;
+    }
+    for cycle in &project.cycles {
+        if service.linked(run, "cycle", &cycle.id).await?.is_some() {
+            continue;
+        }
+        let (Some(starts_at), Some(ends_at)) = (
+            parse_instant_millis(&cycle.starts_at),
+            parse_instant_millis(&cycle.ends_at),
+        ) else {
+            continue;
+        };
+        // A cycle that overlaps one the project already has, or whose number a cycle with other
+        // dates holds, is left out with its tasks' links.
+        let Some(cycle_id) = service
+            .inner
+            .tasks
+            .find_or_create_cycle(
+                run.workspace_id,
+                project_id,
+                run.user_id,
+                cycle.number,
+                cycle
+                    .name
+                    .as_deref()
+                    .map(|name| clamp(name.trim(), 200, 200))
+                    .filter(|name| !name.is_empty()),
+                TimestampMillis::from_millis(starts_at),
+                TimestampMillis::from_millis(ends_at),
+                &run.request_id,
+                TimestampMillis::now(),
+            )
+            .await?
+        else {
+            continue;
+        };
+        service
+            .record_link(run, "cycle", &cycle.id, cycle_id)
+            .await?;
+    }
     service.set_item_state(run, item, "filled").await
 }
 
-/// Statuses and labels of the imported projects, from the links.
+/// Statuses, labels, milestones and cycles of the imported projects, from the links.
 async fn project_contexts(
     service: &OrbitImportService,
     run: &Run,
@@ -416,6 +494,18 @@ async fn project_contexts(
                 labels.insert(label.id.clone(), id);
             }
         }
+        let mut milestones = HashMap::new();
+        for milestone in &project.milestones {
+            if let Some(id) = service.linked(run, "milestone", &milestone.id).await? {
+                milestones.insert(milestone.id.clone(), id);
+            }
+        }
+        let mut cycles = HashMap::new();
+        for cycle in &project.cycles {
+            if let Some(id) = service.linked(run, "cycle", &cycle.id).await? {
+                cycles.insert(cycle.id.clone(), id);
+            }
+        }
         contexts.insert(
             project.id.clone(),
             ProjectContext {
@@ -428,6 +518,8 @@ async fn project_contexts(
                     .collect(),
                 open_status,
                 labels,
+                milestones,
+                cycles,
             },
         );
     }
@@ -578,6 +670,19 @@ async fn create_task(
                 .and_then(parse_instant_millis)
                 .map(TimestampMillis::from_millis),
             parent_task_id: parent,
+            milestone_id: task
+                .milestone
+                .as_ref()
+                .and_then(|milestone| context.milestones.get(&milestone.id))
+                .copied(),
+            cycle_id: task
+                .cycle
+                .as_ref()
+                .and_then(|cycle| context.cycles.get(&cycle.id))
+                .copied(),
+            estimate: task
+                .estimate
+                .filter(|estimate| (0..=1_000).contains(estimate)),
         };
         let completed_at = task
             .completed_at

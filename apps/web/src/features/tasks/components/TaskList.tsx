@@ -28,7 +28,8 @@ import { assigneeToggleUpdates, dueUpdates, everyTaskHasLabel, labelChoices, lab
 import { BulkTaskLimitError, MAX_BULK_TASK_UPDATES, useBulkTasks } from '@/features/tasks/api/tasks'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { DisclosureChevron, GroupIcon } from '@/features/views/components/GroupIcon'
-import { groupTasks, type GroupContext, type TaskGroup } from '@/features/views/grouping'
+import { estimateTotal, groupTasks, type GroupContext, type TaskGroup } from '@/features/views/grouping'
+import { estimateShortLabel } from '@/features/tasks/planningLib'
 import { canDrag, listSections, ownGroupValues, valuesOf, zoneIdOf, type GroupValues } from '@/features/views/layoutGroups'
 import { useCollapsedGroups } from '@/features/views/useCollapsedGroups'
 import { useCollapsedTasks } from '@/features/views/useCollapsedTasks'
@@ -38,6 +39,7 @@ import { useNestDrop } from '@/features/views/useNestDrop'
 import type { DisplayOptions } from '@/features/views/viewState'
 import { TaskRow } from './TaskRow'
 import { LabelPill } from './TaskLabels'
+import { MilestoneLate } from './TaskPropertyChips'
 import { pickerTitle } from '@/features/tasks/relationsLib'
 import { useDuplicateActions } from '@/features/tasks/useDuplicateActions'
 import { useParentActions } from '@/features/tasks/useParentActions'
@@ -135,10 +137,14 @@ export function TaskList({ tasks, users, labels, statuses, projects, display, gr
   })
   // a subtree stays in its root's group (spec §7.2), so only roots are grouped; counts include nested rows
   const rowCount = (zoneTasks: Task[]) => nested ? zoneTasks.reduce((total, task) => total + 1 + subtreeSize(tree, task.id), 0) : zoneTasks.length
+  const taskById = new Map(tasks.map((task) => [task.id, task]))
+  const rowEstimate = (zoneTasks: Task[]) => estimateTotal(nested ? zoneTasks.flatMap((task) => [task, ...descendantIds(tree, task.id).flatMap((id) => taskById.get(id) ?? [])]) : zoneTasks)
 
   const dragEnabled = canDrag(display)
   const sections = listSections(nested ? tree.roots : tasks, display, groupContext)
   const projectById = new Map(projects.map((project) => [project.id, project]))
+  const milestoneById = new Map(groupContext.milestones.map((milestone) => [milestone.id, milestone]))
+  const cycleById = new Map(groupContext.cycles.map((cycle) => [cycle.id, cycle]))
   const statusOptions = groupTasks([], 'status', { ...groupContext, showEmpty: true })
     .filter((group) => !group.value?.startsWith('duplicate:'))
 
@@ -267,6 +273,8 @@ export function TaskList({ tasks, users, labels, statuses, projects, display, gr
           users={users}
           assignees={users.filter((u) => task.assigneeIds.includes(u.id))}
           project={projectById.get(task.projectId)}
+          milestone={task.milestoneId ? milestoneById.get(task.milestoneId) : undefined}
+          cycle={task.cycleId ? cycleById.get(task.cycleId) : undefined}
           properties={display.properties}
           selected={selected.includes(task.id)}
           dragging={task.id === drag?.taskId}
@@ -293,6 +301,7 @@ export function TaskList({ tasks, users, labels, statuses, projects, display, gr
     const isCollapsed = collapsed.includes(zone)
     // inside the Duplicate status (group or sub-group) a new task would need a canonical task first
     const canAdd = !values.some((value) => value.field === 'status' && value.value?.startsWith('duplicate:'))
+    const points = rowEstimate(group.tasks)
     return (
       <div
         ref={virtualizer.measureElement}
@@ -320,7 +329,9 @@ export function TaskList({ tasks, users, labels, statuses, projects, display, gr
         </Button>
         <GroupIcon group={group} context={groupContext} />
         <span className="truncate">{group.label}</span>
+        <MilestoneLate milestone={group.field === 'milestone' && group.value ? milestoneById.get(group.value) : undefined} />
         <span className="font-normal text-muted-foreground/70 tabular-nums">{rowCount(group.tasks)}</span>
+        {points === null ? null : <span title="Total estimate" className="font-normal whitespace-nowrap text-muted-foreground/70 tabular-nums">{estimateShortLabel(points)}</span>}
         <div className="flex-1" />
         {canAdd ? (
           <Tip label="New task">

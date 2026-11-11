@@ -10,10 +10,13 @@ import { MentionSuggestions, useMentionField } from '../../../components/Mention
 import { Attachments, type ShownFile } from '../../../components/tasks/Attachments'
 import { type FileSource, pickFiles } from '../../../components/tasks/files'
 import {
+  CycleChoices,
   DueDateChoices,
+  EstimateChoices,
   LabelChoices,
   LabelPill,
   MenuChoices,
+  MilestoneChoices,
   PeopleChoices,
   PriorityChoices,
   RecurrenceForm,
@@ -34,7 +37,10 @@ import * as taskApi from '../../../data/task-api'
 import {
   attachmentPath,
   bodyWithFiles,
+  cycleLabel,
+  cycleTiming,
   dueDateLabel,
+  estimateLabel,
   identifier,
   isImageType,
   PRIORITY_LABEL,
@@ -51,14 +57,14 @@ import {
 } from '../../../data/tasks'
 import { useAdoptSubIssue, useCommentAttachments, useCreateTask, useRelationWrites, useSubIssues, useTaskAttachments, useTaskRelations, useTaskWrite } from '../../../hooks/tasks'
 import { useOrbit } from '../../../orbit-context'
-import { useLabels, useMentionPeople, usePeople, useProjects, useSeesProject, useStatuses } from '../../../queries'
+import { useCycles, useLabels, useMentionPeople, useMilestones, usePeople, useProjects, useSeesProject, useStatuses } from '../../../queries'
 import { errorMessage } from '../../../session-context'
 import { alpha, useTheme } from '../../../theme'
 import { Avatar, Button, ErrorView, Icon, IconButton, type IconName, KeyboardSpace, LoadingView, PaneHeader, PriorityIcon, PullRefresh, SafeAreaView, StatusIcon, Text } from '../../../ui'
 
 /** The one sheet of the page and what it shows. */
 type TaskSheet =
-  | { kind: 'status' | 'priority' | 'assignees' | 'labels' | 'due' | 'repeat' | 'source' | 'parent-menu' | 'relation-menu' | 'attach' }
+  | { kind: 'status' | 'priority' | 'assignees' | 'labels' | 'due' | 'repeat' | 'milestone' | 'cycle' | 'estimate' | 'source' | 'parent-menu' | 'relation-menu' | 'attach' }
   | { kind: 'pick-task'; purpose: 'parent' | 'sub-issue' | RelationKind }
 
 function sheetTitle(sheet: TaskSheet | null, subject: string): string {
@@ -76,6 +82,12 @@ function sheetTitle(sheet: TaskSheet | null, subject: string): string {
       return 'Due date'
     case 'repeat':
       return 'Repeat'
+    case 'milestone':
+      return 'Milestone'
+    case 'cycle':
+      return 'Cycle'
+    case 'estimate':
+      return 'Estimate'
     case 'source':
       return 'Source'
     case 'parent-menu':
@@ -160,6 +172,8 @@ export default function TaskScreen() {
   const nameOf = (userId: string) => people.find((person) => person.id === userId)?.name ?? 'Unknown'
   const current = task.data
   const project = projects.data?.find((item) => item.id === current?.project_id)
+  const milestones = useMilestones(current?.project_id ?? null)
+  const cycles = useCycles(current?.project_id ?? null)
 
   const feed = useMemo(() => {
     if (!activity.data || !comments.data) return []
@@ -169,13 +183,15 @@ export default function TaskScreen() {
       people,
       labels: labels.data ?? [],
       projects: projects.data ?? [],
+      milestones: milestones.data ?? [],
+      cycles: (cycles.data ?? []).map((cycle) => ({ id: cycle.id, name: cycleLabel(cycle) })),
       identifierOf: (taskId) => {
         const other = known.find((item) => item.id === taskId)
         return other ? identifier(other, projects.data ?? []) : 'another task'
       },
     })
     return buildFeed(rows, comments.data)
-  }, [activity.data, comments.data, labels.data, people, projects.data, queryClient, statuses.data, workspaceId])
+  }, [activity.data, comments.data, cycles.data, labels.data, milestones.data, people, projects.data, queryClient, statuses.data, workspaceId])
 
   /** Uploads each picked file at once, as the web composer does; the comment links them when it is sent. */
   const attach = async (source: FileSource) => {
@@ -256,6 +272,9 @@ export default function TaskScreen() {
     ...(attachments.data ?? []).map((record) => ({ key: record.id, name: record.display_name, path: attachmentPath(record), image: isImageType(record.media_type), size: record.byte_size, deleted: record.deleted })),
   ]
   const taskLabels = (labels.data ?? []).filter((label) => current.label_ids.includes(label.id))
+  const milestone = milestones.data?.find((item) => item.id === current.milestone_id)
+  const cycle = cycles.data?.find((item) => item.id === current.cycle_id)
+  const cycleText = cycle ? `${cycleLabel(cycle)}${cycleTiming(cycle, new Date()) === 'current' ? ' · Current' : ''}` : current.cycle_id ? 'Cycle' : 'Add to cycle'
   const children = subIssues.data ?? []
   // a parent is never the task or a loaded sub-issue (deeper ones: the server's parent_cycle); an added sub-issue is
   // never the task, an ancestor or a sub-issue it already has
@@ -428,6 +447,30 @@ export default function TaskScreen() {
                 </Chip>
               </View>
             </PropertyGroup>
+            <PropertyGroup title="Milestone">
+              <View className="-ml-2 flex-row max-w-full">
+                <Chip label={milestone ? `Milestone: ${milestone.name}` : 'Set milestone'} onPress={() => sheets.open({ kind: 'milestone' })}>
+                  <Icon name="target" size={14} color={milestone ? colors.foreground : colors.mutedForeground} />
+                  <ChipText muted={!current.milestone_id}>{milestone?.name ?? (current.milestone_id ? 'Milestone' : 'Set milestone')}</ChipText>
+                </Chip>
+              </View>
+            </PropertyGroup>
+            <PropertyGroup title="Cycle">
+              <View className="-ml-2 flex-row max-w-full">
+                <Chip label={cycle ? `Cycle: ${cycleText}` : 'Add to cycle'} onPress={() => sheets.open({ kind: 'cycle' })}>
+                  <Icon name="refresh" size={14} color={cycle ? colors.foreground : colors.mutedForeground} />
+                  <ChipText muted={!current.cycle_id}>{cycleText}</ChipText>
+                </Chip>
+              </View>
+            </PropertyGroup>
+            <PropertyGroup title="Estimate">
+              <View className="-ml-2 flex-row">
+                <Chip label={current.estimate === null ? 'Set estimate' : `Estimate: ${estimateLabel(current.estimate)}`} onPress={() => sheets.open({ kind: 'estimate' })}>
+                  <Icon name="chart" size={14} color={current.estimate === null ? colors.mutedForeground : colors.foreground} />
+                  <ChipText muted={current.estimate === null}>{current.estimate === null ? 'Set estimate' : estimateLabel(current.estimate)}</ChipText>
+                </Chip>
+              </View>
+            </PropertyGroup>
           </View>
 
           <View>
@@ -511,6 +554,37 @@ export default function TaskScreen() {
             onStop={() => {
               sheets.close()
               write.mutate({ recurrence: null })
+            }}
+          />
+        ) : null}
+        {sheet?.kind === 'milestone' ? (
+          <MilestoneChoices
+            projectId={current.project_id}
+            value={current.milestone_id}
+            onOpenSettings={sheets.close}
+            onSelect={(milestoneId) => {
+              sheets.close()
+              if (milestoneId !== current.milestone_id) write.mutate({ milestone_id: milestoneId })
+            }}
+          />
+        ) : null}
+        {sheet?.kind === 'cycle' ? (
+          <CycleChoices
+            projectId={current.project_id}
+            value={current.cycle_id}
+            onOpenSettings={sheets.close}
+            onSelect={(cycleId) => {
+              sheets.close()
+              if (cycleId !== current.cycle_id) write.mutate({ cycle_id: cycleId })
+            }}
+          />
+        ) : null}
+        {sheet?.kind === 'estimate' ? (
+          <EstimateChoices
+            value={current.estimate}
+            onSelect={(estimate) => {
+              sheets.close()
+              if (estimate !== current.estimate) write.mutate({ estimate })
             }}
           />
         ) : null}

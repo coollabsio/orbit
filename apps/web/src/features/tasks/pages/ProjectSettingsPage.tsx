@@ -15,6 +15,8 @@ import { Pane, PaneHeader, PaneTitle } from '@/components/common/Pane'
 import { InfoTip } from '@/components/common/InfoTip'
 import { UnsavedBar } from '@/components/common/UnsavedBar'
 import { ProjectLabelsCard } from '@/features/tasks/components/ProjectLabelsCard'
+import { ProjectCyclesCard } from '@/features/tasks/components/ProjectCyclesCard'
+import { ProjectMilestonesCard } from '@/features/tasks/components/ProjectMilestonesCard'
 import { TaskStatusIcon } from '@/features/tasks/components/TaskStatusIcon'
 import { CATEGORY_LABEL, CATEGORY_ORDER, PROJECT_COLORS, STATUS_COLORS, defaultStatusOf, projectStatuses } from '@/features/tasks/taskMeta'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
@@ -259,6 +261,10 @@ export function ProjectSettingsPage() {
               <ProjectAccessCard project={project} />
 
               <ProjectLabelsCard projectId={project.id} />
+
+              <ProjectMilestonesCard projectId={project.id} />
+
+              <ProjectCyclesCard projectId={project.id} />
 
               <ProjectGithubCard workspaceId={workspace.id} projectId={project.id} onPendingChange={setGithubPending} />
 

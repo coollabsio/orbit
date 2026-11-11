@@ -4,6 +4,7 @@ import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
 import { Tip } from '@/components/common/Tip'
 import type { TaskStatusDef } from '@/features/tasks/api/models'
+import { planningProgress } from '@/features/tasks/planningLib'
 import { DisclosureChevron, GroupIcon } from '@/features/views/components/GroupIcon'
 import type { GroupContext } from '@/features/views/grouping'
 import type { TaskProperty } from '@/features/views/viewState'
@@ -28,13 +29,15 @@ export function TimelineRowLabel({ row, statuses, users, properties, groupContex
   onReveal?: () => void
 }) {
   if (row.kind === 'group') {
+    // a milestone's own counts cover all its tasks, also the ones the filters hide
+    const milestone = row.group.field === 'milestone' ? groupContext.milestones.find((item) => item.id === row.group.value) : undefined
     return (
       <LabelCell fill="group">
         <CellButton className="px-3 font-semibold text-foreground" aria-expanded={row.open} onClick={() => onToggle(row.key, !row.open)}>
           <DisclosureChevron open={row.open} className="size-3.5 text-muted-foreground" />
           <GroupIcon group={row.group} context={groupContext} />
           <span className="min-w-0 flex-1 truncate">{row.group.label}</span>
-          <span className="text-xs font-normal text-muted-foreground tabular-nums">{row.done}/{row.total}</span>
+          <span className="shrink-0 text-xs font-normal text-muted-foreground tabular-nums">{milestone ? planningProgress(milestone) : `${row.done}/${row.total}`}</span>
         </CellButton>
       </LabelCell>
     )

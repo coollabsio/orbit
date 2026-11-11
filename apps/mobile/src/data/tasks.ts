@@ -1,7 +1,8 @@
 import { ApiProblem } from '@orbit/api/problem'
 
-import type { AttachmentRecord, CreateTaskBody, TaskRef, TaskRelationRecord } from '@orbit/api/generated/types.gen'
+import type { AttachmentRecord, CreateTaskBody, TaskCycle, TaskMilestone, TaskRef, TaskRelationRecord } from '@orbit/api/generated/types.gen'
 
+import { shortDate } from './format'
 import type { LabelRecord, ProjectRecord, StatusRecord, TaskRecord } from './orbit'
 
 export type StatusCategory = 'unstarted' | 'started' | 'completed' | 'cancelled' | 'duplicate'
@@ -110,7 +111,12 @@ export const toggleId = (list: readonly string[], id: string): string[] => (list
  * The task fields a property write changes. Status, priority, assignees, labels, due date, repeat and source show at once
  * (optimistic, as on the web); a parent or duplicate change waits for the server, which checks cycles.
  */
-export type TaskPatch = Partial<Pick<TaskRecord, 'status_id' | 'priority' | 'assignee_ids' | 'label_ids' | 'due_at' | 'due_start_at' | 'source_url' | 'recurrence'>> & {
+export type TaskPatch = Partial<
+  Pick<
+    TaskRecord,
+    'status_id' | 'priority' | 'assignee_ids' | 'label_ids' | 'due_at' | 'due_start_at' | 'source_url' | 'recurrence' | 'milestone_id' | 'cycle_id' | 'estimate'
+  >
+> & {
   parent_task_id?: string | null
   duplicate_of_id?: string | null
 }
@@ -179,6 +185,120 @@ export function dueDateLabel(dueAt: string | null | undefined, dueStartAt?: stri
     return `${format.format(new Date(dueStartAt))} – ${format.format(new Date(dueAt))}`
   }
   return new Date(dueAt).toLocaleString(locale, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
+
+// ---- milestones, cycles, estimates
+
+/** The estimate menu: the Fibonacci points Linear offers, as the web's. */
+export const ESTIMATE_CHOICES: readonly number[] = [0, 1, 2, 3, 5, 8, 13]
+
+export const estimateLabel = (points: number) => `${points} ${points === 1 ? 'point' : 'points'}`
+
+export const sortMilestones = (milestones: readonly TaskMilestone[]) => [...milestones].sort((a, b) => a.position - b.position || a.name.localeCompare(b.name))
+
+/** `3/8`: done tasks of all the live tasks. */
+export const progressLabel = (item: Pick<TaskMilestone, 'completed_count' | 'task_count' | 'estimate_completed' | 'estimate_total'>) => {
+  const tasks = `${item.completed_count}/${item.task_count} ${item.task_count === 1 ? 'task' : 'tasks'}`
+  return item.estimate_total > 0 ? `${tasks} · ${item.estimate_completed}/${item.estimate_total} pts` : tasks
+}
+
+/** The cycle's name, else `Cycle 3`. */
+export const cycleLabel = (cycle: Pick<TaskCycle, 'name' | 'number'>) => cycle.name?.trim() || `Cycle ${cycle.number}`
+
+export type CycleTiming = 'current' | 'upcoming' | 'past'
+
+/** Where `now` falls: a cycle runs from `starts_at` up to, not including, `ends_at`. */
+export function cycleTiming(cycle: Pick<TaskCycle, 'starts_at' | 'ends_at'>, now: Date): CycleTiming {
+  const time = now.getTime()
+  if (time < Date.parse(cycle.starts_at)) return 'upcoming'
+  return time < Date.parse(cycle.ends_at) ? 'current' : 'past'
+}
+
+/** The picker's order: the current cycle, the upcoming ones soonest first, then the past ones latest first. */
+export function cyclesForPicker(cycles: readonly TaskCycle[], now: Date): TaskCycle[] {
+  const rank: Record<CycleTiming, number> = { current: 0, upcoming: 1, past: 2 }
+  return [...cycles].sort((a, b) => {
+    const byTiming = rank[cycleTiming(a, now)] - rank[cycleTiming(b, now)]
+    if (byTiming !== 0) return byTiming
+    const byStart = a.starts_at.localeCompare(b.starts_at)
+    return cycleTiming(a, now) === 'past' ? -byStart : byStart
+  })
+}
+
+/** By start date, oldest first: the settings list. */
+export const sortCycles = (cycles: readonly TaskCycle[]) => [...cycles].sort((a, b) => a.starts_at.localeCompare(b.starts_at))
+
+/** The last day a cycle covers: its end is exclusive, so the day before `ends_at`. */
+export const cycleLastDay = (cycle: Pick<TaskCycle, 'ends_at'>) => new Date(Date.parse(cycle.ends_at) - 1)
+
+/** `Nov 10 – Nov 23`. */
+export const cycleDates = (cycle: Pick<TaskCycle, 'starts_at' | 'ends_at'>, locale?: string) => `${shortDate(cycle.starts_at, locale)} – ${shortDate(cycleLastDay(cycle).toISOString(), locale)}`
+
+type CycleSpan = Pick<TaskCycle, 'starts_at' | 'ends_at'>
+
+const sameDay = (a: Date, b: Date) => startOfDay(a).getTime() === startOfDay(b).getTime()
+
+/**
+ * The instants a cycle form changed (the web's `changedCycleSpan`): a newly picked first day becomes its local
+ * midnight, a newly picked last day the midnight after it. A day left as shown is left out, so its stored instant
+ * (another time zone's midnight, an imported time) is kept.
+ */
+export function changedCycleSpan(span: CycleSpan, firstDay: Date, lastDay: Date): Partial<CycleSpan> {
+  return {
+    ...(sameDay(firstDay, new Date(span.starts_at)) ? {} : { starts_at: startOfDay(firstDay).toISOString() }),
+    ...(sameDay(lastDay, cycleLastDay(span)) ? {} : { ends_at: dayAfter(lastDay, 1).toISOString() }),
+  }
+}
+
+/**
+ * A new cycle's span: it starts at the instant the latest one ends and lasts as many days (calendar days, so a DST
+ * change does not move the last day); the first one starts today and lasts two weeks.
+ */
+export function nextCycleSpan(cycles: readonly CycleSpan[], now: Date): CycleSpan {
+  const latest = [...cycles].sort((a, b) => b.ends_at.localeCompare(a.ends_at))[0]
+  if (!latest) return { starts_at: startOfDay(now).toISOString(), ends_at: dayAfter(now, 14).toISOString() }
+  const days = Math.max(1, Math.round((Date.parse(latest.ends_at) - Date.parse(latest.starts_at)) / 86_400_000))
+  const end = new Date(latest.ends_at)
+  end.setDate(end.getDate() + days)
+  return { starts_at: latest.ends_at, ends_at: end.toISOString() }
+}
+
+const isProblem = (error: unknown, status: number, code: string) => error instanceof ApiProblem && error.status === status && error.code === code
+const CHANGED = 'Someone else changed it. The list now shows the latest version; try again.'
+
+/** A milestone write's error in words; `fallback` for the rest. */
+export function milestoneErrorMessage(error: unknown, fallback: string): string {
+  if (isProblem(error, 409, 'task_conflict')) return 'This project already has a milestone with that name.'
+  if (isProblem(error, 409, 'conflict')) return CHANGED
+  return error instanceof ApiProblem ? error.detail : fallback
+}
+
+/** A cycle write's error in words; `fallback` for the rest. */
+export function cycleErrorMessage(error: unknown, fallback: string): string {
+  if (isProblem(error, 409, 'cycle_overlap')) return 'These dates overlap another cycle of this project.'
+  if (isProblem(error, 409, 'no_next_cycle')) return 'There is no next cycle to move the tasks to. Create the next cycle first.'
+  if (isProblem(error, 409, 'conflict')) return CHANGED
+  if (isProblem(error, 422, 'validation_failed') && 'ends_at' in ((error as ApiProblem).problem.errors ?? {})) return 'The last day can’t be before the first day.'
+  return error instanceof ApiProblem ? error.detail : fallback
+}
+
+export const isNoNextCycle = (error: unknown) => isProblem(error, 409, 'no_next_cycle')
+
+const pad2 = (n: number) => String(n).padStart(2, '0')
+
+/** A milestone's target as the API takes it: the picked day at noon UTC, so it is the same date in every time zone (the web's `targetDateValue`). */
+export const targetValue = (day: Date | null) => (day ? `${day.getFullYear()}-${pad2(day.getMonth() + 1)}-${pad2(day.getDate())}T12:00:00.000Z` : null)
+
+/** The stored target read back: its UTC day as a local-midnight `Date`, for the date picker and display. */
+export function targetDay(iso: string): Date {
+  const [year, month, date] = iso.slice(0, 10).split('-').map(Number)
+  return new Date(year!, month! - 1, date!)
+}
+
+/** Past its target day (before today) with tasks still unfinished. */
+export function isMilestoneLate(milestone: Pick<TaskMilestone, 'target_at' | 'task_count' | 'completed_count'>, now: Date): boolean {
+  if (!milestone.target_at || milestone.completed_count >= milestone.task_count) return false
+  return targetDay(milestone.target_at) < startOfDay(now)
 }
 
 // ---- labels

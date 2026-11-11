@@ -7,7 +7,7 @@ import { recurrenceChangeText } from '@orbit/api/recurrence'
 
 import { shortDate } from './format'
 import type { CommentRecord, TaskActivityEvent } from './orbit'
-import { PRIORITY_LABEL, type Priority } from './tasks'
+import { estimateLabel, PRIORITY_LABEL, type Priority } from './tasks'
 
 interface Named {
   id: string
@@ -19,6 +19,9 @@ export interface ActivityContext {
   people: readonly Named[]
   labels: readonly Named[]
   projects: readonly Named[]
+  /** The task's project's milestones, and its cycles named by `cycleLabel`. */
+  milestones: readonly Named[]
+  cycles: readonly Named[]
   /** `GEN-12` for a task the app knows, else a neutral word. */
   identifierOf: (taskId: string) => string
   locale?: string
@@ -138,6 +141,16 @@ function changeRows(metadata: Record<string, unknown>, context: ActivityContext)
         if (!end) return [{ field, text: 'removed due date' }]
         return [{ field, text: `set due date to ${start ? `${shortDate(start, context.locale)} – ` : ''}${shortDate(end, context.locale)}` }]
       }
+      case 'milestone': {
+        if (!to) return [{ field, text: 'removed the milestone' }]
+        return [{ field, text: `set milestone to ${context.milestones.find((item) => item.id === to)?.name ?? 'another milestone'}` }]
+      }
+      case 'cycle': {
+        if (!to) return [{ field, text: 'removed the cycle' }]
+        return [{ field, text: `moved to ${context.cycles.find((item) => item.id === to)?.name ?? 'another cycle'}` }]
+      }
+      case 'estimate':
+        return [{ field, text: typeof change.to === 'number' ? `set estimate to ${estimateLabel(change.to)}` : 'removed the estimate' }]
       default:
         return []
     }

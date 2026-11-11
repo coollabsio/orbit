@@ -50,6 +50,11 @@ export const queryKeys = {
     [...workspace(workspaceId), 'projects', projectId, 'statuses'] as const,
   projectMembers: (workspaceId: string, projectId: string) =>
     [...workspace(workspaceId), 'projects', projectId, 'members'] as const,
+  /** Their task counts change with every task write: refetch them with `tasks.all`. */
+  milestones: (workspaceId: string, projectId: string) =>
+    [...workspace(workspaceId), 'projects', projectId, 'milestones'] as const,
+  cycles: (workspaceId: string, projectId: string) =>
+    [...workspace(workspaceId), 'projects', projectId, 'cycles'] as const,
   comments: (workspaceId: string, taskId: string) =>
     [...workspace(workspaceId), 'tasks', 'detail', taskId, 'comments'] as const,
   taskActivity: (workspaceId: string, taskId: string) =>
