@@ -2,7 +2,9 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { ChevronDown } from 'reicon-react'
+import { selectTriggerClassName } from '@/components/ui/select'
+import { SearchPicker } from '@/components/common/SearchPicker'
 import { InfoTip } from '@/components/common/InfoTip'
 import { SettingsCard } from '@/components/common/SettingsCard'
 import { UnsavedBar } from '@/components/common/UnsavedBar'
@@ -81,14 +83,21 @@ function GithubCardContent({ settings, workspaceId, save, remove, onPendingChang
           {settings.can_manage ? <>
             <div className="grid gap-1.5">
               <Label htmlFor="github-repository">Repository</Label>
-              <Select items={repositoryOptions} value={selection} onValueChange={(value) => setSelection(value ?? NO_REPOSITORY)}>
-                <SelectTrigger id="github-repository" className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {repositoryOptions.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}
-                </SelectContent>
-              </Select>
+              <SearchPicker
+                label="Repository"
+                placeholder="Search repositories…"
+                emptyText="No repositories match"
+                options={repositoryOptions}
+                selected={[selection]}
+                onSelect={setSelection}
+                className="w-(--anchor-width) min-w-60"
+                trigger={
+                  <button type="button" id="github-repository" data-size="default" className={selectTriggerClassName}>
+                    <span data-slot="select-value" className="flex flex-1 text-left">{repositoryOptions.find((item) => item.value === selection)?.label ?? 'No repository'}</span>
+                    <ChevronDown className="size-4 text-muted-foreground" aria-hidden="true" />
+                  </button>
+                }
+              />
             </div>
             <div className="grid gap-1.5">
               <Label htmlFor="github-label">

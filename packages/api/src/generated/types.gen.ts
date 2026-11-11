@@ -936,7 +936,13 @@ export type ChatForwardBody = {
 
 export type ChatInteractivityBody = {
     /**
-     * Where clicks go: https (http and local hosts in development). Null turns clicks off.
+     * Also send each member's message in the channel to the request URL (`event_callback`),
+     * and let the webhook's secret read the channel. Needs a request URL.
+     */
+    events?: boolean;
+    /**
+     * Where clicks go: https (http and local hosts in development). Null turns clicks and
+     * events off.
      */
     request_url?: string | null;
 };
@@ -2591,6 +2597,53 @@ export type GroupBy = 'status' | 'assignee' | 'priority' | 'project' | 'label' |
 
 export type GroupOp = 'and' | 'or';
 
+/**
+ * One message as an integration reads it, in Slack's shape.
+ */
+export type HookMessage = {
+    /**
+     * The webhook that posted it; absent for members' messages.
+     */
+    bot_id?: string | null;
+    reply_count?: number | null;
+    /**
+     * Markdown with mention tokens (`<@user_id>`); empty for a deleted message.
+     */
+    text: string;
+    /**
+     * The root of its thread; for a root with replies, its own id.
+     */
+    thread_ts?: string | null;
+    /**
+     * The message id.
+     */
+    ts: string;
+    /**
+     * Always `message`.
+     */
+    type: string;
+    /**
+     * The member who wrote it; for an integration's message, the member who set it up.
+     */
+    user: string;
+    /**
+     * The display name of `user`, or the integration's name for its messages.
+     */
+    username?: string | null;
+};
+
+export type HookMessages = {
+    /**
+     * Oldest first.
+     */
+    messages: Array<HookMessage>;
+    /**
+     * Send it as `before` for the older page; null on the oldest page.
+     */
+    next_before?: string | null;
+    ok: boolean;
+};
+
 export type ImportDatabaseCsvBody = {
     /**
      * One per CSV column, in order (at most 100). Exactly one maps to the title property.
@@ -2639,7 +2692,7 @@ export type ImportSource = 'asana' | 'linear' | 'trello';
 
 /**
  * What a tool posts: the payload of a Slack incoming webhook. Fields that Orbit does not use
- * (`channel`, `thread_ts`, `unfurl_links`) are ignored, so a Slack payload posts as it is.
+ * (`channel`, `unfurl_links`) are ignored, so a Slack payload posts as it is.
  */
 export type IncomingWebhookPayload = {
     /**
@@ -2669,6 +2722,10 @@ export type IncomingWebhookPayload = {
      * `attachments` it is the plain text for notifications and search, and may be left out.
      */
     text?: string | null;
+    /**
+     * The id of a root message in the webhook's channel: the message is a reply in its thread.
+     */
+    thread_ts?: string | null;
     /**
      * The author name of this message only (cut to 80 characters).
      */
@@ -6546,6 +6603,11 @@ export type ReorderItem = {
 export type ReplyPreviewRecord = {
     author_id: string;
     body: string;
+    /**
+     * The integration's name when an integration posted the reply: `author_id` is then only the
+     * member who set it up.
+     */
+    bot_name: string | null;
     created_at: string;
     /**
      * The reply has a sticker: a preview with no text says so.
@@ -7953,6 +8015,11 @@ export type WebhookRecord = {
     conversation_id: string;
     created_at: string;
     created_by: string;
+    /**
+     * Members' messages in the channel are sent to the request URL, and the webhook's secret
+     * can read the channel. Always false without a request URL.
+     */
+    events: boolean;
     /**
      * An https image for the avatar of its messages; null for the default one.
      */
@@ -14728,6 +14795,81 @@ export type StripeWebhookResponses = {
      */
     200: unknown;
 };
+
+export type ReadHookMessagesData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        webhook_id: string;
+    };
+    query?: {
+        /**
+         * The root of a thread: its replies, oldest first. Without it, the channel's main list.
+         */
+        thread_ts?: string;
+        /**
+         * Messages older than this message id, for the next page.
+         */
+        before?: string;
+        /**
+         * 1–100 messages; 50 by default.
+         */
+        limit?: number;
+    };
+    url: '/api/v1/hooks/chat/{webhook_id}/messages';
+};
+
+export type ReadHookMessagesErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * webhook_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * rate_limit_exceeded
+     */
+    429: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ReadHookMessagesError = ReadHookMessagesErrors[keyof ReadHookMessagesErrors];
+
+export type ReadHookMessagesResponses = {
+    200: HookMessages;
+};
+
+export type ReadHookMessagesResponse = ReadHookMessagesResponses[keyof ReadHookMessagesResponses];
 
 export type PostActionResponseData = {
     body: ActionResponsePayload;

@@ -604,7 +604,7 @@ MessageItem,MailHtmlFrame,SafetyBanner,MailSearch}.tsx`), settings in `features/
 Design: `docs/superpowers/specs/2026-10-23-mail-slice-1-design.md` (local file). Operator guide:
 `docs/operations.md#mail`.
 
-Slice 1 receives and reads mail; it does not send. Server (migration 0095):
+Slice 1 receives and reads mail; it does not send. Server (migration 0096):
 
 - Provider intake (`mail_delivery.rs`, `mail_routes/{inbound,providers}.rs`, `crates/mail/src/inbound/`): Cloudflare,
   Postmark, Mailgun, Resend and SES post to `/api/v1/mail/inbound/{kind}/{id}`; instance and workspace providers
@@ -706,6 +706,12 @@ turns its routes, navigation and shortcuts off.
   redirects, public addresses only outside development), and the integration answers through
   `/api/v1/hooks/chat/{id}/responses/{token}` (5 uses, 30 min): replace, delete, `in_channel`, or an ephemeral reply
   (live-only `message.ephemeral` event, `EphemeralMessages.tsx`). The signing secret is encrypted with the app key.
+  With events on (`chat_webhooks.events`, the Interactivity switch), the webhook is a two-way bot
+  (`chat_routes/events.rs`): each member's new message in its channel goes, signed, as a Slack `event_callback`
+  (`app_mention` when the text has `@<webhook name>`, else `message`) to the request URL in the background; its URL
+  secret reads the channel and threads (`GET /api/v1/hooks/chat/{id}/messages`, `Authorization: Bearer`); and
+  `thread_ts` in a post makes a thread reply. A webhook without events only posts. A bot reply adds no avatar to
+  the thread summary and makes its creator follow nothing (`after_reply`).
 - Custom emoji belong to the workspace (Workspace Settings > Emoji, owners and admins): `:name:` stays
   text in the body and in reactions and becomes the image when it is shown.
 - Stickers belong to the workspace too (Workspace Settings > Stickers, owners and admins; 512 KiB, 100 for
