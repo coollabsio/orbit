@@ -167,7 +167,7 @@ function PdfPage({ pdf, number, width }: { pdf: PDFDocumentProxy; number: number
     void pdf.getPage(number).then((page) => {
       const element = canvas.current
       if (cancelled || !element) return
-      const viewport = page.getViewport({ scale: pdfRenderScale(width, pageSize.width, window.devicePixelRatio) })
+      const viewport = page.getViewport({ scale: pdfRenderScale(width, pageSize, window.devicePixelRatio) })
       element.width = Math.floor(viewport.width)
       element.height = Math.floor(viewport.height)
       task = page.render({ canvas: element, viewport })
