@@ -53,19 +53,6 @@ impl ClickSender {
         }
     }
 
-    fn allowed(&self, url: &Url) -> bool {
-        if self.development {
-            return true;
-        }
-        url.scheme() == "https"
-            && match url.host() {
-                Some(Host::Ipv4(ip)) => is_public_ip(IpAddr::V4(ip)),
-                Some(Host::Ipv6(ip)) => is_public_ip(IpAddr::V6(ip)),
-                Some(Host::Domain(_)) => true,
-                None => false,
-            }
-    }
-
     /// Sends one click as a form with the JSON in `payload`, as Slack does.
     async fn send(&self, click: &Click) -> Result<u16, &'static str> {
         let body = url::form_urlencoded::Serializer::new(String::new())
@@ -90,7 +77,7 @@ impl ClickSender {
         body: String,
     ) -> Result<u16, &'static str> {
         let url = Url::parse(request_url).map_err(|_| "invalid_url")?;
-        if !self.allowed(&url) {
+        if !sendable(&url, self.development) {
             return Err("blocked_address");
         }
         let _permit = self.sends.acquire().await.map_err(|_| "unavailable")?;
@@ -122,6 +109,21 @@ impl ClickSender {
             })?;
         Ok(response.status().as_u16())
     }
+}
+
+/// Whether an outgoing request may go to `url`: in development anywhere, else https to a public
+/// IP address or a name (the client's `PublicResolver` checks the name's addresses).
+pub(crate) fn sendable(url: &Url, development: bool) -> bool {
+    if development {
+        return true;
+    }
+    url.scheme() == "https"
+        && match url.host() {
+            Some(Host::Ipv4(ip)) => is_public_ip(IpAddr::V4(ip)),
+            Some(Host::Ipv6(ip)) => is_public_ip(IpAddr::V6(ip)),
+            Some(Host::Domain(_)) => true,
+            None => false,
+        }
 }
 
 /// Slack's request signature: `v0=` and the hex HMAC-SHA256 of `v0:{timestamp}:{body}`.

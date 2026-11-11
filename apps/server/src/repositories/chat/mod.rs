@@ -49,6 +49,7 @@ pub use search::{SearchHitRecord, SearchInput, SearchPage};
 pub use slack::{attachment_blocks, cut, emoji_name, mrkdwn_to_markdown};
 pub use state::{ConversationCursor, ReadSnapshot, StateUpdate, ThreadCursor};
 pub use stickers::{CustomStickerImage, CustomStickerRecord, STICKER_MAX_BYTES, StickerRecord};
+pub(crate) use webhooks::clean_request_url;
 pub use webhooks::{
     BotSender, DeliveryRecord, EventTarget, HookTarget, WebhookInput, WebhookRecord,
     WebhookWithSecret,
