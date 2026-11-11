@@ -27,7 +27,7 @@ function CardRow({ className, ...props }: ComponentProps<typeof Link>) {
 }
 
 function CardEmpty({ children }: { children: React.ReactNode }) {
-  return <div data-slot="card-empty" className="p-4 text-[13px] text-muted-foreground/70">{children}</div>
+  return <div data-slot="card-empty" className="p-4 text-[0.8125rem] text-muted-foreground/70">{children}</div>
 }
 
 /** Quiet trailing detail of a row (identifier, time). */
@@ -56,7 +56,7 @@ function TaskRow({ task, status, now }: { task: Task; status: ComponentProps<typ
     <CardRow to={taskPath(task)}>
       <TaskStatusIcon status={status} />
       <RowMeta>{task.identifier}</RowMeta>
-      <span className="flex-1 truncate text-[13px]">{task.title}</span>
+      <span className="flex-1 truncate text-[0.8125rem]">{task.title}</span>
       {task.dueAt ? <RowMeta className={cn(dueLabel(task.dueAt, now) === 'Overdue' && 'text-destructive')}>{dueLabel(task.dueAt, now)}</RowMeta> : null}
     </CardRow>
   )
@@ -110,7 +110,7 @@ export function HomePage() {
               <h1 className="mb-1.5">
                 {greetingFor(now.getHours())}, {firstName}
               </h1>
-              <p className="text-[13px] text-muted-foreground [&_a]:text-muted-foreground [&_a]:no-underline [&_a:hover]:text-foreground [&_a:hover]:underline">
+              <p className="text-[0.8125rem] text-muted-foreground [&_a]:text-muted-foreground [&_a]:no-underline [&_a:hover]:text-foreground [&_a:hover]:underline">
                 <Link to="/tasks?view=my_week">
                   {weekCount} {weekCount === '1' ? 'task' : 'tasks'} due this week
                 </Link>
@@ -147,7 +147,7 @@ export function HomePage() {
                     return (
                       <CardRow key={notification.id} to={notificationTarget(notification) ?? '/inbox'}>
                         <Inbox className="size-4 shrink-0 text-muted-foreground/70" />
-                        <span className="flex-1 truncate text-[13px]">{notificationCopy(notification, page?.title, actor?.name).title}</span>
+                        <span className="flex-1 truncate text-[0.8125rem]">{notificationCopy(notification, page?.title, actor?.name).title}</span>
                         <RowMeta>{relativeTime(notification.created_at)}</RowMeta>
                       </CardRow>
                     )
@@ -162,7 +162,7 @@ export function HomePage() {
                   recentDocs.map((page) => (
                     <CardRow key={page.id} to={`/docs/${page.id}`}>
                       {page.icon ? <Emoji value={page.icon} /> : <FileText className="size-4 shrink-0 text-muted-foreground/70" />}
-                      <span className="flex-1 truncate text-[13px]">{page.title.trim() || 'Untitled'}</span>
+                      <span className="flex-1 truncate text-[0.8125rem]">{page.title.trim() || 'Untitled'}</span>
                       <RowMeta>{relativeTime(page.updated_at)}</RowMeta>
                     </CardRow>
                   ))

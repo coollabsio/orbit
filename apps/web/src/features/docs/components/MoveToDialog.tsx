@@ -41,7 +41,7 @@ export function MoveToDialog({
       <Command shouldFilter={false} label="Move to" className="gap-2 bg-transparent p-0">
         <CommandInput autoFocus placeholder="Move to a space, page or database…" value={query} onValueChange={setQuery} />
         <CommandList className="max-h-[360px]">
-          <CommandEmpty className="px-3 py-7 text-[13px] text-muted-foreground/70">No pages found</CommandEmpty>
+          <CommandEmpty className="px-3 py-7 text-[0.8125rem] text-muted-foreground/70">No pages found</CommandEmpty>
           {spaces.length > 0 ? (
             <CommandGroup heading="Spaces">
               {spaces.map((space) => (
@@ -71,9 +71,9 @@ export function MoveToDialog({
                     {page.icon ? <Emoji value={page.icon} /> : page.kind === 'database' ? <Grid className="size-4" /> : <FileText className="size-4" />}
                     <span className="flex min-w-0 flex-1 flex-col">
                       <span className="truncate">{pageTitle(page)}</span>
-                      {parent ? <span className="truncate text-[11px] text-muted-foreground/70">{pageTitle(parent)}</span> : null}
+                      {parent ? <span className="truncate text-[0.6875rem] text-muted-foreground/70">{pageTitle(parent)}</span> : null}
                     </span>
-                    {page.kind === 'database' ? <span className="shrink-0 text-[11px] text-muted-foreground/70">As a row</span> : null}
+                    {page.kind === 'database' ? <span className="shrink-0 text-[0.6875rem] text-muted-foreground/70">As a row</span> : null}
                   </CommandItem>
                 )
               })}

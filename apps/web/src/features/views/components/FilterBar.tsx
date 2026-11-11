@@ -157,7 +157,7 @@ export function FilterButton({ filter, options, onChange, onOpenAdvanced }: Filt
           <Filter className="size-4" />
           <span className="max-[899px]:hidden">Filter</span>
           {count > 0 ? (
-            <Badge className="h-4 min-w-4 px-1 text-[10px] tabular-nums">{count}</Badge>
+            <Badge className="h-4 min-w-4 px-1 text-[0.625rem] tabular-nums">{count}</Badge>
           ) : null}
         </Button>
       }

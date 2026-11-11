@@ -16,7 +16,7 @@ export function SetupPage() {
       await setup.mutateAsync({ token, ...form })
       navigate('/onboarding', { replace: true })
     }}>
-      <div role="note" className="rounded-lg border border-primary/30 bg-primary/5 p-3 text-[13px] text-muted-foreground">
+      <div role="note" className="rounded-lg border border-primary/30 bg-primary/5 p-3 text-[0.8125rem] text-muted-foreground">
         <p><strong className="font-semibold text-foreground">This account becomes the root user.</strong> The root user manages this Orbit instance in Admin (accounts, email, backups, audit log) and can choose other admins to help. Nobody else can suspend or reset the root account.</p>
         <p className="mt-1.5">Use a strong password and keep it safe. You create your first workspace in the next step.</p>
       </div>

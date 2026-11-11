@@ -27,11 +27,11 @@ export function DuplicateBanner({ duplicateOf, projects, status, animate, pendin
     <div
       role="note"
       aria-label={`Duplicate of ${identifier}`}
-      className={cn('mb-5 flex min-h-10 min-w-0 items-center gap-2 border-b pb-2 text-[13px] text-muted-foreground', animate && 'animate-relation-enter')}
+      className={cn('mb-5 flex min-h-10 min-w-0 items-center gap-2 border-b pb-2 text-[0.8125rem] text-muted-foreground', animate && 'animate-relation-enter')}
     >
       <TaskStatusIcon status={status ?? DUPLICATE_FALLBACK} />
       <span className="shrink-0">Duplicate of</span>
-      <Button type="button" variant="link" className="h-auto min-w-0 shrink p-0 text-[13px] font-normal text-foreground" onClick={() => onOpen(duplicateOf.id)}>
+      <Button type="button" variant="link" className="h-auto min-w-0 shrink p-0 text-[0.8125rem] font-normal text-foreground" onClick={() => onOpen(duplicateOf.id)}>
         <span className="shrink-0 text-muted-foreground tabular-nums">{identifier}</span>
         <span className="truncate font-medium">{duplicateOf.title || 'Untitled'}</span>
       </Button>

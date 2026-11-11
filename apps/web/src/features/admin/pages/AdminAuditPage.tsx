@@ -21,7 +21,7 @@ export function AdminAuditPage() {
       }
       flush
     >
-      <div className="flex flex-col divide-y text-[13px]">
+      <div className="flex flex-col divide-y text-[0.8125rem]">
         {audit.isPending ? <SettingsRow><LoadingText>Loading events…</LoadingText></SettingsRow> : null}
         {audit.isError ? <SettingsRow role="alert">Events could not be loaded. <Button variant="ghost" onClick={() => void audit.refetch()}>Retry</Button></SettingsRow> : null}
         {audit.data?.length === 0 ? <SettingsRow className="text-muted-foreground">No events yet.</SettingsRow> : null}

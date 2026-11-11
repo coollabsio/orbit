@@ -16,7 +16,7 @@ export function AgenticPage() {
         <div className="flex flex-col gap-4">
           {mcpClientCommands(url).map((entry) => (
             <div key={entry.client} className="flex flex-col gap-1.5">
-              <p className="text-[13px] font-medium text-foreground">{entry.client}</p>
+              <p className="text-[0.8125rem] font-medium text-foreground">{entry.client}</p>
               <CodeBlock text={entry.command} />
               <p className="text-xs text-muted-foreground">{entry.signIn}</p>
             </div>

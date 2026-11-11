@@ -120,32 +120,32 @@ function StorageCard({ workspaceId }: { workspaceId: string }) {
       title="Usage"
       description="Files, emoji and stickers of this workspace. A file attached more than once counts once; a deleted file stops counting about a day after the trash is emptied."
     >
-      {storage.isPending ? <p className="text-[13px] text-muted-foreground"><LoadingText>Loading storage…</LoadingText></p> : null}
-      {storage.isError ? <p role="alert" className="text-[13px] text-destructive">Storage use could not be loaded.</p> : null}
+      {storage.isPending ? <p className="text-[0.8125rem] text-muted-foreground"><LoadingText>Loading storage…</LoadingText></p> : null}
+      {storage.isError ? <p role="alert" className="text-[0.8125rem] text-destructive">Storage use could not be loaded.</p> : null}
       {storage.data ? (
         <Progress
           value={quota ? percent : null}
           className={cn('gap-2', !quota && '[&_[data-slot=progress-track]]:hidden', percent >= 90 && '[&_[data-slot=progress-indicator]]:bg-destructive')}
         >
-          <ProgressLabel className="text-[13px] text-foreground">Used</ProgressLabel>
-          <span className="ml-auto text-[13px] text-muted-foreground tabular-nums">
+          <ProgressLabel className="text-[0.8125rem] text-foreground">Used</ProgressLabel>
+          <span className="ml-auto text-[0.8125rem] text-muted-foreground tabular-nums">
             {quota ? `${formatBytes(used)} of ${formatBytes(quota)}` : `${formatBytes(used)} · no limit`}
           </span>
         </Progress>
       ) : null}
       {storage.data?.largest_files.length ? (
         <div className="mt-5 flex flex-col gap-2">
-          <h3 className="text-[13px] font-medium text-foreground">Largest files</h3>
+          <h3 className="text-[0.8125rem] font-medium text-foreground">Largest files</h3>
           <ul className="flex flex-col divide-y rounded-lg border">
             {storage.data.largest_files.map((file) => {
               const { name, where } = storageFileLabel(file)
               return (
                 <li key={file.id} className="flex items-center gap-3 px-3 py-2">
                   <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-                    <span className="truncate text-[13px] text-foreground">{name}</span>
+                    <span className="truncate text-[0.8125rem] text-foreground">{name}</span>
                     <span className="truncate text-xs text-muted-foreground">{where}</span>
                   </div>
-                  <span className="shrink-0 text-[13px] text-muted-foreground tabular-nums">{formatBytes(file.byte_size)}</span>
+                  <span className="shrink-0 text-[0.8125rem] text-muted-foreground tabular-nums">{formatBytes(file.byte_size)}</span>
                   {canDeleteStorageFile(file) ? (
                     <Button variant="ghost" size="sm" aria-label={`Delete ${name}`} disabled={deleteFile.isPending} onClick={() => void remove(file)}>Delete</Button>
                   ) : null}

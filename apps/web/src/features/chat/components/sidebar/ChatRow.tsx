@@ -16,7 +16,7 @@ export function ChatRow({ className, ...props }: ComponentProps<'div'>) {
     <div
       data-slot="chat-row"
       className={cn(
-        'group/row relative flex h-8 min-w-0 shrink-0 items-center rounded-md text-[13px] text-foreground/80 has-[a:focus-visible]:ring-2 has-[a:focus-visible]:ring-ring/50 has-[a:focus-visible]:ring-inset data-[active=true]:bg-[var(--chat-selected,var(--sidebar-accent))] data-[active=true]:[--foreground:var(--chat-selected-foreground,var(--sidebar-accent-foreground))] data-[active=true]:[--muted-foreground:var(--chat-selected-foreground,var(--sidebar-accent-foreground))] data-[active=true]:text-foreground hover-fine:not-data-[active=true]:hover:bg-sidebar-accent/60 max-[899px]:h-10 max-[899px]:text-sm',
+        'group/row relative flex h-8 min-w-0 shrink-0 items-center rounded-md text-[0.8125rem] text-foreground/80 has-[a:focus-visible]:ring-2 has-[a:focus-visible]:ring-ring/50 has-[a:focus-visible]:ring-inset data-[active=true]:bg-[var(--chat-selected,var(--sidebar-accent))] data-[active=true]:[--foreground:var(--chat-selected-foreground,var(--sidebar-accent-foreground))] data-[active=true]:[--muted-foreground:var(--chat-selected-foreground,var(--sidebar-accent-foreground))] data-[active=true]:text-foreground hover-fine:not-data-[active=true]:hover:bg-sidebar-accent/60 max-[899px]:h-10 max-[899px]:text-sm',
         className,
       )}
       {...props}
@@ -56,7 +56,7 @@ export function CountBadge({ count, className }: { count: number; className?: st
     <span
       data-slot="count-badge"
       aria-hidden="true"
-      className={cn('inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-primary px-1 text-[10px] leading-none font-semibold text-primary-foreground tabular-nums', className)}
+      className={cn('inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-primary px-1 text-[0.625rem] leading-none font-semibold text-primary-foreground tabular-nums', className)}
     >
       {count > 99 ? '99+' : count}
     </span>

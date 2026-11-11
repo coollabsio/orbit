@@ -55,8 +55,8 @@ export function ProviderCallbackPage() {
     return (
       <AuthCard>
         <h1 className="mb-1 text-xl font-semibold">{problem?.problem.title ?? 'Sign-in expired'}</h1>
-        <p role="alert" className="text-[13px] leading-[1.6] text-muted-foreground">{problem ? problem.detail : error ? 'The server could not complete the sign-in. Try again.' : 'This sign-in has expired or was opened in another tab. Start again.'}</p>
-        <p className="mt-4 text-[13px]">
+        <p role="alert" className="text-[0.8125rem] leading-[1.6] text-muted-foreground">{problem ? problem.detail : error ? 'The server could not complete the sign-in. Try again.' : 'This sign-in has expired or was opened in another tab. Start again.'}</p>
+        <p className="mt-4 text-[0.8125rem]">
           {signingIn
             ? <Link to="/login" className="font-medium text-foreground">Back to sign in</Link>
             : <Link to={settingsDestination(returnTo)} className="font-medium text-foreground">Back to settings</Link>}

@@ -96,7 +96,7 @@ function UsageCard({ storage }: { storage: StorageView }) {
     <SettingsCard title="Usage" description="What Orbit keeps in the bucket, and how often it backs up by itself." flush>
       <div className="flex flex-col divide-y">
         <SettingsRow className="flex-nowrap">
-          <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-[13px]">
+          <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-[0.8125rem]">
             {ready ? <span className="inline-flex items-center gap-1.5 font-medium text-foreground">Attachments in S3 <InfoTip text="On: new files go to the bucket and existing files move there in the background. Off: they move back to this server." /></span> : <span className="font-medium text-foreground">Attachments in S3</span>}
             {ready ? null : <span className="text-xs text-muted-foreground">Save a bucket above first.</span>}
             {moving ? (
@@ -116,7 +116,7 @@ function UsageCard({ storage }: { storage: StorageView }) {
           />
         </SettingsRow>
         <SettingsRow className="flex-nowrap">
-          <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-[13px]">
+          <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-[0.8125rem]">
             {ready ? <span className="inline-flex items-center gap-1.5 font-medium text-foreground">Backups in S3 <InfoTip text="On: each new backup is uploaded to the bucket and removed from this server, so a lost server loses no backups." /></span> : <span className="font-medium text-foreground">Backups in S3</span>}
             {ready ? null : <span className="text-xs text-muted-foreground">Save a bucket above first.</span>}
           </div>
@@ -128,7 +128,7 @@ function UsageCard({ storage }: { storage: StorageView }) {
           />
         </SettingsRow>
         <SettingsRow className="flex-nowrap">
-          <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-[13px]">
+          <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-[0.8125rem]">
             <span className="inline-flex items-center gap-1.5 font-medium text-foreground">Automatic backups <InfoTip text="Orbit keeps the newest backup of each of the last 7 days and 4 weeks." /></span>
           </div>
           <Select
@@ -158,7 +158,7 @@ function ImagesCard({ status }: { status: CompressionStatus }) {
   return (
     <SettingsCard title="Images" description="Large images keep their original size if they were uploaded before Orbit made images smaller on upload." flush>
       <SettingsRow className="flex-nowrap">
-        <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-[13px]">
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-[0.8125rem]">
           <span className="inline-flex items-center gap-1.5 font-medium text-foreground">Compress images <InfoTip text="Scales JPEG, PNG and WebP images of 512 KB or more to at most 2560 px and saves them as WebP. The originals are replaced; GIFs and other files stay as they are." /></span>
           {status.running ? <LoadingText className="text-xs">Compressing… {done} {done === 1 ? 'file' : 'files'} checked. {summary}</LoadingText> : null}
           {!status.running && done > 0 ? <span role="status" className="text-xs text-muted-foreground">Done. {summary}</span> : null}

@@ -62,10 +62,10 @@ export function ViewsPage() {
     <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-background">
       <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3 max-[899px]:h-auto max-[899px]:min-h-11 max-[899px]:flex-wrap max-[899px]:px-2 max-[899px]:py-1.5">
         {/* views are a Tasks feature: the header says so and leads back */}
-        <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-2 pl-1 text-[13px]">
+        <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-2 pl-1 text-[0.8125rem]">
           <Link to="/tasks" className="font-medium text-muted-foreground transition-colors hover:text-foreground">Tasks</Link>
           <span aria-hidden="true" className="text-muted-foreground/70 select-none">/</span>
-          <h1 className="text-[13px] font-semibold text-foreground">Views</h1>
+          <h1 className="text-[0.8125rem] font-semibold text-foreground">Views</h1>
         </nav>
         <div className="flex-1" />
         {/* with no views, the empty state in the center carries the only "New view" button */}
@@ -81,7 +81,7 @@ export function ViewsPage() {
       </div>
       <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto">
         {viewsQuery.isPending ? (
-          <p className="p-4 text-[13px] text-muted-foreground"><LoadingText>Loading views…</LoadingText></p>
+          <p className="p-4 text-[0.8125rem] text-muted-foreground"><LoadingText>Loading views…</LoadingText></p>
         ) : loadFailed(viewsQuery) ? (
           <div className="flex h-full flex-col p-2 *:flex-1">
             <EmptyState icon={Layer} title="Views unavailable" description="The server could not load views." />
@@ -101,7 +101,7 @@ export function ViewsPage() {
             />
           </div>
         ) : sections.length === 0 ? (
-          <p className="px-4 py-6 text-[13px] text-muted-foreground">No views match “{search.trim()}”.</p>
+          <p className="px-4 py-6 text-[0.8125rem] text-muted-foreground">No views match “{search.trim()}”.</p>
         ) : (
           sections.map((section) => <ViewSection key={section.key} section={section} {...rowActions} />)
         )}
@@ -271,11 +271,11 @@ function ViewRow({ view, members, workspaceId, onEdit, onDuplicate, drag }: RowA
           draggable={drag ? false : undefined}
           aria-keyshortcuts={drag ? 'Alt+ArrowUp Alt+ArrowDown' : undefined}
           onKeyDown={drag?.onKeyDown}
-          className="min-w-0 shrink-0 truncate text-[13px] font-medium text-foreground outline-none after:absolute after:inset-0 max-[640px]:shrink"
+          className="min-w-0 shrink-0 truncate text-[0.8125rem] font-medium text-foreground outline-none after:absolute after:inset-0 max-[640px]:shrink"
         >
           {view.name}
         </Link>
-        {view.description ? <span className="min-w-0 truncate text-[13px] text-muted-foreground max-[640px]:hidden">{view.description}</span> : null}
+        {view.description ? <span className="min-w-0 truncate text-[0.8125rem] text-muted-foreground max-[640px]:hidden">{view.description}</span> : null}
       </div>
       <span className="flex w-44 shrink-0 items-center gap-1.5 text-xs text-muted-foreground max-[899px]:hidden" title="Filters">
         <Filter className="size-3.5 shrink-0 opacity-70" aria-hidden="true" />

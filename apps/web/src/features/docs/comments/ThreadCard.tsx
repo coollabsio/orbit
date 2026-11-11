@@ -113,14 +113,14 @@ export const ThreadCard = memo(function ThreadCard({ thread, selected = false, o
       <header className="flex items-start gap-2">
         <div className={cn('min-w-0 flex-1', thread.resolved && 'opacity-70')}>
           {orphaned ? (
-            <span className="mb-1 inline-flex h-[18px] items-center rounded bg-muted px-1.5 text-[11px] font-medium text-muted-foreground" data-thread-orphaned="">
+            <span className="mb-1 inline-flex h-[18px] items-center rounded bg-muted px-1.5 text-[0.6875rem] font-medium text-muted-foreground" data-thread-orphaned="">
               Text removed
             </span>
           ) : null}
           {quote ? (
             <p
               className={cn(
-                'line-clamp-2 border-l-2 pl-2 text-xs leading-[18px] text-muted-foreground [overflow-wrap:anywhere]',
+                'line-clamp-2 border-l-2 pl-2 text-xs leading-[1.125rem] text-muted-foreground [overflow-wrap:anywhere]',
                 orphaned ? 'border-border line-through decoration-muted-foreground/50' : 'border-amber-400 dark:border-amber-400/70',
               )}
               title={quote}
@@ -213,7 +213,7 @@ function CommentRow({ thread, comment }: { thread: ThreadData; comment: CommentD
       <MemberAvatar userId={comment.userId} size={24} />
       <div className="min-w-0 flex-1">
         <div className="flex h-6 items-center gap-1.5">
-          <ProfileTrigger userId={member?.id} name={name} className="min-w-0 truncate text-[13px] font-medium text-foreground">
+          <ProfileTrigger userId={member?.id} name={name} className="min-w-0 truncate text-[0.8125rem] font-medium text-foreground">
             <span data-comment-author="">{name}</span>
           </ProfileTrigger>
           <time className="shrink-0 text-xs text-muted-foreground" dateTime={comment.createdAt.toISOString()} title={fullDate(comment.createdAt.toISOString())}>
@@ -275,7 +275,7 @@ function ReplyArea({ threadId, editor }: { threadId: string; editor?: AnyComment
     return (
       <button
         type="button"
-        className="flex h-8 w-full items-center rounded-lg border border-input bg-transparent px-2.5 text-left text-[13px] text-muted-foreground transition-colors hover:border-ring/60 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none dark:bg-input/30"
+        className="flex h-8 w-full items-center rounded-lg border border-input bg-transparent px-2.5 text-left text-[0.8125rem] text-muted-foreground transition-colors hover:border-ring/60 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none dark:bg-input/30"
         data-reply-trigger=""
         onClick={() => setOpen(true)}
         onFocus={() => setOpen(true)}

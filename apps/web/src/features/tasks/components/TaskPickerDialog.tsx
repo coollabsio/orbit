@@ -41,19 +41,19 @@ export function TaskPickerDialog({ open, onOpenChange, title, statuses, excludeI
         showCloseButton={false}
         className="top-[12vh] max-h-[min(60vh,28rem)] translate-y-0 gap-0 overflow-hidden p-0 sm:max-w-[576px]"
       >
-        <DialogTitle className="px-3.5 pt-3 pb-1.5 text-[13px] font-medium text-muted-foreground">{title}</DialogTitle>
+        <DialogTitle className="px-3.5 pt-3 pb-1.5 text-[0.8125rem] font-medium text-muted-foreground">{title}</DialogTitle>
         <DialogDescription className="sr-only">Search tasks by title or identifier.</DialogDescription>
         {/* the list is filtered here (server search + client identifier match); cmdk owns highlight and keys */}
         <Command shouldFilter={false} className="min-h-0 bg-transparent p-0">
           <CommandInput autoFocus placeholder="Search tasks…" value={query} onValueChange={setQuery} />
           <CommandList className="mx-1.5 mt-1 mb-1.5 max-h-none min-h-0 flex-1 rounded-lg bg-background p-1 ring-1 ring-border">
-            <CommandEmpty className="p-6 text-[13px] text-muted-foreground">{loading ? 'Searching…' : 'No matching tasks'}</CommandEmpty>
+            <CommandEmpty className="p-6 text-[0.8125rem] text-muted-foreground">{loading ? 'Searching…' : 'No matching tasks'}</CommandEmpty>
             <CommandGroup className="p-0">
               {candidates.map((task) => (
                 <CommandItem
                   key={task.id}
                   value={task.id}
-                  className="h-9 gap-2.5 px-2.5 text-[13px]"
+                  className="h-9 gap-2.5 px-2.5 text-[0.8125rem]"
                   onSelect={() => {
                     // the popup stays clickable through its exit animation: a second click must not pick again
                     if (closing) return

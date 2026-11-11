@@ -43,7 +43,7 @@ export function PageLinkDialog({
       <Command shouldFilter={false} label={TEXT[kind].title} className="gap-2 bg-transparent p-0">
         <CommandInput autoFocus placeholder={TEXT[kind].placeholder} value={query} onValueChange={setQuery} />
         <CommandList className="max-h-[320px]">
-          <CommandEmpty className="px-3 py-7 text-[13px] text-muted-foreground/70">{TEXT[kind].empty}</CommandEmpty>
+          <CommandEmpty className="px-3 py-7 text-[0.8125rem] text-muted-foreground/70">{TEXT[kind].empty}</CommandEmpty>
           {results.map((page) => {
             const parent = ancestorsOf(pages, page.id).at(-1)
             return (
@@ -56,7 +56,7 @@ export function PageLinkDialog({
                 {page.icon ? <Emoji value={page.icon} /> : page.kind === 'database' ? <Grid className="size-4" /> : <FileText className="size-4" />}
                 <span className="flex min-w-0 flex-1 flex-col">
                   <span className="truncate">{pageTitle(page)}</span>
-                  {parent ? <span className="truncate text-[11px] text-muted-foreground/70">{pageTitle(parent)}</span> : null}
+                  {parent ? <span className="truncate text-[0.6875rem] text-muted-foreground/70">{pageTitle(parent)}</span> : null}
                 </span>
               </CommandItem>
             )
