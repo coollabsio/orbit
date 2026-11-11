@@ -14,6 +14,9 @@ import { alpha, cssColors, mix, useButtonStyle, useCustomTheme, useTheme } from 
 import { ColorScope } from '../theme/ColorScope'
 import { CountBadge, Icon, type IconName, useReduceMotion } from '../ui'
 import { NewProjectSheet } from './NewProjectSheet'
+import { ActionSheet } from './settings/Dialog'
+import { useProjectOrder } from '../hooks/tasks'
+import { moveProject, orderProjects } from '@orbit/api/projectOrder'
 import { DRAWER_AREA_TITLES, type DrawerArea, drawerAreaOf, drawerSections, TASK_PRESETS, tasksHref } from './drawerAreas'
 import { ACCOUNT_NAV, ADMIN_NAV, allowedNav, WORKSPACE_NAV } from './settings/Shell'
 import { guestSettings, isGuestRole } from '../data/guest'
@@ -113,6 +116,8 @@ interface NavLink {
   icon: IconName
   /** A project's colour: a dot replaces the icon tile. */
   color?: string
+  /** A private project: a lock follows the label. */
+  locked?: boolean
   href: Href
   active: boolean
   badge?: number
@@ -294,9 +299,18 @@ function DrawerPanel({ mounted, width, onClose }: { mounted: boolean; width: num
  * keeps the project and a project keeps the preset. The web's Favorite views are left out: the app has no saved views.
  */
 function TasksArea({ view, project, onTasks, onBack, go }: { view?: string; project?: string; onTasks: boolean; onBack: () => void; go: (href: Href) => void }) {
-  const projects = useProjects().data ?? []
+  const { order, save } = useProjectOrder()
+  const projects = orderProjects(useProjects().data ?? [], order)
   const [creating, setCreating] = useState(false)
+  // the project whose Move up / Move down sheet is open (long press, as the Docs teamspaces)
+  const [moving, setMoving] = useState<{ id: string; name: string } | null>(null)
   const current = { view, project }
+  const ids = projects.map((item) => item.id)
+  const movingIndex = moving ? ids.indexOf(moving.id) : -1
+  const move = (to: number) => {
+    const next = moving ? moveProject(ids, moving.id, to) : null
+    if (next) save.mutate(next)
+  }
   const row = (link: NavLink) => <NavRow key={String(link.href)} link={link} onPress={() => go(link.href)} />
   return (
     <>
@@ -310,11 +324,23 @@ function TasksArea({ view, project, onTasks, onBack, go }: { view?: string; proj
         <>
           <Section label="Projects" />
           {row({ label: 'All projects', icon: 'folder', href: tasksHref(current, { project: null }), active: onTasks && !project })}
-          {projects.map((item) => row({ label: item.name, icon: 'folder', color: item.color, href: tasksHref(current, { project: item.id }), active: onTasks && project === item.id }))}
+          {projects.map((item) => {
+            const link: NavLink = { label: item.name, icon: 'folder', color: item.color, locked: item.private, href: tasksHref(current, { project: item.id }), active: onTasks && project === item.id }
+            return <NavRow key={item.id} link={link} onPress={() => go(link.href)} onLongPress={() => setMoving({ id: item.id, name: item.name })} />
+          })}
         </>
       ) : <Section label="Projects" />}
       <NavRow link={{ label: 'New project', icon: 'plus', href: '/tasks', active: false }} onPress={() => setCreating(true)} />
       <NavRow link={{ label: 'Trash', icon: 'trash', href: '/tasks/trash', active: false }} onPress={() => go('/tasks/trash')} />
+      <ActionSheet
+        visible={moving !== null}
+        title={moving?.name}
+        actions={[
+          { label: 'Move up', icon: 'arrowUp', disabled: movingIndex <= 0, onPress: () => move(movingIndex - 1) },
+          { label: 'Move down', icon: 'arrowDown', disabled: movingIndex < 0 || movingIndex >= ids.length - 1, onPress: () => move(movingIndex + 1) },
+        ]}
+        onClose={() => setMoving(null)}
+      />
       <NewProjectSheet visible={creating} onClose={() => setCreating(false)} onCreated={(created) => {
         setCreating(false)
         go(tasksHref(current, { project: created.id }))
@@ -367,17 +393,19 @@ function BackRow({ label, onPress }: { label: string; onPress: () => void }) {
  * The web `SidebarNavItem`: a 36px row with a 30px icon tile; the current row's tile turns pink. The Flat style has no
  * tile: an 18px icon on a 32px row, and the current row is filled.
  */
-function NavRow({ link, onPress, comingSoon = false, tone = 'brand' }: { link: NavLink; onPress?: () => void; comingSoon?: boolean; tone?: TileTone }) {
+function NavRow({ link, onPress, onLongPress, comingSoon = false, tone = 'brand' }: { link: NavLink; onPress?: () => void; onLongPress?: () => void; comingSoon?: boolean; tone?: TileTone }) {
   const { colors } = useTheme()
   const flat = useButtonStyle() === 'flat'
   const shape = flat ? `h-8 rounded-md pl-2.5 ${link.active ? 'bg-black/5 dark:bg-white/6' : 'active:bg-black/4 dark:active:bg-white/5'}` : 'h-9 pl-1'
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={link.badge ? `${link.label}, ${link.badge} unread` : link.dot ? `${link.label}, unread` : link.label}
+      accessibilityLabel={`${link.label}${link.locked ? ', private' : ''}${link.badge ? `, ${link.badge} unread` : link.dot ? ', unread' : ''}`}
       accessibilityState={{ selected: link.active, disabled: comingSoon }}
       disabled={comingSoon || !onPress}
       onPress={onPress}
+      onLongPress={onLongPress}
+      accessibilityHint={onLongPress ? 'Long press to move' : undefined}
       className={`flex-row items-center gap-2.5 pr-2.5 ${shape} ${comingSoon ? 'opacity-[0.48]' : ''}`}
     >
       {({ pressed }) => (
@@ -395,6 +423,7 @@ function NavRow({ link, onPress, comingSoon = false, tone = 'brand' }: { link: N
           <RNText numberOfLines={1} className={`flex-1 font-noto-medium text-[13px] ${link.active || pressed ? 'text-sidebar-nav-active' : 'text-sidebar-nav'}`}>
             {link.label}
           </RNText>
+          {link.locked ? <Icon name="lock" size={12} color={alpha(colors.sidebarNav, 0.7)} /> : null}
           {comingSoon ? <RNText className="font-noto-medium text-[10px] text-muted-foreground/70">Coming soon</RNText> : null}
           {link.badge ? <CountBadge count={link.badge} /> : link.dot ? <View className="mr-1 size-2 rounded-full bg-primary" /> : null}
         </>

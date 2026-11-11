@@ -34,6 +34,7 @@ Mail still uses isolated frontend seed data, and `/mail` redirects to `/tasks`. 
 Core files: `TasksPage.tsx`, `components/TaskList.tsx`, `components/TaskBoard.tsx`, `components/TaskDetail.tsx`, `ProjectSettingsPage.tsx`.
 
 - Project rail: color square, project name, hover settings gear.
+- Sidebar project order is per member (`project_positions`, migration 0099, `GET`/`PUT /project-order`): drag a project row or press Alt+Arrow on it (web), long-press → Move up / Move down (mobile drawer). Projects not placed yet follow by name; the API project list stays by name.
 - The task-list title is a project picker: All tasks or any project can be selected without opening the project rail.
 - List and Kanban layouts share filtering and sorting.
 - Sorting: manual, priority, created, updated, title.
@@ -163,6 +164,7 @@ Core files: `apps/server/src/repositories/sub_issues.rs` (parent checks, tree wa
 - Categories are Unstarted, Started, Completed, Cancelled.
 - Project settings can add, edit, delete, and reorder statuses inside a category.
 - General project settings use a local draft and bottom unsaved-changes bar.
+- Access (#37, migration 0093): a project is Workspace (every non-guest member) or Private (members listed in `project_members`, plus workspace owners and admins, who are not listed). Project settings → Access switches it and adds or removes people (anyone who sees the project may; creating or making it private lists the actor). The rule is `Policy::can_see_project`; `repositories/project_access.rs` is its only SQL form (`ProjectScope`, `user_sees_project_sql`). An unseen project and everything in it (tasks, comments, labels, statuses, files, relations, parent/duplicate data, inbox, push, collab, API tokens, OAuth/MCP grants) answers like a missing one. Assigning someone who cannot see the project is 422; web and mobile assignee and mention pickers offer only people who see it. Private projects show a lock (sidebar/drawer, pickers). Known gaps: the `blocked` flag and activity metadata can still reflect a private related task; existing assignees keep their assignment after losing access.
 
 ## Docs
 
@@ -622,7 +624,12 @@ turns its routes, navigation and shortcuts off.
   group), shared categories, personal favorites. `#general` has every member.
 - Threads are the only reply model (side pane and full view), with follow state for each member.
 - Reactions, pins, files, mentions (`@user`, `@channel`, `@here`, `#channel`), search, the
-  Unreads and Threads views, a notify level for each conversation.
+  Unreads and Threads views, a notify level for each conversation. Unreads also has a group for each thread with
+  unread replies, followed or not, in a joined conversation that is not muted (`GET …/chat/unread-threads`,
+  `unreadGroups` in `lib/sidebar.ts`). Following only decides notifications and the Threads view. In a thread with no
+  `chat_thread_members` row, the replies after the later of `chat_members.joined_at` and `threads_read_to` (migration
+  0094: the newest message at upgrade) are unread; reading the thread or "Mark all as read" writes a row that does not
+  follow. A reply also sent to the channel shows in the channel's group only.
 - Unread and mention counts come from the server (counters, not count queries).
 - Live updates, typing and presence come over the workspace's live socket
   (`GET /api/v1/workspaces/{id}/live`).
@@ -656,6 +663,12 @@ turns its routes, navigation and shortcuts off.
   redirects, public addresses only outside development), and the integration answers through
   `/api/v1/hooks/chat/{id}/responses/{token}` (5 uses, 30 min): replace, delete, `in_channel`, or an ephemeral reply
   (live-only `message.ephemeral` event, `EphemeralMessages.tsx`). The signing secret is encrypted with the app key.
+  With events on (`chat_webhooks.events`, the Interactivity switch), the webhook is a two-way bot
+  (`chat_routes/events.rs`): each member's new message in its channel goes, signed, as a Slack `event_callback`
+  (`app_mention` when the text has `@<webhook name>`, else `message`) to the request URL in the background; its URL
+  secret reads the channel and threads (`GET /api/v1/hooks/chat/{id}/messages`, `Authorization: Bearer`); and
+  `thread_ts` in a post makes a thread reply. A webhook without events only posts. A bot reply adds no avatar to
+  the thread summary and makes its creator follow nothing (`after_reply`).
 - Custom emoji belong to the workspace (Workspace Settings > Emoji, owners and admins): `:name:` stays
   text in the body and in reactions and becomes the image when it is shown.
 - Stickers belong to the workspace too (Workspace Settings > Stickers, owners and admins; 512 KiB, 100 for

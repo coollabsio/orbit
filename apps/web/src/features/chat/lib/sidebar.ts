@@ -1,4 +1,4 @@
-import type { Category, Conversation, ConversationState, FollowedThread } from '../api/types'
+import type { Category, Conversation, ConversationState, FollowedThread, Message } from '../api/types'
 
 export interface RowBadge {
   /** Bold name. */
@@ -54,18 +54,47 @@ export interface UnreadConversation {
   state: ConversationState
 }
 
-/** The groups of the Unreads view, newest activity first. Muted conversations never show here. */
-export function unreadConversations(
+/**
+ * A group of the Unreads view: a conversation's unread messages, or a thread's unread replies. `channel` is the state of
+ * the thread's conversation when that conversation has its own group too.
+ */
+export type UnreadGroup =
+  | ({ kind: 'conversation' } & UnreadConversation)
+  | { kind: 'thread'; conversation: Conversation; thread: FollowedThread; channel: ConversationState | null }
+
+/** A reply that was also sent to the channel and that the channel's group shows: its thread group leaves it out. */
+export function inChannelGroup(reply: Message, channel: ConversationState | null): boolean {
+  return reply.alsoInChannel && channel !== null && (channel.lastReadMessageId === null || reply.id > channel.lastReadMessageId)
+}
+
+const threadActivity = (thread: FollowedThread) => thread.lastReply?.createdAt ?? thread.root.lastReplyAt ?? thread.root.createdAt
+
+const groupActivity = (group: UnreadGroup) => (group.kind === 'thread' ? threadActivity(group.thread) : lastActivity(group.conversation))
+
+/**
+ * The groups of the Unreads view, newest activity first: unread conversations, and threads with unread replies (followed
+ * or not, from `listUnreadThreads`) in conversations the user is a member of. Muted and archived conversations never
+ * show here, nor do their threads: the list is checked again against the live states.
+ */
+export function unreadGroups(
   conversations: readonly Conversation[],
   states: readonly ConversationState[],
-): UnreadConversation[] {
+  unreadThreads: readonly FollowedThread[],
+): UnreadGroup[] {
   const stateById = new Map(states.map((state) => [state.conversationId, state]))
-  return conversations
-    .flatMap((conversation) => {
-      const state = stateById.get(conversation.id)
-      return state && conversationBadge(conversation, state).inUnreads ? [{ conversation, state }] : []
-    })
-    .sort((a, b) => lastActivity(b.conversation) - lastActivity(a.conversation))
+  const conversationGroups = conversations.flatMap((conversation): UnreadGroup[] => {
+    const state = stateById.get(conversation.id)
+    return state && conversationBadge(conversation, state).inUnreads ? [{ kind: 'conversation', conversation, state }] : []
+  })
+  const threadGroups = unreadThreads.flatMap((thread): UnreadGroup[] => {
+    if (thread.state.unreadReplies === 0) return []
+    const conversation = conversations.find((item) => item.id === thread.conversationId)
+    const state = stateById.get(thread.conversationId)
+    if (!conversation || !state || !conversation.isMember || conversation.archived || state.notify === 'muted') return []
+    const channel = conversationGroups.some((group) => group.conversation.id === conversation.id) ? state : null
+    return [{ kind: 'thread', conversation, thread, channel }]
+  })
+  return [...conversationGroups, ...threadGroups].sort((a, b) => groupActivity(b) - groupActivity(a))
 }
 
 export interface ChatPerson {

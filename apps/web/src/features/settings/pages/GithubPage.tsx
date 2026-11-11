@@ -39,10 +39,9 @@ export function GithubPage() {
   if (query.data === undefined) return <SettingsCard title="GitHub">Loading GitHub settings.</SettingsCard>
   const settings = query.data
 
-  return <SettingsCard title="GitHub" description="Manage the GitHub App for this workspace. Connect repositories to projects in each project's settings.">
+  return <SettingsCard title="GitHub" description={`Manage the GitHub App for this workspace. Connect repositories to projects in each project's settings. ${settings.app_slug ? "After installation, open a project's settings to select a repository and issue label." : 'Register a GitHub App from Orbit. GitHub will return you to this workspace.'}`}>
     {!settings.app_slug ? (
       <div className="flex flex-col items-start gap-2">
-        <p className="text-sm text-muted-foreground">Register a GitHub App from Orbit. GitHub will return you to this workspace.</p>
         {settings.can_manage ? <>
           <div className="grid w-full gap-1.5">
             <Label htmlFor="github-organization">GitHub organization (optional)</Label>
@@ -64,7 +63,6 @@ export function GithubPage() {
           </ul>
         ) : <p className="text-sm text-muted-foreground">No repositories installed yet.</p>}
       </div>
-      <p className="text-sm text-muted-foreground">After installation, open a project's settings to select a repository and issue label.</p>
     </div>}
   </SettingsCard>
 }

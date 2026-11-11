@@ -6,6 +6,9 @@ import { type ReactNode, useState } from 'react'
 import { Platform, Pressable, View } from 'react-native'
 
 import type { Person } from '../../data/chat'
+import type { TaskRecurrence, TaskRecurrenceBase, TaskRecurrenceFrequency } from '@orbit/api/generated/types.gen'
+import { DEFAULT_RECURRENCE, MAX_RECURRENCE_INTERVAL, normalizeRecurrence, RECURRENCE_FREQUENCIES, RECURRENCE_WEEKDAYS, recurrenceUnit } from '@orbit/api/recurrence'
+
 import type { LabelRecord, StatusRecord, TaskRecord } from '../../data/orbit'
 import {
   DEFAULT_DUE_TIME,
@@ -29,7 +32,8 @@ import {
 import { useCreateLabel, useTaskSearch } from '../../hooks/tasks'
 import { useLabels, useProjects, useStatuses } from '../../queries'
 import { useTheme } from '../../theme'
-import { Avatar, Button, Icon, type IconName, Input, PriorityIcon, StatusIcon, Text } from '../../ui'
+import { Avatar, Button, Icon, IconButton, type IconName, Input, LabelTip, PriorityIcon, StatusIcon, Text } from '../../ui'
+import { Segmented } from '../settings/Shell'
 import { DayPicker } from './DayPicker'
 import { SheetList, SheetNote, SheetRow, SheetSearch } from './Sheet'
 
@@ -203,6 +207,74 @@ export function DueDateChoices({ dueAt, onChange }: { dueAt: string | null | und
     </SheetList>
   )
 }
+
+const BASE_HELP =
+  'Due date: a fixed calendar, such as every Monday. Completing late skips the missed dates. Completion date: the next due date counts from the day you complete the task, such as 3 days after.'
+
+/** The web's Repeat popover: the rule is a draft until Save (or Repeat); Stop repeating removes it. */
+export function RecurrenceForm({ value, onSave, onStop }: { value: TaskRecurrence | null | undefined; onSave: (rule: TaskRecurrence) => void; onStop: () => void }) {
+  const { colors } = useTheme()
+  const [draft, setDraft] = useState<TaskRecurrence>(value ?? DEFAULT_RECURRENCE)
+  const update = (changes: Partial<TaskRecurrence>) => setDraft((current) => normalizeRecurrence({ ...current, ...changes }))
+  const unit = recurrenceUnit(draft.frequency, draft.interval)
+  return (
+    <View className="px-4 pb-2 gap-4">
+      <View className="flex-row items-center gap-2">
+        <Text className="font-noto-medium text-[13px]">Every</Text>
+        <IconButton icon="minus" label="Fewer" size={32} disabled={draft.interval <= 1} onPress={() => update({ interval: draft.interval - 1 })} />
+        <Text accessibilityLabel={`Interval ${draft.interval}`} className="min-w-8 text-center font-noto-semibold text-[15px] tabular-nums">{draft.interval}</Text>
+        <IconButton icon="plus" label="More" size={32} disabled={draft.interval >= MAX_RECURRENCE_INTERVAL} onPress={() => update({ interval: draft.interval + 1 })} />
+        <Text className="font-noto-medium text-[13px]">{unit}</Text>
+      </View>
+      <Segmented<TaskRecurrenceFrequency>
+        label="Frequency"
+        value={draft.frequency}
+        options={RECURRENCE_FREQUENCIES.map((frequency) => ({ value: frequency, label: capitalize(recurrenceUnit(frequency, 1)) }))}
+        onChange={(frequency) => update({ frequency })}
+      />
+      {draft.frequency === 'weekly' && draft.base === 'due' ? (
+        <View className="gap-2">
+          <Text className="font-noto-medium text-[12px] text-muted-foreground">On</Text>
+          <View accessibilityRole="none" className="flex-row gap-1.5">
+            {RECURRENCE_WEEKDAYS.map((day) => {
+              const selected = draft.weekdays.includes(day.value)
+              return (
+                <Pressable
+                  key={day.value}
+                  accessibilityRole="checkbox"
+                  accessibilityLabel={day.label}
+                  accessibilityState={{ checked: selected }}
+                  onPress={() => update({ weekdays: selected ? draft.weekdays.filter((item) => item !== day.value) : [...draft.weekdays, day.value] })}
+                  className={`size-9 items-center justify-center rounded-lg border ${selected ? 'border-primary bg-primary' : 'border-input'}`}
+                >
+                  <Text className="font-noto-medium text-[13px]" style={{ color: selected ? colors.primaryForeground : colors.foreground }}>{day.letter}</Text>
+                </Pressable>
+              )
+            })}
+          </View>
+        </View>
+      ) : null}
+      <View className="gap-2">
+        <LabelTip label="Next date from" text={BASE_HELP} className="font-noto-medium text-[12px] text-muted-foreground" />
+        <Segmented<TaskRecurrenceBase>
+          label="Next date from"
+          value={draft.base}
+          options={[
+            { value: 'due', label: 'Due date' },
+            { value: 'completion', label: 'Completion date' },
+          ]}
+          onChange={(base) => update({ base })}
+        />
+      </View>
+      <View className="flex-row justify-end gap-2">
+        {value ? <Button label="Stop repeating" variant="ghost" onPress={onStop} /> : null}
+        <Button label={value ? 'Save' : 'Repeat'} onPress={() => onSave(draft)} />
+      </View>
+    </View>
+  )
+}
+
+const capitalize = (text: string) => text.charAt(0).toUpperCase() + text.slice(1)
 
 /** The source URL form of the web's "Add source" popover: Save sets it, an empty field (or Remove) clears it. */
 export function SourceForm({ value, onSave }: { value: string | null | undefined; onSave: (url: string | null) => void }) {

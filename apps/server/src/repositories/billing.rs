@@ -2,18 +2,19 @@
 
 use orbit_platform::{Database, Id, Row, TimestampMillis, TrialConfig};
 use serde_json::json;
-use sqlx::{Any, Transaction};
+use sha2::{Digest, Sha256};
+use sqlx::{Any, AnyConnection, Transaction};
 
 use crate::audit::{self, AuditOutcome};
 use crate::billing::{SubscriptionStatus, TrialLimit, WorkspaceAccess, access, grants_access};
 
-/// A workspace's billing row as stored, with the workspace's creation time (its trial start).
+/// A workspace's billing row as stored, with its trial start (the owner's, see [`crate::billing::access`]).
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct WorkspaceSubscription {
     /// The root user's first workspace, which needs no subscription.
     pub exempt: bool,
-    /// Unix milliseconds.
-    pub workspace_created_at: i64,
+    /// When the trial started, copied from the creator's account (Unix milliseconds).
+    pub trial_started_at: i64,
     pub stripe_customer_id: Option<String>,
     pub plan: Option<String>,
     /// `None` without a subscription, or for a status this server does not know.
@@ -29,7 +30,7 @@ impl WorkspaceSubscription {
         access(
             self.exempt,
             self.status,
-            self.workspace_created_at,
+            self.trial_started_at,
             now.as_millis(),
             trial.millis(),
         )
@@ -38,7 +39,7 @@ impl WorkspaceSubscription {
     /// When the trial ends (or ended), Unix milliseconds.
     #[must_use]
     pub fn trial_ends_at(&self, trial: &TrialConfig) -> i64 {
-        self.workspace_created_at.saturating_add(trial.millis())
+        self.trial_started_at.saturating_add(trial.millis())
     }
 }
 
@@ -95,6 +96,75 @@ pub(crate) async fn cancel_on_delete(
     Ok(())
 }
 
+/// The key under which [`remember_trial`] keeps an address's trial: a SHA-256 of the mailbox, not the address. Case,
+/// a `+tag` and (for Gmail) dots do not make a new mailbox.
+pub(crate) fn trial_email_key(email: &str) -> String {
+    let email = email.trim().to_lowercase();
+    let (local, domain) = email.rsplit_once('@').unwrap_or((email.as_str(), ""));
+    let local = local.split('+').next().unwrap_or(local);
+    let mailbox = if matches!(domain, "gmail.com" | "googlemail.com") {
+        format!("{}@gmail.com", local.replace('.', ""))
+    } else {
+        format!("{local}@{domain}")
+    };
+    format!("{:x}", Sha256::digest(mailbox.as_bytes()))
+}
+
+/// When the account's trial started: its own, else the trial of its mailbox by an account that no longer uses it
+/// ([`remember_trial`]). `None` when the mailbox has had no trial, so the account's next workspace starts one.
+pub(crate) async fn account_trial_start(
+    connection: &mut AnyConnection,
+    user_id: Id,
+) -> Result<Option<i64>, sqlx::Error> {
+    let Some(row) = sqlx::query("SELECT email, trial_started_at FROM users WHERE id = $1")
+        .bind(user_id.to_string())
+        .fetch_optional(&mut *connection)
+        .await?
+    else {
+        return Ok(None);
+    };
+    if let Some(started) = row.get::<Option<i64>, _>("trial_started_at") {
+        return Ok(Some(started));
+    }
+    sqlx::query_scalar("SELECT trial_started_at FROM used_trials WHERE email_key = $1")
+        .bind(trial_email_key(&row.get::<String, _>("email")))
+        .fetch_optional(&mut *connection)
+        .await
+}
+
+/// With billing on, in the transaction where an account stops using its email (account deletion, email change):
+/// keeps the account's trial under the old mailbox, so a new account with it continues that trial. The earlier
+/// trial wins.
+pub(crate) async fn remember_trial(
+    database: &Database,
+    transaction: &mut Transaction<'_, Any>,
+    user_id: Id,
+) -> Result<(), sqlx::Error> {
+    if !enabled(database) {
+        return Ok(());
+    }
+    let row = sqlx::query("SELECT email, trial_started_at FROM users WHERE id = $1")
+        .bind(user_id.to_string())
+        .fetch_optional(&mut **transaction)
+        .await?;
+    let Some((email, started)) = row.and_then(|row| {
+        let started = row.get::<Option<i64>, _>("trial_started_at")?;
+        Some((row.get::<String, _>("email"), started))
+    }) else {
+        return Ok(());
+    };
+    sqlx::query(
+        "INSERT INTO used_trials (email_key, trial_started_at) VALUES ($1, $2) ON CONFLICT (email_key) \
+         DO UPDATE SET trial_started_at = CASE WHEN excluded.trial_started_at < used_trials.trial_started_at \
+         THEN excluded.trial_started_at ELSE used_trials.trial_started_at END",
+    )
+    .bind(trial_email_key(&email))
+    .bind(started)
+    .execute(&mut **transaction)
+    .await?;
+    Ok(())
+}
+
 /// Whether something may write to the workspace: `Full` on a self-hosted server (no query),
 /// else the workspace's subscription decides. Every writer outside the HTTP guard (co-editing
 /// sockets, webhooks, integration jobs) asks this.
@@ -123,7 +193,7 @@ pub async fn trial_counts(database: &Database) -> Result<Option<TrialCounts>, sq
         return Ok(None);
     };
     let rows = sqlx::query(
-        "SELECT workspaces.created_at, workspaces.billing_exempt, s.status FROM workspaces \
+        "SELECT workspaces.trial_started_at, workspaces.billing_exempt, s.status FROM workspaces \
          LEFT JOIN workspace_subscriptions s ON s.workspace_id = workspaces.id \
          WHERE workspaces.deleted_at IS NULL",
     )
@@ -139,7 +209,7 @@ pub async fn trial_counts(database: &Database) -> Result<Option<TrialCounts>, sq
         match access(
             row.get("billing_exempt"),
             status,
-            row.get("created_at"),
+            row.get("trial_started_at"),
             now,
             billing.0.millis(),
         ) {
@@ -175,7 +245,7 @@ async fn subscription_in<'e>(
     workspace_id: Id,
 ) -> Result<WorkspaceSubscription, sqlx::Error> {
     let row = sqlx::query(
-        "SELECT workspaces.created_at, workspaces.billing_exempt, s.stripe_customer_id, s.plan, s.status, \
+        "SELECT workspaces.trial_started_at, workspaces.billing_exempt, s.stripe_customer_id, s.plan, s.status, \
          s.cancel_at_period_end, s.current_period_end FROM workspaces \
          LEFT JOIN workspace_subscriptions s ON s.workspace_id = workspaces.id \
          WHERE workspaces.id = $1",
@@ -186,7 +256,7 @@ async fn subscription_in<'e>(
     Ok(row.map_or_else(WorkspaceSubscription::default, |row| {
         WorkspaceSubscription {
             exempt: row.get("billing_exempt"),
-            workspace_created_at: row.get("created_at"),
+            trial_started_at: row.get("trial_started_at"),
             stripe_customer_id: row.get("stripe_customer_id"),
             plan: row.get("plan"),
             status: row
@@ -463,4 +533,28 @@ pub async fn apply_subscription(
         crate::collab::CollabHub::revalidate_database(database, Some(workspace_id));
     }
     Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::trial_email_key;
+
+    #[test]
+    fn one_mailbox_has_one_trial_email_key() {
+        let key = trial_email_key("jane.doe@gmail.com");
+        assert_eq!(trial_email_key(" Jane.Doe+trial2@GoogleMail.com "), key);
+        assert_eq!(trial_email_key("janedoe@gmail.com"), key);
+        assert_eq!(
+            trial_email_key("Jo+x@Example.com"),
+            trial_email_key("jo@example.com")
+        );
+        assert_ne!(
+            trial_email_key("jo.e@example.com"),
+            trial_email_key("joe@example.com")
+        );
+        assert_ne!(
+            trial_email_key("jo@example.com"),
+            trial_email_key("jo@example.org")
+        );
+    }
 }

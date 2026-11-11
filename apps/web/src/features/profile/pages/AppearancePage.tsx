@@ -2,7 +2,15 @@ import { useState, type ReactNode } from 'react'
 import { Setting2 as Settings, TickCircle, User } from 'reicon-react'
 import { cn } from 'cn'
 import { SettingsCard } from '@/components/common/SettingsCard'
-import { CUSTOM_THEME_PRESETS, serializeCustomTheme, setCustomTheme, useCustomTheme } from '@/lib/customTheme'
+import {
+  APP_SECTIONS,
+  DEFAULT_APP_LOOKS,
+  setAppLook,
+  setCustomTheme,
+  themeName,
+  useCustomThemeChoice,
+  type AppSection,
+} from '@/lib/customTheme'
 import { CustomThemeDialog, CustomThemeSwatch } from '@/features/profile/components/CustomThemeDialog'
 import { useTheme, type Appearance } from '@/lib/themeContext'
 
@@ -11,6 +19,8 @@ const THEMES: { value: Appearance['theme']; label: string; description: string; 
   { value: 'system', label: 'System', description: 'Follow your operating system.', preview: 'bg-linear-to-r from-white via-neutral-400 to-[#050505]' },
   { value: 'dark', label: 'Dark', description: 'Dark surfaces and soft contrast.', preview: 'bg-[#181818]' },
 ]
+
+const SECTION_LABELS: Record<AppSection, string> = { docs: 'Docs', chat: 'Chat', tasks: 'Tasks' }
 
 const NAV_STYLES: { value: Appearance['navStyle']; label: string; description: string }[] = [
   { value: 'default', label: 'Default', description: 'The sidebar and the content run edge to edge.' },
@@ -25,22 +35,22 @@ const STYLES: { value: Appearance['style']; label: string; description: string }
 /** Coolify's Profile → Appearance: how Orbit looks in this browser. */
 export function AppearancePage() {
   const { appearance, setAppearance } = useTheme()
-  const customTheme = useCustomTheme()
-  const [customThemeOpen, setCustomThemeOpen] = useState(false)
-  const customThemeName = customTheme
-    ? (CUSTOM_THEME_PRESETS.find((preset) => serializeCustomTheme(preset.theme) === serializeCustomTheme(customTheme))?.name ?? 'Your colors')
-    : null
+  const choice = useCustomThemeChoice()
+  const appLooks = choice && 'apps' in choice ? choice.apps : null
+  const customTheme = choice && !('apps' in choice) ? choice : null
+  // the colour editor: for the whole app (Custom), or for one part of it (Per app)
+  const [editing, setEditing] = useState<'all' | AppSection | null>(null)
 
   return (
     <>
       <SettingsCard title="Color theme" description="Choose the color scheme used in this browser.">
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
           {THEMES.map((option) => (
             <AppearanceOption
               key={option.value}
               label={option.label}
               description={option.description}
-              selected={!customTheme && appearance.theme === option.value}
+              selected={!choice && appearance.theme === option.value}
               onClick={() => {
                 setCustomTheme(null)
                 setAppearance({ theme: option.value })
@@ -52,16 +62,47 @@ export function AppearancePage() {
           ))}
           {/* the custom theme opens its editor: it is a theme of its own, and picking one above turns it off */}
           <AppearanceOption
-            label={customTheme ? `Custom · ${customThemeName}` : 'Custom'}
+            label={customTheme ? `Custom · ${themeName(customTheme)}` : 'Custom'}
             description="Your own colors for the whole app. Pick a preset or your own."
             selected={Boolean(customTheme)}
             aria-haspopup="dialog"
-            onClick={() => setCustomThemeOpen(true)}
+            onClick={() => setEditing('all')}
           >
             <CustomThemeSwatch theme={customTheme} className="h-12 w-24" />
           </AppearanceOption>
+          <AppearanceOption
+            label="Per app"
+            description="Different colors for docs, chat and tasks. Starts as Notion, Slack and Linear."
+            selected={Boolean(appLooks)}
+            onClick={() => {
+              if (!appLooks) setCustomTheme({ apps: DEFAULT_APP_LOOKS })
+            }}
+            previewClassName="gap-1.5"
+          >
+            {APP_SECTIONS.map((section) => (
+              <CustomThemeSwatch key={section} theme={(appLooks ?? DEFAULT_APP_LOOKS)[section]} className="h-10 w-9" />
+            ))}
+          </AppearanceOption>
         </div>
       </SettingsCard>
+
+      {appLooks ? (
+        <SettingsCard title="Per app colors" description="Pick the colors of each part of Orbit. Orbit uses your Light, System or Dark theme, as set above.">
+          <div className="grid gap-3 sm:grid-cols-3">
+            {APP_SECTIONS.map((section) => (
+              <AppearanceOption
+                key={section}
+                label={SECTION_LABELS[section]}
+                description={themeName(appLooks[section])}
+                aria-haspopup="dialog"
+                onClick={() => setEditing(section)}
+              >
+                <CustomThemeSwatch theme={appLooks[section]} className="h-12 w-24" />
+              </AppearanceOption>
+            ))}
+          </div>
+        </SettingsCard>
+      ) : null}
 
       <SettingsCard title="Navigation style" description="Choose how the sidebar and the content sit on the page.">
         <div className="grid gap-3 sm:grid-cols-2">
@@ -117,7 +158,25 @@ export function AppearancePage() {
         </div>
       </SettingsCard>
 
-      {customThemeOpen ? <CustomThemeDialog open onOpenChange={setCustomThemeOpen} /> : null}
+      {editing === 'all' ? (
+        <CustomThemeDialog
+          open
+          onOpenChange={(open) => !open && setEditing(null)}
+          title="Custom theme"
+          description="Colours of the whole app, in place of Light, System or Dark. Only you see them, and text stays readable on every colour."
+          value={customTheme}
+          onSave={setCustomTheme}
+        />
+      ) : editing ? (
+        <CustomThemeDialog
+          open
+          onOpenChange={(open) => !open && setEditing(null)}
+          title={`${SECTION_LABELS[editing]} colours`}
+          description={`Colours of ${SECTION_LABELS[editing].toLowerCase()} pages. Orbit uses your Light, System or Dark theme. Only you see them.`}
+          value={appLooks?.[editing] ?? null}
+          onSave={(theme) => setAppLook(editing, theme)}
+        />
+      ) : null}
     </>
   )
 }

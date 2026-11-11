@@ -10,7 +10,7 @@ import { type ImageSource, pickCustomImage, useCustomStickers, useStickerWrites 
 import { useOrbit } from '../../../orbit-context'
 import { useMembers } from '../../../queries'
 import { errorMessage } from '../../../session-context'
-import { Button, EmptyState, Input, Text } from '../../../ui'
+import { Button, EmptyState, Input, LabelTip, Text } from '../../../ui'
 
 /** The web's Stickers page: the workspace's stickers, add one from an image, delete one. Owners and administrators only (`chat.manage`). */
 export default function StickersScreen() {
@@ -79,7 +79,7 @@ export default function StickersScreen() {
     <SettingsShell title="Settings" nav={WORKSPACE_NAV} onRefresh={() => stickers.refetch()}>
       <SettingsCard title="Add sticker" description="Stickers are for everyone in this workspace: a large image that is sent as a chat message.">
         <View className="gap-4">
-          <ImageField file={file} description="PNG, JPEG, WebP or GIF, at most 512 KB." onPress={() => setChoosing(true)} />
+          <ImageField file={file} help="PNG, JPEG, WebP or GIF, at most 512 KB." onPress={() => setChoosing(true)} />
           <Input
             label="Name"
             required
@@ -90,7 +90,7 @@ export default function StickersScreen() {
               setName(value)
               setProblem(null)
             }}
-            description="2 to 30 characters. People find the sticker by this name."
+            help="2 to 30 characters. People find the sticker by this name."
           />
           <View className="flex-row flex-wrap items-center gap-3">
             <Button label="Add sticker" disabled={!file || !name.trim() || create.isPending} onPress={submit} />
@@ -147,13 +147,10 @@ export default function StickersScreen() {
 }
 
 /** The web's file `Input`: a field with "Choose File" and the chosen name, the label above and the help below. */
-function ImageField({ file, description, onPress }: { file: PickedImage | null; description: string; onPress: () => void }) {
+function ImageField({ file, help, onPress }: { file: PickedImage | null; help: string; onPress: () => void }) {
   return (
     <View className="gap-2">
-      <Text className="font-noto-medium text-[14px] leading-[19.25px]">
-        Image
-        <Text className="font-noto-semibold text-[14px] leading-[19.25px] text-primary">{'  *'}</Text>
-      </Text>
+      <LabelTip label="Image" text={help} required />
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={file ? `Image: ${file.name}. Choose another` : 'Choose an image'}
@@ -165,7 +162,6 @@ function ImageField({ file, description, onPress }: { file: PickedImage | null; 
           {file ? file.name : 'No file chosen'}
         </Text>
       </Pressable>
-      <Text className="text-[14px] leading-[21px] text-muted-foreground">{description}</Text>
     </View>
   )
 }

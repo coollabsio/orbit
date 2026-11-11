@@ -114,6 +114,7 @@ export default function TasksScreen() {
           <Text numberOfLines={1} className="text-[14px] leading-[20px] shrink text-muted-foreground">
             {project?.name ?? 'All projects'}
           </Text>
+          {project?.private ? <Icon name="lock" size={12} color={colors.mutedForeground} /> : null}
           <Icon name="chevronDown" size={14} color={colors.mutedForeground} />
         </Pressable>
         <View className="flex-1 min-w-0">
@@ -160,7 +161,7 @@ export default function TasksScreen() {
     </>
   )
 
-  const projectOptions = [{ key: 'all', label: 'All projects', selected: projectId === null }, ...(projects.data ?? []).map((item) => ({ key: item.id, label: item.name, selected: item.id === projectId, leading: <View className="size-2 rounded-full" style={{ backgroundColor: item.color }} /> }))]
+  const projectOptions = [{ key: 'all', label: 'All projects', selected: projectId === null }, ...(projects.data ?? []).map((item) => ({ key: item.id, label: item.name, selected: item.id === projectId, leading: <View className="size-2 rounded-full" style={{ backgroundColor: item.color }} />, trailing: item.private ? <Icon name="lock" size={14} color={colors.mutedForeground} /> : undefined }))]
 
   return (
     <SafeAreaView edges={['left', 'right']} className="flex-1 bg-background">

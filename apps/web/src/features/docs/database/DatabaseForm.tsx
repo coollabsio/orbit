@@ -1,4 +1,4 @@
-import { useState, type DragEvent, type ReactNode } from 'react'
+import { useId, useState, type DragEvent, type ReactNode } from 'react'
 import { Link, useLocation } from 'react-router'
 import { toast } from 'sonner'
 import { Add, ChevronDown, ChevronUp, Edit2, Eye, Link2, Maximize4, TickCircle, Trash } from 'reicon-react'
@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
+import { InfoTip } from '@/components/common/InfoTip'
 import { Tip } from '@/components/common/Tip'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import {
@@ -372,6 +373,7 @@ function FormBuilder({ database, form, onForm }: { database: Database; form: Dat
   const questions = formQuestions(form, database.properties)
   const [dragged, setDragged] = useState<string | null>(null)
   const [dropAt, setDropAt] = useState<number | null>(null)
+  const acceptingId = useId()
   const text = (key: 'title' | 'description' | 'submit_label' | 'confirmation', value: string) => {
     const { [key]: _old, ...rest } = form
     onForm(value === '' ? rest : { ...rest, [key]: value })
@@ -416,13 +418,13 @@ function FormBuilder({ database, form, onForm }: { database: Database; form: Dat
       {questions.length === 0 ? <p className="text-sm text-muted-foreground">Add a question: each answer fills that property of a new row.</p> : null}
       <AddQuestion database={database} form={form} onForm={onForm} />
       <div className="flex flex-col gap-3 rounded-lg border border-border p-3">
-        <label className="flex items-center justify-between gap-3 text-sm">
-          <span>
-            Accepting answers
-            <span className="block text-xs text-muted-foreground">Members who can open this database can submit. Each answer adds a row.</span>
+        <div className="flex items-center justify-between gap-3 text-sm">
+          <span className="inline-flex items-center gap-1.5">
+            <label htmlFor={acceptingId}>Accepting answers</label>
+            <InfoTip text="Members who can open this database can submit. Each answer adds a row." />
           </span>
-          <Switch checked={form.access !== 'closed'} onCheckedChange={(open) => onForm({ ...form, access: open ? 'members' : 'closed' })} />
-        </label>
+          <Switch id={acceptingId} checked={form.access !== 'closed'} onCheckedChange={(open) => onForm({ ...form, access: open ? 'members' : 'closed' })} />
+        </div>
         <label className="flex flex-col gap-1 text-sm">
           Submit button
           <Input placeholder="Submit" maxLength={MAX_LABEL} value={form.submit_label ?? ''} onChange={(event) => text('submit_label', event.target.value)} />
