@@ -160,7 +160,7 @@ export type ApiTokenRecord = {
  * includes `tasks:read`, and `docs:write` includes `docs:read`. The two export scopes are for
  * personal API tokens only, each as the token's only scope (see [`ApiTokenScope::export_mode`]).
  */
-export type ApiTokenScope = 'tasks:read' | 'tasks:write' | 'docs:read' | 'docs:write' | 'chat:read' | 'workspace:export' | 'workspace:export:personal';
+export type ApiTokenScope = 'tasks:read' | 'tasks:write' | 'tasks:import' | 'docs:read' | 'docs:write' | 'chat:read' | 'workspace:export' | 'workspace:export:personal';
 
 export type ApnsDeviceBody = {
     /**
@@ -3178,6 +3178,10 @@ export type ListPublicComment = {
          */
         body: string;
         created_at: string;
+        /**
+         * The source tool's ID of an imported comment (`tasks:import`); `null` otherwise.
+         */
+        external_id: string | null;
         id: string;
         parent_id: string | null;
         task_id: string;
@@ -3257,13 +3261,26 @@ export type ListPublicTask = {
      */
     items: Array<{
         assignee_ids: Array<string>;
+        /**
+         * When the task entered a completed or cancelled status; `null` while it is open.
+         */
+        completed_at: string | null;
         created_at: string;
+        /**
+         * The member who created the task; `null` when a service account did.
+         */
+        creator_id: string | null;
+        creator_service_account: null | PublicNamed;
         /**
          * Markdown.
          */
         description: string;
         due_at: string | null;
         due_start_at: string | null;
+        /**
+         * The source tool's ID of an imported task (`tasks:import`); `null` otherwise.
+         */
+        external_id: string | null;
         id: string;
         label_ids: Array<string>;
         /**
@@ -3298,6 +3315,23 @@ export type ListPublicTask = {
          * The task's page in the Orbit web app.
          */
         url: string;
+    }>;
+    /**
+     * Send it as `cursor` for the next page; `null` on the last page.
+     */
+    next_cursor: string | null;
+};
+
+export type ListTaskRelationRecord = {
+    items: Array<{
+        created_at: string;
+        /**
+         * Outgoing when the viewed task is the relation's source (the blocker or the duplicate).
+         */
+        direction: TaskRelationDirection;
+        id: string;
+        task: RelatedTask;
+        type: TaskRelationType;
     }>;
     /**
      * Send it as `cursor` for the next page; `null` on the last page.
@@ -5939,6 +5973,10 @@ export type PublicComment = {
      */
     body: string;
     created_at: string;
+    /**
+     * The source tool's ID of an imported comment (`tasks:import`); `null` otherwise.
+     */
+    external_id: string | null;
     id: string;
     parent_id: string | null;
     task_id: string;
@@ -5948,9 +5986,35 @@ export type PublicComment = {
 
 export type PublicCommentBody = {
     /**
+     * `tasks:import`: the member shown as the author (not a guest).
+     */
+    author_id?: string | null;
+    /**
+     * `tasks:import`: an author who is not a member; shown in bold on the first line, as the
+     * built-in importers do. Not with `author_id`. Up to 200 characters.
+     */
+    author_name?: string | null;
+    /**
      * Markdown, 1 to 100,000 bytes in UTF-8, not only spaces.
      */
     body: string;
+    /**
+     * `tasks:import`: the original creation time.
+     */
+    created_at?: string | null;
+    /**
+     * `tasks:import`: the source tool's ID, unique in the workspace. A second create with the
+     * same ID answers `200` with the comment that the first one made. Up to 200 characters.
+     */
+    external_id?: string | null;
+    /**
+     * A comment of the same task: the new comment is its reply.
+     */
+    parent_id?: string | null;
+    /**
+     * `tasks:import`: the original update time; needs `created_at` and is not before it.
+     */
+    updated_at?: string | null;
 };
 
 /**
@@ -6037,6 +6101,17 @@ export type PublicCreateExportBody = {
     mode: ExportMode;
 };
 
+export type PublicCreateLabelBody = {
+    /**
+     * `#rrggbb`; gray when unset.
+     */
+    color?: string | null;
+    /**
+     * 1 to 100 characters, unique in the project.
+     */
+    name: string;
+};
+
 export type PublicCreateProjectBody = {
     /**
      * `#rrggbb`; `#6366f1` when unset.
@@ -6053,11 +6128,58 @@ export type PublicCreateProjectBody = {
     name: string;
 };
 
+export type PublicCreateRelationBody = {
+    /**
+     * The other task, in an approved project: a UUID or an identifier such as `ENG-12`.
+     */
+    task_id: string;
+    /**
+     * `blocks` (this task blocks `task_id`), `blocked_by` or `related`.
+     */
+    type: NewTaskRelationType;
+};
+
+export type PublicCreateStatusBody = {
+    /**
+     * `unstarted`, `started`, `completed` or `cancelled`. Tasks in a `completed` or
+     * `cancelled` status are done.
+     */
+    category: string;
+    /**
+     * `#rrggbb`; a gray, yellow or green that matches the category when unset.
+     */
+    color?: string | null;
+    /**
+     * Up to 20,000 characters.
+     */
+    description?: string | null;
+    /**
+     * 1 to 200 characters.
+     */
+    name: string;
+    /**
+     * The place in the board order (0 is first); after the last status when unset.
+     */
+    position?: number | null;
+};
+
 export type PublicCreateTaskBody = {
     /**
      * Members of the workspace.
      */
     assignee_ids?: Array<string>;
+    /**
+     * `tasks:import`: when the task was done; kept when its status is completed or cancelled.
+     */
+    completed_at?: string | null;
+    /**
+     * `tasks:import`: the original creation time.
+     */
+    created_at?: string | null;
+    /**
+     * `tasks:import`: the member shown as the creator (not a guest).
+     */
+    creator_id?: string | null;
     /**
      * Markdown, up to 50,000 bytes.
      */
@@ -6068,9 +6190,20 @@ export type PublicCreateTaskBody = {
      */
     due_start_at?: string | null;
     /**
+     * `tasks:import`: the source tool's ID, unique in the workspace. A second create with the
+     * same ID answers `200` with the task that the first one made (unchanged), so a restarted
+     * import does not make duplicates. Up to 200 characters.
+     */
+    external_id?: string | null;
+    /**
      * Labels of the task's project.
      */
     label_ids?: Array<string>;
+    /**
+     * `tasks:import`: the task number, free in the project (`409` otherwise), so `ENG-166`
+     * stays `ENG-166`. Later tasks are numbered after the highest number.
+     */
+    number?: number | null;
     /**
      * A task in an approved project: a UUID or an identifier such as `ENG-12`.
      */
@@ -6088,6 +6221,10 @@ export type PublicCreateTaskBody = {
      * 1 to 500 characters.
      */
     title: string;
+    /**
+     * `tasks:import`: the original update time; needs `created_at` and is not before it.
+     */
+    updated_at?: string | null;
 };
 
 /**
@@ -6303,13 +6440,26 @@ export type PublicStatus = {
  */
 export type PublicTask = {
     assignee_ids: Array<string>;
+    /**
+     * When the task entered a completed or cancelled status; `null` while it is open.
+     */
+    completed_at: string | null;
     created_at: string;
+    /**
+     * The member who created the task; `null` when a service account did.
+     */
+    creator_id: string | null;
+    creator_service_account: null | PublicNamed;
     /**
      * Markdown.
      */
     description: string;
     due_at: string | null;
     due_start_at: string | null;
+    /**
+     * The source tool's ID of an imported task (`tasks:import`); `null` otherwise.
+     */
+    external_id: string | null;
     id: string;
     label_ids: Array<string>;
     /**
@@ -6448,6 +6598,70 @@ export type PublicUpdateDocBody = {
 /**
  * A missing field keeps its value.
  */
+export type PublicUpdateLabelBody = {
+    /**
+     * `#rrggbb`.
+     */
+    color?: string | null;
+    /**
+     * The `version` that you read.
+     */
+    expected_version: number;
+    /**
+     * 1 to 100 characters, unique in the project.
+     */
+    name?: string | null;
+};
+
+/**
+ * A missing field keeps its value.
+ */
+export type PublicUpdateProjectBody = {
+    /**
+     * `#rrggbb`.
+     */
+    color?: string | null;
+    /**
+     * The `version` that you read.
+     */
+    expected_version: number;
+    /**
+     * 1 to 200 characters.
+     */
+    name?: string | null;
+};
+
+/**
+ * A missing field keeps its value. The project's Duplicate status cannot change its category,
+ * and no other status can take it.
+ */
+export type PublicUpdateStatusBody = {
+    /**
+     * `unstarted`, `started`, `completed` or `cancelled`.
+     */
+    category?: string | null;
+    /**
+     * `#rrggbb`.
+     */
+    color?: string | null;
+    /**
+     * Up to 20,000 characters.
+     */
+    description?: string | null;
+    /**
+     * The `version` that you read.
+     */
+    expected_version: number;
+    /**
+     * 1 to 200 characters.
+     */
+    name?: string | null;
+    position?: number | null;
+};
+
+/**
+ * A missing field keeps its value.
+ */
 export type PublicUpdateTaskBody = {
     /**
      * Replaces the assignees.
@@ -6465,6 +6679,11 @@ export type PublicUpdateTaskBody = {
      * `null` clears the date.
      */
     due_start_at?: string | null;
+    /**
+     * A task in an approved project (a UUID or an identifier such as `ENG-12`) marks this task
+     * as its duplicate and moves it to the Duplicate status; `null` unmarks it.
+     */
+    duplicate_of_id?: string | null;
     /**
      * The `version` that you read: an opaque number below 2^53. Compare it for equality only.
      */
@@ -9793,6 +10012,75 @@ export type PublicCreateProjectResponses = {
 
 export type PublicCreateProjectResponse = PublicCreateProjectResponses[keyof PublicCreateProjectResponses];
 
+export type PublicUpdateProjectData = {
+    body: PublicUpdateProjectBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        /**
+         * The token's workspace, from `GET /me`.
+         */
+        workspace_id: string;
+        project_id: string;
+    };
+    query?: never;
+    url: '/api/public/v1/workspaces/{workspace_id}/projects/{project_id}';
+};
+
+export type PublicUpdateProjectErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: Problem;
+    /**
+     * unauthorized
+     */
+    401: Problem;
+    /**
+     * insufficient_scope
+     */
+    403: Problem;
+    /**
+     * not_found
+     */
+    404: Problem;
+    /**
+     * contract_mismatch
+     */
+    409: Problem;
+    /**
+     * request_too_large
+     */
+    413: Problem;
+    /**
+     * rate_limit_exceeded
+     */
+    429: Problem;
+    /**
+     * internal_error
+     */
+    500: Problem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: Problem;
+};
+
+export type PublicUpdateProjectError = PublicUpdateProjectErrors[keyof PublicUpdateProjectErrors];
+
+export type PublicUpdateProjectResponses = {
+    /**
+     * The project
+     */
+    200: PublicProject;
+};
+
+export type PublicUpdateProjectResponse = PublicUpdateProjectResponses[keyof PublicUpdateProjectResponses];
+
 export type PublicListLabelsData = {
     body?: never;
     headers?: {
@@ -9871,6 +10159,145 @@ export type PublicListLabelsResponses = {
 
 export type PublicListLabelsResponse = PublicListLabelsResponses[keyof PublicListLabelsResponses];
 
+export type PublicCreateLabelData = {
+    body: PublicCreateLabelBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        /**
+         * The token's workspace, from `GET /me`.
+         */
+        workspace_id: string;
+        project_id: string;
+    };
+    query?: never;
+    url: '/api/public/v1/workspaces/{workspace_id}/projects/{project_id}/labels';
+};
+
+export type PublicCreateLabelErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: Problem;
+    /**
+     * unauthorized
+     */
+    401: Problem;
+    /**
+     * insufficient_scope
+     */
+    403: Problem;
+    /**
+     * not_found
+     */
+    404: Problem;
+    /**
+     * contract_mismatch
+     */
+    409: Problem;
+    /**
+     * request_too_large
+     */
+    413: Problem;
+    /**
+     * rate_limit_exceeded
+     */
+    429: Problem;
+    /**
+     * internal_error
+     */
+    500: Problem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: Problem;
+};
+
+export type PublicCreateLabelError = PublicCreateLabelErrors[keyof PublicCreateLabelErrors];
+
+export type PublicCreateLabelResponses = {
+    /**
+     * The new label
+     */
+    201: PublicLabel;
+};
+
+export type PublicCreateLabelResponse = PublicCreateLabelResponses[keyof PublicCreateLabelResponses];
+
+export type PublicUpdateLabelData = {
+    body: PublicUpdateLabelBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        /**
+         * The token's workspace, from `GET /me`.
+         */
+        workspace_id: string;
+        project_id: string;
+        label_id: string;
+    };
+    query?: never;
+    url: '/api/public/v1/workspaces/{workspace_id}/projects/{project_id}/labels/{label_id}';
+};
+
+export type PublicUpdateLabelErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: Problem;
+    /**
+     * unauthorized
+     */
+    401: Problem;
+    /**
+     * insufficient_scope
+     */
+    403: Problem;
+    /**
+     * not_found
+     */
+    404: Problem;
+    /**
+     * contract_mismatch
+     */
+    409: Problem;
+    /**
+     * request_too_large
+     */
+    413: Problem;
+    /**
+     * rate_limit_exceeded
+     */
+    429: Problem;
+    /**
+     * internal_error
+     */
+    500: Problem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: Problem;
+};
+
+export type PublicUpdateLabelError = PublicUpdateLabelErrors[keyof PublicUpdateLabelErrors];
+
+export type PublicUpdateLabelResponses = {
+    /**
+     * The label
+     */
+    200: PublicLabel;
+};
+
+export type PublicUpdateLabelResponse = PublicUpdateLabelResponses[keyof PublicUpdateLabelResponses];
+
 export type PublicListStatusesData = {
     body?: never;
     headers?: {
@@ -9948,6 +10375,145 @@ export type PublicListStatusesResponses = {
 };
 
 export type PublicListStatusesResponse = PublicListStatusesResponses[keyof PublicListStatusesResponses];
+
+export type PublicCreateStatusData = {
+    body: PublicCreateStatusBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        /**
+         * The token's workspace, from `GET /me`.
+         */
+        workspace_id: string;
+        project_id: string;
+    };
+    query?: never;
+    url: '/api/public/v1/workspaces/{workspace_id}/projects/{project_id}/statuses';
+};
+
+export type PublicCreateStatusErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: Problem;
+    /**
+     * unauthorized
+     */
+    401: Problem;
+    /**
+     * insufficient_scope
+     */
+    403: Problem;
+    /**
+     * not_found
+     */
+    404: Problem;
+    /**
+     * contract_mismatch
+     */
+    409: Problem;
+    /**
+     * request_too_large
+     */
+    413: Problem;
+    /**
+     * rate_limit_exceeded
+     */
+    429: Problem;
+    /**
+     * internal_error
+     */
+    500: Problem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: Problem;
+};
+
+export type PublicCreateStatusError = PublicCreateStatusErrors[keyof PublicCreateStatusErrors];
+
+export type PublicCreateStatusResponses = {
+    /**
+     * The new status
+     */
+    201: PublicStatus;
+};
+
+export type PublicCreateStatusResponse = PublicCreateStatusResponses[keyof PublicCreateStatusResponses];
+
+export type PublicUpdateStatusData = {
+    body: PublicUpdateStatusBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        /**
+         * The token's workspace, from `GET /me`.
+         */
+        workspace_id: string;
+        project_id: string;
+        status_id: string;
+    };
+    query?: never;
+    url: '/api/public/v1/workspaces/{workspace_id}/projects/{project_id}/statuses/{status_id}';
+};
+
+export type PublicUpdateStatusErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: Problem;
+    /**
+     * unauthorized
+     */
+    401: Problem;
+    /**
+     * insufficient_scope
+     */
+    403: Problem;
+    /**
+     * not_found
+     */
+    404: Problem;
+    /**
+     * contract_mismatch
+     */
+    409: Problem;
+    /**
+     * request_too_large
+     */
+    413: Problem;
+    /**
+     * rate_limit_exceeded
+     */
+    429: Problem;
+    /**
+     * internal_error
+     */
+    500: Problem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: Problem;
+};
+
+export type PublicUpdateStatusError = PublicUpdateStatusErrors[keyof PublicUpdateStatusErrors];
+
+export type PublicUpdateStatusResponses = {
+    /**
+     * The status
+     */
+    200: PublicStatus;
+};
+
+export type PublicUpdateStatusResponse = PublicUpdateStatusResponses[keyof PublicUpdateStatusResponses];
 
 export type PublicListTasksData = {
     body?: never;
@@ -10126,6 +10692,10 @@ export type PublicCreateTaskErrors = {
 export type PublicCreateTaskError = PublicCreateTaskErrors[keyof PublicCreateTaskErrors];
 
 export type PublicCreateTaskResponses = {
+    /**
+     * `tasks:import`: the task that an earlier create with the same `external_id` made
+     */
+    200: PublicTask;
     /**
      * The new task
      */
@@ -10540,12 +11110,233 @@ export type PublicCreateCommentError = PublicCreateCommentErrors[keyof PublicCre
 
 export type PublicCreateCommentResponses = {
     /**
+     * `tasks:import`: the comment that an earlier create with the same `external_id` made
+     */
+    200: PublicComment;
+    /**
      * The new comment
      */
     201: PublicComment;
 };
 
 export type PublicCreateCommentResponse = PublicCreateCommentResponses[keyof PublicCreateCommentResponses];
+
+export type PublicListRelationsData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        /**
+         * The token's workspace, from `GET /me`.
+         */
+        workspace_id: string;
+        /**
+         * A task UUID or identifier such as `ENG-12` (any letter case).
+         */
+        task: string;
+    };
+    query?: never;
+    url: '/api/public/v1/workspaces/{workspace_id}/tasks/{task}/relations';
+};
+
+export type PublicListRelationsErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: Problem;
+    /**
+     * unauthorized
+     */
+    401: Problem;
+    /**
+     * insufficient_scope
+     */
+    403: Problem;
+    /**
+     * not_found
+     */
+    404: Problem;
+    /**
+     * contract_mismatch
+     */
+    409: Problem;
+    /**
+     * request_too_large
+     */
+    413: Problem;
+    /**
+     * rate_limit_exceeded
+     */
+    429: Problem;
+    /**
+     * internal_error
+     */
+    500: Problem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: Problem;
+};
+
+export type PublicListRelationsError = PublicListRelationsErrors[keyof PublicListRelationsErrors];
+
+export type PublicListRelationsResponses = {
+    /**
+     * Every relation; `next_cursor` is `null`
+     */
+    200: ListTaskRelationRecord;
+};
+
+export type PublicListRelationsResponse = PublicListRelationsResponses[keyof PublicListRelationsResponses];
+
+export type PublicCreateRelationData = {
+    body: PublicCreateRelationBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        /**
+         * The token's workspace, from `GET /me`.
+         */
+        workspace_id: string;
+        /**
+         * A task UUID or identifier such as `ENG-12` (any letter case).
+         */
+        task: string;
+    };
+    query?: never;
+    url: '/api/public/v1/workspaces/{workspace_id}/tasks/{task}/relations';
+};
+
+export type PublicCreateRelationErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: Problem;
+    /**
+     * unauthorized
+     */
+    401: Problem;
+    /**
+     * insufficient_scope
+     */
+    403: Problem;
+    /**
+     * not_found
+     */
+    404: Problem;
+    /**
+     * contract_mismatch
+     */
+    409: Problem;
+    /**
+     * request_too_large
+     */
+    413: Problem;
+    /**
+     * rate_limit_exceeded
+     */
+    429: Problem;
+    /**
+     * internal_error
+     */
+    500: Problem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: Problem;
+};
+
+export type PublicCreateRelationError = PublicCreateRelationErrors[keyof PublicCreateRelationErrors];
+
+export type PublicCreateRelationResponses = {
+    /**
+     * The relation, seen from this task
+     */
+    201: TaskRelationRecord;
+};
+
+export type PublicCreateRelationResponse = PublicCreateRelationResponses[keyof PublicCreateRelationResponses];
+
+export type PublicDeleteRelationData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        /**
+         * The token's workspace, from `GET /me`.
+         */
+        workspace_id: string;
+        /**
+         * A task UUID or identifier such as `ENG-12` (any letter case).
+         */
+        task: string;
+        relation_id: string;
+    };
+    query?: never;
+    url: '/api/public/v1/workspaces/{workspace_id}/tasks/{task}/relations/{relation_id}';
+};
+
+export type PublicDeleteRelationErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: Problem;
+    /**
+     * unauthorized
+     */
+    401: Problem;
+    /**
+     * insufficient_scope
+     */
+    403: Problem;
+    /**
+     * not_found
+     */
+    404: Problem;
+    /**
+     * contract_mismatch
+     */
+    409: Problem;
+    /**
+     * request_too_large
+     */
+    413: Problem;
+    /**
+     * rate_limit_exceeded
+     */
+    429: Problem;
+    /**
+     * internal_error
+     */
+    500: Problem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: Problem;
+};
+
+export type PublicDeleteRelationError = PublicDeleteRelationErrors[keyof PublicDeleteRelationErrors];
+
+export type PublicDeleteRelationResponses = {
+    /**
+     * The relation is removed
+     */
+    204: void;
+};
+
+export type PublicDeleteRelationResponse = PublicDeleteRelationResponses[keyof PublicDeleteRelationResponses];
 
 export type StartImageCompressionData = {
     body?: never;

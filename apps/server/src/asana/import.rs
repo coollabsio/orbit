@@ -50,7 +50,9 @@ use crate::notion::import::clamp;
 use crate::repositories::attachments::AttachmentRepository;
 use crate::repositories::membership;
 use crate::repositories::task_relations::NewTaskRelationType;
-use crate::repositories::tasks::{CommentContent, CreateTask, TaskError, TaskRepository};
+use crate::repositories::tasks::{
+    CommentContent, CreateTask, ImportedTask, TaskError, TaskRepository,
+};
 use crate::secret_box::{decrypt_secret, encrypt_secret};
 pub use crate::task_import::JobRun;
 use crate::task_import::{
@@ -1321,7 +1323,7 @@ impl AsanaImportService {
                     run.workspace_id,
                     run.user_id,
                     input.clone(),
-                    completed_at,
+                    ImportedTask::completed(completed_at),
                     &run.request_id,
                     TimestampMillis::now(),
                 )
@@ -1337,7 +1339,7 @@ impl AsanaImportService {
                         run.workspace_id,
                         run.user_id,
                         input,
-                        completed_at,
+                        ImportedTask::completed(completed_at),
                         &run.request_id,
                         TimestampMillis::now(),
                     )
