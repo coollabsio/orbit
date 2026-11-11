@@ -50,7 +50,7 @@ export default function NotificationsScreen() {
               {choices.map(({ field, label }, index) => (
                 <View key={field} className={`flex-row items-center justify-between gap-4 border-border ${index === 0 ? 'pt-0 border-t-0' : 'pt-3 border-t'} ${index === choices.length - 1 ? 'pb-0' : 'pb-3'}`}>
                   <Text className="font-noto-medium text-[14px] flex-1">{label}</Text>
-                  <Toggle label={label} value={current[field]} onChange={(checked) => save.mutate({ ...current, [field]: checked })} />
+                  <Toggle label={label} value={current[field] ?? true} onChange={(checked) => save.mutate({ ...current, [field]: checked })} />
                 </View>
               ))}
             </View>

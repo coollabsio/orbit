@@ -1,9 +1,15 @@
+import { pullPath } from '@orbit/api/github'
+
 import type { NotificationRecord } from './orbit'
 
 const IMPORT_NAMES: Record<string, string> = { asana: 'Asana', linear: 'Linear', trello: 'Trello', notion: 'Notion', obsidian: 'Obsidian' }
 
 /** Where a notification leads in the app: its conversation, page, task or import, as on the web. */
 export function notificationTarget(notification: NotificationRecord): string | null {
+  if (notification.kind.startsWith('github_')) {
+    const [owner, repo] = (notification.github_repository ?? '').split('/')
+    return owner && repo && notification.github_pull_number ? pullPath({ owner, repo, number: notification.github_pull_number }) : null
+  }
   if (notification.kind === 'import_finished') {
     const source = notification.import_source ?? ''
     return IMPORT_NAMES[source] && notification.import_id ? `/settings/import/${source}/${notification.import_id}` : null
@@ -21,6 +27,16 @@ export const isMention = (notification: NotificationRecord) =>
 export function notificationCopy(notification: NotificationRecord, pageTitle: string | undefined, actorName: string | undefined): { title: string; body: string } {
   const actor = actorName ?? 'Someone'
   const page = pageTitle === undefined ? 'a page' : `“${pageTitle.trim() || 'Untitled'}”`
+  if (notification.kind.startsWith('github_')) {
+    // the GitHub login: who acted may have no Orbit account
+    const who = notification.github_actor_login ?? 'Someone'
+    const body = `${notification.github_repository ?? ''}#${notification.github_pull_number ?? ''}`
+    if (notification.kind === 'github_review_requested') return { title: `${who} asked for your review`, body }
+    if (notification.kind === 'github_merged') return { title: `${who} merged your pull request`, body }
+    if (notification.github_review_state === 'approved') return { title: `${who} approved your pull request`, body }
+    if (notification.github_review_state === 'changes_requested') return { title: `${who} requested changes`, body }
+    return { title: `${who} commented on your pull request`, body }
+  }
   switch (notification.kind) {
     case 'import_finished': {
       const name = IMPORT_NAMES[notification.import_source ?? ''] ?? 'An'

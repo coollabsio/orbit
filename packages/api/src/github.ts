@@ -106,3 +106,16 @@ export function draftKey(workspaceId: string, ref: PullRef, target: CommentTarge
 export function replyDraftKey(workspaceId: string, ref: PullRef, threadId: string): string {
   return `${draftPrefix(workspaceId, ref)}:reply:${threadId}`
 }
+
+/** The GitHub pull requests a text links to, in order, once each, at most `limit` (chat cards). */
+export function extractPullRefs(text: string, limit = 3): PullRef[] {
+  const refs: PullRef[] = []
+  for (const match of text.matchAll(/https?:\/\/(?:www\.)?github\.com\/[^\s<>()[\]"']+/gi)) {
+    // a link at the end of a sentence: the punctuation is not part of it
+    const ref = parseGithubPullUrl(match[0].replace(/[.,;:!?]+$/, ''))
+    if (!ref || refs.some((seen) => seen.owner === ref.owner && seen.repo === ref.repo && seen.number === ref.number)) continue
+    refs.push(ref)
+    if (refs.length === limit) break
+  }
+  return refs
+}

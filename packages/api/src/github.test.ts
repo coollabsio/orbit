@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 
-import { draftKey, replyDraftKey, mergeDisabledReason, mergeMethodKey, parseGithubPullUrl, pickMergeMethod, pullPath, squashDefaults, threadsOutsideDiff, toCommentTarget, toGitPatch } from './github'
+import { draftKey, extractPullRefs, replyDraftKey, mergeDisabledReason, mergeMethodKey, parseGithubPullUrl, pickMergeMethod, pullPath, squashDefaults, threadsOutsideDiff, toCommentTarget, toGitPatch } from './github'
 
 test('reads GitHub pull request URLs', () => {
   expect(parseGithubPullUrl('https://github.com/acme/repo/pull/12')).toEqual({ owner: 'acme', repo: 'repo', number: 12 })
@@ -79,4 +79,11 @@ test('comment drafts are keyed by pull request and lines', () => {
   expect(draftKey('ws', ref, { path: 'a.ts', side: 'RIGHT', line: 9, start_side: 'LEFT', start_line: 3 })).toBe('orbit:pulls:draft:ws:acme/repo#12:a.ts:L3-R9')
   expect(draftKey('ws', ref, { path: 'a.ts', side: 'LEFT', line: 4 })).toBe('orbit:pulls:draft:ws:acme/repo#12:a.ts:L4')
   expect(replyDraftKey('ws', ref, 'T_1')).toBe('orbit:pulls:draft:ws:acme/repo#12:reply:T_1')
+})
+
+test('the pull requests a message links to, once each, at most three', () => {
+  const text = 'See https://github.com/acme/repo/pull/12 and https://github.com/acme/repo/pull/12/files, also https://github.com/acme/repo/issues/3 and https://github.com/acme/other/pull/4.'
+  expect(extractPullRefs(text)).toEqual([{ owner: 'acme', repo: 'repo', number: 12 }, { owner: 'acme', repo: 'other', number: 4 }])
+  const many = [1, 2, 3, 4].map((n) => `https://github.com/acme/repo/pull/${n}`).join(' ')
+  expect(extractPullRefs(many).length).toBe(3)
 })

@@ -145,7 +145,7 @@ function Preferences() {
             <span className="text-sm font-medium text-foreground">{label}</span>
             <Switch
               aria-label={label}
-              checked={current[field]}
+              checked={current[field] ?? true}
               onCheckedChange={(checked: boolean) =>
                 save.mutate({ ...current, [field]: checked }, { onError: () => toast.error('Could not save your choice. Try again.') })
               }

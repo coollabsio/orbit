@@ -42,3 +42,12 @@ test('an import notice opens its import screen and names how it ended', () => {
   expect(notificationCopy(failed, undefined, 'Me').title).toBe('Obsidian import failed')
   expect(isMention(done)).toBe(false)
 })
+
+test('GitHub notices open the pull request and use the web wording', () => {
+  const github = notification({ kind: 'github_review', github_repository: 'acme/repo', github_pull_number: 12, github_actor_login: 'octo', github_review_state: 'approved' })
+  expect(notificationTarget(github)).toBe('/tasks/pulls/acme/repo/12')
+  expect(notificationCopy(github, undefined, undefined)).toEqual({ title: 'octo approved your pull request', body: 'acme/repo#12' })
+  expect(notificationCopy({ ...github, kind: 'github_review_requested' }, undefined, undefined).title).toBe('octo asked for your review')
+  expect(notificationCopy({ ...github, kind: 'github_merged' }, undefined, undefined).title).toBe('octo merged your pull request')
+  expect(isMention(github)).toBe(false)
+})
