@@ -31,7 +31,7 @@ function MobileDockItem({ to, label, icon: Icon, enabled, badge = 0, unread = fa
     props: {
       'data-slot': 'mobile-dock-item',
       className: cn(
-        'relative flex flex-1 flex-col items-center justify-center gap-0.5 text-[10px] font-medium text-muted-foreground',
+        'relative flex flex-1 flex-col items-center justify-center gap-0.5 text-[0.625rem] font-medium text-muted-foreground',
         enabled
           ? 'aria-[current=page]:text-primary'
           : 'h-auto rounded-none p-0 hover:bg-transparent dark:hover:bg-transparent disabled:pointer-events-auto disabled:cursor-not-allowed disabled:text-muted-foreground/50 disabled:opacity-100',
@@ -44,7 +44,7 @@ function MobileDockItem({ to, label, icon: Icon, enabled, badge = 0, unread = fa
               <span
                 data-slot="mobile-dock-badge"
                 aria-hidden="true"
-                className="absolute -top-1 left-3 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] leading-none font-semibold text-primary-foreground tabular-nums"
+                className="absolute -top-1 left-3 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[0.625rem] leading-none font-semibold text-primary-foreground tabular-nums"
               >
                 {count > 99 ? '99+' : count}
               </span>

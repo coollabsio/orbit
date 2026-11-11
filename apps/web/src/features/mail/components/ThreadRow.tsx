@@ -55,7 +55,7 @@ export function ThreadRow({ thread, labels, active, focused, selected, selecting
       </span>
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <div className="flex items-baseline gap-2">
-          <span className="min-w-0 truncate text-[13px] font-normal text-foreground group-data-unread/row:font-semibold">
+          <span className="min-w-0 truncate text-[0.8125rem] font-normal text-foreground group-data-unread/row:font-semibold">
             {threadSenders(thread)}
             {thread.message_count > 1 ? <span className="ml-1 text-xs font-normal text-muted-foreground/70">{thread.message_count}</span> : null}
           </span>
@@ -64,12 +64,12 @@ export function ThreadRow({ thread, labels, active, focused, selected, selecting
             {relativeTime(thread.last_message_at)}
           </span>
         </div>
-        <div className="truncate text-[13px] text-foreground group-data-unread/row:font-semibold">{thread.subject || '(no subject)'}</div>
+        <div className="truncate text-[0.8125rem] text-foreground group-data-unread/row:font-semibold">{thread.subject || '(no subject)'}</div>
         <div className="truncate text-xs text-muted-foreground/70">{thread.snippet}</div>
         {chips.length > 0 ? (
           <div className="mt-1 flex min-w-0 flex-wrap gap-1">
             {chips.map((label) => (
-              <span key={label.id} className="inline-flex h-5 max-w-32 items-center gap-1 rounded-full border px-1.5 text-[11px] text-muted-foreground">
+              <span key={label.id} className="inline-flex h-5 max-w-32 items-center gap-1 rounded-full border px-1.5 text-[0.6875rem] text-muted-foreground">
                 <ColorDot color={label.color} />
                 <span className="truncate">{label.name}</span>
               </span>

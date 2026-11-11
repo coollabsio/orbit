@@ -37,7 +37,7 @@ export function DomainRouteRow({ domain, providers }: { domain: MailDomain; prov
   const setRoute = useSetDomainRoute()
   return (
     <SettingsRow className="flex-nowrap">
-      <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-[13px]">
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-[0.8125rem]">
         <span className="font-medium text-foreground">Receive mail</span>
         <span className="text-xs text-muted-foreground">Where mail for {domain.name} arrives. The MX record below changes with it.</span>
       </div>

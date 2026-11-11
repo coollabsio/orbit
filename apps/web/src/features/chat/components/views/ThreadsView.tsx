@@ -39,7 +39,7 @@ function ThreadRow({ thread, conversation, people }: { thread: FollowedThread; c
         <a
           href={href}
           aria-label={`Thread in ${title}, ${replies}${unread > 0 ? `, ${unread} unread` : ''}`}
-          className="flex min-w-0 items-center gap-1.5 text-[13px] font-medium text-foreground outline-none after:absolute after:inset-0 in-data-[unread=true]:font-semibold"
+          className="flex min-w-0 items-center gap-1.5 text-[0.8125rem] font-medium text-foreground outline-none after:absolute after:inset-0 in-data-[unread=true]:font-semibold"
           onClick={(event) => {
             // a modified click opens a new tab, like any link
             if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
@@ -81,7 +81,7 @@ export function ThreadsView() {
         </PaneTitle>
       </PaneHeader>
       {threads.isError ? (
-        <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-[13px] text-muted-foreground" role="alert">
+        <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-[0.8125rem] text-muted-foreground" role="alert">
           Could not load your threads.
           <Button type="button" variant="outline" size="sm" onClick={() => void threads.refetch()}>
             Try again

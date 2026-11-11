@@ -238,7 +238,7 @@ function MailApp({ view, threadId }: { view: MailView; threadId: string | null }
             <Xmark className="size-4" />
           </Button>
         </Tip>
-        <span className="text-[13px] font-semibold">{selected.size} selected</span>
+        <span className="text-[0.8125rem] font-semibold">{selected.size} selected</span>
         <span className="flex-1" />
         <BulkButton label={all(picked, 'archive') ? 'Move to inbox' : 'Archive'} onClick={() => archive(picked)}>
           {all(picked, 'archive') ? <DirectInbox className="size-4" /> : <Archive className="size-4" />}

@@ -210,7 +210,7 @@ export function DatabaseTimeline({ database, config, rows, onConfig, onAddRow, o
               {axis.ticks.map((tick) => (
                 <div
                   key={tick.day}
-                  className={cn('absolute top-6 flex h-[26px] items-center justify-center border-l border-border/60 text-[11px] whitespace-nowrap text-muted-foreground', tick.day === today && 'font-semibold text-primary')}
+                  className={cn('absolute top-6 flex h-[26px] items-center justify-center border-l border-border/60 text-[0.6875rem] whitespace-nowrap text-muted-foreground', tick.day === today && 'font-semibold text-primary')}
                   style={{ left: tick.start * axis.dayWidth, width: tick.days * axis.dayWidth }}
                 >
                   {tick.days * axis.dayWidth >= 18 ? tick.label : null}
@@ -357,7 +357,7 @@ function TableCells({ row, title, columns, width, onOpen }: { row: Row; title: P
         {title ? <CellView property={title} row={row} width={TITLE_WIDTH - 16} wrap={false} /> : null}
       </button>
       {columns.map((property) => (
-        <div key={property.id} role="gridcell" className="flex min-w-0 items-center px-2 text-[13px]" style={{ width: COLUMN_WIDTH }}>
+        <div key={property.id} role="gridcell" className="flex min-w-0 items-center px-2 text-[0.8125rem]" style={{ width: COLUMN_WIDTH }}>
           <CellView property={property} row={row} width={COLUMN_WIDTH - 16} wrap={false} />
         </div>
       ))}

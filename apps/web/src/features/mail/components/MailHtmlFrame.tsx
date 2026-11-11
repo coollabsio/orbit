@@ -25,7 +25,7 @@ export function MailHtmlFrame({ messageId, loadImages, title }: { messageId: str
 
   if (view.isError) {
     return (
-      <div role="alert" className="flex items-center gap-3 rounded-md border px-3 py-2 text-[13px] text-muted-foreground">
+      <div role="alert" className="flex items-center gap-3 rounded-md border px-3 py-2 text-[0.8125rem] text-muted-foreground">
         The message could not be shown.
         <Button variant="outline" size="sm" onClick={() => void view.refetch()}>
           Try again

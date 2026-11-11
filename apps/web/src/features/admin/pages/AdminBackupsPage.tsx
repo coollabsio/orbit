@@ -28,7 +28,7 @@ export function AdminBackupsPage() {
       }
       flush
     >
-      <div className="flex flex-col divide-y text-[13px]">
+      <div className="flex flex-col divide-y text-[0.8125rem]">
         {backup.isError ? <SettingsRow role="alert"><span className="text-destructive">{backup.error instanceof ApiProblem ? backup.error.detail : 'Backup failed.'}</span></SettingsRow> : null}
         {remove.isError ? <SettingsRow role="alert"><span className="text-destructive">The backup could not be deleted.</span></SettingsRow> : null}
         {backups.isError ? <SettingsRow role="alert">Backups could not be loaded. <Button variant="ghost" onClick={() => void backups.refetch()}>Retry</Button></SettingsRow> : null}

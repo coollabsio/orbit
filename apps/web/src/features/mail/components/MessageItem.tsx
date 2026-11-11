@@ -88,7 +88,7 @@ export function MessageItem({ message, expanded, onToggle, onPrint }: MessageIte
         >
           <UserAvatar user={null} name={name} size={32} />
           <div className="flex min-w-0 flex-col">
-            <span className="truncate text-[13px] font-semibold text-foreground">{name}</span>
+            <span className="truncate text-[0.8125rem] font-semibold text-foreground">{name}</span>
             <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground/70">
               <span className="truncate">{address}</span>
               {message.auth.aligned_domain ? (
@@ -137,7 +137,7 @@ export function MessageItem({ message, expanded, onToggle, onPrint }: MessageIte
           </div>
           <SafetyBanner message={message} />
           {offerImages ? (
-            <div data-print-hide="" className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border px-2.5 py-1.5 text-[13px] text-muted-foreground">
+            <div data-print-hide="" className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border px-2.5 py-1.5 text-[0.8125rem] text-muted-foreground">
               <Gallery className="size-4 shrink-0" />
               <span className="min-w-0 flex-1">Remote images are hidden.</span>
               <Button variant="outline" size="sm" onClick={() => setImagesLoaded(true)}>
@@ -176,7 +176,7 @@ export function MessageItem({ message, expanded, onToggle, onPrint }: MessageIte
           {files.length > 0 ? <Attachments attachments={files} /> : null}
         </div>
       ) : (
-        <div className="mt-1.5 truncate pl-[42px] text-[13px] text-muted-foreground">{firstLine(message.body_text)}</div>
+        <div className="mt-1.5 truncate pl-[42px] text-[0.8125rem] text-muted-foreground">{firstLine(message.body_text)}</div>
       )}
       {originalOpen ? <OriginalMessage messageId={message.id} onClose={() => setOriginalOpen(false)} /> : null}
     </div>

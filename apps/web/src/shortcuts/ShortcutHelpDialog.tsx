@@ -30,7 +30,7 @@ function Rows({ label, rows }: { label: string; rows: Row[] }) {
       <h3 className="mb-1 text-xs font-medium text-muted-foreground">{label}</h3>
       <ul>
         {rows.map((row) => (
-          <li key={row.ids.join()} className="flex min-h-8 items-center justify-between gap-4 text-[13px]">
+          <li key={row.ids.join()} className="flex min-h-8 items-center justify-between gap-4 text-[0.8125rem]">
             <span className="truncate">{row.title}</span>
             <span className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground/70">
               {row.keys.map((keys, index) => (
@@ -68,7 +68,7 @@ export function ShortcutHelpDialog({ onClose }: { onClose: () => void }) {
           <Input type="search" aria-label="Search shortcuts" placeholder="Search shortcuts…" autoFocus value={query} onChange={(event) => setQuery(event.target.value)} className="ml-auto h-7 w-56 max-sm:w-40" />
         </DialogHeader>
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pt-4">
-          {rows.length === 0 ? <p className="py-10 text-center text-[13px] text-muted-foreground">No shortcut matches "{query.trim()}".</p> : null}
+          {rows.length === 0 ? <p className="py-10 text-center text-[0.8125rem] text-muted-foreground">No shortcut matches "{query.trim()}".</p> : null}
           <div className="gap-x-10 sm:columns-2">
             {pageRows.length > 0 ? <Rows label="On this page" rows={pageRows} /> : null}
             {GROUPS.map((group) => {
@@ -77,7 +77,7 @@ export function ShortcutHelpDialog({ onClose }: { onClose: () => void }) {
             })}
           </div>
         </div>
-        <div className="border-t px-4 py-2.5 text-[13px]">
+        <div className="border-t px-4 py-2.5 text-[0.8125rem]">
           <Link to="/profile/shortcuts" className="text-muted-foreground underline-offset-4 hover:text-foreground hover:underline" onClick={onClose}>Customize shortcuts</Link>
         </div>
       </DialogContent>

@@ -95,7 +95,7 @@ export function ImportTreePicker<T extends ImportNode & { child_count: number }>
                 aria-level={row.depth + 1}
                 aria-selected={state === 'checked'}
                 aria-expanded={row.hasChildren ? row.expanded : undefined}
-                className="flex h-8 min-w-0 items-center gap-1.5 rounded-md pr-2 text-[13px] transition-colors duration-150 ease-out hover:bg-sidebar-accent/50"
+                className="flex h-8 min-w-0 items-center gap-1.5 rounded-md pr-2 text-[0.8125rem] transition-colors duration-150 ease-out hover:bg-sidebar-accent/50"
                 style={{ paddingLeft: 4 + row.depth * 18 }}
               >
                 {row.hasChildren && !query.trim() ? (

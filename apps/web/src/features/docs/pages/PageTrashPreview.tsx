@@ -149,7 +149,7 @@ export function PageTrashPreview({ workspaceId, pageId }: { workspaceId: string;
   return (
     <Pane>
       {back}
-      <div role="alert" className="flex shrink-0 flex-wrap items-center justify-center gap-x-4 gap-y-2 bg-destructive px-4 py-2 text-[13px] text-white">
+      <div role="alert" className="flex shrink-0 flex-wrap items-center justify-center gap-x-4 gap-y-2 bg-destructive px-4 py-2 text-[0.8125rem] text-white">
         <span className="min-w-0 text-center">
           {who} moved this page to Trash{when}. It will be permanently deleted {days === 0 ? 'today' : `in ${days} day${days === 1 ? '' : 's'}`}.
         </span>
@@ -184,11 +184,11 @@ export function PageTrashPreview({ workspaceId, pageId }: { workspaceId: string;
         {page.cover_url ? <CoverBanner url={page.cover_url} position={page.cover_position} onChange={noop} readOnly /> : null}
         <div className="mx-auto max-w-[708px] px-6 pt-10 max-[899px]:px-3 max-[899px]:pt-6">
           {page.icon ? (
-            <div className="mb-2 text-[56px] leading-none">
+            <div className="mb-2 text-[3.5rem] leading-none">
               <Emoji value={page.icon} />
             </div>
           ) : null}
-          <h1 className="mb-4 text-[32px] leading-tight font-bold text-foreground">{pageTitle(page)}</h1>
+          <h1 className="mb-4 text-[2rem] leading-tight font-bold text-foreground">{pageTitle(page)}</h1>
           <Suspense
             fallback={
               <div className="flex justify-center py-10">
@@ -216,7 +216,7 @@ export function PageTrashPreview({ workspaceId, pageId }: { workspaceId: string;
                 <Link
                   key={child.id}
                   to={`/docs/trash/${child.id}`}
-                  className="flex min-h-8 items-center gap-2 rounded-md px-1.5 text-[13px] text-foreground hover:bg-accent/60"
+                  className="flex min-h-8 items-center gap-2 rounded-md px-1.5 text-[0.8125rem] text-foreground hover:bg-accent/60"
                   style={{ paddingLeft: 6 + depth * 18 }}
                 >
                   <span className="inline-flex w-[18px] shrink-0 items-center justify-center text-muted-foreground/70">

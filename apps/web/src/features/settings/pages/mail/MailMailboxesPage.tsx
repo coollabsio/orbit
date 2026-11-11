@@ -112,7 +112,7 @@ function MailboxRow({ mailbox, domains, members, open, onToggle }: { mailbox: Ma
         <RowIcon><DirectInbox /></RowIcon>
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span className="flex min-w-0 items-center gap-2">
-            <span className="truncate text-[13px] font-medium text-foreground">{mailbox.name}</span>
+            <span className="truncate text-[0.8125rem] font-medium text-foreground">{mailbox.name}</span>
             <Badge variant="outline">{mailbox.kind === 'personal' ? 'Personal' : 'Shared'}</Badge>
             {mailbox.status === 'suspended' ? <Badge variant="destructive">Suspended</Badge> : null}
             {domains.filter((domain) => domain.catch_all_mailbox_id === mailbox.id).map((domain) => (

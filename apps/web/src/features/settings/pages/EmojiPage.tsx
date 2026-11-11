@@ -125,7 +125,7 @@ export function EmojiPage() {
             <SettingsRow className="flex-nowrap" key={entry.id}>
               <RowIcon><img src={entry.url} alt="" draggable={false} className="size-6 object-contain" /></RowIcon>
               <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-                <span className="truncate text-[13px] font-medium text-foreground">:{entry.name}:</span>
+                <span className="truncate text-[0.8125rem] font-medium text-foreground">:{entry.name}:</span>
                 <span className="truncate text-xs text-muted-foreground/70">Added by {memberNames.get(entry.created_by) ?? 'a former member'} · {shortDate(entry.created_at)}</span>
               </div>
               <Button variant="ghost" type="button" aria-label={`Delete :${entry.name}:`} disabled={deleteEmoji.isPending} onClick={() => void remove(entry)}>Delete</Button>

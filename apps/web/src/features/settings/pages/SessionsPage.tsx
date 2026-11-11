@@ -46,7 +46,7 @@ export function SessionsPage() {
                   {session.device.toLowerCase().includes('iphone') || session.device.toLowerCase().includes('android') ? <Smartphone /> : <Monitor />}
                 </RowIcon>
                 <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-                  <span className="flex items-center gap-2 text-[13px] font-medium text-foreground">
+                  <span className="flex items-center gap-2 text-[0.8125rem] font-medium text-foreground">
                     {session.device} · {session.browser}
                     {session.current ? <Badge>Current</Badge> : null}
                   </span>
@@ -54,7 +54,7 @@ export function SessionsPage() {
                 </div>
                 <span className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
                   <Avatar size="sm" className="size-7">
-                    <AvatarFallback className="rounded-lg text-[11px] font-semibold">{session.user.display_name.charAt(0).toUpperCase()}</AvatarFallback>
+                    <AvatarFallback className="rounded-lg text-[0.6875rem] font-semibold">{session.user.display_name.charAt(0).toUpperCase()}</AvatarFallback>
                   </Avatar>
                   {session.user.display_name}
                 </span>

@@ -20,7 +20,7 @@ export function ImportHeader({ title, detail, actions }: { title: string; detail
         <ArrowLeft className="size-4" />
       </Button>
       <PaneTitle render={<h1 />}>{title}</PaneTitle>
-      {detail ? <span className="truncate text-[13px] text-muted-foreground">{detail}</span> : null}
+      {detail ? <span className="truncate text-[0.8125rem] text-muted-foreground">{detail}</span> : null}
       <span className="flex-1" />
       {actions}
     </div>

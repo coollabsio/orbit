@@ -105,7 +105,7 @@ export function ProviderForm({
           </Field>
         </div>
         {fields.length === 0 && !provider ? (
-          <p className="m-0 text-[13px] text-muted-foreground">Orbit makes the secret for this provider and shows it once, after you add it.</p>
+          <p className="m-0 text-[0.8125rem] text-muted-foreground">Orbit makes the secret for this provider and shows it once, after you add it.</p>
         ) : null}
         {fields.map((field) => (
           <Field key={field.name}>

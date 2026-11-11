@@ -232,11 +232,11 @@ export function MembersPage() {
                   <div className="flex min-w-0 items-center gap-2">
                     <ProfileTrigger userId={user.id} name={user.name} kind="avatar" tabIndex={-1} className="flex shrink-0">
                       <Avatar size="sm" className="size-7">
-                        <AvatarFallback className="rounded-lg text-[11px] font-semibold">{initial(user)}</AvatarFallback>
+                        <AvatarFallback className="rounded-lg text-[0.6875rem] font-semibold">{initial(user)}</AvatarFallback>
                         <AvatarStatusBadge status={presenceOf(presence, user.id).status} size={28} />
                       </Avatar>
                     </ProfileTrigger>
-                    <ProfileTrigger userId={user.id} name={user.name} className="truncate text-[13px] font-medium text-foreground">
+                    <ProfileTrigger userId={user.id} name={user.name} className="truncate text-[0.8125rem] font-medium text-foreground">
                       {user.name}
                     </ProfileTrigger>
                     {user.id === currentUser.data?.id ? (
@@ -254,7 +254,7 @@ export function MembersPage() {
                     {currentUser.data && user.id !== currentUser.data.id && (user.can.changeRole || user.can.remove) ? (
                       <DropdownMenu>
                         <DropdownMenuTrigger
-                          render={<Button variant="outline" size="sm" className="text-[11px]" />}
+                          render={<Button variant="outline" size="sm" className="text-[0.6875rem]" />}
                         >
                           Manage
                         </DropdownMenuTrigger>
@@ -416,7 +416,7 @@ const memberRowVariants = cva(
   {
     variants: {
       kind: {
-        header: 'h-10 border-b border-muted bg-black/[0.02] text-[13px] font-medium text-muted-foreground dark:bg-white/[0.02]',
+        header: 'h-10 border-b border-muted bg-black/[0.02] text-[0.8125rem] font-medium text-muted-foreground dark:bg-white/[0.02]',
         row: 'min-h-12 border-b py-2.5 transition-colors last:border-b-0 hover:bg-foreground/[0.02]',
       },
     },

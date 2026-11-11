@@ -35,7 +35,7 @@ export function ReplySummary({ message }: { message: Message }) {
           <span data-slot="reply-preview" className="flex min-w-0 items-center gap-1.5">
             <BotAvatar bot={{ name: reply.botName, iconUrl: null, iconEmoji: null }} size={16} />
             <span className="shrink-0 font-medium text-foreground/90">{reply.botName}</span>
-            <span className="truncate text-[13px]">{text || wordlessPreview(reply.sticker === true)}</span>
+            <span className="truncate text-[0.8125rem]">{text || wordlessPreview(reply.sticker === true)}</span>
           </span>
         ) : reply ? (
           <span data-slot="reply-preview" className="flex min-w-0 items-center gap-1.5">
@@ -45,7 +45,7 @@ export function ReplySummary({ message }: { message: Message }) {
             <ProfileTrigger userId={author?.id} name={author?.name ?? 'Unknown'} tabIndex={-1} className="relative z-1 shrink-0 font-medium text-foreground/90">
               {author?.name ?? 'Unknown'}
             </ProfileTrigger>
-            <span className="truncate text-[13px]">{text || wordlessPreview(reply.sticker === true)}</span>
+            <span className="truncate text-[0.8125rem]">{text || wordlessPreview(reply.sticker === true)}</span>
           </span>
         ) : null}
         <button

@@ -34,7 +34,7 @@ function RailRow({
     <Button
       type="button"
       variant="ghost"
-      className="w-full min-w-0 justify-start gap-2.5 text-[13px] data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
+      className="w-full min-w-0 justify-start gap-2.5 text-[0.8125rem] data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
       data-active={active || undefined}
       aria-current={active ? 'page' : undefined}
       aria-label={unread > 0 ? `${label}, ${unread} unread` : label}
@@ -43,7 +43,7 @@ function RailRow({
       {Icon ? <Icon className="opacity-90" /> : children}
       <span className="min-w-0 flex-1 truncate text-left">{label}</span>
       {unread > 0 ? (
-        <Badge aria-hidden="true" className="h-4 min-w-4 px-1 text-[10px] tabular-nums">
+        <Badge aria-hidden="true" className="h-4 min-w-4 px-1 text-[0.625rem] tabular-nums">
           {unread > 999 ? '999+' : unread}
         </Badge>
       ) : null}
@@ -52,7 +52,7 @@ function RailRow({
 }
 
 function RailSection({ children }: { children: string }) {
-  return <span className="mt-3 px-2.5 py-1 text-[11px] font-medium text-sidebar-foreground/60 select-none">{children}</span>
+  return <span className="mt-3 px-2.5 py-1 text-[0.6875rem] font-medium text-sidebar-foreground/60 select-none">{children}</span>
 }
 
 /**

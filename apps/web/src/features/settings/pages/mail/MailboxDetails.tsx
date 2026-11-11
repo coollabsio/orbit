@@ -90,7 +90,7 @@ export function MailboxDetails({ mailbox, domains, members }: { mailbox: MailMai
         <h4 className="text-xs font-medium text-muted-foreground">Addresses</h4>
         <ul className="flex flex-col gap-1">
           {mailbox.addresses.map((address) => (
-            <li key={address.id} className="flex items-center gap-2 text-[13px]">
+            <li key={address.id} className="flex items-center gap-2 text-[0.8125rem]">
               <span className="min-w-0 truncate font-mono text-xs">{address.address}</span>
               <Badge variant={address.kind === 'primary' ? 'secondary' : 'outline'}>{address.kind === 'primary' ? 'Primary' : 'Alias'}</Badge>
               {address.kind === 'alias' ? (
@@ -121,7 +121,7 @@ export function MailboxDetails({ mailbox, domains, members }: { mailbox: MailMai
             <MemberPicker label={`Members of ${mailbox.name}`} people={members} selectedIds={readerIds} onChange={changeReaders} />
           </div>
         ) : (
-          <p className="m-0 text-[13px]">
+          <p className="m-0 text-[0.8125rem]">
             {ownerLeft ? 'The owner left the workspace. The mailbox refuses mail and nobody reads it; delete it when it is no longer needed.' : (owner ? `${owner.name} (${owner.email}). Only the owner reads a personal mailbox.` : 'A former member.')}
           </p>
         )}

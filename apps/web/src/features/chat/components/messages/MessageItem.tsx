@@ -130,7 +130,7 @@ export function MessageItem({ message, groupStart, editing, active, tone, menuOp
       {confirmed && !editing && !message.deleted ? <MessageToolbar message={message} /> : null}
       {message.replyToId && !message.deleted ? <MessageQuote message={message} active={active} /> : null}
       {/* The measure: at most 90 characters of text beside the avatar column. */}
-      <div className="relative flex max-w-[calc(90ch+3rem)] gap-3 text-[15px] max-[899px]:gap-2 max-[899px]:text-sm">
+      <div className="relative flex max-w-[calc(90ch+3rem)] gap-3 text-[0.9375rem] max-[899px]:gap-2 max-[899px]:text-sm">
         <div className="flex w-9 shrink-0 justify-center max-[899px]:w-[30px]">
           {groupStart && bot ? (
             <span className="mt-0.5 flex self-start">
@@ -144,7 +144,7 @@ export function MessageItem({ message, groupStart, editing, active, tone, menuOp
             <time
               dateTime={iso}
               title={fullTimestamp(message.createdAt)}
-              className="hidden text-[11px] leading-[22.5px] text-muted-foreground max-[899px]:leading-[21px] tabular-nums group-focus-visible/message:block hover-fine:group-hover/message:block"
+              className="hidden text-[0.6875rem] leading-[1.40625rem] text-muted-foreground max-[899px]:leading-[1.3125rem] tabular-nums group-focus-visible/message:block hover-fine:group-hover/message:block"
             >
               {gutterTime(message.createdAt)}
             </time>

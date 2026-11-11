@@ -51,7 +51,7 @@ function DomainsCard({ admin }: { admin: MailAdmin }) {
     <SettingsCard title="Mail" description="Orbit receives mail for the verified domains of each workspace, through its own SMTP listener or through a mail provider." flush>
       <div className="flex flex-col divide-y">
         <SettingsRow className="flex-nowrap">
-          <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-[13px]">
+          <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-[0.8125rem]">
             <span className="font-medium text-foreground">Workspaces can add mail domains</span>
             <span className="text-xs text-muted-foreground">Off: owners and admins cannot add a new domain. Domains added before keep working.</span>
           </div>
@@ -66,7 +66,7 @@ function DomainsCard({ admin }: { admin: MailAdmin }) {
           />
         </SettingsRow>
         <SettingsRow className="flex-nowrap">
-          <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-[13px]">
+          <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-[0.8125rem]">
             <span className="font-medium text-foreground">Workspaces can add their own providers</span>
             <span className="text-xs text-muted-foreground">Owners and admins connect their own Cloudflare, Postmark, Mailgun, Resend or SES account. Off: no new ones; existing ones keep receiving.</span>
           </div>
@@ -81,14 +81,14 @@ function DomainsCard({ admin }: { admin: MailAdmin }) {
           />
         </SettingsRow>
         <SettingsRow>
-          <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-[13px]">
+          <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-[0.8125rem]">
             <span className="font-medium text-foreground">Mail hostname</span>
             <span className="text-xs text-muted-foreground">From <code className="font-mono">ORBIT_MAIL_HOSTNAME</code>: the SMTP greeting, the MX target and the name the certificate must cover.</span>
           </div>
-          <code className="font-mono text-[13px]">{admin.hostname ?? 'Not set'}</code>
+          <code className="font-mono text-[0.8125rem]">{admin.hostname ?? 'Not set'}</code>
         </SettingsRow>
         <SettingsRow>
-          <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-[13px]">
+          <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-[0.8125rem]">
             <span className="font-medium text-foreground">Mode</span>
             <span className="text-xs text-muted-foreground">
               {admin.mode === 'relay'
@@ -188,7 +188,7 @@ function HealthCard({ admin, hasProviders, refreshing, onRefresh }: { admin: Mai
                 aria-hidden
                 className="mt-0.5 size-4.5 shrink-0 text-muted-foreground group-data-[state=error]:text-destructive group-data-[state=ok]:text-emerald-600 group-data-[state=warning]:text-amber-600 dark:group-data-[state=ok]:text-emerald-400 dark:group-data-[state=warning]:text-amber-400"
               />
-              <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-[13px]">
+              <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-[0.8125rem]">
                 <span className="font-medium text-foreground">
                   {item.label}
                   <span className="sr-only">: {STATE_WORDS[item.state]}</span>

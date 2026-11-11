@@ -611,7 +611,7 @@ function DropZone({ className, ...props }: React.ComponentProps<'section'>) {
 function BulkAction({ icon, label, title, className, ...props }: React.ComponentProps<typeof Button> & { icon: React.ReactNode; label: string }) {
   return (
     <Tip label={title}>
-      <Button variant="ghost" className={cn('shrink-0 text-[13px] text-muted-foreground', className)} {...props}>
+      <Button variant="ghost" className={cn('shrink-0 text-[0.8125rem] text-muted-foreground', className)} {...props}>
         {icon}
         <span className="max-sm:sr-only">{label}</span>
       </Button>

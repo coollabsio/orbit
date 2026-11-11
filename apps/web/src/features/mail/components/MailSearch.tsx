@@ -51,7 +51,7 @@ export function MailSearch({
           aria-controls={shown ? listId : undefined}
           aria-activedescendant={shown && active >= 0 ? `${listId}-${active}` : undefined}
           placeholder="Search mail"
-          className="text-[13px] md:text-[13px]"
+          className="text-[0.8125rem] md:text-[0.8125rem]"
           value={value}
           onChange={(event) => {
             setValue(event.target.value)

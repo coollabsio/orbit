@@ -66,7 +66,7 @@ export function ShortcutsPage() {
       }
       flush
     >
-      {shown.length === 0 ? <p className="px-4 py-10 text-center text-[13px] text-muted-foreground">No shortcut matches "{query.trim()}".</p> : null}
+      {shown.length === 0 ? <p className="px-4 py-10 text-center text-[0.8125rem] text-muted-foreground">No shortcut matches "{query.trim()}".</p> : null}
       {GROUPS.map((group) => {
         const commands = shown.filter((command) => command.group === group)
         if (commands.length === 0) return null
@@ -80,7 +80,7 @@ export function ShortcutsPage() {
                 // a default that another command's override took over
                 const clash = keys && !rowNotice ? findConflict(bindings, command.id, keys) : null
                 return (
-                  <li key={command.id} aria-label={command.title} className="px-4 py-1.5 text-[13px]">
+                  <li key={command.id} aria-label={command.title} className="px-4 py-1.5 text-[0.8125rem]">
                     {/* a fixed height, so a row does not move when its recorder or keys change */}
                     <div className="flex h-8 items-center gap-2">
                       <span className="min-w-0 flex-1 truncate">{command.title}</span>

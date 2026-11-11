@@ -108,7 +108,7 @@ export function ThreadList({
             type="button"
             variant="ghost"
             size="sm"
-            className="shrink-0 text-[13px] text-muted-foreground data-active:bg-primary/10 data-active:text-primary"
+            className="shrink-0 text-[0.8125rem] text-muted-foreground data-active:bg-primary/10 data-active:text-primary"
             data-active={mailViewPath(entry.view) === currentPath || undefined}
             onClick={() => navigate(mailViewPath(entry.view))}
           >

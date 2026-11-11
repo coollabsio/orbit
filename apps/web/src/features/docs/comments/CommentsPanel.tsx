@@ -37,7 +37,7 @@ export function CommentsPanel({
       className="flex w-[340px] shrink-0 animate-in flex-col border-l border-border bg-background duration-150 ease-out fade-in max-[1099px]:absolute max-[1099px]:inset-y-0 max-[1099px]:right-0 max-[1099px]:z-20 max-[1099px]:shadow-xl max-[1099px]:duration-200 max-[1099px]:slide-in-from-right-4 max-[599px]:w-full motion-reduce:animate-none"
     >
       <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border pr-2 pl-3">
-        <span className="text-[13px] font-semibold text-foreground">Comments</span>
+        <span className="text-[0.8125rem] font-semibold text-foreground">Comments</span>
         <span className="flex-1" />
         <Tip label="Close" side="bottom">
           <Button type="button" variant="ghost" size="icon-sm" className="text-muted-foreground" aria-label="Close comments" onClick={onClose}>
@@ -50,11 +50,11 @@ export function CommentsPanel({
           {(['open', 'resolved'] as const).map((item) => {
             const count = item === 'open' ? openCount : resolvedCount
             return (
-              <TabsTrigger key={item} value={item} className="gap-1.5 text-[13px]">
+              <TabsTrigger key={item} value={item} className="gap-1.5 text-[0.8125rem]">
                 {item === 'open' ? 'Open' : 'Resolved'}
                 <span
                   className={cn(
-                    'min-w-[18px] rounded-full px-1 text-center text-[11px] leading-4 font-semibold tabular-nums',
+                    'min-w-[18px] rounded-full px-1 text-center text-[0.6875rem] leading-4 font-semibold tabular-nums',
                     item === 'open' && count > 0 && filter === 'open'
                       ? 'bg-primary text-primary-foreground'
                       : 'bg-foreground/8 text-muted-foreground dark:bg-foreground/10',
@@ -74,16 +74,16 @@ export function CommentsPanel({
               <CommentIcon className="size-[18px]" aria-hidden="true" />
             </span>
             {loading ? (
-              <p className="text-[13px] text-muted-foreground"><LoadingText>Loading comments…</LoadingText></p>
+              <p className="text-[0.8125rem] text-muted-foreground"><LoadingText>Loading comments…</LoadingText></p>
             ) : filter === 'open' ? (
               <>
-                <p className="text-[13px] font-medium text-foreground">No open comments</p>
-                <p className="max-w-[260px] text-xs leading-[18px] text-muted-foreground">Select text and click Comment to start a thread.</p>
+                <p className="text-[0.8125rem] font-medium text-foreground">No open comments</p>
+                <p className="max-w-[260px] text-xs leading-[1.125rem] text-muted-foreground">Select text and click Comment to start a thread.</p>
               </>
             ) : (
               <>
-                <p className="text-[13px] font-medium text-foreground">No resolved comments</p>
-                <p className="max-w-[240px] text-xs leading-[18px] text-muted-foreground">Resolved threads show up here.</p>
+                <p className="text-[0.8125rem] font-medium text-foreground">No resolved comments</p>
+                <p className="max-w-[240px] text-xs leading-[1.125rem] text-muted-foreground">Resolved threads show up here.</p>
               </>
             )}
           </div>

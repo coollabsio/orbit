@@ -39,7 +39,7 @@ export function ProviderSetup({ setup, generated }: { setup: MailProviderSetup; 
       ) : null}
       <CopyRow label="Webhook URL" value={setup.webhook_url} />
       {secrets.map(([name, value]) => <CopyRow key={name} label={SECRET_LABELS[name] ?? name} value={value} />)}
-      <ol className="m-0 flex list-decimal flex-col gap-1.5 pl-5 text-[13px]">
+      <ol className="m-0 flex list-decimal flex-col gap-1.5 pl-5 text-[0.8125rem]">
         {setup.steps.map((step) => <li key={step}>{step}</li>)}
       </ol>
       {setup.worker_script ? (

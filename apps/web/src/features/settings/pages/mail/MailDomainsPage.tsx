@@ -229,7 +229,7 @@ function DomainCard({ listed, mailboxes, providers }: { listed: MailDomain; mail
             ) : null}
             {providers.length > 0 || domain.provider ? <DomainRouteRow domain={domain} providers={providers} /> : null}
             <SettingsRow className="flex-nowrap">
-              <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[13px] font-medium text-foreground">
+              <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[0.8125rem] font-medium text-foreground">
                 Mail on
                 <InfoTip text={`Off: Orbit refuses all mail for ${domain.name}. Mailboxes and their mail stay.`} />
               </span>
@@ -243,7 +243,7 @@ function DomainCard({ listed, mailboxes, providers }: { listed: MailDomain; mail
               />
             </SettingsRow>
             <SettingsRow className="flex-nowrap">
-              <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[13px] font-medium text-foreground">
+              <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[0.8125rem] font-medium text-foreground">
                 Catch-all
                 <InfoTip text={`The mailbox that gets mail for addresses of ${domain.name} that no mailbox has.`} />
               </span>

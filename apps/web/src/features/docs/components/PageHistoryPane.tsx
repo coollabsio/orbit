@@ -156,7 +156,7 @@ export function PageHistoryPane({ workspaceId, pageId, readCurrent, resolvePage,
       <div className="flex min-h-0 flex-1 max-[899px]:flex-col-reverse">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <div className="flex h-11 shrink-0 items-center gap-2 border-b border-border px-4">
-            <span className="min-w-0 flex-1 truncate text-[13px] text-muted-foreground" data-testid="history-preview-label">
+            <span className="min-w-0 flex-1 truncate text-[0.8125rem] text-muted-foreground" data-testid="history-preview-label">
               {selected ? `${dayLabel(selected.created_at)}, ${timeOfDay(selected.created_at)}` : 'Current version'}
             </span>
             <Button type="button" size="sm" disabled={!selected || !detail.data || restoring} onClick={() => void requestRestore()}>
@@ -168,11 +168,11 @@ export function PageHistoryPane({ workspaceId, pageId, readCurrent, resolvePage,
             {preview ? (
               <div className="mx-auto max-w-[680px]">
                 {preview.icon ? (
-                  <div className="mb-2 text-[44px] leading-none">
+                  <div className="mb-2 text-[2.75rem] leading-none">
                     <Emoji value={preview.icon} />
                   </div>
                 ) : null}
-                <h2 className="mb-4 text-[26px] leading-tight font-bold text-foreground">{preview.title.trim() ? preview.title : 'Untitled'}</h2>
+                <h2 className="mb-4 text-[1.625rem] leading-tight font-bold text-foreground">{preview.title.trim() ? preview.title : 'Untitled'}</h2>
                 <Suspense
                   fallback={
                     <div className="flex justify-center py-10">
@@ -212,7 +212,7 @@ export function PageHistoryPane({ workspaceId, pageId, readCurrent, resolvePage,
           <VersionOption id={CURRENT} selected={selectedId === CURRENT} onSelect={setPicked} title="Current version" />
           {groups.map((group) => (
             <div key={group.label} role="group" aria-label={group.label} className="mt-2 flex flex-col">
-              <div className="px-2 pt-1 pb-1 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">{group.label}</div>
+              <div className="px-2 pt-1 pb-1 text-[0.6875rem] font-medium tracking-wide text-muted-foreground uppercase">{group.label}</div>
               {group.items.map((version) => (
                 <VersionOption
                   key={version.id}
@@ -300,7 +300,7 @@ function VersionOption({ id, selected, onSelect, title, author, authorId, note }
         }
       }}
     >
-      <span className="text-[13px] font-medium text-foreground">{title}</span>
+      <span className="text-[0.8125rem] font-medium text-foreground">{title}</span>
       {author ? (
         // not a tab stop: the list moves with the arrow keys
         <ProfileTrigger userId={authorId} name={author} tabIndex={-1} className="flex w-fit max-w-full min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
@@ -308,7 +308,7 @@ function VersionOption({ id, selected, onSelect, title, author, authorId, note }
           <span className="truncate">{author}</span>
         </ProfileTrigger>
       ) : null}
-      {note ? <span className="text-[11px] text-muted-foreground/80">{note}</span> : null}
+      {note ? <span className="text-[0.6875rem] text-muted-foreground/80">{note}</span> : null}
     </div>
   )
 }

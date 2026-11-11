@@ -80,7 +80,7 @@ export function S3BucketForm({ s3, title, description, endpointPlaceholder, savi
         {children}
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-1.5">
-            <label className="flex items-center gap-2 text-[13px]">
+            <label className="flex items-center gap-2 text-[0.8125rem]">
               <Switch checked={draft.path_style} onCheckedChange={(checked: boolean) => setDraft((current) => ({ ...current, path_style: checked }))} />
               Path-style URLs
             </label>

@@ -146,7 +146,7 @@ function ProviderRow({
       <div className="flex flex-wrap items-start gap-3">
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-[13px] font-medium text-foreground">{provider.name}</span>
+            <span className="text-[0.8125rem] font-medium text-foreground">{provider.name}</span>
             <Badge variant="outline">{PROVIDER_LABELS[provider.kind]}</Badge>
             {scope === 'workspace' && provider.scope === 'instance' ? <Badge variant="secondary">Server</Badge> : null}
           </div>

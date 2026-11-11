@@ -43,7 +43,7 @@ export function MailTestCard({ admin }: { admin: MailAdmin }) {
     >
       <div className="flex flex-col divide-y">
         <div className="flex flex-wrap items-center gap-2 px-4 py-3">
-          {unavailable ? <p className="m-0 flex-1 text-[13px] text-muted-foreground">{unavailable}</p> : (
+          {unavailable ? <p className="m-0 flex-1 text-[0.8125rem] text-muted-foreground">{unavailable}</p> : (
             <>
               <Select items={options} value={chosen} onValueChange={(value) => setDomainId(value as string)}>
                 <SelectTrigger aria-label="Domain of the test address" className="w-56"><SelectValue /></SelectTrigger>
@@ -67,7 +67,7 @@ export function MailTestCard({ admin }: { admin: MailAdmin }) {
 function TestResult({ test, result, failed }: { test: MailTestAddress; result: MailTestResult | undefined; failed: boolean }) {
   const status = result?.status ?? 'waiting'
   return (
-    <div className="flex flex-col gap-3 px-4 py-3 text-[13px]" data-slot="test-result" data-status={status}>
+    <div className="flex flex-col gap-3 px-4 py-3 text-[0.8125rem]" data-slot="test-result" data-status={status}>
       <div className="flex flex-wrap items-center gap-2">
         <code className="font-mono">{test.address}</code>
         <Tip label="Copy address">
