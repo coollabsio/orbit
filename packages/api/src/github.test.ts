@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 
-import { parseGithubPullUrl, pullPath, threadsOutsideDiff, toCommentTarget, toGitPatch } from './github'
+import { mergeDisabledReason, mergeMethodKey, parseGithubPullUrl, pickMergeMethod, pullPath, squashDefaults, threadsOutsideDiff, toCommentTarget, toGitPatch } from './github'
 
 test('reads GitHub pull request URLs', () => {
   expect(parseGithubPullUrl('https://github.com/acme/repo/pull/12')).toEqual({ owner: 'acme', repo: 'repo', number: 12 })
@@ -49,4 +49,27 @@ test('a Pierre line range becomes GitHub comment coordinates', () => {
   expect(toCommentTarget('a.ts', { start: 9, end: 5, side: 'additions' })).toEqual({ path: 'a.ts', side: 'RIGHT', line: 9, start_side: 'RIGHT', start_line: 5 })
   // a range from a deleted line to an added line keeps both sides
   expect(toCommentTarget('a.ts', { start: 3, end: 6, side: 'deletions', endSide: 'additions' })).toEqual({ path: 'a.ts', side: 'RIGHT', line: 6, start_side: 'LEFT', start_line: 3 })
+})
+
+const merge = { methods: ['merge', 'squash'], mergeable: 'mergeable', blocked_reason: null, default_method: 'squash' }
+const pull = { title: 'Fix it', number: 12, body: 'Body', state: 'open', merge, viewer: { can_comment: true, can_review: true, can_merge: true, is_author: false } }
+
+test('the merge method: the stored one if allowed, else the default, else the first', () => {
+  expect(pickMergeMethod(merge, 'merge')).toBe('merge')
+  expect(pickMergeMethod(merge, 'rebase')).toBe('squash')
+  expect(pickMergeMethod({ ...merge, default_method: 'rebase' }, null)).toBe('merge')
+  expect(pickMergeMethod({ ...merge, methods: [] }, 'merge')).toBeNull()
+  expect(mergeMethodKey({ owner: 'acme', repo: 'repo', number: 1 })).toBe('orbit:pulls:merge-method:acme/repo')
+})
+
+test('why merging is not possible, in the order a person fixes it', () => {
+  expect(mergeDisabledReason(pull)).toBeNull()
+  expect(mergeDisabledReason({ ...pull, viewer: { ...pull.viewer, can_merge: false } })).toBe("You can't merge this pull request on GitHub.")
+  expect(mergeDisabledReason({ ...pull, merge: { ...merge, blocked_reason: 'Branch protection blocks merging.' } })).toBe('Branch protection blocks merging.')
+  expect(mergeDisabledReason({ ...pull, merge: { ...merge, mergeable: 'conflicting' } })).toBe('This branch has conflicts.')
+  expect(mergeDisabledReason({ ...pull, merge: { ...merge, methods: [] } })).toBe('This repository allows no merge method.')
+})
+
+test('a squash commit starts as the title with the number, and the description', () => {
+  expect(squashDefaults(pull)).toEqual({ title: 'Fix it (#12)', message: 'Body' })
 })

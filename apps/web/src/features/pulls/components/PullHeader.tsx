@@ -22,7 +22,7 @@ export function PullHeader({ pull, actions }: { pull: GithubPullDetail; actions?
         <h1 className="min-w-0 text-lg leading-snug font-semibold text-foreground">{pull.title}</h1>
         <span className="shrink-0 text-lg text-muted-foreground tabular-nums">#{pull.number}</span>
       </div>
-      <div className="flex shrink-0 items-center gap-2">
+      <div className="flex shrink-0 items-start gap-2">
         {actions}
         <a href={pull.html_url} target="_blank" rel="noopener noreferrer" aria-label="Open on GitHub" className="flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"><ArrowUpRight className="size-4" /></a>
       </div>

@@ -11,8 +11,10 @@ import { ConnectGithubPrompt } from '@/features/github/components/ConnectGithubP
 import { needsGithubConnection, usePull, usePullConversation, usePullFiles, usePullThreads, useSetViewed } from '@/features/pulls/api'
 import { fileAnchor, PullDiffList } from '@/features/pulls/components/PullDiffList'
 import { PullFileTree } from '@/features/pulls/components/PullFileTree'
+import { MergeButton } from '@/features/pulls/components/MergeButton'
 import { PullHeader } from '@/features/pulls/components/PullHeader'
 import { PullOverview } from '@/features/pulls/components/PullOverview'
+import { ReviewPanel } from '@/features/pulls/components/ReviewPanel'
 import { buildFileTree, treeOrder } from '@/features/pulls/lib/fileTree'
 import { useDiffStyle } from '@/features/pulls/useDiffStyle'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
@@ -91,7 +93,10 @@ function PullView({ workspaceId, pullRef, pull }: { workspaceId: string; pullRef
   useCommand('pull.toggleViewed', toggleViewed, { enabled: onFiles && active !== null })
 
   return <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
-    <PullHeader pull={pull} />
+    <PullHeader pull={pull} actions={<>
+      <ReviewPanel workspaceId={workspaceId} pullRef={pullRef} viewer={pull.viewer} />
+      <MergeButton workspaceId={workspaceId} pullRef={pullRef} pull={pull} />
+    </>} />
     <div className="flex items-center gap-3 border-b px-4 py-1.5">
       <Tabs value={tab} onValueChange={(value) => setTab(value as 'files' | 'overview')}>
         <TabsList>

@@ -60,3 +60,36 @@ export function toCommentTarget(path: string, range: LineRange): CommentTarget {
   if (start.side === end.side && start.line === end.line) return { path, side: end.side, line: end.line }
   return { path, side: end.side, line: end.line, start_side: start.side, start_line: start.line }
 }
+
+export type MergeMethod = 'merge' | 'squash' | 'rebase'
+type MergeInfo = { methods: string[]; mergeable: string; blocked_reason?: string | null; default_method?: string | null }
+type PullForMerge = { title: string; number: number; body: string; state: string; merge: MergeInfo; viewer: { can_merge: boolean } }
+
+const isMethod = (value: string | null | undefined): value is MergeMethod => value === 'merge' || value === 'squash' || value === 'rebase'
+
+/** Where the member's last merge method for a repository is kept. */
+export function mergeMethodKey(ref: Pick<PullRef, 'owner' | 'repo'>): string {
+  return `orbit:pulls:merge-method:${ref.owner}/${ref.repo}`
+}
+
+/** The merge method to offer: the stored one when the repository allows it, else its default, else the first allowed. */
+export function pickMergeMethod(info: MergeInfo, stored: string | null): MergeMethod | null {
+  const allowed = info.methods.filter(isMethod)
+  if (isMethod(stored) && allowed.includes(stored)) return stored
+  if (isMethod(info.default_method) && allowed.includes(info.default_method)) return info.default_method
+  return allowed[0] ?? null
+}
+
+/** Why the member cannot merge now (shown next to the disabled button), or `null`. */
+export function mergeDisabledReason(pull: PullForMerge): string | null {
+  if (!pull.viewer.can_merge) return "You can't merge this pull request on GitHub."
+  if (pull.merge.blocked_reason) return pull.merge.blocked_reason
+  if (pull.merge.mergeable === 'conflicting') return 'This branch has conflicts.'
+  if (!pull.merge.methods.some(isMethod)) return 'This repository allows no merge method.'
+  return null
+}
+
+/** The squash commit GitHub would make: the title with the number, and the description as the message. */
+export function squashDefaults(pull: Pick<PullForMerge, 'title' | 'number' | 'body'>): { title: string; message: string } {
+  return { title: `${pull.title} (#${pull.number})`, message: pull.body }
+}
