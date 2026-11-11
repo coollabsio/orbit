@@ -206,8 +206,11 @@ function TextEditor({ property, anchor, initial, onCommit, onClose }: CellEditor
   )
 }
 
-function newOptionId(): string {
-  return crypto.randomUUID()
+/** `list` with a new option named `name` (a status option starts in "To do"), and that option. */
+export function withNewOption(property: Property, list: readonly SelectOption[], name: string): { next: SelectOption[]; option: SelectOption } {
+  const option = { id: crypto.randomUUID(), name: name.trim().slice(0, 200), color: OPTION_COLORS[(list.length % (OPTION_COLORS.length - 1)) + 1] }
+  const next = property.type === 'status' ? [...list, { ...option, group: 'todo' as const }] : [...list, option]
+  return { next, option }
 }
 
 function ChoiceEditor({ property, row, anchor, onCommit, onOptions, onClose }: CellEditorProps) {
@@ -238,8 +241,7 @@ function ChoiceEditor({ property, row, anchor, onCommit, onOptions, onClose }: C
   }
   const create = async () => {
     if (!onOptions) return
-    const option = { id: newOptionId(), name: trimmed.slice(0, 200), color: OPTION_COLORS[(list.length % (OPTION_COLORS.length - 1)) + 1] }
-    const next = property.type === 'status' ? [...list, { ...option, group: 'todo' as const }] : [...list, option]
+    const { next, option } = withNewOption(property, list, trimmed)
     try {
       await onOptions(next)
     } catch {
@@ -296,7 +298,7 @@ function ChoiceEditor({ property, row, anchor, onCommit, onOptions, onClose }: C
 }
 
 /** Rename, recolor or delete one option. It saves the property's whole option list. */
-function OptionMenu({ option, list, onOptions }: { option: SelectOption; list: readonly SelectOption[]; onOptions: (options: SelectOption[]) => Promise<void> }) {
+export function OptionMenu({ option, list, onOptions }: { option: SelectOption; list: readonly SelectOption[]; onOptions: (options: SelectOption[]) => Promise<void> }) {
   const [name, setName] = useState(option.name)
   const save = (change: Partial<SelectOption>) =>
     void onOptions(list.map((other) => (other.id === option.id ? { ...other, ...change } : other))).catch(() => undefined)

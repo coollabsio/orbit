@@ -33,6 +33,7 @@ import { RelationMenu, RelationSetup, RollupMenu, RollupSetup } from './Relation
 import { ButtonConfigDialog } from './ButtonConfigDialog'
 import { FormulaDialog } from './FormulaDialog'
 import { UniqueIdPrefix } from './UniqueIdPrefix'
+import { PropertyOptions } from './PropertyOptions'
 
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'JPY', 'CHF', 'CAD', 'AUD', 'HUF']
 
@@ -173,6 +174,17 @@ export function ColumnHeaderMenu({ property, config, onConfig, onFilter }: Colum
                 Edit property
               </DropdownMenuSubTrigger>
               <DropdownMenuSubContent className="w-56">
+                {property.type === 'select' || property.type === 'multi_select' || property.type === 'status' ? (
+                  <>
+                    <PropertyOptions
+                      property={property}
+                      onOptions={(options) =>
+                        updateProperty.mutateAsync({ propertyId: property.id, body: { config: { ...property.config, options } } }).then(() => undefined)
+                      }
+                    />
+                    <DropdownMenuSeparator />
+                  </>
+                ) : null}
                 <DropdownMenuGroup>
                   <DropdownMenuLabel>Type</DropdownMenuLabel>
                   <DropdownMenuRadioGroup value={property.type} onValueChange={(type) => void changeType(type as DatabasePropertyType)}>
