@@ -32,7 +32,7 @@ test('project settings save an installed repository and label without an API tok
   }) as typeof fetch
 
   const view = render(<ProjectGithubCard workspaceId="workspace-1" projectId="project-1" />, { wrapper: Wrapper })
-  const repository = await view.findByRole('combobox', { name: 'Repository' })
+  const repository = await view.findByRole('button', { name: 'Repository' })
   expect(view.queryByRole('button', { name: 'Save Changes' })).toBeNull()
   const label = view.getByRole('textbox', { name: 'Issue label' })
   for (const style of ['rounded-lg', 'bg-transparent', 'dark:bg-input/30']) {
@@ -68,7 +68,7 @@ test('choosing No repository disconnects a linked project', async () => {
   }) as typeof fetch
 
   const view = render(<ProjectGithubCard workspaceId="workspace-1" projectId="project-1" />, { wrapper: Wrapper })
-  const repository = await view.findByRole('combobox', { name: 'Repository' })
+  const repository = await view.findByRole('button', { name: 'Repository' })
   fireEvent.click(repository)
   await userEvent.click(await view.findByRole('option', { name: 'No repository' }))
   expect(repository.querySelector('[data-slot="select-value"]')?.textContent).toBe('No repository')

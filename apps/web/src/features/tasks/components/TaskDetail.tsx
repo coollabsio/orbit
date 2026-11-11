@@ -9,16 +9,15 @@ import { Badge } from '@/components/ui/badge'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Tip } from '@/components/common/Tip'
 import { Input } from '@/components/ui/input'
-import { UserAvatar, UserAvatarStack } from '@/components/common/UserAvatar'
+import { UserAvatarStack } from '@/components/common/UserAvatar'
 import { DatePicker } from '@/components/common/DatePicker'
+import { SearchPicker } from '@/components/common/SearchPicker'
+import { personOption, projectOption } from './pickerOptions'
 import { useTaskPickerUpdate } from '@/features/tasks/useTaskPickerUpdate'
 import {
   DropdownMenu,
-  DropdownMenuCheckboxItem,
   DropdownMenuContent,
-  DropdownMenuGroup,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -313,45 +312,32 @@ export function TaskDetail({ task, project, state, onClose, onOpenTask, onOpenPr
                   ))}
                 </DropdownMenuContent>
               </DropdownMenu>
-              {/* Multi-assignee options toggle individually; the checked indicator marks the active ones. */}
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  render={
-                    <PropertyButton>
-                      {assignees.length > 0 ? (
-                        <>
-                          <UserAvatarStack users={assignees} size={16} />
-                          <span className="truncate">{assignees.map((u) => u.name).join(', ')}</span>
-                        </>
-                      ) : (
-                        <>
-                          <UserIcon aria-hidden="true" className="text-muted-foreground" />
-                          Assign
-                        </>
-                      )}
-                    </PropertyButton>
-                  }
-                />
-                <DropdownMenuContent className="w-auto min-w-45">
-                  <DropdownMenuGroup>
-                    <DropdownMenuLabel>Assignees</DropdownMenuLabel>
-                    {audience.map((u) => {
-                      const active = task.assigneeIds.includes(u.id)
-                      return (
-                        <DropdownMenuCheckboxItem
-                          key={u.id}
-                          checked={active}
-                          closeOnClick
-                          onCheckedChange={() => updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, assignee_ids: active ? task.assigneeIds.filter((id) => id !== u.id) : [...task.assigneeIds, u.id] } })}
-                        >
-                          <UserAvatar user={u} size={16} />
-                          {u.name}
-                        </DropdownMenuCheckboxItem>
-                      )
-                    })}
-                  </DropdownMenuGroup>
-                </DropdownMenuContent>
-              </DropdownMenu>
+              {/* several assignees; the picker closes after each toggle, like the other properties */}
+              <SearchPicker
+                multiple
+                closeOnSelect
+                label="Assignees"
+                placeholder="Assign to…"
+                emptyText="No people match"
+                options={audience.map(personOption)}
+                selected={task.assigneeIds}
+                onSelect={(id) => updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, assignee_ids: task.assigneeIds.includes(id) ? task.assigneeIds.filter((item) => item !== id) : [...task.assigneeIds, id] } })}
+                trigger={
+                  <PropertyButton>
+                    {assignees.length > 0 ? (
+                      <>
+                        <UserAvatarStack users={assignees} size={16} />
+                        <span className="truncate">{assignees.map((u) => u.name).join(', ')}</span>
+                      </>
+                    ) : (
+                      <>
+                        <UserIcon aria-hidden="true" className="text-muted-foreground" />
+                        Assign
+                      </>
+                    )}
+                  </PropertyButton>
+                }
+              />
               {task.parent ? (
                 <DropdownMenu>
                   <DropdownMenuTrigger render={
@@ -406,34 +392,24 @@ export function TaskDetail({ task, project, state, onClose, onOpenTask, onOpenPr
                   <p className="mt-1 text-xs text-muted-foreground">Synced with GitHub, so it stays in this project.</p>
                 </>
               ) : (
-                <DropdownMenu>
-                  <DropdownMenuTrigger
-                    render={
-                      // the pill is the trigger, like "Add label": a ghost button around a badge reads as two controls
-                      <Button variant="outline" size="xs" className="h-5 max-w-full rounded-full font-medium" aria-label={`Project: ${project?.name ?? 'none'}`}>
-                        {project ? <ColorDot color={project.color} /> : null}
-                        <span className="truncate">{project?.name ?? 'Set project'}</span>
-                      </Button>
-                    }
-                  />
-                  <DropdownMenuContent className="w-auto min-w-52">
-                    <DropdownMenuGroup>
-                      <DropdownMenuLabel>Move to project</DropdownMenuLabel>
-                      {projects.map((item) => (
-                        <DropdownMenuItem
-                          key={item.id}
-                          className="data-selected:bg-accent data-selected:font-medium"
-                          data-selected={item.id === task.projectId || undefined}
-                          onClick={() => moveToProject([task], item)}
-                        >
-                          <ColorDot color={item.color} className="size-2" />
-                          <span className="flex-1 truncate">{item.name}</span>
-                          <span className="text-xs text-muted-foreground tabular-nums">{item.key}</span>
-                        </DropdownMenuItem>
-                      ))}
-                    </DropdownMenuGroup>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                <SearchPicker
+                  label="Move to project"
+                  placeholder="Move to project…"
+                  emptyText="No projects match"
+                  options={projects.map(projectOption)}
+                  selected={[task.projectId]}
+                  onSelect={(id) => {
+                    const target = projects.find((item) => item.id === id)
+                    if (target && id !== task.projectId) moveToProject([task], target)
+                  }}
+                  trigger={
+                    // the pill is the trigger, like "Add label": a ghost button around a badge reads as two controls
+                    <Button variant="outline" size="xs" className="h-5 max-w-full rounded-full font-medium" aria-label={`Project: ${project?.name ?? 'none'}`}>
+                      {project ? <ColorDot color={project.color} /> : null}
+                      <span className="truncate">{project?.name ?? 'Set project'}</span>
+                    </Button>
+                  }
+                />
               )}
             </PropertyGroup>
 
