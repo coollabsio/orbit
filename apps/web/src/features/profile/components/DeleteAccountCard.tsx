@@ -21,11 +21,9 @@ export function DeleteAccountCard() {
       <SettingsCard
         className="shadow-[0_0_0_1px_var(--destructive)] hover:shadow-[0_0_0_1px_var(--destructive)] [&_h3]:text-destructive [&>div]:bg-transparent [&>div]:shadow-none"
         title="Delete account"
-        description={me.root
-          ? 'The root account cannot be deleted.'
-          : 'Delete your account for good. What you wrote stays, without your name.'}
+        description={me.root ? undefined : 'Delete your account for good. What you wrote stays, without your name.'}
       >
-        {me.root ? null : <Button type="button" variant="destructive" onClick={() => setOpen(true)}>Delete account</Button>}
+        {me.root ? <p className="text-sm text-muted-foreground">The root account cannot be deleted.</p> : <Button type="button" variant="destructive" onClick={() => setOpen(true)}>Delete account</Button>}
       </SettingsCard>
       {open ? <DeleteAccountDialog email={me.email} hasPassword={me.has_password !== false} onClose={() => setOpen(false)} /> : null}
     </>

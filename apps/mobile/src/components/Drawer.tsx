@@ -116,6 +116,8 @@ interface NavLink {
   icon: IconName
   /** A project's colour: a dot replaces the icon tile. */
   color?: string
+  /** A private project: a lock follows the label. */
+  locked?: boolean
   href: Href
   active: boolean
   badge?: number
@@ -323,7 +325,7 @@ function TasksArea({ view, project, onTasks, onBack, go }: { view?: string; proj
           <Section label="Projects" />
           {row({ label: 'All projects', icon: 'folder', href: tasksHref(current, { project: null }), active: onTasks && !project })}
           {projects.map((item) => {
-            const link: NavLink = { label: item.name, icon: 'folder', color: item.color, href: tasksHref(current, { project: item.id }), active: onTasks && project === item.id }
+            const link: NavLink = { label: item.name, icon: 'folder', color: item.color, locked: item.private, href: tasksHref(current, { project: item.id }), active: onTasks && project === item.id }
             return <NavRow key={item.id} link={link} onPress={() => go(link.href)} onLongPress={() => setMoving({ id: item.id, name: item.name })} />
           })}
         </>
@@ -398,7 +400,7 @@ function NavRow({ link, onPress, onLongPress, comingSoon = false, tone = 'brand'
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={link.badge ? `${link.label}, ${link.badge} unread` : link.dot ? `${link.label}, unread` : link.label}
+      accessibilityLabel={`${link.label}${link.locked ? ', private' : ''}${link.badge ? `, ${link.badge} unread` : link.dot ? ', unread' : ''}`}
       accessibilityState={{ selected: link.active, disabled: comingSoon }}
       disabled={comingSoon || !onPress}
       onPress={onPress}
@@ -421,6 +423,7 @@ function NavRow({ link, onPress, onLongPress, comingSoon = false, tone = 'brand'
           <RNText numberOfLines={1} className={`flex-1 font-noto-medium text-[13px] ${link.active || pressed ? 'text-sidebar-nav-active' : 'text-sidebar-nav'}`}>
             {link.label}
           </RNText>
+          {link.locked ? <Icon name="lock" size={12} color={alpha(colors.sidebarNav, 0.7)} /> : null}
           {comingSoon ? <RNText className="font-noto-medium text-[10px] text-muted-foreground/70">Coming soon</RNText> : null}
           {link.badge ? <CountBadge count={link.badge} /> : link.dot ? <View className="mr-1 size-2 rounded-full bg-primary" /> : null}
         </>

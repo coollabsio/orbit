@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { ScrollView } from 'react-native'
+import { ScrollView, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { useTheme } from '../theme'
@@ -13,6 +13,8 @@ export interface PickerOption {
   label: string
   subtitle?: string
   leading?: ReactNode
+  /** A mark before the selection check, such as a private project's lock. */
+  trailing?: ReactNode
   selected?: boolean
 }
 
@@ -49,7 +51,12 @@ export function PickerSheet({
               title={option.label}
               subtitle={option.subtitle}
               leading={option.leading}
-              trailing={option.selected ? <Icon name="check" size={18} color={colors.primary} /> : undefined}
+              trailing={option.trailing || option.selected ? (
+                <View className="flex-row items-center gap-2">
+                  {option.trailing}
+                  {option.selected ? <Icon name="check" size={18} color={colors.primary} /> : null}
+                </View>
+              ) : undefined}
               onPress={() => onSelect(option.key)}
             />
           ))}

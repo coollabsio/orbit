@@ -1,4 +1,4 @@
--- Each member's own order of the projects in the Tasks sidebar, as in migrations/0093_project_positions.sql.
+-- Each member's own order of the projects in the Tasks sidebar, as in migrations/0096_project_positions.sql.
 CREATE TABLE project_positions (
     workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
     user_id TEXT NOT NULL REFERENCES users(id),

@@ -154,6 +154,9 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::public_api::databases::create_row,
         crate::public_api::databases::update_row,
         crate::public_api::databases::trash_rows,
+        crate::public_api::databases::create_property,
+        crate::public_api::databases::update_property,
+        crate::public_api::databases::delete_property,
         crate::public_api::create_export,
         crate::public_api::get_export,
         crate::public_api::download_export,
@@ -169,6 +172,9 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::task_routes::create_project,
         crate::task_routes::update_project,
         crate::task_routes::delete_project,
+        crate::task_routes::list_project_members,
+        crate::task_routes::add_project_member,
+        crate::task_routes::remove_project_member,
         crate::task_routes::restore_project,
         crate::task_routes::list_project_trash,
         crate::task_routes::purge_project,
@@ -386,6 +392,7 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::chat_routes::hooks::delete_chat_webhook,
         crate::chat_routes::hooks::post_incoming_webhook,
         crate::chat_routes::hooks::post_action_response,
+        crate::chat_routes::events::read_hook_messages,
         crate::chat_routes::interactions::click_chat_action,
         crate::chat_routes::interactions::set_chat_webhook_interactivity,
         crate::chat_routes::interactions::get_chat_webhook_signing_secret,
@@ -552,6 +559,7 @@ fn public_operation(operation_id: &str) -> bool {
             | "github_webhook"
             | "post_incoming_webhook"
             | "post_action_response"
+            | "read_hook_messages"
             | "github_manifest_callback"
             | "stripe_webhook"
             | "provider_callback"
@@ -845,6 +853,11 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             add_code(&mut responses, "404", "response_url_not_found");
             add_code(&mut responses, "413", "payload_too_large");
             add_code(&mut responses, "415", "unsupported_media_type");
+            add_code(&mut responses, "422", "validation_failed");
+            add_code(&mut responses, "429", "rate_limit_exceeded");
+        }
+        "read_hook_messages" => {
+            add_code(&mut responses, "404", "webhook_not_found");
             add_code(&mut responses, "422", "validation_failed");
             add_code(&mut responses, "429", "rate_limit_exceeded");
         }
@@ -1245,6 +1258,9 @@ fn invalid_request_operation(operation_id: &str) -> bool {
             | "create_project"
             | "update_project"
             | "delete_project"
+            | "list_project_members"
+            | "add_project_member"
+            | "remove_project_member"
             | "restore_project"
             | "list_project_trash"
             | "list_statuses"
@@ -1567,6 +1583,9 @@ fn task_operation(operation_id: &str) -> bool {
             | "create_project"
             | "update_project"
             | "delete_project"
+            | "list_project_members"
+            | "add_project_member"
+            | "remove_project_member"
             | "restore_project"
             | "list_project_trash"
             | "purge_project"

@@ -340,8 +340,8 @@ export function createHttpChatClient(options: HttpChatClientOptions): ChatClient
         throw toChatError(error)
       }
     },
-    async setWebhookInteractivity(conversationId, webhookId, requestUrl) {
-      const body = { request_url: requestUrl }
+    async setWebhookInteractivity(conversationId, webhookId, requestUrl, events) {
+      const body = { request_url: requestUrl, events }
       return toWebhook(await call(setChatWebhookInteractivity({ ...at({ conversation_id: conversationId, webhook_id: webhookId }), body })))
     },
     async webhookSigningSecret(conversationId, webhookId, rotate) {

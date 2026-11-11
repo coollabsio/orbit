@@ -10,7 +10,7 @@ import { keys } from '../data/keys'
 import * as api from '../data/orbit'
 import type { Page, PageSummary, Teamspace } from '../data/orbit'
 import { useOrbit } from '../orbit-context'
-import { useMentionPeople } from '../queries'
+import { useMentionPeople, useProjects } from '../queries'
 
 /**
  * A saved page into its detail cache and the tree, without a refetch. A database row is not in the tree: its title
@@ -233,12 +233,14 @@ export function usePageThreads(pageId: string) {
 
 /** A new comment on the page (`threadId` unset) or a reply in a thread, as plain paragraphs. */
 export function useAddComment(pageId: string) {
-  const { client, workspaceId } = useOrbit()
+  const { client, workspaceId, session } = useOrbit()
   const queryClient = useQueryClient()
   const people = useMentionPeople()
+  const keys = (useProjects().data ?? []).map((project) => project.key)
   return useMutation({
     mutationFn: async ({ text, threadId }: { text: string; threadId?: string }) => {
-      const body = paragraphBlocks(text, undefined, people)
+      // a typed task ID goes as a link to the task, as the web's "#" inserts it
+      const body = paragraphBlocks(text, undefined, people, { keys, server: session.server })
       if (threadId) await docs.replyToThread(client, workspaceId, pageId, threadId, body)
       else await docs.commentOnPage(client, workspaceId, pageId, body)
     },

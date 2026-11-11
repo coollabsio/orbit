@@ -612,7 +612,22 @@ impl MigrationRunner {
                 ),
                 Migration::new(
                     93,
-                    include_str!("../../../../apps/server/migrations/0093_project_positions.sql"),
+                    include_str!("../../../../apps/server/migrations/0093_task_recurrences.sql"),
+                    false,
+                ),
+                Migration::new(
+                    94,
+                    include_str!("../../../../apps/server/migrations/0094_private_projects.sql"),
+                    false,
+                ),
+                Migration::new(
+                    95,
+                    include_str!("../../../../apps/server/migrations/0095_chat_webhook_events.sql"),
+                    false,
+                ),
+                Migration::new(
+                    96,
+                    include_str!("../../../../apps/server/migrations/0096_project_positions.sql"),
                     false,
                 ),
             ],
@@ -900,7 +915,28 @@ impl MigrationRunner {
             Migration::new(
                 93,
                 include_str!(
-                    "../../../../apps/server/migrations/postgres/0093_project_positions.sql"
+                    "../../../../apps/server/migrations/postgres/0093_task_recurrences.sql"
+                ),
+                false,
+            ),
+            Migration::new(
+                94,
+                include_str!(
+                    "../../../../apps/server/migrations/postgres/0094_private_projects.sql"
+                ),
+                false,
+            ),
+            Migration::new(
+                95,
+                include_str!(
+                    "../../../../apps/server/migrations/postgres/0095_chat_webhook_events.sql"
+                ),
+                false,
+            ),
+            Migration::new(
+                96,
+                include_str!(
+                    "../../../../apps/server/migrations/postgres/0096_project_positions.sql"
                 ),
                 false,
             ),

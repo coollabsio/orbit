@@ -24,7 +24,7 @@ import {
   type RelationKind,
 } from '../data/tasks'
 import { useOrbit } from '../orbit-context'
-import { useLabels, usePeople, useProjects, useStatuses } from '../queries'
+import { useLabels, usePeople, useProjects, useSeesProject, useStatuses } from '../queries'
 import { errorMessage } from '../session-context'
 import { alpha, cssColors, useTheme } from '../theme'
 import { Avatar, Button, Icon, IconButton, type IconName, KeyboardSpace, PriorityIcon, StatusIcon, Text } from '../ui'
@@ -102,6 +102,7 @@ export function NewTaskDialog({ defaults, onClose }: { defaults: NewTaskDefaults
   const [created, setCreated] = useState<api.TaskRecord | null>(null)
 
   const project = projects.data?.find((item) => item.id === projectId) ?? projects.data?.[0]
+  const seesProject = useSeesProject(project?.id ?? null)
   const own = project && statuses.data ? projectStatuses(statuses.data, project.id).filter((item) => item.category !== 'duplicate') : []
   const status = own.find((item) => item.id === statusId) ?? (project && statuses.data ? defaultStatusOf(statuses.data, project.id) : undefined)
   // labels follow by name into another project, like a task that moves
@@ -345,7 +346,7 @@ export function NewTaskDialog({ defaults, onClose }: { defaults: NewTaskDefaults
             }}
           />
         ) : null}
-        {sheet?.kind === 'assignees' ? <PeopleChoices people={people} value={assigneeIds} onChange={setAssigneeIds} /> : null}
+        {sheet?.kind === 'assignees' ? <PeopleChoices people={people.filter((person) => seesProject(person.id))} value={assigneeIds} onChange={setAssigneeIds} /> : null}
         {sheet?.kind === 'labels' && project ? <LabelChoices projectId={project.id} value={labelIds} onChange={setChosenLabelIds} /> : null}
         {sheet?.kind === 'due' ? (
           <DueDateChoices

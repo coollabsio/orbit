@@ -26,6 +26,7 @@ use crate::audit::{self, AuditOutcome};
 use crate::auth_routes::CookieMode;
 use crate::repositories::api_tokens::{ApiTokenPrincipal, ApiTokenScope, live_projects};
 use crate::repositories::identity::IdentityRepository;
+use crate::repositories::project_access::user_sees_project_sql;
 use crate::task_routes::authenticate_session;
 
 const SCOPE: &str = "tasks:read";
@@ -95,7 +96,11 @@ impl OAuthState {
             .map_err(|_| OAuthError::server())?;
         // An all-projects grant covers the live projects of today and stays valid without any.
         if row.get::<bool, _>("all_projects") {
-            let approved = live_projects(self.database.pool(), workspace_id)
+            let viewer = row
+                .get::<String, _>("user_id")
+                .parse()
+                .map_err(|_| OAuthError::server())?;
+            let approved = live_projects(self.database.pool(), workspace_id, Some(viewer))
                 .await
                 .map_err(|_| OAuthError::server())?;
             return principal(&row, workspace_id, approved).map(Some);
@@ -104,8 +109,15 @@ impl OAuthState {
             serde_json::from_str(row.get("project_ids")).map_err(|_| OAuthError::server())?;
         let mut approved = Vec::new();
         for id in project_ids {
-            let Flag(active) = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM projects WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL)")
-                .bind(&id).bind(row.get::<String, _>("workspace_id")).fetch_one(self.database.pool()).await?;
+            let Flag(active) = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+                "SELECT EXISTS(SELECT 1 FROM projects WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL AND {})",
+                user_sees_project_sql("projects.id", "$3")
+            )))
+            .bind(&id)
+            .bind(row.get::<String, _>("workspace_id"))
+            .bind(row.get::<String, _>("user_id"))
+            .fetch_one(self.database.pool())
+            .await?;
             if active {
                 approved.push(id.parse().map_err(|_| OAuthError::server())?);
             }
@@ -538,7 +550,10 @@ async fn consent(
     }
     let (client, redirect_uri): (String, String) = sqlx::query_as("SELECT c.name, r.redirect_uri FROM oauth_clients c JOIN oauth_requests r ON r.client_id = c.id WHERE r.id = $1")
         .bind(&id).fetch_one(&mut *tx).await?;
-    let rows = sqlx::query("SELECT p.id, p.name, p.workspace_id, w.name AS workspace_name FROM projects p JOIN workspaces w ON w.id = p.workspace_id JOIN memberships m ON m.workspace_id = w.id AND m.role <> 'guest' WHERE m.user_id = $1 AND p.deleted_at IS NULL AND w.deleted_at IS NULL ORDER BY w.name, p.name, p.id")
+    let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
+        "SELECT p.id, p.name, p.workspace_id, w.name AS workspace_name FROM projects p JOIN workspaces w ON w.id = p.workspace_id JOIN memberships m ON m.workspace_id = w.id AND m.role <> 'guest' WHERE m.user_id = $1 AND p.deleted_at IS NULL AND w.deleted_at IS NULL AND {} ORDER BY w.name, p.name, p.id",
+        user_sees_project_sql("p.id", "m.user_id")
+    )))
         .bind(user.to_string()).fetch_all(&mut *tx).await?;
     let projects: Vec<_> = rows
         .into_iter()
@@ -549,13 +564,19 @@ async fn consent(
             workspace_name: row.get("workspace_name"),
         })
         .collect();
+    // Listed apart from projects, so a workspace without projects can still be picked.
+    let workspaces: Vec<Value> = sqlx::query("SELECT w.id, w.name FROM workspaces w JOIN memberships m ON m.workspace_id = w.id AND m.role <> 'guest' WHERE m.user_id = $1 AND w.deleted_at IS NULL ORDER BY w.name, w.id")
+        .bind(user.to_string()).fetch_all(&mut *tx).await?
+        .into_iter()
+        .map(|row| json!({"id": row.get::<String, _>("id"), "name": row.get::<String, _>("name")}))
+        .collect();
     let requested: String =
         sqlx::query_scalar("SELECT mcp_scopes FROM oauth_requests WHERE id = $1")
             .bind(&id)
             .fetch_one(&mut *tx)
             .await?;
     tx.commit().await?;
-    Ok(([(header::CACHE_CONTROL, "no-store")], Json(json!({"client_name": client, "redirect_to": redirect_target(&redirect_uri), "scope": requested, "csrf_token": nonce, "projects": projects}))).into_response())
+    Ok(([(header::CACHE_CONTROL, "no-store")], Json(json!({"client_name": client, "redirect_to": redirect_target(&redirect_uri), "scope": requested, "csrf_token": nonce, "workspaces": workspaces, "projects": projects}))).into_response())
 }
 
 #[derive(Deserialize)]
@@ -604,7 +625,10 @@ async fn approve(
             return Err(OAuthError::invalid("invalid_request"));
         }
         for project in &project_ids {
-            let Flag(allowed) = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM projects p JOIN workspaces w ON w.id = p.workspace_id JOIN memberships m ON m.workspace_id = w.id AND m.role <> 'guest' WHERE p.id = $1 AND p.workspace_id = $2 AND m.user_id = $3 AND p.deleted_at IS NULL AND w.deleted_at IS NULL)")
+            let Flag(allowed) = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+                "SELECT EXISTS(SELECT 1 FROM projects p JOIN workspaces w ON w.id = p.workspace_id JOIN memberships m ON m.workspace_id = w.id AND m.role <> 'guest' WHERE p.id = $1 AND p.workspace_id = $2 AND m.user_id = $3 AND p.deleted_at IS NULL AND w.deleted_at IS NULL AND {})",
+                user_sees_project_sql("p.id", "m.user_id")
+            )))
                 .bind(project.to_string()).bind(workspace.to_string()).bind(user.to_string()).fetch_one(&mut *tx).await?;
             if !allowed {
                 return Err(OAuthError::invalid("invalid_request"));

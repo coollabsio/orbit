@@ -173,37 +173,43 @@ struct Names {
     actor_id: Id,
 }
 
-impl Names {
-    /// The property `key` names: its id, else its exact name, else its name in any letter case.
-    /// A name that two properties share is an error.
-    fn property(&self, key: &str, path: &str) -> Result<&Property, DatabaseError> {
-        if let Ok(id) = key.parse::<Id>()
-            && let Some(property) = self.properties.iter().find(|property| property.id == id)
-        {
-            return Ok(property);
-        }
-        let exact: Vec<&Property> = self
-            .properties
-            .iter()
-            .filter(|property| property.name == key)
-            .collect();
-        let found = match exact.as_slice() {
-            [] => {
-                let lower = key.to_lowercase();
-                let loose: Vec<&Property> = self
-                    .properties
-                    .iter()
-                    .filter(|property| property.name.to_lowercase() == lower)
-                    .collect();
-                match loose.as_slice() {
-                    [property] => Some(*property),
-                    _ => None,
-                }
+/// The property `key` names: its id, else its exact name, else its name in any letter case.
+/// A name that two properties share is an error.
+pub(super) fn property_by_key<'a>(
+    properties: &'a [Property],
+    key: &str,
+    path: &str,
+) -> Result<&'a Property, DatabaseError> {
+    if let Ok(id) = key.parse::<Id>()
+        && let Some(property) = properties.iter().find(|property| property.id == id)
+    {
+        return Ok(property);
+    }
+    let exact: Vec<&Property> = properties
+        .iter()
+        .filter(|property| property.name == key)
+        .collect();
+    let found = match exact.as_slice() {
+        [] => {
+            let lower = key.to_lowercase();
+            let loose: Vec<&Property> = properties
+                .iter()
+                .filter(|property| property.name.to_lowercase() == lower)
+                .collect();
+            match loose.as_slice() {
+                [property] => Some(*property),
+                _ => None,
             }
-            [property] => Some(*property),
-            _ => None,
-        };
-        found.ok_or_else(|| DatabaseError::invalid(path))
+        }
+        [property] => Some(*property),
+        _ => None,
+    };
+    found.ok_or_else(|| DatabaseError::invalid(path))
+}
+
+impl Names {
+    fn property(&self, key: &str, path: &str) -> Result<&Property, DatabaseError> {
+        property_by_key(&self.properties, key, path)
     }
 
     fn option_id(kind: &PropertyKind, text: &str) -> Option<String> {
@@ -576,6 +582,21 @@ pub fn invalid_detail(field: &str) -> &'static str {
         "title" => "Send a title of at most 500 characters.",
         "template_id" => {
             "No template of this database has this id. Send the id of one of the database's templates (its templates list), or leave template_id out."
+        }
+        "property" => {
+            "No property has this name or id, or two properties share the name: use the property id from get_database."
+        }
+        "name" => "Send a name of 1 to 200 characters.",
+        "type" => {
+            "Send one of these types: text, number, select, multi_select, status, date, person, checkbox, url, email, phone, files, unique_id, relation, rollup, created_time, created_by, last_edited_time, last_edited_by, button, formula. The title property cannot be added and cannot change its type."
+        }
+        "position" => "Send a position of 0 or more.",
+        "changes" => "Send at least one of name, type, config, add_options or position.",
+        "add_options" => {
+            "add_options takes option names or {name, color, group} objects, only for a select, multi-select or status property, and not together with config."
+        }
+        _ if field.starts_with("config") => {
+            "The config does not fit the property's type. Select, multi-select and status take {\"options\": [...]}: names or {id, name, color, group} objects, at most 200, with names of 1 to 200 characters; group (todo, in_progress, done) only for a status. Colors: default, gray, brown, orange, yellow, green, blue, purple, pink, red. For other types, send the shape that get_database shows in the property's config."
         }
         _ if field.ends_with(".property_id") => {
             "No property has this name or id, or two properties share the name: use the property id."

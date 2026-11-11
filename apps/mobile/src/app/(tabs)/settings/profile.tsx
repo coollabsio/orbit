@@ -13,7 +13,7 @@ import { pickImage, useAuthOptions, useChangePassword, useConnectedAccounts, use
 import { DeleteAccountDialog } from '../../../components/settings/DeleteAccountDialog'
 import { useOrbit } from '../../../orbit-context'
 import { errorMessage } from '../../../session-context'
-import { Avatar, Button, Input, Text } from '../../../ui'
+import { Avatar, Button, Input, Text, LabelTip } from '../../../ui'
 
 /** The server refuses a bigger picture. */
 const MAX_PICTURE_BYTES = 512 * 1024
@@ -50,12 +50,12 @@ export default function ProfileScreen() {
           <Input label="Pronouns" value={form.pronouns} onChangeText={(pronouns) => set({ pronouns })} placeholder="she/her" maxLength={40} />
           <Input
             label="Phone number"
+            help="The people in your workspaces can see it."
             value={form.phone}
             onChangeText={(phone) => set({ phone })}
             placeholder="+1 555 010 0000"
             keyboardType="phone-pad"
             autoComplete="tel"
-            description="The people in your workspaces can see it."
             error={phoneInvalid ? 'Use digits, spaces and + - ( ) . only.' : undefined}
           />
           <Input label="Time zone" value={form.timezone} onChangeText={(timezone) => set({ timezone })} placeholder="Europe/Budapest" autoCapitalize="none" autoCorrect={false} />
@@ -97,11 +97,12 @@ function PictureField() {
     <View className="items-start gap-4">
       <Avatar id={user.id} name={user.display_name} size={64} />
       <View className="min-w-0 gap-2">
+        <LabelTip label="Profile picture" text="Cropped to a square. People in your workspaces see it." />
         <View className="flex-row gap-2">
           <Button label={setPicture.isPending ? 'Saving…' : user.avatar_url ? 'Change picture' : 'Upload picture'} variant="outline" disabled={setPicture.isPending} onPress={choose} />
           {user.avatar_url ? <Button label="Remove" variant="ghost" disabled={setPicture.isPending} onPress={() => setPicture.mutate(null)} /> : null}
         </View>
-        <Text className={`text-[12px] leading-[16px] ${error ? 'text-destructive' : 'text-muted-foreground'}`}>{error ?? 'Cropped to a square. People in your workspaces see it.'}</Text>
+        {error ? <Text className="text-[12px] leading-[16px] text-destructive">{error}</Text> : null}
       </View>
     </View>
   )
@@ -245,7 +246,7 @@ function EmailChangeDialog({ onClose }: { onClose: () => void }) {
 function DeleteAccountCard() {
   const { user } = useOrbit()
   const [open, setOpen] = useState(false)
-  if (user.root) return <SettingsCard title="Delete account" description="The root account cannot be deleted." danger>{null}</SettingsCard>
+  if (user.root) return <SettingsCard title="Delete account" danger><Note>The root account cannot be deleted.</Note></SettingsCard>
   return (
     <SettingsCard title="Delete account" description={'Delete your account for good. What you wrote stays, without your name.'} danger>
       <View className="items-start">

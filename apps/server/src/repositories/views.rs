@@ -13,6 +13,7 @@ use sqlx::any::AnyRow;
 use utoipa::ToSchema;
 
 use super::membership;
+use super::project_access::user_sees_project_sql;
 use super::task_filter::{ViewState, parse_view_state, preset_filter, validate_view_state};
 use super::tasks::{TaskError, parse_id, record_mutation};
 use crate::audit::{self, AuditOutcome};
@@ -446,7 +447,7 @@ impl ViewRepository {
         Ok(())
     }
 
-    /// The caller's own order of the workspace's live projects (Tasks sidebar). Projects the
+    /// The caller's own order of the live projects they see (Tasks sidebar). Projects the
     /// caller never placed are not listed; clients put them after these, by name.
     pub async fn project_order(
         &self,
@@ -454,13 +455,14 @@ impl ViewRepository {
         actor_id: Id,
     ) -> Result<Vec<Id>, TaskError> {
         load_caller(self.database.pool(), workspace_id, actor_id).await?;
-        sqlx::query_scalar::<_, String>(
+        sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(format!(
             "SELECT project_positions.project_id FROM project_positions \
              JOIN projects ON projects.id = project_positions.project_id \
              WHERE project_positions.workspace_id = $1 AND project_positions.user_id = $2 \
-             AND projects.deleted_at IS NULL \
+             AND projects.deleted_at IS NULL AND {} \
              ORDER BY project_positions.position, project_positions.project_id",
-        )
+            user_sees_project_sql("projects.id", "$2")
+        )))
         .bind(workspace_id.to_string())
         .bind(actor_id.to_string())
         .fetch_all(self.database.pool())
@@ -471,7 +473,7 @@ impl ViewRepository {
     }
 
     /// Replaces the caller's project order. Every id must be a distinct live project of the
-    /// workspace; projects left out lose their place. Not audited and not broadcast.
+    /// workspace that the caller sees; projects left out lose their place. Not audited and not broadcast.
     pub async fn set_project_order(
         &self,
         workspace_id: Id,
@@ -488,10 +490,12 @@ impl ViewRepository {
         }
         let mut tx = self.database.immediate_transaction().await?;
         load_caller(&mut *tx, workspace_id, actor_id).await?;
-        let live = sqlx::query_scalar::<_, String>(
-            "SELECT id FROM projects WHERE workspace_id = $1 AND deleted_at IS NULL",
-        )
+        let live = sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(format!(
+            "SELECT id FROM projects WHERE workspace_id = $1 AND deleted_at IS NULL AND {}",
+            user_sees_project_sql("projects.id", "$2")
+        )))
         .bind(workspace_id.to_string())
+        .bind(actor_id.to_string())
         .fetch_all(&mut *tx)
         .await?
         .into_iter()
@@ -564,12 +568,14 @@ impl ViewRepository {
         load_caller(&mut *tx, workspace_id, actor_id).await?;
         // Only live projects of this workspace get a row, so made-up ids cannot pile up rows.
         if let Some(project_id) = page_key.strip_prefix("project:") {
-            let Flag(exists) = sqlx::query_scalar(
+            let Flag(exists) = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
                 "SELECT EXISTS(SELECT 1 FROM projects \
-                 WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL)",
-            )
+                 WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL AND {})",
+                user_sees_project_sql("projects.id", "$3")
+            )))
             .bind(project_id)
             .bind(workspace_id.to_string())
+            .bind(actor_id.to_string())
             .fetch_one(&mut *tx)
             .await?;
             if !exists {
