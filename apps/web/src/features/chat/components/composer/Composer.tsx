@@ -269,6 +269,7 @@ export function Composer({ ref, conversation, threadRootId = null, replyTo = nul
             onSelect={mention.insert}
             onHover={mention.setActiveIndex}
             hint={mention.emptyTaskQuery ? 'Type a task title or ID, like ENG-12' : undefined}
+            loading={mention.searchingTasks}
           />
         ) : emoji.open ? (
           <EmojiSuggestions id={emojiListId} query={emoji.query} suggestions={emoji.suggestions} activeIndex={emoji.activeIndex} onSelect={emoji.insert} onHover={emoji.setActiveIndex} />

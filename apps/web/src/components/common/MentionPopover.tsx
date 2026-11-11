@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react'
 import { Hashtag as Hash, User } from 'reicon-react'
 import type { MentionSuggestion } from '@/lib/useMentionAutocomplete'
 import { Button } from '@/components/ui/button'
@@ -19,6 +20,7 @@ export function MentionPopover({
   placement = 'above',
   showHandle = true,
   hint,
+  loading = false,
 }: {
   suggestions: MentionSuggestion[]
   activeIndex: number
@@ -29,10 +31,19 @@ export function MentionPopover({
   showHandle?: boolean
   /** A line under the list, e.g. what else typing finds. */
   hint?: string
+  /** A search is still running: the popup shows "Searching tasks…", also with no rows yet. */
+  loading?: boolean
 }) {
-  if (suggestions.length === 0) return null
+  const list = useRef<HTMLDivElement>(null)
+  // ↑/↓ can move the highlight out of view: scroll the list to keep it visible
+  useEffect(() => {
+    list.current?.querySelector('[data-active="true"]')?.scrollIntoView?.({ block: 'nearest' })
+  }, [activeIndex, suggestions.length])
+  if (suggestions.length === 0 && !loading) return null
+  const footer = loading ? 'Searching tasks…' : hint
   return (
     <div
+      ref={list}
       className={cn(
         'absolute z-50 max-h-80 overflow-y-auto overscroll-contain border border-border bg-popover py-2 shadow-xl',
         placement === 'below' ? 'top-[calc(100%+6px)] left-[30px] w-[min(340px,calc(100vw-48px))] rounded-[10px]' : 'right-0 bottom-full left-0 mb-3 rounded-lg',
@@ -62,7 +73,11 @@ export function MentionPopover({
           </div>
         )
       })}
-      {hint ? <div className="border-t border-border/60 px-3 pt-2 mt-1.5 text-xs text-muted-foreground">{hint}</div> : null}
+      {footer ? (
+        <div className={cn('px-3 text-xs text-muted-foreground', suggestions.length > 0 ? 'mt-1.5 border-t border-border/60 pt-2' : 'py-1')} aria-live="polite">
+          {footer}
+        </div>
+      ) : null}
     </div>
   )
 }
