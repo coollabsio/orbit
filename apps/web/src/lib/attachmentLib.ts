@@ -24,6 +24,21 @@ export function isImage(att: Pick<Attachment, 'mimeType'>): boolean {
   return att.mimeType.startsWith('image/')
 }
 
+/** A PDF opens in the PDF viewer instead of downloading. */
+export function isPdf(att: Pick<Attachment, 'mimeType'>): boolean {
+  return att.mimeType === 'application/pdf'
+}
+
+/** The largest canvas side a PDF page renders at: big enough for a sharp page, small enough for phone memory. */
+const PDF_MAX_CANVAS_PX = 4096
+
+/** The pdf.js scale that draws a page of `page` points sharply at `cssWidth` CSS pixels (2× screens at most). No canvas side goes above the limit. */
+export function pdfRenderScale(cssWidth: number, page: { width: number; height: number }, devicePixelRatio: number): number {
+  if (!(cssWidth > 0) || !(page.width > 0) || !(page.height > 0)) return 1
+  const ratio = Math.min(Math.max(devicePixelRatio || 1, 1), 2)
+  return Math.min((cssWidth * ratio) / page.width, PDF_MAX_CANVAS_PX / page.width, PDF_MAX_CANVAS_PX / page.height)
+}
+
 /** the chat reference isMedia: images and videos */
 export function isMedia(att: Pick<Attachment, 'mimeType'>): boolean {
   return att.mimeType.startsWith('image/') || att.mimeType.startsWith('video/')

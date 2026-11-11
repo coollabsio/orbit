@@ -8,8 +8,8 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use orbit_platform::{
-    BackupError, BackupSnapshot, Database, Flag, Id, LocalBlobStore, Row, SnapshotReader,
-    SnapshotRow, StagedUpload, TimestampMillis, UploadError, UploadService,
+    BackupError, BackupSnapshot, Database, Flag, Id, Row, SnapshotReader, SnapshotRow,
+    StagedUpload, TimestampMillis, UploadError, UploadService,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -446,7 +446,7 @@ impl BackupItemRepository {
         let data = snapshot_database_data(reader, &workspace, &pages).await?;
         let mut staging = BlobStaging::new(&self.uploads, workspace_id, actor_id);
         let result = match staging
-            .prepare(&self.database, snapshot, reader, &files, "file_name")
+            .prepare(&self.database, reader, &files, "file_name")
             .await
         {
             Ok(()) => {
@@ -599,13 +599,28 @@ impl BackupItemRepository {
             }
             None => data.values.retain(|(page, ..)| *page != root.id),
         }
-        write_database_data(&mut tx, workspace_id, data, &page_ids, &file_ids, actor_id, now)
+        write_database_data(
+            &mut tx,
+            workspace_id,
+            data,
+            &page_ids,
+            &file_ids,
+            actor_id,
+            now,
+        )
+        .await
+        .map_err(page_error)?;
+        if let Some(database_id) = database_id {
+            renumber_copy(
+                &mut tx,
+                workspace_id,
+                database_id,
+                page_ids[&root.id],
+                actor_id,
+                now,
+            )
             .await
             .map_err(page_error)?;
-        if let Some(database_id) = database_id {
-            renumber_copy(&mut tx, workspace_id, database_id, page_ids[&root.id], actor_id, now)
-                .await
-                .map_err(page_error)?;
         }
         for ((page, file), row, blob) in &file_rows {
             sqlx::query(
@@ -777,13 +792,7 @@ impl BackupItemRepository {
 
         let mut staging = BlobStaging::new(&self.uploads, workspace_id, actor_id);
         let result = match staging
-            .prepare(
-                &self.database,
-                snapshot,
-                reader,
-                &references,
-                "display_name",
-            )
+            .prepare(&self.database, reader, &references, "display_name")
             .await
         {
             Ok(()) => {
@@ -1256,7 +1265,6 @@ impl<'a> BlobStaging<'a> {
     async fn prepare(
         &mut self,
         database: &Database,
-        snapshot: &BackupSnapshot,
         reader: &SnapshotReader,
         files: &[SnapshotRow],
         name_column: &str,
@@ -1275,7 +1283,6 @@ impl<'a> BlobStaging<'a> {
                 |row| row.get("id").is_some_and(|id| names.contains_key(id)),
             )
             .await?;
-        let snapshot_store = LocalBlobStore::new(snapshot.path.join("attachments"));
         for row in rows {
             let (Some(id), Some(sha256), Some(size)) = (
                 row.get("id"),
@@ -1294,7 +1301,7 @@ impl<'a> BlobStaging<'a> {
                 .await?
                 .is_none()
                 && let Some(bytes) = self
-                    .bytes(&snapshot_store, row.get("storage_key").unwrap_or_default())
+                    .bytes(reader, row.get("storage_key").unwrap_or_default())
                     .await
             {
                 match self
@@ -1324,10 +1331,8 @@ impl<'a> BlobStaging<'a> {
 
     /// The bytes of a blob: from the snapshot's attachments, else from the live store (local or
     /// S3, which keeps released objects for a while). `None` when neither has them.
-    async fn bytes(&self, snapshot_store: &LocalBlobStore, storage_key: &str) -> Option<Vec<u8>> {
-        if let Ok(path) = snapshot_store.path(storage_key)
-            && let Ok(bytes) = tokio::fs::read(&path).await
-        {
+    async fn bytes(&self, reader: &SnapshotReader, storage_key: &str) -> Option<Vec<u8>> {
+        if let Ok(Some(bytes)) = reader.attachment(storage_key).await {
             return Some(bytes);
         }
         self.uploads.read_blob(storage_key).await.ok()

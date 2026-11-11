@@ -471,7 +471,11 @@ async fn installation_admin_can_create_an_online_backup() {
         root.path().join("backups"),
         root.path().join("data/attachments"),
     );
-    backups.verify(id).await.unwrap();
+    let snapshot = backups.verify(id).await.unwrap();
+    assert!(
+        snapshot.manifest.encryption.is_some(),
+        "the server encrypts backups with its app key"
+    );
 
     let list = app
         .router()
@@ -510,19 +514,18 @@ async fn installation_admin_can_create_an_online_backup() {
         .map(|name| name.unwrap().into_owned())
         .collect();
     assert!(names.contains(&format!("{id}/manifest.json")));
-    // A Postgres snapshot holds the `COPY` rows of every table instead of the SQLite file.
-    let (database_file, header) = if orbit_platform::testing_postgres() {
-        (
-            format!("{id}/database/users.copy.zst"),
-            &[0x28, 0xB5, 0x2F, 0xFD][..],
-        )
+    // A Postgres snapshot holds the `COPY` rows of every table instead of the SQLite file. The archive keeps the
+    // files encrypted, so `orbit backup restore` with the same app key restores it.
+    let database_file = if orbit_platform::testing_postgres() {
+        format!("{id}/database/users.copy.zst")
     } else {
-        (format!("{id}/database.sqlite"), &b"SQLite format 3\0"[..])
+        format!("{id}/database.sqlite")
     };
     let mut database = Vec::new();
     std::io::Read::read_to_end(&mut archive.by_name(&database_file).unwrap(), &mut database)
         .unwrap();
-    assert!(database.starts_with(header));
+    assert!(!database.is_empty());
+    assert!(!database.starts_with(b"SQLite format 3"));
 
     let missing = app
         .router()
@@ -568,6 +571,8 @@ async fn critical_durable_schedules_exist_before_serve() {
             "backup.scheduled",
             "docs.search_text",
             "integrity.weekly",
+            "mail.dns_check",
+            "mail.purge",
             "notion.cleanup",
             "workspace.retention"
         ]
@@ -643,10 +648,12 @@ async fn weekly_foreign_key_failure_stops_serving() {
         .unwrap();
     sqlx::query(
         "INSERT INTO sessions (id, token_hash, user_id, created_at, last_activity_at, \
-         idle_expires_at, absolute_expires_at) VALUES ($1, zeroblob(32), $2, 1, 1, 2, 2)",
+         idle_expires_at, absolute_expires_at) VALUES ($1, zeroblob(32), $2, 1, $3, 2, 2)",
     )
     .bind(orbit_platform::Id::new_v7().to_string())
     .bind(orbit_platform::Id::new_v7().to_string())
+    // Recent activity, so the retention job does not delete the orphan before the check sees it.
+    .bind(orbit_platform::TimestampMillis::now().as_millis())
     .execute(&mut *connection)
     .await
     .unwrap();

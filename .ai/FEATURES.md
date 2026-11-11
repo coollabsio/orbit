@@ -8,7 +8,7 @@ Docs pages persist too (tree, content, trash, search; see Docs below).
 
 Chat persists too (channels, direct messages, threads, files, search; see Chat below).
 
-Mail still uses isolated frontend seed data, and `/mail` redirects to `/tasks`. SMTP sending, inbound SMTP and mailboxes are follow-up milestones.
+Mail persists too (receiving and a read-only web client: domains, mailboxes, threads, search; see Mail below). Sending mail is a follow-up milestone.
 
 ## Global shell
 
@@ -598,18 +598,69 @@ blocks and cover URLs load; the image host then sees the viewer's IP. Plain http
 
 ## Mail
 
-Core files: `MailPage.tsx`, `components/FolderRail.tsx`, `components/ThreadList.tsx`, `components/ThreadView.tsx`.
+Core files: server `crates/mail` (`orbit-mail`: SMTP, SPF/DKIM/DMARC, MIME, HTML sanitizing),
+`apps/server/src/{mail_listener,mail_intake,mail_dns,mail_image_proxy}.rs`, `repositories/mail/`, `mail_routes/`;
+web `features/mail/` (`pages/MailPage.tsx`, `mailLib.ts`, `api/`, `components/{FolderRail,ThreadList,ThreadView,
+MessageItem,MailHtmlFrame,SafetyBanner,MailSearch}.tsx`), settings in `features/settings/pages/mail/`.
+Design: `docs/superpowers/specs/2026-10-23-mail-slice-1-design.md` (local file). Operator guide:
+`docs/operations.md#mail`.
 
-This feature is mock-backed. No outbound or inbound SMTP service runs in milestone one.
+Slice 1 receives and reads mail; it does not send. Server (migration `20261111122204_mail`):
 
-- Three-pane desktop layout: folders, thread list, reader.
-- Custom folders can be created inline.
-- Threads can be dragged onto system/custom folders with a compact drag ghost.
-- Reader toolbar supports star, unread, move-to-folder, archive, and trash.
-- Messages expand/collapse and offer Reply and Forward.
-- Forward opens compose with quoted sender/date/subject/body.
-- Reply composer is hidden until Reply is clicked; it is free-flow rather than boxed.
-- Replies support text, attachment-only sending, file picker, paste, drop, compact file chips, inline images, removal, discard, and Cmd/Ctrl+Enter.
+- Provider intake (`mail_delivery.rs`, `mail_routes/{inbound,providers}.rs`, `crates/mail/src/inbound/`): PostShiba
+  (recommended; signed JSON webhook, then the raw message from its API), Cloudflare, Postmark, Mailgun, Resend and SES post to `/api/v1/mail/inbound/{kind}/{id}`; instance and workspace providers
+  (`mail_providers`), a route per domain (`mail_domains.provider_id`), rejected deliveries listed for 30 days.
+- SMTP listener on port 2525 when `ORBIT_MAIL_ENABLED=true`, relay mode (default, trusts the relay's
+  `Authentication-Results`) or direct mode (own SPF/DKIM/DMARC checks, STARTTLS, certificate reload every 60 s).
+- Domains per workspace, verified by `_orbit-verify` TXT (`mail.dns_check` every 10 min while pending, daily after);
+  verified → suspended (7-day grace) when the record goes. Root switch **Mail** in Admin → Inbound mail (`instance_settings.mail_enabled`, off by default): off hides
+  the app, its menu items, shortcuts and settings (`useMailEnabled`, `MailGate`, from `/api/v1/auth/options`) and the
+  workspace mail API answers `403 mail_disabled` (`Call::enter`); mail for existing domains still arrives.
+- Personal and shared mailboxes, aliases, `+tag`, catch-all, labels, bulk personal mailboxes.
+- Intake stores the raw message as an encrypted blob (per-workspace key) and enqueues `mail.ingest`; ingest threads,
+  dedupes per mailbox, indexes search, and sends `thread.updated` on the live socket (topic `mail`).
+- DMARC fail → Spam. Trash purged after 30 days (`mail.purge`). HTML is sanitized on each view and served in a
+  sandboxed frame with signed URLs; remote images go through the image proxy.
+- Admin health card (listener, certificate, client IP, PTR) and a one-time `check-…@domain` test address.
+  Failed messages list with Retry.
+
+Web client (`/mail`, sidebar entry with a **Beta** tag; read-only, no compose or reply yet):
+
+- Three panes: the folder rail (Inbox of all mailboxes, each mailbox with its unread count from `GET counts`, Starred,
+  Archive, Spam, Trash, labels; with a mailbox open the folders are that mailbox's), a virtual thread list with cursor
+  pages, and the reader. Routes `/mail`, `/mail/<folder>`, `/mail/<mailbox>/<folder>`, `/mail/label/<id>`,
+  `/mail/starred`, `/mail/search?q=`, each with `/t/<thread>` for the open thread (`parseMailPath` in `mailLib.ts`).
+- Rows: senders, subject, snippet, time, label chips, star, unread dot, attachment icon; `x` or the row checkbox
+  selects, and a bulk bar archives, moves to spam or trash, restores, marks read or unread, stars and labels.
+- Opening a thread marks it read; only the newest message is expanded. HTML shows in a sandboxed iframe from a
+  short-lived `view-url` (height from the frame's own `postMessage`, 80–20,000 px); plain text renders as text.
+- Banners: Failed authentication (DMARC fail), Lookalike name, Outside reply (`external`), External sender, plain
+  text after a parse warning; In Spam (Not spam) and In Trash (Restore). The sender line shows the address and the
+  DMARC-aligned domain.
+- Remote images stay off until **Load images** (offered on every HTML message whose sender has no preference, since
+  the view cannot report how many it removed); **Always for this sender** (only when DMARC passed) saves a sender pref.
+- Message menu: Show original (first 1 MB as text), Download `.eml`, Print (the conversation, via `lib/print.ts`).
+  Attachments: images open in the viewer (`?inline=1`, PNG/JPEG/GIF/WebP/AVIF), other files download.
+- Search box with operator and value completion (`from:`, `to:`, `subject:`, `label:`, `in:`, `is:`, `has:`,
+  `before:`, `after:`). Live updates from the `mail` topic; `app/shell/AppShell.tsx` passes `emitMailEvent` and
+  `resyncMail` to `ChatProvider`, so chat does not import mail.
+- Shortcuts (context `mail`): `j`/`k`, `Enter`/`o`, `Esc`, `e`, `#`, `!`, `s`, `u`, `l`, `x`, `/`, `g s` (starred),
+  `g t` (trash), and global `g i` (mail). `/`, `g s` and `g t` shadow the global search, settings and tasks keys on
+  the mail page (`Command.shadows`). Mail commands also show in ⌘K.
+- Empty states fill the pane: **Set up mail** for managers without a mailbox, "Ask an admin for a mailbox" for
+  members, and one text for each empty folder, label, Starred and search.
+
+Not done yet (mail stays **Beta** until slices 1 to 5 are done):
+
+- Checked only by automated tests: no real mail from Gmail or Outlook in direct or relay mode, no real PostShiba,
+  Cloudflare, Postmark, Mailgun, Resend or SES account, no click-through of the UI, no `docker build`.
+- Mobile has no mail screens: the mail app, its settings, the Mail badge and the PDF preview are web only.
+- The Resend download host is not pinned (Resend's docs do not name it); the fetch must be `https`, public and
+  without redirects.
+- Rejected deliveries for domains that no workspace has are stored but not listed (Admin has no such list).
+- Next slices: 2 send (compose, reply, forward, DKIM signing, sending through a provider's SMTP, send queue,
+  bounces), 3 spam and safety, 4 client access (IMAP server, SMTP submission, app passwords), 5 migration (import
+  from Google Workspace and Fastmail), 6 team inbox, 7 rules and admin.
 
 ## Chat
 

@@ -20,6 +20,7 @@ use crate::import_people_routes::{ImportPeopleState, import_people_router};
 use crate::import_routes::{ImportState, import_router};
 use crate::integration_routes::{IntegrationState, integration_router};
 use crate::linear_import_routes::{LinearImportState, linear_import_router};
+use crate::mail_routes::{MailState, mail_router};
 use crate::obsidian_import_routes::{ObsidianImportState, obsidian_import_router};
 use crate::orbit_import_routes::{OrbitImportState, orbit_import_router};
 use crate::page_comment_routes::{PageCommentState, page_comment_router};
@@ -60,6 +61,7 @@ pub struct ApiRoutes {
     pub import_people: ImportPeopleState,
     pub orbit_imports: OrbitImportState,
     pub chat: ChatState,
+    pub mail: MailState,
     pub webhooks: crate::webhooks::routes::WebhookState,
 }
 
@@ -109,6 +111,7 @@ pub fn production_router(
         .merge(orbit_import_router(api.orbit_imports))
         .merge(crate::live::socket::live_router(api.chat.clone()))
         .merge(chat_router(api.chat))
+        .merge(mail_router(api.mail))
         .merge(crate::webhooks::routes::webhook_router(api.webhooks))
         .merge(
             Router::new()

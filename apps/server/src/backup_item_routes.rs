@@ -255,7 +255,7 @@ async fn open(
                 unreadable(instance, request_id)
             }
         })?;
-    let reader = SnapshotReader::open(&snapshot).map_err(|error| {
+    let reader = backups.snapshot_reader(&snapshot).await.map_err(|error| {
         tracing::warn!(%error, backup_id, "backup snapshot cannot be read");
         unreadable(instance, request_id)
     })?;

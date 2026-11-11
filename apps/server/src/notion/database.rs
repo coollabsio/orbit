@@ -15,10 +15,10 @@ use super::convert::{ConvertReport, page_icon, page_title};
 use super::model::{NotionDataSource, NotionPage, NotionView, normalize_id, plain_text};
 use crate::repositories::databases::{
     CalendarMode, CardPreview, CardSize, FilterGroup, FilterNode, FilterOperator, FilterRule,
-    GroupOp, MAX_CELL_ITEMS, MAX_FILES, MAX_FILTER_LEVELS, MAX_GROUP_CHILDREN, MAX_NAME_CHARS, MAX_OPTIONS,
-    MAX_PROPERTIES, MAX_RULES, MAX_SORTS, MAX_TEXT_CHARS, MAX_VIEWS, Property, PropertyType,
-    SchemaProperty, SchemaView, SortDirection, TimelineZoom, ViewColumn, ViewConfig, ViewSort,
-    ViewType, accepts_value,
+    GroupOp, MAX_CELL_ITEMS, MAX_FILES, MAX_FILTER_LEVELS, MAX_GROUP_CHILDREN, MAX_NAME_CHARS,
+    MAX_OPTIONS, MAX_PROPERTIES, MAX_RULES, MAX_SORTS, MAX_TEXT_CHARS, MAX_VIEWS, Property,
+    PropertyType, SchemaProperty, SchemaView, SortDirection, TimelineZoom, ViewColumn, ViewConfig,
+    ViewSort, ViewType, accepts_value,
 };
 
 /// Orbit members by lowercase email: `(user id, display name)`.
@@ -322,7 +322,9 @@ fn unique_id_config(config: &Value) -> Value {
         .and_then(Value::as_str)
         .filter(|prefix| {
             (1..=10).contains(&prefix.chars().count())
-                && prefix.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+                && prefix
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '_')
         });
     json!({ "prefix": prefix })
 }
@@ -341,9 +343,18 @@ pub fn row_files(
         }
         let notion_id = value.get("id").and_then(Value::as_str).unwrap_or(name);
         let mut files = Vec::new();
-        for file in value.get("files").and_then(Value::as_array).into_iter().flatten() {
+        for file in value
+            .get("files")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
             let file_name = file.get("name").and_then(Value::as_str).map(str::to_owned);
-            match file.get("file").and_then(|file| file.get("url")).and_then(Value::as_str) {
+            match file
+                .get("file")
+                .and_then(|file| file.get("url"))
+                .and_then(Value::as_str)
+            {
                 Some(url) if files.len() < MAX_FILES => files.push((url.to_owned(), file_name)),
                 _ => lossy(report, "files_dropped"),
             }

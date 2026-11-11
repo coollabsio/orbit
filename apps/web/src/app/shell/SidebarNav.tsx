@@ -29,7 +29,8 @@ const WORKSPACE_LINKS = [
   { to: '/tasks', label: 'Tasks', icon: SquareCheck, enabled: true },
   { to: '/docs', label: 'Docs', icon: FileText, enabled: true },
   { to: '/chat', label: 'Chat', icon: MessageSquare, enabled: false },
-  { to: '/mail', label: 'Mail', icon: Mail, enabled: false },
+  // slice 1 receives and reads mail; sending comes later
+  { to: '/mail', label: 'Mail', icon: Mail, enabled: true, tag: 'Beta' },
 ].filter((link) => !(docsHidden && link.to === '/docs'))
 
 // Coolify tile navigation: the row never fills; the icon sits in a 3D tile and the current row shows a pink tile.
@@ -84,6 +85,7 @@ function SidebarNavItem({
   active,
   badge = 0,
   unread = false,
+  tag,
   tone,
   className,
   trailing,
@@ -98,6 +100,8 @@ function SidebarNavItem({
   badge?: number
   /** Something waits for the user, but there is no count: a dot shows. */
   unread?: boolean
+  /** A short note after the label, e.g. "Beta". Hidden while collapsed. */
+  tag?: string
   /** A mark right after the label, hidden with the label when the sidebar is collapsed. */
   trailing?: ReactNode
 }) {
@@ -118,6 +122,11 @@ function SidebarNavItem({
       >
         <SidebarNavTile icon={Icon} tone={tone} />
         <SidebarNavLabel>{label}</SidebarNavLabel>
+        {tag ? (
+          <span data-slot="sidebar-nav-tag" aria-hidden="true" className="shrink-0 text-[0.625rem] text-muted-foreground/70 group-data-[collapsed=true]/sidebar-nav:hidden">
+            {tag}
+          </span>
+        ) : null}
         {trailing ? <span aria-hidden="true" className="flex shrink-0 group-data-[collapsed=true]/sidebar-nav:hidden">{trailing}</span> : null}
         {badge > 0 ? (
           <span
@@ -441,6 +450,8 @@ export function SidebarNav({
   onNavigate,
   collapsed = false,
   chatBadge,
+  mailBadge,
+  mailEnabled = false,
   chatUnread,
   chatEnabled: chat = chatEnabled,
   isRoot = false,
@@ -451,6 +462,10 @@ export function SidebarNav({
   collapsed?: boolean
   /** Unread count on the Chat item. */
   chatBadge?: number
+  /** Unread Inbox threads on the Mail item. */
+  mailBadge?: number
+  /** Mail is on for the server; off, Mail shows as Coming soon. */
+  mailEnabled?: boolean
   /** Chat has an unread message, with or without a count. */
   chatUnread?: boolean
   /** Chat is a link instead of "Coming soon". Defaults to the build's setting. */
@@ -559,7 +574,7 @@ export function SidebarNav({
                 </>
               ) : (
                 <>
-                  {WORKSPACE_LINKS.map((link) => link.enabled || (link.to === '/chat' && chat) ? (
+                  {WORKSPACE_LINKS.map((link) => (link.to === '/mail' ? mailEnabled : link.enabled || (link.to === '/chat' && chat)) ? (
                     <SidebarNavItem
                       key={link.to}
                       to={link.to === '/tasks' ? tasksPath : link.to}
@@ -567,7 +582,8 @@ export function SidebarNav({
                       end={link.to === '/'}
                       icon={link.icon}
                       label={link.label}
-                      badge={link.to === '/chat' ? chatBadge : undefined}
+                      tag={link.tag}
+                      badge={link.to === '/chat' ? chatBadge : link.to === '/mail' ? mailBadge : undefined}
                       unread={link.to === '/chat' ? chatUnread : undefined}
                       onClick={onNavigate}
                     />

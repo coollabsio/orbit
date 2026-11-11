@@ -1833,7 +1833,11 @@ async fn board_views_check_and_repair_their_grouping() {
             Some(json!({"name": "Mystery", "type": "spreadsheet"})),
         )
         .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "an unknown view type: {body}");
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "an unknown view type: {body}"
+    );
 
     let priority = fixture
         .add_property(

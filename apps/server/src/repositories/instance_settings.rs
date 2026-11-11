@@ -264,6 +264,96 @@ impl InstanceSettingsRepository {
         Ok(())
     }
 
+    /// Mail is on for this installation (off until the root user turns it on). Off hides the mail
+    /// app and refuses the workspace mail API; mail for domains added before still arrives.
+    pub async fn mail_enabled(&self) -> Result<bool, sqlx::Error> {
+        let enabled =
+            sqlx::query_scalar::<_, i64>("SELECT mail_enabled FROM instance_settings WHERE id = 1")
+                .fetch_one(self.database.pool())
+                .await?;
+        Ok(enabled == 1)
+    }
+
+    pub async fn set_mail_enabled(
+        &self,
+        actor_id: Id,
+        enabled: bool,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<(), sqlx::Error> {
+        self.set_mail_switches(actor_id, Some(enabled), None, request_id, now)
+            .await
+    }
+
+    /// Sets the given mail switches together, in one transaction with one audit event.
+    pub async fn set_mail_switches(
+        &self,
+        actor_id: Id,
+        mail_enabled: Option<bool>,
+        workspace_providers_enabled: Option<bool>,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<(), sqlx::Error> {
+        let mut transaction = self.database.immediate_transaction().await?;
+        let mut changed = serde_json::Map::new();
+        for (column, field, value) in [
+            ("mail_enabled", "mail_enabled", mail_enabled),
+            (
+                "mail_workspace_providers_enabled",
+                "workspace_providers_enabled",
+                workspace_providers_enabled,
+            ),
+        ] {
+            let Some(enabled) = value else { continue };
+            sqlx::query(sqlx::AssertSqlSafe(format!(
+                "UPDATE instance_settings SET {column} = $1, updated_at = $2 WHERE id = 1"
+            )))
+            .bind(i64::from(enabled))
+            .bind(now.as_millis())
+            .execute(&mut *transaction)
+            .await?;
+            changed.insert(field.to_owned(), enabled.into());
+        }
+        if changed.is_empty() {
+            return Ok(());
+        }
+        audit::record_global(
+            &mut transaction,
+            Some(actor_id),
+            "instance.mail_updated",
+            AuditOutcome::Success,
+            "installation",
+            None,
+            request_id,
+            serde_json::Value::Object(changed),
+            now,
+        )
+        .await?;
+        transaction.commit().await
+    }
+
+    /// Whether workspace admins may set up their own mail providers (on by default; Orbit Cloud
+    /// turns it off). Off stops new ones only: existing workspace providers keep receiving.
+    pub async fn mail_workspace_providers_enabled(&self) -> Result<bool, sqlx::Error> {
+        let enabled = sqlx::query_scalar::<_, i64>(
+            "SELECT mail_workspace_providers_enabled FROM instance_settings WHERE id = 1",
+        )
+        .fetch_one(self.database.pool())
+        .await?;
+        Ok(enabled == 1)
+    }
+
+    pub async fn set_mail_workspace_providers_enabled(
+        &self,
+        actor_id: Id,
+        enabled: bool,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<(), sqlx::Error> {
+        self.set_mail_switches(actor_id, None, Some(enabled), request_id, now)
+            .await
+    }
+
     pub async fn save_smtp(
         &self,
         actor_id: Id,
