@@ -60,6 +60,7 @@ pub struct ApiRoutes {
     pub import_people: ImportPeopleState,
     pub orbit_imports: OrbitImportState,
     pub chat: ChatState,
+    pub webhooks: crate::webhooks::routes::WebhookState,
 }
 
 pub fn production_router(
@@ -108,6 +109,7 @@ pub fn production_router(
         .merge(orbit_import_router(api.orbit_imports))
         .merge(crate::live::socket::live_router(api.chat.clone()))
         .merge(chat_router(api.chat))
+        .merge(crate::webhooks::routes::webhook_router(api.webhooks))
         .merge(
             Router::new()
                 .route("/health/live", get(liveness))
