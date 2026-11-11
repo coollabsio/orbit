@@ -31,6 +31,8 @@ const MAX: u64 = 64 * 1024;
 const HOSTNAME: &str = "mx.orbit.test";
 const MAILGUN_KEY: &str = "mailgun-signing-key";
 const RESEND_KEY: &str = "re_test_key";
+const POSTSHIBA_KEY: &str = "ps_test_key";
+const POSTSHIBA_SECRET: &str = "postshiba-inbox-secret";
 const SVIX_KEY: &[u8] = b"resend-svix-key-0123456789abcdef";
 const TOPIC: &str = "arn:aws:sns:us-east-1:123456789012:orbit-mail";
 const SNS_HOST: &str = "sns.us-east-1.amazonaws.com";
@@ -265,6 +267,10 @@ impl Fixture {
         let secrets = match kind {
             ProviderKind::Mailgun => Some(ProviderSecrets::Mailgun {
                 signing_key: MAILGUN_KEY.to_owned(),
+            }),
+            ProviderKind::Postshiba => Some(ProviderSecrets::Postshiba {
+                api_key: POSTSHIBA_KEY.to_owned(),
+                webhook_secret: POSTSHIBA_SECRET.to_owned(),
             }),
             ProviderKind::Resend => Some(ProviderSecrets::Resend {
                 api_key: RESEND_KEY.to_owned(),
@@ -871,6 +877,23 @@ async fn fake_hosts(fake: Fake) -> SocketAddr {
                 axum::Json(json!({ "object": "email", "id": id, "raw": { "download_url": url, "expires_at": "2026-10-30T12:00:00Z" } })).into_response()
             }),
         )
+        .route(
+            "/api/v1/inboxes/{inbox}/inbound_messages/{id}",
+            get(|Path((inbox, id)): Path<(String, String)>, headers: axum::http::HeaderMap| async move {
+                if headers.get(header::AUTHORIZATION).and_then(|v| v.to_str().ok())
+                    != Some(&format!("Bearer {POSTSHIBA_KEY}"))
+                    || inbox != "PqRzMn"
+                {
+                    return StatusCode::UNAUTHORIZED.into_response();
+                }
+                match id.as_str() {
+                    "broken" => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+                    // what a key of a user who is not a team admin gets
+                    "masked" => axum::Json(json!({ "id": id, "raw": null })).into_response(),
+                    _ => axum::Json(json!({ "id": id, "inbox_id": inbox, "raw": mail("box@one.test", "postshiba") })).into_response(),
+                }
+            }),
+        )
         .route("/raw/1", get(|| async { mail("box@one.test", "resend") }))
         .route("/broken", get(|| async { StatusCode::INTERNAL_SERVER_ERROR }))
         .route(
@@ -918,10 +941,15 @@ async fn fake_hosts(fake: Fake) -> SocketAddr {
 async fn fetching_fixture(fake: Fake) -> Fixture {
     let address = fake_hosts(fake).await;
     Fixture::with(move |intake| {
-        let hosts = ["api.resend.com", "download.test", SNS_HOST]
-            .into_iter()
-            .map(|host| (host.to_owned(), address))
-            .collect();
+        let hosts = [
+            "api.resend.com",
+            "app.postshiba.com",
+            "download.test",
+            SNS_HOST,
+        ]
+        .into_iter()
+        .map(|host| (host.to_owned(), address))
+        .collect();
         intake
             .with_fetch(SafeFetch::with_test_hosts(hosts))
             .with_s3_endpoint(format!("http://{address}"))
@@ -960,6 +988,80 @@ async fn resend(fixture: &Fixture, provider: &Provider, email_id: &str) -> (Stat
             body.into_bytes(),
         )
         .await
+}
+
+async fn postshiba(
+    fixture: &Fixture,
+    provider: &Provider,
+    message_id: &str,
+    secret: &str,
+) -> (StatusCode, Value) {
+    let body = json!({
+        "id": message_id,
+        "inbox_id": "PqRzMn",
+        "to": "box@one.test",
+        "from": "ann@sender.example",
+        "envelope": { "mail_from": "ann@sender.example", "rcpt_to": "box@one.test", "plus_tag": null },
+        "authentication": { "spf": { "result": "pass", "domain": "sender.example" } },
+        "attachments": []
+    })
+    .to_string();
+    let timestamp = (TimestampMillis::now().as_millis() / 1000).to_string();
+    let signature = hmac_hex(secret.as_bytes(), format!("{timestamp}.{body}").as_bytes());
+    fixture
+        .post(
+            &format!("/api/v1/mail/inbound/postshiba/{}", provider.id),
+            "application/json",
+            &[
+                ("x-capsule-timestamp", timestamp),
+                ("x-capsule-signature", format!("sha256={signature}")),
+            ],
+            body.into_bytes(),
+        )
+        .await
+}
+
+#[tokio::test]
+async fn postshiba_webhook_fetches_and_stores_the_raw_message() {
+    let mut fixture = fetching_fixture(Fake::default()).await;
+    let provider = fixture
+        .provider(ProviderKind::Postshiba, &[fixture.one])
+        .await;
+    let (status, body) = postshiba(&fixture, &provider, "GxTyVu", POSTSHIBA_SECRET).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["stored"], 1);
+    let receipts = fixture.receipts().await;
+    assert_eq!(receipts.len(), 1);
+    assert_eq!(receipts[0].1, "postshiba");
+    assert!(
+        receipts[0].2.contains(r#""spf":"pass""#),
+        "{}",
+        receipts[0].2
+    );
+}
+
+#[tokio::test]
+async fn postshiba_webhook_with_a_wrong_signature_is_refused() {
+    let mut fixture = fetching_fixture(Fake::default()).await;
+    let provider = fixture
+        .provider(ProviderKind::Postshiba, &[fixture.one])
+        .await;
+    let (status, _) = postshiba(&fixture, &provider, "GxTyVu", "another-secret").await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert!(fixture.receipts().await.is_empty());
+}
+
+#[tokio::test]
+async fn postshiba_without_the_raw_message_is_503_so_postshiba_retries() {
+    let mut fixture = fetching_fixture(Fake::default()).await;
+    let provider = fixture
+        .provider(ProviderKind::Postshiba, &[fixture.one])
+        .await;
+    for message_id in ["masked", "broken"] {
+        let (status, _) = postshiba(&fixture, &provider, message_id, POSTSHIBA_SECRET).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{message_id}");
+    }
+    assert!(fixture.receipts().await.is_empty());
 }
 
 #[tokio::test]

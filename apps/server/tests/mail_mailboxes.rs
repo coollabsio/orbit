@@ -75,7 +75,7 @@ impl Fixture {
             .await
             .unwrap();
         InstanceSettingsRepository::new((*database).clone())
-            .set_mail_domains_enabled(setup.user_id, true, "request", now)
+            .set_mail_enabled(setup.user_id, true, "request", now)
             .await
             .unwrap();
         let root = tempfile::tempdir().unwrap();

@@ -6358,7 +6358,7 @@
         "tags": [
           "crate::mail_routes::admin"
         ],
-        "summary": "Turns on or off whether workspaces may add mail domains (audit `instance.mail_updated`).",
+        "summary": "Turns Mail on or off for the installation, and whether workspaces may add their own providers\n(audit `instance.mail_updated`).",
         "operationId": "set_mail_admin",
         "parameters": [
           {
@@ -15391,7 +15391,7 @@
           {
             "name": "kind",
             "in": "path",
-            "description": "cloudflare, postmark, mailgun, resend or ses",
+            "description": "postshiba, cloudflare, postmark, mailgun, resend or ses",
             "required": true,
             "schema": {
               "type": "string"
@@ -36656,6 +36656,16 @@
               }
             }
           },
+          "403": {
+            "description": "mail_disabled",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
           "404": {
             "description": "attachment_not_found",
             "content": {
@@ -36763,6 +36773,16 @@
           },
           "401": {
             "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "mail_disabled",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -36890,7 +36910,7 @@
             }
           },
           "403": {
-            "description": "mail_forbidden",
+            "description": "mail_forbidden, mail_disabled",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -37023,7 +37043,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, mail_forbidden, mail_domains_disabled",
+            "description": "origin_forbidden, mail_forbidden, mail_disabled",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -37165,7 +37185,7 @@
             }
           },
           "403": {
-            "description": "mail_forbidden",
+            "description": "mail_forbidden, mail_disabled",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -37289,7 +37309,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, mail_forbidden",
+            "description": "origin_forbidden, mail_forbidden, mail_disabled",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -37432,7 +37452,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, mail_forbidden",
+            "description": "origin_forbidden, mail_forbidden, mail_disabled",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -37568,7 +37588,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, mail_forbidden",
+            "description": "origin_forbidden, mail_forbidden, mail_disabled",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -37711,7 +37731,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, mail_forbidden",
+            "description": "origin_forbidden, mail_forbidden, mail_disabled",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -37854,7 +37874,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, mail_forbidden",
+            "description": "origin_forbidden, mail_forbidden, mail_disabled",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -37991,6 +38011,16 @@
               }
             }
           },
+          "403": {
+            "description": "mail_disabled",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
           "404": {
             "description": "mail_not_found",
             "content": {
@@ -38114,7 +38144,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, mail_forbidden",
+            "description": "origin_forbidden, mail_forbidden, mail_disabled",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -38250,7 +38280,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, mail_forbidden",
+            "description": "origin_forbidden, mail_forbidden, mail_disabled",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -38391,7 +38421,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, mail_forbidden",
+            "description": "origin_forbidden, mail_forbidden, mail_disabled",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -38528,6 +38558,16 @@
               }
             }
           },
+          "403": {
+            "description": "mail_disabled",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
           "404": {
             "description": "mail_not_found",
             "content": {
@@ -38652,7 +38692,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, mail_forbidden",
+            "description": "origin_forbidden, mail_forbidden, mail_disabled",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -38797,7 +38837,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, mail_forbidden",
+            "description": "origin_forbidden, mail_forbidden, mail_disabled",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -38945,7 +38985,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, mail_forbidden",
+            "description": "origin_forbidden, mail_forbidden, mail_disabled",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -39087,6 +39127,16 @@
               }
             }
           },
+          "403": {
+            "description": "mail_disabled",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
           "404": {
             "description": "mail_not_found",
             "content": {
@@ -39202,7 +39252,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, mail_forbidden",
+            "description": "origin_forbidden, mail_forbidden, mail_disabled",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -39343,7 +39393,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, mail_forbidden",
+            "description": "origin_forbidden, mail_forbidden, mail_disabled",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -39496,7 +39546,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, mail_forbidden",
+            "description": "origin_forbidden, mail_forbidden, mail_disabled",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -39647,7 +39697,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, mail_forbidden",
+            "description": "origin_forbidden, mail_forbidden, mail_disabled",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -39790,7 +39840,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, mail_forbidden",
+            "description": "origin_forbidden, mail_forbidden, mail_disabled",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -39941,7 +39991,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, mail_forbidden",
+            "description": "origin_forbidden, mail_forbidden, mail_disabled",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -40084,7 +40134,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, mail_forbidden",
+            "description": "origin_forbidden, mail_forbidden, mail_disabled",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -40218,6 +40268,16 @@
               }
             }
           },
+          "403": {
+            "description": "mail_disabled",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
           "404": {
             "description": "mail_not_found",
             "content": {
@@ -40333,6 +40393,16 @@
           },
           "401": {
             "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "mail_disabled",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -40475,7 +40545,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden",
+            "description": "origin_forbidden, mail_disabled",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -40610,7 +40680,7 @@
             }
           },
           "403": {
-            "description": "mail_forbidden",
+            "description": "mail_forbidden, mail_disabled",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -40743,7 +40813,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, mail_forbidden, workspace_providers_disabled",
+            "description": "origin_forbidden, mail_forbidden, workspace_providers_disabled, mail_disabled",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -40878,7 +40948,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, mail_forbidden",
+            "description": "origin_forbidden, mail_forbidden, mail_disabled",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -41018,7 +41088,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, mail_forbidden",
+            "description": "origin_forbidden, mail_forbidden, mail_disabled",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -41152,6 +41222,16 @@
               }
             }
           },
+          "403": {
+            "description": "mail_disabled",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
           "409": {
             "description": "contract_mismatch",
             "content": {
@@ -41259,7 +41339,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden",
+            "description": "origin_forbidden, mail_disabled",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -41402,7 +41482,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden",
+            "description": "origin_forbidden, mail_disabled",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -41547,7 +41627,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden",
+            "description": "origin_forbidden, mail_disabled",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -41735,6 +41815,16 @@
               }
             }
           },
+          "403": {
+            "description": "mail_disabled",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
           "404": {
             "description": "mail_not_found",
             "content": {
@@ -41871,7 +41961,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden",
+            "description": "origin_forbidden, mail_disabled",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -42013,6 +42103,16 @@
               }
             }
           },
+          "403": {
+            "description": "mail_disabled",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
           "404": {
             "description": "mail_not_found",
             "content": {
@@ -42145,7 +42245,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden",
+            "description": "origin_forbidden, mail_disabled",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -61384,6 +61484,7 @@
           "email_enabled",
           "passkeys_enabled",
           "billing_enabled",
+          "mail_enabled",
           "providers",
           "provider_registration_open",
           "version"
@@ -61396,6 +61497,10 @@
           "email_enabled": {
             "type": "boolean",
             "description": "A mail server is saved: password reset links and invitations go out by email."
+          },
+          "mail_enabled": {
+            "type": "boolean",
+            "description": "Mail is on (Admin → Inbound mail). Off: the mail app and its settings are hidden."
           },
           "passkeys_enabled": {
             "type": "boolean",
@@ -66840,12 +66945,12 @@
         "type": "object",
         "description": "Mail on this installation; the health card is `GET /api/v1/admin/mail`.",
         "required": [
-          "domains_enabled"
+          "mail_enabled"
         ],
         "properties": {
-          "domains_enabled": {
+          "mail_enabled": {
             "type": "boolean",
-            "description": "Workspaces may add mail domains (`PUT /api/v1/admin/mail`)."
+            "description": "Mail is on for this installation (`PUT /api/v1/admin/mail`). Off: the mail app is hidden and\nthe workspace mail API refuses with `mail_disabled`."
           }
         }
       },
@@ -68294,7 +68399,7 @@
         "type": "object",
         "description": "The Admin mail page.",
         "required": [
-          "domains_enabled",
+          "mail_enabled",
           "workspace_providers_enabled",
           "enabled",
           "mode",
@@ -68303,10 +68408,6 @@
           "test_domains"
         ],
         "properties": {
-          "domains_enabled": {
-            "type": "boolean",
-            "description": "Workspaces may add mail domains."
-          },
           "enabled": {
             "type": "boolean",
             "description": "`ORBIT_MAIL_ENABLED` on this server."
@@ -68320,6 +68421,10 @@
           },
           "listener": {
             "$ref": "#/components/schemas/MailListenerView"
+          },
+          "mail_enabled": {
+            "type": "boolean",
+            "description": "Mail is on for this installation (the app, its settings and the workspace mail API)."
           },
           "mode": {
             "$ref": "#/components/schemas/MailAdminMode"
@@ -69154,6 +69259,7 @@
       "MailProviderKind": {
         "type": "string",
         "enum": [
+          "postshiba",
           "cloudflare",
           "postmark",
           "mailgun",
@@ -69189,7 +69295,7 @@
       },
       "MailProviderSecretsBody": {
         "type": "object",
-        "description": "The secrets a provider gives (Mailgun, Resend, SES); Orbit makes Cloudflare's and Postmark's.",
+        "description": "The secrets a provider gives (PostShiba, Mailgun, Resend, SES); Orbit makes Cloudflare's and Postmark's.",
         "properties": {
           "access_key_id": {
             "type": [
@@ -69203,7 +69309,7 @@
               "string",
               "null"
             ],
-            "description": "Resend: an API key that can read received emails."
+            "description": "PostShiba: an API key of a team admin (it reads the raw message). Resend: an API key that\ncan read received emails."
           },
           "secret_access_key": {
             "type": [
@@ -69223,7 +69329,7 @@
               "string",
               "null"
             ],
-            "description": "Resend: the webhook's signing secret (`whsec_…`)."
+            "description": "PostShiba: the inbox's webhook signing secret. Resend: the webhook's signing secret\n(`whsec_…`)."
           }
         },
         "additionalProperties": false
@@ -77061,7 +77167,7 @@
       "SetMailAdminBody": {
         "type": "object",
         "properties": {
-          "domains_enabled": {
+          "mail_enabled": {
             "type": [
               "boolean",
               "null"

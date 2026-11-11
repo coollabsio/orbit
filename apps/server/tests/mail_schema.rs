@@ -256,13 +256,13 @@ impl Fixture {
 }
 
 #[tokio::test]
-async fn schema_0095_applies_and_constraints_hold() {
+async fn mail_schema_applies_and_constraints_hold() {
     let fixture = Fixture::new().await;
     assert_eq!(
         fixture
-            .count("SELECT MAX(version) FROM schema_migrations")
+            .count("SELECT COUNT(*) FROM schema_migrations WHERE version = 20261111122204")
             .await,
-        95
+        1
     );
 
     // A domain name has one owner on the instance, whatever its case.
@@ -353,12 +353,12 @@ async fn schema_0095_applies_and_constraints_hold() {
 
     // Mail domains are off until the root user turns them on.
     let settings = InstanceSettingsRepository::new((*fixture.database).clone());
-    assert!(!settings.mail_domains_enabled().await.unwrap());
+    assert!(!settings.mail_enabled().await.unwrap());
     settings
-        .set_mail_domains_enabled(fixture.user_id, true, "request", TimestampMillis::now())
+        .set_mail_enabled(fixture.user_id, true, "request", TimestampMillis::now())
         .await
         .unwrap();
-    assert!(settings.mail_domains_enabled().await.unwrap());
+    assert!(settings.mail_enabled().await.unwrap());
 }
 
 #[tokio::test]

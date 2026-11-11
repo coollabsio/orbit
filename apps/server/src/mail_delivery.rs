@@ -9,6 +9,7 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use orbit_mail::inbound::postshiba::PostshibaEvent;
 use orbit_mail::inbound::resend::ResendEvent;
 use orbit_mail::inbound::{Delivery, InboundError, SpfHeaderOwned, SpfSource, ses};
 use orbit_mail::{Authenticator, authentication_results, provider_spf, strip_auth_results};
@@ -28,6 +29,8 @@ const AUTH_TIMEOUT: Duration = Duration::from_secs(30);
 const TOKEN_MEMORY_SECS: i64 = orbit_mail::inbound::mailgun::RETRY_WINDOW_SECS + 60 * 60;
 /// Request bodies read at once: a provider's message can be tens of MiB.
 const BODIES_AT_ONCE: usize = 4;
+/// PostShiba's Inbound messages API.
+const POSTSHIBA_API: &str = "https://app.postshiba.com/api/v1/inboxes/";
 /// Resend's Receiving API.
 const RESEND_API: &str = "https://api.resend.com/emails/receiving/";
 /// Small answers: Resend's message details, SNS certificates and confirmations.
@@ -192,6 +195,73 @@ impl ProviderIntake {
             peer_ip: None,
             helo: None,
             spf: SpfSource::Header(SpfHeaderOwned::ReceivedSpf),
+        };
+        self.deliver(provider, delivery, now).await
+    }
+
+    /// PostShiba: fetches the raw message that the webhook names (PostShiba keeps it until the
+    /// webhook succeeds), then delivers it.
+    pub async fn receive_postshiba(
+        &self,
+        provider: &MailProvider,
+        api_key: &str,
+        event: PostshibaEvent,
+        now: TimestampMillis,
+    ) -> DeliveryResult {
+        #[derive(Deserialize)]
+        struct Message {
+            raw: Option<String>,
+        }
+        let url = format!(
+            "{POSTSHIBA_API}{}/inbound_messages/{}",
+            event.inbox_id, event.message_id
+        );
+        let max = usize::try_from(self.max_message_bytes).unwrap_or(usize::MAX);
+        // the answer holds the raw message, the decoded bodies and the attachments in base64
+        let answer_max = max.saturating_mul(3).saturating_add(1024 * 1024);
+        let answer = match self
+            .fetch
+            .get(
+                &url,
+                answer_max,
+                "application/json",
+                Some(api_key),
+                DOWNLOAD_TIMEOUT,
+                Fetching::Provider,
+            )
+            .await
+        {
+            Ok(answer) => answer,
+            Err(error) => {
+                return self
+                    .failed(provider, now, format!("PostShiba API: {error}"))
+                    .await;
+            }
+        };
+        // `raw` is null for an API key of a user who is not a team admin, and after delivery
+        let Some(raw) = serde_json::from_slice::<Message>(&answer)
+            .ok()
+            .and_then(|message| message.raw)
+        else {
+            return self
+                .failed(
+                    provider,
+                    now,
+                    "PostShiba API: no raw message (the API key must belong to a team admin)"
+                        .to_owned(),
+                )
+                .await;
+        };
+        if raw.len() > max {
+            return DeliveryResult::TooLarge;
+        }
+        let delivery = Delivery {
+            raw: raw.into_bytes(),
+            mail_from: event.mail_from,
+            recipients: event.recipients,
+            peer_ip: None,
+            helo: None,
+            spf: event.spf.map_or(SpfSource::None, SpfSource::Given),
         };
         self.deliver(provider, delivery, now).await
     }

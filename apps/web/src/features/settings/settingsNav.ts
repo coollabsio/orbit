@@ -4,6 +4,7 @@ import type { Permission } from '@orbit/api/generated/types.gen'
 import { RobotIcon } from '@/components/common/icons/RobotIcon'
 import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
 import { useBillingEnabled } from '@/features/workspaces/billing'
+import { useMailEnabled } from '@/features/mail/enabled'
 import { guestMayOpen } from '@/app/shell/productNavigation'
 
 export interface SettingsNavItem {
@@ -15,6 +16,8 @@ export interface SettingsNavItem {
   permission?: Permission
   /** Shown only in Orbit Cloud (billing on). */
   cloud?: boolean
+  /** Shown only while Mail is on for the server. */
+  mail?: boolean
 }
 
 export interface SettingsNavSection {
@@ -54,11 +57,11 @@ const AREAS: Record<SettingsAreaName, SettingsArea> = {
       {
         label: 'Mail',
         items: [
-          { to: '/settings/mail/domains', label: 'Domains', icon: Global, permission: 'mail.manage' },
-          { to: '/settings/mail/providers', label: 'Providers', icon: Routing, permission: 'mail.manage' },
-          { to: '/settings/mail/mailboxes', label: 'Mailboxes', icon: DirectInbox, permission: 'mail.manage' },
-          { to: '/settings/mail/labels', label: 'Mail labels', icon: Tag, permission: 'mail.manage' },
-          { to: '/settings/mail/failed', label: 'Failed messages', icon: SmsTracking, permission: 'mail.manage' },
+          { to: '/settings/mail/domains', label: 'Domains', icon: Global, permission: 'mail.manage', mail: true },
+          { to: '/settings/mail/providers', label: 'Providers', icon: Routing, permission: 'mail.manage', mail: true },
+          { to: '/settings/mail/mailboxes', label: 'Mailboxes', icon: DirectInbox, permission: 'mail.manage', mail: true },
+          { to: '/settings/mail/labels', label: 'Mail labels', icon: Tag, permission: 'mail.manage', mail: true },
+          { to: '/settings/mail/failed', label: 'Failed messages', icon: SmsTracking, permission: 'mail.manage', mail: true },
         ],
       },
       {
@@ -170,11 +173,12 @@ export function useSettingsArea(name: SettingsAreaName, profileOnly = false): Se
   // a guest sees only the pages it may open (`guestMayOpen`)
   const guest = workspace?.role === 'guest'
   const cloud = useBillingEnabled()
+  const mail = useMailEnabled()
   const area = AREAS[name]
   const sections = area.sections
     .map((section) => ({
       ...section,
-      items: section.items.filter((item) => (!item.permission || permissions.includes(item.permission)) && (!item.cloud || cloud) && (!profileOnly || item.to === '/profile') && (!guest || guestMayOpen(item.to))),
+      items: section.items.filter((item) => (!item.permission || permissions.includes(item.permission)) && (!item.cloud || cloud) && (!item.mail || mail) && (!profileOnly || item.to === '/profile') && (!guest || guestMayOpen(item.to))),
     }))
     .filter((section) => section.items.length > 0)
   return { ...area, sections }

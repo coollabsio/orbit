@@ -2,8 +2,8 @@
 -- Same tables, columns, indexes and trigger messages; INTEGER is BIGINT, BLOB is BYTEA, and the
 -- FTS5 table mail_search is a plain table with a generated tsvector column.
 
-ALTER TABLE instance_settings ADD COLUMN mail_domains_enabled BIGINT NOT NULL DEFAULT 0
-    CHECK (mail_domains_enabled IN (0, 1));
+ALTER TABLE instance_settings ADD COLUMN mail_enabled BIGINT NOT NULL DEFAULT 0
+    CHECK (mail_enabled IN (0, 1));
 
 ALTER TABLE instance_settings ADD COLUMN mail_workspace_providers_enabled BIGINT NOT NULL DEFAULT 1
     CHECK (mail_workspace_providers_enabled IN (0, 1));
@@ -11,7 +11,7 @@ ALTER TABLE instance_settings ADD COLUMN mail_workspace_providers_enabled BIGINT
 CREATE TABLE mail_providers (
     id TEXT PRIMARY KEY,
     workspace_id TEXT REFERENCES workspaces(id) ON DELETE CASCADE,
-    kind TEXT NOT NULL CHECK (kind IN ('cloudflare', 'postmark', 'mailgun', 'resend', 'ses')),
+    kind TEXT NOT NULL CHECK (kind IN ('postshiba', 'cloudflare', 'postmark', 'mailgun', 'resend', 'ses')),
     name TEXT NOT NULL CHECK (length(name) BETWEEN 1 AND 80),
     secrets BYTEA NOT NULL,
     settings TEXT NOT NULL CHECK (orbit_json_valid(settings)),

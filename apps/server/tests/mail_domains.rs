@@ -79,7 +79,7 @@ impl Fixture {
             .await
             .unwrap();
         InstanceSettingsRepository::new((*database).clone())
-            .set_mail_domains_enabled(setup.user_id, true, "request", now)
+            .set_mail_enabled(setup.user_id, true, "request", now)
             .await
             .unwrap();
         let root = tempfile::tempdir().unwrap();
@@ -774,17 +774,27 @@ async fn only_owners_and_admins_manage_domains() {
 }
 
 #[tokio::test]
-async fn the_instance_switch_off_refuses_new_domains() {
+async fn mail_off_refuses_the_workspace_mail_api_and_keeps_the_domains() {
     let fixture = Fixture::new().await;
     fixture.add(fixture.first, "example.com").await;
     InstanceSettingsRepository::new((*fixture.database).clone())
-        .set_mail_domains_enabled(fixture.owner.id, false, "request", TimestampMillis::now())
+        .set_mail_enabled(fixture.owner.id, false, "request", TimestampMillis::now())
         .await
         .unwrap();
     assert_eq!(
         fixture.refused(fixture.first, "other.test").await,
-        (StatusCode::FORBIDDEN, "mail_domains_disabled".to_owned())
+        (StatusCode::FORBIDDEN, "mail_disabled".to_owned())
     );
+    let (status, body) = fixture
+        .call(&fixture.owner, fixture.first, "GET", "/domains", None)
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(body["code"], "mail_disabled");
+    // on again: the domain added before is still there
+    InstanceSettingsRepository::new((*fixture.database).clone())
+        .set_mail_enabled(fixture.owner.id, true, "request", TimestampMillis::now())
+        .await
+        .unwrap();
     let (status, listed) = fixture
         .call(&fixture.owner, fixture.first, "GET", "/domains", None)
         .await;
@@ -1409,7 +1419,7 @@ async fn root_only_instance_routes() {
             &fixture.owner,
             "PUT",
             "",
-            Some(json!({ "domains_enabled": true, "workspace_providers_enabled": false })),
+            Some(json!({ "mail_enabled": true, "workspace_providers_enabled": false })),
         )
         .await;
     assert_eq!(status, StatusCode::OK, "{settings}");

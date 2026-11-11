@@ -330,7 +330,7 @@ async fn admin_routes_need_the_root_user() {
         (
             "PUT",
             "/api/v1/admin/mail".to_owned(),
-            Some(json!({ "domains_enabled": true })),
+            Some(json!({ "mail_enabled": true })),
         ),
         (
             "POST",
@@ -365,46 +365,46 @@ async fn admin_routes_need_the_root_user() {
 async fn the_switch_persists_and_is_audited() {
     let fixture = Fixture::new().await;
     let settings = InstanceSettingsRepository::new((*fixture.database).clone());
-    assert!(!settings.mail_domains_enabled().await.unwrap());
+    assert!(!settings.mail_enabled().await.unwrap());
 
     let (status, body) = fixture
         .call(
             &fixture.root,
             "PUT",
             "/api/v1/admin/mail",
-            Some(json!({ "domains_enabled": true })),
+            Some(json!({ "mail_enabled": true })),
         )
         .await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(body["domains_enabled"], true);
-    assert!(settings.mail_domains_enabled().await.unwrap());
+    assert_eq!(body["mail_enabled"], true);
+    assert!(settings.mail_enabled().await.unwrap());
     let (_, body) = fixture
         .call(&fixture.root, "GET", "/api/v1/admin/mail", None)
         .await;
-    assert_eq!(body["domains_enabled"], true);
+    assert_eq!(body["mail_enabled"], true);
 
     let (status, body) = fixture
         .call(
             &fixture.root,
             "PUT",
             "/api/v1/admin/mail",
-            Some(json!({ "domains_enabled": false })),
+            Some(json!({ "mail_enabled": false })),
         )
         .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["domains_enabled"], false);
-    assert!(!settings.mail_domains_enabled().await.unwrap());
+    assert_eq!(body["mail_enabled"], false);
+    assert!(!settings.mail_enabled().await.unwrap());
     // both switches together: one change, one audit event
     let (status, body) = fixture
         .call(
             &fixture.root,
             "PUT",
             "/api/v1/admin/mail",
-            Some(json!({ "domains_enabled": true, "workspace_providers_enabled": false })),
+            Some(json!({ "mail_enabled": true, "workspace_providers_enabled": false })),
         )
         .await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    assert!(settings.mail_domains_enabled().await.unwrap());
+    assert!(settings.mail_enabled().await.unwrap());
     assert!(!settings.mail_workspace_providers_enabled().await.unwrap());
     assert_eq!(
         fixture
@@ -643,6 +643,14 @@ async fn a_test_address_needs_a_verified_domain() {
 #[tokio::test]
 async fn failed_and_stuck_receipts_are_listed_and_retried() {
     let fixture = Fixture::new().await;
+    fixture
+        .call(
+            &fixture.root,
+            "PUT",
+            "/api/v1/admin/mail",
+            Some(json!({ "mail_enabled": true })),
+        )
+        .await;
     let (_, address) = fixture.domain("one.test", "verified").await;
     let mut ids = Vec::new();
     for subject in ["One", "Two", "Three", "Four"] {
@@ -839,7 +847,7 @@ async fn a_test_message_over_smtp_reaches_the_health_card() {
         origin,
         "PUT",
         "/api/v1/admin/mail",
-        Some(json!({ "domains_enabled": true })),
+        Some(json!({ "mail_enabled": true })),
     )
     .await;
     assert_eq!(code, StatusCode::OK, "{body}");
@@ -852,7 +860,7 @@ async fn a_test_message_over_smtp_reaches_the_health_card() {
         None,
     )
     .await;
-    assert_eq!(body["mail"]["domains_enabled"], true, "{body}");
+    assert_eq!(body["mail"]["mail_enabled"], true, "{body}");
 
     let (code, body) = request(
         &router,

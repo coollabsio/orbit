@@ -68,7 +68,7 @@ test('settings pages are not duplicated in the main sidebar', () => {
 test('docs are enabled in the sidebar and highlight on page routes', () => {
   const view = render(
     <MemoryRouter initialEntries={['/']}>
-      <SidebarNav />
+      <SidebarNav mailEnabled />
       <Location />
     </MemoryRouter>,
   )
@@ -84,6 +84,14 @@ test('docs are enabled in the sidebar and highlight on page routes', () => {
   fireEvent.click(mail)
   expect(view.getByTestId('location').textContent).toBe('/mail')
   expect(view.getByRole('link', { name: 'Chat' })).toBeTruthy()
+})
+
+test('Mail is Coming soon in the sidebar while Mail is off for the server', () => {
+  const view = render(<MemoryRouter initialEntries={['/']}><SidebarNav /></MemoryRouter>)
+  expect(view.queryByRole('link', { name: 'Mail' })).toBeNull()
+  const mail = view.getByRole('button', { name: /Mail/ }) as HTMLButtonElement
+  expect(mail.disabled).toBe(true)
+  expect(mail.textContent).toContain('Coming soon')
 })
 
 test('chat and direct messages are not products in production: Chat is "Coming soon"', () => {

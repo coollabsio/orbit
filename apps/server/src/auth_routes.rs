@@ -1670,6 +1670,8 @@ struct AuthOptions {
     passkeys_enabled: bool,
     /// Orbit Cloud: workspaces need a subscription (Settings → Billing) to be writable.
     billing_enabled: bool,
+    /// Mail is on (Admin → Inbound mail). Off: the mail app and its settings are hidden.
+    mail_enabled: bool,
     /// The sign-in providers an admin configured ("Continue with Google").
     providers: Vec<crate::sign_in_providers::Provider>,
     /// A first sign-in with one of `providers` creates an account (registration is open; no mail server needed).
@@ -1685,8 +1687,13 @@ async fn auth_options(
     request_id: Option<Extension<RequestId>>,
 ) -> Result<Json<AuthOptions>, ApiError> {
     let email_enabled = state.mailer().await.is_some();
-    let settings = InstanceSettingsRepository::new(state.repository.database().clone())
+    let repository = InstanceSettingsRepository::new(state.repository.database().clone());
+    let settings = repository
         .get()
+        .await
+        .map_err(|_| ApiError::internal("/api/v1/auth/options", request_id.as_ref()))?;
+    let mail_enabled = repository
+        .mail_enabled()
         .await
         .map_err(|_| ApiError::internal("/api/v1/auth/options", request_id.as_ref()))?;
     let providers = providers::configured(&state)
@@ -1697,6 +1704,7 @@ async fn auth_options(
         email_enabled,
         passkeys_enabled: state.webauthn.is_some(),
         billing_enabled: state.billing_enabled,
+        mail_enabled,
         provider_registration_open: settings.registration_open && !providers.is_empty(),
         providers,
         version: env!("CARGO_PKG_VERSION"),

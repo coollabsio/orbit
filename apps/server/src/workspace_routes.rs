@@ -1836,8 +1836,9 @@ struct InstanceSettingsView {
 /// Mail on this installation; the health card is `GET /api/v1/admin/mail`.
 #[derive(Serialize, ToSchema)]
 struct InstanceMailView {
-    /// Workspaces may add mail domains (`PUT /api/v1/admin/mail`).
-    domains_enabled: bool,
+    /// Mail is on for this installation (`PUT /api/v1/admin/mail`). Off: the mail app is hidden and
+    /// the workspace mail API refuses with `mail_disabled`.
+    mail_enabled: bool,
 }
 
 #[derive(Serialize, ToSchema)]
@@ -1888,8 +1889,8 @@ async fn settings_view(
         .limits()
         .await
         .map_err(|_| internal(instance, request_id))?;
-    let mail_domains_enabled = repository
-        .mail_domains_enabled()
+    let mail_enabled = repository
+        .mail_enabled()
         .await
         .map_err(|_| internal(instance, request_id))?;
     let sign_in_providers = repository
@@ -1928,9 +1929,7 @@ async fn settings_view(
             image_compression: state.image_compressor.as_ref().map(ImageCompressor::status),
         },
         limits: limits.into(),
-        mail: InstanceMailView {
-            domains_enabled: mail_domains_enabled,
-        },
+        mail: InstanceMailView { mail_enabled },
         registration_open: settings.registration_open,
         smtp: settings.smtp.map(|smtp| SmtpView {
             host: smtp.host,

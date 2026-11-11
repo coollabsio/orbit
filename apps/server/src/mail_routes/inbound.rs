@@ -21,7 +21,7 @@ use crate::repositories::mail::{MailProvider, ProviderKind, ProviderSecrets};
 #[utoipa::path(
     post,
     path = "/api/v1/mail/inbound/{kind}/{provider_id}",
-    params(("kind" = String, Path, description = "cloudflare, postmark, mailgun, resend or ses"), ("provider_id" = String, Path)),
+    params(("kind" = String, Path, description = "postshiba, cloudflare, postmark, mailgun, resend or ses"), ("provider_id" = String, Path)),
     request_body(content = String, content_type = "application/json", description = "The provider's own payload (JSON; Mailgun: a form)"),
     responses((status = 200), (status = 401), (status = 404), (status = 413), (status = 503))
 )]
@@ -73,6 +73,7 @@ pub(crate) async fn post_inbound(
         ]
         .iter()
         .all(|name| header(name).is_some()),
+        ProviderSecrets::Postshiba { .. } => header("x-capsule-signature").is_some(),
         ProviderSecrets::Resend { .. } => header("svix-signature").is_some(),
         ProviderSecrets::Mailgun { .. } | ProviderSecrets::Ses { .. } => true,
     };
@@ -142,6 +143,27 @@ pub(crate) async fn post_inbound(
                 intake.remember_token(token, now_secs);
             }
             return delivered(kind, result);
+        }
+        ProviderSecrets::Postshiba {
+            api_key,
+            webhook_secret,
+        } => {
+            let event = match inbound::postshiba::verify_webhook(
+                header("x-capsule-timestamp"),
+                header("x-capsule-signature"),
+                &body,
+                webhook_secret,
+                now_secs,
+            ) {
+                Ok(event) => event,
+                Err(error) => return refused(&intake, &provider, error, now, true).await,
+            };
+            return delivered(
+                kind,
+                intake
+                    .receive_postshiba(&provider, api_key, event, now)
+                    .await,
+            );
         }
         ProviderSecrets::Resend {
             api_key,
@@ -258,6 +280,8 @@ fn body_limit(kind: ProviderKind, max: usize) -> usize {
         ProviderKind::Cloudflare => max.saturating_add(64 * 1024),
         ProviderKind::Postmark => max.saturating_mul(2).saturating_add(MIB),
         ProviderKind::Mailgun => max.saturating_mul(3).saturating_add(MIB),
+        // the JSON event carries the attachments in base64 up to 4 MB
+        ProviderKind::Postshiba => 8 * MIB,
         ProviderKind::Resend | ProviderKind::Ses => 256 * 1024,
     }
 }

@@ -26,6 +26,7 @@ type RequestIdRef<'a> = Option<&'a Extension<RequestId>>;
 #[derive(Serialize, Deserialize, ToSchema, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum MailProviderKind {
+    Postshiba,
     Cloudflare,
     Postmark,
     Mailgun,
@@ -36,6 +37,7 @@ pub(crate) enum MailProviderKind {
 impl From<ProviderKind> for MailProviderKind {
     fn from(kind: ProviderKind) -> Self {
         match kind {
+            ProviderKind::Postshiba => Self::Postshiba,
             ProviderKind::Cloudflare => Self::Cloudflare,
             ProviderKind::Postmark => Self::Postmark,
             ProviderKind::Mailgun => Self::Mailgun,
@@ -48,6 +50,7 @@ impl From<ProviderKind> for MailProviderKind {
 impl From<MailProviderKind> for ProviderKind {
     fn from(kind: MailProviderKind) -> Self {
         match kind {
+            MailProviderKind::Postshiba => Self::Postshiba,
             MailProviderKind::Cloudflare => Self::Cloudflare,
             MailProviderKind::Postmark => Self::Postmark,
             MailProviderKind::Mailgun => Self::Mailgun,
@@ -138,15 +141,17 @@ pub(crate) struct MailProviderList {
     workspace_providers_enabled: bool,
 }
 
-/// The secrets a provider gives (Mailgun, Resend, SES); Orbit makes Cloudflare's and Postmark's.
+/// The secrets a provider gives (PostShiba, Mailgun, Resend, SES); Orbit makes Cloudflare's and Postmark's.
 #[derive(Deserialize, ToSchema, Default)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct MailProviderSecretsBody {
     /// Mailgun: the HTTP webhook signing key.
     signing_key: Option<String>,
-    /// Resend: an API key that can read received emails.
+    /// PostShiba: an API key of a team admin (it reads the raw message). Resend: an API key that
+    /// can read received emails.
     api_key: Option<String>,
-    /// Resend: the webhook's signing secret (`whsec_…`).
+    /// PostShiba: the inbox's webhook signing secret. Resend: the webhook's signing secret
+    /// (`whsec_…`).
     webhook_secret: Option<String>,
     /// SES: an IAM user with `s3:GetObject` and `s3:DeleteObject` on the bucket.
     access_key_id: Option<String>,
@@ -184,6 +189,10 @@ pub(crate) struct UpdateMailProviderBody {
 fn secrets(kind: ProviderKind, body: MailProviderSecretsBody) -> Option<ProviderSecrets> {
     let value = |value: Option<String>| value.filter(|value| !value.trim().is_empty());
     Some(match kind {
+        ProviderKind::Postshiba => ProviderSecrets::Postshiba {
+            api_key: value(body.api_key)?,
+            webhook_secret: value(body.webhook_secret)?,
+        },
         ProviderKind::Mailgun => ProviderSecrets::Mailgun {
             signing_key: value(body.signing_key)?,
         },
@@ -248,6 +257,13 @@ fn steps(provider: &MailProvider) -> Vec<String> {
     let region = settings.region.as_deref().unwrap_or("<region>");
     let bucket = settings.bucket.as_deref().unwrap_or("<bucket>");
     let steps: Vec<String> = match provider.kind {
+        ProviderKind::Postshiba => vec![
+            "In PostShiba, add the domain as a sending domain, then open Inbound → Inboxes and select Issue inbox on it.".to_owned(),
+            "Under Where should mail land?, choose Root domain (or a subdomain, and add that subdomain to Orbit instead). Set Address to * so every address reaches Orbit.".to_owned(),
+            "Set Webhook URL to the webhook URL and Webhook format to PostShiba JSON. Copy the inbox's signing secret, and an API key of a team admin (Orbit reads the raw message with it), into this provider.".to_owned(),
+            "Publish the MX record that the inbox shows (inbound.postshiba.com) and select Check MX.".to_owned(),
+            "In Orbit, route the domain to this provider.".to_owned(),
+        ],
         ProviderKind::Cloudflare => vec![
             "In Cloudflare, open the domain, then Email → Email Routing, and turn it on. Cloudflare adds its MX records.".to_owned(),
             "In Workers & Pages, create a Worker, paste the script below and deploy it.".to_owned(),

@@ -412,7 +412,7 @@ async fn check_claim(
     Ok(())
 }
 
-/// The caller manages mail, the instance allows mail domains and `name` is free to claim.
+/// The caller manages mail, Mail is on for the instance and `name` is free to claim.
 /// Returns the normalized name.
 async fn claim_checks(
     transaction: &mut Transaction<'_, Any>,
@@ -422,12 +422,12 @@ async fn claim_checks(
 ) -> Result<String, MailError> {
     manager(transaction, workspace_id, actor_id).await?;
     let enabled: i64 =
-        sqlx::query_scalar("SELECT mail_domains_enabled FROM instance_settings WHERE id = 1")
+        sqlx::query_scalar("SELECT mail_enabled FROM instance_settings WHERE id = 1")
             .fetch_optional(&mut **transaction)
             .await?
             .unwrap_or(0);
     if enabled != 1 {
-        return Err(MailError::Forbidden("mail_domains_disabled"));
+        return Err(MailError::Forbidden("mail_disabled"));
     }
     let name = clean_domain(name)?;
     check_claim(transaction, workspace_id, &name, None).await?;

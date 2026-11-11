@@ -508,7 +508,8 @@ export const getMailAdmin = <ThrowOnError extends boolean = false>(options?: Opt
 });
 
 /**
- * Turns on or off whether workspaces may add mail domains (audit `instance.mail_updated`).
+ * Turns Mail on or off for the installation, and whether workspaces may add their own providers
+ * (audit `instance.mail_updated`).
  */
 export const setMailAdmin = <ThrowOnError extends boolean = false>(options: Options<SetMailAdminData, ThrowOnError>): RequestResult<SetMailAdminResponses, SetMailAdminErrors, ThrowOnError> => (options.client ?? client).put<SetMailAdminResponses, SetMailAdminErrors, ThrowOnError>({
     security: [{

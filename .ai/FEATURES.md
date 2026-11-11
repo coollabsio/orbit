@@ -607,13 +607,15 @@ Design: `docs/superpowers/specs/2026-10-23-mail-slice-1-design.md` (local file).
 
 Slice 1 receives and reads mail; it does not send. Server (migration `20261111122204_mail`):
 
-- Provider intake (`mail_delivery.rs`, `mail_routes/{inbound,providers}.rs`, `crates/mail/src/inbound/`): Cloudflare,
-  Postmark, Mailgun, Resend and SES post to `/api/v1/mail/inbound/{kind}/{id}`; instance and workspace providers
+- Provider intake (`mail_delivery.rs`, `mail_routes/{inbound,providers}.rs`, `crates/mail/src/inbound/`): PostShiba
+  (recommended; signed JSON webhook, then the raw message from its API), Cloudflare, Postmark, Mailgun, Resend and SES post to `/api/v1/mail/inbound/{kind}/{id}`; instance and workspace providers
   (`mail_providers`), a route per domain (`mail_domains.provider_id`), rejected deliveries listed for 30 days.
 - SMTP listener on port 2525 when `ORBIT_MAIL_ENABLED=true`, relay mode (default, trusts the relay's
   `Authentication-Results`) or direct mode (own SPF/DKIM/DMARC checks, STARTTLS, certificate reload every 60 s).
 - Domains per workspace, verified by `_orbit-verify` TXT (`mail.dns_check` every 10 min while pending, daily after);
-  verified → suspended (7-day grace) when the record goes. Root switch in Admin → Mail.
+  verified → suspended (7-day grace) when the record goes. Root switch **Mail** in Admin → Inbound mail (`instance_settings.mail_enabled`, off by default): off hides
+  the app, its menu items, shortcuts and settings (`useMailEnabled`, `MailGate`, from `/api/v1/auth/options`) and the
+  workspace mail API answers `403 mail_disabled` (`Call::enter`); mail for existing domains still arrives.
 - Personal and shared mailboxes, aliases, `+tag`, catch-all, labels, bulk personal mailboxes.
 - Intake stores the raw message as an encrypted blob (per-workspace key) and enqueues `mail.ingest`; ingest threads,
   dedupes per mailbox, indexes search, and sends `thread.updated` on the live socket (topic `mail`).
@@ -650,8 +652,8 @@ Web client (`/mail`, sidebar entry with a **Beta** tag; read-only, no compose or
 
 Not done yet (mail stays **Beta** until slices 1 to 5 are done):
 
-- Checked only by automated tests: no real mail from Gmail or Outlook in direct or relay mode, no real Cloudflare,
-  Postmark, Mailgun, Resend or SES account, no click-through of the UI, no `docker build`.
+- Checked only by automated tests: no real mail from Gmail or Outlook in direct or relay mode, no real PostShiba,
+  Cloudflare, Postmark, Mailgun, Resend or SES account, no click-through of the UI, no `docker build`.
 - Mobile has no mail screens: the mail app, its settings, the Mail badge and the PDF preview are web only.
 - The Resend download host is not pinned (Resend's docs do not name it); the fetch must be `https`, public and
   without redirects.

@@ -25,7 +25,7 @@ import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { shortDate } from '@/lib/format'
 import { DomainRouteRow, RouteSelect } from './DomainRoute'
 import { MailDomainRecords } from './MailDomainRecords'
-import { count, dateTime, DIRECT, domainHealth, isDomainsDisabled, mailProblem, since } from './mailSettingsLib'
+import { count, dateTime, DIRECT, domainHealth, isMailDisabled, mailProblem, since } from './mailSettingsLib'
 
 /** **Check now** reads the domain this often until the check job has run, for at most `CHECK_WAIT_MS`. */
 const CHECK_POLL_MS = 2000
@@ -60,7 +60,7 @@ function MailDomains() {
     if (!trimmed || create.isPending) return
     create.mutate({ name: trimmed, providerId: route === DIRECT ? null : route }, {
       onSuccess: (domain) => { setName(''); toast(`${domain.name} added`) },
-      onError: (error) => { if (isDomainsDisabled(error)) setDisabled(true) },
+      onError: (error) => { if (isMailDisabled(error)) setDisabled(true) },
     })
   }
 
@@ -69,8 +69,8 @@ function MailDomains() {
       {disabled ? (
         <Alert>
           <Danger />
-          <AlertTitle>Mail domains are off on this Orbit server</AlertTitle>
-          <AlertDescription>An instance administrator can turn them on in Admin → Mail. Domains added before keep working.</AlertDescription>
+          <AlertTitle>Mail is off on this Orbit server</AlertTitle>
+          <AlertDescription>An instance administrator can turn it on in Admin → Inbound mail.</AlertDescription>
         </Alert>
       ) : null}
       <SettingsCard title="Add a domain" description="Orbit receives mail for the domain once its verification record is in the DNS.">

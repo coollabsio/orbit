@@ -37,6 +37,7 @@ import { useDebouncedValue } from '@/lib/useDebouncedValue'
 import type { CommandId, Group } from '@/shortcuts/commands'
 import { ShortcutKeys } from '@/shortcuts/Shortcut'
 import { useAvailableCommands, useBindings, useRunCommand } from '@/shortcuts/useCommand'
+import { useMailEnabled } from '@/features/mail/enabled'
 import { chatEnabled, docsHidden } from './productNavigation'
 import { namesDestination, paletteArea, sectionOrder, type PaletteArea, type PaletteSection } from './paletteOrder'
 
@@ -188,13 +189,14 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
   const teamspaces = useTeamspaces(workspace.id, search.length > 0 || recentCount > 0)
   const searching = query.trim().length > 0
 
+  const mailEnabled = useMailEnabled()
   const navigation = useMemo<CommandEntry[]>(() => {
     const go = (entry: Omit<CommandEntry, 'kind' | 'meta'>): CommandEntry => ({ ...entry, kind: 'navigation', meta: 'Navigation' })
     const entries: CommandEntry[] = [
       go({ id: 'nav_home', icon: Home, title: 'Go to Home', to: '/', keywords: 'home' }),
       go({ id: 'nav_tasks', icon: SquareCheck, title: 'Go to Tasks', to: '/tasks', command: 'nav.tasks', keywords: 'tasks all', area: 'tasks' }),
       go({ id: 'nav_docs', icon: FileText, title: 'Go to Docs', to: '/docs', command: 'nav.docs', keywords: 'docs pages wiki documents', area: 'docs' }),
-      go({ id: 'nav_mail', icon: Mail, title: 'Go to Mail', to: '/mail', command: 'nav.mail', keywords: 'mail email inbox messages' }),
+      ...(mailEnabled ? [go({ id: 'nav_mail', icon: Mail, title: 'Go to Mail', to: '/mail', command: 'nav.mail', keywords: 'mail email inbox messages' })] : []),
       ...(chatEnabled ? [go({ id: 'nav_chat', icon: MessageSquare, title: 'Go to Chat', to: '/chat', command: 'nav.chat', keywords: 'chat messages channels', area: 'chat' })] : []),
       go({ id: 'nav_inbox', icon: Bell, title: 'Go to Activity', to: '/activity', command: 'nav.inbox', keywords: 'activity notifications mentions inbox' }),
       go({ id: 'nav_profile', icon: Users, title: 'Go to Profile', to: '/profile', command: 'nav.profile', keywords: 'profile account password name' }),
@@ -213,7 +215,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
       go({ id: 'nav_shortcuts', icon: Settings, title: 'Go to Keyboard shortcuts', to: '/profile/shortcuts', keywords: 'keyboard shortcuts keys hotkeys customize' }),
     ]
     return docsHidden ? entries.filter((entry) => !entry.to?.startsWith('/docs')) : entries
-  }, [])
+  }, [mailEnabled])
 
   const sections = useMemo(() => {
     const q = query.trim().toLowerCase()

@@ -11,9 +11,10 @@
 -- * Users are never hard-deleted. A removed member's rows go with the membership, except a
 --   personal mailbox, which stays (its owner set to NULL) for the admins.
 
--- Instance switch (Admin, root user): whether workspaces may add mail domains.
-ALTER TABLE instance_settings ADD COLUMN mail_domains_enabled INTEGER NOT NULL DEFAULT 0
-    CHECK (mail_domains_enabled IN (0, 1));
+-- Instance switch (Admin, root user): Mail is on. Off (the default): the mail app is hidden and the
+-- workspace mail API refuses; mail for domains added before still arrives.
+ALTER TABLE instance_settings ADD COLUMN mail_enabled INTEGER NOT NULL DEFAULT 0
+    CHECK (mail_enabled IN (0, 1));
 
 -- Instance switch: whether workspace admins may set up their own mail providers (Orbit Cloud: 0).
 ALTER TABLE instance_settings ADD COLUMN mail_workspace_providers_enabled INTEGER NOT NULL DEFAULT 1
@@ -25,7 +26,7 @@ ALTER TABLE instance_settings ADD COLUMN mail_workspace_providers_enabled INTEGE
 CREATE TABLE mail_providers (
     id TEXT PRIMARY KEY,
     workspace_id TEXT REFERENCES workspaces(id) ON DELETE CASCADE,
-    kind TEXT NOT NULL CHECK (kind IN ('cloudflare', 'postmark', 'mailgun', 'resend', 'ses')),
+    kind TEXT NOT NULL CHECK (kind IN ('postshiba', 'cloudflare', 'postmark', 'mailgun', 'resend', 'ses')),
     name TEXT NOT NULL CHECK (length(name) BETWEEN 1 AND 80),
     -- JSON of the kind's secrets, sealed with the app key; associated data `mail-provider:<id>`.
     secrets BLOB NOT NULL,

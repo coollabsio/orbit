@@ -264,17 +264,17 @@ impl InstanceSettingsRepository {
         Ok(())
     }
 
-    /// Whether workspaces may add mail domains (off until the root user turns it on).
-    pub async fn mail_domains_enabled(&self) -> Result<bool, sqlx::Error> {
-        let enabled = sqlx::query_scalar::<_, i64>(
-            "SELECT mail_domains_enabled FROM instance_settings WHERE id = 1",
-        )
-        .fetch_one(self.database.pool())
-        .await?;
+    /// Mail is on for this installation (off until the root user turns it on). Off hides the mail
+    /// app and refuses the workspace mail API; mail for domains added before still arrives.
+    pub async fn mail_enabled(&self) -> Result<bool, sqlx::Error> {
+        let enabled =
+            sqlx::query_scalar::<_, i64>("SELECT mail_enabled FROM instance_settings WHERE id = 1")
+                .fetch_one(self.database.pool())
+                .await?;
         Ok(enabled == 1)
     }
 
-    pub async fn set_mail_domains_enabled(
+    pub async fn set_mail_enabled(
         &self,
         actor_id: Id,
         enabled: bool,
@@ -289,7 +289,7 @@ impl InstanceSettingsRepository {
     pub async fn set_mail_switches(
         &self,
         actor_id: Id,
-        domains_enabled: Option<bool>,
+        mail_enabled: Option<bool>,
         workspace_providers_enabled: Option<bool>,
         request_id: &str,
         now: TimestampMillis,
@@ -297,7 +297,7 @@ impl InstanceSettingsRepository {
         let mut transaction = self.database.immediate_transaction().await?;
         let mut changed = serde_json::Map::new();
         for (column, field, value) in [
-            ("mail_domains_enabled", "domains_enabled", domains_enabled),
+            ("mail_enabled", "mail_enabled", mail_enabled),
             (
                 "mail_workspace_providers_enabled",
                 "workspace_providers_enabled",

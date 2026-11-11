@@ -8,8 +8,8 @@ export function mailProblem(error: unknown, fallback: string): string {
   return error instanceof ApiProblem ? error.detail : `${fallback} Orbit did not answer. Check your connection and try again.`
 }
 
-/** The instance admin has not let workspaces add mail domains (Admin → Mail). */
-export const isDomainsDisabled = (error: unknown) => error instanceof ApiProblem && error.code === 'mail_domains_disabled'
+/** Mail is off for this server (Admin → Inbound mail). */
+export const isMailDisabled = (error: unknown) => error instanceof ApiProblem && error.code === 'mail_disabled'
 
 /** Copies `text` and says so; `what` names it in the toast ("Name copied"). */
 export function copyText(text: string, what: string) {
@@ -32,7 +32,9 @@ export function since(iso: string): string {
 /** `1 address`, `2 addresses`. */
 export const count = (amount: number, one: string, many: string) => `${amount} ${amount === 1 ? one : many}`
 
+/** In the order the form offers them: the recommended one first. */
 export const PROVIDER_LABELS: Record<MailProviderKind, string> = {
+  postshiba: 'PostShiba',
   cloudflare: 'Cloudflare Email Routing',
   postmark: 'Postmark',
   mailgun: 'Mailgun',

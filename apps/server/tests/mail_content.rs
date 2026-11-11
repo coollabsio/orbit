@@ -23,6 +23,7 @@ use orbit_server::mail_routes::{
     MailSettings, MailState, ViewGrant, ViewKey, ViewPurpose, mail_router,
 };
 use orbit_server::repositories::identity::{IdentityRepository, SetupRequest};
+use orbit_server::repositories::instance_settings::InstanceSettingsRepository;
 use orbit_server::repositories::mail::{IngestOutcome, MailRepository, MailboxKind, NewMailbox};
 use serde_json::{Value, json};
 use tower::ServiceExt;
@@ -80,6 +81,10 @@ impl Fixture {
                 },
                 now,
             )
+            .await
+            .unwrap();
+        InstanceSettingsRepository::new((*database).clone())
+            .set_mail_enabled(setup.user_id, true, "request", now)
             .await
             .unwrap();
         let root = tempfile::tempdir().unwrap();

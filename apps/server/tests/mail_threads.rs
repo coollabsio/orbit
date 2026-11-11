@@ -17,6 +17,7 @@ use orbit_server::auth_routes::CookieMode;
 use orbit_server::mail_intake::{InboundMessage, MailIntake, Recipient, Source};
 use orbit_server::mail_routes::{MailSettings, MailState, mail_router};
 use orbit_server::repositories::identity::{IdentityRepository, SetupRequest};
+use orbit_server::repositories::instance_settings::InstanceSettingsRepository;
 use orbit_server::repositories::mail::{
     IngestOutcome, MailFolder, MailRepository, MailboxKind, NewMailbox, parse_query,
 };
@@ -90,6 +91,10 @@ impl Fixture {
                 },
                 now,
             )
+            .await
+            .unwrap();
+        InstanceSettingsRepository::new((*database).clone())
+            .set_mail_enabled(setup.user_id, true, "request", now)
             .await
             .unwrap();
         let second = WorkspaceRepository::new((*database).clone())

@@ -10,6 +10,7 @@ import { useWorkspaceEvents } from '@/features/realtime/useWorkspaceEvents'
 import { ChatProvider } from '@/features/chat/api/ChatProvider'
 import { emitMailEvent, resyncMail } from '@/features/mail/api/events'
 import { useMailInboxUnread } from '@/features/mail/api/queries'
+import { useMailEnabled } from '@/features/mail/enabled'
 import { useChatBadges } from '@/features/chat/api/queries'
 import { useHasUnreadNotifications } from '@/features/inbox/api'
 import { startPushWorker } from '@/features/realtime/push'
@@ -74,6 +75,7 @@ function Shell() {
   const guest = useIsGuest()
   const live = useWorkspaceEvents(workspace.id)
   const { total: chatBadge, unread: chatUnread } = useChatBadges()
+  const mailEnabled = useMailEnabled()
   const mailBadge = useMailInboxUnread()
   // The tab icon gets a dot while chat, mail or the Inbox has something unread. A guest has only chat.
   const inboxUnread = useHasUnreadNotifications(workspace.id, !guest).data === true
@@ -184,7 +186,7 @@ function Shell() {
             {/* a guest has no Activity page */}
             {guest ? null : <ActivityBell unread={inboxUnread} />}
           </div>
-          <SidebarNav collapsed={sidebarCollapsed} chatBadge={chatBadge} chatUnread={chatUnread} mailBadge={mailBadge} isRoot={isRoot} pageListRef={hostsList ? setPageListSlot : undefined} />
+          <SidebarNav collapsed={sidebarCollapsed} chatBadge={chatBadge} chatUnread={chatUnread} mailBadge={mailBadge} mailEnabled={mailEnabled} isRoot={isRoot} pageListRef={hostsList ? setPageListSlot : undefined} />
           <div
             className={cn(
               'flex shrink-0 items-center justify-between gap-1 py-2',
@@ -216,7 +218,7 @@ function Shell() {
             <Outlet />
           </ErrorBoundary>
         </div>
-        <MobileDock chatBadge={chatBadge} chatUnread={chatUnread} mailBadge={mailBadge} />
+        <MobileDock chatBadge={chatBadge} chatUnread={chatUnread} mailBadge={mailBadge} mailEnabled={mailEnabled} />
         {!guest && <DonationReminder />}
       </div>
 
@@ -228,14 +230,14 @@ function Shell() {
           style={sidebarTheme.style}
         >
           <MenuSurfaceContext value={menuSurface}>
-            <SidebarNav backShowsMenu onNavigate={() => setDrawerOpen(false)} chatBadge={chatBadge} chatUnread={chatUnread} mailBadge={mailBadge} isRoot={isRoot} />
+            <SidebarNav backShowsMenu onNavigate={() => setDrawerOpen(false)} chatBadge={chatBadge} chatUnread={chatUnread} mailBadge={mailBadge} mailEnabled={mailEnabled} isRoot={isRoot} />
           </MenuSurfaceContext>
         </SideSheetContent>
       </SideSheet>
 
       {/* a guest has nothing the palette searches (tasks, docs) */}
       {paletteOpen && !guest ? <CommandPalette onClose={() => setPaletteOpen(false)} /> : null}
-      {helpOpen ? <ShortcutHelpDialog onClose={() => setHelpOpen(false)} /> : null}
+      {helpOpen ? <ShortcutHelpDialog onClose={() => setHelpOpen(false)} mailEnabled={mailEnabled} /> : null}
       <NavigationCommands />
       <SequenceHint />
     </div>

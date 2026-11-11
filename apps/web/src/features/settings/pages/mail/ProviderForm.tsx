@@ -10,7 +10,11 @@ import { useCreateProvider, useUpdateProvider } from '@/features/mail/api/mutati
 import type { ProviderScope } from '@/features/mail/api/queries'
 import { mailProblem, PROVIDER_LABELS } from './mailSettingsLib'
 
-const KIND_OPTIONS = (Object.keys(PROVIDER_LABELS) as MailProviderKind[]).map((kind) => ({ value: kind, label: PROVIDER_LABELS[kind] }))
+const RECOMMENDED: MailProviderKind = 'postshiba'
+const KIND_OPTIONS = (Object.keys(PROVIDER_LABELS) as MailProviderKind[]).map((kind) => ({
+  value: kind,
+  label: kind === RECOMMENDED ? `${PROVIDER_LABELS[kind]} (recommended)` : PROVIDER_LABELS[kind],
+}))
 
 const MAILGUN_REGIONS = [
   { value: 'us', label: 'US' },
@@ -19,6 +23,10 @@ const MAILGUN_REGIONS = [
 
 /** The secrets each kind needs from its provider; Orbit makes Cloudflare's and Postmark's. */
 const SECRET_FIELDS: Record<MailProviderKind, { name: keyof MailProviderSecretsBody; label: string; hint?: string }[]> = {
+  postshiba: [
+    { name: 'api_key', label: 'API key', hint: 'A key of a team admin: Orbit reads the raw message with it.' },
+    { name: 'webhook_secret', label: 'Inbox signing secret', hint: 'In the inbox’s Webhook dialog.' },
+  ],
   cloudflare: [],
   postmark: [],
   mailgun: [{ name: 'signing_key', label: 'HTTP webhook signing key' }],
@@ -50,7 +58,7 @@ export function ProviderForm({
   const ids = useId()
   const create = useCreateProvider(scope)
   const update = useUpdateProvider(scope)
-  const [kind, setKind] = useState<MailProviderKind>(provider?.kind ?? 'cloudflare')
+  const [kind, setKind] = useState<MailProviderKind>(provider?.kind ?? RECOMMENDED)
   const [name, setName] = useState(provider?.name ?? '')
   const [secrets, setSecrets] = useState<MailProviderSecretsBody>({})
   const [settings, setSettings] = useState<MailProviderSettings>(provider?.settings ?? { mx_hosts: [] })

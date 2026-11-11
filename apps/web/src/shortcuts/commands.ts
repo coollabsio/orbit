@@ -2,6 +2,9 @@ import { chatEnabled } from '@/lib/chatEnabled'
 
 /** Where a command can run. A page mounts the handlers of its contexts; `task-target` needs a target task. */
 export type Context = 'global' | 'task-list' | 'task-board' | 'timeline' | 'task-detail' | 'task-target' | 'new-task' | 'docs' | 'views' | 'chat' | 'mail'
+/** Mail's commands, hidden while Mail is off for the server. */
+export const isMailCommand = (id: string) => id === 'nav.mail' || id.startsWith('mail.')
+
 export type Group = 'General' | 'Navigation' | 'List' | 'Task' | 'Docs' | 'Chat' | 'Mail'
 
 export interface Command {

@@ -6,6 +6,7 @@
 pub mod cloudflare;
 pub mod mailgun;
 pub mod postmark;
+pub mod postshiba;
 pub mod resend;
 pub mod ses;
 

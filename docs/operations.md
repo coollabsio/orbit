@@ -400,7 +400,7 @@ Orbit is its own mail server for incoming mail. Mail for the verified domains of
 | `ORBIT_MAIL_DNS_RESOLVER` | system | A resolver address (`ip:port`) for the SPF, DKIM, DMARC and domain checks. |
 | `ORBIT_MAIL_CONTENT_ORIGIN` | public origin | An optional separate origin for mail HTML and its images. When set, only this host serves them; the public origin answers 404. Point it at the same server and keep the original `Host` header in the proxy. |
 
-The root user lets workspaces add mail domains in **Admin → Mail**. Workspace admins then add domains and mailboxes in **Settings → Mail**.
+Mail is off by default. The root user turns it on with the **Mail** switch in **Admin → Inbound mail**. Until then, no one sees the Mail app, its menu items, its shortcuts or **Settings → Mail**, and the workspace mail API answers `403 mail_disabled`. When the switch is on, workspace admins add domains and mailboxes in **Settings → Mail**. If you turn it off again, mail for the domains that were added before still arrives, and it shows again when you turn Mail on.
 
 ### Modes
 
@@ -420,11 +420,12 @@ The domain's MX points to a mail provider, and the provider sends each message t
 - In **Settings → Mail → Domains**, pick where each domain's mail arrives. The MX record on the page then shows the provider's hosts, and the domain check expects them. The verification TXT record stays required.
 - Add the domain at the provider yourself; Orbit shows the steps for each provider after you add it. Orbit makes the secrets of Cloudflare and Postmark and shows them once. **New secret** on the provider makes new ones: the old ones stop working at once, so set the new ones on the Worker or in Postmark right away.
 - Each request must carry the provider's signature or credentials. Orbit refuses requests older than 5 minutes and Mailgun tokens it has seen.
-- Orbit checks DKIM and DMARC itself and takes SPF from the provider (its `Received-SPF` header, or SES's verdict).
+- Orbit checks DKIM and DMARC itself and takes SPF from the provider (its `Received-SPF` header, or the verdict of PostShiba or SES).
 - Mail for an address that no mailbox has: Cloudflare bounces it to the sender. The other providers have already accepted it, so Orbit lists it under **Settings → Mail → Failed messages → Not delivered** for 30 days, without its body.
 
 | Provider | MX | At the provider | Notes |
 |---|---|---|---|
+| PostShiba (recommended) | `inbound.postshiba.com` | A sending domain, and an inbox on it: **Root domain** (or a subdomain, which you then add to Orbit), address `*`, webhook URL Orbit's URL, format **PostShiba JSON**. Enter the inbox's signing secret and an API key of a team admin. | Orbit reads the raw message with the API key while the webhook waits (PostShiba keeps it until the webhook succeeds). Receiving is free at PostShiba. |
 | Cloudflare Email Routing | `route1/2/3.mx.cloudflare.net` (Cloudflare adds them) | An Email Worker with Orbit's script; variables `ORBIT_WEBHOOK_URL` and the secret `ORBIT_SIGNING_SECRET`; the catch-all rule sends to the Worker. | Messages up to 25 MiB. The Worker runs while the sender is connected, so unknown addresses bounce and Orbit errors make the sender retry. |
 | Postmark | `inbound.postmarkapp.com` | Inbound webhook URL with Orbit's credentials in it, and **Include raw email content in JSON payload** on. | Postmark retries until Orbit stores the message. |
 | Mailgun | `mxa.mailgun.org`, `mxb.mailgun.org` (EU: `mxa/mxb.eu.mailgun.org`) | A receiving route that matches `.*@<domain>` and forwards to Orbit's URL (it ends in `/mime`); the HTTP webhook signing key. | |

@@ -454,6 +454,10 @@ export type AuthOptions = {
      */
     email_enabled: boolean;
     /**
+     * Mail is on (Admin → Inbound mail). Off: the mail app and its settings are hidden.
+     */
+    mail_enabled: boolean;
+    /**
      * People can add passkeys and sign in with them (the public origin is a domain name).
      */
     passkeys_enabled: boolean;
@@ -2755,9 +2759,10 @@ export type InstanceAdminBody = {
  */
 export type InstanceMailView = {
     /**
-     * Workspaces may add mail domains (`PUT /api/v1/admin/mail`).
+     * Mail is on for this installation (`PUT /api/v1/admin/mail`). Off: the mail app is hidden and
+     * the workspace mail API refuses with `mail_disabled`.
      */
-    domains_enabled: boolean;
+    mail_enabled: boolean;
 };
 
 export type InstanceSettingsView = {
@@ -3278,10 +3283,6 @@ export type MailAddressKind = 'primary' | 'alias';
  */
 export type MailAdmin = {
     /**
-     * Workspaces may add mail domains.
-     */
-    domains_enabled: boolean;
-    /**
      * `ORBIT_MAIL_ENABLED` on this server.
      */
     enabled: boolean;
@@ -3290,6 +3291,10 @@ export type MailAdmin = {
      */
     hostname?: string | null;
     listener: MailListenerView;
+    /**
+     * Mail is on for this installation (the app, its settings and the workspace mail API).
+     */
+    mail_enabled: boolean;
     mode: MailAdminMode;
     /**
      * Looked up on each request.
@@ -3684,7 +3689,7 @@ export type MailPerson = {
     name?: string | null;
 };
 
-export type MailProviderKind = 'cloudflare' | 'postmark' | 'mailgun' | 'resend' | 'ses';
+export type MailProviderKind = 'postshiba' | 'cloudflare' | 'postmark' | 'mailgun' | 'resend' | 'ses';
 
 export type MailProviderList = {
     providers: Array<MailProviderView>;
@@ -3697,7 +3702,7 @@ export type MailProviderList = {
 export type MailProviderScope = 'instance' | 'workspace';
 
 /**
- * The secrets a provider gives (Mailgun, Resend, SES); Orbit makes Cloudflare's and Postmark's.
+ * The secrets a provider gives (PostShiba, Mailgun, Resend, SES); Orbit makes Cloudflare's and Postmark's.
  */
 export type MailProviderSecretsBody = {
     /**
@@ -3705,7 +3710,8 @@ export type MailProviderSecretsBody = {
      */
     access_key_id?: string | null;
     /**
-     * Resend: an API key that can read received emails.
+     * PostShiba: an API key of a team admin (it reads the raw message). Resend: an API key that
+     * can read received emails.
      */
     api_key?: string | null;
     secret_access_key?: string | null;
@@ -3714,7 +3720,8 @@ export type MailProviderSecretsBody = {
      */
     signing_key?: string | null;
     /**
-     * Resend: the webhook's signing secret (`whsec_…`).
+     * PostShiba: the inbox's webhook signing secret. Resend: the webhook's signing secret
+     * (`whsec_…`).
      */
     webhook_secret?: string | null;
 };
@@ -6875,7 +6882,7 @@ export type SetMailAdminBody = {
     /**
      * Absent: unchanged.
      */
-    domains_enabled?: boolean | null;
+    mail_enabled?: boolean | null;
     /**
      * Absent: unchanged. Off stops new workspace providers; existing ones keep receiving.
      */
@@ -15449,7 +15456,7 @@ export type PostInboundData = {
     };
     path: {
         /**
-         * cloudflare, postmark, mailgun, resend or ses
+         * postshiba, cloudflare, postmark, mailgun, resend or ses
          */
         kind: string;
         provider_id: string;
@@ -24735,6 +24742,10 @@ export type DownloadMailAttachmentErrors = {
      */
     401: TaskProblem;
     /**
+     * mail_disabled
+     */
+    403: TaskProblem;
+    /**
      * attachment_not_found
      */
     404: TaskProblem;
@@ -24788,6 +24799,10 @@ export type GetMailCountsErrors = {
      * authentication_required
      */
     401: TaskProblem;
+    /**
+     * mail_disabled
+     */
+    403: TaskProblem;
     /**
      * mail_not_found
      */
@@ -24843,7 +24858,7 @@ export type ListMailDomainsErrors = {
      */
     401: TaskProblem;
     /**
-     * mail_forbidden
+     * mail_forbidden, mail_disabled
      */
     403: TaskProblem;
     /**
@@ -24901,7 +24916,7 @@ export type CreateMailDomainErrors = {
      */
     401: TaskProblem;
     /**
-     * origin_forbidden, mail_forbidden, mail_domains_disabled
+     * origin_forbidden, mail_forbidden, mail_disabled
      */
     403: TaskProblem;
     /**
@@ -24964,7 +24979,7 @@ export type DeleteMailDomainErrors = {
      */
     401: TaskProblem;
     /**
-     * origin_forbidden, mail_forbidden
+     * origin_forbidden, mail_forbidden, mail_disabled
      */
     403: TaskProblem;
     /**
@@ -25023,7 +25038,7 @@ export type GetMailDomainErrors = {
      */
     401: TaskProblem;
     /**
-     * mail_forbidden
+     * mail_forbidden, mail_disabled
      */
     403: TaskProblem;
     /**
@@ -25082,7 +25097,7 @@ export type SetMailDomainCatchAllErrors = {
      */
     401: TaskProblem;
     /**
-     * origin_forbidden, mail_forbidden
+     * origin_forbidden, mail_forbidden, mail_disabled
      */
     403: TaskProblem;
     /**
@@ -25145,7 +25160,7 @@ export type CheckMailDomainErrors = {
      */
     401: TaskProblem;
     /**
-     * origin_forbidden, mail_forbidden
+     * origin_forbidden, mail_forbidden, mail_disabled
      */
     403: TaskProblem;
     /**
@@ -25202,7 +25217,7 @@ export type SetMailDomainEnabledErrors = {
      */
     401: TaskProblem;
     /**
-     * origin_forbidden, mail_forbidden
+     * origin_forbidden, mail_forbidden, mail_disabled
      */
     403: TaskProblem;
     /**
@@ -25261,7 +25276,7 @@ export type SetMailDomainRouteErrors = {
      */
     401: TaskProblem;
     /**
-     * origin_forbidden, mail_forbidden
+     * origin_forbidden, mail_forbidden, mail_disabled
      */
     403: TaskProblem;
     /**
@@ -25323,6 +25338,10 @@ export type ListMailLabelsErrors = {
      */
     401: TaskProblem;
     /**
+     * mail_disabled
+     */
+    403: TaskProblem;
+    /**
      * mail_not_found
      */
     404: TaskProblem;
@@ -25377,7 +25396,7 @@ export type CreateMailLabelErrors = {
      */
     401: TaskProblem;
     /**
-     * origin_forbidden, mail_forbidden
+     * origin_forbidden, mail_forbidden, mail_disabled
      */
     403: TaskProblem;
     /**
@@ -25440,7 +25459,7 @@ export type DeleteMailLabelErrors = {
      */
     401: TaskProblem;
     /**
-     * origin_forbidden, mail_forbidden
+     * origin_forbidden, mail_forbidden, mail_disabled
      */
     403: TaskProblem;
     /**
@@ -25499,7 +25518,7 @@ export type UpdateMailLabelErrors = {
      */
     401: TaskProblem;
     /**
-     * origin_forbidden, mail_forbidden
+     * origin_forbidden, mail_forbidden, mail_disabled
      */
     403: TaskProblem;
     /**
@@ -25561,6 +25580,10 @@ export type ListMailboxesErrors = {
      */
     401: TaskProblem;
     /**
+     * mail_disabled
+     */
+    403: TaskProblem;
+    /**
      * mail_not_found
      */
     404: TaskProblem;
@@ -25615,7 +25638,7 @@ export type CreateMailboxErrors = {
      */
     401: TaskProblem;
     /**
-     * origin_forbidden, mail_forbidden
+     * origin_forbidden, mail_forbidden, mail_disabled
      */
     403: TaskProblem;
     /**
@@ -25677,7 +25700,7 @@ export type CreatePersonalMailboxesErrors = {
      */
     401: TaskProblem;
     /**
-     * origin_forbidden, mail_forbidden
+     * origin_forbidden, mail_forbidden, mail_disabled
      */
     403: TaskProblem;
     /**
@@ -25739,7 +25762,7 @@ export type PreviewPersonalMailboxesErrors = {
      */
     401: TaskProblem;
     /**
-     * origin_forbidden, mail_forbidden
+     * origin_forbidden, mail_forbidden, mail_disabled
      */
     403: TaskProblem;
     /**
@@ -25802,7 +25825,7 @@ export type DeleteMailboxErrors = {
      */
     401: TaskProblem;
     /**
-     * origin_forbidden, mail_forbidden
+     * origin_forbidden, mail_forbidden, mail_disabled
      */
     403: TaskProblem;
     /**
@@ -25861,6 +25884,10 @@ export type GetMailboxErrors = {
      */
     401: TaskProblem;
     /**
+     * mail_disabled
+     */
+    403: TaskProblem;
+    /**
      * mail_not_found
      */
     404: TaskProblem;
@@ -25916,7 +25943,7 @@ export type UpdateMailboxErrors = {
      */
     401: TaskProblem;
     /**
-     * origin_forbidden, mail_forbidden
+     * origin_forbidden, mail_forbidden, mail_disabled
      */
     403: TaskProblem;
     /**
@@ -25979,7 +26006,7 @@ export type AddMailboxAliasErrors = {
      */
     401: TaskProblem;
     /**
-     * origin_forbidden, mail_forbidden
+     * origin_forbidden, mail_forbidden, mail_disabled
      */
     403: TaskProblem;
     /**
@@ -26043,7 +26070,7 @@ export type RemoveMailboxAddressErrors = {
      */
     401: TaskProblem;
     /**
-     * origin_forbidden, mail_forbidden
+     * origin_forbidden, mail_forbidden, mail_disabled
      */
     403: TaskProblem;
     /**
@@ -26102,7 +26129,7 @@ export type AddMailboxMemberErrors = {
      */
     401: TaskProblem;
     /**
-     * origin_forbidden, mail_forbidden
+     * origin_forbidden, mail_forbidden, mail_disabled
      */
     403: TaskProblem;
     /**
@@ -26166,7 +26193,7 @@ export type RemoveMailboxMemberErrors = {
      */
     401: TaskProblem;
     /**
-     * origin_forbidden, mail_forbidden
+     * origin_forbidden, mail_forbidden, mail_disabled
      */
     403: TaskProblem;
     /**
@@ -26225,7 +26252,7 @@ export type SetMailboxStatusErrors = {
      */
     401: TaskProblem;
     /**
-     * origin_forbidden, mail_forbidden
+     * origin_forbidden, mail_forbidden, mail_disabled
      */
     403: TaskProblem;
     /**
@@ -26287,6 +26314,10 @@ export type GetMailMeErrors = {
      */
     401: TaskProblem;
     /**
+     * mail_disabled
+     */
+    403: TaskProblem;
+    /**
      * mail_not_found
      */
     404: TaskProblem;
@@ -26341,6 +26372,10 @@ export type DownloadMailMessageErrors = {
      * authentication_required
      */
     401: TaskProblem;
+    /**
+     * mail_disabled
+     */
+    403: TaskProblem;
     /**
      * mail_not_found
      */
@@ -26397,7 +26432,7 @@ export type CreateMailViewUrlErrors = {
      */
     401: TaskProblem;
     /**
-     * origin_forbidden
+     * origin_forbidden, mail_disabled
      */
     403: TaskProblem;
     /**
@@ -26459,7 +26494,7 @@ export type ListWorkspaceMailProvidersErrors = {
      */
     401: TaskProblem;
     /**
-     * mail_forbidden
+     * mail_forbidden, mail_disabled
      */
     403: TaskProblem;
     /**
@@ -26517,7 +26552,7 @@ export type CreateWorkspaceMailProviderErrors = {
      */
     401: TaskProblem;
     /**
-     * origin_forbidden, mail_forbidden, workspace_providers_disabled
+     * origin_forbidden, mail_forbidden, workspace_providers_disabled, mail_disabled
      */
     403: TaskProblem;
     /**
@@ -26580,7 +26615,7 @@ export type DeleteWorkspaceMailProviderErrors = {
      */
     401: TaskProblem;
     /**
-     * origin_forbidden, mail_forbidden
+     * origin_forbidden, mail_forbidden, mail_disabled
      */
     403: TaskProblem;
     /**
@@ -26639,7 +26674,7 @@ export type UpdateWorkspaceMailProviderErrors = {
      */
     401: TaskProblem;
     /**
-     * origin_forbidden, mail_forbidden
+     * origin_forbidden, mail_forbidden, mail_disabled
      */
     403: TaskProblem;
     /**
@@ -26701,6 +26736,10 @@ export type ListFailedMailReceiptsErrors = {
      */
     401: TaskProblem;
     /**
+     * mail_disabled
+     */
+    403: TaskProblem;
+    /**
      * contract_mismatch
      */
     409: TaskProblem;
@@ -26752,7 +26791,7 @@ export type RetryMailReceiptErrors = {
      */
     401: TaskProblem;
     /**
-     * origin_forbidden
+     * origin_forbidden, mail_disabled
      */
     403: TaskProblem;
     /**
@@ -26821,7 +26860,7 @@ export type SearchMailErrors = {
      */
     401: TaskProblem;
     /**
-     * origin_forbidden
+     * origin_forbidden, mail_disabled
      */
     403: TaskProblem;
     /**
@@ -26883,7 +26922,7 @@ export type SetMailSenderPrefErrors = {
      */
     401: TaskProblem;
     /**
-     * origin_forbidden
+     * origin_forbidden, mail_disabled
      */
     403: TaskProblem;
     /**
@@ -26968,6 +27007,10 @@ export type ListMailThreadsErrors = {
      */
     401: TaskProblem;
     /**
+     * mail_disabled
+     */
+    403: TaskProblem;
+    /**
      * mail_not_found
      */
     404: TaskProblem;
@@ -27026,7 +27069,7 @@ export type UpdateMailThreadsErrors = {
      */
     401: TaskProblem;
     /**
-     * origin_forbidden
+     * origin_forbidden, mail_disabled
      */
     403: TaskProblem;
     /**
@@ -27089,6 +27132,10 @@ export type GetMailThreadErrors = {
      */
     401: TaskProblem;
     /**
+     * mail_disabled
+     */
+    403: TaskProblem;
+    /**
      * mail_not_found
      */
     404: TaskProblem;
@@ -27144,7 +27191,7 @@ export type UpdateMailThreadErrors = {
      */
     401: TaskProblem;
     /**
-     * origin_forbidden
+     * origin_forbidden, mail_disabled
      */
     403: TaskProblem;
     /**

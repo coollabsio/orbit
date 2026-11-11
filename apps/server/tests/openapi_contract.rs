@@ -595,7 +595,7 @@ fn mail_domain_routes_are_documented() {
         }
     }
     let create = operation(&document, domains, "post");
-    assert!(codes(create, "403").contains(&"mail_domains_disabled".to_owned()));
+    assert!(codes(create, "403").contains(&"mail_disabled".to_owned()));
     assert_eq!(
         codes(create, "409"),
         ["contract_mismatch", "domain_claimed", "domain_exists"]

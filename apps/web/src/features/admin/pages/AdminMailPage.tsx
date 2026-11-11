@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { toast } from 'sonner'
 import { CloseCircle, InfoCircle, TickCircle, Warning } from 'reicon-react'
 import type { MailAdmin, PtrStatus } from '@orbit/api/generated/types.gen'
+import { InfoTip } from '@/components/common/InfoTip'
 import { SettingsCard } from '@/components/common/SettingsCard'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -26,7 +27,7 @@ interface HealthItem {
 const STATE_ICONS: Record<HealthState, typeof TickCircle> = { ok: TickCircle, warning: Warning, error: CloseCircle, info: InfoCircle }
 const STATE_WORDS: Record<HealthState, string> = { ok: 'OK', warning: 'Warning', error: 'Problem', info: 'Note' }
 
-/** The instance's mail: whether workspaces can add domains, the listener's health, and a test message. */
+/** The instance's mail: the Mail switch, the listener's health, and a test message. */
 export function AdminMailPage() {
   const admin = useAdminMail()
   const providers = useMailProviders('instance')
@@ -51,25 +52,25 @@ function DomainsCard({ admin }: { admin: MailAdmin }) {
     <SettingsCard title="Mail" description="Orbit receives mail for the verified domains of each workspace, through its own SMTP listener or through a mail provider." flush>
       <div className="flex flex-col divide-y">
         <SettingsRow className="flex-nowrap">
-          <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-[0.8125rem]">
-            <span className="font-medium text-foreground">Workspaces can add mail domains</span>
-            <span className="text-xs text-muted-foreground">Off: owners and admins cannot add a new domain. Domains added before keep working.</span>
-          </div>
+          <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[0.8125rem] font-medium text-foreground">
+            Mail (Beta)
+            <InfoTip text="On: every workspace gets the Mail app and its settings. Off: Mail is hidden for everyone and the workspace mail API refuses. Mail for domains added before still arrives and shows again when you turn it on." />
+          </span>
           <Switch
-            aria-label="Workspaces can add mail domains"
-            checked={admin.domains_enabled}
+            aria-label="Mail"
+            checked={admin.mail_enabled}
             disabled={save.isPending}
-            onCheckedChange={(checked: boolean) => save.mutate({ domains_enabled: checked }, {
-              onSuccess: () => toast(checked ? 'Workspaces can add mail domains' : 'Workspaces cannot add mail domains'),
+            onCheckedChange={(checked: boolean) => save.mutate({ mail_enabled: checked }, {
+              onSuccess: () => toast(checked ? 'Mail is on' : 'Mail is off'),
               onError: (error) => toast.error(mailProblem(error, 'The setting could not be saved.')),
             })}
           />
         </SettingsRow>
         <SettingsRow className="flex-nowrap">
-          <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-[0.8125rem]">
-            <span className="font-medium text-foreground">Workspaces can add their own providers</span>
-            <span className="text-xs text-muted-foreground">Owners and admins connect their own Cloudflare, Postmark, Mailgun, Resend or SES account. Off: no new ones; existing ones keep receiving.</span>
-          </div>
+          <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[0.8125rem] font-medium text-foreground">
+            Workspaces can add their own providers
+            <InfoTip text="Owners and admins connect their own PostShiba, Cloudflare, Postmark, Mailgun, Resend or SES account. Off: no new ones; existing ones keep receiving." />
+          </span>
           <Switch
             aria-label="Workspaces can add their own providers"
             checked={admin.workspace_providers_enabled}

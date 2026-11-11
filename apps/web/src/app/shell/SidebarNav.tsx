@@ -451,6 +451,7 @@ export function SidebarNav({
   collapsed = false,
   chatBadge,
   mailBadge,
+  mailEnabled = false,
   chatUnread,
   chatEnabled: chat = chatEnabled,
   isRoot = false,
@@ -463,6 +464,8 @@ export function SidebarNav({
   chatBadge?: number
   /** Unread Inbox threads on the Mail item. */
   mailBadge?: number
+  /** Mail is on for the server; off, Mail shows as Coming soon. */
+  mailEnabled?: boolean
   /** Chat has an unread message, with or without a count. */
   chatUnread?: boolean
   /** Chat is a link instead of "Coming soon". Defaults to the build's setting. */
@@ -571,7 +574,7 @@ export function SidebarNav({
                 </>
               ) : (
                 <>
-                  {WORKSPACE_LINKS.map((link) => link.enabled || (link.to === '/chat' && chat) ? (
+                  {WORKSPACE_LINKS.map((link) => (link.to === '/mail' ? mailEnabled : link.enabled || (link.to === '/chat' && chat)) ? (
                     <SidebarNavItem
                       key={link.to}
                       to={link.to === '/tasks' ? tasksPath : link.to}

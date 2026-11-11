@@ -43,7 +43,7 @@ function PageCommands({ target, children }: { target: boolean; children: ReactNo
   return ready ? children : null
 }
 
-function setup(onClose = () => {}, target = false, path = '/tasks') {
+function setup(onClose = () => {}, target = false, path = '/tasks', mail = true) {
   pageSearches = []
   taskSearches = []
   window.localStorage.clear()
@@ -51,6 +51,7 @@ function setup(onClose = () => {}, target = false, path = '/tasks') {
   client.setQueryData(chatKeys.conversations('workspace-1'), [
     { id: 'c-general', kind: 'public', name: 'general', topic: 'Company news', memberIds: [], isMember: true, archived: false },
   ])
+  client.setQueryData(queryKeys.authOptions, { mail_enabled: mail })
   client.setQueryData(queryKeys.workspaces, [
     { id: 'workspace-1', name: 'Alpha', role: 'owner', permissions: [], version: 1 },
   ])
@@ -153,6 +154,13 @@ test('empty search shows enabled navigation and Escape closes the palette', asyn
   expect(view.getByRole('option', { name: /Go to Mail/ })).toBeTruthy()
   fireEvent.keyDown(input, { key: 'Escape' })
   expect(closed).toBe(1)
+})
+
+test('the palette offers no Go to Mail while Mail is off for the server', async () => {
+  const view = setup(() => {}, false, '/tasks', false)
+  await view.findByPlaceholderText(PLACEHOLDER)
+  expect(view.getByRole('option', { name: /Go to Tasks/ })).toBeTruthy()
+  expect(view.queryByRole('option', { name: /Go to Mail/ })).toBeNull()
 })
 
 test('unknown search terms show an empty state', async () => {

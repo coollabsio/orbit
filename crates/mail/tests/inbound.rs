@@ -562,3 +562,93 @@ fn only_sns_certificate_urls_are_fetched() {
         assert!(!ses::cert_url_ok(url), "{url}");
     }
 }
+
+// ---------------------------------------------------------------- PostShiba
+
+const POSTSHIBA_SECRET: &str = "inbox-secret";
+
+fn postshiba(
+    body: &str,
+    timestamp: i64,
+    secret: &str,
+    now: i64,
+) -> Result<orbit_mail::inbound::postshiba::PostshibaEvent, InboundError> {
+    let signature = hmac_hex(secret.as_bytes(), format!("{timestamp}.{body}").as_bytes());
+    orbit_mail::inbound::postshiba::verify_webhook(
+        Some(&timestamp.to_string()),
+        Some(&format!("sha256={signature}")),
+        body.as_bytes(),
+        POSTSHIBA_SECRET,
+        now,
+    )
+}
+
+const POSTSHIBA_BODY: &str = r#"{"id":"GxTyVu","inbox_id":"PqRzMn","to":"box@example.com","envelope":{"mail_from":"Ann <ann@sender.example>","rcpt_to":"box+tag@example.com","plus_tag":"tag"},"authentication":{"spf":{"result":"softfail","domain":"sender.example"},"dkim":[]}}"#;
+
+#[test]
+fn postshiba_event_is_read_after_its_signature() {
+    let event = postshiba(POSTSHIBA_BODY, 1_000, POSTSHIBA_SECRET, 1_010).unwrap();
+    assert_eq!(event.message_id, "GxTyVu");
+    assert_eq!(event.inbox_id, "PqRzMn");
+    // the envelope recipient, with its tag (not the `to` field)
+    assert_eq!(event.recipients, ["box+tag@example.com"]);
+    assert_eq!(event.mail_from.as_deref(), Some("ann@sender.example"));
+    assert_eq!(
+        event.spf,
+        Some(ProviderSpf {
+            verdict: Verdict::SoftFail,
+            domain: "sender.example".to_owned()
+        })
+    );
+}
+
+#[test]
+fn postshiba_refuses_a_wrong_secret_a_changed_body_and_an_old_request() {
+    assert_eq!(
+        postshiba(POSTSHIBA_BODY, 1_000, "other", 1_000),
+        Err(InboundError::Unauthorized)
+    );
+    let signature = hmac_hex(
+        POSTSHIBA_SECRET.as_bytes(),
+        format!("1000.{POSTSHIBA_BODY}").as_bytes(),
+    );
+    let changed = POSTSHIBA_BODY.replace("box+tag@", "evil@");
+    assert_eq!(
+        orbit_mail::inbound::postshiba::verify_webhook(
+            Some("1000"),
+            Some(&signature),
+            changed.as_bytes(),
+            POSTSHIBA_SECRET,
+            1_000
+        ),
+        Err(InboundError::Unauthorized)
+    );
+    assert_eq!(
+        orbit_mail::inbound::postshiba::verify_webhook(
+            Some("1000"),
+            None,
+            POSTSHIBA_BODY.as_bytes(),
+            POSTSHIBA_SECRET,
+            1_000
+        ),
+        Err(InboundError::Unauthorized)
+    );
+    assert_eq!(
+        postshiba(POSTSHIBA_BODY, 1_000, POSTSHIBA_SECRET, 1_000 + 6 * 60),
+        Err(InboundError::Replay)
+    );
+}
+
+#[test]
+fn postshiba_refuses_ids_that_could_leave_the_api_path_and_a_missing_envelope() {
+    let traversal = POSTSHIBA_BODY.replace(r#""id":"GxTyVu""#, r#""id":"../../teams""#);
+    assert_eq!(
+        postshiba(&traversal, 1_000, POSTSHIBA_SECRET, 1_000),
+        Err(InboundError::Malformed("id"))
+    );
+    let no_envelope = r#"{"id":"GxTyVu","inbox_id":"PqRzMn","to":"box@example.com"}"#;
+    assert_eq!(
+        postshiba(no_envelope, 1_000, POSTSHIBA_SECRET, 1_000),
+        Err(InboundError::Malformed("no_envelope"))
+    );
+}

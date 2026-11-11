@@ -1256,6 +1256,9 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
         id if mail_content_operation(id) => mail_content_errors(id, &mut responses),
         _ => {}
     }
+    if workspace_mail_operation(operation_id) {
+        add_code(&mut responses, "403", "mail_disabled");
+    }
     // Orbit Cloud: these creates and restores are refused at the trial's limits.
     if matches!(
         operation_id,
@@ -2187,7 +2190,6 @@ fn mail_domain_errors(
     add_code(responses, "404", "mail_not_found");
     match operation_id {
         "create_mail_domain" => {
-            add_code(responses, "403", "mail_domains_disabled");
             add_code(responses, "409", "domain_claimed");
             add_code(responses, "409", "domain_exists");
             add_code(responses, "422", "validation_failed");
@@ -2254,6 +2256,24 @@ fn mailbox_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec
         }
         _ => {}
     }
+}
+
+/// The workspace mail routes, refused with `mail_disabled` while Mail is off for the instance (not
+/// the root user's routes, nor the content-token routes of the message frame).
+fn workspace_mail_operation(operation_id: &str) -> bool {
+    let instance_route = operation_id == "move_mail_domain" || operation_id.contains("instance");
+    let token_route = matches!(
+        operation_id,
+        "get_mail_content" | "get_mail_part" | "get_mail_image"
+    );
+    let mail_route = operation_id.contains("mail_domain")
+        || operation_id.contains("mail_provider")
+        || operation_id.contains("mailbox")
+        || operation_id.contains("mail_label")
+        || operation_id.contains("mail_receipt")
+        || mail_thread_operation(operation_id)
+        || mail_content_operation(operation_id);
+    mail_route && !instance_route && !token_route
 }
 
 fn mail_thread_operation(operation_id: &str) -> bool {

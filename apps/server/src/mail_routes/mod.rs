@@ -27,6 +27,7 @@ use crate::mail_dns::{DnsLookup, HickoryDns};
 use crate::mail_image_proxy::ImageProxy;
 use crate::mail_listener::MailListenerStatus;
 use crate::repositories::identity::IdentityRepository;
+use crate::repositories::instance_settings::InstanceSettingsRepository;
 use crate::repositories::mail::{MailError, MailRepository};
 use crate::task_routes::{ApiError, authenticate_session, request_id_value, validation};
 
@@ -363,6 +364,17 @@ impl<'a> Call<'a> {
         let workspace_id = workspace
             .parse()
             .map_err(|_| problem(MailError::NotFound, &instance, request_id))?;
+        let enabled = InstanceSettingsRepository::new(state.identity.database().clone())
+            .mail_enabled()
+            .await
+            .map_err(|error| problem(MailError::Unavailable(error), &instance, request_id))?;
+        if !enabled {
+            return Err(problem(
+                MailError::Forbidden("mail_disabled"),
+                &instance,
+                request_id,
+            ));
+        }
         Ok(Self {
             workspace_id,
             actor_id: session.user.id,
@@ -397,9 +409,7 @@ impl<'a> Call<'a> {
 fn detail(code: &'static str) -> &'static str {
     match code {
         "mail_forbidden" => "Only workspace owners and admins can manage mail.",
-        "mail_domains_disabled" => {
-            "This Orbit server does not let workspaces add mail domains. An instance admin can turn it on."
-        }
+        "mail_disabled" => "Mail is off on this Orbit server. An instance admin can turn it on.",
         "domain_claimed" => {
             "This domain, a parent domain or a subdomain of it belongs to another workspace."
         }

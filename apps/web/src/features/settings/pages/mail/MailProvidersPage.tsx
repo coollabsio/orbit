@@ -49,7 +49,7 @@ export function MailProviders({ scope }: { scope: ProviderScope }) {
         description={
           scope === 'instance'
             ? 'Providers that every workspace can route its domains to. Use one when this server cannot receive on port 25.'
-            : 'Receive a domain through your own account at Cloudflare, Postmark, Mailgun, Resend or Amazon SES, when this server cannot receive on port 25.'
+            : 'Receive a domain through your own account at PostShiba, Cloudflare, Postmark, Mailgun, Resend or Amazon SES, when this server cannot receive on port 25.'
         }
         actions={canAdd ? <Button type="button" onClick={() => setAdding(true)}><Add />Add provider</Button> : undefined}
         flush

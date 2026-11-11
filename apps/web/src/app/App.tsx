@@ -52,6 +52,7 @@ import { MailLabelsPage } from '@/features/settings/pages/mail/MailLabelsPage'
 import { FailedMailPage } from '@/features/settings/pages/mail/FailedMailPage'
 import { MailPage } from '@/features/mail/pages/MailPage'
 import { WebhooksPage } from '@/features/settings/pages/WebhooksPage'
+import { MailGate } from '@/features/mail/MailGate'
 import { FileStoragePage } from '@/features/settings/pages/FileStoragePage'
 import { ProfilePage } from '@/features/profile/pages/ProfilePage'
 import { AppearancePage } from '@/features/profile/pages/AppearancePage'
@@ -130,7 +131,7 @@ export default function App() {
                 <Route path="docs/import/:importId?" element={<DocsPage view="import" />} />
                 <Route path="docs/:pageId/form/:viewId" element={<DocsPage view="form" />} />
                 <Route path="docs/:pageId?" element={<DocsPage />} />
-                <Route path="mail/*" element={<MailPage />} />
+                <Route path="mail/*" element={<MailGate fallback="/"><MailPage /></MailGate>} />
                 {chatEnabled ? (
                   <>
                     <Route path="chat" element={<ChatPage />} />
@@ -190,12 +191,14 @@ export default function App() {
                   <Route path="shortcuts" element={<MovedTo path="/profile/shortcuts" />} />
                   <Route path="notifications" element={<MovedTo path="/profile/notifications" />} />
                   <Route path="api-tokens" element={<ApiTokensPage />} />
-                  <Route path="mail" element={<Navigate to="/settings/mail/domains" replace />} />
-                  <Route path="mail/domains" element={<MailDomainsPage />} />
-                  <Route path="mail/providers" element={<MailProvidersPage />} />
-                  <Route path="mail/mailboxes" element={<MailMailboxesPage />} />
-                  <Route path="mail/labels" element={<MailLabelsPage />} />
-                  <Route path="mail/failed" element={<FailedMailPage />} />
+                  <Route element={<MailGate fallback="/settings" />}>
+                    <Route path="mail" element={<Navigate to="/settings/mail/domains" replace />} />
+                    <Route path="mail/domains" element={<MailDomainsPage />} />
+                    <Route path="mail/providers" element={<MailProvidersPage />} />
+                    <Route path="mail/mailboxes" element={<MailMailboxesPage />} />
+                    <Route path="mail/labels" element={<MailLabelsPage />} />
+                    <Route path="mail/failed" element={<FailedMailPage />} />
+                  </Route>
                   <Route path="webhooks" element={<WebhooksPage />} />
                   <Route path="file-storage" element={<FileStoragePage />} />
                 </Route>

@@ -421,6 +421,8 @@ export function useSetAdminMail() {
     onSuccess: (admin) => {
       queryClient.setQueryData(queryKeys.adminMail, admin)
       void queryClient.invalidateQueries({ queryKey: queryKeys.adminSettings })
+      // the Mail switch shows or hides the mail app for this user at once
+      void queryClient.invalidateQueries({ queryKey: queryKeys.authOptions })
     },
   })
 }

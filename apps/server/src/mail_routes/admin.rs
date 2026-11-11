@@ -111,8 +111,8 @@ pub(crate) struct MailTestDomain {
 /// The Admin mail page.
 #[derive(Serialize, ToSchema)]
 pub(crate) struct MailAdmin {
-    /// Workspaces may add mail domains.
-    domains_enabled: bool,
+    /// Mail is on for this installation (the app, its settings and the workspace mail API).
+    mail_enabled: bool,
     /// Workspace admins may set up their own mail providers.
     workspace_providers_enabled: bool,
     /// `ORBIT_MAIL_ENABLED` on this server.
@@ -132,7 +132,7 @@ pub(crate) struct MailAdmin {
 pub(crate) struct SetMailAdminBody {
     /// Absent: unchanged.
     #[serde(default)]
-    domains_enabled: Option<bool>,
+    mail_enabled: Option<bool>,
     /// Absent: unchanged. Off stops new workspace providers; existing ones keep receiving.
     #[serde(default)]
     workspace_providers_enabled: Option<bool>,
@@ -145,8 +145,8 @@ async fn admin_view(
 ) -> Result<Json<MailAdmin>, ApiError> {
     let fail = |error: MailError| problem(error, instance, request_id);
     let settings = InstanceSettingsRepository::new(state.identity.database().clone());
-    let domains_enabled = settings
-        .mail_domains_enabled()
+    let mail_enabled = settings
+        .mail_enabled()
         .await
         .map_err(|error| fail(MailError::Unavailable(error)))?;
     let workspace_providers_enabled = settings
@@ -165,7 +165,7 @@ async fn admin_view(
     });
     let ptr = check_ptr(state.dns.as_ref(), hostname.as_deref()).await;
     Ok(Json(MailAdmin {
-        domains_enabled,
+        mail_enabled,
         workspace_providers_enabled,
         enabled: state.settings.enabled,
         mode: match state.settings.mode {
@@ -205,7 +205,8 @@ pub(crate) async fn get_mail_admin(
     admin_view(&state, &instance, request_id).await
 }
 
-/// Turns on or off whether workspaces may add mail domains (audit `instance.mail_updated`).
+/// Turns Mail on or off for the installation, and whether workspaces may add their own providers
+/// (audit `instance.mail_updated`).
 #[utoipa::path(put, path = "/api/v1/admin/mail", request_body = SetMailAdminBody, responses((status = 200, body = MailAdmin)))]
 pub(crate) async fn set_mail_admin(
     State(state): State<MailState>,
@@ -221,7 +222,7 @@ pub(crate) async fn set_mail_admin(
     settings
         .set_mail_switches(
             actor_id,
-            body.domains_enabled,
+            body.mail_enabled,
             body.workspace_providers_enabled,
             request_id_value(request_id),
             TimestampMillis::now(),

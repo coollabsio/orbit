@@ -24,6 +24,7 @@ import { queryKeys } from '@/api/queryKeys'
 import { useContext } from 'react'
 import { useWorkspace, WorkspaceContext } from '@/features/workspaces/workspaceContext'
 import { mailKeys, type ThreadFilter } from './keys'
+import { useMailEnabled } from '@/features/mail/enabled'
 
 /** Lists, threads and counts stay current through the `mail` live topic (`emitMailEvent`). */
 const LIVE_STALE_MS = 5 * 60_000
@@ -110,9 +111,10 @@ export function useThread(threadId: string | null | undefined) {
 }
 
 /** Unread threads of each folder of each mailbox the user reads. */
-export function useMailCounts() {
+export function useMailCounts(enabled = true) {
   const workspaceId = useWorkspaceId()
   return useQuery({
+    enabled,
     queryKey: mailKeys.counts(workspaceId),
     queryFn: async () => required((await getMailCounts({ client: apiClient, path: { workspace_id: workspaceId }, throwOnError: true })).data),
     staleTime: LIVE_STALE_MS,
@@ -121,7 +123,7 @@ export function useMailCounts() {
 
 /** Unread threads in the Inbox of every mailbox the user reads (the Mail badge, like a mail app's dock badge). */
 export function useMailInboxUnread(): number {
-  return useMailCounts().data?.mailboxes.reduce((total, mailbox) => total + mailbox.inbox, 0) ?? 0
+  return useMailCounts(useMailEnabled()).data?.mailboxes.reduce((total, mailbox) => total + mailbox.inbox, 0) ?? 0
 }
 
 /**

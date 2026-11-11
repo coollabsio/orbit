@@ -26,6 +26,7 @@ pub const REJECTED_RETENTION_MS: i64 = 30 * 24 * 60 * 60 * 1000;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderKind {
+    Postshiba,
     Cloudflare,
     Postmark,
     Mailgun,
@@ -37,6 +38,7 @@ impl ProviderKind {
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
+            Self::Postshiba => "postshiba",
             Self::Cloudflare => "cloudflare",
             Self::Postmark => "postmark",
             Self::Mailgun => "mailgun",
@@ -49,6 +51,7 @@ impl ProviderKind {
     #[must_use]
     pub fn default_mx_hosts(self, region: Option<&str>) -> Vec<String> {
         let hosts: Vec<String> = match self {
+            Self::Postshiba => vec!["inbound.postshiba.com".to_owned()],
             Self::Cloudflare => ["route1", "route2", "route3"]
                 .iter()
                 .map(|host| format!("{host}.mx.cloudflare.net"))
@@ -76,6 +79,7 @@ impl FromStr for ProviderKind {
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         Ok(match value {
+            "postshiba" => Self::Postshiba,
             "cloudflare" => Self::Cloudflare,
             "postmark" => Self::Postmark,
             "mailgun" => Self::Mailgun,
@@ -90,6 +94,10 @@ impl FromStr for ProviderKind {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ProviderSecrets {
+    Postshiba {
+        api_key: String,
+        webhook_secret: String,
+    },
     Cloudflare {
         signing_secret: String,
     },
@@ -114,6 +122,7 @@ impl ProviderSecrets {
     #[must_use]
     pub const fn kind(&self) -> ProviderKind {
         match self {
+            Self::Postshiba { .. } => ProviderKind::Postshiba,
             Self::Cloudflare { .. } => ProviderKind::Cloudflare,
             Self::Postmark { .. } => ProviderKind::Postmark,
             Self::Mailgun { .. } => ProviderKind::Mailgun,
@@ -135,7 +144,11 @@ impl ProviderSecrets {
                 ("basic_password", basic_password),
             ],
             Self::Mailgun { signing_key } => vec![("signing_key", signing_key)],
-            Self::Resend {
+            Self::Postshiba {
+                api_key,
+                webhook_secret,
+            }
+            | Self::Resend {
                 api_key,
                 webhook_secret,
             } => vec![("api_key", api_key), ("webhook_secret", webhook_secret)],
@@ -263,7 +276,7 @@ impl ProviderScope {
 pub struct NewProvider {
     pub kind: ProviderKind,
     pub name: String,
-    /// Required for Mailgun, Resend and SES; ignored for Cloudflare and Postmark (Orbit makes them).
+    /// Required for PostShiba, Mailgun, Resend and SES; ignored for Cloudflare and Postmark (Orbit makes them).
     pub secrets: Option<ProviderSecrets>,
     pub settings: ProviderSettings,
 }
