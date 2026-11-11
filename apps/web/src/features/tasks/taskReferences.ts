@@ -26,6 +26,8 @@ export interface TaskReference {
 
 /** Hits for one search: enough to pick from, few enough to scan. */
 export const TASK_REFERENCE_LIMIT = 8
+/** Hits a typed search ranks before it keeps the best `TASK_REFERENCE_LIMIT` (the server's page maximum). */
+const SEARCH_PAGE = 100
 /** Projects and statuses change rarely: a search reuses what the app already loaded. */
 const REUSE_MS = 60_000
 
@@ -69,28 +71,33 @@ export async function searchTaskReferences(queryClient: QueryClient, workspaceId
 
 async function loadReferences(queryClient: QueryClient, workspaceId: string, search: string): Promise<TaskReference[]> {
   const [page, projects, exact] = await Promise.all([
-    taskListPage(apiClient, workspaceId, { search: search || undefined, limit: TASK_REFERENCE_LIMIT, sort: 'updated_at', order: 'desc' }),
+    // The server lists the latest hits, and a word ("mail") also matches many descriptions: a wide page lets the
+    // ranking below put an older title hit before them.
+    taskListPage(apiClient, workspaceId, { search: search || undefined, limit: search ? SEARCH_PAGE : TASK_REFERENCE_LIMIT, sort: 'updated_at', order: 'desc' }),
     queryClient.fetchQuery({ ...projectsQuery(workspaceId), staleTime: REUSE_MS }),
     exactTask(workspaceId, search),
   ])
-  // The list holds the latest hits only, which may leave out the task the identifier names: that one always comes.
-  const items = exact && !page.items.some((task) => task.id === exact.id) ? [exact, ...page.items.slice(0, TASK_REFERENCE_LIMIT - 1)] : page.items
-  const projectIds = [...new Set(items.map((task) => task.project_id))]
+  // The list may leave out the task the identifier names: that one always comes.
+  const items = exact && !page.items.some((task) => task.id === exact.id) ? [exact, ...page.items] : page.items
+  const ranked = rankTaskReferences(
+    items.map((task) => {
+      const project = projects.find((candidate) => candidate.id === task.project_id)
+      return { task, project, identifier: taskIdentifier(task.id, project, task.number), title: task.title }
+    }),
+    search,
+  ).slice(0, TASK_REFERENCE_LIMIT)
+  const projectIds = [...new Set(ranked.map(({ task }) => task.project_id))]
   // A failed status load only costs the icon.
   const statusLists = await Promise.all(projectIds.map((id) => queryClient.fetchQuery({ ...statusesQuery(workspaceId, id), staleTime: REUSE_MS }).catch(() => [])))
   const statuses = statusLists.flat()
-  const references = items.map((task) => {
-    const project = projects.find((candidate) => candidate.id === task.project_id)
-    return {
-      id: task.id,
-      identifier: taskIdentifier(task.id, project, task.number),
-      title: task.title,
-      projectName: project?.name ?? '',
-      status: statuses.find((status) => status.id === task.status_id),
-      path: taskPath({ id: task.id, number: task.number, projectKey: project?.key }),
-    }
-  })
-  return rankTaskReferences(references, search)
+  return ranked.map(({ task, project, identifier, title }) => ({
+    id: task.id,
+    identifier,
+    title,
+    projectName: project?.name ?? '',
+    status: statuses.find((status) => status.id === task.status_id),
+    path: taskPath({ id: task.id, number: task.number, projectKey: project?.key }),
+  }))
 }
 
 /** The task a full identifier (`ENG-12`) names, or null (not an identifier, no such task, or not visible). */
