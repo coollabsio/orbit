@@ -139,6 +139,7 @@ pub struct OauthTokens {
 
 #[derive(Deserialize)]
 struct OauthReply {
+    error: Option<String>,
     access_token: Option<String>,
     expires_in: Option<i64>,
     refresh_token: Option<String>,
@@ -217,6 +218,16 @@ impl GithubClient {
             .map_err(|_| GithubError::Network)?;
         let response = check(response).await?;
         let reply: OauthReply = response.json().await.map_err(|_| GithubError::Network)?;
+        if let Some(error) = reply.error.as_deref() {
+            tracing::warn!(error, "GitHub refused an OAuth token request");
+            // The app's own client is wrong (secret rotated on GitHub): not the member's fault.
+            if error == "incorrect_client_credentials" {
+                return Err(GithubError::Forbidden(
+                    "GitHub rejected this workspace's GitHub App credentials. Ask an admin to re-create the GitHub App."
+                        .to_owned(),
+                ));
+            }
+        }
         let access_token = reply
             .access_token
             .filter(|token| !token.is_empty())
@@ -301,6 +312,10 @@ impl GithubClient {
             .api
             .join(path.trim_start_matches('/'))
             .map_err(|_| GithubError::NotFound)?;
+        // Paths carry names from users (owner, repo, file): never let one leave the API root.
+        if !url.as_str().starts_with(self.endpoints.api.as_str()) {
+            return Err(GithubError::NotFound);
+        }
         let mut request = self
             .http
             .request(method, url)

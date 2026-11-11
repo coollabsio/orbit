@@ -24,7 +24,8 @@ use crate::billing::WorkspaceAccess;
 use crate::billing::guard::READ_ONLY_DETAIL;
 use crate::github::{GithubClient, GithubEndpoints};
 use crate::github_user_routes::{
-    delete_github_connection, github_connection, github_connection_callback, start_github_connection,
+    delete_github_connection, finish_github_connection, github_connection, github_connection_callback,
+    start_github_connection,
 };
 use crate::repositories::api_tokens::{ApiTokenError, ApiTokenRepository, ApiTokenScope};
 use crate::repositories::billing;
@@ -211,6 +212,10 @@ pub fn integration_router(state: IntegrationState) -> Router {
             get(github_connection)
                 .post(start_github_connection)
                 .delete(delete_github_connection),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/github/me/finish",
+            post(finish_github_connection),
         )
         .route(
             "/api/v1/integrations/github/user/callback",

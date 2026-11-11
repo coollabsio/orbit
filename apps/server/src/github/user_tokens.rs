@@ -34,6 +34,8 @@ pub enum TokenError {
     AppMissing,
     /// The workspace's app is from before PR review: it has no OAuth client.
     NeedsRecreate,
+    /// GitHub did not answer as it should (outage, rate limit, rejected app credentials).
+    Github(GithubError),
     Database,
 }
 
@@ -60,6 +62,7 @@ impl TokenError {
                 "Re-create the GitHub App",
                 "This workspace's GitHub App is from an older Orbit version. Ask an admin to re-create it.",
             ),
+            Self::Github(error) => return error.into_api(request_id),
             Self::Database => return ApiError::internal(request_id),
         };
         ApiError::new(StatusCode::CONFLICT, code, title, detail, request_id)
@@ -78,7 +81,6 @@ pub(crate) async fn app_client(
     state: &IntegrationState,
     workspace: &Id,
 ) -> Result<AppClient, TokenError> {
-    let key = state.encryption_key().ok_or(TokenError::Database)?;
     let row = sqlx::query(
         "SELECT client_id, client_secret_encrypted, callback_origin FROM github_apps WHERE workspace_id = $1",
     )
@@ -92,6 +94,7 @@ pub(crate) async fn app_client(
     let (Some(client_id), Some(secret)) = (client_id, secret) else {
         return Err(TokenError::NeedsRecreate);
     };
+    let key = state.encryption_key().ok_or(TokenError::Database)?;
     Ok(AppClient {
         client_id,
         client_secret: decrypt_secret(&key, &secret).map_err(|_| TokenError::NeedsRecreate)?,
@@ -246,8 +249,8 @@ pub async fn user_token(
                 Err(error) => Err(error),
             }
         }
-        // GitHub unreachable: keep the connection; the caller fails this once.
-        Err(_) => Err(TokenError::Database),
+        // GitHub unreachable or refusing the app: keep the connection; the caller fails this once.
+        Err(error) => Err(TokenError::Github(error)),
     }
 }
 
@@ -296,23 +299,40 @@ async fn mark_broken_if(
     tx.commit().await.map_err(|_| TokenError::Database)
 }
 
-/// Marks the connection broken after GitHub answered 401 to its access token.
+/// Marks the connection broken after GitHub answered 401 to `token`. Does nothing when the connection holds another
+/// token by now (renewed meanwhile): GitHub revokes the old access token on renewal.
 pub async fn mark_broken(
     state: &IntegrationState,
     workspace: &Id,
     user: &Id,
+    token: &str,
 ) -> Result<(), TokenError> {
+    let key = state.encryption_key().ok_or(TokenError::Database)?;
     let mut tx = state
         .database()
         .immediate_transaction()
         .await
         .map_err(|_| TokenError::Database)?;
+    let stored: Option<Vec<u8>> = sqlx::query_scalar(
+        "SELECT access_token_encrypted FROM github_user_connections WHERE workspace_id = $1 AND user_id = $2",
+    )
+    .bind(workspace.to_string())
+    .bind(user.to_string())
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|_| TokenError::Database)?;
+    let Some(stored) = stored else { return Ok(()) };
+    if decrypt_secret(&key, &stored).ok().as_deref() != Some(token) {
+        return Ok(());
+    }
     sqlx::query(
-        "UPDATE github_user_connections SET broken = 1, updated_at = $1 WHERE workspace_id = $2 AND user_id = $3",
+        "UPDATE github_user_connections SET broken = 1, updated_at = $1 WHERE workspace_id = $2 AND user_id = $3 \
+         AND access_token_encrypted = $4",
     )
     .bind(TimestampMillis::now().as_millis())
     .bind(workspace.to_string())
     .bind(user.to_string())
+    .bind(stored)
     .execute(&mut *tx)
     .await
     .map_err(|_| TokenError::Database)?;

@@ -3,6 +3,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import * as Linking from 'expo-linking'
 import * as WebBrowser from 'expo-web-browser'
 
+import { ApiProblem } from '@orbit/api/problem'
+
 import * as api from '../data/github-api'
 import { nativeRedirect } from '../data/sign-in-provider'
 import { useOrbit } from '../orbit-context'
@@ -22,7 +24,16 @@ export function useConnectGithub() {
       const returnUrl = nativeRedirect(Linking.createURL('auth/callback'))
       const url = await api.startConnection(client, workspaceId, returnUrl)
       const session = await WebBrowser.openAuthSessionAsync(url, returnUrl)
-      return session.type === 'success' ? api.githubConnectResult(session.url) : null
+      if (session.type !== 'success') return null
+      const back = api.githubReturn(session.url)
+      if (!back) return null
+      if (back.kind === 'failed') return 'failed'
+      try {
+        await api.finishConnection(client, workspaceId, back.token)
+        return 'connected'
+      } catch (error) {
+        return api.finishResult(error instanceof ApiProblem ? error.code : undefined)
+      }
     },
     onSettled: () => void queryClient.invalidateQueries({ queryKey: api.githubKeys.connection(workspaceId) }),
   })

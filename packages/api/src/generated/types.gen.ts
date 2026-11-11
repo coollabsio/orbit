@@ -2474,6 +2474,13 @@ export type ForwardedRecord = {
     message_id: string;
 };
 
+export type GithubConnectFinish = {
+    /**
+     * The `token` GitHub's callback put in the return URL.
+     */
+    token: string;
+};
+
 export type GithubConnectStart = {
     /**
      * `web` or `mobile`.
@@ -20681,6 +20688,72 @@ export type StartGithubConnectionResponses = {
 };
 
 export type StartGithubConnectionResponse = StartGithubConnectionResponses[keyof StartGithubConnectionResponses];
+
+export type FinishGithubConnectionData = {
+    body: GithubConnectFinish;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/github/me/finish';
+};
+
+export type FinishGithubConnectionErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden, github_connect_mismatch
+     */
+    403: WorkspaceProblem;
+    /**
+     * github_workspace_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch, github_account_taken
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * github_connect_failed
+     */
+    422: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * app_key_missing
+     */
+    503: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type FinishGithubConnectionError = FinishGithubConnectionErrors[keyof FinishGithubConnectionErrors];
+
+export type FinishGithubConnectionResponses = {
+    200: GithubConnection;
+};
+
+export type FinishGithubConnectionResponse = FinishGithubConnectionResponses[keyof FinishGithubConnectionResponses];
 
 export type ListImportPeopleData = {
     body?: never;

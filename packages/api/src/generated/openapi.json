@@ -13691,6 +13691,7 @@
         "tags": [
           "crate::github_user_routes"
         ],
+        "summary": "GitHub's callback. It connects nothing: it keeps the code and sends the browser to Orbit with a one-time token.\nThe signed-in member then finishes (`POST /github/me/finish`), so a link someone else started cannot connect the\naccount of whoever opens it.",
         "operationId": "github_connection_callback",
         "parameters": [
           {
@@ -13721,7 +13722,7 @@
         ],
         "responses": {
           "303": {
-            "description": "Back to Orbit with github=connected, failed or taken"
+            "description": "Back to Orbit with github=finish and a token, or github=failed"
           },
           "400": {
             "description": "invalid_proxy_headers",
@@ -30004,6 +30005,161 @@
           },
           "500": {
             "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/github/me/finish": {
+      "post": {
+        "tags": [
+          "crate::github_user_routes"
+        ],
+        "summary": "Finishes a connect flow as the signed-in member. Problems: 403 `github_connect_mismatch` (another member started\nthis flow), 409 `github_account_taken`, 422 `github_connect_failed` (unknown, used or expired token; GitHub refused).",
+        "operationId": "finish_github_connection",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GithubConnectFinish"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GithubConnection"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden, github_connect_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "github_workspace_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch, github_account_taken",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "github_connect_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "app_key_missing",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -57786,6 +57942,19 @@
             "type": "string"
           }
         }
+      },
+      "GithubConnectFinish": {
+        "type": "object",
+        "required": [
+          "token"
+        ],
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "The `token` GitHub's callback put in the return URL."
+          }
+        },
+        "additionalProperties": false
       },
       "GithubConnectStart": {
         "type": "object",

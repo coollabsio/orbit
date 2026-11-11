@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { deleteGithubConnection, githubConnection, startGithubConnection } from '@orbit/api/generated/sdk.gen'
+import { deleteGithubConnection, finishGithubConnection, githubConnection, startGithubConnection } from '@orbit/api/generated/sdk.gen'
+import { ApiProblem } from '@orbit/api/problem'
 import { apiClient } from '@/api/client'
 import { queryKeys } from '@/api/queryKeys'
 
@@ -33,5 +34,25 @@ export function useDisconnectGithub(workspaceId: string) {
       await deleteGithubConnection({ client: apiClient, path: { workspace_id: workspaceId }, throwOnError: true })
     },
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: queryKeys.github.connection(workspaceId) }),
+  })
+}
+
+export type FinishResult = 'connected' | 'failed' | 'taken' | 'mismatch'
+
+/** Back from GitHub: connects the account as the signed-in member, with the one-time `token` of the return URL. */
+export function useFinishGithub(workspaceId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (token: string): Promise<FinishResult> => {
+      try {
+        await finishGithubConnection({ client: apiClient, path: { workspace_id: workspaceId }, body: { token }, throwOnError: true })
+        return 'connected'
+      } catch (error) {
+        if (error instanceof ApiProblem && error.code === 'github_account_taken') return 'taken'
+        if (error instanceof ApiProblem && error.code === 'github_connect_mismatch') return 'mismatch'
+        return 'failed'
+      }
+    },
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: queryKeys.github.connection(workspaceId) }),
   })
 }

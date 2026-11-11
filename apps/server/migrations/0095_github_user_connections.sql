@@ -29,6 +29,10 @@ CREATE TABLE github_user_authorizations (
     code_verifier_encrypted BLOB NOT NULL,
     client TEXT NOT NULL CHECK (client IN ('web', 'mobile')),
     return_url TEXT,
+    -- After GitHub's callback: its code, and the hash of the one-time token the signed-in member finishes with.
+    code_encrypted BLOB,
+    finish_hash BLOB,
     expires_at INTEGER NOT NULL
 );
 CREATE INDEX github_user_authorizations_expiry ON github_user_authorizations (expires_at);
+CREATE UNIQUE INDEX github_user_authorizations_finish ON github_user_authorizations (finish_hash);

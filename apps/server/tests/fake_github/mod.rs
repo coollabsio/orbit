@@ -44,6 +44,8 @@ pub struct FakeState {
     /// Refresh token → GitHub user.
     pub refresh_users: HashMap<String, (i64, String)>,
     pub refresh_calls: u32,
+    /// When set, every refresh gets this answer (status, body) instead.
+    pub token_reply: Option<(u16, Value)>,
     /// Sleep inside a refresh, so two refreshes overlap.
     pub refresh_delay_ms: u64,
     /// Every form posted to the token endpoint.
@@ -132,6 +134,10 @@ async fn oauth_token(
         state.refresh_delay_ms
     };
     let refreshing = form.get("grant_type").map(String::as_str) == Some("refresh_token");
+    let reply = state.lock().unwrap().token_reply.clone();
+    if let Some((status, body)) = reply.filter(|_| refreshing) {
+        return (StatusCode::from_u16(status).unwrap(), Json(body)).into_response();
+    }
     if refreshing && delay > 0 {
         tokio::time::sleep(Duration::from_millis(delay)).await;
     }
@@ -303,6 +309,34 @@ pub async fn fixture() -> GithubFixture {
 }
 
 impl GithubFixture {
+    /// The router of a server that has no app key (`ORBIT_APP_KEY` unset).
+    pub fn router_without_key(&self) -> Router {
+        let state = IntegrationState::new(
+            Arc::new(ApiTokenRepository::new((*self.database).clone())),
+            Arc::new(TaskRepository::new((*self.database).clone())),
+        )
+        .with_github_settings(
+            Arc::new(self.identity.clone()),
+            CookieMode::secure(),
+            ORIGIN.to_owned(),
+            false,
+            None,
+        )
+        .with_github_endpoints(GithubEndpoints::local(&self.github.base));
+        integration_router(state).layer(HttpPlatformLayer::new(OriginPolicy::new(ORIGIN)))
+    }
+
+    pub async fn send_to(&self, app: &Router, method: &str, path: &str, cookie: &str) -> Response {
+        let request = Request::builder()
+            .method(method)
+            .uri(path)
+            .header(header::COOKIE, cookie)
+            .header(header::ORIGIN, ORIGIN)
+            .body(Body::empty())
+            .unwrap();
+        app.clone().oneshot(request).await.unwrap()
+    }
+
     /// Another server on the same database: its own state, its own process-local locks.
     pub fn second_server(&self) -> IntegrationState {
         integration_state(&self.database, &self.identity, &self.github)

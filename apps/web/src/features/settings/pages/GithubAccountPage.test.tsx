@@ -45,10 +45,45 @@ test('connect starts the web flow and opens GitHub', async () => {
   expect(body).toEqual({ client: 'web' })
 })
 
-test('the result of the GitHub flow shows once as a toast', async () => {
-  serve('disconnected')
-  const view = renderWithWorkspace(<GithubAccountPage />, { path: '/profile/github?github=taken' })
+function serveFinish(reply: Response, seen: { path?: string; body?: unknown }) {
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const request = input as Request
+    if (request.method === 'POST') {
+      seen.path = new URL(request.url).pathname
+      seen.body = await request.json()
+      return reply
+    }
+    return Response.json({ status: 'disconnected', login: null })
+  }) as typeof fetch
+}
+
+const problem = (status: number, code: string) => new Response(JSON.stringify({ type: 'about:blank', title: 'x', status, code, detail: 'x', instance: '/', request_id: 'r' }), { status, headers: { 'content-type': 'application/problem+json' } })
+
+test('back from GitHub, the page finishes the connection as the signed-in member', async () => {
+  const seen: { path?: string; body?: unknown } = {}
+  serveFinish(Response.json({ status: 'connected', login: 'octo' }), seen)
+  const view = renderWithWorkspace(<GithubAccountPage />, { path: '/profile/github?github=finish&token=t1' })
+  expect(await view.findByText('GitHub connected')).toBeTruthy()
+  expect(seen.path).toBe('/api/v1/workspaces/workspace-1/github/me/finish')
+  expect(seen.body).toEqual({ token: 't1' })
+})
+
+test('a GitHub account of another member is refused with a clear message', async () => {
+  serveFinish(problem(409, 'github_account_taken'), {})
+  const view = renderWithWorkspace(<GithubAccountPage />, { path: '/profile/github?github=finish&token=t1' })
   expect(await view.findByText('This GitHub account is already connected to another Orbit user.')).toBeTruthy()
+})
+
+test('a link that another member started is refused', async () => {
+  serveFinish(problem(403, 'github_connect_mismatch'), {})
+  const view = renderWithWorkspace(<GithubAccountPage />, { path: '/profile/github?github=finish&token=t1' })
+  expect(await view.findByText('Another member started this GitHub connection. Connect from your own Account settings.')).toBeTruthy()
+})
+
+test('a failed GitHub flow shows once as a toast', async () => {
+  serve('disconnected')
+  const view = renderWithWorkspace(<GithubAccountPage />, { path: '/profile/github?github=failed' })
+  expect(await view.findByText('Could not connect GitHub. Try again.')).toBeTruthy()
 })
 
 test('a broken connection asks to reconnect', async () => {

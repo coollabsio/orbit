@@ -1,5 +1,6 @@
-//! Connecting a member's GitHub account to the workspace's GitHub App (OAuth web flow with PKCE). The callback has
-//! no session: the single-use state row says who started the flow, so the mobile app can use the system browser.
+//! Connecting a member's GitHub account to the workspace's GitHub App (OAuth web flow with PKCE). GitHub's callback
+//! has no session (the mobile app uses the system browser), so it only keeps the code; the member who started the
+//! flow finishes it with their own session.
 
 use axum::Json;
 use axum::extract::{Extension, Path, Query, State};
@@ -185,7 +186,7 @@ pub(crate) async fn delete_github_connection(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// Where the browser goes after the flow, with `github=connected|failed|taken`.
+/// Where the browser goes after GitHub's callback: `github=finish&token=…`, or `github=failed`.
 struct Return {
     client: String,
     return_url: Option<String>,
@@ -193,22 +194,25 @@ struct Return {
 }
 
 impl Return {
-    fn to(&self, outcome: &str) -> Redirect {
+    fn to(&self, query: &str) -> Redirect {
         let url = match (self.client.as_str(), &self.return_url) {
             ("mobile", Some(url)) => {
                 let separator = if url.contains('?') { '&' } else { '?' };
-                format!("{url}{separator}github={outcome}")
+                format!("{url}{separator}{query}")
             }
-            _ => format!(
-                "{}/profile/github?github={outcome}",
-                self.origin.trim_end_matches('/')
-            ),
+            _ => format!("{}/profile/github?{query}", self.origin.trim_end_matches('/')),
         };
         Redirect::to(&url)
     }
 }
 
-#[utoipa::path(get, path = "/api/v1/integrations/github/user/callback", params(("code" = Option<String>, Query), ("state" = Option<String>, Query)), responses((status = 303, description = "Back to Orbit with github=connected, failed or taken")))]
+/// How long the member has to finish after GitHub sent the browser back.
+const FINISH_TTL_MS: i64 = 5 * 60 * 1000;
+
+/// GitHub's callback. It connects nothing: it keeps the code and sends the browser to Orbit with a one-time token.
+/// The signed-in member then finishes (`POST /github/me/finish`), so a link someone else started cannot connect the
+/// account of whoever opens it.
+#[utoipa::path(get, path = "/api/v1/integrations/github/user/callback", params(("code" = Option<String>, Query), ("state" = Option<String>, Query)), responses((status = 303, description = "Back to Orbit with github=finish and a token, or github=failed")))]
 pub(crate) async fn github_connection_callback(
     State(state): State<IntegrationState>,
     Query(query): Query<CallbackQuery>,
@@ -218,58 +222,152 @@ pub(crate) async fn github_connection_callback(
         return_url: None,
         origin: state.public_origin().to_owned(),
     };
-    let Some(pending) = take_state(&state, query.state.as_deref()).await else {
-        return fallback.to("failed");
-    };
-    let (workspace, user, verifier, back) = pending;
     let code = query.code.filter(|code| !code.is_empty() && code.len() <= 200);
-    let Some(code) = code else { return back.to("failed") };
-    match finish(&state, &workspace, &user, &verifier, &code, &back.origin).await {
-        Ok(()) => back.to("connected"),
-        Err(Outcome::Taken) => back.to("taken"),
-        Err(Outcome::Failed) => back.to("failed"),
+    let token = query.state.filter(|token| !token.is_empty() && token.len() <= 200);
+    let (Some(code), Some(token)) = (code, token) else {
+        return fallback.to("github=failed");
+    };
+    match keep_code(&state, &token, &code).await {
+        Some((back, finish)) => back.to(&format!("github=finish&token={finish}")),
+        None => fallback.to("github=failed"),
     }
 }
 
-/// Consumes the state row; `None` when it is unknown, expired or already used.
-async fn take_state(
-    state: &IntegrationState,
-    token: Option<&str>,
-) -> Option<(Id, Id, String, Return)> {
-    let token = token.filter(|token| !token.is_empty() && token.len() <= 200)?;
+/// Stores GitHub's code on the state row (once) and returns where to go with the new finish token.
+async fn keep_code(state: &IntegrationState, token: &str, code: &str) -> Option<(Return, String)> {
     let key = state.encryption_key()?;
     let hash: [u8; 32] = Sha256::digest(token.as_bytes()).into();
+    let now = TimestampMillis::now().as_millis();
+    let finish = generate_opaque_token();
+    let finish_hash: [u8; 32] = Sha256::digest(finish.as_bytes()).into();
     let mut tx = state.database().immediate_transaction().await.ok()?;
     let row = sqlx::query(
-        "SELECT a.workspace_id, a.user_id, a.code_verifier_encrypted, a.client, a.return_url, a.expires_at, \
-         g.callback_origin FROM github_user_authorizations a JOIN github_apps g ON g.workspace_id = a.workspace_id \
-         WHERE a.state_hash = $1",
+        "SELECT a.client, a.return_url, g.callback_origin FROM github_user_authorizations a \
+         JOIN github_apps g ON g.workspace_id = a.workspace_id \
+         WHERE a.state_hash = $1 AND a.code_encrypted IS NULL AND a.expires_at > $2",
     )
     .bind(hash.to_vec())
+    .bind(now)
     .fetch_optional(&mut *tx)
     .await
     .ok()??;
-    sqlx::query("DELETE FROM github_user_authorizations WHERE state_hash = $1")
-        .bind(hash.to_vec())
-        .execute(&mut *tx)
-        .await
-        .ok()?;
-    tx.commit().await.ok()?;
-    if row.get::<i64, _>("expires_at") <= TimestampMillis::now().as_millis() {
+    let updated = sqlx::query(
+        "UPDATE github_user_authorizations SET code_encrypted = $1, finish_hash = $2, expires_at = $3 \
+         WHERE state_hash = $4 AND code_encrypted IS NULL",
+    )
+    .bind(encrypt_secret(&key, code).ok()?)
+    .bind(finish_hash.to_vec())
+    .bind(now + FINISH_TTL_MS)
+    .bind(hash.to_vec())
+    .execute(&mut *tx)
+    .await
+    .ok()?;
+    if updated.rows_affected() != 1 {
         return None;
     }
-    let verifier: Vec<u8> = row.get("code_verifier_encrypted");
+    tx.commit().await.ok()?;
     let origin: Option<String> = row.get("callback_origin");
     Some((
-        row.get::<String, _>("workspace_id").parse().ok()?,
-        row.get::<String, _>("user_id").parse().ok()?,
-        decrypt_secret(&key, &verifier).ok()?,
         Return {
             client: row.get("client"),
             return_url: row.get("return_url"),
             origin: origin.unwrap_or_else(|| state.public_origin().to_owned()),
         },
+        finish,
     ))
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+#[schema(as = GithubConnectFinish)]
+pub struct GithubConnectFinish {
+    /// The `token` GitHub's callback put in the return URL.
+    token: String,
+}
+
+/// Finishes a connect flow as the signed-in member. Problems: 403 `github_connect_mismatch` (another member started
+/// this flow), 409 `github_account_taken`, 422 `github_connect_failed` (unknown, used or expired token; GitHub refused).
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/github/me/finish", params(("workspace_id" = String, Path)), request_body = GithubConnectFinish, responses((status = 200, body = GithubConnection)))]
+pub(crate) async fn finish_github_connection(
+    State(state): State<IntegrationState>,
+    Path(workspace): Path<String>,
+    headers: HeaderMap,
+    request: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<GithubConnectFinish>,
+) -> Result<Json<GithubConnection>, ApiError> {
+    let id = request_id(request.as_ref());
+    let (workspace_id, _) = github_workspace_access(&state, &headers, &workspace, id).await?;
+    let user = state.session_user(&headers, id).await?;
+    let key = state.app_key(id)?;
+    let failed = || {
+        ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "github_connect_failed",
+            "GitHub not connected",
+            "Orbit could not connect GitHub. Start again.",
+            id,
+        )
+    };
+    if body.token.is_empty() || body.token.len() > 200 {
+        return Err(failed());
+    }
+    let hash: [u8; 32] = Sha256::digest(body.token.as_bytes()).into();
+    // Single use: the row goes whether this finish works or not.
+    let mut tx = state
+        .database()
+        .immediate_transaction()
+        .await
+        .map_err(|_| ApiError::internal(id))?;
+    let row = sqlx::query(
+        "SELECT a.user_id, a.code_encrypted, a.code_verifier_encrypted, a.expires_at, g.callback_origin \
+         FROM github_user_authorizations a JOIN github_apps g ON g.workspace_id = a.workspace_id \
+         WHERE a.finish_hash = $1 AND a.workspace_id = $2",
+    )
+    .bind(hash.to_vec())
+    .bind(&workspace)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|_| ApiError::internal(id))?;
+    if row.is_some() {
+        sqlx::query("DELETE FROM github_user_authorizations WHERE finish_hash = $1")
+            .bind(hash.to_vec())
+            .execute(&mut *tx)
+            .await
+            .map_err(|_| ApiError::internal(id))?;
+    }
+    tx.commit().await.map_err(|_| ApiError::internal(id))?;
+    let row = row.ok_or_else(failed)?;
+    if row.get::<i64, _>("expires_at") <= TimestampMillis::now().as_millis() {
+        return Err(failed());
+    }
+    if row.get::<String, _>("user_id") != user.to_string() {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "github_connect_mismatch",
+            "Not your connection",
+            "Another member started this GitHub connection. Start your own from Account settings.",
+            id,
+        ));
+    }
+    let code: Option<Vec<u8>> = row.get("code_encrypted");
+    let verifier: Vec<u8> = row.get("code_verifier_encrypted");
+    let code = code
+        .and_then(|code| decrypt_secret(&key, &code).ok())
+        .ok_or_else(failed)?;
+    let verifier = decrypt_secret(&key, &verifier).map_err(|_| failed())?;
+    let origin: Option<String> = row.get("callback_origin");
+    let origin = origin.unwrap_or_else(|| state.public_origin().to_owned());
+    match finish(&state, &workspace_id, &user, &verifier, &code, &origin).await {
+        Ok(login) => Ok(Json(GithubConnection { status: "connected", login: Some(login) })),
+        Err(Outcome::Taken) => Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "github_account_taken",
+            "GitHub account in use",
+            "This GitHub account is already connected to another Orbit user.",
+            id,
+        )),
+        Err(Outcome::Failed) => Err(failed()),
+    }
 }
 
 enum Outcome {
@@ -290,7 +388,7 @@ async fn finish(
     verifier: &str,
     code: &str,
     origin: &str,
-) -> Result<(), Outcome> {
+) -> Result<String, Outcome> {
     let key = state.encryption_key().ok_or(Outcome::Failed)?;
     let client = app_client(state, workspace).await.map_err(|_| Outcome::Failed)?;
     let github = state.github_client().ok_or(Outcome::Failed)?;
@@ -368,5 +466,5 @@ async fn finish(
     .await
     .map_err(|_| Outcome::Failed)?;
     tx.commit().await.map_err(|_| Outcome::Failed)?;
-    Ok(())
+    Ok(profile.login)
 }

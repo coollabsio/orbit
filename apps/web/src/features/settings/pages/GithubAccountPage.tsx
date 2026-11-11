@@ -1,20 +1,27 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { useSearchParams } from 'react-router'
 import { toast } from 'sonner'
 import { confirmAction } from '@/components/common/confirmAction'
 import { ProviderMark } from '@/components/common/icons/ProviderMark'
 import { SettingsCard } from '@/components/common/SettingsCard'
 import { Button } from '@/components/ui/button'
-import { useConnectGithub, useDisconnectGithub, useGithubConnection } from '@/features/github/api'
+import { type FinishResult, useConnectGithub, useDisconnectGithub, useFinishGithub, useGithubConnection } from '@/features/github/api'
 import { ConnectGithubPrompt } from '@/features/github/components/ConnectGithubPrompt'
 import { RowIcon, SettingsRow } from '@/features/settings/components/SettingsParts'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { loadFailed } from '@/lib/connection'
 
-const RESULTS: Record<string, { ok: boolean; text: string }> = {
+const RESULTS: Record<FinishResult, { ok: boolean; text: string }> = {
   connected: { ok: true, text: 'GitHub connected' },
   failed: { ok: false, text: 'Could not connect GitHub. Try again.' },
   taken: { ok: false, text: 'This GitHub account is already connected to another Orbit user.' },
+  mismatch: { ok: false, text: 'Another member started this GitHub connection. Connect from your own Account settings.' },
+}
+
+function showResult(result: FinishResult) {
+  const shown = RESULTS[result]
+  // The id keeps it to one toast when an effect runs again (StrictMode).
+  ;(shown.ok ? toast.success : toast.error)(shown.text, { id: 'github-connect' })
 }
 
 /** Account settings → GitHub: the member's own GitHub account, used to review pull requests as themselves. */
@@ -23,16 +30,22 @@ export function GithubAccountPage() {
   const query = useGithubConnection(workspace.id)
   const connect = useConnectGithub(workspace.id)
   const disconnect = useDisconnectGithub(workspace.id)
+  const finish = useFinishGithub(workspace.id)
+  const finishOnce = finish.mutate
   const [params, setParams] = useSearchParams()
   const result = params.get('github')
+  const token = params.get('token')
+  const finished = useRef<string | null>(null)
 
   useEffect(() => {
     if (!result) return
-    const shown = RESULTS[result]
-    // The id keeps it to one toast when the effect runs again before the parameter is gone (StrictMode).
-    if (shown) (shown.ok ? toast.success : toast.error)(shown.text, { id: 'github-connect' })
+    // GitHub sent the browser back: connect as the signed-in member, once for each token.
+    if (result === 'finish' && token && finished.current !== token) {
+      finished.current = token
+      finishOnce(token, { onSuccess: showResult })
+    } else if (result === 'failed') showResult('failed')
     setParams({}, { replace: true })
-  }, [result, setParams])
+  }, [result, token, setParams, finishOnce])
 
   const description = `Review, comment on and merge pull requests in ${workspace.name} as yourself. GitHub shows your name, and your own GitHub permissions apply.`
   if (loadFailed(query)) return <SettingsCard title="GitHub" description={description}>Your GitHub connection could not be loaded.</SettingsCard>
