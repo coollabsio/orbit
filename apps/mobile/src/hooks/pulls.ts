@@ -75,7 +75,7 @@ function useThreadWrite<V, R>(ref: PullRef, write: (variables: V) => Promise<R>)
 
 export function useAddComment(ref: PullRef) {
   const { client, workspaceId } = useOrbit()
-  return useThreadWrite(ref, ({ target, body, mode }: { target: CommentTarget; body: string; mode: 'pending' | 'single' }) => api.addComment(client, workspaceId, ref, target, body, mode))
+  return useThreadWrite(ref, ({ target, body, mode, headSha }: { target: CommentTarget; body: string; mode: 'pending' | 'single'; headSha: string }) => api.addComment(client, workspaceId, ref, target, body, mode, headSha))
 }
 
 export function useReply(ref: PullRef) {
@@ -98,6 +98,7 @@ export function useSubmitReview(ref: PullRef) {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (review: GithubSubmitReview) => api.submitReview(client, workspaceId, ref, review),
+    // the pull, its threads (no more pending) and the conversation (the new review)
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: api.pullKeys.pull(workspaceId, ref) }),
   })
 }

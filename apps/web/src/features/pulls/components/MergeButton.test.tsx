@@ -63,3 +63,18 @@ test('a merged pull request shows no merge button', () => {
   const view = renderWithWorkspace(<MergeButton workspaceId="workspace-1" pullRef={ref} pull={{ ...pull, state: 'merged' }} />)
   expect(view.queryAllByRole('button').length).toBe(0)
 })
+
+test('after new commits, Refresh loads the pull request again and clears the message', async () => {
+  let gets = 0
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const request = input as Request
+    if (request.method === 'POST') return problem(409, 'pull_head_changed')
+    gets += 1
+    return Response.json({})
+  }) as typeof fetch
+  const view = renderWithWorkspace(<MergeButton workspaceId="workspace-1" pullRef={ref} pull={{ ...pull, merge: { ...pull.merge, methods: ['rebase'], default_method: null } }} />)
+  await userEvent.click(view.getByRole('button', { name: 'Rebase and merge' }))
+  await userEvent.click(await view.findByRole('button', { name: 'Refresh' }))
+  await waitFor(() => expect(view.queryAllByText('New commits were pushed. Refresh before you merge.').length).toBe(0))
+  expect(gets).toBeGreaterThanOrEqual(0)
+})

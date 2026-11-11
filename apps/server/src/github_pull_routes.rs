@@ -385,6 +385,7 @@ pub(crate) async fn create_github_review_comment(
     }
     match reviews::add_comment(&github(&state, id)?, &access.token.token, &access.pull, &body).await {
         Ok(thread) => Ok(Json(thread)),
+        Err(GithubError::Conflict(_)) => Err(ApiError::new(StatusCode::CONFLICT, "pull_head_changed", "New commits", "New commits were pushed. Refresh to comment on the latest changes.", id)),
         Err(error) => Err(github_failed(&state, &access, error, id).await),
     }
 }

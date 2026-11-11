@@ -30649,7 +30649,7 @@
             }
           },
           "409": {
-            "description": "contract_mismatch, github_not_connected, github_reconnect, github_app_missing, github_app_recreate",
+            "description": "contract_mismatch, github_not_connected, github_reconnect, github_app_missing, github_app_recreate, pull_head_changed",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -61728,6 +61728,13 @@
           "body": {
             "type": "string",
             "description": "Markdown."
+          },
+          "head_sha": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The head commit of the diff the member commented on. When the pull request has moved on, the comment is\nrefused (409) instead of landing on another line."
           },
           "line": {
             "type": "integer",

@@ -8,6 +8,9 @@ import { clearDraft, readDraft, writeDraft } from '../../data/pull-drafts'
 import { githubMessage } from '../../data/pulls-api'
 import { markdownToText } from '../../data/markdown'
 import { relativeAgo } from '../../data/format'
+import { useQueryClient } from '@tanstack/react-query'
+
+import { pullKeys } from '../../data/pulls-api'
 import { useAddComment, useDeleteComment, useDeleteBranch, useDiscardReview, useMerge, useReply, useResolveThread, useSubmitReview } from '../../hooks/pulls'
 import { useOrbit } from '../../orbit-context'
 import { useTheme } from '../../theme'
@@ -70,21 +73,22 @@ function useDraft(key: string): [string, (value: string) => void, () => void] {
 const lines = (target: CommentTarget) => (target.start_line != null && target.start_line !== target.line ? `lines ${target.start_line} to ${target.line}` : `line ${target.line}`)
 
 /** The web's comment box: Add to review (pending) or Comment now. */
-export function CommentSheet({ pullRef, target, onClose }: { pullRef: PullRef; target: CommentTarget | null; onClose: () => void }) {
+export function CommentSheet({ pullRef, headSha, reviewing, target, onClose }: { pullRef: PullRef; headSha: string; reviewing: boolean; target: CommentTarget | null; onClose: () => void }) {
+  const { workspaceId } = useOrbit()
   return (
     <PageSheet title={target ? `Comment on ${lines(target)}` : 'Comment'} visible={target !== null} onClose={onClose}>
-      {target ? <CommentForm key={`${target.path}:${target.side}:${target.line}:${target.start_line ?? ''}`} pullRef={pullRef} target={target} onDone={onClose} /> : null}
+      {target ? <CommentForm key={draftKey(workspaceId, pullRef, target)} pullRef={pullRef} headSha={headSha} reviewing={reviewing} target={target} onDone={onClose} /> : null}
     </PageSheet>
   )
 }
 
-function CommentForm({ pullRef, target, onDone }: { pullRef: PullRef; target: CommentTarget; onDone: () => void }) {
+function CommentForm({ pullRef, headSha, reviewing, target, onDone }: { pullRef: PullRef; headSha: string; reviewing: boolean; target: CommentTarget; onDone: () => void }) {
   const { workspaceId } = useOrbit()
   const [text, setText, clear] = useDraft(draftKey(workspaceId, pullRef, target))
   const add = useAddComment(pullRef)
   const post = (mode: 'pending' | 'single') =>
     add.mutate(
-      { target, body: text, mode },
+      { target, body: text, mode, headSha },
       {
         onSuccess: () => {
           clear()
@@ -99,7 +103,8 @@ function CommentForm({ pullRef, target, onDone }: { pullRef: PullRef; target: Co
       {add.isError ? <Text className="text-[12px] text-destructive">{githubMessage(add.error, 'GitHub did not take the comment. Try again.')}</Text> : null}
       <View className="flex-row flex-wrap gap-2">
         <Button label="Add to review" disabled={!text.trim()} loading={add.isPending} onPress={() => post('pending')} />
-        <Button label="Comment now" variant="outline" disabled={!text.trim() || add.isPending} onPress={() => post('single')} />
+        {/* GitHub allows one pending review: while it is open, comments go into it */}
+        {reviewing ? null : <Button label="Comment now" variant="outline" disabled={!text.trim() || add.isPending} onPress={() => post('single')} />}
         {text ? (
           <Button
             label="Discard"
@@ -253,6 +258,8 @@ export function MergeSheet({ pullRef, pull, visible, onClose }: { pullRef: PullR
   const [commit, setCommit] = useState(() => squashDefaults(pull))
   const merge = useMerge(pullRef)
   const deleteBranch = useDeleteBranch(pullRef)
+  const queryClient = useQueryClient()
+  const { workspaceId } = useOrbit()
   const reason = mergeDisabledReason(pull)
   const methods = pull.merge.methods.filter((item): item is MergeMethod => item === 'merge' || item === 'squash' || item === 'rebase')
   const headChanged = merge.error instanceof ApiProblem && merge.error.code === 'pull_head_changed'
@@ -289,6 +296,17 @@ export function MergeSheet({ pullRef, pull, visible, onClose }: { pullRef: PullR
           </>
         ) : null}
         {merge.isError ? <Text className="text-[12px] text-destructive">{headChanged ? 'New commits were pushed. Refresh before you merge.' : githubMessage(merge.error, 'GitHub did not merge. Try again.')}</Text> : null}
+        {headChanged ? (
+          <Button
+            label="Refresh"
+            variant="outline"
+            onPress={() => {
+              merge.reset()
+              void queryClient.invalidateQueries({ queryKey: pullKeys.pull(workspaceId, pullRef) })
+              onClose()
+            }}
+          />
+        ) : null}
         <Button label={method ? LABEL[method] : 'Merge'} disabled={reason !== null || !method || (method !== 'rebase' && !commit.title.trim())} loading={merge.isPending} onPress={run} />
       </ScrollView>
     </PageSheet>

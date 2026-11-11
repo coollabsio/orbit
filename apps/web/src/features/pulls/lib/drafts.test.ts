@@ -21,3 +21,11 @@ test('a draft survives a remount and goes when cleared', async () => {
   act(() => second.result.current[2]())
   expect(localStorage.getItem('k')).toBeNull()
 })
+
+test('a draft follows its key when the composer is reused for another line', () => {
+  localStorage.setItem('line-10', 'About line 10')
+  const view = renderHook(({ key }) => useDraft(key), { initialProps: { key: 'line-10' } })
+  expect(view.result.current[0]).toBe('About line 10')
+  view.rerender({ key: 'line-20' })
+  expect(view.result.current[0]).toBe('')
+})

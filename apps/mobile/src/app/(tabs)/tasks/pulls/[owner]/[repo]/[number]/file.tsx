@@ -53,7 +53,7 @@ export default function PullFileScreen() {
       ) : (
         <PullDiffView path={file.path} patch={patch} threads={threads.data?.threads ?? []} onThreadPress={setThreadId} onLinesSelected={(selected) => { if (canComment) setTarget(selected) }} />
       )}
-    <CommentSheet pullRef={ref} target={target} onClose={() => setTarget(null)} />
+    <CommentSheet pullRef={ref} headSha={pull.data?.head_sha ?? ''} reviewing={(threads.data?.pending_review ?? null) !== null} target={target} onClose={() => setTarget(null)} />
       <ThreadSheet pullRef={ref} thread={thread} onClose={() => setThreadId(null)} />
     </SafeAreaView>
   )

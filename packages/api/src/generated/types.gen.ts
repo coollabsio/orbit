@@ -2605,6 +2605,11 @@ export type GithubNewReviewComment = {
      * Markdown.
      */
     body: string;
+    /**
+     * The head commit of the diff the member commented on. When the pull request has moved on, the comment is
+     * refused (409) instead of landing on another line.
+     */
+    head_sha?: string | null;
     line: number;
     /**
      * `pending` (in the member's review, seen when it is submitted) or `single` (posted now).
@@ -21212,7 +21217,7 @@ export type CreateGithubReviewCommentErrors = {
      */
     404: WorkspaceProblem;
     /**
-     * contract_mismatch, github_not_connected, github_reconnect, github_app_missing, github_app_recreate
+     * contract_mismatch, github_not_connected, github_reconnect, github_app_missing, github_app_recreate, pull_head_changed
      */
     409: WorkspaceProblem;
     /**

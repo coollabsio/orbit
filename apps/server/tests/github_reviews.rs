@@ -344,3 +344,27 @@ async fn bad_node_ids_are_404() {
         .await;
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+async fn comment_on_a_diff_that_is_no_longer_the_head_is_409() {
+    let fixture = connected().await;
+    fixture.github.graphql("query PullBasics", basics("hubot"));
+    let mut body = comment_body("pending");
+    body["head_sha"] = json!("old");
+    let response = fixture.send("POST", &pull_path(&fixture, "/comments"), &fixture.session_cookie, Some(body)).await;
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    assert_eq!(json_body(response).await["code"], "pull_head_changed");
+    assert_eq!(count(&fixture, "mutation"), 0);
+}
+
+#[tokio::test]
+async fn comment_on_the_head_the_member_saw_is_placed() {
+    let fixture = connected().await;
+    fixture.github.graphql("query PullBasics", basics("hubot"));
+    fixture.github.graphql("query PendingReview", pending(Some("R_1"), 0));
+    fixture.github.graphql("mutation AddThread", json!({ "addPullRequestReviewThread": { "thread": thread_node("T_1", "Nit", "PENDING") } }));
+    let mut body = comment_body("pending");
+    body["head_sha"] = json!("h1");
+    let response = fixture.send("POST", &pull_path(&fixture, "/comments"), &fixture.session_cookie, Some(body)).await;
+    assert_eq!(response.status(), StatusCode::OK);
+}

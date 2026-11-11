@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
-import { githubMessage, useDeleteBranch, useMerge } from '@/features/pulls/api'
+import { githubMessage, useDeleteBranch, useMerge, useRefreshPull } from '@/features/pulls/api'
 
 const LABEL: Record<MergeMethod, string> = { merge: 'Create a merge commit', squash: 'Squash and merge', rebase: 'Rebase and merge' }
 const BUTTON: Record<MergeMethod, string> = { merge: 'Merge', squash: 'Squash and merge', rebase: 'Rebase and merge' }
@@ -25,6 +25,8 @@ export function MergeButton({ workspaceId, pullRef, pull }: { workspaceId: strin
   const [commit, setCommit] = useState(() => squashDefaults(pull))
   const merge = useMerge(workspaceId, pullRef)
   const deleteBranch = useDeleteBranch(workspaceId, pullRef)
+  const refreshPull = useRefreshPull(workspaceId, pullRef)
+  const refresh = () => { merge.reset(); setConfirming(false); refreshPull() }
   if (pull.state !== 'open' && pull.state !== 'draft') return null
   const reason = mergeDisabledReason(pull)
   const headChanged = merge.error instanceof ApiProblem && merge.error.code === 'pull_head_changed'
@@ -67,6 +69,7 @@ export function MergeButton({ workspaceId, pullRef, pull }: { workspaceId: strin
     </div>
     {reason ? <p className="max-w-64 text-right text-xs text-muted-foreground">{reason}</p> : null}
     {merge.isError && !confirming ? <p role="alert" className="max-w-64 text-right text-xs text-destructive">{headChanged ? 'New commits were pushed. Refresh before you merge.' : githubMessage(merge.error, 'GitHub did not merge. Try again.')}</p> : null}
+    {headChanged && !confirming ? <Button size="xs" variant="outline" onClick={refresh}>Refresh</Button> : null}
     <Dialog open={confirming} onOpenChange={setConfirming}>
       <DialogContent>
         <DialogHeader>
@@ -81,6 +84,7 @@ export function MergeButton({ workspaceId, pullRef, pull }: { workspaceId: strin
         </label>
         {merge.isError ? <p role="alert" className="text-xs text-destructive">{headChanged ? 'New commits were pushed. Refresh before you merge.' : githubMessage(merge.error, 'GitHub did not merge. Try again.')}</p> : null}
         <DialogFooter>
+          {headChanged ? <Button variant="outline" className="mr-auto" onClick={refresh}>Refresh</Button> : null}
           <Button variant="outline" onClick={() => setConfirming(false)}>Cancel</Button>
           <Button aria-label={`Confirm ${method ? LABEL[method].toLowerCase() : 'merge'}`} disabled={!commit.title.trim() || merge.isPending} onClick={() => method && run(method)}>{method ? BUTTON[method] : 'Merge'}</Button>
         </DialogFooter>

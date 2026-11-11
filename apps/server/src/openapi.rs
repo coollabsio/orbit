@@ -960,6 +960,9 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             match operation_id {
                 "create_github_review_comment" | "reply_github_review_thread" | "update_github_review_comment" => {
                     add_code(&mut responses, "422", "invalid_review_comment");
+                    if operation_id == "create_github_review_comment" {
+                        add_code(&mut responses, "409", "pull_head_changed");
+                    }
                 }
                 "submit_github_review" => {
                     add_code(&mut responses, "422", "invalid_review");

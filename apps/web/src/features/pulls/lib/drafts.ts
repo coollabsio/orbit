@@ -9,6 +9,12 @@ function read(key: string): string {
 /** A comment draft that outlives the page: written 300 ms after typing stops, removed by `clear`. */
 export function useDraft(key: string): [string, (value: string) => void, () => void] {
   const [value, setValue] = useState(() => read(key))
+  // The same component can be reused for another line (the diff reuses annotation slots): read that line's draft.
+  const [shownKey, setShownKey] = useState(key)
+  if (shownKey !== key) {
+    setShownKey(key)
+    setValue(read(key))
+  }
   const timer = useRef<number | undefined>(undefined)
   const pending = useRef<string | null>(null)
   const flush = () => {

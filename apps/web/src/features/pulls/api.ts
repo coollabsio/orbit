@@ -111,8 +111,8 @@ function useThreadsCache(workspaceId: string, ref: PullRef) {
 export function useAddComment(workspaceId: string, ref: PullRef) {
   const threads = useThreadsCache(workspaceId, ref)
   return useMutation({
-    mutationFn: async ({ target, body, mode }: { target: CommentTarget; body: string; mode: 'pending' | 'single' }) =>
-      (await createGithubReviewComment({ client: apiClient, path: path(workspaceId, ref), body: { ...target, start_side: target.start_side ?? null, start_line: target.start_line ?? null, body, mode }, throwOnError: true })).data,
+    mutationFn: async ({ target, body, mode, headSha }: { target: CommentTarget; body: string; mode: 'pending' | 'single'; headSha: string }) =>
+      (await createGithubReviewComment({ client: apiClient, path: path(workspaceId, ref), body: { ...target, start_side: target.start_side ?? null, start_line: target.start_line ?? null, body, mode, head_sha: headSha }, throwOnError: true })).data,
     onSuccess: (thread) => { threads.put(thread); threads.refresh() },
   })
 }
@@ -169,6 +169,12 @@ export function useDiscardReview(workspaceId: string, ref: PullRef) {
     mutationFn: async () => { await discardGithubReview({ client: apiClient, path: path(workspaceId, ref), throwOnError: true }) },
     onSuccess: () => threads.refresh(),
   })
+}
+
+/** After new commits: the pull request, its files and threads again. */
+export function useRefreshPull(workspaceId: string, ref: PullRef) {
+  const queryClient = useQueryClient()
+  return () => void queryClient.invalidateQueries({ queryKey: pullKeys.pull(workspaceId, ref) })
 }
 
 export function useMerge(workspaceId: string, ref: PullRef) {

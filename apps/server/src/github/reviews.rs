@@ -89,6 +89,9 @@ pub struct NewReviewComment {
     pub body: String,
     /// `pending` (in the member's review, seen when it is submitted) or `single` (posted now).
     pub mode: String,
+    /// The head commit of the diff the member commented on. When the pull request has moved on, the comment is
+    /// refused (409) instead of landing on another line.
+    pub head_sha: Option<String>,
 }
 
 impl NewReviewComment {
@@ -106,6 +109,10 @@ impl NewReviewComment {
             && !self.path.is_empty()
             && self.path.len() <= 4096
             && matches!(self.mode.as_str(), "pending" | "single")
+            && self
+                .head_sha
+                .as_deref()
+                .is_none_or(|sha| (1..=64).contains(&sha.len()) && sha.bytes().all(|c| c.is_ascii_alphanumeric()))
     }
 }
 
@@ -119,6 +126,9 @@ const ADD_THREAD: &str = concat!(
 
 pub async fn add_comment(github: &GithubClient, token: &str, pull: &PullRef, comment: &NewReviewComment) -> Result<ReviewThread, GithubError> {
     let basics = basics(github, token, pull).await?;
+    if comment.head_sha.as_deref().is_some_and(|seen| seen != basics.head_sha) {
+        return Err(GithubError::Conflict("New commits were pushed.".to_owned()));
+    }
     if comment.mode == "single" {
         let mut body = json!({ "commit_id": basics.head_sha, "path": comment.path, "body": comment.body, "line": comment.line, "side": comment.side });
         if let (Some(start), Some(side)) = (comment.start_line, &comment.start_side) {

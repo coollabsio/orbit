@@ -3,7 +3,7 @@ import { forwardRef, useCallback, useMemo, useRef, useState } from 'react'
 import { PatchDiff, Virtualizer, type DiffLineAnnotation, type FileDiffOptions } from '@pierre/diffs/react'
 import { getGithubPullContents, getGithubPullMergeBase } from '@orbit/api/generated/sdk.gen'
 import type { GithubPullDetail, GithubPullFile, GithubReviewThread } from '@orbit/api/generated/types.gen'
-import { toCommentTarget, toGitPatch, type CommentTarget, type PullRef } from '@orbit/api/github'
+import { draftKey, toCommentTarget, toGitPatch, type CommentTarget, type PullRef } from '@orbit/api/github'
 import { apiClient } from '@/api/client'
 import { pullKeys } from '@/features/pulls/api'
 import { threadAnnotations } from '@/features/pulls/lib/annotations'
@@ -85,7 +85,7 @@ export const PullDiffList = forwardRef<HTMLDivElement, {
         composer={composer?.path === file.path ? composer : null}
         onComment={canComment ? setComposer : null}
         onHover={setHovered}
-        renderComposer={(target) => <CommentComposer workspaceId={workspaceId} pullRef={pullRef} target={target} onDone={closeComposer} />}
+        renderComposer={(target) => <CommentComposer key={draftKey(workspaceId, pullRef, target)} workspaceId={workspaceId} pullRef={pullRef} headSha={pull.head_sha} target={target} onDone={closeComposer} />}
         actions={canComment ? actions : undefined}
       />)}
     </div>
@@ -124,7 +124,7 @@ function FileSection({ file, pull, threads, options, highlightedThread, composer
       lineAnnotations={annotations}
       renderAnnotation={(annotation) => annotation.metadata?.composer
         ? renderComposer(annotation.metadata.composer)
-        : annotation.metadata?.thread ? <ThreadView thread={annotation.metadata.thread} highlighted={annotation.metadata.thread.id === highlightedThread} actions={actions} /> : null}
+        : annotation.metadata?.thread ? <ThreadView key={annotation.metadata.thread.id} thread={annotation.metadata.thread} highlighted={annotation.metadata.thread.id === highlightedThread} actions={actions} /> : null}
     /> : <div className="flex flex-wrap items-center gap-2 px-3 py-2.5 text-sm">
       <span className="min-w-0 truncate font-mono text-[13px]">{file.path}</span>
       <span className="text-xs text-muted-foreground">+{file.additions} −{file.deletions}</span>

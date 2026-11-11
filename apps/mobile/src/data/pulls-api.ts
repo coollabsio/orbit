@@ -100,8 +100,8 @@ export function fileHref(pull: Pick<GithubPullDetail, 'repository' | 'number'>, 
   return `/tasks/pulls/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${pull.number}/file?${query}`
 }
 
-export async function addComment(client: OrbitClient, workspaceId: string, ref: PullRef, target: CommentTarget, body: string, mode: 'pending' | 'single'): Promise<GithubReviewThread> {
-  return (await createGithubReviewComment({ client, path: path(workspaceId, ref), body: { ...target, start_side: target.start_side ?? null, start_line: target.start_line ?? null, body, mode }, throwOnError: true })).data
+export async function addComment(client: OrbitClient, workspaceId: string, ref: PullRef, target: CommentTarget, body: string, mode: 'pending' | 'single', headSha: string): Promise<GithubReviewThread> {
+  return (await createGithubReviewComment({ client, path: path(workspaceId, ref), body: { ...target, start_side: target.start_side ?? null, start_line: target.start_line ?? null, body, mode, head_sha: headSha }, throwOnError: true })).data
 }
 
 export async function reply(client: OrbitClient, workspaceId: string, ref: PullRef, threadId: string, body: string): Promise<GithubReviewComment> {
