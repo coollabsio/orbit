@@ -34,7 +34,12 @@ struct Fixture {
 }
 
 impl Fixture {
+    /// Backups are encrypted with the app key, as on a real server.
     async fn new() -> Self {
+        Self::with_app_key(Some(APP_KEY)).await
+    }
+
+    async fn with_app_key(app_key: Option<[u8; 32]>) -> Self {
         let root = tempfile::tempdir().unwrap();
         let database = TestDatabase::new().await.unwrap();
         let identity = Arc::new(IdentityRepository::new((*database).clone()));
@@ -63,7 +68,8 @@ impl Fixture {
             .await
             .unwrap();
         let attachments = root.path().join("attachments");
-        let backups = BackupService::new(root.path().join("backups"), &attachments);
+        let backups =
+            BackupService::new(root.path().join("backups"), &attachments).with_app_key(app_key);
         let uploads = UploadService::new(
             (*database).clone(),
             Arc::new(LocalBlobStore::new(&attachments)),
@@ -393,6 +399,8 @@ impl Fixture {
     }
 }
 
+const APP_KEY: [u8; 32] = [3; 32];
+
 fn find<'a>(items: &'a Value, title: &str) -> &'a Value {
     items["items"]
         .as_array()
@@ -430,6 +438,11 @@ async fn lists_the_workspaces_and_items_of_a_backup() {
         .create_task(&fixture.project_id, json!({"title": "Fix login"}))
         .await;
     let backup = fixture.backup().await;
+    let snapshot = fixture.backups.verify(&backup).await.unwrap();
+    assert!(
+        snapshot.manifest.encryption.is_some(),
+        "the fixture's backups are encrypted"
+    );
     fixture.create_page("Delta later", None).await;
 
     let (status, workspaces) = fixture
@@ -1161,7 +1174,8 @@ async fn postgres_snapshots_are_read_compressed_and_as_legacy_plain_copy_files()
         // Only Postgres snapshots hold `COPY` files.
         return;
     }
-    let fixture = Fixture::new().await;
+    // older backups (plain `.copy` files) were not encrypted
+    let fixture = Fixture::with_app_key(None).await;
     let page = fixture
         .create_page("Tab\there \\ \"quoted\"\nline", None)
         .await;

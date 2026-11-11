@@ -27,8 +27,8 @@ function touchDistance(touches: TouchEvent['touches']): number {
   return touches.length < 2 ? 0 : Math.hypot(touches[0].clientX - touches[1].clientX, touches[0].clientY - touches[1].clientY)
 }
 
-/** A light-on-dark control in the viewer's top bar. */
-function ViewerBarButton({ className, size = 'icon-lg', title, ...props }: ComponentProps<typeof Button>) {
+/** A light-on-dark control in the viewer's top bar (also the PDF viewer's). */
+export function ViewerBarButton({ className, size = 'icon-lg', title, ...props }: ComponentProps<typeof Button>) {
   return (
     <Tip label={title} side="bottom">
       <Button

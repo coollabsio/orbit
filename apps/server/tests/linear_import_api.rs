@@ -1211,7 +1211,10 @@ async fn reads_issues_page_by_page_and_goes_on_from_the_stored_page_after_a_long
 
     let import = h.view(&id).await;
     assert_eq!(import["status"], "importing", "{import}");
-    assert_eq!(import["progress"]["total"], 3, "the first page is stored: {import}");
+    assert_eq!(
+        import["progress"]["total"], 3,
+        "the first page is stored: {import}"
+    );
     assert_eq!(
         import["progress"]["done"], 2,
         "its tasks are imported at once, and ENG-3 waits for its parent: {import}"

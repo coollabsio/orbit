@@ -88,7 +88,11 @@ export function findConflicts(bindings: Bindings, id: string, keys: string): Com
     const otherKeys = bindings[other.id]
     if (other.id === id || !otherKeys || !contextsOverlap(command.context, other.context)) return false
     const otherSteps = parseKeys(otherKeys)?.map(toEngineStep)
-    return otherSteps !== undefined && (isPrefix(steps, otherSteps) || isPrefix(otherSteps, steps))
+    if (otherSteps === undefined) return false
+    // a page command that shadows a global one takes the same complete keys on purpose; the engine shadows only identical keys, so a prefix still collides
+    const shadowing = command.shadows === other.id || other.shadows === command.id
+    if (shadowing && steps.length === otherSteps.length && isPrefix(steps, otherSteps)) return false
+    return isPrefix(steps, otherSteps) || isPrefix(otherSteps, steps)
   })
 }
 

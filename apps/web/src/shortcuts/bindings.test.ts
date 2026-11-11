@@ -74,7 +74,14 @@ test('isReserved refuses browser shortcuts and bare modifiers', () => {
 
 test('findConflicts lists every command a key collides with', () => {
   const bindings = resolveBindings({})
-  expect(findConflicts(bindings, 'task.setStatus', 'G').length).toBe(11)
+  expect(findConflicts(bindings, 'task.setStatus', 'G').length).toBe(12)
   expect(findConflicts(bindings, 'task.setStatus', 'P').map((command) => command.id)).toEqual(['task.setPriority'])
   expect(findConflicts(bindings, 'task.setStatus', 'Q')).toEqual([])
+})
+
+test('a shadowing page command may take the same keys, but not a sequence that starts with them', () => {
+  const bindings = resolveBindings({})
+  expect(findConflicts(bindings, 'mail.search', '/').map((command) => command.id)).not.toContain('search.open')
+  expect(findConflicts(bindings, 'mail.search', '/ Q').map((command) => command.id)).toContain('search.open')
+  expect(findConflicts(bindings, 'search.open', '/ Q').map((command) => command.id)).toContain('mail.search')
 })

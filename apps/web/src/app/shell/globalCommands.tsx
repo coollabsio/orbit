@@ -3,6 +3,7 @@ import { useTheme } from '@/lib/themeContext'
 import type { CommandId } from '@/shortcuts/commands'
 import { useCommand } from '@/shortcuts/useCommand'
 import { useIsGuest } from '@/features/workspaces/permissions'
+import { useMailEnabled } from '@/features/mail/enabled'
 import { chatEnabled, docsHidden, guestMayOpen } from './productNavigation'
 
 /** Where each navigation command goes. */
@@ -15,6 +16,7 @@ export const NAVIGATION: ReadonlyArray<{ id: CommandId; to: string }> = [
   { id: 'nav.views', to: '/views' },
   { id: 'nav.docs', to: '/docs' },
   { id: 'nav.chat', to: '/chat' },
+  { id: 'nav.mail', to: '/mail' },
   { id: 'nav.trash', to: '/tasks-trash' },
   { id: 'nav.settings', to: '/settings' },
   { id: 'nav.profile', to: '/profile' },
@@ -29,7 +31,8 @@ function NavigationCommand({ id, to }: { id: CommandId; to: string }) {
 /** Mounts the navigation commands; one component each, so the list can change without breaking the rules of hooks. */
 export function NavigationCommands() {
   const guest = useIsGuest()
-  return NAVIGATION.filter(({ id, to }) => !(docsHidden && id === 'nav.docs') && !(id === 'nav.chat' && !chatEnabled) && !(guest && !guestMayOpen(to))).map((entry) => <NavigationCommand key={entry.id} {...entry} />)
+  const mail = useMailEnabled()
+  return NAVIGATION.filter(({ id, to }) => !(docsHidden && id === 'nav.docs') && !(id === 'nav.chat' && !chatEnabled) && !(id === 'nav.mail' && !mail) && !(guest && !guestMayOpen(to))).map((entry) => <NavigationCommand key={entry.id} {...entry} />)
 }
 
 /** The commands that work on every page of the app shell. */

@@ -1,0 +1,30 @@
+[package]
+name = "orbit-mail"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+ammonia = "4"
+base64 = "0.22"
+hmac = "0.12"
+idna = "1"
+mail-parser = { version = "0.11", features = ["full_encoding"] }
+ring = "0.17"
+mail-auth = { version = "0.13", default-features = false, features = ["ring"] }
+rsa = { version = "0.9", features = ["getrandom"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+rustls = { version = "0.23", default-features = false, features = ["logging", "ring", "std", "tls12"] }
+smtp-proto = "0.2"
+thiserror = "2"
+tokio = { version = "1", features = ["io-util", "rt", "time"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["logging", "ring", "tls12"] }
+tokio-util = "0.7"
+tracing = "0.1"
+x509-parser = "0.16"
+
+[dev-dependencies]
+rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem", "ring"] }
+tokio = { version = "1", features = ["macros", "rt", "time", "test-util"] }
