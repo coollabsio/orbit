@@ -63,12 +63,12 @@ export function applyChatEvents(queryClient: QueryClient, workspaceId: string, e
     if (event.type === 'thread.changed' || (event.type === 'message.created' && event.message.thread_root_id)) {
       void queryClient.invalidateQueries({ queryKey: chatQueryKeys.followedThreads(workspaceId) })
     }
-    // Unreads lists threads the user does not follow too: their replies send no thread state. Unmuting brings a
-    // conversation's threads back.
+    // Unreads lists threads the user does not follow too: their replies send no thread state. Unreads leaves out
+    // muted conversations; unmuting brings their threads back.
     const unmuted = event.type === 'state.changed' && event.state.notify !== 'muted' && wasMuted(event.state.conversation_id)
     if (
       event.type === 'thread.changed' ||
-      (event.type === 'message.created' && event.message.thread_root_id) ||
+      (event.type === 'message.created' && event.message.thread_root_id && !wasMuted(event.message.conversation_id)) ||
       (event.type === 'message.deleted' && event.thread_root_id) ||
       unmuted
     ) {

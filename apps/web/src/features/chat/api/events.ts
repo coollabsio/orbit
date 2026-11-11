@@ -289,11 +289,16 @@ function changedKeys(workspaceId: string, event: ChatEvent): (readonly unknown[]
 export function applyChatEvent(queryClient: QueryClient, workspaceId: string, event: ChatEvent) {
   applyAgainAfterFetch(queryClient, workspaceId, event)
   switch (event.type) {
-    case 'message.created':
+    case 'message.created': {
       messageCreated(queryClient, workspaceId, event.message)
-      // A reply in a thread the user does not follow sends no thread state: Unreads asks again.
-      if (event.message.threadRootId) void queryClient.invalidateQueries({ queryKey: chatKeys.unreadThreads(workspaceId) })
+      // A reply in a thread the user does not follow sends no thread state: Unreads asks again. Unreads leaves out
+      // muted conversations, and unmuting asks again (see `state.changed`).
+      const notify = queryClient
+        .getQueryData<ConversationState[]>(chatKeys.states(workspaceId))
+        ?.find((state) => state.conversationId === event.message.conversationId)?.notify
+      if (event.message.threadRootId && notify !== 'muted') void queryClient.invalidateQueries({ queryKey: chatKeys.unreadThreads(workspaceId) })
       break
+    }
     case 'message.updated':
       messageUpdated(queryClient, workspaceId, event.message)
       break

@@ -20,6 +20,7 @@ import type { User } from '@/features/workspaces/models'
 import { Shortcut } from '@/shortcuts/Shortcut'
 import { MessagePreview } from './MessagePreview'
 import { useMarkAllReadWithUndo } from './useMarkAllReadWithUndo'
+import { useNearViewport } from '@/features/tasks/lib/useNearViewport'
 
 /** The newest unread messages shown for each conversation; the rest is one click away. */
 const PREVIEW_LIMIT = 5
@@ -91,7 +92,8 @@ function UnreadGroup({ conversation, state, people }: UnreadConversation & { peo
 
 /**
  * One thread's unread replies, followed or not: the root for context, the newest few unread replies, "Mark as read" and
- * a link that opens the thread in full view. A reply that the channel's group shows too is left out here.
+ * a link that opens the thread in full view. A reply that the channel's group shows too is left out here. The replies load
+ * only near the screen, so a long list does not send one request per thread at once.
  */
 function ThreadGroup({
   conversation,
@@ -107,7 +109,8 @@ function ThreadGroup({
   const { currentUserId } = useChatContext()
   const navigation = useChatNavigation()
   const href = useHref(threadPath(thread.conversationId, thread.root.id))
-  const replies = useThread(thread.root.id)
+  const [sectionRef, near] = useNearViewport<HTMLElement>()
+  const replies = useThread(near ? thread.root.id : null)
   const markThreadRead = useMarkThreadRead()
   const title = conversationTitle(conversation, people, currentUserId ?? '')
   const cursor = thread.state.lastReadReplyId
@@ -126,7 +129,7 @@ function ThreadGroup({
   }
 
   return (
-    <section data-slot="unread-thread-group" aria-label={`Thread in ${title}`} className="flex flex-col gap-3 border-b px-4 py-3 max-[899px]:px-3">
+    <section ref={sectionRef} data-slot="unread-thread-group" aria-label={`Thread in ${title}`} className="flex flex-col gap-3 border-b px-4 py-3 max-[899px]:px-3">
       <div className="flex min-w-0 items-center gap-2">
         <a
           href={href}

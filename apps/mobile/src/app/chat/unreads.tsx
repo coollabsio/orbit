@@ -1,5 +1,5 @@
 import { router } from 'expo-router'
-import { Pressable, ScrollView, View } from 'react-native'
+import { FlatList, Pressable, View } from 'react-native'
 
 import { useMessageText } from '../../components/chat/MessageList'
 import { ChatPane, ConversationGlyph, MessagePreview } from '../../components/chat/Pane'
@@ -37,15 +37,19 @@ export default function UnreadsScreen() {
       ) : groups.length === 0 ? (
         <EmptyState icon="checkCircle" title="You're all caught up" description="New messages and thread replies in your channels and direct messages show here." />
       ) : (
-        <ScrollView refreshControl={<PullRefresh onRefresh={() => refresh()} />}>
-          {groups.map((group) =>
+        // a virtualized list mounts only the groups near the screen, so a long list does not load every thread at once
+        <FlatList
+          data={groups}
+          keyExtractor={(group) => (group.kind === 'thread' ? `thread-${group.thread.root.id}` : group.conversation.id)}
+          refreshControl={<PullRefresh onRefresh={() => refresh()} />}
+          renderItem={({ item: group }) =>
             group.kind === 'thread' ? (
-              <ThreadGroup key={`thread-${group.thread.root.id}`} conversation={group.conversation} thread={group.thread} channel={group.channel} />
+              <ThreadGroup conversation={group.conversation} thread={group.thread} channel={group.channel} />
             ) : (
-              <UnreadGroup key={group.conversation.id} conversation={group.conversation} state={group.state} />
-            ),
-          )}
-        </ScrollView>
+              <UnreadGroup conversation={group.conversation} state={group.state} />
+            )
+          }
+        />
       )}
     </ChatPane>
   )

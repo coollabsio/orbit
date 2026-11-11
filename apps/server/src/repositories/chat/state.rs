@@ -4,7 +4,7 @@
 use std::collections::HashSet;
 
 use orbit_platform::Id;
-use orbit_platform::Row;
+use orbit_platform::{Row, SqlBuilder};
 use serde::Serialize;
 use sqlx::AnyConnection;
 use utoipa::ToSchema;
@@ -21,6 +21,10 @@ use super::{
 
 /// Cursors that one `restore_read` call may put back.
 const MAX_RESTORE: usize = 1000;
+
+/// Conversations whose thread baselines go in one `unread_threads` query: two binds each, far
+/// below the bind limits of SQLite and Postgres.
+const BASELINE_CHUNK: usize = 500;
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct StateUpdate {
@@ -238,8 +242,9 @@ impl ChatRepository {
         finish(tx, events, state).await
     }
 
-    /// Reads every conversation and followed thread that has something unread. Returns their
-    /// states as they were, for `restore_read`.
+    /// Reads every conversation and thread that has something unread. Returns their states as
+    /// they were, for `restore_read`. It reads at most `MAX_RESTORE` threads, so that the undo
+    /// accepts the snapshot; the others stay unread for a next call.
     pub async fn mark_all_read(
         &self,
         workspace_id: Id,
@@ -297,6 +302,9 @@ impl ChatRepository {
         .await?;
         let mut threads = Vec::with_capacity(roots.len());
         for root_id in roots {
+            if threads.len() >= MAX_RESTORE {
+                break;
+            }
             let root_id = parse_id(root_id)?;
             let (Some(root), Some(member)) = (
                 load_message(&mut tx, root_id).await?,
@@ -323,6 +331,9 @@ impl ChatRepository {
         // Threads the caller does not follow: those of conversations it has not muted. A thread
         // without a row gets one, and its snapshot cursor puts the same replies back to unread.
         for thread in unread_threads(&mut tx, workspace_id, actor_id).await? {
+            if threads.len() >= MAX_RESTORE {
+                break;
+            }
             if thread.state.following {
                 continue;
             }
@@ -694,27 +705,38 @@ pub(super) async fn unread_threads(
     .bind(actor_id.to_string())
     .fetch_all(&mut *conn)
     .await?;
-    for member in &members {
-        let conversation_id = parse_id(member.get("conversation_id"))?;
-        let baseline = thread_baseline(member.get("joined_at"), member.get("threads_read_to"));
-        // `chat_messages_threads` (partial: `reply_count > 0`) finds the roots with a reply after
-        // the baseline.
-        let rows = sqlx::query(
-            "SELECT r.id, r.last_reply_id, \
-             (SELECT MAX(x.id) FROM chat_messages x WHERE x.thread_root_id = r.id AND x.id <= $2) \
-             AS cursor, \
-             (SELECT COUNT(*) FROM chat_messages x WHERE x.thread_root_id = r.id AND x.id > $2 \
-              AND x.author_id <> $3) AS unread \
-             FROM chat_messages r WHERE r.conversation_id = $1 AND r.reply_count > 0 \
-             AND r.last_reply_id > $2 AND r.thread_root_id IS NULL AND NOT EXISTS (SELECT 1 FROM chat_thread_members t \
-             WHERE t.root_id = r.id AND t.user_id = $3)",
+    // One query for each chunk of conversations, not one for each conversation: the baselines go
+    // in as a `VALUES` table. `chat_messages_threads` (partial: `reply_count > 0`) finds the roots
+    // with a reply after the baseline; `chat_messages_thread` serves the two subqueries.
+    for chunk in members.chunks(BASELINE_CHUNK) {
+        let mut sql = SqlBuilder::new("WITH b (conversation_id, baseline) AS (VALUES ");
+        for (index, member) in chunk.iter().enumerate() {
+            let conversation_id: String = member.get("conversation_id");
+            let baseline = thread_baseline(member.get("joined_at"), member.get("threads_read_to"));
+            sql.push(if index == 0 { "(" } else { ", (" })
+                .push_bind(conversation_id)
+                .push(", ")
+                .push_bind(baseline)
+                .push(")");
+        }
+        sql.push(
+            ") SELECT r.id, r.conversation_id, r.last_reply_id, \
+             (SELECT MAX(x.id) FROM chat_messages x WHERE x.thread_root_id = r.id \
+              AND x.id <= b.baseline) AS cursor, \
+             (SELECT COUNT(*) FROM chat_messages x WHERE x.thread_root_id = r.id \
+              AND x.id > b.baseline AND x.author_id <> ",
         )
-        .bind(conversation_id.to_string())
-        .bind(baseline)
-        .bind(actor_id.to_string())
-        .fetch_all(&mut *conn)
-        .await?;
-        for row in &rows {
+        .push_bind(actor_id.to_string())
+        .push(
+            ") AS unread \
+             FROM b JOIN chat_messages r ON r.conversation_id = b.conversation_id \
+             WHERE r.reply_count > 0 AND r.last_reply_id > b.baseline \
+             AND r.thread_root_id IS NULL AND NOT EXISTS (SELECT 1 FROM chat_thread_members t \
+             WHERE t.root_id = r.id AND t.user_id = ",
+        )
+        .push_bind(actor_id.to_string())
+        .push(")");
+        for row in &sql.build().fetch_all(&mut *conn).await? {
             let unread: i64 = row.get("unread");
             if unread == 0 {
                 continue;
@@ -722,7 +744,7 @@ pub(super) async fn unread_threads(
             threads.push(UnreadThread {
                 state: ThreadStateRecord {
                     root_id: parse_id(row.get("id"))?,
-                    conversation_id,
+                    conversation_id: parse_id(row.get("conversation_id"))?,
                     following: false,
                     last_read_reply_id: parse_optional_id(row.get("cursor"))?,
                     unread_replies: unread,
