@@ -12,7 +12,7 @@ import { useOrbit } from '../../../orbit-context'
 import { useConversations, useMembers } from '../../../queries'
 import { errorMessage } from '../../../session-context'
 import { alpha, useTheme } from '../../../theme'
-import { Button, Icon, IconButton, Input, Text } from '../../../ui'
+import { Button, Icon, IconButton, Input, Text, LabelTip } from '../../../ui'
 
 const INVITE_ROLES = [
   { value: 'admin', label: 'Admin' },
@@ -246,8 +246,7 @@ function GuestChannels({ value, onChange }: { value: readonly string[]; onChange
     .sort((a, b) => a.name.localeCompare(b.name))
   return (
     <View className="gap-1.5">
-      <FieldLabel>Channels</FieldLabel>
-      <Note>A guest sees only these private channels and the people in them.</Note>
+      <LabelTip label="Channels" text="A guest sees only these private channels and the people in them." />
       {conversations.isPending ? <Note>Loading channels…</Note> : null}
       {conversations.isError && !conversations.data ? (
         <View className="flex-row items-center gap-2">

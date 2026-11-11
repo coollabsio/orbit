@@ -2,7 +2,8 @@ import { useContext, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { ApiProblem } from '@orbit/api/problem'
 import { UnsavedBar } from '@/components/common/UnsavedBar'
-import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
+import { InfoTip } from '@/components/common/InfoTip'
+import { Field, FieldDescription, FieldError, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { PasswordInput } from '@/components/ui/password-input'
@@ -79,7 +80,7 @@ function AvatarField() {
         size={64}
       />
       <div className="flex min-w-0 flex-col gap-2">
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button type="button" variant="outline" disabled={setAvatar.isPending} onClick={() => inputRef.current?.click()}>
             {setAvatar.isPending ? 'Saving…' : me?.avatar_url ? 'Change picture' : 'Upload picture'}
           </Button>
@@ -88,12 +89,9 @@ function AvatarField() {
               Remove
             </Button>
           ) : null}
+          <InfoTip text="Cropped to a square. People in your workspaces see it." />
         </div>
-        {error ? (
-          <p className="text-xs text-destructive" role="alert">{error}</p>
-        ) : (
-          <p className="text-xs text-muted-foreground">Cropped to a square. People in your workspaces see it.</p>
-        )}
+        {error ? <p className="text-xs text-destructive" role="alert">{error}</p> : null}
       </div>
       <input
         ref={inputRef}
@@ -234,7 +232,7 @@ export function ProfilePage() {
                     <Input id="profile-pronouns" maxLength={PROFILE_LIMITS.pronouns} placeholder="she/her" value={form.pronouns} onChange={(e) => set({ pronouns: e.target.value })} />
                   </Field>
                   <Field data-invalid={phoneInvalid || undefined}>
-                    <FieldLabel htmlFor="profile-phone">Phone number</FieldLabel>
+                    <FieldLabel htmlFor="profile-phone">Phone number <InfoTip text="The people in your workspaces can see it." /></FieldLabel>
                     <Input
                       id="profile-phone"
                       type="tel"
@@ -245,9 +243,7 @@ export function ProfilePage() {
                       value={form.phone}
                       onChange={(e) => set({ phone: e.target.value })}
                     />
-                    <FieldDescription>
-                      {phoneInvalid ? 'Use digits, spaces and + - ( ) . only.' : 'The people in your workspaces can see it.'}
-                    </FieldDescription>
+                    {phoneInvalid ? <FieldError>Use digits, spaces and + - ( ) . only.</FieldError> : null}
                   </Field>
                   <Field>
                     <FieldLabel htmlFor="profile-timezone">Time zone</FieldLabel>

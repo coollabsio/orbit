@@ -10,7 +10,7 @@ import { type ImageSource, pickCustomImage, useCustomEmojiList, useEmojiWrites, 
 import { useOrbit } from '../../../orbit-context'
 import { useMembers } from '../../../queries'
 import { errorMessage } from '../../../session-context'
-import { Button, EmptyState, Input, Text } from '../../../ui'
+import { Button, EmptyState, Input, LabelTip, Text } from '../../../ui'
 
 /** The web's Emoji page: the workspace's custom emoji, add one from an image, delete one. Owners and administrators only (`chat.manage`). */
 export default function EmojiScreen() {
@@ -82,7 +82,7 @@ export default function EmojiScreen() {
     <SettingsShell title="Settings" nav={WORKSPACE_NAV} onRefresh={() => emoji.refetch()}>
       <SettingsCard title="Add emoji" description="Custom emoji are for everyone in this workspace: in chat messages and as reactions.">
         <View className="gap-4">
-          <ImageField file={file} description="PNG, JPEG, WebP or GIF, at most 256 KB." onPress={() => setChoosing(true)} />
+          <ImageField file={file} help="PNG, JPEG, WebP or GIF, at most 256 KB." onPress={() => setChoosing(true)} />
           <Input
             label="Name"
             required
@@ -95,7 +95,7 @@ export default function EmojiScreen() {
               setName(value.toLowerCase())
               setProblem(null)
             }}
-            description={`Lower case letters, digits and underscores. In a message, type :${name || 'name'}:`}
+            help={`Lower case letters, digits and underscores. In a message, type :${name || 'name'}:`}
           />
           <View className="flex-row flex-wrap items-center gap-3">
             <Button label="Add emoji" disabled={!file || !name || create.isPending} onPress={submit} />
@@ -154,13 +154,10 @@ export default function EmojiScreen() {
 }
 
 /** The web's file `Input`: a field with "Choose File" and the chosen name, the label above and the help below. */
-function ImageField({ file, description, onPress }: { file: PickedImage | null; description: string; onPress: () => void }) {
+function ImageField({ file, help, onPress }: { file: PickedImage | null; help: string; onPress: () => void }) {
   return (
     <View className="gap-2">
-      <Text className="font-noto-medium text-[14px] leading-[19.25px]">
-        Image
-        <Text className="font-noto-semibold text-[14px] leading-[19.25px] text-primary">{'  *'}</Text>
-      </Text>
+      <LabelTip label="Image" text={help} required />
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={file ? `Image: ${file.name}. Choose another` : 'Choose an image'}
@@ -172,7 +169,6 @@ function ImageField({ file, description, onPress }: { file: PickedImage | null; 
           {file ? file.name : 'No file chosen'}
         </Text>
       </Pressable>
-      <Text className="text-[14px] leading-[21px] text-muted-foreground">{description}</Text>
     </View>
   )
 }

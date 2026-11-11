@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { InfoTip } from '@/components/common/InfoTip'
 import { LoadingScreen } from '@/components/common/LoadingScreen'
 import { AccessPicker, ProjectPicker, type ScopeResource } from '@/components/common/ScopeAccess'
 import { AuthBrand, AuthCard } from '@/features/auth/components/AuthForm'
@@ -88,12 +89,12 @@ export function OAuthConsentPage() {
         <SelectContent>{workspaces.map(([id, name]) => <SelectItem key={id} value={id}>{name}</SelectItem>)}</SelectContent>
       </Select></Label>
       <AccessPicker id="consent-access" resources={RESOURCES.map((resource) => resource.name === 'Tasks' ? { ...resource, details: <ProjectPicker id="consent-projects" projects={workspaceProjects} selected={selected} onChange={setSelected} all={allProjects} onAllChange={setAllProjects} empty={workspaces.length ? undefined : 'No active projects are available to your account.'} /> } : resource)} scopes={scopes} onChange={setScopes} />
-      <div className="grid gap-2">
+      <div className="flex items-center gap-1.5">
         <Label className="flex items-center gap-2">
           <Checkbox checked={remote} disabled={approve.isPending} onCheckedChange={(checked) => setRemote(Boolean(checked))} />
           Client runs on a remote server
         </Label>
-        <p className="text-xs text-muted-foreground">Use --no-browser when you start sign-in in Claude or Codex. Orbit will show a callback URL to paste into that terminal.</p>
+        <InfoTip text="Use --no-browser when you start sign-in in Claude or Codex. Orbit will show a callback URL to paste into that terminal." />
       </div>
       {approve.isError ? <p role="alert" className="text-sm text-destructive">{approve.error.message}</p> : null}
       <div className="flex gap-3">

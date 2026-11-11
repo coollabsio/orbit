@@ -5,7 +5,7 @@ import { confirmAction } from '@/components/common/confirmAction'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
-import { Field, FieldContent, FieldDescription, FieldLabel, FieldTitle } from '@/components/ui/field'
+import { Field, FieldContent, FieldLabel, FieldTitle } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { relativeTime, shortDate } from '@/lib/format'
@@ -13,6 +13,7 @@ import { useCan } from '@/features/workspaces/permissions'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { useProjects } from '@/features/tasks/api/projects'
 import { SettingsCard } from '@/components/common/SettingsCard'
+import { InfoTip } from '@/components/common/InfoTip'
 import { AccessPicker, ProjectPicker, type ScopeResource } from '@/components/common/ScopeAccess'
 import { FieldGrid, RequiredMark, RowIcon, SettingsRow } from '@/features/settings/components/SettingsParts'
 import { useApiTokens, useCreateApiToken, useRevokeApiToken } from '@/features/settings/api/apiTokens'
@@ -115,7 +116,7 @@ export function ApiTokensPage() {
           </Select>
         </Field>
         {canManage ? <Field className="min-[900px]:col-span-2">
-          <FieldLabel htmlFor="api-token-kind">Token type</FieldLabel>
+          <FieldLabel htmlFor="api-token-kind" className="items-center gap-1.5">Token type {kindDescription ? <InfoTip text={kindDescription} /> : null}</FieldLabel>
           <Select items={TOKEN_KINDS} value={kind} onValueChange={(value) => setKind(value as TokenKind)}>
             <SelectTrigger id="api-token-kind" aria-label="Token type">
               <SelectValue />
@@ -124,7 +125,6 @@ export function ApiTokensPage() {
               {TOKEN_KINDS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
             </SelectContent>
           </Select>
-          <FieldDescription>{kindDescription}</FieldDescription>
         </Field> : null}
         {access ? <>
         {/* a choice card: the whole card toggles the checkbox and tints while checked */}
@@ -132,8 +132,7 @@ export function ApiTokensPage() {
           <Field orientation="horizontal">
             <Checkbox checked={serviceAccount} onCheckedChange={selectServiceAccount} />
             <FieldContent>
-              <FieldTitle>Use a service account</FieldTitle>
-              <FieldDescription>For bots, such as a Discord bot. Changes show as made by this account, not by you. Tokens with the same name share one account.</FieldDescription>
+              <FieldTitle className="gap-1.5">Use a service account <InfoTip text="For bots, such as a Discord bot. Changes show as made by this account, not by you. Tokens with the same name share one account." /></FieldTitle>
             </FieldContent>
           </Field>
         </FieldLabel>
