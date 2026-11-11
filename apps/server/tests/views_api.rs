@@ -1547,3 +1547,92 @@ async fn views_store_the_sub_issues_display_and_default_it_to_nested() {
         .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
 }
+
+impl Fixture {
+    /// A live project of the fixture workspace.
+    async fn add_project(&self, name: &str, key: &str) -> String {
+        let id = Id::new_v7().to_string();
+        let now = TimestampMillis::now().as_millis();
+        sqlx::query(
+            "INSERT INTO projects (id, workspace_id, name, project_key, color, created_at, updated_at) \
+             VALUES ($1, $2, $3, $4, '#888888', $5, $6)",
+        )
+        .bind(&id)
+        .bind(&self.workspace_id)
+        .bind(name)
+        .bind(key)
+        .bind(now)
+        .bind(now)
+        .execute(self.database.pool())
+        .await
+        .unwrap();
+        id
+    }
+
+    async fn project_order(&self, cookie: &str) -> Value {
+        let (status, body) = self.call("GET", "/project-order", cookie, None).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        body["project_ids"].clone()
+    }
+
+    async fn put_project_order(&self, cookie: &str, ids: Value) -> (StatusCode, Value) {
+        self.call(
+            "PUT",
+            "/project-order",
+            cookie,
+            Some(json!({"project_ids": ids})),
+        )
+        .await
+    }
+}
+
+#[tokio::test]
+async fn each_member_keeps_their_own_project_order() {
+    let fixture = Fixture::new().await;
+    let owner = fixture.owner_cookie.clone();
+    let (_, member) = fixture
+        .add_user("member@example.com", "Member", Some("member"))
+        .await;
+    let a = fixture.add_project("Alpha", "ALP").await;
+    let b = fixture.add_project("Beta", "BET").await;
+    assert_eq!(fixture.project_order(&owner).await, json!([]));
+
+    let (status, body) = fixture.put_project_order(&owner, json!([b, a])).await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+    assert_eq!(fixture.project_order(&owner).await, json!([b, a]));
+    // another member's sidebar is not changed
+    assert_eq!(fixture.project_order(&member).await, json!([]));
+    assert_eq!(
+        fixture.put_project_order(&member, json!([a])).await.0,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(fixture.project_order(&member).await, json!([a]));
+    assert_eq!(fixture.project_order(&owner).await, json!([b, a]));
+
+    // a trashed project leaves the order and cannot be placed
+    sqlx::query("UPDATE projects SET deleted_at = 1 WHERE id = $1")
+        .bind(&b)
+        .execute(fixture.database.pool())
+        .await
+        .unwrap();
+    assert_eq!(fixture.project_order(&owner).await, json!([a]));
+    for bad in [
+        json!([a, b]),
+        json!([a, a]),
+        json!([Id::new_v7().to_string()]),
+        json!(["not-an-id"]),
+    ] {
+        let (status, problem) = fixture.put_project_order(&owner, bad).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{problem}");
+        assert_eq!(problem["detail"], "project_ids");
+    }
+    assert_eq!(fixture.project_order(&owner).await, json!([a]));
+
+    let (_, outsider) = fixture.add_user("out@example.com", "Out", None).await;
+    let (status, _) = fixture.call("GET", "/project-order", &outsider, None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(
+        fixture.put_project_order(&outsider, json!([])).await.0,
+        StatusCode::NOT_FOUND
+    );
+}

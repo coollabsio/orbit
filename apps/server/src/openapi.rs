@@ -225,6 +225,8 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::view_routes::reorder_view_favorites,
         crate::view_routes::get_view_preference,
         crate::view_routes::put_view_preference,
+        crate::view_routes::get_project_order,
+        crate::view_routes::put_project_order,
         crate::attachment_routes::list_task_attachments,
         crate::attachment_routes::list_comment_attachments,
         crate::attachment_routes::upload_task_attachments,
@@ -1363,6 +1365,7 @@ fn invalid_request_operation(operation_id: &str) -> bool {
             | "update_view"
             | "reorder_view_favorites"
             | "put_view_preference"
+            | "put_project_order"
             | "create_page"
             | "update_page"
             | "move_page"
@@ -1804,6 +1807,8 @@ fn view_operation(operation_id: &str) -> bool {
             | "reorder_view_favorites"
             | "get_view_preference"
             | "put_view_preference"
+            | "get_project_order"
+            | "put_project_order"
     )
 }
 
@@ -1816,6 +1821,7 @@ fn view_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec<&'
             | "reorder_view_favorites"
             | "get_view_preference"
             | "put_view_preference"
+            | "put_project_order"
     ) {
         add_code(responses, "422", "validation_failed");
     }

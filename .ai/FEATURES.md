@@ -34,6 +34,7 @@ Mail persists too (receiving and a read-only web client: domains, mailboxes, thr
 Core files: `TasksPage.tsx`, `components/TaskList.tsx`, `components/TaskBoard.tsx`, `components/TaskDetail.tsx`, `ProjectSettingsPage.tsx`.
 
 - Project rail: color square, project name, hover settings gear.
+- Sidebar project order is per member (`project_positions`, migration 0099, `GET`/`PUT /project-order`): drag a project row or press Alt+Arrow on it (web), long-press → Move up / Move down (mobile drawer). Projects not placed yet follow by name; the API project list stays by name.
 - The task-list title is a project picker: All tasks or any project can be selected without opening the project rail.
 - List and Kanban layouts share filtering and sorting.
 - Sorting: manual, priority, created, updated, title.
@@ -604,7 +605,7 @@ MessageItem,MailHtmlFrame,SafetyBanner,MailSearch}.tsx`), settings in `features/
 Design: `docs/superpowers/specs/2026-10-23-mail-slice-1-design.md` (local file). Operator guide:
 `docs/operations.md#mail`.
 
-Slice 1 receives and reads mail; it does not send. Server (migration 0099):
+Slice 1 receives and reads mail; it does not send. Server (migration 0100):
 
 - Provider intake (`mail_delivery.rs`, `mail_routes/{inbound,providers}.rs`, `crates/mail/src/inbound/`): Cloudflare,
   Postmark, Mailgun, Resend and SES post to `/api/v1/mail/inbound/{kind}/{id}`; instance and workspace providers
