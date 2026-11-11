@@ -253,11 +253,19 @@ async fn api(State(state): State<Shared>, request: Request<Body>) -> Response {
     }
     if path == "graphql" {
         state.graphql_accepts.push(accept);
-        let reply = state
+        // Answers for one needle are used in order; the last one stays for every later request.
+        let matching: Vec<usize> = state
             .graphql
             .iter()
-            .find(|(needle, _)| query.contains(needle.as_str()))
-            .map(|(_, body)| body.clone());
+            .enumerate()
+            .filter(|(_, (needle, _))| query.contains(needle.as_str()))
+            .map(|(index, _)| index)
+            .collect();
+        let reply = match matching.as_slice() {
+            [] => None,
+            [only] => Some(state.graphql[*only].1.clone()),
+            [first, ..] => Some(state.graphql.remove(*first).1),
+        };
         return match reply {
             Some(body) => Json(body).into_response(),
             None => Json(json!({ "errors": [{ "type": "NOT_FOUND", "message": "no fake answer" }] })).into_response(),

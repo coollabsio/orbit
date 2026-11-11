@@ -234,6 +234,7 @@ async fn outdated_thread_has_null_line() {
         }],
         "pageInfo": { "hasNextPage": false, "endCursor": null }
     } } } }));
+    fixture.github.graphql("query PendingReview", json!({ "repository": { "pullRequest": { "reviews": { "nodes": [] } } } }));
     let response = fixture.get(&pull_path(&fixture, "/threads")).await;
     assert_eq!(response.status(), StatusCode::OK);
     let body = json_body(response).await;

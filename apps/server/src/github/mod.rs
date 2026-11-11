@@ -2,6 +2,7 @@
 //! GitHub App user token (see [`user_tokens`]); GitHub then applies that person's own permissions.
 
 pub mod pulls;
+pub mod reviews;
 pub mod user_tokens;
 
 use std::time::Duration;

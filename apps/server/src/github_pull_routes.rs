@@ -202,10 +202,13 @@ pub(crate) async fn list_github_pull_threads(
     let id = request_id(request.as_ref());
     let access = pull_access(&state, &headers, &workspace, &owner, &repo, number, id).await?;
     match pulls::threads(&github(&state, id)?, &access.token.token, &access.pull).await {
-        Ok(threads) => Ok(Json(PullThreads {
-            threads,
-            pending_review: None,
-        })),
+        Ok(threads) => {
+            let pending = reviews::pending_review(&github(&state, id)?, &access.token.token, &access.pull).await;
+            match pending {
+                Ok(pending_review) => Ok(Json(PullThreads { threads, pending_review })),
+                Err(error) => Err(github_failed(&state, &access, error, id).await),
+            }
+        }
         Err(error) => Err(github_failed(&state, &access, error, id).await),
     }
 }
@@ -353,5 +356,221 @@ pub(crate) async fn list_github_project_pulls(
             }
             Err(error.into_api(id))
         }
+    }
+}
+
+// ---- writes (plan 3): comments, threads, review, merge, branch ----
+
+use crate::github::pulls::{ReviewComment, ReviewThread};
+use crate::github::reviews::{self, MergePull, MergeResult, NewReviewComment, ReviewRefusal, SubmitReview, valid_node_id};
+
+fn unprocessable(code: &str, title: &str, detail: &str, request_id: Option<&RequestId>) -> ApiError {
+    ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, code, title, detail, request_id)
+}
+
+type NodePath = Path<(String, String, String, i64, String)>;
+
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/github/pulls/{owner}/{repo}/{number}/comments", params(("workspace_id" = String, Path), ("owner" = String, Path), ("repo" = String, Path), ("number" = i64, Path)), request_body = NewReviewComment, responses((status = 200, body = ReviewThread)))]
+pub(crate) async fn create_github_review_comment(
+    State(state): State<IntegrationState>,
+    Path((workspace, owner, repo, number)): PullPath,
+    headers: HeaderMap,
+    request: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<NewReviewComment>,
+) -> Result<Json<ReviewThread>, ApiError> {
+    let id = request_id(request.as_ref());
+    let access = pull_access(&state, &headers, &workspace, &owner, &repo, number, id).await?;
+    if !body.valid() {
+        return Err(unprocessable("invalid_review_comment", "Invalid comment", "Give a side (LEFT or RIGHT), a line, a body and a mode (pending or single).", id));
+    }
+    match reviews::add_comment(&github(&state, id)?, &access.token.token, &access.pull, &body).await {
+        Ok(thread) => Ok(Json(thread)),
+        Err(error) => Err(github_failed(&state, &access, error, id).await),
+    }
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+#[schema(as = GithubCommentBody)]
+pub struct CommentBody {
+    /// Markdown.
+    body: String,
+}
+
+fn check_body(body: &CommentBody, request_id: Option<&RequestId>) -> Result<(), ApiError> {
+    if body.body.trim().is_empty() || body.body.len() > 65_536 {
+        return Err(unprocessable("invalid_review_comment", "Invalid comment", "Write a comment first.", request_id));
+    }
+    Ok(())
+}
+
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/github/pulls/{owner}/{repo}/{number}/threads/{thread_id}/replies", params(("workspace_id" = String, Path), ("owner" = String, Path), ("repo" = String, Path), ("number" = i64, Path), ("thread_id" = String, Path)), request_body = CommentBody, responses((status = 200, body = ReviewComment)))]
+pub(crate) async fn reply_github_review_thread(
+    State(state): State<IntegrationState>,
+    Path((workspace, owner, repo, number, thread)): NodePath,
+    headers: HeaderMap,
+    request: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<CommentBody>,
+) -> Result<Json<ReviewComment>, ApiError> {
+    let id = request_id(request.as_ref());
+    let access = pull_access(&state, &headers, &workspace, &owner, &repo, number, id).await?;
+    if !valid_node_id(&thread) {
+        return Err(not_found(id));
+    }
+    check_body(&body, id)?;
+    match reviews::reply(&github(&state, id)?, &access.token.token, &access.pull, &thread, &body.body).await {
+        Ok(comment) => Ok(Json(comment)),
+        Err(error) => Err(github_failed(&state, &access, error, id).await),
+    }
+}
+
+#[utoipa::path(patch, path = "/api/v1/workspaces/{workspace_id}/github/pulls/{owner}/{repo}/{number}/comments/{comment_id}", params(("workspace_id" = String, Path), ("owner" = String, Path), ("repo" = String, Path), ("number" = i64, Path), ("comment_id" = String, Path)), request_body = CommentBody, responses((status = 200, body = ReviewComment)))]
+pub(crate) async fn update_github_review_comment(
+    State(state): State<IntegrationState>,
+    Path((workspace, owner, repo, number, comment)): NodePath,
+    headers: HeaderMap,
+    request: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<CommentBody>,
+) -> Result<Json<ReviewComment>, ApiError> {
+    let id = request_id(request.as_ref());
+    let access = pull_access(&state, &headers, &workspace, &owner, &repo, number, id).await?;
+    if !valid_node_id(&comment) {
+        return Err(not_found(id));
+    }
+    check_body(&body, id)?;
+    match reviews::update_comment(&github(&state, id)?, &access.token.token, &comment, &body.body).await {
+        Ok(comment) => Ok(Json(comment)),
+        Err(error) => Err(github_failed(&state, &access, error, id).await),
+    }
+}
+
+#[utoipa::path(delete, path = "/api/v1/workspaces/{workspace_id}/github/pulls/{owner}/{repo}/{number}/comments/{comment_id}", params(("workspace_id" = String, Path), ("owner" = String, Path), ("repo" = String, Path), ("number" = i64, Path), ("comment_id" = String, Path)), responses((status = 204, description = "Deleted on GitHub")))]
+pub(crate) async fn delete_github_review_comment(
+    State(state): State<IntegrationState>,
+    Path((workspace, owner, repo, number, comment)): NodePath,
+    headers: HeaderMap,
+    request: Option<Extension<RequestId>>,
+) -> Result<StatusCode, ApiError> {
+    let id = request_id(request.as_ref());
+    let access = pull_access(&state, &headers, &workspace, &owner, &repo, number, id).await?;
+    if !valid_node_id(&comment) {
+        return Err(not_found(id));
+    }
+    match reviews::delete_comment(&github(&state, id)?, &access.token.token, &comment).await {
+        Ok(()) => Ok(StatusCode::NO_CONTENT),
+        Err(error) => Err(github_failed(&state, &access, error, id).await),
+    }
+}
+
+async fn set_resolved(
+    state: IntegrationState,
+    (workspace, owner, repo, number, thread): (String, String, String, i64, String),
+    headers: HeaderMap,
+    request: Option<Extension<RequestId>>,
+    resolved: bool,
+) -> Result<Json<ReviewThread>, ApiError> {
+    let id = request_id(request.as_ref());
+    let access = pull_access(&state, &headers, &workspace, &owner, &repo, number, id).await?;
+    if !valid_node_id(&thread) {
+        return Err(not_found(id));
+    }
+    match reviews::set_resolved(&github(&state, id)?, &access.token.token, &thread, resolved).await {
+        Ok(thread) => Ok(Json(thread)),
+        Err(error) => Err(github_failed(&state, &access, error, id).await),
+    }
+}
+
+#[utoipa::path(put, path = "/api/v1/workspaces/{workspace_id}/github/pulls/{owner}/{repo}/{number}/threads/{thread_id}/resolved", params(("workspace_id" = String, Path), ("owner" = String, Path), ("repo" = String, Path), ("number" = i64, Path), ("thread_id" = String, Path)), responses((status = 200, body = ReviewThread)))]
+pub(crate) async fn resolve_github_review_thread(
+    State(state): State<IntegrationState>,
+    Path(path): NodePath,
+    headers: HeaderMap,
+    request: Option<Extension<RequestId>>,
+) -> Result<Json<ReviewThread>, ApiError> {
+    set_resolved(state, path, headers, request, true).await
+}
+
+#[utoipa::path(delete, path = "/api/v1/workspaces/{workspace_id}/github/pulls/{owner}/{repo}/{number}/threads/{thread_id}/resolved", params(("workspace_id" = String, Path), ("owner" = String, Path), ("repo" = String, Path), ("number" = i64, Path), ("thread_id" = String, Path)), responses((status = 200, body = ReviewThread)))]
+pub(crate) async fn unresolve_github_review_thread(
+    State(state): State<IntegrationState>,
+    Path(path): NodePath,
+    headers: HeaderMap,
+    request: Option<Extension<RequestId>>,
+) -> Result<Json<ReviewThread>, ApiError> {
+    set_resolved(state, path, headers, request, false).await
+}
+
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/github/pulls/{owner}/{repo}/{number}/review", params(("workspace_id" = String, Path), ("owner" = String, Path), ("repo" = String, Path), ("number" = i64, Path)), request_body = SubmitReview, responses((status = 204, description = "Review submitted on GitHub")))]
+pub(crate) async fn submit_github_review(
+    State(state): State<IntegrationState>,
+    Path((workspace, owner, repo, number)): PullPath,
+    headers: HeaderMap,
+    request: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<SubmitReview>,
+) -> Result<StatusCode, ApiError> {
+    let id = request_id(request.as_ref());
+    let access = pull_access(&state, &headers, &workspace, &owner, &repo, number, id).await?;
+    if !matches!(body.event.as_str(), "COMMENT" | "APPROVE" | "REQUEST_CHANGES") || body.body.len() > 65_536 {
+        return Err(unprocessable("invalid_review", "Invalid review", "Choose Comment, Approve or Request changes.", id));
+    }
+    match reviews::submit_review(&github(&state, id)?, &access.token.token, &access.pull, &body).await {
+        Ok(Ok(())) => Ok(StatusCode::NO_CONTENT),
+        Ok(Err(ReviewRefusal::OwnPull)) => Err(unprocessable("cannot_review_own_pull", "Your own pull request", "You cannot approve or request changes on your own pull request.", id)),
+        Ok(Err(ReviewRefusal::Empty)) => Err(unprocessable("review_empty", "Empty review", "Write a summary or add comments first.", id)),
+        Err(error) => Err(github_failed(&state, &access, error, id).await),
+    }
+}
+
+#[utoipa::path(delete, path = "/api/v1/workspaces/{workspace_id}/github/pulls/{owner}/{repo}/{number}/review", params(("workspace_id" = String, Path), ("owner" = String, Path), ("repo" = String, Path), ("number" = i64, Path)), responses((status = 204, description = "Pending review discarded")))]
+pub(crate) async fn discard_github_review(
+    State(state): State<IntegrationState>,
+    Path((workspace, owner, repo, number)): PullPath,
+    headers: HeaderMap,
+    request: Option<Extension<RequestId>>,
+) -> Result<StatusCode, ApiError> {
+    let id = request_id(request.as_ref());
+    let access = pull_access(&state, &headers, &workspace, &owner, &repo, number, id).await?;
+    match reviews::discard_review(&github(&state, id)?, &access.token.token, &access.pull).await {
+        Ok(true) => Ok(StatusCode::NO_CONTENT),
+        Ok(false) => Err(ApiError::new(StatusCode::NOT_FOUND, "no_pending_review", "No pending review", "You have no pending review on this pull request.", id)),
+        Err(error) => Err(github_failed(&state, &access, error, id).await),
+    }
+}
+
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/github/pulls/{owner}/{repo}/{number}/merge", params(("workspace_id" = String, Path), ("owner" = String, Path), ("repo" = String, Path), ("number" = i64, Path)), request_body = MergePull, responses((status = 200, body = MergeResult)))]
+pub(crate) async fn merge_github_pull(
+    State(state): State<IntegrationState>,
+    Path((workspace, owner, repo, number)): PullPath,
+    headers: HeaderMap,
+    request: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<MergePull>,
+) -> Result<Json<MergeResult>, ApiError> {
+    let id = request_id(request.as_ref());
+    let access = pull_access(&state, &headers, &workspace, &owner, &repo, number, id).await?;
+    let sha_ok = (1..=64).contains(&body.expected_head_sha.len()) && body.expected_head_sha.bytes().all(|c| c.is_ascii_alphanumeric());
+    if !matches!(body.method.as_str(), "merge" | "squash" | "rebase") || !sha_ok {
+        return Err(unprocessable("invalid_merge", "Invalid merge", "Choose merge, squash or rebase.", id));
+    }
+    match reviews::merge(&github(&state, id)?, &access.token.token, &access.pull, &body).await {
+        Ok(result) => Ok(Json(result)),
+        Err(GithubError::Conflict(_)) => Err(ApiError::new(StatusCode::CONFLICT, "pull_head_changed", "New commits", "New commits were pushed. Refresh before you merge.", id)),
+        Err(GithubError::MethodNotAllowed(message)) => Err(unprocessable("merge_blocked", "Cannot merge", &format!("GitHub says: {message}"), id)),
+        Err(error) => Err(github_failed(&state, &access, error, id).await),
+    }
+}
+
+#[utoipa::path(delete, path = "/api/v1/workspaces/{workspace_id}/github/pulls/{owner}/{repo}/{number}/branch", params(("workspace_id" = String, Path), ("owner" = String, Path), ("repo" = String, Path), ("number" = i64, Path)), responses((status = 204, description = "Head branch deleted")))]
+pub(crate) async fn delete_github_pull_branch(
+    State(state): State<IntegrationState>,
+    Path((workspace, owner, repo, number)): PullPath,
+    headers: HeaderMap,
+    request: Option<Extension<RequestId>>,
+) -> Result<StatusCode, ApiError> {
+    let id = request_id(request.as_ref());
+    let access = pull_access(&state, &headers, &workspace, &owner, &repo, number, id).await?;
+    match reviews::delete_branch(&github(&state, id)?, &access.token.token, &access.pull).await {
+        Ok(true) => Ok(StatusCode::NO_CONTENT),
+        Ok(false) => Err(unprocessable("branch_not_deletable", "Branch stays", "Only the branch of a merged pull request in this repository can be deleted here.", id)),
+        Err(error) => Err(github_failed(&state, &access, error, id).await),
     }
 }

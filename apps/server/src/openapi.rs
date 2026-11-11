@@ -180,6 +180,16 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::github_pull_routes::list_github_pull_threads,
         crate::github_pull_routes::list_github_pull_conversation,
         crate::github_pull_routes::get_github_pull_merge_base,
+        crate::github_pull_routes::create_github_review_comment,
+        crate::github_pull_routes::update_github_review_comment,
+        crate::github_pull_routes::delete_github_review_comment,
+        crate::github_pull_routes::reply_github_review_thread,
+        crate::github_pull_routes::resolve_github_review_thread,
+        crate::github_pull_routes::unresolve_github_review_thread,
+        crate::github_pull_routes::submit_github_review,
+        crate::github_pull_routes::discard_github_review,
+        crate::github_pull_routes::merge_github_pull,
+        crate::github_pull_routes::delete_github_pull_branch,
         crate::github_pull_routes::mark_github_file_viewed,
         crate::github_pull_routes::unmark_github_file_viewed,
         crate::task_routes::list_projects,
@@ -924,6 +934,16 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
         | "list_github_pull_threads"
         | "list_github_pull_conversation"
         | "get_github_pull_merge_base"
+        | "create_github_review_comment"
+        | "update_github_review_comment"
+        | "delete_github_review_comment"
+        | "reply_github_review_thread"
+        | "resolve_github_review_thread"
+        | "unresolve_github_review_thread"
+        | "submit_github_review"
+        | "discard_github_review"
+        | "merge_github_pull"
+        | "delete_github_pull_branch"
         | "mark_github_file_viewed"
         | "unmark_github_file_viewed" => {
             add_code(&mut responses, "403", "github_forbidden");
@@ -937,6 +957,24 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             add_code(&mut responses, "422", "github_refused");
             add_code(&mut responses, "429", "github_rate_limited");
             add_code(&mut responses, "502", "github_unavailable");
+            match operation_id {
+                "create_github_review_comment" | "reply_github_review_thread" | "update_github_review_comment" => {
+                    add_code(&mut responses, "422", "invalid_review_comment");
+                }
+                "submit_github_review" => {
+                    add_code(&mut responses, "422", "invalid_review");
+                    add_code(&mut responses, "422", "cannot_review_own_pull");
+                    add_code(&mut responses, "422", "review_empty");
+                }
+                "discard_github_review" => add_code(&mut responses, "404", "no_pending_review"),
+                "merge_github_pull" => {
+                    add_code(&mut responses, "409", "pull_head_changed");
+                    add_code(&mut responses, "422", "invalid_merge");
+                    add_code(&mut responses, "422", "merge_blocked");
+                }
+                "delete_github_pull_branch" => add_code(&mut responses, "422", "branch_not_deletable"),
+                _ => {}
+            }
         }
         "finish_github_connection" => {
             add_code(&mut responses, "403", "github_connect_mismatch");

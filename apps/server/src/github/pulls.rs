@@ -605,17 +605,32 @@ pub async fn contents(
     Ok(FileContents { text })
 }
 
-const THREADS_QUERY: &str = "query PullThreads($owner: String!, $repo: String!, $number: Int!, $after: String) {
-  repository(owner: $owner, name: $repo) { pullRequest(number: $number) {
-    reviewThreads(first: 100, after: $after) {
-      nodes {
-        id path line startLine diffSide startDiffSide isResolved isOutdated viewerCanResolve viewerCanReply
-        comments(first: 100) { nodes { id databaseId body createdAt state viewerCanUpdate author { login avatarUrl } } }
-      }
-      pageInfo { hasNextPage endCursor }
-    }
-  } }
-}";
+/// The fields of a review thread and of a review comment, for every query and mutation that returns them.
+macro_rules! comment_fields {
+    () => {
+        "id databaseId body createdAt state viewerCanUpdate author { login avatarUrl }"
+    };
+}
+macro_rules! thread_fields {
+    () => {
+        concat!(
+            "id path line startLine diffSide startDiffSide isResolved isOutdated viewerCanResolve viewerCanReply ",
+            "comments(first: 100) { nodes { ",
+            comment_fields!(),
+            " } }"
+        )
+    };
+}
+pub(crate) use {comment_fields, thread_fields};
+
+const THREADS_QUERY: &str = concat!(
+    "query PullThreads($owner: String!, $repo: String!, $number: Int!, $after: String) {\n",
+    "  repository(owner: $owner, name: $repo) { pullRequest(number: $number) {\n",
+    "    reviewThreads(first: 100, after: $after) { nodes { ",
+    thread_fields!(),
+    " } pageInfo { hasNextPage endCursor } }\n",
+    "  } }\n}"
+);
 
 pub async fn threads(github: &GithubClient, token: &str, pull: &PullRef) -> Result<Vec<ReviewThread>, GithubError> {
     let mut threads = Vec::new();
@@ -626,25 +641,7 @@ pub async fn threads(github: &GithubClient, token: &str, pull: &PullRef) -> Resu
         let data: Value = github.graphql(token, THREADS_QUERY, variables).await?;
         let page = &data["repository"]["pullRequest"]["reviewThreads"];
         for node in page["nodes"].as_array().map(Vec::as_slice).unwrap_or_default() {
-            threads.push(ReviewThread {
-                id: text(&node["id"]),
-                path: text(&node["path"]),
-                side: node["diffSide"].as_str().unwrap_or("RIGHT").to_owned(),
-                line: node["line"].as_i64(),
-                start_line: node["startLine"].as_i64(),
-                start_side: node["startDiffSide"].as_str().map(str::to_owned),
-                is_resolved: node["isResolved"].as_bool().unwrap_or(false),
-                is_outdated: node["isOutdated"].as_bool().unwrap_or(false),
-                can_resolve: node["viewerCanResolve"].as_bool().unwrap_or(false),
-                can_reply: node["viewerCanReply"].as_bool().unwrap_or(false),
-                comments: node["comments"]["nodes"]
-                    .as_array()
-                    .map(Vec::as_slice)
-                    .unwrap_or_default()
-                    .iter()
-                    .map(review_comment)
-                    .collect(),
-            });
+            threads.push(review_thread(node));
         }
         if page["pageInfo"]["hasNextPage"] != true {
             break;
@@ -652,6 +649,29 @@ pub async fn threads(github: &GithubClient, token: &str, pull: &PullRef) -> Resu
         after = page["pageInfo"]["endCursor"].clone();
     }
     Ok(threads)
+}
+
+/// One GraphQL `PullRequestReviewThread` (see `thread_fields!`).
+pub fn review_thread(node: &Value) -> ReviewThread {
+    ReviewThread {
+        id: text(&node["id"]),
+        path: text(&node["path"]),
+        side: node["diffSide"].as_str().unwrap_or("RIGHT").to_owned(),
+        line: node["line"].as_i64(),
+        start_line: node["startLine"].as_i64(),
+        start_side: node["startDiffSide"].as_str().map(str::to_owned),
+        is_resolved: node["isResolved"].as_bool().unwrap_or(false),
+        is_outdated: node["isOutdated"].as_bool().unwrap_or(false),
+        can_resolve: node["viewerCanResolve"].as_bool().unwrap_or(false),
+        can_reply: node["viewerCanReply"].as_bool().unwrap_or(false),
+        comments: node["comments"]["nodes"]
+            .as_array()
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+            .iter()
+            .map(review_comment)
+            .collect(),
+    }
 }
 
 /// One GraphQL `PullRequestReviewComment`.

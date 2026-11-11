@@ -234,6 +234,37 @@ pub fn integration_router(state: IntegrationState) -> Router {
             get(crate::github_pull_routes::list_github_pull_threads),
         )
         .route(
+            "/api/v1/workspaces/{workspace_id}/github/pulls/{owner}/{repo}/{number}/comments",
+            post(crate::github_pull_routes::create_github_review_comment),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/github/pulls/{owner}/{repo}/{number}/comments/{comment_id}",
+            axum::routing::patch(crate::github_pull_routes::update_github_review_comment)
+                .delete(crate::github_pull_routes::delete_github_review_comment),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/github/pulls/{owner}/{repo}/{number}/threads/{thread_id}/replies",
+            post(crate::github_pull_routes::reply_github_review_thread),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/github/pulls/{owner}/{repo}/{number}/threads/{thread_id}/resolved",
+            axum::routing::put(crate::github_pull_routes::resolve_github_review_thread)
+                .delete(crate::github_pull_routes::unresolve_github_review_thread),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/github/pulls/{owner}/{repo}/{number}/review",
+            post(crate::github_pull_routes::submit_github_review)
+                .delete(crate::github_pull_routes::discard_github_review),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/github/pulls/{owner}/{repo}/{number}/merge",
+            post(crate::github_pull_routes::merge_github_pull),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/github/pulls/{owner}/{repo}/{number}/branch",
+            axum::routing::delete(crate::github_pull_routes::delete_github_pull_branch),
+        )
+        .route(
             "/api/v1/workspaces/{workspace_id}/github/pulls/{owner}/{repo}/{number}/merge-base",
             get(crate::github_pull_routes::get_github_pull_merge_base),
         )
