@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 
 import { paragraphBlocks } from './docs'
-import { applyMention, encodeMentions, insertTrigger, mentionedUserIds, mentionQuery, mentionSuggestions } from './mentions'
+import { applyMention, encodeMentions, insertTrigger, looksLikeTaskId, mentionedUserIds, mentionQuery, mentionSuggestions, mixSuggestions, rankTaskSuggestions, taskSearchText } from './mentions'
 
 const people = [
   { id: 'u1', name: 'Ada Lovelace', handle: 'ada' },
@@ -59,4 +59,30 @@ test('a page comment line holds mention nodes for @Name', () => {
     { type: 'mention', props: { userId: 'u1', name: 'Ada Lovelace' } },
     { type: 'text', text: '!', styles: {} },
   ])
+})
+
+describe('task suggestions', () => {
+  const task = (id: string, detail: string, label: string) => ({ id, label, detail, kind: 'task' as const })
+
+  test('a picked task goes in as its identifier', () => {
+    const query = mentionQuery('see #ship', 9, true)!
+    expect(applyMention('see #ship', query, task('t1', 'ENG-12', 'Ship it'))).toEqual({ text: 'see ENG-12 ', cursor: 11 })
+  })
+
+  test('a short query searches tasks, none lists recent ones, a heading or plain text none', () => {
+    expect(taskSearchText('login')).toBe('login')
+    expect(taskSearchText('')).toBe('')
+    expect(taskSearchText(' Heading')).toBeNull()
+    expect(taskSearchText('can you check this one please')).toBeNull()
+  })
+
+  test('the exact identifier ranks first, and an identifier puts tasks before channels', () => {
+    const tasks = [task('a', 'ENG-120', 'Other'), task('b', 'ENG-12', 'The one')]
+    expect(rankTaskSuggestions(tasks, 'eng-12').map((item) => item.detail)).toEqual(['ENG-12', 'ENG-120'])
+    expect(looksLikeTaskId('eng-12')).toBe(true)
+    expect(looksLikeTaskId('login')).toBe(false)
+    const channel = { id: 'c1', label: 'general', detail: '', kind: 'channel' as const }
+    expect(mixSuggestions([channel], tasks, 'eng-12').map((item) => item.id)).toEqual(['a', 'b', 'c1'])
+    expect(mixSuggestions([channel], tasks, 'gen').map((item) => item.id)).toEqual(['c1', 'a', 'b'])
+  })
 })

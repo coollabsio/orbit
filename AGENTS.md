@@ -16,6 +16,18 @@ a keyboard-only or desktop-only feature, or a fix for a component that mobile do
 which changes you did not port, and why. When mobile lacks a screen that the change needs, say so and offer to port
 that screen.
 
+## UI: help text goes in a tooltip
+
+Do not put help paragraphs under a title, a field label or a switch label. For a card or section title, give the
+text to `SettingsCard`'s `description`; for another heading, use `TitleTip`
+(`apps/web/src/components/common/TitleTip.tsx`). Both give the title a solid underline (as in Coolify) and show the
+text on hover. For a field or switch label, put the text in an info icon with a tooltip next to the label: `InfoTip`
+(`apps/web/src/components/common/InfoTip.tsx`), for example `<FieldLabel>Request URL <InfoTip text="…" /></FieldLabel>`.
+Short errors (`FieldError`), empty states, steps, links and "why is this disabled" notes stay visible. Use this in new
+views, and change an old view to it when you edit that view. Mobile has no hover: there, a tap shows the text. Use
+`Input`'s `help` prop, `LabelTip` (`apps/mobile/src/ui/LabelTip.tsx`), `OptionText`'s `help` prop, or the mobile
+`SettingsCard` `description`.
+
 ## Databases: SQLite and Postgres
 
 Orbit runs on SQLite (default, `ORBIT_DATABASE_PATH`) or Postgres (`ORBIT_DATABASE_URL`).
@@ -30,8 +42,11 @@ Every change must work on both.
   branch on `database.backend()` (`Backend::Sqlite` / `Backend::Postgres`).
 - **Transactions:** writes use `immediate_transaction()`. It serializes writers on both databases. On Postgres, an
   error ends the whole transaction, so do not catch a database error and continue in the same transaction.
-- **Migrations:** a new SQLite migration in `apps/server/migrations/` also needs the same change in the Postgres
-  schema in `apps/server/migrations/postgres/` (see `.ai/lessons.md` for the other places to update).
+- **Migrations:** make a new one with `just new-migration <name>` (add `destructive` if it needs a backup first). It
+  makes a SQLite and a Postgres file with the same UTC timestamp version, so parallel worktrees do not collide. Write
+  the same change in both files. `crates/platform/build.rs` finds the files and refuses a new 4-digit number, a
+  duplicate version or a missing Postgres file. Do not add migrations by hand to a list, and never rename or edit
+  0001–0099.
 - **Tests:** run the tests that cover your change on both databases:
   `cargo test -p orbit-server --test <name>`, then the same with
   `ORBIT_TEST_POSTGRES_URL=postgres://orbit:orbit@127.0.0.1:15432/orbit`. Tests that only make sense on SQLite

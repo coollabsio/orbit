@@ -11,7 +11,10 @@ import { Separator } from '@/components/ui/separator'
 import { Tip } from '@/components/common/Tip'
 import { ColorDot } from '@/components/common/ColorDot'
 import { useQuery } from '@tanstack/react-query'
-import { useProjects } from '@/features/tasks/api/projects'
+import { useProjectOrder, useProjects, useSetProjectOrder } from '@/features/tasks/api/projects'
+import { moveProject, orderProjects } from '@orbit/api/projectOrder'
+import type { ProjectRecord } from '@orbit/api/generated/types.gen'
+import { ProjectLock } from '@/features/tasks/components/ProjectLock'
 import { NewProjectModal } from '@/features/tasks/components/NewProjectModal'
 import { savedViewsQueryOptions } from '@/features/views/api/views'
 import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
@@ -83,6 +86,7 @@ function SidebarNavItem({
   unread = false,
   tone,
   className,
+  trailing,
   ...props
 }: Omit<LinkProps, 'className' | 'children' | 'title'> & VariantProps<typeof sidebarNavTileVariants> & {
   className?: string
@@ -94,6 +98,8 @@ function SidebarNavItem({
   badge?: number
   /** Something waits for the user, but there is no count: a dot shows. */
   unread?: boolean
+  /** A mark right after the label, hidden with the label when the sidebar is collapsed. */
+  trailing?: ReactNode
 }) {
   const collapsed = useContext(SidebarNavCollapsed)
   const match = useMatch({ path: useResolvedPath(to).pathname, end })
@@ -112,6 +118,7 @@ function SidebarNavItem({
       >
         <SidebarNavTile icon={Icon} tone={tone} />
         <SidebarNavLabel>{label}</SidebarNavLabel>
+        {trailing ? <span aria-hidden="true" className="flex shrink-0 group-data-[collapsed=true]/sidebar-nav:hidden">{trailing}</span> : null}
         {badge > 0 ? (
           <span
             data-slot="sidebar-nav-badge"
@@ -211,7 +218,7 @@ function TasksAreaNav({ onNavigate, onBack }: { onNavigate?: () => void; onBack?
   const navigate = useNavigate()
   const [creating, setCreating] = useState(false)
   const workspaceId = useContext(WorkspaceContext)?.workspace.id ?? ''
-  const projects = useProjects(workspaceId, workspaceId !== '').data ?? []
+  const projects = orderProjects(useProjects(workspaceId, workspaceId !== '').data ?? [], useProjectOrder(workspaceId, workspaceId !== '').data ?? [])
   const favorites = (useQuery({ ...savedViewsQueryOptions(workspaceId), enabled: workspaceId !== '' }).data ?? [])
     .filter((saved) => saved.is_favorite)
     .sort((a, b) => (a.favorite_position ?? 0) - (b.favorite_position ?? 0))
@@ -238,23 +245,7 @@ function TasksAreaNav({ onNavigate, onBack }: { onNavigate?: () => void; onBack?
         <>
           <SidebarSection label="Projects" collapsed={collapsed} />
           <SidebarNavItem to={tasksPath({ project: null })} active={onTasks && !project} icon={Folder} label="All projects" onClick={onNavigate} />
-          {projects.map((item) => (
-            <div key={item.id} className="group/project relative">
-              <SidebarNavItem to={tasksPath({ project: item.id })} active={onTasks && project === item.id} icon={dotIcon(item.color)} label={item.name} className="pr-8" onClick={onNavigate} />
-              {collapsed ? null : (
-                <Tip label="Project settings" side="right">
-                  <Link
-                    to={`/tasks/projects/${item.id}/settings`}
-                    aria-label={`${item.name} settings`}
-                    className="absolute top-1/2 right-1 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-sidebar-nav opacity-0 transition-opacity outline-none group-hover/project:opacity-100 hover:bg-black/5 hover:text-sidebar-nav-active focus-visible:opacity-100 pointer-coarse:opacity-100 dark:hover:bg-white/8"
-                    onClick={onNavigate}
-                  >
-                    <Settings className="size-3.5" />
-                  </Link>
-                </Tip>
-              )}
-            </div>
-          ))}
+          <ProjectLinks workspaceId={workspaceId} projects={projects} selected={onTasks ? project : null} pathOf={(id) => tasksPath({ project: id })} onNavigate={onNavigate} />
         </>
       ) : <SidebarSection label="Projects" collapsed={collapsed} />}
       <Tip label={collapsed ? 'New project' : undefined} side="right">
@@ -286,6 +277,100 @@ function TasksAreaNav({ onNavigate, onBack }: { onNavigate?: () => void; onBack?
       <SidebarNavItem to="/tasks-trash" icon={Trash} label="Trash" aria-label="Task trash" onClick={onNavigate} />
     </>
   )
+}
+
+/**
+ * The project links in the member's own order. A row drags to a new place, or moves with Alt+Arrow when its link has
+ * focus; the order saves for this member only.
+ */
+function ProjectLinks({ workspaceId, projects, selected, pathOf, onNavigate }: {
+  workspaceId: string
+  projects: ProjectRecord[]
+  selected: string | null
+  pathOf: (projectId: string) => string
+  onNavigate?: () => void
+}) {
+  const collapsed = useContext(SidebarNavCollapsed)
+  const setOrder = useSetProjectOrder(workspaceId)
+  const [dragId, setDragId] = useState<string | null>(null)
+  const [overId, setOverId] = useState<string | null>(null)
+  const ids = projects.map((item) => item.id)
+  const move = (id: string, to: number) => {
+    const next = moveProject(ids, id, to)
+    if (next) setOrder.mutate(next)
+  }
+  const endDrag = () => {
+    setDragId(null)
+    setOverId(null)
+  }
+
+  return projects.map((item, index) => {
+    const target = overId === item.id && dragId !== null && dragId !== item.id
+    return (
+      <div
+        key={item.id}
+        // the dragged row fades and stays mounted (a drag cancels if its source leaves the DOM); a 2px pink line marks the drop
+        className="group/project relative data-[dragging=true]:opacity-50 data-[drop-target=true]:before:absolute data-[drop-target=true]:before:inset-x-2 data-[drop-target=true]:before:z-10 data-[drop-target=true]:before:h-0.5 data-[drop-target=true]:before:rounded-full data-[drop-target=true]:before:bg-primary data-[drop-edge=before]:before:-top-px data-[drop-edge=after]:before:-bottom-px"
+        draggable
+        data-dragging={dragId === item.id || undefined}
+        data-drop-target={target || undefined}
+        // dropping takes the target's slot, so a downward move lands below it and an upward one above
+        data-drop-edge={target && dragId !== null ? (ids.indexOf(dragId) < index ? 'after' : 'before') : undefined}
+        onDragStart={(event) => {
+          setDragId(item.id)
+          event.dataTransfer.effectAllowed = 'move'
+          event.dataTransfer.setData('text/plain', item.id)
+        }}
+        onDragOver={(event) => {
+          if (!dragId) return
+          event.preventDefault()
+          event.dataTransfer.dropEffect = 'move'
+          setOverId(item.id)
+        }}
+        onDrop={(event) => {
+          event.preventDefault()
+          if (dragId) move(dragId, index)
+          endDrag()
+        }}
+        onDragEnd={endDrag}
+      >
+        <SidebarNavItem
+          to={pathOf(item.id)}
+          active={selected === item.id}
+          icon={dotIcon(item.color)}
+          label={item.name}
+          aria-label={item.private ? `${item.name}, private` : item.name}
+          trailing={item.private ? <ProjectLock project={item} className="text-sidebar-nav" /> : undefined}
+          className="pr-8"
+          // the row is the drag source, not the link (a dragged link carries its URL and a text drag image)
+          draggable={false}
+          aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
+          onClick={onNavigate}
+          onKeyDown={(event) => {
+            if (!event.altKey || (event.key !== 'ArrowUp' && event.key !== 'ArrowDown')) return
+            event.preventDefault()
+            move(item.id, event.key === 'ArrowUp' ? index - 1 : index + 1)
+            // React moves the focused node while reordering; keep focus on it for the next press
+            const link = event.currentTarget
+            requestAnimationFrame(() => link.focus())
+          }}
+        />
+        {collapsed ? null : (
+          <Tip label="Project settings" side="right">
+            <Link
+              to={`/tasks/projects/${item.id}/settings`}
+              aria-label={`${item.name} settings`}
+              draggable={false}
+              className="absolute top-1/2 right-1 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-sidebar-nav opacity-0 transition-opacity outline-none group-hover/project:opacity-100 hover:bg-black/5 hover:text-sidebar-nav-active focus-visible:opacity-100 pointer-coarse:opacity-100 dark:hover:bg-white/8"
+              onClick={onNavigate}
+            >
+              <Settings className="size-3.5" />
+            </Link>
+          </Tip>
+        )}
+      </div>
+    )
+  })
 }
 
 /**

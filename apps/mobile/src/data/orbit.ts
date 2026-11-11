@@ -19,6 +19,7 @@ import {
   listComments,
   listLabels,
   listMembers,
+  listProjectMembers,
   listNotifications,
   listPages,
   listProjects,
@@ -39,6 +40,7 @@ import {
   updateTask,
 } from '@orbit/api/generated/sdk.gen'
 import type {
+  ProjectMemberRecord,
   AuthUserResponse,
   CategoryRecord,
   CommentRecord,
@@ -258,6 +260,10 @@ export async function removeComment(client: OrbitClient, workspaceId: string, co
     query: { expected_version: comment.version },
     throwOnError: true,
   })
+}
+
+export async function projectMembers(client: OrbitClient, workspaceId: string, projectId: string): Promise<ProjectMemberRecord[]> {
+  return (await listProjectMembers({ client, path: { workspace_id: workspaceId, project_id: projectId }, throwOnError: true })).data
 }
 
 export function members(client: OrbitClient, workspaceId: string): Promise<MemberRecord[]> {

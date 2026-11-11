@@ -338,6 +338,10 @@ impl Fixture {
     }
 
     /// `(following, unread_replies, mention_count)` of the member in the thread; `None` without a state.
+    async fn unread_threads(&self, member: &Member) -> Value {
+        self.ok(member, "GET", "/unread-threads", None).await
+    }
+
     async fn thread(&self, member: &Member, root: &str) -> Option<(bool, i64, i64)> {
         let page = self
             .ok(member, "GET", &format!("/threads/{root}"), None)
@@ -408,7 +412,8 @@ impl Fixture {
             "after {step}: (conversation, user, unread stored/counted, mentions stored/counted, \
              broadcasts stored/counted) {wrong:?}"
         );
-        let wrong: Vec<(String, String, i64, i64, i64, i64)> = sqlx::query_as(
+        // Unread replies are exact for every thread state; mentions only count while following.
+        let wrong: Vec<(String, String, i64, i64, i64, i64, bool)> = sqlx::query_as(
             "SELECT * FROM (SELECT t.root_id, t.user_id, r.reply_count - t.read_reply_count AS stored, \
                     (SELECT COUNT(*) FROM chat_messages x WHERE x.thread_root_id = t.root_id \
                      AND x.author_id <> t.user_id \
@@ -416,10 +421,10 @@ impl Fixture {
                     t.mention_count AS stored_mentions, \
                     (SELECT COUNT(*) FROM chat_message_mentions x WHERE x.thread_root_id = t.root_id \
                      AND x.user_id = t.user_id \
-                     AND (t.last_read_reply_id IS NULL OR x.message_id > t.last_read_reply_id)) AS mentions \
-             FROM chat_thread_members t JOIN chat_messages r ON r.id = t.root_id \
-             WHERE t.following = 1) counts \
-             WHERE stored <> unread OR stored_mentions <> mentions",
+                     AND (t.last_read_reply_id IS NULL OR x.message_id > t.last_read_reply_id)) AS mentions, \
+                    t.following \
+             FROM chat_thread_members t JOIN chat_messages r ON r.id = t.root_id) counts \
+             WHERE stored <> unread OR (following = 1 AND stored_mentions <> mentions)",
         )
         .fetch_all(self.database.pool())
         .await
@@ -588,11 +593,12 @@ async fn a_thread_is_followed_by_its_participants_and_by_mentioned_members() {
     let root = fixture.send(&ada, &general, "Root").await;
     assert_eq!(fixture.thread(&ada, &root).await, None);
 
-    // The root's author follows from the first reply; the replier has read it; others do not follow.
+    // The root's author follows from the first reply; the replier has read it; others do not
+    // follow, but have the reply unread.
     fixture.reply(&bob, &general, &root, "First").await;
     assert_eq!(fixture.thread(&ada, &root).await, Some((true, 1, 0)));
     assert_eq!(fixture.thread(&bob, &root).await, Some((true, 0, 0)));
-    assert_eq!(fixture.thread(&cy, &root).await, None);
+    assert_eq!(fixture.thread(&cy, &root).await, Some((false, 1, 0)));
 
     // A mention in a reply makes the member follow from that reply on.
     fixture
@@ -611,7 +617,8 @@ async fn a_thread_is_followed_by_its_participants_and_by_mentioned_members() {
     assert_eq!(followed[0]["root"]["reply_count"], 2);
     assert_eq!(followed[0]["last_reply"]["author_id"], bob.id.to_string());
 
-    // A member who stops following has nothing unread, and does not follow again by itself.
+    // A member who stops following still has the new replies unread (Unreads shows them), and
+    // does not follow again by itself.
     let follow = |following: bool| Some(json!({ "following": following }));
     fixture
         .ok(
@@ -622,7 +629,7 @@ async fn a_thread_is_followed_by_its_participants_and_by_mentioned_members() {
         )
         .await;
     fixture.reply(&bob, &general, &root, "Third").await;
-    assert_eq!(fixture.thread(&ada, &root).await, Some((false, 0, 0)));
+    assert_eq!(fixture.thread(&ada, &root).await, Some((false, 1, 0)));
     // Following again starts from now.
     fixture
         .ok(
@@ -1287,6 +1294,125 @@ async fn mark_unread_read_all_and_restore_move_the_cursors() {
     let followed = fixture.ok(&ada, "GET", "/threads", None).await;
     assert_eq!(followed[0]["state"]["unread_replies"], 1);
     fixture.assert_counters_exact("restore").await;
+}
+
+#[tokio::test]
+async fn unread_threads_include_threads_the_member_does_not_follow() {
+    let fixture = Fixture::new().await;
+    let ada = fixture.add_member("ada").await;
+    let bob = fixture.add_member("bob").await;
+    let cy = fixture.add_member("cy").await;
+    let general = fixture.general().await;
+    let unread_of = |list: &Value| -> Vec<(String, i64, bool)> {
+        list.as_array()
+            .unwrap()
+            .iter()
+            .map(|thread| {
+                (
+                    thread["root"]["body"].as_str().unwrap().to_owned(),
+                    thread["state"]["unread_replies"].as_i64().unwrap(),
+                    thread["state"]["following"].as_bool().unwrap(),
+                )
+            })
+            .collect()
+    };
+
+    // cy follows nothing, but the replies after it joined are unread for it: in its state of the
+    // thread (so opening the thread reads it) and in the Unreads list. The Threads list stays
+    // for followed threads.
+    let root = fixture.send(&ada, &general, "Root").await;
+    fixture.reply(&bob, &general, &root, "First").await;
+    fixture.reply(&bob, &general, &root, "Second").await;
+    assert_eq!(fixture.thread(&cy, &root).await, Some((false, 2, 0)));
+    let list = fixture.unread_threads(&cy).await;
+    assert_eq!(unread_of(&list), [("Root".to_owned(), 2, false)]);
+    assert_eq!(list[0]["state"]["last_read_reply_id"], Value::Null);
+    assert_eq!(list[0]["last_reply"]["body"], "Second");
+    assert_eq!(
+        unread_of(&fixture.unread_threads(&ada).await),
+        [("Root".to_owned(), 2, true)]
+    );
+    assert!(unread_of(&fixture.unread_threads(&bob).await).is_empty());
+    let followed = fixture.ok(&cy, "GET", "/threads", None).await;
+    assert!(followed.as_array().unwrap().is_empty());
+
+    // Reading the thread does not make cy follow it; the next reply is unread again.
+    fixture
+        .ok(&cy, "POST", &format!("/threads/{root}/read"), None)
+        .await;
+    assert_eq!(fixture.thread(&cy, &root).await, Some((false, 0, 0)));
+    assert!(unread_of(&fixture.unread_threads(&cy).await).is_empty());
+    fixture.reply(&bob, &general, &root, "Third").await;
+    assert_eq!(
+        unread_of(&fixture.unread_threads(&cy).await),
+        [("Root".to_owned(), 1, false)]
+    );
+
+    // A muted conversation keeps its threads out of Unreads.
+    let notify = |level: &str| Some(json!({ "notify": level }));
+    let path = format!("/conversations/{general}/state");
+    fixture.ok(&cy, "PATCH", &path, notify("muted")).await;
+    assert!(unread_of(&fixture.unread_threads(&cy).await).is_empty());
+    fixture.ok(&cy, "PATCH", &path, notify("mentions")).await;
+
+    // A member who joins later has none of the older replies unread.
+    tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+    let dan = fixture.add_member("dan").await;
+    assert_eq!(fixture.thread(&dan, &root).await, None);
+    assert!(unread_of(&fixture.unread_threads(&dan).await).is_empty());
+    fixture.reply(&bob, &general, &root, "Fourth").await;
+    assert_eq!(fixture.thread(&dan, &root).await, Some((false, 1, 0)));
+
+    // "Mark all as read" reads threads without a state too, and the undo puts them back.
+    let other = fixture.send(&ada, &general, "Other").await;
+    fixture.reply(&bob, &general, &other, "Reply").await;
+    assert_eq!(
+        unread_of(&fixture.unread_threads(&cy).await),
+        [
+            ("Other".to_owned(), 1, false),
+            ("Root".to_owned(), 2, false)
+        ]
+    );
+    let all = fixture.ok(&cy, "POST", "/read-all", None).await;
+    assert_eq!(all["result"]["threads"].as_array().unwrap().len(), 2);
+    assert!(unread_of(&fixture.unread_threads(&cy).await).is_empty());
+    fixture
+        .assert_counters_exact("read all with unfollowed threads")
+        .await;
+    fixture
+        .ok(
+            &cy,
+            "POST",
+            "/read-restore",
+            Some(restore_body(&all["result"])),
+        )
+        .await;
+    assert_eq!(
+        unread_of(&fixture.unread_threads(&cy).await),
+        [
+            ("Other".to_owned(), 1, false),
+            ("Root".to_owned(), 2, false)
+        ]
+    );
+    fixture
+        .assert_counters_exact("restore of unfollowed threads")
+        .await;
+
+    // Members who were there before the migration start with nothing unread in such threads.
+    sqlx::query(
+        "UPDATE chat_members SET threads_read_to = (SELECT MAX(id) FROM chat_messages) \
+         WHERE user_id = $1",
+    )
+    .bind(dan.id.to_string())
+    .execute(fixture.database.pool())
+    .await
+    .unwrap();
+    assert!(unread_of(&fixture.unread_threads(&dan).await).is_empty());
+    fixture.reply(&bob, &general, &other, "Later").await;
+    assert_eq!(
+        unread_of(&fixture.unread_threads(&dan).await),
+        [("Other".to_owned(), 1, false)]
+    );
 }
 
 /// The cursors of a `read-all` result, in the shape that `read-restore` takes.
@@ -2043,6 +2169,13 @@ async fn every_call_stays_fast_with_half_a_million_messages() {
             &ada,
             "GET",
             format!("/conversations/{general}/threads"),
+            None,
+        ),
+        (
+            "unread threads",
+            &fixture.owner,
+            "GET",
+            "/unread-threads".to_owned(),
             None,
         ),
         (

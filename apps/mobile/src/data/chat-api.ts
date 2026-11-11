@@ -23,6 +23,7 @@ import {
   listChatSearch,
   listChatThreads,
   listFollowedChatThreads,
+  listUnreadChatThreads,
   markChatMessageUnread,
   openChatDm,
   pinChatMessage,
@@ -231,6 +232,11 @@ export async function search(client: OrbitClient, workspaceId: string, input: Se
 
 export async function followedThreads(client: OrbitClient, workspaceId: string): Promise<FollowedThreadRecord[]> {
   return (await listFollowedChatThreads(at(client, workspaceId))).data
+}
+
+/** Threads with unread replies, followed or not, in joined conversations that are not muted. Newest reply first. */
+export async function unreadThreads(client: OrbitClient, workspaceId: string): Promise<FollowedThreadRecord[]> {
+  return (await listUnreadChatThreads(at(client, workspaceId))).data
 }
 
 /** Without `before`: the newest replies. Items are oldest first. */

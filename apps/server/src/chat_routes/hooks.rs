@@ -56,7 +56,7 @@ pub(crate) struct ChatWebhookWithUrl {
 }
 
 /// What a tool posts: the payload of a Slack incoming webhook. Fields that Orbit does not use
-/// (`channel`, `thread_ts`, `unfurl_links`) are ignored, so a Slack payload posts as it is.
+/// (`channel`, `unfurl_links`) are ignored, so a Slack payload posts as it is.
 #[derive(Deserialize, ToSchema)]
 pub(crate) struct IncomingWebhookPayload {
     /// Slack mrkdwn or Markdown; mentions are tokens: `<@user_id>`, `<#channel_id>`,
@@ -83,6 +83,9 @@ pub(crate) struct IncomingWebhookPayload {
     /// The avatar of this message only as an emoji (`:ghost:`); it wins over `icon_url`.
     #[schema(required = false)]
     icon_emoji: Option<String>,
+    /// The id of a root message in the webhook's channel: the message is a reply in its thread.
+    #[schema(required = false)]
+    thread_ts: Option<String>,
 }
 
 fn with_url(state: &ChatState, created: WebhookWithSecret) -> ChatWebhookWithUrl {
@@ -335,6 +338,16 @@ fn build_post(
     }
     blocks.extend(attachments);
     check_message_blocks(&blocks).map_err(|error| invalid(error.0))?;
+    let thread_root_id = payload
+        .thread_ts
+        .as_deref()
+        .map(str::trim)
+        .filter(|ts| !ts.is_empty())
+        .map(|ts| {
+            ts.parse::<Id>()
+                .map_err(|_| invalid("thread_ts: not a message id".to_owned()))
+        })
+        .transpose()?;
     Ok(BotPost {
         text: text
             .map(|text| cut(&text, MESSAGE_MAX_CHARS))
@@ -350,6 +363,7 @@ fn build_post(
                 && url.len() <= 2048
         }),
         icon_emoji: payload.icon_emoji.as_deref().and_then(emoji_name),
+        thread_root_id,
     })
 }
 
@@ -509,7 +523,7 @@ pub(crate) async fn post_action_response(
     Ok(hook_ok())
 }
 
-fn hook_problem(
+pub(super) fn hook_problem(
     error: ChatError,
     instance: &str,
     request_id: Option<&axum::Extension<orbit_platform::RequestId>>,

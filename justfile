@@ -103,6 +103,19 @@ api-check:
     diff -ru "$first" "$second"
     diff -ru packages/api/src/generated "$first"
 
+# Make a SQLite and a Postgres migration file with a UTC timestamp version, e.g. `just new-migration task_colors`.
+# Add `destructive` to take a backup before it runs: `just new-migration drop_old_table destructive`.
+new-migration name kind="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    [[ "{{name}}" =~ ^[a-z0-9_]+$ ]] || { echo "use lowercase letters, digits and _ in the name"; exit 1; }
+    case "{{kind}}" in "") suffix="" ;; destructive) suffix=".destructive" ;; *) echo "kind must be empty or destructive"; exit 1 ;; esac
+    file="$(date -u +%Y%m%d%H%M%S)_{{name}}${suffix}.sql"
+    echo "-- SQLite" > "apps/server/migrations/$file"
+    echo "-- Postgres: the same change as apps/server/migrations/$file" > "apps/server/migrations/postgres/$file"
+    echo "apps/server/migrations/$file"
+    echo "apps/server/migrations/postgres/$file"
+
 db-reset:
     ORBIT_ENV=development cargo run -p orbit-server -- db-reset --yes
 

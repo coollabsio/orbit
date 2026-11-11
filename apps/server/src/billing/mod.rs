@@ -106,18 +106,19 @@ pub const fn grants_access(status: Option<SubscriptionStatus>) -> bool {
 
 /// The only rule that maps a workspace to access: the billing-exempt workspace (the root user's
 /// first) and a granting subscription are full access, otherwise the workspace is on a trial until
-/// `trial_millis` after its creation, then read-only.
+/// `trial_millis` after `trial_started_at_ms`, then read-only. The trial start is the creator's account's first
+/// trial (`users.trial_started_at`), so a new workspace does not start a new trial.
 #[must_use]
 pub const fn access(
     exempt: bool,
     status: Option<SubscriptionStatus>,
-    created_at_ms: i64,
+    trial_started_at_ms: i64,
     now_ms: i64,
     trial_millis: i64,
 ) -> WorkspaceAccess {
     if exempt || grants_access(status) {
         WorkspaceAccess::Full
-    } else if now_ms < created_at_ms.saturating_add(trial_millis) {
+    } else if now_ms < trial_started_at_ms.saturating_add(trial_millis) {
         WorkspaceAccess::Trial
     } else {
         WorkspaceAccess::ReadOnly

@@ -5,7 +5,7 @@ import { confirmAction } from '@/components/common/confirmAction'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
-import { Field, FieldContent, FieldDescription, FieldLabel, FieldTitle } from '@/components/ui/field'
+import { Field, FieldContent, FieldLabel, FieldTitle } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { relativeTime, shortDate } from '@/lib/format'
@@ -13,6 +13,7 @@ import { useCan } from '@/features/workspaces/permissions'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { useProjects } from '@/features/tasks/api/projects'
 import { SettingsCard } from '@/components/common/SettingsCard'
+import { InfoTip } from '@/components/common/InfoTip'
 import { AccessPicker, ProjectPicker, type ScopeResource } from '@/components/common/ScopeAccess'
 import { FieldGrid, RequiredMark, RowIcon, SettingsRow } from '@/features/settings/components/SettingsParts'
 import { useApiTokens, useCreateApiToken, useRevokeApiToken } from '@/features/settings/api/apiTokens'
@@ -115,7 +116,7 @@ export function ApiTokensPage() {
           </Select>
         </Field>
         {canManage ? <Field className="min-[900px]:col-span-2">
-          <FieldLabel htmlFor="api-token-kind">Token type</FieldLabel>
+          <FieldLabel htmlFor="api-token-kind" className="items-center gap-1.5">Token type {kindDescription ? <InfoTip text={kindDescription} /> : null}</FieldLabel>
           <Select items={TOKEN_KINDS} value={kind} onValueChange={(value) => setKind(value as TokenKind)}>
             <SelectTrigger id="api-token-kind" aria-label="Token type">
               <SelectValue />
@@ -124,7 +125,6 @@ export function ApiTokensPage() {
               {TOKEN_KINDS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
             </SelectContent>
           </Select>
-          <FieldDescription>{kindDescription}</FieldDescription>
         </Field> : null}
         {access ? <>
         {/* a choice card: the whole card toggles the checkbox and tints while checked */}
@@ -132,8 +132,7 @@ export function ApiTokensPage() {
           <Field orientation="horizontal">
             <Checkbox checked={serviceAccount} onCheckedChange={selectServiceAccount} />
             <FieldContent>
-              <FieldTitle>Use a service account</FieldTitle>
-              <FieldDescription>For bots, such as a Discord bot. Changes show as made by this account, not by you. Tokens with the same name share one account.</FieldDescription>
+              <FieldTitle className="gap-1.5">Use a service account <InfoTip text="For bots, such as a Discord bot. Changes show as made by this account, not by you. Tokens with the same name share one account." /></FieldTitle>
             </FieldContent>
           </Field>
         </FieldLabel>
@@ -154,8 +153,11 @@ export function ApiTokensPage() {
         {tokens.data?.length === 0 ? <SettingsRow>No active API tokens.</SettingsRow> : null}
         {tokens.data?.map((token) => <SettingsRow className="flex-nowrap" key={token.id}>
           <RowIcon><Key /></RowIcon>
-          <div className="flex min-w-0 flex-1 flex-col gap-0.5"><span className="flex items-center gap-2 text-[13px] font-medium text-foreground">{token.name}{isExpired(token.expires_at) ? <Badge variant="destructive">Expired</Badge> : null}</span><span className="text-xs text-muted-foreground/70">{token.service_account_name ? `Service account: ${token.service_account_name}` : 'Personal token'} · <code>{token.token_prefix}…</code> · {token.all_projects ? 'All projects · ' : token.project_ids.length ? `${token.project_ids.map((id) => projectNames.get(id) ?? 'Unavailable project').join(', ')} · ` : null}{token.expires_at ? `${isExpired(token.expires_at) ? 'expired' : 'expires'} ${shortDate(token.expires_at)}` : 'never expires'} · created {relativeTime(token.created_at)}</span></div>
-          <span className="flex gap-1">{token.scopes.map((scope) => <Badge variant="secondary" key={scope}>{scope}</Badge>)}</span>
+          <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+            <div className="flex min-w-0 flex-1 flex-col gap-0.5"><span className="flex items-center gap-2 text-[13px] font-medium text-foreground">{token.name}{isExpired(token.expires_at) ? <Badge variant="destructive">Expired</Badge> : null}</span><span className="text-xs text-muted-foreground/70">{token.service_account_name ? `Service account: ${token.service_account_name}` : 'Personal token'} · <code>{token.token_prefix}…</code> · {token.all_projects ? 'All projects · ' : token.project_ids.length ? `${token.project_ids.map((id) => projectNames.get(id) ?? 'Unavailable project').join(', ')} · ` : null}{token.expires_at ? `${isExpired(token.expires_at) ? 'expired' : 'expires'} ${shortDate(token.expires_at)}` : 'never expires'} · created {relativeTime(token.created_at)}</span></div>
+            {/* Phones have no room beside the text, so the badges go under it, as in the mobile app. */}
+            <span className="flex flex-wrap gap-1">{token.scopes.map((scope) => <Badge variant="secondary" key={scope}>{scope}</Badge>)}</span>
+          </div>
           <Button variant="ghost" type="button" disabled={revokeToken.isPending} onClick={async () => { if (await confirmAction({ title: `Revoke ${token.name}?`, description: 'The integration will lose access immediately.', confirmLabel: 'Revoke', danger: true })) revokeToken.mutate(token.id) }}>Revoke</Button>
         </SettingsRow>)}
       </div>

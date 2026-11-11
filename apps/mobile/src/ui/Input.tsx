@@ -4,6 +4,7 @@ import { TextInput } from './scaled'
 
 import { useTheme } from '../theme'
 import { Icon } from './Icon'
+import { LabelTip } from './LabelTip'
 import { Text } from './Text'
 
 export interface InputProps extends Omit<TextInputProps, 'style'> {
@@ -12,6 +13,8 @@ export interface InputProps extends Omit<TextInputProps, 'style'> {
   required?: boolean
   /** Quiet help under the field; `error` replaces it. */
   description?: string
+  /** Help text behind an info icon next to the label (the web `InfoTip`). */
+  help?: string
   error?: string
   /** A control beside the field, like the web's `flex gap-2` row (Profile's email and Change). */
   accessory?: ReactNode
@@ -21,7 +24,7 @@ export interface InputProps extends Omit<TextInputProps, 'style'> {
  * The web `Input` at phone size: a 32px field (16px text, so iOS does not zoom) under a 14px label. A `secureTextEntry`
  * field gets the web `PasswordInput`'s eye button, which shows or hides the password.
  */
-export function Input({ label, required = false, description, error, multiline, accessory, secureTextEntry, ...props }: InputProps) {
+export function Input({ label, required = false, description, help, error, multiline, accessory, secureTextEntry, ...props }: InputProps) {
   const { colors, scheme } = useTheme()
   const [visible, setVisible] = useState(false)
   const input = (
@@ -58,7 +61,9 @@ export function Input({ label, required = false, description, error, multiline, 
   )
   return (
     <View className="gap-2">
-      {label ? (
+      {label && help ? (
+        <LabelTip label={label} text={help} required={required} />
+      ) : label ? (
         <Text className="font-noto-medium text-[14px] leading-[19.25px]">
           {label}
           {required ? <Text className="font-noto-semibold text-[14px] leading-[19.25px] text-primary">{'  *'}</Text> : null}

@@ -193,6 +193,8 @@ export function useCreateWorkspace() {
     onSuccess: (workspace) => {
       queryClient.setQueryData(queryKeys.workspaces, (items: unknown) =>
         Array.isArray(items) ? [...items, workspace] : [workspace])
+      // The first workspace starts the account's trial.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.accountTrial })
     },
   })
 }

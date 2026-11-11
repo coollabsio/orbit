@@ -4,6 +4,7 @@ import { createRef } from 'react'
 import { BlockNoteEditor } from '@blocknote/core'
 import { EditorState, TextSelection } from '@tiptap/pm/state'
 import { insertPageMention, mentionTriggerAllowed, pageMentionItems } from './mentionItems'
+import { taskTriggerAllowed } from './taskMentionItems'
 import { PageMentionChip } from './PageMentionChip'
 import { PageEditor, type PageEditorHandle, type PageEditorProps } from './PageEditor'
 import {
@@ -130,6 +131,27 @@ describe('schema', () => {
     expect(mentionTriggerAllowed(at('mail '))).toBe(true)
     expect(mentionTriggerAllowed(at('mai'))).toBe(false)
     expect(mentionTriggerAllowed(at('x '))).toBe(false)
+  })
+
+  test('"#" opens the task picker at a word start inside a line, never at a block start (a heading) or in code', () => {
+    const editor = BlockNoteEditor.create({ schema: pageEditorSchema, _tiptapOptions: { injectCSS: false } })
+    editor.replaceBlocks(editor.document, [
+      { id: 'p', type: 'paragraph', content: 'see me' },
+      { id: 'c', type: 'codeBlock', content: 'x ' },
+    ])
+    const doc = editor.prosemirrorState.doc
+    const at = (search: string) => {
+      let found = -1
+      doc.descendants((node, pos) => {
+        if (found < 0 && node.isText && node.text!.includes(search)) found = pos + node.text!.indexOf(search) + search.length
+        return found < 0
+      })
+      return EditorState.create({ doc, selection: TextSelection.create(doc, found) }).tr
+    }
+    expect(taskTriggerAllowed(at('see '))).toBe(true)
+    expect(taskTriggerAllowed(at('se'))).toBe(false)
+    expect(taskTriggerAllowed(at(''))).toBe(false)
+    expect(taskTriggerAllowed(at('x '))).toBe(false)
   })
 })
 
