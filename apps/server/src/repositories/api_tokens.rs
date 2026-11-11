@@ -50,6 +50,10 @@ pub enum ApiTokenScope {
     TasksRead,
     #[serde(rename = "tasks:write")]
     TasksWrite,
+    /// With `tasks:write`: task and comment writes may keep the source tool's dates, numbers,
+    /// authors and IDs, and notify nobody. The creator must stay an owner or admin.
+    #[serde(rename = "tasks:import")]
+    TasksImport,
     #[serde(rename = "docs:read")]
     DocsRead,
     #[serde(rename = "docs:write")]
@@ -65,9 +69,10 @@ pub enum ApiTokenScope {
 }
 
 impl ApiTokenScope {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::TasksRead,
         Self::TasksWrite,
+        Self::TasksImport,
         Self::DocsRead,
         Self::DocsWrite,
         Self::ChatRead,
@@ -80,6 +85,7 @@ impl ApiTokenScope {
         match self {
             Self::TasksRead => "tasks:read",
             Self::TasksWrite => "tasks:write",
+            Self::TasksImport => "tasks:import",
             Self::DocsRead => "docs:read",
             Self::DocsWrite => "docs:write",
             Self::ChatRead => "chat:read",
@@ -103,7 +109,8 @@ impl ApiTokenScope {
     }
 
     /// Whether a token may hold these scopes: an export scope stands alone on a personal token,
-    /// and a service account (which acts as the workspace owner) gets tasks only.
+    /// a service account (which acts as the workspace owner) gets tasks only, and `tasks:import`
+    /// comes with `tasks:write`.
     #[must_use]
     pub fn valid_combination(scopes: &[Self], service_account: bool) -> bool {
         let export = scopes.iter().any(|scope| scope.is_export());
@@ -113,6 +120,7 @@ impl ApiTokenScope {
         !scopes.is_empty()
             && !(export && (service_account || scopes.len() > 1))
             && !(service_account && content)
+            && (!scopes.contains(&Self::TasksImport) || scopes.contains(&Self::TasksWrite))
     }
 
     /// The scopes of a stored space-separated list, in canonical order; unknown names are dropped.

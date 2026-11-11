@@ -67,13 +67,14 @@ service-account token shows the service account as the actor.
 
 API tokens and MCP OAuth connections use the same five resource scopes. In
 **Settings → API tokens**, set the access for each resource to **No access**,
-**Read** or **Write**. API tokens also have two export scopes, which MCP does
-not use.
+**Read** or **Write**. API tokens also have an import scope and two export
+scopes, which MCP does not use.
 
 | Scope | Access in **Settings → API tokens** | Public API endpoints |
 | --- | --- | --- |
 | `tasks:read` | Tasks: **Read** | `GET` projects, statuses, labels, members, tasks and comments |
-| `tasks:write` | Tasks: **Write** | Create, update and delete tasks, add comments, `POST /integrations/discord/events` |
+| `tasks:write` | Tasks: **Write** | Create, update and delete tasks, add comments, link tasks, create and change projects, statuses and labels, `POST /integrations/discord/events` |
+| `tasks:import` | Tasks: **Write** with **Import mode** | With `tasks:write`: the import fields of new tasks and comments. See [Import from another tool](#import-from-another-tool). |
 | `docs:read` | Docs: **Read** | `GET /docs`, `GET /docs/{page_id}`, `GET /docs/{page_id}/database`, `POST /docs/{page_id}/database/query` |
 | `docs:write` | Docs: **Write** | `POST /docs`, `PATCH /docs/{page_id}`, `POST /docs/{page_id}/rows`, `PATCH /docs/{page_id}/rows/{row_id}`, `POST /docs/{page_id}/rows/trash` |
 | `chat:read` | Chat: **Read** | None. Chat is available through MCP only. A bot that reads and writes one channel uses a [chat webhook with events](chat-webhooks.md#events). |
@@ -88,6 +89,11 @@ service-account token with an export scope, or an export scope together with
 another scope (`422 invalid_api_token`). `workspace:export` needs a workspace
 owner or administrator, when you create the token and on each request.
 `workspace:export:personal` is open to each member except guests.
+
+`tasks:import` needs `tasks:write` (`422 invalid_api_token` otherwise). Its
+creator must be a workspace owner or administrator on each write: when the
+creator loses that role, each write of the token gets `403
+workspace_action_forbidden`.
 
 ## Conventions
 
@@ -168,6 +174,10 @@ curl -sS -X POST "$ORBIT_WS/projects" -H "Authorization: Bearer $ORBIT_TOKEN" \
   -H 'Content-Type: application/json' --data '{"name":"Video series","key":"VID"}'
 ```
 
+`PATCH /workspaces/{workspace_id}/projects/{project_id}`. Scope: `tasks:write`. Body:
+`{expected_version, name?, color?}`. A missing field keeps its value. Answers 200 with the
+project, or 409 when the project changed after you read it. The key does not change.
+
 `GET /workspaces/{workspace_id}/projects/{project_id}/statuses?cursor&limit`. Scope: `tasks:read`. Item:
 `{id, project_id, name, description, color, category, position, version}`.
 `category` is `unstarted`, `started`, `completed`, `cancelled` or `duplicate`.
@@ -175,6 +185,23 @@ curl -sS -X POST "$ORBIT_WS/projects" -H "Authorization: Bearer $ORBIT_TOKEN" \
 ```bash
 curl -sS "$ORBIT_WS/projects/$PROJECT_ID/statuses" \
   -H "Authorization: Bearer $ORBIT_TOKEN"
+```
+
+`POST /workspaces/{workspace_id}/projects/{project_id}/statuses`. Scope: `tasks:write`. Body:
+`{name, category, color?, description?, position?}`. `category` is `unstarted`, `started`,
+`completed` or `cancelled`: tasks in a `completed` or `cancelled` status are done. Orbit makes
+the `duplicate` status itself. Without `color`, the status gets the color of its category.
+Without `position`, it goes after the last status. Answers 201 with the status.
+
+`PATCH /workspaces/{workspace_id}/projects/{project_id}/statuses/{status_id}`. Scope:
+`tasks:write`. Body: `{expected_version, name?, category?, color?, description?, position?}`. A
+missing field keeps its value. The Duplicate status cannot change its category, and no other
+status can become `duplicate` (400). Answers 200 with the status, or 409 after a change.
+
+```bash
+curl -sS -X POST "$ORBIT_WS/projects/$PROJECT_ID/statuses" \
+  -H "Authorization: Bearer $ORBIT_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"name":"In review","category":"started"}'
 ```
 
 `GET /workspaces/{workspace_id}/projects/{project_id}/labels?cursor&limit`.
@@ -185,6 +212,14 @@ IDs in `label_ids`.
 curl -sS "$ORBIT_WS/projects/$PROJECT_ID/labels" \
   -H "Authorization: Bearer $ORBIT_TOKEN"
 ```
+
+`POST /workspaces/{workspace_id}/projects/{project_id}/labels`. Scope: `tasks:write`. Body:
+`{name, color?}`: 1 to 100 characters, and `#rrggbb` (gray when unset). Answers 201 with the
+label, or 400 when the project already has a label with this name.
+
+`PATCH /workspaces/{workspace_id}/projects/{project_id}/labels/{label_id}`. Scope:
+`tasks:write`. Body: `{expected_version, name?, color?}`. A missing field keeps its value.
+Answers 200 with the label, or 409 after a change.
 
 `GET /workspaces/{workspace_id}/members?cursor&limit`. Scope: `tasks:read`. The
 workspace members, to find assignee IDs. Item: `{user_id, display_name}`. The
@@ -204,7 +239,9 @@ A task:
   "title": "Fix login", "description": "Markdown text", "priority": "high",
   "assignee_ids": ["…"], "label_ids": ["…"],
   "due_start_at": null, "due_at": null,
-  "created_at": "…", "updated_at": "…", "version": 4503599627370495,
+  "created_at": "…", "updated_at": "…", "completed_at": null,
+  "creator_id": "…", "creator_service_account": null, "external_id": null,
+  "version": 4503599627370495,
   "parent_task_id": null,
   "identifier": "ENG-12",
   "url": "https://orbit.example.com/tasks/…?workspace=…"
@@ -213,6 +250,11 @@ A task:
 
 `identifier` is the project key and the task number. Use it in `{task}` paths.
 `url` is the task's page in the Orbit web app.
+`completed_at` is when the task entered a `completed` or `cancelled` status, and `null` while it
+is open. `creator_id` is the member who created the task. For a task that a service account
+created, `creator_id` is `null` and `creator_service_account` is `{id, name}`. `external_id` is the
+source tool's ID of an imported task (see [Import from another tool](#import-from-another-tool)),
+and `null` otherwise.
 
 `priority` is `none`, `low`, `medium`, `high` or `urgent`.
 
@@ -256,7 +298,9 @@ curl -sS "$ORBIT_WS/tasks" -H "Authorization: Bearer $ORBIT_TOKEN" \
 `PATCH /workspaces/{workspace_id}/tasks/{task}`. Scope: `tasks:write`. Response: `200` with the task. Body:
 `expected_version` (required, the `version` that you read), and the optional
 `title`, `description`, `status_id`, `priority`, `assignee_ids`, `label_ids`,
-`due_start_at`, `due_at` and `parent_task_id`. A list replaces the old list. A missing field keeps
+`due_start_at`, `due_at`, `parent_task_id` and `duplicate_of_id`. A list replaces the old list.
+`duplicate_of_id` (a task UUID or identifier in an approved project) marks the task as a
+duplicate of that task and moves it to the Duplicate status; `null` unmarks it. A missing field keeps
 its value, `null` clears a due date, and `parent_task_id: null` detaches the task from its
 parent (a new parent is a task UUID or an identifier such as `ENG-12`). A new parent and all the tasks related to it must be in approved projects. If the task changed after you read it, the
 response is `409`. This includes edits that people make to the description in
@@ -300,11 +344,35 @@ curl -sS -X DELETE "$ORBIT_WS/tasks/ENG-12?expected_version=4503599627370495&per
   -H "Authorization: Bearer $ORBIT_TOKEN"
 ```
 
+### Relations
+
+`GET /workspaces/{workspace_id}/tasks/{task}/relations`. Scope: `tasks:read`. Every relation of
+the task, as seen from it: `{id, type, direction, task, created_at}`. `type` is `blocks`,
+`related` or `duplicate`. `direction` is `outgoing` when this task is the blocker or the
+duplicate. `task` is the other task: `{id, project_id, number, title, status_id, version}`.
+Relations to tasks outside the approved projects are left out. `next_cursor` is `null`.
+
+`POST /workspaces/{workspace_id}/tasks/{task}/relations`. Scope: `tasks:write`. Body:
+`{type, task_id}`. `type` is `blocks` (this task blocks `task_id`), `blocked_by` or `related`.
+`task_id` is a task UUID or identifier in an approved project (422 otherwise). A relation that
+already links the two tasks is replaced, and the same relation again is returned unchanged. A
+duplicate relation is not replaced (409). Answers 201 with the relation.
+
+`DELETE /workspaces/{workspace_id}/tasks/{task}/relations/{relation_id}`. Scope: `tasks:write`.
+Answers 204. Removing a duplicate relation also moves the duplicate out of the Duplicate status.
+Make duplicates with `duplicate_of_id` on `PATCH /tasks/{task}`.
+
+```bash
+curl -sS -X POST "$ORBIT_WS/tasks/ENG-12/relations" \
+  -H "Authorization: Bearer $ORBIT_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"type":"blocks","task_id":"ENG-14"}'
+```
+
 ### Comments
 
 `GET /workspaces/{workspace_id}/tasks/{task}/comments?cursor&limit`. Scope:
 `tasks:read`. Oldest first. Item:
-`{id, task_id, author_id, author_service_account, body, parent_id, version,
+`{id, task_id, author_id, author_service_account, body, parent_id, external_id, version,
 created_at, updated_at}`. `author_service_account` is `{id, name}` for a comment
 that a service account wrote, and `null` otherwise. Show it as the author when
 it is set.
@@ -315,13 +383,58 @@ curl -sS "$ORBIT_WS/tasks/ENG-12/comments" -H "Authorization: Bearer $ORBIT_TOKE
 ```
 
 `POST /workspaces/{workspace_id}/tasks/{task}/comments`. Scope: `tasks:write`.
-Body: `{"body": "Markdown"}` (1 to 100,000 bytes in UTF-8, not only spaces). Response: `201` with
-the comment. The author is the token's creator, or for a service-account token
+Body: `{"body": "Markdown", "parent_id"?: "…"}` (1 to 100,000 bytes in UTF-8, not only
+spaces). `parent_id` is a comment of the same task: the new comment is its reply. Response:
+`201` with the comment. The author is the token's creator, or for a service-account token
 the service account.
 
 ```bash
 curl -sS "$ORBIT_WS/tasks/ENG-12/comments" -H "Authorization: Bearer $ORBIT_TOKEN" \
   -H 'Content-Type: application/json' -d '{"body":"Deployed in build 512."}'
+```
+
+### Import from another tool
+
+A token with `tasks:write` and `tasks:import` (**Import mode** in **Settings → API tokens**)
+copies tasks from another tool, such as Plane, Jira or a tool of your own, as the built-in
+importers do:
+
+- Its writes notify nobody (assignees, mentions) and run no sub-issue automation, also its
+  updates. The source tool already decided the state of each task.
+- New tasks and comments take the import fields below. A token without `tasks:import` that
+  sends one of them gets `403 insufficient_scope`.
+
+| Field | On | Effect |
+| --- | --- | --- |
+| `external_id` | tasks, comments | The source tool's ID, 1 to 200 characters, unique in the workspace. A second create with the same ID answers `200` with the item that the first create made, and changes nothing. A restarted import thus makes no duplicates. An ID whose task is in the trash, or a comment ID on another task, answers `409`. |
+| `number` | tasks | The task number, so `ABC-166` stays `ABC-166`. It must be free in the project, also among tasks in the trash (`409`). Later tasks get numbers after the highest one. |
+| `created_at`, `updated_at` | tasks, comments | The original times (RFC 3339). `updated_at` needs `created_at` and must not be before it; it is `created_at` when unset. |
+| `completed_at` | tasks | When the task was done. Kept when the status is `completed` or `cancelled`. |
+| `creator_id` | tasks | The member shown as the creator. |
+| `author_id` | comments | The member shown as the author. |
+| `author_name` | comments | An author who is not a member, shown in bold on the first line of the comment. Not with `author_id`. |
+
+`creator_id` and `author_id` must be active members who are not guests (`422`). The audit
+log still names the token.
+
+A typical import:
+
+1. Create the projects (`POST /projects`, with a token for all projects), then their statuses
+   and labels.
+2. Create the tasks, parents before their sub-issues, with `external_id`, `number` and the
+   original times.
+3. Add the comments, oldest first, with `external_id`, the author and the original times.
+4. Link the tasks with `POST /tasks/{task}/relations`, and mark duplicates with
+   `duplicate_of_id`.
+
+If the script stops, run it again: each create with an `external_id` that Orbit already has
+returns the existing item.
+
+```bash
+curl -sS "$ORBIT_WS/tasks" -H "Authorization: Bearer $ORBIT_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d "{\"project_id\":\"$PROJECT_ID\",\"status_id\":\"$STATUS_ID\",\"title\":\"Fix login\",
+       \"external_id\":\"plane:6f1c…\",\"number\":166,\"created_at\":\"2024-03-01T09:30:00.000Z\"}"
 ```
 
 ### Docs

@@ -362,10 +362,14 @@ async fn read_endpoints_return_public_fields_of_approved_projects_only() {
         keys,
         [
             "assignee_ids",
+            "completed_at",
             "created_at",
+            "creator_id",
+            "creator_service_account",
             "description",
             "due_at",
             "due_start_at",
+            "external_id",
             "id",
             "identifier",
             "label_ids",
@@ -373,6 +377,7 @@ async fn read_endpoints_return_public_fields_of_approved_projects_only() {
             "parent_task_id",
             "priority",
             "project_id",
+            "recurrence",
             "status_id",
             "title",
             "updated_at",
@@ -1160,6 +1165,8 @@ async fn service_account_writes_name_the_service_account_and_the_token() {
         )
         .await;
     assert_eq!(code, StatusCode::CREATED, "{created}");
+    assert_eq!(created["creator_id"], Value::Null);
+    assert_eq!(created["creator_service_account"], me["service_account"]);
     let id = created["id"].as_str().unwrap().to_owned();
     let creator: Option<String> =
         sqlx::query_scalar("SELECT creator_service_account_id FROM tasks WHERE id = $1")

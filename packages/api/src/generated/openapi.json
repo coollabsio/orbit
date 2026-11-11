@@ -3110,6 +3110,160 @@
         ]
       }
     },
+    "/api/public/v1/workspaces/{workspace_id}/projects/{project_id}": {
+      "patch": {
+        "tags": [
+          "public-api"
+        ],
+        "summary": "Rename or recolor a project",
+        "operationId": "public_update_project",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "description": "The token's workspace, from `GET /me`.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublicUpdateProjectBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The project",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicProject"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthorized",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "insufficient_scope",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limit_exceeded",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/public/v1/workspaces/{workspace_id}/projects/{project_id}/labels": {
       "get": {
         "tags": [
@@ -3178,6 +3332,321 @@
           },
           "400": {
             "description": "invalid_proxy_headers, invalid_request, invalid_cursor",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthorized",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "insufficient_scope",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limit_exceeded",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "public-api"
+        ],
+        "summary": "Add a label to a project",
+        "description": "A name that the project already has answers 400.",
+        "operationId": "public_create_label",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "description": "The token's workspace, from `GET /me`.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublicCreateLabelBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "The new label",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicLabel"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthorized",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "insufficient_scope",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limit_exceeded",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/public/v1/workspaces/{workspace_id}/projects/{project_id}/labels/{label_id}": {
+      "patch": {
+        "tags": [
+          "public-api"
+        ],
+        "summary": "Rename or recolor a label",
+        "operationId": "public_update_label",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "description": "The token's workspace, from `GET /me`.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "label_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublicUpdateLabelBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The label",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicLabel"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3342,6 +3811,320 @@
           },
           "400": {
             "description": "invalid_proxy_headers, invalid_request, invalid_cursor",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthorized",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "insufficient_scope",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limit_exceeded",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "public-api"
+        ],
+        "summary": "Add a status to a project",
+        "operationId": "public_create_status",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "description": "The token's workspace, from `GET /me`.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublicCreateStatusBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "The new status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthorized",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "insufficient_scope",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limit_exceeded",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/public/v1/workspaces/{workspace_id}/projects/{project_id}/statuses/{status_id}": {
+      "patch": {
+        "tags": [
+          "public-api"
+        ],
+        "summary": "Change a status of a project",
+        "operationId": "public_update_status",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "description": "The token's workspace, from `GET /me`.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublicUpdateStatusBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3708,6 +4491,16 @@
           "required": true
         },
         "responses": {
+          "200": {
+            "description": "`tasks:import`: the task that an earlier create with the same `external_id` made",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicTask"
+                }
+              }
+            }
+          },
           "201": {
             "description": "The new task",
             "content": {
@@ -4561,6 +5354,16 @@
           "required": true
         },
         "responses": {
+          "200": {
+            "description": "`tasks:import`: the comment that an earlier create with the same `external_id` made",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicComment"
+                }
+              }
+            }
+          },
           "201": {
             "description": "The new comment",
             "content": {
@@ -4673,6 +5476,453 @@
           },
           "503": {
             "description": "service_unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/public/v1/workspaces/{workspace_id}/tasks/{task}/relations": {
+      "get": {
+        "tags": [
+          "public-api"
+        ],
+        "summary": "The relations of a task",
+        "description": "Relations to tasks outside the approved projects are left out.",
+        "operationId": "public_list_relations",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "description": "The token's workspace, from `GET /me`.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "task",
+            "in": "path",
+            "description": "A task UUID or identifier such as `ENG-12` (any letter case).",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Every relation; `next_cursor` is `null`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/List_TaskRelationRecord"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthorized",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "insufficient_scope",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limit_exceeded",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "public-api"
+        ],
+        "summary": "Link two tasks",
+        "description": "A relation that already links the two tasks is replaced; the same relation again is returned unchanged. A duplicate relation cannot be replaced here (409): remove it or update `duplicate_of_id` first.",
+        "operationId": "public_create_relation",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "description": "The token's workspace, from `GET /me`.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "task",
+            "in": "path",
+            "description": "A task UUID or identifier such as `ENG-12` (any letter case).",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublicCreateRelationBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "The relation, seen from this task",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskRelationRecord"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthorized",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "insufficient_scope",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limit_exceeded",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/public/v1/workspaces/{workspace_id}/tasks/{task}/relations/{relation_id}": {
+      "delete": {
+        "tags": [
+          "public-api"
+        ],
+        "summary": "Remove a relation",
+        "description": "Removing a duplicate relation also moves the duplicate out of the Duplicate status.",
+        "operationId": "public_delete_relation",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "description": "The token's workspace, from `GET /me`.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "task",
+            "in": "path",
+            "description": "A task UUID or identifier such as `ENG-12` (any letter case).",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "relation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "The relation is removed"
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthorized",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "insufficient_scope",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limit_exceeded",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -60778,6 +62028,7 @@
         "enum": [
           "tasks:read",
           "tasks:write",
+          "tasks:import",
           "docs:read",
           "docs:write",
           "chat:read",
@@ -67939,6 +69190,7 @@
                 "author_service_account",
                 "body",
                 "parent_id",
+                "external_id",
                 "version",
                 "created_at",
                 "updated_at"
@@ -67965,6 +69217,13 @@
                 "created_at": {
                   "type": "string",
                   "format": "date-time"
+                },
+                "external_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "The source tool's ID of an imported comment (`tasks:import`); `null` otherwise."
                 },
                 "id": {
                   "type": "string"
@@ -68231,6 +69490,10 @@
                     "recurrence",
                     "created_at",
                     "updated_at",
+                    "completed_at",
+                    "creator_id",
+                    "creator_service_account",
+                    "external_id",
                     "version"
                   ],
                   "properties": {
@@ -68240,9 +69503,35 @@
                         "type": "string"
                       }
                     },
+                    "completed_at": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "format": "date-time",
+                      "description": "When the task entered a completed or cancelled status; `null` while it is open."
+                    },
                     "created_at": {
                       "type": "string",
                       "format": "date-time"
+                    },
+                    "creator_id": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "The member who created the task; `null` when a service account did."
+                    },
+                    "creator_service_account": {
+                      "oneOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "$ref": "#/components/schemas/PublicNamed",
+                          "description": "Set when a service account created the task; show it as the creator then."
+                        }
+                      ]
                     },
                     "description": {
                       "type": "string",
@@ -68261,6 +69550,13 @@
                         "null"
                       ],
                       "format": "date-time"
+                    },
+                    "external_id": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "The source tool's ID of an imported task (`tasks:import`); `null` otherwise."
                     },
                     "id": {
                       "type": "string"
@@ -68339,6 +69635,54 @@
                 }
               ],
               "description": "A task, without embedded parent, duplicate or ancestor records."
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Send it as `cursor` for the next page; `null` on the last page."
+          }
+        }
+      },
+      "List_TaskRelationRecord": {
+        "type": "object",
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "type",
+                "direction",
+                "task",
+                "created_at"
+              ],
+              "properties": {
+                "created_at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "direction": {
+                  "$ref": "#/components/schemas/TaskRelationDirection",
+                  "description": "Outgoing when the viewed task is the relation's source (the blocker or the duplicate)."
+                },
+                "id": {
+                  "type": "string"
+                },
+                "task": {
+                  "$ref": "#/components/schemas/RelatedTask"
+                },
+                "type": {
+                  "$ref": "#/components/schemas/TaskRelationType"
+                }
+              }
             }
           },
           "next_cursor": {
@@ -74808,6 +76152,7 @@
           "author_service_account",
           "body",
           "parent_id",
+          "external_id",
           "version",
           "created_at",
           "updated_at"
@@ -74834,6 +76179,13 @@
           "created_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "external_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The source tool's ID of an imported comment (`tasks:import`); `null` otherwise."
           },
           "id": {
             "type": "string"
@@ -74864,9 +76216,53 @@
           "body"
         ],
         "properties": {
+          "author_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`tasks:import`: the member shown as the author (not a guest)."
+          },
+          "author_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`tasks:import`: an author who is not a member; shown in bold on the first line, as the\nbuilt-in importers do. Not with `author_id`. Up to 200 characters."
+          },
           "body": {
             "type": "string",
             "description": "Markdown, 1 to 100,000 bytes in UTF-8, not only spaces."
+          },
+          "created_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "`tasks:import`: the original creation time."
+          },
+          "external_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`tasks:import`: the source tool's ID, unique in the workspace. A second create with the\nsame ID answers `200` with the comment that the first one made. Up to 200 characters."
+          },
+          "parent_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A comment of the same task: the new comment is its reply."
+          },
+          "updated_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "`tasks:import`: the original update time; needs `created_at` and is not before it."
           }
         },
         "additionalProperties": false
@@ -74986,6 +76382,26 @@
         },
         "additionalProperties": false
       },
+      "PublicCreateLabelBody": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "color": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`#rrggbb`; gray when unset."
+          },
+          "name": {
+            "type": "string",
+            "description": "1 to 100 characters, unique in the project."
+          }
+        },
+        "additionalProperties": false
+      },
       "PublicCreateProjectBody": {
         "type": "object",
         "required": [
@@ -75011,6 +76427,64 @@
         },
         "additionalProperties": false
       },
+      "PublicCreateRelationBody": {
+        "type": "object",
+        "required": [
+          "type",
+          "task_id"
+        ],
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "description": "The other task, in an approved project: a UUID or an identifier such as `ENG-12`."
+          },
+          "type": {
+            "$ref": "#/components/schemas/NewTaskRelationType",
+            "description": "`blocks` (this task blocks `task_id`), `blocked_by` or `related`."
+          }
+        },
+        "additionalProperties": false
+      },
+      "PublicCreateStatusBody": {
+        "type": "object",
+        "required": [
+          "name",
+          "category"
+        ],
+        "properties": {
+          "category": {
+            "type": "string",
+            "description": "`unstarted`, `started`, `completed` or `cancelled`. Tasks in a `completed` or\n`cancelled` status are done."
+          },
+          "color": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`#rrggbb`; a gray, yellow or green that matches the category when unset."
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Up to 20,000 characters."
+          },
+          "name": {
+            "type": "string",
+            "description": "1 to 200 characters."
+          },
+          "position": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The place in the board order (0 is first); after the last status when unset."
+          }
+        },
+        "additionalProperties": false
+      },
       "PublicCreateTaskBody": {
         "type": "object",
         "required": [
@@ -75025,6 +76499,29 @@
               "type": "string"
             },
             "description": "Members of the workspace."
+          },
+          "completed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "`tasks:import`: when the task was done; kept when its status is completed or cancelled."
+          },
+          "created_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "`tasks:import`: the original creation time."
+          },
+          "creator_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`tasks:import`: the member shown as the creator (not a guest)."
           },
           "description": {
             "type": "string",
@@ -75045,12 +76542,27 @@
             "format": "date-time",
             "description": "Needs `due_at` and must not be after it."
           },
+          "external_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`tasks:import`: the source tool's ID, unique in the workspace. A second create with the\nsame ID answers `200` with the task that the first one made (unchanged), so a restarted\nimport does not make duplicates. Up to 200 characters."
+          },
           "label_ids": {
             "type": "array",
             "items": {
               "type": "string"
             },
             "description": "Labels of the task's project."
+          },
+          "number": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "`tasks:import`: the task number, free in the project (`409` otherwise), so `ENG-166`\nstays `ENG-166`. Later tasks are numbered after the highest number."
           },
           "parent_task_id": {
             "type": [
@@ -75074,6 +76586,14 @@
           "title": {
             "type": "string",
             "description": "1 to 500 characters."
+          },
+          "updated_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "`tasks:import`: the original update time; needs `created_at` and is not before it."
           }
         },
         "additionalProperties": false
@@ -75620,6 +77140,10 @@
               "recurrence",
               "created_at",
               "updated_at",
+              "completed_at",
+              "creator_id",
+              "creator_service_account",
+              "external_id",
               "version"
             ],
             "properties": {
@@ -75629,9 +77153,35 @@
                   "type": "string"
                 }
               },
+              "completed_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time",
+                "description": "When the task entered a completed or cancelled status; `null` while it is open."
+              },
               "created_at": {
                 "type": "string",
                 "format": "date-time"
+              },
+              "creator_id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The member who created the task; `null` when a service account did."
+              },
+              "creator_service_account": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/PublicNamed",
+                    "description": "Set when a service account created the task; show it as the creator then."
+                  }
+                ]
               },
               "description": {
                 "type": "string",
@@ -75650,6 +77200,13 @@
                   "null"
                 ],
                 "format": "date-time"
+              },
+              "external_id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The source tool's ID of an imported task (`tasks:import`); `null` otherwise."
               },
               "id": {
                 "type": "string"
@@ -75898,6 +77455,117 @@
         },
         "additionalProperties": false
       },
+      "PublicUpdateLabelBody": {
+        "type": "object",
+        "description": "A missing field keeps its value.",
+        "required": [
+          "expected_version"
+        ],
+        "properties": {
+          "color": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`#rrggbb`."
+          },
+          "expected_version": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The `version` that you read.",
+            "minimum": 0
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "1 to 100 characters, unique in the project."
+          }
+        },
+        "additionalProperties": false
+      },
+      "PublicUpdateProjectBody": {
+        "type": "object",
+        "description": "A missing field keeps its value.",
+        "required": [
+          "expected_version"
+        ],
+        "properties": {
+          "color": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`#rrggbb`."
+          },
+          "expected_version": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The `version` that you read.",
+            "minimum": 0
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "1 to 200 characters."
+          }
+        },
+        "additionalProperties": false
+      },
+      "PublicUpdateStatusBody": {
+        "type": "object",
+        "description": "A missing field keeps its value. The project's Duplicate status cannot change its category,\nand no other status can take it.",
+        "required": [
+          "expected_version"
+        ],
+        "properties": {
+          "category": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`unstarted`, `started`, `completed` or `cancelled`."
+          },
+          "color": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`#rrggbb`."
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Up to 20,000 characters."
+          },
+          "expected_version": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The `version` that you read.",
+            "minimum": 0
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "1 to 200 characters."
+          },
+          "position": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          }
+        },
+        "additionalProperties": false
+      },
       "PublicUpdateTaskBody": {
         "type": "object",
         "description": "A missing field keeps its value.",
@@ -75937,6 +77605,13 @@
             ],
             "format": "date-time",
             "description": "`null` clears the date."
+          },
+          "duplicate_of_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A task in an approved project (a UUID or an identifier such as `ENG-12`) marks this task\nas its duplicate and moves it to the Duplicate status; `null` unmarks it."
           },
           "expected_version": {
             "type": "integer",
