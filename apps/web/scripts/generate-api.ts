@@ -1,3 +1,4 @@
+import { createClient, defaultPlugins } from '@hey-api/openapi-ts'
 import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -15,22 +16,15 @@ const temporaryInput = join(temporary, 'openapi.json')
 await Bun.write(temporaryInput, source)
 await rm(output, { recursive: true, force: true })
 await mkdir(output, { recursive: true })
-const generated = Bun.spawnSync([
-  process.execPath,
-  'x',
-  'openapi-ts',
-  '-i',
-  temporaryInput,
-  '-o',
-  output,
-  '-c',
-  '@hey-api/client-fetch',
-  '-s',
-])
-await rm(temporary, { recursive: true, force: true })
-if (!generated.success) {
-  process.stderr.write(generated.stderr)
-  process.exit(generated.exitCode)
+try {
+  await createClient({
+    input: temporaryInput,
+    output: { path: output, entryFile: false },
+    plugins: [...defaultPlugins, '@hey-api/client-fetch'],
+    logs: { level: 'silent', file: false },
+  })
+} finally {
+  await rm(temporary, { recursive: true, force: true })
 }
 
 const rolePermissions = document['x-role-permissions']

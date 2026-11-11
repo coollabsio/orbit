@@ -7303,6 +7303,81 @@ export type ViewUpdateBody = {
 
 export type Visibility = 'personal' | 'workspace';
 
+export type WebhookCreateBody = {
+    enabled?: boolean;
+    /**
+     * At least one.
+     */
+    event_types: Array<WebhookEventType>;
+    /**
+     * 1 to 100 characters.
+     */
+    name: string;
+    /**
+     * Live projects of the workspace whose tasks send events; at least one.
+     */
+    project_ids: Array<string>;
+    /**
+     * A public https URL (development also takes http and local hosts).
+     */
+    url: string;
+};
+
+/**
+ * A subscription and its signing secret, which is shown only here.
+ */
+export type WebhookCreated = {
+    created_at: string;
+    enabled: boolean;
+    event_types: Array<WebhookEventType>;
+    id: string;
+    name: string;
+    project_ids: Array<string>;
+    updated_at: string;
+    url: string;
+} & {
+    /**
+     * `whsec_…`: verifies the `webhook-signature` header. Shown once.
+     */
+    signing_secret: string;
+};
+
+/**
+ * `pending` until a 2xx answer (`succeeded`), the last retry (`failed`), or a cancel (the
+ * subscription was turned off, or its project left the subscription or went to the trash).
+ */
+export type WebhookDelivery = {
+    attempt_count: number;
+    created_at: string;
+    delivered_at?: string | null;
+    /**
+     * The `webhook-id` header: the same on every retry and for every subscription.
+     */
+    event_id: string;
+    event_type: WebhookEventType;
+    id: string;
+    last_attempt_at?: string | null;
+    /**
+     * Why the last attempt failed: `http_status`, `timeout`, `unreachable`, `blocked_address`,
+     * `app_key_missing`, `secret_unreadable` or `failed`.
+     */
+    last_error?: string | null;
+    /**
+     * The HTTP status of the last answer; null when there was none.
+     */
+    last_status?: number | null;
+    /**
+     * The task's id.
+     */
+    resource_id: string;
+    /**
+     * `pending`, `succeeded`, `failed` or `cancelled`.
+     */
+    state: string;
+};
+
+export type WebhookEventType = 'task.created' | 'task.updated' | 'task.deleted';
+
 export type WebhookRecord = {
     conversation_id: string;
     created_at: string;
@@ -7327,6 +7402,35 @@ export type WebhookRecord = {
      */
     request_url: string | null;
     rotated_at: string | null;
+};
+
+export type WebhookSigningSecret = {
+    /**
+     * `whsec_…`: verifies the `webhook-signature` header from now on. Shown once.
+     */
+    signing_secret: string;
+};
+
+export type WebhookSubscription = {
+    created_at: string;
+    enabled: boolean;
+    event_types: Array<WebhookEventType>;
+    id: string;
+    name: string;
+    project_ids: Array<string>;
+    updated_at: string;
+    url: string;
+};
+
+/**
+ * Omitted fields keep their value. Turning a subscription off cancels its pending deliveries.
+ */
+export type WebhookUpdateBody = {
+    enabled?: boolean | null;
+    event_types?: Array<WebhookEventType> | null;
+    name?: string | null;
+    project_ids?: Array<string> | null;
+    url?: string | null;
 };
 
 /**
@@ -31067,3 +31171,490 @@ export type FavoriteViewResponses = {
 };
 
 export type FavoriteViewResponse = FavoriteViewResponses[keyof FavoriteViewResponses];
+
+export type ListWebhooksData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/webhooks';
+};
+
+export type ListWebhooksErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * webhook_manager_required
+     */
+    403: TaskProblem;
+    /**
+     * webhook_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ListWebhooksError = ListWebhooksErrors[keyof ListWebhooksErrors];
+
+export type ListWebhooksResponses = {
+    200: Array<WebhookSubscription>;
+};
+
+export type ListWebhooksResponse = ListWebhooksResponses[keyof ListWebhooksResponses];
+
+export type CreateWebhookData = {
+    body: WebhookCreateBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/webhooks';
+};
+
+export type CreateWebhookErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, webhook_manager_required
+     */
+    403: TaskProblem;
+    /**
+     * webhook_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * app_key_missing
+     */
+    503: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type CreateWebhookError = CreateWebhookErrors[keyof CreateWebhookErrors];
+
+export type CreateWebhookResponses = {
+    201: WebhookCreated;
+};
+
+export type CreateWebhookResponse = CreateWebhookResponses[keyof CreateWebhookResponses];
+
+export type DeleteWebhookData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        webhook_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/webhooks/{webhook_id}';
+};
+
+export type DeleteWebhookErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, webhook_manager_required
+     */
+    403: TaskProblem;
+    /**
+     * webhook_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type DeleteWebhookError = DeleteWebhookErrors[keyof DeleteWebhookErrors];
+
+export type DeleteWebhookResponses = {
+    204: void;
+};
+
+export type DeleteWebhookResponse = DeleteWebhookResponses[keyof DeleteWebhookResponses];
+
+export type GetWebhookData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        webhook_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/webhooks/{webhook_id}';
+};
+
+export type GetWebhookErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * webhook_manager_required
+     */
+    403: TaskProblem;
+    /**
+     * webhook_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type GetWebhookError = GetWebhookErrors[keyof GetWebhookErrors];
+
+export type GetWebhookResponses = {
+    200: WebhookSubscription;
+};
+
+export type GetWebhookResponse = GetWebhookResponses[keyof GetWebhookResponses];
+
+export type UpdateWebhookData = {
+    body: WebhookUpdateBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        webhook_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/webhooks/{webhook_id}';
+};
+
+export type UpdateWebhookErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, webhook_manager_required
+     */
+    403: TaskProblem;
+    /**
+     * webhook_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type UpdateWebhookError = UpdateWebhookErrors[keyof UpdateWebhookErrors];
+
+export type UpdateWebhookResponses = {
+    200: WebhookSubscription;
+};
+
+export type UpdateWebhookResponse = UpdateWebhookResponses[keyof UpdateWebhookResponses];
+
+export type ListWebhookDeliveriesData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        webhook_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/webhooks/{webhook_id}/deliveries';
+};
+
+export type ListWebhookDeliveriesErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * webhook_manager_required
+     */
+    403: TaskProblem;
+    /**
+     * webhook_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ListWebhookDeliveriesError = ListWebhookDeliveriesErrors[keyof ListWebhookDeliveriesErrors];
+
+export type ListWebhookDeliveriesResponses = {
+    200: Array<WebhookDelivery>;
+};
+
+export type ListWebhookDeliveriesResponse = ListWebhookDeliveriesResponses[keyof ListWebhookDeliveriesResponses];
+
+export type RetryWebhookDeliveryData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        webhook_id: string;
+        delivery_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/webhooks/{webhook_id}/deliveries/{delivery_id}/retry';
+};
+
+export type RetryWebhookDeliveryErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, webhook_manager_required
+     */
+    403: TaskProblem;
+    /**
+     * webhook_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, webhook_delivery_not_retryable
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type RetryWebhookDeliveryError = RetryWebhookDeliveryErrors[keyof RetryWebhookDeliveryErrors];
+
+export type RetryWebhookDeliveryResponses = {
+    200: WebhookDelivery;
+};
+
+export type RetryWebhookDeliveryResponse = RetryWebhookDeliveryResponses[keyof RetryWebhookDeliveryResponses];
+
+export type RotateWebhookSecretData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        webhook_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/webhooks/{webhook_id}/rotate-secret';
+};
+
+export type RotateWebhookSecretErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, webhook_manager_required
+     */
+    403: TaskProblem;
+    /**
+     * webhook_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * app_key_missing
+     */
+    503: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type RotateWebhookSecretError = RotateWebhookSecretErrors[keyof RotateWebhookSecretErrors];
+
+export type RotateWebhookSecretResponses = {
+    200: WebhookSigningSecret;
+};
+
+export type RotateWebhookSecretResponse = RotateWebhookSecretResponses[keyof RotateWebhookSecretResponses];

@@ -193,33 +193,39 @@ impl TaskView {
             .filter(|parent| grant.contains(&parent.project_id))
             .map(|parent| parent.id);
         Self {
-            task: ReadTask {
-                id: task.id,
-                project_id: task.project_id,
-                number: task.number,
-                status_id: task.status_id,
-                title: task.title,
-                description: task.description,
-                priority: task.priority,
-                assignee_ids: task.assignee_ids,
-                label_ids: task.label_ids,
-                due_start_at: task.due_start_at,
-                due_at: task.due_at,
-                recurrence: task.recurrence,
-                created_at: task.created_at,
-                updated_at: task.updated_at,
-                completed_at: task.completed_at,
-                creator_id: task.creator_id,
-                creator_service_account: task.creator_service_account_id.map(|id| Named {
-                    id,
-                    name: task.creator_service_account_name.unwrap_or_default(),
-                }),
-                external_id: task.external_id,
-                version: revision(task.version, task.updated_at),
-            },
+            task: ReadTask::new(task),
             parent_task_id,
             identifier,
             url,
+        }
+    }
+}
+
+impl ReadTask {
+    pub(crate) fn new(task: TaskRecord) -> Self {
+        Self {
+            id: task.id,
+            project_id: task.project_id,
+            number: task.number,
+            status_id: task.status_id,
+            title: task.title,
+            description: task.description,
+            priority: task.priority,
+            assignee_ids: task.assignee_ids,
+            label_ids: task.label_ids,
+            due_start_at: task.due_start_at,
+            due_at: task.due_at,
+            recurrence: task.recurrence,
+            created_at: task.created_at,
+            updated_at: task.updated_at,
+            completed_at: task.completed_at,
+            creator_id: task.creator_id,
+            creator_service_account: task.creator_service_account_id.map(|id| Named {
+                id,
+                name: task.creator_service_account_name.unwrap_or_default(),
+            }),
+            external_id: task.external_id,
+            version: revision(task.version, task.updated_at),
         }
     }
 }
