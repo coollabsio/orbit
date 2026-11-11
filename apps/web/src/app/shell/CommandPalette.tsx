@@ -40,7 +40,7 @@ import { useAvailableCommands, useBindings, useRunCommand } from '@/shortcuts/us
 import { chatEnabled, docsHidden } from './productNavigation'
 import { namesDestination, paletteArea, sectionOrder, type PaletteArea, type PaletteSection } from './paletteOrder'
 
-const COMMAND_ICON: Record<Group, LucideIcon> = { General: Settings, Navigation: Home, List: SquareCheck, Task: SquareCheck, Docs: FileText, Chat: MessageSquare }
+const COMMAND_ICON: Record<Group, LucideIcon> = { General: Settings, Navigation: Home, List: SquareCheck, Task: SquareCheck, 'Pull requests': FileText, Docs: FileText, Chat: MessageSquare }
 
 type EntryKind = 'navigation' | 'command' | 'task' | 'page' | 'chat'
 

@@ -1,0 +1,26 @@
+/*
+ * Pierre Diffs writes its theme (CSS variables, color-scheme) into a <style> element inside each diff's shadow root.
+ * The production CSP (style-src 'self') blocks that element. CSS variables inherit into a shadow root, so Orbit sets
+ * them here, on the host element, from Orbit's own theme. Token colors are inline style attributes, which the CSP
+ * allows (style-src-attr 'unsafe-inline'). Host styles from this sheet win over Pierre's own :host rules, so dev
+ * (no CSP) and production look the same.
+ */
+diffs-container {
+  color-scheme: light;
+  --diffs-light: var(--foreground);
+  --diffs-light-bg: var(--background);
+  --diffs-dark: var(--foreground);
+  --diffs-dark-bg: var(--background);
+  --diffs-light-addition-color: #1a7f37;
+  --diffs-light-deletion-color: #cf222e;
+  --diffs-light-modified-color: #9a6700;
+  --diffs-dark-addition-color: #3fb950;
+  --diffs-dark-deletion-color: #f85149;
+  --diffs-dark-modified-color: #d29922;
+  --diffs-font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  --diffs-header-font-family: var(--font-sans);
+}
+
+.dark diffs-container {
+  color-scheme: dark;
+}

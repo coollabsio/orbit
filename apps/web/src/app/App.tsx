@@ -10,6 +10,7 @@ import { chatEnabled } from '@/app/shell/productNavigation'
 import { ChatPage } from '@/features/chat/pages/ChatPage'
 import { ProjectSettingsPage } from '@/features/tasks/pages/ProjectSettingsPage'
 import { PullListPage } from '@/features/pulls/pages/PullListPage'
+import { PullPage } from '@/features/pulls/pages/PullPage'
 import { TasksPage } from '@/features/tasks/pages/TasksPage'
 import { HomePage } from '@/features/home/pages/HomePage'
 import { TaskTrashPage } from '@/features/tasks/pages/TaskTrashPage'
@@ -108,6 +109,7 @@ export default function App() {
                 <Route path="tasks" element={<TasksPage />} />
                 <Route path="tasks/projects/:projectId/settings" element={<ProjectSettingsPage />} />
                 <Route path="tasks/projects/:projectId/pulls" element={<PullListPage />} />
+                <Route path="tasks/pulls/:owner/:repo/:number" element={<PullPage />} />
                 <Route path="tasks/:taskId" element={<TasksPage />} />
                 <Route path="tasks-trash" element={<TaskTrashPage />} />
                 <Route path="tasks-trash/task/:taskId" element={<TrashedTaskPage />} />
