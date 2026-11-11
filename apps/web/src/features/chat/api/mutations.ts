@@ -399,8 +399,8 @@ export function useDeleteWebhook() {
 }
 
 export function useSetWebhookInteractivity() {
-  return useWebhookMutation((client, input: { conversationId: string; webhookId: string; requestUrl: string | null }) =>
-    client.setWebhookInteractivity(input.conversationId, input.webhookId, input.requestUrl))
+  return useWebhookMutation((client, input: { conversationId: string; webhookId: string; requestUrl: string | null; events: boolean }) =>
+    client.setWebhookInteractivity(input.conversationId, input.webhookId, input.requestUrl, input.events))
 }
 
 /** Reveals (`rotate: false`) or rotates the signing secret of a webhook. */

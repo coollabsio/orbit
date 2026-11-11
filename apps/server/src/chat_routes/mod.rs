@@ -3,6 +3,7 @@
 
 pub(crate) mod conversations;
 pub(crate) mod emoji;
+pub(crate) mod events;
 pub(crate) mod files;
 pub(crate) mod hooks;
 mod images;
@@ -258,6 +259,10 @@ fn json_router(state: ChatState) -> Router {
         .route(
             "/api/v1/hooks/chat/{webhook_id}/responses/{token}",
             post(hooks::post_action_response),
+        )
+        .route(
+            "/api/v1/hooks/chat/{webhook_id}/messages",
+            get(events::read_hook_messages),
         )
         .route(
             "/api/v1/workspaces/{workspace_id}/chat/messages/{message_id}/actions",

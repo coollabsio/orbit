@@ -622,7 +622,12 @@ impl MigrationRunner {
                 ),
                 Migration::new(
                     95,
-                    include_str!("../../../../apps/server/migrations/0095_chat_thread_unreads.sql"),
+                    include_str!("../../../../apps/server/migrations/0095_chat_webhook_events.sql"),
+                    false,
+                ),
+                Migration::new(
+                    96,
+                    include_str!("../../../../apps/server/migrations/0096_chat_thread_unreads.sql"),
                     false,
                 ),
             ],
@@ -924,7 +929,14 @@ impl MigrationRunner {
             Migration::new(
                 95,
                 include_str!(
-                    "../../../../apps/server/migrations/postgres/0095_chat_thread_unreads.sql"
+                    "../../../../apps/server/migrations/postgres/0095_chat_webhook_events.sql"
+                ),
+                false,
+            ),
+            Migration::new(
+                96,
+                include_str!(
+                    "../../../../apps/server/migrations/postgres/0096_chat_thread_unreads.sql"
                 ),
                 false,
             ),

@@ -50,7 +50,8 @@ pub use slack::{attachment_blocks, cut, emoji_name, mrkdwn_to_markdown};
 pub use state::{ConversationCursor, ReadSnapshot, StateUpdate, ThreadCursor};
 pub use stickers::{CustomStickerImage, CustomStickerRecord, STICKER_MAX_BYTES, StickerRecord};
 pub use webhooks::{
-    BotSender, DeliveryRecord, HookTarget, WebhookInput, WebhookRecord, WebhookWithSecret,
+    BotSender, DeliveryRecord, EventTarget, HookTarget, WebhookInput, WebhookRecord,
+    WebhookWithSecret,
 };
 
 /// Characters in one message body.
@@ -249,6 +250,10 @@ pub struct ReplyPreviewRecord {
     pub sticker: bool,
     #[schema(value_type = String, format = DateTime)]
     pub created_at: TimestampMillis,
+    /// The integration's name when an integration posted the reply: `author_id` is then only the
+    /// member who set it up.
+    #[schema(required = true)]
+    pub bot_name: Option<String>,
 }
 
 /// The message that a message quotes, shown above it.
@@ -1065,6 +1070,7 @@ const MESSAGE_SELECT: &str = "SELECT m.id, m.conversation_id, m.thread_root_id, 
      m.body, m.mention_channel, m.mention_here, m.also_in_channel, m.nonce, m.pinned_at, \
      m.edited_at, m.deleted_at, m.created_at, m.reply_count, m.reply_user_ids, m.last_reply_id, \
      l.author_id AS last_author_id, l.body AS last_body, l.created_at AS last_created_at, \
+     l.bot_name AS last_bot_name, \
      l.sticker_id IS NOT NULL AS last_sticker, q.sticker_id IS NOT NULL AS quoted_sticker, \
      m.reply_to_id, q.author_id AS quoted_author_id, substr(q.body, 1, 200) AS quoted_body, \
      m.forward_of_id, m.forward_conversation_id, m.forward_author_id, m.forward_created_at, \
@@ -1089,6 +1095,7 @@ fn message_from_row(row: &AnyRow) -> Result<MessageRecord, ChatError> {
             body: row.get("last_body"),
             sticker: row.get("last_sticker"),
             created_at: TimestampMillis::from_millis(row.get("last_created_at")),
+            bot_name: row.get("last_bot_name"),
         }),
         None => None,
     };

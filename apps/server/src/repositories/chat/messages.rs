@@ -11,12 +11,13 @@ use super::state::unread_threads;
 use super::stickers::load_sticker;
 use super::webhooks::{BotSender, HookTarget, clean_bot_name, clean_icon_url};
 use super::{
-    Access, BotRecord, ChatError, ChatEvent, ChatRepository, ConversationKind, Events,
-    FollowedThreadRecord, ForwardedRecord, MESSAGE_MAX_CHARS, MESSAGE_SELECT, MentionsRecord,
-    MessageKind, MessagePage, MessageRecord, ReplyToRecord, StickerRecord, ThreadMember,
-    ThreadPage, Written, current_state, finish, hydrate, id_list, in_ids, json_values, load_access,
-    load_actor, load_conversation, load_message, load_message_access, load_thread_member,
-    mentioned_user_ids, parse_id, parse_optional_id, public_for, reachable_dm, thread_state,
+    Access, BotRecord, ChatError, ChatEvent, ChatRepository, Conversation, ConversationKind,
+    Events, FollowedThreadRecord, ForwardedRecord, MESSAGE_MAX_CHARS, MESSAGE_SELECT,
+    MentionsRecord, MessageKind, MessagePage, MessageRecord, ReplyToRecord, StickerRecord,
+    ThreadMember, ThreadPage, Written, current_state, finish, hydrate, id_list, in_ids,
+    json_values, load_access, load_actor, load_conversation, load_message, load_message_access,
+    load_thread_member, mentioned_user_ids, parse_id, parse_optional_id, public_for, reachable_dm,
+    thread_state,
 };
 
 const DEFAULT_PAGE: usize = 50;
@@ -41,6 +42,8 @@ pub struct BotPost {
     pub icon_url: Option<String>,
     /// An emoji name (checked by [`super::emoji_name`]); it takes the place of any icon URL.
     pub icon_emoji: Option<String>,
+    /// The root of the thread to reply in (Slack's `thread_ts`); `None` posts a root message.
+    pub thread_root_id: Option<Id>,
 }
 
 /// At most one of `before`, `after` and `around`. Without one: the newest page.
@@ -420,7 +423,7 @@ impl ChatRepository {
         }
         if let Some(root) = &root {
             events.replied = Some(root.id);
-            after_reply(&mut tx, &access, root, &message, &mentioned).await?;
+            after_reply(&mut tx, &access.conversation, root, &message, &mentioned).await?;
             let root = load_message(&mut tx, root.id)
                 .await?
                 .ok_or(ChatError::NotFound)?;
@@ -444,15 +447,16 @@ impl ChatRepository {
         finish(tx, events, message).await
     }
 
-    /// Posts a root message as an integration into a channel. The caller has checked the
-    /// integration's secret; the channel's membership is not checked. The message is unread for
-    /// every member and makes no inbox notification. Incoming webhooks post through here; a later
-    /// API token scope that writes chat must too.
+    /// Posts a message as an integration into a channel, or as a reply in one of its threads. The
+    /// caller has checked the integration's secret; the channel's membership is not checked. The
+    /// message is unread for every member and makes no inbox notification. Incoming webhooks post
+    /// through here; a later API token scope that writes chat must too.
     pub async fn post_as_bot(
         &self,
         target: HookTarget,
         post: BotPost,
     ) -> Result<Written<MessageRecord>, ChatError> {
+        let thread_root_id = post.thread_root_id;
         let (body, bot, blocks) = bot_message_parts(post, &target.sender)?;
         let now = TimestampMillis::now();
         let mut tx = self.database.immediate_transaction().await?;
@@ -475,20 +479,35 @@ impl ChatRepository {
             return Err(ChatError::NotFound);
         }
         let conversation_id = conversation.id;
+        let root = match thread_root_id {
+            Some(root_id) => Some(
+                load_message(&mut tx, root_id)
+                    .await?
+                    .filter(|root| {
+                        root.conversation_id == conversation_id
+                            && root.thread_root_id.is_none()
+                            && root.kind == MessageKind::Message
+                    })
+                    .ok_or(ChatError::Invalid { field: "thread_ts" })?,
+            ),
+            None => None,
+        };
         let bot = BotRecord {
             interactive: webhook_interactive(&mut tx, bot.webhook_id).await?,
             ..bot
         };
+        // `@channel` and `@here` do nothing in a thread.
+        let broadcast = |token: &str| root.is_none() && body.contains(token);
         let message = insert_message(
             &mut tx,
             NewMessage {
                 conversation_id,
-                thread_root_id: None,
+                thread_root_id: root.as_ref().map(|root| root.id),
                 kind: MessageKind::Message,
                 author_id: target.sender.created_by,
                 body: &body,
-                mention_channel: body.contains("<!channel>"),
-                mention_here: body.contains("<!here>"),
+                mention_channel: broadcast("<!channel>"),
+                mention_here: broadcast("<!here>"),
                 also_in_channel: false,
                 nonce: None,
                 reply_to: None,
@@ -510,28 +529,69 @@ impl ChatRepository {
         .await?;
         insert_mention_rows(&mut tx, &message, &mentioned).await?;
         adjust_mentions(&mut tx, &message, &mentioned, 1).await?;
-        sqlx::query(
-            "UPDATE chat_conversations SET message_count = message_count + 1, last_message_at = $1 \
-             WHERE id = $2",
-        )
-        .bind(now.as_millis())
-        .bind(conversation_id.to_string())
-        .execute(&mut *tx)
-        .await?;
-        if message.mentions.channel || message.mentions.here {
-            adjust_broadcast(&mut tx, &message, 1).await?;
-        }
-        let mut events = Events {
-            counted: Some(conversation_id),
-            ..Events::default()
-        };
+        let mut events = Events::default();
         events.conversation(
             conversation_id,
             ChatEvent::MessageCreated {
                 message: message.clone(),
             },
         );
+        if let Some(root) = &root {
+            events.replied = Some(root.id);
+            after_reply(&mut tx, &conversation, root, &message, &mentioned).await?;
+            let root = load_message(&mut tx, root.id)
+                .await?
+                .ok_or(ChatError::NotFound)?;
+            events.conversation(conversation_id, ChatEvent::MessageUpdated { message: root });
+        } else {
+            sqlx::query(
+                "UPDATE chat_conversations SET message_count = message_count + 1, last_message_at = $1 \
+                 WHERE id = $2",
+            )
+            .bind(now.as_millis())
+            .bind(conversation_id.to_string())
+            .execute(&mut *tx)
+            .await?;
+            if message.mentions.channel || message.mentions.here {
+                adjust_broadcast(&mut tx, &message, 1).await?;
+            }
+            events.counted = Some(conversation_id);
+        }
         finish(tx, events, message).await
+    }
+
+    /// A page of the webhook's channel (`thread_root_id: None`) or of one of its threads, for an
+    /// integration with events on. The caller has checked the secret and the events flag.
+    pub async fn read_as_bot(
+        &self,
+        target: &HookTarget,
+        thread_root_id: Option<Id>,
+        cursor: MessageCursor,
+    ) -> Result<MessagePage, ChatError> {
+        let mut tx = self.database.pool().begin().await?;
+        load_conversation(&mut tx, target.workspace_id, target.conversation_id)
+            .await?
+            .filter(|conversation| conversation.kind != ConversationKind::Dm)
+            .ok_or(ChatError::NotFound)?;
+        let scope = match thread_root_id {
+            Some(root_id) => {
+                load_message(&mut tx, root_id)
+                    .await?
+                    .filter(|root| {
+                        root.conversation_id == target.conversation_id
+                            && root.thread_root_id.is_none()
+                    })
+                    .ok_or(ChatError::Invalid { field: "thread_ts" })?;
+                Scope::Thread(root_id)
+            }
+            None => Scope::Main(target.conversation_id),
+        };
+        let (items, before, after) = page(&mut tx, scope, cursor).await?;
+        Ok(MessagePage {
+            items,
+            before,
+            after,
+        })
     }
 
     /// Copies a message the caller can read into the main list of a conversation the caller can
@@ -1615,17 +1675,19 @@ async fn delete_row(
 }
 
 /// The thread's side of a new reply: the root's summary, and who follows the thread now.
+/// The root's summary and the followers after a reply. An integration's reply adds no author
+/// avatar and makes the member who set it up follow nothing.
 async fn after_reply(
     conn: &mut AnyConnection,
-    access: &Access,
+    conversation: &Conversation,
     root: &MessageRecord,
     reply: &MessageRecord,
     mentioned: &[Id],
 ) -> Result<(), ChatError> {
-    let conversation = &access.conversation;
+    let from_bot = reply.bot.is_some();
     let reply_count = root.reply_count + 1;
     let mut authors = root.reply_user_ids.clone();
-    if !authors.contains(&reply.author_id) && authors.len() < REPLY_AUTHORS {
+    if !from_bot && !authors.contains(&reply.author_id) && authors.len() < REPLY_AUTHORS {
         authors.push(reply.author_id);
     }
     sqlx::query(
@@ -1639,19 +1701,21 @@ async fn after_reply(
     .await?;
 
     // The author follows, and has read the thread up to the reply.
-    upsert_thread_member(
-        conn,
-        conversation.workspace_id,
-        root,
-        reply.author_id,
-        &ThreadMember {
-            following: true,
-            last_read_reply_id: Some(reply.id),
-            read_reply_count: reply_count,
-            mention_count: 0,
-        },
-    )
-    .await?;
+    if !from_bot {
+        upsert_thread_member(
+            conn,
+            conversation.workspace_id,
+            root,
+            reply.author_id,
+            &ThreadMember {
+                following: true,
+                last_read_reply_id: Some(reply.id),
+                read_reply_count: reply_count,
+                mention_count: 0,
+            },
+        )
+        .await?;
+    }
 
     // Members who start to follow with this reply: mentioned in it, or (if they have no
     // thread state yet) the root's author, members the root mentions, and both sides of a
@@ -1666,7 +1730,7 @@ async fn after_reply(
         }
     }
     let mut candidates = mentioned.to_vec();
-    candidates.extend(members_among(conn, conversation.id, &automatic, reply.author_id).await?);
+    candidates.extend(members_among(conn, conversation.id, &automatic, reply.sender_id()).await?);
     candidates.sort_unstable();
     candidates.dedup();
     for user_id in candidates {
