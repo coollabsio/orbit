@@ -507,7 +507,8 @@ impl App {
                     config.http.public_origin.clone(),
                     config.environment == orbit_platform::EnvironmentMode::Development,
                     app_key,
-                ),
+                )
+                .with_native_redirects(&config.http.dev_native_redirects),
                 imports: ImportState::new(Arc::clone(&identity), notion_imports, cookie_mode),
                 asana_imports: AsanaImportState::new(
                     Arc::clone(&identity),

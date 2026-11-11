@@ -168,6 +168,10 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::integration_routes::save_github_project_connection,
         crate::integration_routes::delete_github_project_connection,
         crate::integration_routes::start_github_manifest,
+        crate::github_user_routes::github_connection,
+        crate::github_user_routes::start_github_connection,
+        crate::github_user_routes::delete_github_connection,
+        crate::github_user_routes::github_connection_callback,
         crate::task_routes::list_projects,
         crate::task_routes::create_project,
         crate::task_routes::update_project,
@@ -557,6 +561,7 @@ fn public_operation(operation_id: &str) -> bool {
             | "post_incoming_webhook"
             | "post_action_response"
             | "github_manifest_callback"
+            | "github_connection_callback"
             | "stripe_webhook"
             | "provider_callback"
             | "link_provider_sign_in"
@@ -898,6 +903,16 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             add_code(&mut responses, "422", "github_repository_not_installed");
             add_code(&mut responses, "422", "invalid_github_connection");
             add_code(&mut responses, "409", "github_label_conflict");
+        }
+        "github_connection" | "delete_github_connection" => {
+            add_code(&mut responses, "404", "github_workspace_not_found");
+        }
+        "start_github_connection" => {
+            add_code(&mut responses, "404", "github_workspace_not_found");
+            add_code(&mut responses, "409", "github_app_missing");
+            add_code(&mut responses, "409", "github_app_recreate");
+            add_code(&mut responses, "422", "invalid_redirect");
+            add_code(&mut responses, "503", "app_key_missing");
         }
         "start_github_manifest" => {
             add_code(&mut responses, "403", "github_manager_required");

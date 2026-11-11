@@ -18,6 +18,8 @@ pub mod import_notice;
 pub mod import_people;
 pub mod import_people_routes;
 pub mod import_routes;
+pub mod github;
+pub mod github_user_routes;
 pub mod integration_routes;
 pub mod linear;
 pub mod linear_import_routes;
