@@ -609,7 +609,12 @@ mod tests {
 
     #[test]
     fn an_empty_flag_or_schedule_is_an_error() {
-        for key in [OPEN_REGISTRATION, AUTOMATIC_BACKUPS, S3_ATTACHMENTS, S3_BACKUPS] {
+        for key in [
+            OPEN_REGISTRATION,
+            AUTOMATIC_BACKUPS,
+            S3_ATTACHMENTS,
+            S3_BACKUPS,
+        ] {
             assert_eq!(invalid_key(parse(&[(key, " ")])), key);
         }
     }
