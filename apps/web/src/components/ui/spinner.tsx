@@ -2,9 +2,10 @@ import { cn } from "cn"
 
 function Spinner({ className, ...props }: React.ComponentProps<"svg">) {
   return (
-    <svg data-slot="spinner" role="status" aria-label="Loading" viewBox="0 0 24 24" fill="none" className={cn("size-4 shrink-0 animate-spin", className)} {...props}>
+    <svg data-slot="spinner" role="status" aria-label="Loading" viewBox="0 0 24 24" fill="none" className={cn("size-4 shrink-0", className)} {...props}>
       <circle cx="12" cy="12" r="9.5" stroke="currentColor" strokeWidth="2.5" opacity="0.2" />
-      <path d="M21.5 12a9.5 9.5 0 0 0-9.5-9.5" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+      {/* Spin the arc inside the viewBox, not the <svg> box: a box on a fractional pixel (rem text sizes) wobbles as it turns */}
+      <path className="origin-center animate-spin" d="M21.5 12a9.5 9.5 0 0 0-9.5-9.5" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
     </svg>
   )
 }
