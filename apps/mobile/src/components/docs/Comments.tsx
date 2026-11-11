@@ -52,7 +52,7 @@ export function CommentsSheet({ pageId, visible, onClose }: { pageId: string; vi
             </ScrollView>
           )}
           <View className="border-t border-border">
-            <MentionSuggestions suggestions={mention.suggestions} onPick={mention.pick} />
+            <MentionSuggestions suggestions={mention.suggestions} onPick={mention.pick} loading={mention.searchingTasks} />
           </View>
           <View className="flex-row items-end gap-2 p-3">
             <TextInput
@@ -103,7 +103,7 @@ function ThreadCard({ pageId, thread }: { pageId: string; thread: PageThread }) 
           </View>
         </View>
       ))}
-      <MentionSuggestions suggestions={mention.suggestions} onPick={mention.pick} />
+      <MentionSuggestions suggestions={mention.suggestions} onPick={mention.pick} loading={mention.searchingTasks} />
       <View className="flex-row items-center gap-2">
         <TextInput
           {...mention.inputProps}
