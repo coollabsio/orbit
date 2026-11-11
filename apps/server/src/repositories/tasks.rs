@@ -5237,6 +5237,29 @@ pub(super) async fn task_in_tx(
     task_from_row_tx(tx, row).await
 }
 
+/// A task, live or in the trash, with its project key, for an outgoing webhook event.
+pub(crate) async fn webhook_task_in_tx(
+    tx: &mut Transaction<'_, Any>,
+    workspace_id: Id,
+    task_id: Id,
+) -> Result<Option<(TaskRecord, String)>, TaskError> {
+    let sql = format!(
+        "SELECT {}, projects.project_key AS webhook_project_key FROM tasks \
+         JOIN projects ON projects.id = tasks.project_id WHERE tasks.id = $1 AND tasks.workspace_id = $2",
+        task_columns(connection_backend(tx), false, ProjectScope::All)
+    );
+    let Some(row) = sqlx::query(sqlx::AssertSqlSafe(sql))
+        .bind(task_id.to_string())
+        .bind(workspace_id.to_string())
+        .fetch_optional(&mut **tx)
+        .await?
+    else {
+        return Ok(None);
+    };
+    let key: String = row.get("webhook_project_key");
+    Ok(Some((task_from_row_tx(tx, row).await?, key)))
+}
+
 async fn comment_in_tx(
     tx: &mut Transaction<'_, Any>,
     workspace_id: Id,

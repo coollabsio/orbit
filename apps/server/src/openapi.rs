@@ -400,6 +400,14 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::chat_routes::interactions::get_chat_webhook_signing_secret,
         crate::chat_routes::interactions::rotate_chat_webhook_signing_secret,
         crate::chat_routes::interactions::list_chat_webhook_deliveries,
+        crate::webhooks::routes::list_webhooks,
+        crate::webhooks::routes::create_webhook,
+        crate::webhooks::routes::get_webhook,
+        crate::webhooks::routes::update_webhook,
+        crate::webhooks::routes::delete_webhook,
+        crate::webhooks::routes::rotate_webhook_secret,
+        crate::webhooks::routes::list_webhook_deliveries,
+        crate::webhooks::routes::retry_webhook_delivery,
     )
 )]
 struct ApiDocument;
@@ -537,6 +545,7 @@ fn problem_schema(route: &str) -> &'static str {
         || route.contains("/imports/")
         || route.contains("/chat/")
         || route.contains("/billing")
+        || route.contains("/webhooks")
     {
         "TaskProblem"
     } else if route.starts_with("/api/v1/auth") || route.starts_with("/api/v1/setup") {
@@ -901,6 +910,26 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
         }
         "github_workspace_settings" => {
             add_code(&mut responses, "404", "github_workspace_not_found");
+        }
+        "list_webhooks"
+        | "create_webhook"
+        | "get_webhook"
+        | "update_webhook"
+        | "delete_webhook"
+        | "rotate_webhook_secret"
+        | "list_webhook_deliveries"
+        | "retry_webhook_delivery" => {
+            add_code(&mut responses, "403", "webhook_manager_required");
+            add_code(&mut responses, "404", "webhook_not_found");
+            if matches!(operation_id, "create_webhook" | "update_webhook") {
+                add_code(&mut responses, "422", "validation_failed");
+            }
+            if matches!(operation_id, "create_webhook" | "rotate_webhook_secret") {
+                add_code(&mut responses, "503", "app_key_missing");
+            }
+            if operation_id == "retry_webhook_delivery" {
+                add_code(&mut responses, "409", "webhook_delivery_not_retryable");
+            }
         }
         "github_project_settings" => add_code(&mut responses, "404", "github_project_not_found"),
         "save_github_project_connection" | "delete_github_project_connection" => {
@@ -1336,6 +1365,8 @@ fn invalid_request_operation(operation_id: &str) -> bool {
             | "create_orbit_import"
             | "get_orbit_import"
             | "start_orbit_import"
+            | "create_webhook"
+            | "update_webhook"
     )
 }
 
