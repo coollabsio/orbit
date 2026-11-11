@@ -11,6 +11,7 @@ import { PasswordInput } from '@/components/ui/password-input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useAuthOptions, useCurrentUser } from '@/features/auth/api'
 import { useInstanceSettings, useRemoveSmtp, useSaveSmtp, useSendTestEmail } from '@/features/admin/api'
+import { SetByEnvironment } from '@/features/admin/components/SetByEnvironment'
 import { FieldGrid, RequiredMark } from '@/features/settings/components/SettingsParts'
 import { LoadingText } from '@/components/ui/spinner'
 
@@ -33,10 +34,10 @@ export function AdminEmailPage() {
   if (settings.isError) return <SettingsCard title="Email"><p role="alert">Settings could not be loaded. <Button variant="ghost" onClick={() => void settings.refetch()}>Retry</Button></p></SettingsCard>
   const smtp = settings.data.smtp ?? null
   // Remount on save so the form shows what the server stored.
-  return <EmailCard key={JSON.stringify(smtp)} smtp={smtp} />
+  return <EmailCard key={JSON.stringify(smtp)} smtp={smtp} locked={settings.data.environment.smtp} />
 }
 
-function EmailCard({ smtp }: { smtp: SmtpView | null }) {
+function EmailCard({ smtp, locked }: { smtp: SmtpView | null; locked: boolean }) {
   const currentUser = useCurrentUser()
   // Orbit Cloud always needs a mail server: it can be replaced, not removed.
   const cloud = useAuthOptions().data?.billing_enabled ?? false
@@ -98,18 +99,18 @@ function EmailCard({ smtp }: { smtp: SmtpView | null }) {
             })}>
               {test.isPending ? 'Sending…' : 'Send test email'}
             </Button>
-            {cloud ? null : <Button type="button" variant="ghost" className="text-destructive" disabled={remove.isPending} onClick={() => void removeServer()}>Remove</Button>}
+            {cloud ? null : <Button type="button" variant="ghost" className="text-destructive" disabled={locked || remove.isPending} onClick={() => void removeServer()}>Remove</Button>}
           </>
         ) : undefined}
       >
         <FieldGrid>
           <Field>
             <FieldLabel htmlFor="smtp-host">Host <RequiredMark /></FieldLabel>
-            <Input id="smtp-host" required placeholder="smtp.example.com" value={draft.host} onChange={set('host')} />
+            <Input id="smtp-host" required placeholder="smtp.example.com" disabled={locked} value={draft.host} onChange={set('host')} />
           </Field>
           <Field>
             <FieldLabel htmlFor="smtp-security">Encryption</FieldLabel>
-            <Select items={SECURITY_OPTIONS} value={draft.security} onValueChange={(value) => {
+            <Select items={SECURITY_OPTIONS} value={draft.security} disabled={locked} onValueChange={(value) => {
               const security = value as SmtpSecurity
               setDraft((current) => ({ ...current, security, port: String(DEFAULT_PORT[security]) }))
             }}>
@@ -121,28 +122,29 @@ function EmailCard({ smtp }: { smtp: SmtpView | null }) {
           </Field>
           <Field>
             <FieldLabel htmlFor="smtp-port">Port <RequiredMark /></FieldLabel>
-            <Input id="smtp-port" required type="number" min={1} max={65535} value={draft.port} onChange={set('port')} />
+            <Input id="smtp-port" required type="number" min={1} max={65535} disabled={locked} value={draft.port} onChange={set('port')} />
           </Field>
           <Field>
             <FieldLabel htmlFor="smtp-username">Username</FieldLabel>
-            <Input id="smtp-username" autoComplete="off" value={draft.username} onChange={set('username')} />
+            <Input id="smtp-username" autoComplete="off" disabled={locked} value={draft.username} onChange={set('username')} />
           </Field>
           <Field>
             <FieldLabel htmlFor="smtp-password">Password</FieldLabel>
-            <PasswordInput id="smtp-password" autoComplete="new-password" placeholder={smtp?.password_set ? 'Saved. Leave empty to keep it.' : ''} value={draft.password} onChange={set('password')} />
+            <PasswordInput id="smtp-password" autoComplete="new-password" placeholder={smtp?.password_set ? 'Saved. Leave empty to keep it.' : ''} disabled={locked} value={draft.password} onChange={set('password')} />
           </Field>
           <Field>
             <FieldLabel htmlFor="smtp-from-address">From address <RequiredMark /></FieldLabel>
-            <Input id="smtp-from-address" required type="email" placeholder="orbit@example.com" value={draft.from_address} onChange={set('from_address')} />
+            <Input id="smtp-from-address" required type="email" placeholder="orbit@example.com" disabled={locked} value={draft.from_address} onChange={set('from_address')} />
           </Field>
           <Field>
             <FieldLabel htmlFor="smtp-from-name">From name</FieldLabel>
-            <Input id="smtp-from-name" placeholder="Orbit" value={draft.from_name} onChange={set('from_name')} />
+            <Input id="smtp-from-name" placeholder="Orbit" disabled={locked} value={draft.from_name} onChange={set('from_name')} />
           </Field>
         </FieldGrid>
         <div className="mt-4 flex items-center justify-end gap-3">
-          {cloud && smtp ? <p className="mr-auto text-xs text-muted-foreground">Orbit Cloud needs a mail server. Save a different one instead.</p> : null}
-          <Button type="submit" disabled={save.isPending}>{save.isPending ? 'Saving…' : 'Save mail settings'}</Button>
+          {locked ? <SetByEnvironment variable="ORBIT_SMTP_*" className="mr-auto" /> : null}
+          {cloud && smtp && !locked ? <p className="mr-auto text-xs text-muted-foreground">Orbit Cloud needs a mail server. Save a different one instead.</p> : null}
+          <Button type="submit" disabled={locked || save.isPending}>{save.isPending ? 'Saving…' : 'Save mail settings'}</Button>
         </div>
       </SettingsCard>
     </form>

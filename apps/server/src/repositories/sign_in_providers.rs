@@ -9,6 +9,7 @@ use sqlx::{Any, Transaction};
 use thiserror::Error;
 use utoipa::ToSchema;
 
+use super::environment_settings::EnvironmentSettings;
 use super::identity::{IdentityRepository, NO_PASSWORD, insert_session};
 use super::instance_settings::InstanceSettingsRepository;
 use crate::audit::{self, AuditOutcome};
@@ -266,12 +267,8 @@ impl IdentityRepository {
         };
         let registration_open = owner.is_none()
             && email_account.is_none()
-            && sqlx::query_scalar::<_, i64>(
-                "SELECT registration_open FROM instance_settings WHERE id = 1",
-            )
-            .fetch_one(&mut *transaction)
-            .await?
-                == 1;
+            && super::environment_settings::registration_open(self.database(), &mut transaction)
+                .await?;
         let route = sign_in_route(
             owner,
             profile.verified_email.is_some(),
@@ -569,22 +566,28 @@ impl InstanceSettingsRepository {
         )
         .fetch_all(self.database.pool())
         .await?;
-        Ok(rows
-            .into_iter()
-            .filter_map(|row| {
-                Some(SavedSignInProvider {
-                    provider: Provider::parse(&row.get::<String, _>("provider"))?,
-                    client_id: row.get("client_id"),
-                    client_secret: row.get("client_secret"),
-                })
+        let environment = EnvironmentSettings::of(&self.database);
+        let saved = rows.into_iter().filter_map(|row| {
+            Some(SavedSignInProvider {
+                provider: Provider::parse(&row.get::<String, _>("provider"))?,
+                client_id: row.get("client_id"),
+                client_secret: row.get("client_secret"),
             })
-            .collect())
+        });
+        let mut providers = environment.sign_in_providers.clone();
+        providers
+            .extend(saved.filter(|saved| environment.sign_in_provider(saved.provider).is_none()));
+        providers.sort_by_key(|saved| saved.provider.as_str());
+        Ok(providers)
     }
 
     pub async fn sign_in_provider(
         &self,
         provider: Provider,
     ) -> Result<Option<SavedSignInProvider>, sqlx::Error> {
+        if let Some(saved) = EnvironmentSettings::of(&self.database).sign_in_provider(provider) {
+            return Ok(Some(saved.clone()));
+        }
         let row = sqlx::query(
             "SELECT client_id, client_secret FROM sign_in_providers WHERE provider = $1",
         )

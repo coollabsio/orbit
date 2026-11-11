@@ -28,9 +28,10 @@ pub use backup::{
     SnapshotRow,
 };
 pub use config::{
-    ApnsConfig, AppKey, BillingConfig, Config, ConfigError, DataConfig, EnvironmentMode,
-    HttpConfig, JobsConfig, MailConfig, MailMode, MetricsConfig, Plan, RateLimitConfig, Secret,
-    TrialConfig, UploadConfig, redact_database_url,
+    ApnsConfig, AppKey, BackupSchedule, BillingConfig, Config, ConfigError, DataConfig,
+    EnvironmentMode, HttpConfig, InstanceConfig, JobsConfig, MailConfig, MailMode, MetricsConfig,
+    OAuthClientConfig, Plan, RateLimitConfig, Secret, SmtpConfig, SmtpSecurity, TrialConfig,
+    UploadConfig, redact_database_url,
 };
 pub use db::{
     Access, Backend, Column, Database, DatabaseConfig, DatabaseError, Flag, GuardedMigrationError,

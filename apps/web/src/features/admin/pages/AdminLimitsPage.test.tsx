@@ -2,6 +2,7 @@ import { afterEach, expect, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import type { EnvironmentView } from '@orbit/api/generated/types.gen'
 import { AdminLimitsPage } from './AdminLimitsPage'
 
 const originalFetch = globalThis.fetch
@@ -9,13 +10,14 @@ afterEach(() => { globalThis.fetch = originalFetch })
 
 const STORAGE = { s3: null, attachments_in_s3: false, backups_in_s3: false, backup_schedule: 'off', files_to_move: 0, move_error: null }
 const LIMITS = { max_owned_workspaces: 10, workspace_storage_quota_bytes: 5_000_000_000 }
+const ENVIRONMENT: EnvironmentView = { registration_open: false, smtp: false, s3: false, attachments_in_s3: false, backups_in_s3: false, backup_schedule: false, sign_in_providers: [] }
 
 test('limits are saved in bytes, and an empty field is no limit', async () => {
   const bodies: unknown[] = []
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const request = input as Request
     if (request.method === 'PUT') bodies.push({ url: new URL(request.url).pathname, body: await request.json() })
-    return Response.json({ registration_open: false, smtp: null, storage: STORAGE, limits: LIMITS })
+    return Response.json({ registration_open: false, smtp: null, storage: STORAGE, limits: LIMITS, environment: ENVIRONMENT })
   }) as unknown as typeof fetch
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const view = render(<QueryClientProvider client={client}><AdminLimitsPage /></QueryClientProvider>)

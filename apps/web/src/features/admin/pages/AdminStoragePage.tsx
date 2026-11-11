@@ -1,5 +1,5 @@
 import { toast } from 'sonner'
-import type { BackupSchedule, CompressionStatus, S3View, StorageView } from '@orbit/api/generated/types.gen'
+import type { BackupSchedule, CompressionStatus, EnvironmentView, S3View, StorageView } from '@orbit/api/generated/types.gen'
 import { ApiProblem } from '@orbit/api/problem'
 import { confirmAction } from '@/components/common/confirmAction'
 import { InfoTip } from '@/components/common/InfoTip'
@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { LoadingText, Spinner } from '@/components/ui/spinner'
 import { Switch } from '@/components/ui/switch'
 import { useInstanceSettings, useRemoveS3, useSaveS3, useSaveStorageOptions, useStartImageCompression } from '@/features/admin/api'
+import { SetByEnvironment } from '@/features/admin/components/SetByEnvironment'
 import { S3BucketForm } from '@/features/settings/components/S3BucketForm'
 import { SettingsRow } from '@/features/settings/components/SettingsParts'
 import { formatSize } from '@/lib/attachmentLib'
@@ -29,18 +30,18 @@ export function AdminStoragePage() {
   const settings = useInstanceSettings()
   if (settings.isPending) return <SettingsCard title="Storage"><p><LoadingText>Loading settings…</LoadingText></p></SettingsCard>
   if (settings.isError) return <SettingsCard title="Storage"><p role="alert">Settings could not be loaded. <Button variant="ghost" onClick={() => void settings.refetch()}>Retry</Button></p></SettingsCard>
-  const storage = settings.data.storage
+  const { storage, environment } = settings.data
   return (
     <>
       {/* Remount on save so the form shows what the server stored. */}
-      <BucketCard key={JSON.stringify(storage.s3)} s3={storage.s3 ?? null} />
-      <UsageCard storage={storage} />
+      <BucketCard key={JSON.stringify(storage.s3)} s3={storage.s3 ?? null} locked={environment.s3} />
+      <UsageCard storage={storage} environment={environment} />
       {storage.image_compression ? <ImagesCard status={storage.image_compression} /> : null}
     </>
   )
 }
 
-function BucketCard({ s3 }: { s3: S3View | null }) {
+function BucketCard({ s3, locked }: { s3: S3View | null; locked: boolean }) {
   const save = useSaveS3()
   const remove = useRemoveS3()
 
@@ -66,16 +67,19 @@ function BucketCard({ s3 }: { s3: S3View | null }) {
       endpointPlaceholder="https://s3.eu-central-1.amazonaws.com"
       saving={save.isPending}
       removing={remove.isPending}
+      disabled={locked}
       onSave={(body) => save.mutate(body, {
         onSuccess: () => toast('Bucket saved'),
         onError: (error) => toast.error(problemText(error, 'The bucket could not be saved.')),
       })}
       onRemove={s3 ? () => void removeBucket() : undefined}
-    />
+    >
+      {locked ? <SetByEnvironment variable="ORBIT_S3_*" className="mt-4" /> : null}
+    </S3BucketForm>
   )
 }
 
-function UsageCard({ storage }: { storage: StorageView }) {
+function UsageCard({ storage, environment }: { storage: StorageView; environment: EnvironmentView }) {
   const save = useSaveStorageOptions()
   const ready = Boolean(storage.s3)
   function change(options: Partial<Pick<StorageView, 'attachments_in_s3' | 'backups_in_s3' | 'backup_schedule'>>, message: string) {
@@ -107,11 +111,12 @@ function UsageCard({ storage }: { storage: StorageView }) {
               </span>
             ) : null}
             {storage.move_error ? <span role="alert" className="text-xs text-destructive">Moving files stopped: {storage.move_error} Orbit tries again every ten minutes.</span> : null}
+            {environment.attachments_in_s3 ? <SetByEnvironment variable="ORBIT_S3_ATTACHMENTS" /> : null}
           </div>
           <Switch
             aria-label="Attachments in S3"
             checked={storage.attachments_in_s3}
-            disabled={(!ready && !storage.attachments_in_s3) || save.isPending}
+            disabled={environment.attachments_in_s3 || (!ready && !storage.attachments_in_s3) || save.isPending}
             onCheckedChange={(checked: boolean) => change({ attachments_in_s3: checked }, checked ? 'Attachments go to S3' : 'Attachments move back to this server')}
           />
         </SettingsRow>
@@ -119,22 +124,24 @@ function UsageCard({ storage }: { storage: StorageView }) {
           <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-[0.8125rem]">
             {ready ? <span className="inline-flex items-center gap-1.5 font-medium text-foreground">Backups in S3 <InfoTip text="On: each new backup is uploaded to the bucket and removed from this server, so a lost server loses no backups." /></span> : <span className="font-medium text-foreground">Backups in S3</span>}
             {ready ? null : <span className="text-xs text-muted-foreground">Save a bucket above first.</span>}
+            {environment.backups_in_s3 ? <SetByEnvironment variable="ORBIT_S3_BACKUPS" /> : null}
           </div>
           <Switch
             aria-label="Backups in S3"
             checked={storage.backups_in_s3}
-            disabled={(!ready && !storage.backups_in_s3) || save.isPending}
+            disabled={environment.backups_in_s3 || (!ready && !storage.backups_in_s3) || save.isPending}
             onCheckedChange={(checked: boolean) => change({ backups_in_s3: checked }, checked ? 'Backups go to S3' : 'Backups stay on this server')}
           />
         </SettingsRow>
         <SettingsRow className="flex-nowrap">
           <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-[0.8125rem]">
             <span className="inline-flex items-center gap-1.5 font-medium text-foreground">Automatic backups <InfoTip text="Orbit keeps the newest backup of each of the last 7 days and 4 weeks." /></span>
+            {environment.backup_schedule ? <SetByEnvironment variable="ORBIT_AUTOMATIC_BACKUPS" /> : null}
           </div>
           <Select
             items={SCHEDULE_OPTIONS}
             value={storage.backup_schedule}
-            disabled={save.isPending}
+            disabled={environment.backup_schedule || save.isPending}
             onValueChange={(value) => change({ backup_schedule: value as BackupSchedule }, 'Backup schedule saved')}
           >
             <SelectTrigger aria-label="Automatic backups" className="w-36"><SelectValue /></SelectTrigger>

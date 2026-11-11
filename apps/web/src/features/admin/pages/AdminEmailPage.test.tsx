@@ -2,6 +2,7 @@ import { afterEach, expect, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import type { EnvironmentView } from '@orbit/api/generated/types.gen'
 import { AdminEmailPage } from './AdminEmailPage'
 
 const originalFetch = globalThis.fetch
@@ -9,17 +10,18 @@ afterEach(() => { globalThis.fetch = originalFetch })
 
 const STORAGE = { s3: null, attachments_in_s3: false, backups_in_s3: false, backup_schedule: 'off', files_to_move: 0, move_error: null }
 const LIMITS = { max_owned_workspaces: 10, workspace_storage_quota_bytes: 5_000_000_000 }
+const ENVIRONMENT: EnvironmentView = { registration_open: false, smtp: false, s3: false, attachments_in_s3: false, backups_in_s3: false, backup_schedule: false, sign_in_providers: [] }
 const SMTP = { host: 'smtp.example.com', port: 587, security: 'starttls', username: 'orbit', password_set: true, from_address: 'orbit@example.com', from_name: 'Orbit' }
 
 test('saving with an empty password field keeps the saved password', async () => {
   const bodies: unknown[] = []
-  let settings: object = { registration_open: false, smtp: null, storage: STORAGE, limits: LIMITS }
+  let settings: object = { registration_open: false, smtp: null, storage: STORAGE, limits: LIMITS, environment: ENVIRONMENT }
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const request = input as Request
     if (request.method === 'PUT') {
       const body = await request.json()
       bodies.push(body)
-      settings = { registration_open: false, smtp: SMTP, storage: STORAGE, limits: LIMITS }
+      settings = { registration_open: false, smtp: SMTP, storage: STORAGE, limits: LIMITS, environment: ENVIRONMENT }
     }
     return Response.json(settings)
   }) as unknown as typeof fetch
@@ -34,13 +36,13 @@ test('saving with an empty password field keeps the saved password', async () =>
   expect(await view.findByRole('button', { name: 'Send test email' })).toBeTruthy()
 })
 
-function renderSaved(billingEnabled: boolean) {
+function renderSaved(billingEnabled: boolean, environment: EnvironmentView = ENVIRONMENT) {
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const path = new URL((input as Request).url).pathname
     if (path === '/api/v1/auth/options') {
       return Response.json({ registration_open: false, email_enabled: true, passkeys_enabled: false, billing_enabled: billingEnabled, providers: [], provider_registration_open: false })
     }
-    return Response.json({ registration_open: false, smtp: SMTP, storage: STORAGE, limits: LIMITS })
+    return Response.json({ registration_open: false, smtp: SMTP, storage: STORAGE, limits: LIMITS, environment })
   }) as unknown as typeof fetch
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(<QueryClientProvider client={client}><AdminEmailPage /></QueryClientProvider>)
@@ -56,4 +58,15 @@ test('a self-hosted server can remove its mail server', async () => {
   const view = renderSaved(false)
   expect(await view.findByRole('button', { name: 'Remove' })).toBeTruthy()
   expect(view.queryByText('Orbit Cloud needs a mail server. Save a different one instead.')).toBeNull()
+})
+
+test('a mail server set by the environment is read-only, and the test email still works', async () => {
+  const view = renderSaved(false, { ...ENVIRONMENT, smtp: true })
+  const host = await view.findByLabelText(/^Host/)
+  expect((host as HTMLInputElement).disabled).toBe(true)
+  expect((view.getByLabelText(/^From address/) as HTMLInputElement).disabled).toBe(true)
+  expect((view.getByRole('button', { name: 'Save mail settings' }) as HTMLButtonElement).disabled).toBe(true)
+  expect((view.getByRole('button', { name: 'Remove' }) as HTMLButtonElement).disabled).toBe(true)
+  expect((view.getByRole('button', { name: 'Send test email' }) as HTMLButtonElement).disabled).toBe(false)
+  expect(view.getByText('ORBIT_SMTP_*')).toBeTruthy()
 })

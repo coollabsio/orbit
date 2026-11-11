@@ -797,3 +797,114 @@ async fn self_hosted_opens_registration_with_only_a_provider_and_removes_the_mai
     assert_eq!(status, StatusCode::OK);
     assert!(body["smtp"].is_null());
 }
+
+#[tokio::test]
+async fn environment_settings_replace_the_saved_ones_and_admin_cannot_change_them() {
+    use orbit_platform::{InstanceConfig, OAuthClientConfig, Secret, SmtpConfig, SmtpSecurity};
+    use orbit_server::repositories::environment_settings::EnvironmentSettings;
+
+    let fixture = fixture().await;
+    let database = fixture.identity.database().clone();
+    let key = [9; 32];
+    EnvironmentSettings::from_config(
+        &InstanceConfig {
+            registration_open: Some(true),
+            smtp: Some(SmtpConfig {
+                host: "smtp.env.example".to_owned(),
+                port: 2525,
+                security: SmtpSecurity::None,
+                username: None,
+                password: Some(Secret::new("env-password")),
+                from_address: "orbit@env.example".to_owned(),
+                from_name: None,
+            }),
+            github: Some(OAuthClientConfig {
+                client_id: "env-client".to_owned(),
+                client_secret: Secret::new("env-secret"),
+            }),
+            ..InstanceConfig::default()
+        },
+        &key,
+    )
+    .unwrap()
+    .install(&database);
+    let app = &router(
+        &fixture.identity,
+        Some(Mailer::new(database.clone(), Some(key), ORIGIN)),
+    );
+    let root = Some(fixture.root_cookie.as_str());
+
+    let (status, body) = call(app, "GET", "/api/v1/admin/settings", root, None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        (
+            &body["registration_open"],
+            &body["smtp"]["host"],
+            &body["smtp"]["port"],
+            &body["smtp"]["password_set"],
+            &body["sign_in_providers"][0]["client_id"],
+        ),
+        (
+            &json!(true),
+            &json!("smtp.env.example"),
+            &json!(2525),
+            &json!(true),
+            &json!("env-client")
+        )
+    );
+    assert_eq!(
+        body["environment"],
+        json!({"registration_open": true, "smtp": true, "s3": false, "attachments_in_s3": false,
+               "backups_in_s3": false, "backup_schedule": false, "sign_in_providers": ["github"]})
+    );
+    assert_eq!(
+        call(app, "GET", "/api/v1/auth/options", None, None).await.1["registration_open"],
+        true
+    );
+
+    for (method, uri, request) in [
+        ("PUT", "/api/v1/admin/settings/smtp", Some(smtp_body())),
+        ("DELETE", "/api/v1/admin/settings/smtp", None),
+        (
+            "PUT",
+            "/api/v1/admin/settings/registration",
+            Some(json!({"open": false})),
+        ),
+        (
+            "DELETE",
+            "/api/v1/admin/settings/sign-in-providers/github",
+            None,
+        ),
+    ] {
+        let (status, body) = call(app, method, uri, root, request).await;
+        assert_eq!(
+            (status, body["code"].as_str()),
+            (StatusCode::CONFLICT, Some("set_by_environment")),
+            "{method} {uri}"
+        );
+    }
+    let (status, _) = call(
+        app,
+        "PUT",
+        "/api/v1/admin/settings/sign-in-providers/google",
+        root,
+        Some(json!({"client_id": "saved-client", "client_secret": "saved-secret"})),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "a provider without variables is saved as before"
+    );
+
+    let saved = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM instance_settings WHERE smtp_host IS NULL AND registration_open = 0",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        saved, 1,
+        "the environment values are not written to the database"
+    );
+}

@@ -141,6 +141,13 @@ pub enum AttachmentsCommand {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Forgets the bucket that may still hold attachment files, so Orbit starts with another bucket. Use it only
+    /// when the files in that bucket are no longer needed, for example when the bucket was deleted: Orbit does not
+    /// read them again.
+    ForgetBucket {
+        #[arg(long)]
+        yes: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -542,11 +549,18 @@ async fn safety_backup(
 }
 
 async fn attachments(config: Config, command: &AttachmentsCommand) -> Result<String, CliError> {
+    if let AttachmentsCommand::ForgetBucket { yes: false } = command {
+        return Err(CliError::Operation(
+            "forget-bucket requires --yes: attachment files still in the bucket are not used again"
+                .to_owned(),
+        ));
+    }
     let database = Database::open(&DatabaseConfig::for_data(&config.data))
         .await
         .map_err(|error| match error {
             DatabaseError::AlreadyOwned { .. } => CliError::Operation(
-                "Orbit is running: use Admin → Storage → Compress images instead, or stop it first"
+                "Orbit is running: stop it first (to compress images while it runs, use Admin → Storage → \
+                 Compress images)"
                     .to_owned(),
             ),
             error => operation(error),
@@ -560,6 +574,21 @@ async fn attachments(config: Config, command: &AttachmentsCommand) -> Result<Str
         UploadLimits::default(),
     );
     match command {
+        AttachmentsCommand::ForgetBucket { .. } => {
+            let forgotten =
+                orbit_server::repositories::instance_settings::InstanceSettingsRepository::new(
+                    database.clone(),
+                )
+                .forget_files_bucket("cli", orbit_platform::TimestampMillis::now())
+                .await
+                .map_err(operation)?;
+            Ok(match forgotten {
+                Some(location) => format!(
+                    "forgot the {location}: Orbit starts with another bucket, and does not read the files in this one again"
+                ),
+                None => "no bucket of attachment files is recorded".to_owned(),
+            })
+        }
         AttachmentsCommand::Compress { dry_run } => Ok(
             orbit_server::image_compression::compress_images(&database, &uploads, *dry_run, |_| {})
                 .await
@@ -1147,8 +1176,8 @@ fn apply_path_overrides(cli: &Cli, config: &mut Config) {
     }
 }
 
-/// The bucket for backups: the one in `ORBIT_BACKUP_S3_*` when it is set (for a lost database), else the one saved
-/// in Admin → Storage. When the database cannot give its saved bucket, only local backups are used.
+/// The bucket for backups: the one in `ORBIT_BACKUP_S3_*` when it is set (for a lost database), else the one in
+/// `ORBIT_S3_*` or saved in Admin → Storage. When the database cannot give its saved bucket, only local backups are used.
 async fn backup_storage(
     config: &Config,
     database: Option<&Database>,
@@ -1161,6 +1190,14 @@ async fn backup_storage(
         return Ok(storage);
     }
     let app_key = config.app_key.as_ref().map(|key| *key.bytes());
+    if let Some(key) = &app_key {
+        orbit_server::repositories::environment_settings::EnvironmentSettings::from_config(
+            &config.instance,
+            key,
+        )
+        .map_err(CliError::Operation)?
+        .install(database);
+    }
     match orbit_server::object_storage::saved_storage(database, app_key.as_ref()).await {
         Ok(saved) => Ok(saved),
         Err(error) => {
@@ -1406,6 +1443,11 @@ pub fn redacted_config(config: &Config) -> String {
         ]),
         None => lines.push("# ORBIT_APNS_KEY is not set: no native iOS pushes".to_owned()),
     }
+    let instance = config.instance.redacted_lines();
+    if instance.is_empty() {
+        lines.push("# No instance settings are set by variables: Admin saves them".to_owned());
+    }
+    lines.extend(instance);
     lines.join("\n")
 }
 

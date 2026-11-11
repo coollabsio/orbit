@@ -4,42 +4,12 @@
 //! kind (`job_limits`).
 
 use orbit_platform::Row;
+pub use orbit_platform::{BackupSchedule, SmtpSecurity};
 use orbit_platform::{Database, Id, JobKind, JobLimits, TimestampMillis, load_limit_overrides};
-use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use utoipa::ToSchema;
 
+use super::environment_settings::EnvironmentSettings;
 use crate::audit::{self, AuditOutcome};
-
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, ToSchema)]
-#[serde(rename_all = "lowercase")]
-pub enum SmtpSecurity {
-    /// TLS from the first byte (usually port 465).
-    Tls,
-    /// Plain connection upgraded with STARTTLS (usually port 587). Refuses servers without STARTTLS.
-    Starttls,
-    /// No encryption. Only for a mail relay on the same host or private network.
-    None,
-}
-
-impl SmtpSecurity {
-    const fn as_str(self) -> &'static str {
-        match self {
-            Self::Tls => "tls",
-            Self::Starttls => "starttls",
-            Self::None => "none",
-        }
-    }
-
-    fn parse(value: &str) -> Option<Self> {
-        match value {
-            "tls" => Some(Self::Tls),
-            "starttls" => Some(Self::Starttls),
-            "none" => Some(Self::None),
-            _ => None,
-        }
-    }
-}
 
 /// The saved mail server. `password` is encrypted under the app key.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -59,33 +29,6 @@ pub struct InstanceSettings {
     pub smtp: Option<SmtpSettings>,
 }
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize, ToSchema)]
-#[serde(rename_all = "lowercase")]
-pub enum BackupSchedule {
-    #[default]
-    Off,
-    Hourly,
-    Daily,
-}
-
-impl BackupSchedule {
-    const fn as_str(self) -> &'static str {
-        match self {
-            Self::Off => "off",
-            Self::Hourly => "hourly",
-            Self::Daily => "daily",
-        }
-    }
-
-    fn parse(value: &str) -> Self {
-        match value {
-            "hourly" => Self::Hourly,
-            "daily" => Self::Daily,
-            _ => Self::Off,
-        }
-    }
-}
-
 /// The saved bucket. `secret_access_key` is encrypted under the app key.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct S3Settings {
@@ -96,6 +39,35 @@ pub struct S3Settings {
     pub access_key_id: String,
     pub secret_access_key: Vec<u8>,
     pub path_style: bool,
+}
+
+/// Where a bucket's objects are: two buckets at one location share their objects.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BucketLocation {
+    pub endpoint: String,
+    pub bucket: String,
+    pub prefix: String,
+}
+
+impl BucketLocation {
+    #[must_use]
+    pub fn of(s3: &S3Settings) -> Self {
+        Self {
+            endpoint: s3.endpoint.clone(),
+            bucket: s3.bucket.clone(),
+            prefix: s3.prefix.clone(),
+        }
+    }
+}
+
+impl std::fmt::Display for BucketLocation {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "bucket {} at {} with prefix {:?}",
+            self.bucket, self.endpoint, self.prefix
+        )
+    }
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -168,6 +140,12 @@ pub struct JobKindLimits {
     pub defaults: JobLimits,
 }
 
+/// Sign-up needs a way to prove the email: an emailed link, or a sign-in provider that verified it.
+/// Orbit Cloud needs the mail server even with a provider.
+pub(crate) fn can_confirm_sign_up(database: &Database, smtp: bool, sign_in_provider: bool) -> bool {
+    smtp || (sign_in_provider && !super::billing::enabled(database))
+}
+
 #[derive(Clone, Debug)]
 pub struct InstanceSettingsRepository {
     pub(super) database: Database,
@@ -205,13 +183,16 @@ impl InstanceSettingsRepository {
             }),
             _ => None,
         };
+        let environment = EnvironmentSettings::of(&self.database);
         Ok(InstanceSettings {
-            registration_open: row.get::<i64, _>("registration_open") == 1,
-            smtp,
+            registration_open: environment
+                .registration_open
+                .unwrap_or(row.get::<i64, _>("registration_open") == 1),
+            smtp: environment.smtp.clone().or(smtp),
         })
     }
 
-    /// Opening registration needs a mail server: the sign-up link goes out by email.
+    /// Opening registration needs a way to confirm the email of a new account (see [`can_confirm_sign_up`]).
     pub async fn set_registration_open(
         &self,
         actor_id: Id,
@@ -220,11 +201,16 @@ impl InstanceSettingsRepository {
         now: TimestampMillis,
     ) -> Result<(), InstanceSettingsError> {
         let mut transaction = self.database.immediate_transaction().await?;
-        // Sign-up needs a way to prove the email: an emailed link, or a sign-in provider that verified it.
-        // Orbit Cloud needs the mail server even with a provider.
-        if open {
+        let environment = EnvironmentSettings::of(&self.database);
+        let billing = super::billing::enabled(&self.database);
+        let set_by_environment = can_confirm_sign_up(
+            &self.database,
+            environment.smtp.is_some(),
+            !environment.sign_in_providers.is_empty(),
+        );
+        if open && !set_by_environment {
             let configured = sqlx::query_scalar::<_, i64>(
-                if super::billing::enabled(&self.database) {
+                if billing {
                     "SELECT COUNT(*) FROM instance_settings WHERE id = 1 AND smtp_host IS NOT NULL"
                 } else {
                     "SELECT (SELECT COUNT(*) FROM instance_settings WHERE id = 1 AND smtp_host IS NOT NULL) \
@@ -524,11 +510,21 @@ impl InstanceSettingsRepository {
             }
             _ => None,
         };
+        let environment = EnvironmentSettings::of(&self.database);
+        let s3 = environment.s3.clone().or(s3);
         Ok(StorageSettings {
-            attachments_in_s3: s3.is_some() && row.get::<i64, _>("attachments_in_s3") == 1,
-            backups_in_s3: s3.is_some() && row.get::<i64, _>("backups_in_s3") == 1,
+            attachments_in_s3: s3.is_some()
+                && environment
+                    .attachments_in_s3
+                    .unwrap_or(row.get::<i64, _>("attachments_in_s3") == 1),
+            backups_in_s3: s3.is_some()
+                && environment
+                    .backups_in_s3
+                    .unwrap_or(row.get::<i64, _>("backups_in_s3") == 1),
             s3,
-            backup_schedule: BackupSchedule::parse(&row.get::<String, _>("backup_schedule")),
+            backup_schedule: environment.backup_schedule.unwrap_or_else(|| {
+                BackupSchedule::parse(&row.get::<String, _>("backup_schedule")).unwrap_or_default()
+            }),
         })
     }
 
@@ -553,6 +549,16 @@ impl InstanceSettingsRepository {
         .bind(&s3.secret_access_key)
         .bind(i64::from(s3.path_style))
         .bind(now.as_millis())
+        .execute(&mut *transaction)
+        .await?;
+        // The caller found no attachment files left in a bucket at another location.
+        sqlx::query(
+            "UPDATE instance_settings SET files_s3_endpoint = NULL, files_s3_bucket = NULL, files_s3_prefix = NULL \
+             WHERE id = 1 AND NOT (files_s3_endpoint = $1 AND files_s3_bucket = $2 AND files_s3_prefix = $3)",
+        )
+        .bind(&s3.endpoint)
+        .bind(&s3.bucket)
+        .bind(&s3.prefix)
         .execute(&mut *transaction)
         .await?;
         audit::record_global(
@@ -581,7 +587,8 @@ impl InstanceSettingsRepository {
         sqlx::query(
             "UPDATE instance_settings SET s3_endpoint = NULL, s3_region = NULL, s3_bucket = NULL, s3_prefix = '', \
              s3_access_key_id = NULL, s3_secret_access_key = NULL, s3_path_style = 0, attachments_in_s3 = 0, \
-             backups_in_s3 = 0, updated_at = $1 WHERE id = 1",
+             backups_in_s3 = 0, files_s3_endpoint = NULL, files_s3_bucket = NULL, files_s3_prefix = NULL, \
+             updated_at = $1 WHERE id = 1",
         )
         .bind(now.as_millis())
         .execute(&mut *transaction)
@@ -612,7 +619,9 @@ impl InstanceSettingsRepository {
         now: TimestampMillis,
     ) -> Result<(), StorageSettingsError> {
         let mut transaction = self.database.immediate_transaction().await?;
-        if attachments_in_s3 || backups_in_s3 {
+        if (attachments_in_s3 || backups_in_s3)
+            && EnvironmentSettings::of(&self.database).s3.is_none()
+        {
             let configured = sqlx::query_scalar::<_, i64>(
                 "SELECT COUNT(*) FROM instance_settings WHERE id = 1 AND s3_endpoint IS NOT NULL",
             )
@@ -622,16 +631,40 @@ impl InstanceSettingsRepository {
                 return Err(StorageSettingsError::NotConfigured);
             }
         }
+        // The saved value of a setting from the environment stays, for when its variable is removed.
+        let environment = EnvironmentSettings::of(&self.database);
+        let saved = |set: bool, value: i64| (!set).then_some(value);
         sqlx::query(
-            "UPDATE instance_settings SET attachments_in_s3 = $1, backups_in_s3 = $2, backup_schedule = $3, \
+            "UPDATE instance_settings SET attachments_in_s3 = COALESCE($1, attachments_in_s3), \
+             backups_in_s3 = COALESCE($2, backups_in_s3), backup_schedule = COALESCE($3, backup_schedule), \
              updated_at = $4 WHERE id = 1",
         )
-        .bind(i64::from(attachments_in_s3))
-        .bind(i64::from(backups_in_s3))
-        .bind(backup_schedule.as_str())
+        .bind(saved(environment.attachments_in_s3.is_some(), i64::from(attachments_in_s3)))
+        .bind(saved(environment.backups_in_s3.is_some(), i64::from(backups_in_s3)))
+        .bind(
+            environment
+                .backup_schedule
+                .is_none()
+                .then_some(backup_schedule.as_str()),
+        )
         .bind(now.as_millis())
         .execute(&mut *transaction)
         .await?;
+        if attachments_in_s3 {
+            match &environment.s3 {
+                Some(s3) => {
+                    record_files_bucket(&mut transaction, &BucketLocation::of(s3)).await?;
+                }
+                None => {
+                    sqlx::query(
+                        "UPDATE instance_settings SET files_s3_endpoint = s3_endpoint, files_s3_bucket = s3_bucket, \
+                         files_s3_prefix = s3_prefix WHERE id = 1",
+                    )
+                    .execute(&mut *transaction)
+                    .await?;
+                }
+            }
+        }
         audit::record_global(
             &mut transaction,
             Some(actor_id),
@@ -650,6 +683,97 @@ impl InstanceSettingsRepository {
         .await?;
         transaction.commit().await?;
         Ok(())
+    }
+
+    /// The bucket that may hold the installation's attachment files (migration `20261111122359_files_bucket`).
+    pub async fn files_bucket(&self) -> Result<Option<BucketLocation>, sqlx::Error> {
+        let row = sqlx::query(
+            "SELECT files_s3_endpoint, files_s3_bucket, files_s3_prefix FROM instance_settings WHERE id = 1",
+        )
+        .fetch_one(self.database.pool())
+        .await?;
+        Ok(
+            match (
+                row.get::<Option<String>, _>("files_s3_endpoint"),
+                row.get::<Option<String>, _>("files_s3_bucket"),
+            ) {
+                (Some(endpoint), Some(bucket)) => Some(BucketLocation {
+                    endpoint,
+                    bucket,
+                    prefix: row
+                        .get::<Option<String>, _>("files_s3_prefix")
+                        .unwrap_or_default(),
+                }),
+                _ => None,
+            },
+        )
+    }
+
+    /// Attachments use the bucket at `location`: Orbit keeps it until the mover empties it.
+    pub async fn keep_files_bucket(&self, location: &BucketLocation) -> Result<(), sqlx::Error> {
+        let mut transaction = self.database.immediate_transaction().await?;
+        record_files_bucket(&mut transaction, location).await?;
+        transaction.commit().await
+    }
+
+    /// No attachment files are left in the bucket at `location`. False when another bucket is recorded, or when
+    /// `unless_attachments_saved_on` and the saved setting sends attachments to S3 again: turning them on records
+    /// the bucket in the same transaction, so this one statement cannot clear a record that new uploads need.
+    pub async fn files_bucket_emptied(
+        &self,
+        location: &BucketLocation,
+        unless_attachments_saved_on: bool,
+    ) -> Result<bool, sqlx::Error> {
+        let cleared = sqlx::query(
+            "UPDATE instance_settings SET files_s3_endpoint = NULL, files_s3_bucket = NULL, files_s3_prefix = NULL \
+             WHERE id = 1 AND files_s3_endpoint = $1 AND files_s3_bucket = $2 AND files_s3_prefix = $3 \
+             AND ($4 = 0 OR attachments_in_s3 = 0)",
+        )
+        .bind(&location.endpoint)
+        .bind(&location.bucket)
+        .bind(&location.prefix)
+        .bind(i64::from(unless_attachments_saved_on))
+        .execute(self.database.pool())
+        .await?
+        .rows_affected();
+        Ok(cleared > 0)
+    }
+
+    /// `orbit attachments forget-bucket`: the operator says the recorded bucket no longer matters. Files still in
+    /// it are not used again. Returns the bucket it forgot.
+    pub async fn forget_files_bucket(
+        &self,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<Option<BucketLocation>, sqlx::Error> {
+        let Some(location) = self.files_bucket().await? else {
+            return Ok(None);
+        };
+        let mut transaction = self.database.immediate_transaction().await?;
+        sqlx::query(
+            "UPDATE instance_settings SET files_s3_endpoint = NULL, files_s3_bucket = NULL, files_s3_prefix = NULL \
+             WHERE id = 1",
+        )
+        .execute(&mut *transaction)
+        .await?;
+        audit::record_global(
+            &mut transaction,
+            None,
+            "instance.files_bucket_forgotten",
+            AuditOutcome::Success,
+            "installation",
+            None,
+            request_id,
+            serde_json::json!({
+                "endpoint": location.endpoint,
+                "bucket": location.bucket,
+                "prefix": location.prefix,
+            }),
+            now,
+        )
+        .await?;
+        transaction.commit().await?;
+        Ok(Some(location))
     }
 
     pub async fn job_limits(&self) -> Result<Vec<JobKindLimits>, sqlx::Error> {
@@ -720,4 +844,20 @@ impl InstanceSettingsRepository {
         .await?;
         transaction.commit().await
     }
+}
+
+async fn record_files_bucket(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Any>,
+    location: &BucketLocation,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE instance_settings SET files_s3_endpoint = $1, files_s3_bucket = $2, files_s3_prefix = $3 \
+         WHERE id = 1",
+    )
+    .bind(&location.endpoint)
+    .bind(&location.bucket)
+    .bind(&location.prefix)
+    .execute(&mut **transaction)
+    .await?;
+    Ok(())
 }

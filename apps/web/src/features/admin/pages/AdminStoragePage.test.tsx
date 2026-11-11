@@ -2,6 +2,7 @@ import { afterEach, expect, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import type { EnvironmentView } from '@orbit/api/generated/types.gen'
 import { AdminStoragePage } from './AdminStoragePage'
 
 const originalFetch = globalThis.fetch
@@ -9,6 +10,7 @@ afterEach(() => { globalThis.fetch = originalFetch })
 
 const NO_BUCKET = { s3: null, attachments_in_s3: false, backups_in_s3: false, backup_schedule: 'off', files_to_move: 0, move_error: null }
 const S3 = { endpoint: 'http://minio:9000', region: 'us-east-1', bucket: 'orbit-files', prefix: '', access_key_id: 'orbit', path_style: true }
+const ENVIRONMENT: EnvironmentView = { registration_open: false, smtp: false, s3: false, attachments_in_s3: false, backups_in_s3: false, backup_schedule: false, sign_in_providers: [] }
 
 test('a bucket is saved first, then a switch sends the other options unchanged', async () => {
   const requests: { url: string; body: unknown }[] = []
@@ -22,7 +24,7 @@ test('a bucket is saved first, then a switch sends the other options unchanged',
         ? { ...NO_BUCKET, s3: S3, backup_schedule: 'daily' }
         : { ...NO_BUCKET, s3: S3, ...(body as object) }
     }
-    return Response.json({ registration_open: false, smtp: null, storage })
+    return Response.json({ registration_open: false, smtp: null, storage, environment: ENVIRONMENT })
   }) as unknown as typeof fetch
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const view = render(<QueryClientProvider client={client}><AdminStoragePage /></QueryClientProvider>)
@@ -48,4 +50,23 @@ test('a bucket is saved first, then a switch sends the other options unchanged',
     url: '/api/v1/admin/settings/storage',
     body: { attachments_in_s3: true, backups_in_s3: false, backup_schedule: 'daily' },
   })
+})
+
+test('settings set by the environment are read-only', async () => {
+  const storage = { ...NO_BUCKET, s3: S3, attachments_in_s3: true, backup_schedule: 'daily' }
+  const environment = { ...ENVIRONMENT, s3: true, attachments_in_s3: true, backup_schedule: true }
+  globalThis.fetch = (async () => Response.json({ registration_open: false, smtp: null, storage, environment })) as unknown as typeof fetch
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const view = render(<QueryClientProvider client={client}><AdminStoragePage /></QueryClientProvider>)
+
+  const endpoint = await view.findByLabelText(/^Endpoint/)
+  expect((endpoint as HTMLInputElement).disabled).toBe(true)
+  expect((view.getByRole('button', { name: 'Save bucket' }) as HTMLButtonElement).disabled).toBe(true)
+  expect((view.getByRole('button', { name: 'Remove' }) as HTMLButtonElement).disabled).toBe(true)
+  const attachments = view.getByRole('switch', { name: 'Attachments in S3' })
+  expect(attachments.getAttribute('aria-disabled') === 'true' || attachments.hasAttribute('data-disabled')).toBe(true)
+  const backups = view.getByRole('switch', { name: 'Backups in S3' })
+  expect(backups.getAttribute('aria-disabled') === 'true' || backups.hasAttribute('data-disabled')).toBe(false)
+  expect((view.getByRole('combobox', { name: 'Automatic backups' }) as HTMLButtonElement).disabled).toBe(true)
+  expect(view.getByText('ORBIT_S3_*')).toBeTruthy()
 })
