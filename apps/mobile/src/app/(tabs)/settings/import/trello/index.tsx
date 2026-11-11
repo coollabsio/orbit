@@ -74,7 +74,7 @@ function ConnectStep() {
   return (
     <ImportScreen title={SOURCE.title}>
       <ImportBody>
-        <ConnectSection title="Connect Trello" intro={<Paragraph>Orbit needs an API key and a token. It keeps both encrypted only until the import finishes.</Paragraph>}>
+        <ConnectSection title="Connect Trello" help="Orbit needs an API key and a token. It keeps both encrypted only until the import finishes.">
           <View className="gap-4">
             <View className="gap-1.5">
               <Text className="font-noto-medium text-[14px] leading-[19.25px]">API key</Text>

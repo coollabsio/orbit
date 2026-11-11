@@ -16,6 +16,18 @@ a keyboard-only or desktop-only feature, or a fix for a component that mobile do
 which changes you did not port, and why. When mobile lacks a screen that the change needs, say so and offer to port
 that screen.
 
+## UI: help text goes in a tooltip
+
+Do not put help paragraphs under a title, a field label or a switch label. For a card or section title, give the
+text to `SettingsCard`'s `description`; for another heading, use `TitleTip`
+(`apps/web/src/components/common/TitleTip.tsx`). Both give the title a solid underline (as in Coolify) and show the
+text on hover. For a field or switch label, put the text in an info icon with a tooltip next to the label: `InfoTip`
+(`apps/web/src/components/common/InfoTip.tsx`), for example `<FieldLabel>Request URL <InfoTip text="…" /></FieldLabel>`.
+Short errors (`FieldError`), empty states, steps, links and "why is this disabled" notes stay visible. Use this in new
+views, and change an old view to it when you edit that view. Mobile has no hover: there, a tap shows the text. Use
+`Input`'s `help` prop, `LabelTip` (`apps/mobile/src/ui/LabelTip.tsx`), `OptionText`'s `help` prop, or the mobile
+`SettingsCard` `description`.
+
 ## Databases: SQLite and Postgres
 
 Orbit runs on SQLite (default, `ORBIT_DATABASE_PATH`) or Postgres (`ORBIT_DATABASE_URL`).

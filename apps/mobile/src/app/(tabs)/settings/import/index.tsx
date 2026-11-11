@@ -9,7 +9,7 @@ import { useOrbit } from '../../../../orbit-context'
 import { useMembers } from '../../../../queries'
 import { errorMessage } from '../../../../session-context'
 import { useTheme } from '../../../../theme'
-import { Button, Icon, Spinner, Text } from '../../../../ui'
+import { Button, Icon, Spinner, LabelTip } from '../../../../ui'
 
 const SOURCES: readonly { name: string; description: string; href: Href }[] = [
   { name: 'Notion', description: 'Import pages and databases into Docs.', href: '/settings/import/notion' },
@@ -41,9 +41,8 @@ export default function ImportScreen() {
             <View className="size-9 items-center justify-center rounded-lg bg-muted">
               <Icon name="import" size={18} color={colors.mutedForeground} />
             </View>
-            <View className="min-w-0 flex-1 gap-0.5">
-              <Text className="font-noto-medium text-[13px]">{source.name}</Text>
-              <Text className="text-[12px] leading-[16px] text-muted-foreground">{source.description}</Text>
+            <View className="min-w-0 flex-1">
+              <LabelTip label={source.name} text={source.description} className="font-noto-medium text-[13px]" />
             </View>
             <Button label={`Import from ${source.name}`} variant="outline" size="sm" onPress={() => router.push(source.href)} />
           </View>

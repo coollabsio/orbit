@@ -163,6 +163,7 @@ Core files: `apps/server/src/repositories/sub_issues.rs` (parent checks, tree wa
 - Categories are Unstarted, Started, Completed, Cancelled.
 - Project settings can add, edit, delete, and reorder statuses inside a category.
 - General project settings use a local draft and bottom unsaved-changes bar.
+- Access (#37, migration 0093): a project is Workspace (every non-guest member) or Private (members listed in `project_members`, plus workspace owners and admins, who are not listed). Project settings → Access switches it and adds or removes people (anyone who sees the project may; creating or making it private lists the actor). The rule is `Policy::can_see_project`; `repositories/project_access.rs` is its only SQL form (`ProjectScope`, `user_sees_project_sql`). An unseen project and everything in it (tasks, comments, labels, statuses, files, relations, parent/duplicate data, inbox, push, collab, API tokens, OAuth/MCP grants) answers like a missing one. Assigning someone who cannot see the project is 422; web and mobile assignee and mention pickers offer only people who see it. Private projects show a lock (sidebar/drawer, pickers). Known gaps: the `blocked` flag and activity metadata can still reflect a private related task; existing assignees keep their assignment after losing access.
 
 ## Docs
 
@@ -656,6 +657,12 @@ turns its routes, navigation and shortcuts off.
   redirects, public addresses only outside development), and the integration answers through
   `/api/v1/hooks/chat/{id}/responses/{token}` (5 uses, 30 min): replace, delete, `in_channel`, or an ephemeral reply
   (live-only `message.ephemeral` event, `EphemeralMessages.tsx`). The signing secret is encrypted with the app key.
+  With events on (`chat_webhooks.events`, the Interactivity switch), the webhook is a two-way bot
+  (`chat_routes/events.rs`): each member's new message in its channel goes, signed, as a Slack `event_callback`
+  (`app_mention` when the text has `@<webhook name>`, else `message`) to the request URL in the background; its URL
+  secret reads the channel and threads (`GET /api/v1/hooks/chat/{id}/messages`, `Authorization: Bearer`); and
+  `thread_ts` in a post makes a thread reply. A webhook without events only posts. A bot reply adds no avatar to
+  the thread summary and makes its creator follow nothing (`after_reply`).
 - Custom emoji belong to the workspace (Workspace Settings > Emoji, owners and admins): `:name:` stays
   text in the body and in reactions and becomes the image when it is shown.
 - Stickers belong to the workspace too (Workspace Settings > Stickers, owners and admins; 512 KiB, 100 for

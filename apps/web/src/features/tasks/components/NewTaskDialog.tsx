@@ -31,7 +31,7 @@ import { useTeamMembers } from '@/features/workspaces/api'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { useLabels } from '@/features/tasks/api/labels'
 import { taskIdentifier, type Task, type TaskPriority } from '@/features/tasks/api/models'
-import { useAllStatuses, useProjects } from '@/features/tasks/api/projects'
+import { useAllStatuses, useProjectAudience, useProjects } from '@/features/tasks/api/projects'
 import { useCreateTask } from '@/features/tasks/api/tasks'
 import { dueDateLabel, matchingLabelIds, PRIORITY_LABEL, PRIORITY_ORDER, projectStatuses, statusKeyOf } from '@/features/tasks/taskMeta'
 import { resolveStatusId } from '@/features/tasks/tasksLib'
@@ -116,6 +116,7 @@ export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescrip
   const labelIds = project && labelsQuery.isSuccess ? matchingLabelIds(labels, draft.labelIds, project.id) : draft.labelIds
   const chosenLabels = labels.filter((label) => labelIds.includes(label.id)).sort((a, b) => a.name.localeCompare(b.name))
   const assignees = members.filter((member) => draft.assigneeIds.includes(member.id))
+  const audience = useProjectAudience(workspace.id, project, members)
   const busy = createTask.isPending || uploading
   const canCreate = title.trim() !== '' && project !== undefined && status !== undefined && !busy
   const attach = (added: FileList | File[] | null) => {
@@ -298,7 +299,7 @@ export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescrip
                     editable={!busy}
                     onChange={(content) => setHasDescription(!isEmptyRichText(content))}
                     submitShortcut={() => void submit()}
-                    mentions={{ members, candidates: members.filter((member) => !member.suspended), privatePage: false }}
+                    mentions={{ members, candidates: audience.filter((member) => !member.suspended), privatePage: false }}
                     sideMenu={false}
                     ariaLabel="New task description"
                   />
@@ -394,7 +395,7 @@ export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescrip
               label="Assignees"
               placeholder="Assign to…"
               emptyText="No people match"
-              options={members.map(personOption)}
+              options={audience.map(personOption)}
               selected={draft.assigneeIds}
               onSelect={(id) => setDraft((current) => ({ ...current, assigneeIds: current.assigneeIds.includes(id) ? current.assigneeIds.filter((item) => item !== id) : [...current.assigneeIds, id] }))}
               trigger={

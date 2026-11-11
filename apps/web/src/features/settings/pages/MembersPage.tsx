@@ -3,7 +3,7 @@ import { ApiProblem } from '@orbit/api/problem'
 import { useMemo, useState, type ComponentProps } from 'react'
 import { cva, type VariantProps } from 'class-variance-authority'
 import { confirmAction } from '@/components/common/confirmAction'
-import { ArrowRight, Notification as Bell, Copy, Add as Plus, Search4 as Search, People as Users, Xmark as X } from 'reicon-react'
+import { Notification as Bell, Copy, Add as Plus, Search4 as Search, People as Users, Xmark as X } from 'reicon-react'
 import { cn } from 'cn'
 import { EmptyState } from '@/components/common/EmptyState'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
@@ -12,6 +12,7 @@ import { presenceOf, usePresence } from '@/features/realtime/presence'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Tip } from '@/components/common/Tip'
+import { ListPager, usePagedList } from '@/components/common/ListPager'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
@@ -36,7 +37,6 @@ type Role = User['role']
 type Sort = 'name_asc' | 'name_desc' | 'email_asc' | 'role'
 
 const ROLES: Role[] = ['Owner', 'Admin', 'Member', 'Guest']
-const PAGE_SIZES = [10, 25, 50, 100]
 // `items` lets Select.Value render the option label instead of the raw value.
 const ROLE_FILTER_OPTIONS = [{ value: 'all', label: 'All roles' }, ...ROLES.map((role) => ({ value: role, label: role }))]
 const SORT_OPTIONS: { value: Sort; label: string }[] = [
@@ -45,7 +45,6 @@ const SORT_OPTIONS: { value: Sort; label: string }[] = [
   { value: 'email_asc', label: 'Email A–Z' },
   { value: 'role', label: 'Role' },
 ]
-const PAGE_SIZE_OPTIONS = PAGE_SIZES.map((size) => ({ value: String(size), label: String(size) }))
 const INVITE_ROLE_OPTIONS = INVITABLE_ROLES.map((role) => ({ value: role, label: role }))
 const EMPTY_USERS: User[] = []
 
@@ -73,8 +72,6 @@ export function MembersPage() {
   const [search, setSearch] = useState('')
   const [roleFilter, setRoleFilter] = useState<'all' | Role>('all')
   const [sortBy, setSortBy] = useState<Sort>('name_asc')
-  const [page, setPage] = useState(1)
-  const [perPage, setPerPage] = useState(10)
 
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviteRole, setInviteRole] = useState<InvitableRole>('Member')
@@ -100,15 +97,10 @@ export function MembersPage() {
       return a.name.localeCompare(b.name)
     })
   }, [users, search, roleFilter, sortBy])
+  const { visible, pager, resetPage } = usePagedList(filtered)
 
   if (membersQuery.isPending) return <SettingsCard title="Members"><p><LoadingText>Loading workspace members…</LoadingText></p></SettingsCard>
   if (loadFailed(membersQuery)) return <SettingsCard title="Members"><p role="alert">Workspace members could not be loaded. No mock data was substituted.</p></SettingsCard>
-
-  const lastPage = Math.max(1, Math.ceil(filtered.length / perPage))
-  const currentPage = Math.min(page, lastPage)
-  const firstRow = filtered.length === 0 ? 0 : (currentPage - 1) * perPage + 1
-  const lastRow = Math.min(currentPage * perPage, filtered.length)
-  const visible = filtered.slice((currentPage - 1) * perPage, currentPage * perPage)
 
   const generateLink = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -173,7 +165,7 @@ export function MembersPage() {
               value={search}
               onChange={(e) => {
                 setSearch(e.target.value)
-                setPage(1)
+                resetPage()
               }}
             />
             {search ? (
@@ -184,7 +176,7 @@ export function MembersPage() {
                   aria-label="Clear search"
                   onClick={() => {
                     setSearch('')
-                    setPage(1)
+                    resetPage()
                   }}
                 >
                   <X className="size-3" />
@@ -198,7 +190,7 @@ export function MembersPage() {
               value={roleFilter}
               onValueChange={(value) => {
                 setRoleFilter(value as 'all' | Role)
-                setPage(1)
+                resetPage()
               }}
             >
               <SelectTrigger aria-label="Filter by role" className="w-36 max-[899px]:w-full">
@@ -213,7 +205,7 @@ export function MembersPage() {
               value={sortBy}
               onValueChange={(value) => {
                 setSortBy(value as Sort)
-                setPage(1)
+                resetPage()
               }}
             >
               <SelectTrigger aria-label="Sort members" className="w-40 max-[899px]:w-full">
@@ -308,54 +300,7 @@ export function MembersPage() {
                 </MemberRow>
               ))}
             </MemberTable>
-            <footer className="flex min-h-11 items-center justify-between border-t px-4 text-[11px] text-muted-foreground/70">
-              <div className="inline-flex h-7 items-center gap-3 whitespace-nowrap tabular-nums">
-                <span>
-                  {firstRow}-{lastRow} of {filtered.length}
-                </span>
-                <Select
-                  items={PAGE_SIZE_OPTIONS}
-                  value={String(perPage)}
-                  onValueChange={(value) => {
-                    setPerPage(Number(value))
-                    setPage(1)
-                  }}
-                >
-                  <SelectTrigger aria-label="Items per page" size="sm" className="w-16 px-2">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {PAGE_SIZE_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="flex items-center gap-1">
-                <Tip label="Previous page">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="icon-sm"
-                    aria-label="Previous page"
-                    disabled={currentPage <= 1}
-                    onClick={() => setPage(currentPage - 1)}
-                  >
-                    <ArrowRight className="size-3.5 rotate-180" />
-                  </Button>
-                </Tip>
-                <Tip label="Next page">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="icon-sm"
-                    aria-label="Next page"
-                    disabled={currentPage >= lastPage}
-                    onClick={() => setPage(currentPage + 1)}
-                  >
-                    <ArrowRight className="size-3.5" />
-                  </Button>
-                </Tip>
-              </div>
-            </footer>
+            <ListPager {...pager} />
           </>
         ) : (
           <div className="p-4">

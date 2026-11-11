@@ -20,8 +20,14 @@ export interface CustomThemePreset {
   theme: CustomTheme
 }
 
+const NOTION: CustomThemePreset = { name: 'Notion', theme: { sidebar: '#f7f7f5', selected: '#ebebe9', accent: '#2383e2', chat: '#ffffff' } }
+const SLACK: CustomThemePreset = { name: 'Slack', theme: { sidebar: '#3f0e40', selected: '#1164a3', accent: '#ecb22e', chat: '#ffffff' } }
+const LINEAR: CustomThemePreset = { name: 'Linear', theme: { sidebar: '#0e0f11', selected: '#24252a', accent: '#5e6ad2', chat: '#16171a' } }
+
 export const CUSTOM_THEME_PRESETS: readonly CustomThemePreset[] = [
-  { name: 'Slack', theme: { sidebar: '#3f0e40', selected: '#1164a3', accent: '#ecb22e', chat: '#ffffff' } },
+  SLACK,
+  NOTION,
+  LINEAR,
   { name: 'Slack Dark', theme: { sidebar: '#19171d', selected: '#1164a3', accent: '#ecb22e', chat: '#1a1d21' } },
   { name: 'Discord Ash', theme: { sidebar: '#2b2d31', selected: '#404249', accent: '#5865f2', chat: '#313338' } },
   { name: 'Discord Dark', theme: { sidebar: '#121214', selected: '#2c2c30', accent: '#5865f2', chat: '#1a1a1e' } },
@@ -35,8 +41,37 @@ export const CUSTOM_THEME_PRESETS: readonly CustomThemePreset[] = [
   { name: 'Blossom', theme: { sidebar: '#fde8f1', selected: '#f9c4dc', accent: '#d61f69', chat: '#fff7fa' } },
 ]
 
+/** The part of the app that a page belongs to, for Appearance → Per app. */
+export type AppSection = 'docs' | 'chat' | 'tasks'
+export const APP_SECTIONS: readonly AppSection[] = ['docs', 'chat', 'tasks']
+
+/** Appearance → Per app: the colours of each part of the app. `null` is the chosen Light, System or Dark theme. */
+export type AppLooks = Readonly<Record<AppSection, CustomTheme | null>>
+
+/** Per app starts with each part in the colours of the app it replaces. */
+export const DEFAULT_APP_LOOKS: AppLooks = { docs: NOTION.theme, chat: SLACK.theme, tasks: LINEAR.theme }
+
+/** The saved choice: colours for the whole app, colours per part of the app, or `null` for Light, System or Dark. */
+export type CustomThemeChoice = CustomTheme | { apps: AppLooks } | null
+
+/** A theme's preset name, `Your colors` when it is not a preset, or `Orbit` for the Light, System or Dark theme. */
+export function themeName(theme: CustomTheme | null): string {
+  if (!theme) return 'Orbit'
+  const code = serializeCustomTheme(theme)
+  return CUSTOM_THEME_PRESETS.find((preset) => serializeCustomTheme(preset.theme) === code)?.name ?? 'Your colors'
+}
+
+export function appSectionOf(pathname: string): AppSection | null {
+  if (/^\/docs(\/|$)/.test(pathname)) return 'docs'
+  if (/^\/chat(\/|$)/.test(pathname)) return 'chat'
+  if (/^\/(tasks|views)(\/|$)/.test(pathname)) return 'tasks'
+  return null
+}
+
 // the old name, from when the theme coloured only chat: renaming it would drop saved themes
 const STORAGE_KEY = 'orbit:chat:theme'
+// Per app: `apps:` and a JSON object of share codes, for example `apps:{"docs":"#f7f7f5,…","chat":null,"tasks":…}`
+const APPS_PREFIX = 'apps:'
 const HEX = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i
 
 /** A colour as `#rrggbb` in lower case, or `null` when the text is not a hex colour. */
@@ -161,23 +196,60 @@ export function customSidebarVariables(theme: CustomTheme | null): CSSProperties
 }
 
 const listeners = new Set<() => void>()
-let cached: { raw: string | null; theme: CustomTheme | null } | null = null
+let cached: { raw: string | null; theme: CustomThemeChoice } | null = null
+let section: AppSection | null = null
 
-function read(): CustomTheme | null {
+function read(): CustomThemeChoice {
   let raw: string | null = null
   try {
     raw = globalThis.localStorage?.getItem(STORAGE_KEY) ?? null
   } catch {
     // Unreadable storage: the default theme.
   }
-  if (!cached || cached.raw !== raw) cached = { raw, theme: raw ? parseCustomTheme(raw) : null }
+  if (!cached || cached.raw !== raw) cached = { raw, theme: raw ? parseChoice(raw) : null }
   return cached.theme
 }
 
-/** Saves the theme in this browser (theme sync is a backend project). `null` goes back to the Orbit default. */
-export function setCustomTheme(theme: CustomTheme | null) {
+function parseChoice(raw: string): CustomThemeChoice {
+  if (!raw.startsWith(APPS_PREFIX)) return parseCustomTheme(raw)
+  let codes: unknown
   try {
-    if (theme) globalThis.localStorage?.setItem(STORAGE_KEY, serializeCustomTheme(theme))
+    codes = JSON.parse(raw.slice(APPS_PREFIX.length))
+  } catch {
+    return { apps: DEFAULT_APP_LOOKS }
+  }
+  const code = (section: AppSection) => (codes && typeof codes === 'object' ? (codes as Record<string, unknown>)[section] : undefined)
+  const look = (section: AppSection) => {
+    const value = code(section)
+    return typeof value === 'string' ? parseCustomTheme(value) : value === null ? null : DEFAULT_APP_LOOKS[section]
+  }
+  return { apps: { docs: look('docs'), chat: look('chat'), tasks: look('tasks') } }
+}
+
+function serializeChoice(choice: NonNullable<CustomThemeChoice>): string {
+  if (!('apps' in choice)) return serializeCustomTheme(choice)
+  const codes = Object.fromEntries(APP_SECTIONS.map((section) => [section, choice.apps[section] && serializeCustomTheme(choice.apps[section])]))
+  return APPS_PREFIX + JSON.stringify(codes)
+}
+
+/** The theme on screen: your own colours, or under Per app the colours of the open page's part of the app. */
+function readActive(): CustomTheme | null {
+  const choice = read()
+  if (!choice || !('apps' in choice)) return choice
+  return section ? choice.apps[section] : null
+}
+
+/** Per app: new colours for one part of the app, and Per app on when it was not. */
+export function setAppLook(section: AppSection, theme: CustomTheme | null) {
+  const choice = read()
+  const looks = choice && 'apps' in choice ? choice.apps : DEFAULT_APP_LOOKS
+  setCustomTheme({ apps: { ...looks, [section]: theme } })
+}
+
+/** Saves the theme in this browser (theme sync is a backend project). `null` goes back to the Orbit default. */
+export function setCustomTheme(theme: CustomThemeChoice) {
+  try {
+    if (theme) globalThis.localStorage?.setItem(STORAGE_KEY, serializeChoice(theme))
     else globalThis.localStorage?.removeItem(STORAGE_KEY)
   } catch {
     // Storage is full or blocked: the theme does not change.
@@ -194,8 +266,22 @@ function subscribe(listener: () => void): () => void {
   }
 }
 
-export function useCustomTheme(): CustomTheme | null {
+/** `AppShell` tells which page is open, so that Per app can colour it. `null` when no app page is open. */
+export function setOpenPage(pathname: string | null) {
+  const next = pathname === null ? null : appSectionOf(pathname)
+  if (next === section) return
+  section = next
+  for (const listener of listeners) listener()
+}
+
+/** The saved choice, for Appearance: it shows which card is on, whatever page is open. */
+export function useCustomThemeChoice(): CustomThemeChoice {
   return useSyncExternalStore(subscribe, read, () => null)
+}
+
+/** The colours on screen now, or `null` for the chosen Light, System or Dark theme. */
+export function useCustomTheme(): CustomTheme | null {
+  return useSyncExternalStore(subscribe, readActive, () => null)
 }
 
 /**

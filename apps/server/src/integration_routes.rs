@@ -25,6 +25,7 @@ use crate::repositories::api_tokens::{ApiTokenError, ApiTokenRepository, ApiToke
 use crate::repositories::billing;
 use crate::repositories::identity::IdentityRepository;
 use crate::repositories::membership;
+use crate::repositories::project_access::user_sees_project_sql;
 use crate::repositories::tasks::{
     DiscordTask, GithubWorkItem, TaskError, TaskRecord, TaskRepository,
 };
@@ -298,11 +299,13 @@ async fn github_project_access(
     let actor = membership::actor(pool, workspace_id, user_id)
         .await
         .map_err(|_| ApiError::internal(request_id))?;
-    let Flag(project_exists) = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM projects WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL",
-    )
+    let Flag(project_exists) = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+        "SELECT COUNT(*) FROM projects WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL AND {}",
+        user_sees_project_sql("projects.id", "$3")
+    )))
     .bind(project)
     .bind(workspace)
+    .bind(user_id.to_string())
     .fetch_one(pool)
     .await
     .map_err(|_| ApiError::internal(request_id))?;

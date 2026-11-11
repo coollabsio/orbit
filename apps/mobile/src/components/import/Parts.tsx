@@ -23,7 +23,7 @@ import {
 import { relativeTime } from '../../data/format'
 import type { ImportDestination } from '../../hooks/imports'
 import { alpha, presenceColors, useTheme } from '../../theme'
-import { Button, Icon, IconButton, type IconName, KeyboardSpace, PaneHeader, SafeAreaView, Spinner, Text } from '../../ui'
+import { Button, Icon, IconButton, type IconName, KeyboardSpace, PaneHeader, SafeAreaView, Spinner, Text, LabelTip } from '../../ui'
 import { TextInput } from '../../ui/scaled'
 import { Dialog } from '../settings/Dialog'
 import { Badge, Select } from '../settings/Shell'
@@ -65,14 +65,18 @@ export function ImportBody({ children }: { children: ReactNode }) {
   )
 }
 
-/** The bordered "Connect …" or "Upload your vault" box: the title over its explanation (`gap`), then the form. */
-export function ConnectSection({ title, intro, gap = 'gap-1', children }: { title: string; intro: ReactNode; gap?: 'gap-1' | 'gap-2'; children: ReactNode }) {
+/** The bordered "Connect …" or "Upload your vault" box: the title (with optional `help` behind an info icon) over its explanation (`gap`), then the form. */
+export function ConnectSection({ title, help, intro, gap = 'gap-1', children }: { title: string; help?: string; intro?: ReactNode; gap?: 'gap-1' | 'gap-2'; children: ReactNode }) {
   return (
     <View className="gap-4 rounded-lg border border-border p-5">
       <View className={gap}>
-        <Text accessibilityRole="header" className="font-noto-semibold text-[14px] leading-[20px]">
-          {title}
-        </Text>
+        {help ? (
+          <LabelTip label={title} text={help} className="font-noto-semibold text-[14px] leading-[20px]" />
+        ) : (
+          <Text accessibilityRole="header" className="font-noto-semibold text-[14px] leading-[20px]">
+            {title}
+          </Text>
+        )}
         {intro}
       </View>
       {children}

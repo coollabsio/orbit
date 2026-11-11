@@ -6,7 +6,8 @@ import { ApiProblem } from '@orbit/api/problem'
 import { confirmAction } from '@/components/common/confirmAction'
 import { SettingsCard } from '@/components/common/SettingsCard'
 import { Button } from '@/components/ui/button'
-import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
+import { InfoTip } from '@/components/common/InfoTip'
+import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { PasswordInput } from '@/components/ui/password-input'
 import { useInstanceSettings, useRemoveSignInProvider, useSaveSignInProvider } from '@/features/admin/api'
@@ -89,9 +90,8 @@ function ProviderCard({ provider, description, saved }: { provider: Provider; de
             <Input id={`${id}-client-id`} required autoComplete="off" spellCheck={false} value={clientId} onChange={(event) => setClientId(event.target.value)} />
           </Field>
           <Field>
-            <FieldLabel htmlFor={`${id}-secret`}>Client secret {saved?.secret_set ? null : <RequiredMark />}</FieldLabel>
+            <FieldLabel htmlFor={`${id}-secret`}>Client secret {saved?.secret_set ? null : <RequiredMark />} <InfoTip text="Stored encrypted." /></FieldLabel>
             <PasswordInput id={`${id}-secret`} autoComplete="new-password" required={!saved?.secret_set} placeholder={saved?.secret_set ? 'Saved. Leave empty to keep it.' : ''} value={secret} onChange={(event) => setSecret(event.target.value)} />
-            <FieldDescription>Stored encrypted.</FieldDescription>
           </Field>
         </FieldGrid>
         <div className="mt-4 flex items-center justify-end gap-2">

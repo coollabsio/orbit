@@ -41,8 +41,6 @@ export default function ObsidianImportScreen() {
   return <ImportFlow source={SOURCE} importId={importId} connect={<UploadStep />} chooser={(item, tree) => <Chooser item={item} tree={tree} />} result={(item) => <Result item={item} />} />
 }
 
-const Code = ({ children }: { children: string }) => <Text className="font-mono text-[13px] leading-[20px] text-muted-foreground">{children}</Text>
-
 function UploadStep() {
   const { colors } = useTheme()
   const { client, workspaceId } = useOrbit()
@@ -87,18 +85,11 @@ function UploadStep() {
         <ConnectSection
           title="Upload your vault"
           gap="gap-2"
+          help="Zip the vault folder and upload the .zip file. Its folders become pages with their notes inside, and a note named like its folder (Projects/Projects.md) becomes that folder’s page. Images and files that notes link to or embed are attached to those pages. The .obsidian/ settings folder, canvases and CSV files are skipped. You choose which notes to import after the upload."
           intro={
-            <>
-              <Paragraph>
-                Zip the vault folder and upload the .zip file. Its folders become pages with their notes inside, and a note named like its folder (<Code>Projects/Projects.md</Code>) becomes that folder’s page. Images and files that notes link to or embed are attached to those pages.
-              </Paragraph>
-              <Paragraph>
-                To find the vault folder, open the vault switcher in Obsidian (bottom left) and choose <Strong>Reveal vault in system explorer</Strong>. Then right-click the folder and choose <Strong>Compress</Strong> (macOS) or <Strong>Compress to ZIP file</Strong> (Windows).
-              </Paragraph>
-              <Paragraph>
-                The <Code>.obsidian/</Code> settings folder, canvases and CSV files are skipped. You choose which notes to import after the upload.
-              </Paragraph>
-            </>
+            <Paragraph>
+              To find the vault folder, open the vault switcher in Obsidian (bottom left) and choose <Strong>Reveal vault in system explorer</Strong>. Then right-click the folder and choose <Strong>Compress</Strong> (macOS) or <Strong>Compress to ZIP file</Strong> (Windows).
+            </Paragraph>
           }
         >
           {upload ? (

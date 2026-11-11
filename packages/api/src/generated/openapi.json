@@ -1471,6 +1471,470 @@
         ]
       }
     },
+    "/api/public/v1/workspaces/{workspace_id}/docs/{page_id}/database/properties": {
+      "post": {
+        "tags": [
+          "public-api"
+        ],
+        "summary": "Add a property to a database",
+        "operationId": "public_create_database_property",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "description": "The token's workspace, from `GET /me`.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page_id",
+            "in": "path",
+            "description": "The database's page id.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublicCreateDatabasePropertyBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "The new property",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseProperty"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthorized",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "insufficient_scope",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limit_exceeded",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/public/v1/workspaces/{workspace_id}/docs/{page_id}/database/properties/{property}": {
+      "delete": {
+        "tags": [
+          "public-api"
+        ],
+        "summary": "Delete a database property with its values",
+        "operationId": "public_delete_database_property",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "description": "The token's workspace, from `GET /me`.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page_id",
+            "in": "path",
+            "description": "The database's page id.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "property",
+            "in": "path",
+            "description": "The property's name or id.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthorized",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "insufficient_scope",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limit_exceeded",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "public-api"
+        ],
+        "summary": "Rename, retype, reconfigure or move a database property",
+        "operationId": "public_update_database_property",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "description": "The token's workspace, from `GET /me`.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page_id",
+            "in": "path",
+            "description": "The database's page id.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "property",
+            "in": "path",
+            "description": "The property's name or id.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublicUpdateDatabasePropertyBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The property, with the values the change converted or cleared",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabasePropertyUpdate"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthorized",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "insufficient_scope",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limit_exceeded",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/public/v1/workspaces/{workspace_id}/docs/{page_id}/database/query": {
       "post": {
         "tags": [
@@ -12723,6 +13187,167 @@
           },
           "413": {
             "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {}
+        ]
+      }
+    },
+    "/api/v1/hooks/chat/{webhook_id}/messages": {
+      "get": {
+        "tags": [
+          "crate::chat_routes::events"
+        ],
+        "summary": "Reads the webhook's channel, or one thread of it, for an integration with events on. The\ncredential is the webhook URL's secret in `Authorization: Bearer <secret>`.",
+        "operationId": "read_hook_messages",
+        "parameters": [
+          {
+            "name": "webhook_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "thread_ts",
+            "in": "query",
+            "description": "The root of a thread: its replies, oldest first. Without it, the channel's main list.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "description": "Messages older than this message id, for the next page.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "1–100 messages; 50 by default.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HookMessages"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "webhook_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limit_exceeded",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -42072,6 +42697,407 @@
         ]
       }
     },
+    "/api/v1/workspaces/{workspace_id}/projects/{project_id}/members": {
+      "get": {
+        "tags": [
+          "crate::task_routes"
+        ],
+        "summary": "The members of a private project. Workspace owners and admins see every project and are\nlisted only when someone added them.",
+        "operationId": "list_project_members",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ProjectMemberRecord"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "task_resource_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "crate::task_routes"
+        ],
+        "summary": "Adds a member. Anyone who sees the project may; adding a member again returns their row.",
+        "operationId": "add_project_member",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectMemberBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectMemberRecord"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "task_resource_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/projects/{project_id}/members/{user_id}": {
+      "delete": {
+        "tags": [
+          "crate::task_routes"
+        ],
+        "summary": "Removes a member, who then no longer sees the project while it is private.",
+        "operationId": "remove_project_member",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "task_resource_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/workspaces/{workspace_id}/projects/{project_id}/permanent": {
       "delete": {
         "tags": [
@@ -52876,12 +53902,16 @@
       "ChatInteractivityBody": {
         "type": "object",
         "properties": {
+          "events": {
+            "type": "boolean",
+            "description": "Also send each member's message in the channel to the request URL (`event_callback`),\nand let the webhook's secret read the channel. Needs a request URL."
+          },
           "request_url": {
             "type": [
               "string",
               "null"
             ],
-            "description": "Where clicks go: https (http and local hosts in development). Null turns clicks off."
+            "description": "Where clicks go: https (http and local hosts in development). Null turns clicks and\nevents off."
           }
         },
         "additionalProperties": false
@@ -56615,6 +57645,88 @@
           "or"
         ]
       },
+      "HookMessage": {
+        "type": "object",
+        "description": "One message as an integration reads it, in Slack's shape.",
+        "required": [
+          "type",
+          "ts",
+          "user",
+          "text"
+        ],
+        "properties": {
+          "bot_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The webhook that posted it; absent for members' messages."
+          },
+          "reply_count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "text": {
+            "type": "string",
+            "description": "Markdown with mention tokens (`<@user_id>`); empty for a deleted message."
+          },
+          "thread_ts": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The root of its thread; for a root with replies, its own id."
+          },
+          "ts": {
+            "type": "string",
+            "description": "The message id."
+          },
+          "type": {
+            "type": "string",
+            "description": "Always `message`."
+          },
+          "user": {
+            "type": "string",
+            "description": "The member who wrote it; for an integration's message, the member who set it up."
+          },
+          "username": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The display name of `user`, or the integration's name for its messages."
+          }
+        }
+      },
+      "HookMessages": {
+        "type": "object",
+        "required": [
+          "ok",
+          "messages"
+        ],
+        "properties": {
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HookMessage"
+            },
+            "description": "Oldest first."
+          },
+          "next_before": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Send it as `before` for the older page; null on the oldest page."
+          },
+          "ok": {
+            "type": "boolean"
+          }
+        }
+      },
       "ImportDatabaseCsvBody": {
         "type": "object",
         "required": [
@@ -56716,7 +57828,7 @@
       },
       "IncomingWebhookPayload": {
         "type": "object",
-        "description": "What a tool posts: the payload of a Slack incoming webhook. Fields that Orbit does not use\n(`channel`, `thread_ts`, `unfurl_links`) are ignored, so a Slack payload posts as it is.",
+        "description": "What a tool posts: the payload of a Slack incoming webhook. Fields that Orbit does not use\n(`channel`, `unfurl_links`) are ignored, so a Slack payload posts as it is.",
         "properties": {
           "attachments": {
             "type": [
@@ -56763,6 +57875,13 @@
               "null"
             ],
             "description": "Slack mrkdwn or Markdown; mentions are tokens: `<@user_id>`, `<#channel_id>`,\n`<!channel>`, `<!here>`. Longer than 4000 characters, it is cut. With `blocks` or\n`attachments` it is the plain text for notifications and search, and may be left out."
+          },
+          "thread_ts": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The id of a root message in the webhook's channel: the message is a reply in its thread."
           },
           "username": {
             "type": [
@@ -58055,6 +59174,7 @@
                     "label_ids",
                     "due_start_at",
                     "due_at",
+                    "recurrence",
                     "created_at",
                     "updated_at",
                     "version"
@@ -58108,6 +59228,17 @@
                     },
                     "project_id": {
                       "type": "string"
+                    },
+                    "recurrence": {
+                      "oneOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "$ref": "#/components/schemas/TaskRecurrence",
+                          "description": "How the task repeats; null when it does not. Completing it creates the next occurrence."
+                        }
+                      ]
                     },
                     "status_id": {
                       "type": "string"
@@ -61957,6 +63088,7 @@
                 "color",
                 "auto_close_parent",
                 "auto_close_sub_issues",
+                "private",
                 "version",
                 "created_at",
                 "updated_at"
@@ -61992,6 +63124,10 @@
                 },
                 "name": {
                   "type": "string"
+                },
+                "private": {
+                  "type": "boolean",
+                  "description": "Only the project's members, and workspace owners and admins, see a private project and\nwhat is in it. Everyone else gets the answers of a missing project."
                 },
                 "updated_at": {
                   "type": "string",
@@ -62103,6 +63239,7 @@
                 "position",
                 "assignee_ids",
                 "label_ids",
+                "recurrence",
                 "version",
                 "created_at",
                 "updated_at",
@@ -62247,6 +63384,17 @@
                 },
                 "project_id": {
                   "type": "string"
+                },
+                "recurrence": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TaskRecurrence",
+                      "description": "How the task repeats; null when it does not. Completing it creates the next occurrence."
+                    }
+                  ]
                 },
                 "source_url": {
                   "type": [
@@ -62615,9 +63763,46 @@
           },
           "name": {
             "type": "string"
+          },
+          "private": {
+            "type": "boolean",
+            "description": "Only the project's members see it; the creator becomes the first member. Absent: false."
           }
         },
         "additionalProperties": false
+      },
+      "ProjectMemberBody": {
+        "type": "object",
+        "required": [
+          "user_id"
+        ],
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "description": "An active workspace member who is not a guest."
+          }
+        },
+        "additionalProperties": false
+      },
+      "ProjectMemberRecord": {
+        "type": "object",
+        "required": [
+          "project_id",
+          "user_id",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "project_id": {
+            "type": "string"
+          },
+          "user_id": {
+            "type": "string"
+          }
+        }
       },
       "ProjectRecord": {
         "type": "object",
@@ -62629,6 +63814,7 @@
           "color",
           "auto_close_parent",
           "auto_close_sub_issues",
+          "private",
           "version",
           "created_at",
           "updated_at"
@@ -62664,6 +63850,10 @@
           },
           "name": {
             "type": "string"
+          },
+          "private": {
+            "type": "boolean",
+            "description": "Only the project's members, and workspace owners and admins, see a private project and\nwhat is in it. Everyone else gets the answers of a missing project."
           },
           "updated_at": {
             "type": "string",
@@ -62715,6 +63905,13 @@
           },
           "name": {
             "type": "string"
+          },
+          "private": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Absent: unchanged. Making a project private adds the caller to its members."
           }
         },
         "additionalProperties": false
@@ -62794,6 +63991,40 @@
           "body": {
             "type": "string",
             "description": "Markdown, 1 to 100,000 bytes in UTF-8, not only spaces."
+          }
+        },
+        "additionalProperties": false
+      },
+      "PublicCreateDatabasePropertyBody": {
+        "type": "object",
+        "description": "See `create_database_property` in `docs/mcp.md` for the config shapes.",
+        "required": [
+          "name",
+          "type"
+        ],
+        "properties": {
+          "config": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "The type's config. Select, multi-select and status take `{\"options\": [...]}` with option\nnames or `{name, color, group}` objects. Omitted: the type's default."
+          },
+          "name": {
+            "type": "string",
+            "description": "1 to 200 characters."
+          },
+          "position": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Index among the properties; omitted appends it."
+          },
+          "type": {
+            "type": "string",
+            "description": "Any type but `title`, such as `select`, `status`, `number` or `date`."
           }
         },
         "additionalProperties": false
@@ -63510,6 +64741,7 @@
               "label_ids",
               "due_start_at",
               "due_at",
+              "recurrence",
               "created_at",
               "updated_at",
               "version"
@@ -63563,6 +64795,17 @@
               },
               "project_id": {
                 "type": "string"
+              },
+              "recurrence": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/TaskRecurrence",
+                    "description": "How the task repeats; null when it does not. Completing it creates the next occurrence."
+                  }
+                ]
               },
               "status_id": {
                 "type": "string"
@@ -63676,6 +64919,53 @@
             "minimum": 0
           }
         }
+      },
+      "PublicUpdateDatabasePropertyBody": {
+        "type": "object",
+        "description": "Send at least one of `name`, `type`, `config`, `add_options` or `position`.",
+        "properties": {
+          "add_options": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            },
+            "description": "Options to add after the current ones, by name or as `{name, color, group}`; names the\nproperty already has are skipped. Not with `config`."
+          },
+          "config": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "The whole config. Options left out are removed from every row; an option sent by name\nonly keeps its id, color and group."
+          },
+          "dry_run": {
+            "type": "boolean",
+            "description": "Returns what the change would do without saving it."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "1 to 200 characters."
+          },
+          "position": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The new index among the properties."
+          },
+          "type": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A new type converts the values and gives the type's default config."
+          }
+        },
+        "additionalProperties": false
       },
       "PublicUpdateDatabaseRowBody": {
         "type": "object",
@@ -63801,6 +65091,17 @@
               "null"
             ],
             "description": "`none`, `low`, `medium`, `high` or `urgent`."
+          },
+          "recurrence": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TaskRecurrence",
+                "description": "Makes the task repeat: completing it creates the next occurrence. Every occurrence of the\nseries shares the rule. `null` stops repeating."
+              }
+            ]
           },
           "status_id": {
             "type": [
@@ -64288,7 +65589,8 @@
           "author_id",
           "body",
           "sticker",
-          "created_at"
+          "created_at",
+          "bot_name"
         ],
         "properties": {
           "author_id": {
@@ -64296,6 +65598,13 @@
           },
           "body": {
             "type": "string"
+          },
+          "bot_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The integration's name when an integration posted the reply: `author_id` is then only the\nmember who set it up."
           },
           "created_at": {
             "type": "string",
@@ -65922,6 +67231,7 @@
           "position",
           "assignee_ids",
           "label_ids",
+          "recurrence",
           "version",
           "created_at",
           "updated_at",
@@ -66067,6 +67377,17 @@
           "project_id": {
             "type": "string"
           },
+          "recurrence": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TaskRecurrence",
+                "description": "How the task repeats; null when it does not. Completing it creates the next occurrence."
+              }
+            ]
+          },
           "source_url": {
             "type": [
               "string",
@@ -66110,6 +67431,68 @@
             "type": "string"
           }
         }
+      },
+      "TaskRecurrence": {
+        "type": "object",
+        "description": "How a task repeats, as clients read and write it. Shared by every occurrence of the series.",
+        "required": [
+          "frequency",
+          "interval",
+          "weekdays",
+          "base"
+        ],
+        "properties": {
+          "base": {
+            "$ref": "#/components/schemas/TaskRecurrenceBase",
+            "description": "`due`: a fixed calendar counted from the due date (missed dates are skipped). `completion`:\nthe next due date is `interval` units after the day the task was completed."
+          },
+          "frequency": {
+            "$ref": "#/components/schemas/TaskRecurrenceFrequency"
+          },
+          "interval": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Every `interval` days, weeks, months or years (1 to 365).",
+            "maximum": 365,
+            "minimum": 1
+          },
+          "weekdays": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskRecurrenceWeekday"
+            },
+            "description": "Weekly rules from the due date only: the weekdays it falls on. Empty means the weekday of\nthe due date the rule was set from."
+          }
+        },
+        "additionalProperties": false
+      },
+      "TaskRecurrenceBase": {
+        "type": "string",
+        "enum": [
+          "due",
+          "completion"
+        ]
+      },
+      "TaskRecurrenceFrequency": {
+        "type": "string",
+        "enum": [
+          "daily",
+          "weekly",
+          "monthly",
+          "yearly"
+        ]
+      },
+      "TaskRecurrenceWeekday": {
+        "type": "string",
+        "enum": [
+          "mon",
+          "tue",
+          "wed",
+          "thu",
+          "fri",
+          "sat",
+          "sun"
+        ]
       },
       "TaskRef": {
         "type": "object",
@@ -66314,6 +67697,17 @@
             "type": [
               "string",
               "null"
+            ]
+          },
+          "recurrence": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TaskRecurrence",
+                "description": "Absent: unchanged. A rule: set or replace how the task's series repeats (every\noccurrence shares it). `null`: stop repeating."
+              }
             ]
           },
           "source_url": {
@@ -67636,7 +69030,8 @@
           "created_at",
           "rotated_at",
           "last_used_at",
-          "request_url"
+          "request_url",
+          "events"
         ],
         "properties": {
           "conversation_id": {
@@ -67648,6 +69043,10 @@
           },
           "created_by": {
             "type": "string"
+          },
+          "events": {
+            "type": "boolean",
+            "description": "Members' messages in the channel are sent to the request URL, and the webhook's secret\ncan read the channel. Always false without a request URL."
           },
           "icon_url": {
             "type": [
