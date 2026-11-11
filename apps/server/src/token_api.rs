@@ -29,6 +29,7 @@ use crate::repositories::task_filter::{
     Condition, FilterField, FilterGroup, FilterNode, FilterOperator, GroupOp, ShowCompleted,
     SubIssuesDisplay,
 };
+use crate::repositories::task_recurrences::TaskRecurrence;
 use crate::repositories::tasks::{
     CommentContent, CommentRecord, CreateTask, LabelRecord, Page, ProjectRecord, SortOrder,
     StatusRecord, TaskChanges, TaskError, TaskFilter, TaskRecord, TaskRepository, TaskSort,
@@ -120,6 +121,9 @@ pub struct ReadTask {
     pub due_start_at: Option<TimestampMillis>,
     #[schema(value_type = Option<String>, format = DateTime, required = true)]
     pub due_at: Option<TimestampMillis>,
+    /// How the task repeats; null when it does not. Completing it creates the next occurrence.
+    #[schema(required = true)]
+    pub recurrence: Option<TaskRecurrence>,
     #[schema(value_type = String, format = DateTime)]
     pub created_at: TimestampMillis,
     #[schema(value_type = String, format = DateTime)]
@@ -175,6 +179,7 @@ impl TaskView {
                 label_ids: task.label_ids,
                 due_start_at: task.due_start_at,
                 due_at: task.due_at,
+                recurrence: task.recurrence,
                 created_at: task.created_at,
                 updated_at: task.updated_at,
                 version: revision(task.version, task.updated_at),
@@ -377,6 +382,8 @@ pub struct TaskPatch {
     pub due_at: Option<Option<TimestampMillis>>,
     /// `Some(None)` detaches the task from its parent.
     pub parent_task_id: Option<Option<Id>>,
+    /// `Some(None)` stops repeating.
+    pub recurrence: Option<Option<TaskRecurrence>>,
 }
 
 #[derive(Clone)]
@@ -873,6 +880,10 @@ impl Authorized<'_> {
             patch.description.as_deref(),
             patch.priority.as_deref(),
         )?;
+        let recurrence = patch
+            .recurrence
+            .map(|value| value.map(|recurrence| recurrence.rule()).transpose())
+            .transpose()?;
         let p = self.principal;
         let id = self.task_id(task_ref).await?;
         let outcome = self
@@ -893,6 +904,7 @@ impl Authorized<'_> {
                         due_start_at: patch.due_start_at,
                         due_at: patch.due_at,
                         parent_task_id: patch.parent_task_id,
+                        recurrence,
                         ..Default::default()
                     },
                 },

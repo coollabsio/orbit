@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Pane } from '@/components/common/Pane'
+import { TitleTip } from '@/components/common/TitleTip'
 import { usePageTree } from '@/features/docs/api/pages'
 import { useTeamspaces } from '@/features/docs/api/teamspaces'
 import { ImportDestinationFields } from '@/features/docs/components/ImportDestinationFields'
@@ -29,13 +30,12 @@ export function CsvImportPane({ workspaceId }: { workspaceId: string }) {
       <ImportHeader title="Import CSV" />
       <ImportBody>
         <section className="flex flex-col gap-4 rounded-lg border border-border p-5">
-          <div className="flex flex-col gap-2">
-            <h2 className="text-sm font-semibold text-foreground">Create a database from a CSV file</h2>
-            <p className="text-sm text-muted-foreground">
-              Each row becomes a row of the database, and you choose a property type for each column. One column holds the
-              row titles. Values that do not fit their type are left empty; you see how many before the import.
-            </p>
-          </div>
+          <TitleTip
+            as="h2"
+            title="Create a database from a CSV file"
+            text="Each row becomes a row of the database, and you choose a property type for each column. One column holds the row titles. Values that do not fit their type are left empty; you see how many before the import."
+            className="text-sm font-semibold text-foreground"
+          />
           <CsvImportFlow
             workspaceId={workspaceId}
             destination={{ kind: 'new', request }}

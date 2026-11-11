@@ -4,6 +4,7 @@ import { ApiProblem } from '@orbit/api/problem'
 import type { ImportPerson, ImportSource } from '@orbit/api/generated/types.gen'
 import { Import, People as Users } from 'reicon-react'
 import { SettingsCard } from '@/components/common/SettingsCard'
+import { InfoTip } from '@/components/common/InfoTip'
 import { buttonVariants } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -42,10 +43,7 @@ export function ImportPage() {
             <RowIcon>
               <Import />
             </RowIcon>
-            <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-[13px]">
-              <span className="font-medium text-foreground">{source.name}</span>
-              <span className="text-xs text-muted-foreground">{source.description}</span>
-            </div>
+            <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[13px] font-medium text-foreground">{source.name} <InfoTip text={source.description} /></span>
             <Link to={source.to} className={buttonVariants({ variant: 'outline', size: 'sm' })}>
               Import from {source.name}
             </Link>

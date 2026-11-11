@@ -24,6 +24,7 @@ use crate::repositories::task_filter::{
     self, Condition, FilterField, FilterGroup, FilterNode, FilterOperator, GroupOp, OrderBy,
     OrderDirection, ShowCompleted, SubIssuesDisplay,
 };
+use crate::repositories::task_recurrences::TaskRecurrence;
 use crate::repositories::task_relations::{NewTaskRelationType, TaskRelationRecord};
 use crate::repositories::tasks::{
     CommentContent, CreateTask, NotificationRecord, Page, ProjectAutomationPatch, SortOrder,
@@ -1147,6 +1148,11 @@ struct TaskUpdateBody {
     /// Absent: unchanged. A task id: make this task its sub-issue. `null`: detach.
     #[serde(default, deserialize_with = "deserialize_source_patch")]
     parent_task_id: Option<Option<String>>,
+    /// Absent: unchanged. A rule: set or replace how the task's series repeats (every
+    /// occurrence shares it). `null`: stop repeating.
+    #[serde(default, deserialize_with = "deserialize_patch")]
+    #[schema(value_type = Option<TaskRecurrence>)]
+    recurrence: Option<Option<TaskRecurrence>>,
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -1727,6 +1733,7 @@ async fn bulk_tasks(
                     due_at: item.due_at,
                     duplicate_of_id: item.duplicate_of_id,
                     parent_task_id: item.parent_task_id,
+                    recurrence: None,
                 },
                 &instance,
                 request_id.as_ref(),
@@ -2303,6 +2310,15 @@ fn task_update(
                 .parent_task_id
                 .map(|value| optional_id(value, instance, request_id))
                 .transpose()?,
+            recurrence: body
+                .recurrence
+                .map(|value| {
+                    value
+                        .map(|recurrence| recurrence.rule())
+                        .transpose()
+                        .map_err(|_| validation("recurrence", instance, request_id))
+                })
+                .transpose()?,
         },
     })
 }
@@ -2341,6 +2357,15 @@ where
     D: serde::Deserializer<'de>,
 {
     Option::<String>::deserialize(deserializer).map(Some)
+}
+
+/// A nullable PATCH field: absent stays `None`, `null` becomes `Some(None)`.
+pub(crate) fn deserialize_patch<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer).map(Some)
 }
 
 fn deserialize_due_patch<'de, D>(

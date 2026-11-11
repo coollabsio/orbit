@@ -1,3 +1,4 @@
+import { recurrenceChangeText } from '@orbit/api/recurrence'
 import type { StatusCategory, Task, TaskActivity, TaskChange, TaskComment, TaskPriority, TaskStatusDef, TaskViewState } from '@/features/tasks/api/models'
 import { relativeTime, shortDate } from '@/lib/format'
 import { defaultStatusOf, PRIORITY_LABEL, sortStatuses, statusKeyOf } from './taskMeta'
@@ -117,5 +118,7 @@ export function activityChangeText(change: TaskChange, state: Pick<TaskViewState
       return 'updated the description'
     case 'source_url':
       return 'updated the source link'
+    case 'recurrence':
+      return recurrenceChangeText(change.rule)
   }
 }

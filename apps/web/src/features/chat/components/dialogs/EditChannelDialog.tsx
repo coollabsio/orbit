@@ -1,5 +1,6 @@
 import { useId, useState } from 'react'
 import { Hashtag } from 'reicon-react'
+import { InfoTip } from '@/components/common/InfoTip'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogClose, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Field, FieldContent, FieldDescription, FieldError, FieldLabel } from '@/components/ui/field'
@@ -149,14 +150,13 @@ function EditChannelForm({ conversation, onDone }: { conversation: Conversation;
 
       <Field orientation="horizontal" data-disabled={conversation.isDefault || undefined}>
         <FieldContent>
-          <FieldLabel htmlFor={privateId}>Private channel</FieldLabel>
-          <FieldDescription>
-            {conversation.isDefault
-              ? `#${conversation.name} is the default channel. Everybody is in it, so it cannot be private.`
-              : isPrivate
-                ? 'Only the people in it can see it. New people must be added.'
-                : 'Everyone in the workspace is in it.'}
-          </FieldDescription>
+          <span className="inline-flex items-center gap-1.5">
+            <FieldLabel htmlFor={privateId}>Private channel</FieldLabel>
+            {conversation.isDefault ? null : (
+              <InfoTip text={isPrivate ? 'Only the people in it can see it. New people must be added.' : 'Everyone in the workspace is in it.'} />
+            )}
+          </span>
+          {conversation.isDefault ? <FieldDescription>{`#${conversation.name} is the default channel. Everybody is in it, so it cannot be private.`}</FieldDescription> : null}
         </FieldContent>
         <Switch id={privateId} checked={isPrivate} disabled={conversation.isDefault} onCheckedChange={setIsPrivate} />
       </Field>

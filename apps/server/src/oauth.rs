@@ -564,13 +564,19 @@ async fn consent(
             workspace_name: row.get("workspace_name"),
         })
         .collect();
+    // Listed apart from projects, so a workspace without projects can still be picked.
+    let workspaces: Vec<Value> = sqlx::query("SELECT w.id, w.name FROM workspaces w JOIN memberships m ON m.workspace_id = w.id AND m.role <> 'guest' WHERE m.user_id = $1 AND w.deleted_at IS NULL ORDER BY w.name, w.id")
+        .bind(user.to_string()).fetch_all(&mut *tx).await?
+        .into_iter()
+        .map(|row| json!({"id": row.get::<String, _>("id"), "name": row.get::<String, _>("name")}))
+        .collect();
     let requested: String =
         sqlx::query_scalar("SELECT mcp_scopes FROM oauth_requests WHERE id = $1")
             .bind(&id)
             .fetch_one(&mut *tx)
             .await?;
     tx.commit().await?;
-    Ok(([(header::CACHE_CONTROL, "no-store")], Json(json!({"client_name": client, "redirect_to": redirect_target(&redirect_uri), "scope": requested, "csrf_token": nonce, "projects": projects}))).into_response())
+    Ok(([(header::CACHE_CONTROL, "no-store")], Json(json!({"client_name": client, "redirect_to": redirect_target(&redirect_uri), "scope": requested, "csrf_token": nonce, "workspaces": workspaces, "projects": projects}))).into_response())
 }
 
 #[derive(Deserialize)]

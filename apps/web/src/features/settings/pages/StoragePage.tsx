@@ -1,8 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { SettingsCard } from '@/components/common/SettingsCard'
+import { InfoTip } from '@/components/common/InfoTip'
 import { Button } from '@/components/ui/button'
-import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
+import { Field, FieldLabel } from '@/components/ui/field'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { FieldGrid, SettingsRow } from '@/features/settings/components/SettingsParts'
 import { formatBytes } from '@/lib/formatBytes'
@@ -48,7 +49,7 @@ export function StoragePage() {
         <div className="p-4">
           <FieldGrid>
             <Field>
-              <FieldLabel htmlFor="media-limit">Space for images</FieldLabel>
+              <FieldLabel htmlFor="media-limit" className="items-center gap-1.5">Space for images <InfoTip text="Over the limit, the images kept for the longest time go first. Messages are kept for the 100 conversations you opened last, for 30 days." /></FieldLabel>
               <Select
                 items={LIMIT_OPTIONS}
                 value={String(limit)}
@@ -64,7 +65,6 @@ export function StoragePage() {
                   {LIMIT_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
                 </SelectContent>
               </Select>
-              <FieldDescription>Over the limit, the images kept for the longest time go first. Messages are kept for the 100 conversations you opened last, for 30 days.</FieldDescription>
             </Field>
           </FieldGrid>
         </div>

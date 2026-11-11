@@ -28,6 +28,7 @@ use crate::repositories::api_tokens::{
 };
 use crate::repositories::databases::{DatabaseError, invalid_detail};
 use crate::repositories::pages::PageError;
+use crate::repositories::task_recurrences::TaskRecurrence;
 use crate::repositories::tasks::{TaskError, TaskRepository};
 use crate::token_api::{
     DOC_TOO_LARGE_DETAIL, DocPatch, NewDoc, NewTask, TaskPatch, TaskQuery, TokenApi, TokenApiError,
@@ -224,6 +225,10 @@ struct UpdateArgs {
     /// Replaces the assignees with these member user IDs (from list_members or get_me); `[]`
     /// unassigns everyone.
     assignee_ids: Option<Vec<String>>,
+    /// Makes the task repeat: completing it creates the next occurrence. Every occurrence of
+    /// the series shares this rule. `null` stops repeating.
+    #[serde(default, deserialize_with = "present")]
+    recurrence: Option<Option<TaskRecurrence>>,
 }
 /// A field that is present, `null` included: `null` clears the value, a missing field keeps it.
 fn present<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
@@ -387,7 +392,7 @@ fn tools() -> Vec<Tool> {
         ),
         write_definition::<UpdateArgs>(
             "update_task",
-            "Update a task using its current version. parent_task_id moves the task under another task; null detaches it. Related task projects must also be approved. assignee_ids replaces the assignees: add your get_me user id to claim a task, send [] to unassign everyone.",
+            "Update a task using its current version. parent_task_id moves the task under another task; null detaches it. Related task projects must also be approved. assignee_ids replaces the assignees: add your get_me user id to claim a task, send [] to unassign everyone. recurrence makes the task repeat, e.g. {\"frequency\": \"weekly\", \"interval\": 1, \"weekdays\": [\"mon\", \"wed\"], \"base\": \"due\"}; base \"completion\" counts from the day it is completed (no weekdays); null stops repeating.",
             true,
         ),
         write_definition::<DeleteArgs>(
@@ -586,6 +591,7 @@ impl TaskTools {
                         priority: a.priority,
                         parent_task_id,
                         assignee_ids,
+                        recurrence: a.recurrence,
                         ..Default::default()
                     };
                     api.update_task(&a.task_id, a.expected_version, patch).await
@@ -800,6 +806,12 @@ fn database_detail(error: DatabaseError) -> String {
         DatabaseError::TemplateNotFound => "Database template is not available".to_owned(),
         DatabaseError::RowLimit => "A database holds at most 5,000 rows".to_owned(),
         DatabaseError::Locked => "Database is locked".to_owned(),
+        DatabaseError::PropertyNotFound => "Database property is not available".to_owned(),
+        DatabaseError::PropertyLimit => "A database holds at most 100 properties".to_owned(),
+        DatabaseError::TitleProperty => {
+            "The title property cannot be deleted or change its type".to_owned()
+        }
+        DatabaseError::FormulaInvalid(problem) => format!("Invalid formula: {}", problem.message),
         _ => "Database is not available".to_owned(),
     }
 }

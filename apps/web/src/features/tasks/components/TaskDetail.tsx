@@ -3,7 +3,8 @@ import { useEffect, useRef, useState, type ComponentProps, type ReactNode } from
 import { cn } from 'cn'
 import { useQueryClient } from '@tanstack/react-query'
 import { confirmAction } from '@/components/common/confirmAction'
-import { Add as Plus, ArrowLeft, Calendar, Hierarchy2, Link2, Tag, TaskSquare as SquareCheck, User as UserIcon, Xmark as X } from 'reicon-react'
+import { recurrenceLabel } from '@orbit/api/recurrence'
+import { Add as Plus, ArrowLeft, Calendar, Hierarchy2, Link2, Repeat, Tag, TaskSquare as SquareCheck, User as UserIcon, Xmark as X } from 'reicon-react'
 import { Badge } from '@/components/ui/badge'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Tip } from '@/components/common/Tip'
@@ -51,6 +52,7 @@ import { TaskCommentComposer } from './TaskCommentComposer'
 import { LabelPicker, LabelPill } from './TaskLabels'
 import { TaskDescriptionEditor, type TaskDescriptionHandle } from './TaskDescriptionEditor'
 import { TaskTextFields } from './TaskTextFields'
+import { RecurrenceEditor } from './RecurrenceEditor'
 
 interface TaskDetailProps {
   task: Task | undefined
@@ -89,6 +91,7 @@ export function TaskDetail({ task, project, state, onClose, onOpenTask, onOpenPr
   const [dueDateOpen, setDueDateOpen] = useState(false)
   // each pick saves and the picker stays open; quick picks queue behind the save in flight
   const saveDueDate = useTaskPickerUpdate(task, 'Due date update failed.')
+  const [repeatOpen, setRepeatOpen] = useState(false)
   const [sourceOpen, setSourceOpen] = useState(false)
   const projects = useProjects(workspace.id).data ?? []
   const relations = useTaskRelations(workspace.id, task?.id).data ?? []
@@ -482,6 +485,33 @@ export function TaskDetail({ task, project, state, onClose, onOpenTask, onOpenPr
                       setDueDateOpen(false)
                     }}
                     onChange={({ start, end }) => saveDueDate({ due_start_at: start, due_at: end })}
+                  />
+                </PopoverContent>
+              </Popover>
+            </PropertyGroup>
+
+            <PropertyGroup title="Repeat">
+              <Popover open={repeatOpen} onOpenChange={setRepeatOpen}>
+                <PopoverTrigger
+                  render={
+                    <PropertyButton type="button" aria-label="Repeat" className={task.recurrence ? undefined : 'text-muted-foreground'}>
+                      <Repeat className="size-3.5" aria-hidden="true" />
+                      <span className="truncate">{recurrenceLabel(task.recurrence)}</span>
+                    </PropertyButton>
+                  }
+                />
+                <PopoverContent align="start" side="top" className="w-auto p-3">
+                  <RecurrenceEditor
+                    value={task.recurrence}
+                    onSave={(recurrence) => {
+                      // the due date's queue: a repeat saved right after a date pick does not send a stale version
+                      saveDueDate({ recurrence })
+                      setRepeatOpen(false)
+                    }}
+                    onStop={() => {
+                      saveDueDate({ recurrence: null })
+                      setRepeatOpen(false)
+                    }}
                   />
                 </PopoverContent>
               </Popover>

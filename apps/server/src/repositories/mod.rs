@@ -19,6 +19,7 @@ pub mod project_members;
 pub mod sign_in_providers;
 pub mod sub_issues;
 pub mod task_filter;
+pub mod task_recurrences;
 pub mod task_relations;
 pub mod tasks;
 pub mod teamspaces;

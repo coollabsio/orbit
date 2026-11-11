@@ -4,6 +4,8 @@
  * matches that are sent as mentions.
  */
 
+import { findTaskIds, taskUrl } from './taskIds'
+
 /** Someone or something a mention can name. `handle` (the email's local part) also matches a query. */
 export interface MentionTarget {
   id: string
@@ -24,9 +26,12 @@ export interface MentionQuery {
 export interface MentionSuggestion {
   id: string
   label: string
-  /** The handle of a person; a note such as "everyone here" for `@channel`. */
+  /** The handle of a person; a note such as "everyone here" for `@channel`; a task's identifier (`ENG-12`). */
   detail: string
-  kind: 'user' | 'channel'
+  kind: 'user' | 'channel' | 'task'
+  /** A task's status and project name, for its row. */
+  status?: { category: string; color: string }
+  project?: string
 }
 
 /** `@channel` and `@here`, offered in a conversation (not in a thread). */
@@ -59,9 +64,12 @@ export function mentionSuggestions(query: MentionQuery, people: readonly Mention
     .map((item) => ({ id: item.id, label: item.name, detail: kind === 'user' ? (item.handle ?? '') : '', kind }))
 }
 
-/** The text after picking a suggestion: `@Name ` (or `#name `) replaces the query, and the cursor goes after it. */
+/**
+ * The text after picking a suggestion: `@Name ` (or `#name `) replaces the query, and the cursor goes after it. A task
+ * goes in as its identifier (`ENG-12 `), which the web shows as the task's chip.
+ */
 export function applyMention(text: string, query: MentionQuery, suggestion: MentionSuggestion): { text: string; cursor: number } {
-  const insertion = `${suggestion.kind === 'channel' ? '#' : '@'}${suggestion.label} `
+  const insertion = suggestion.kind === 'task' ? `${suggestion.detail} ` : `${suggestion.kind === 'channel' ? '#' : '@'}${suggestion.label} `
   return { text: `${text.slice(0, query.start)}${insertion}${text.slice(query.end)}`, cursor: query.start + insertion.length }
 }
 
@@ -161,11 +169,29 @@ export function mentionedUserIds(text: string, people: readonly MentionTarget[])
   return ids
 }
 
-/** One line of a page comment as BlockNote inline content: text runs, and a `mention` node for each `@Name`. */
-export function mentionInlineContent(line: string, people: readonly MentionTarget[]): Record<string, unknown>[] {
+/** What turns typed task IDs into links: the workspace's project keys and the server's address. */
+export interface TaskLinking {
+  keys: readonly string[]
+  server: string
+}
+
+/**
+ * One line of a page comment as BlockNote inline content: text runs, a `mention` node for each `@Name`, and a link to
+ * the task for each typed `ENG-12` (with `tasks`).
+ */
+export function mentionInlineContent(line: string, people: readonly MentionTarget[], tasks?: TaskLinking): Record<string, unknown>[] {
   const content: Record<string, unknown>[] = []
-  const text = (value: string) => {
+  const plain = (value: string) => {
     if (value) content.push({ type: 'text', text: value, styles: {} })
+  }
+  const text = (value: string) => {
+    let at = 0
+    for (const id of tasks ? findTaskIds(value, tasks.keys) : []) {
+      plain(value.slice(at, id.start))
+      content.push({ type: 'link', href: taskUrl(tasks!.server, id.identifier), content: [{ type: 'text', text: value.slice(id.start, id.end), styles: {} }] })
+      at = id.end
+    }
+    plain(value.slice(at))
   }
   let cursor = 0
   for (const { start, end, target } of findMentions(line, people, [])) {
@@ -176,4 +202,49 @@ export function mentionInlineContent(line: string, people: readonly MentionTarge
   }
   text(line.slice(cursor))
   return content
+}
+
+/** `ENG-12`, `eng-`, `#12` or `12`: the user is typing an identifier, so tasks lead (the web's `looksLikeTaskId`). */
+export function looksLikeTaskId(query: string): boolean {
+  const text = query.trim()
+  return (/^[A-Za-z0-9_]{1,20}-\d*$/.test(text) && /[A-Za-z_]/.test(text)) || /^#?\d+$/.test(text)
+}
+
+/**
+ * The text after "#" that may name a task, or null when it cannot: it starts with a space (`# Heading`) or is long, so
+ * plain text typed after a stray "#" stops searching. Empty: nothing typed yet (recently updated tasks).
+ */
+export function taskSearchText(query: string): string | null {
+  if (/^\s/.test(query) || query.trim().split(/\s+/).length > 4) return null
+  return query.trim()
+}
+
+/** Best task hit first: the exact identifier, an identifier that starts with the query, then title hits (the web's order). */
+export function rankTaskSuggestions(tasks: readonly MentionSuggestion[], query: string): MentionSuggestion[] {
+  const needle = query.trim().toLowerCase().replace(/^#/, '')
+  if (!needle) return [...tasks]
+  const rank = (task: MentionSuggestion) => {
+    const id = task.detail.toLowerCase()
+    const title = task.label.toLowerCase()
+    if (id === needle || (/^\d+$/.test(needle) && id.endsWith(`-${needle}`))) return 0
+    if (looksLikeTaskId(needle) && id.startsWith(needle)) return 1
+    if (title.startsWith(needle)) return 2
+    if (title.includes(needle)) return 3
+    return 4
+  }
+  return tasks
+    .map((task, index) => ({ task, index, rank: rank(task) }))
+    .sort((a, b) => a.rank - b.rank || a.index - b.index)
+    .map(({ task }) => task)
+}
+
+/**
+ * Channels and tasks (the "#" list) in one list of at most 10: tasks first when the query looks like an identifier,
+ * channels first otherwise. A kind with fewer hits leaves its room to the other (the web's `mixSuggestions`).
+ */
+export function mixSuggestions(others: MentionSuggestion[], tasks: MentionSuggestion[], query: string): MentionSuggestion[] {
+  if (tasks.length === 0) return others.slice(0, 10)
+  const shownOthers = others.slice(0, Math.max(4, 10 - Math.min(tasks.length, 6)))
+  const shownTasks = tasks.slice(0, 10 - shownOthers.length)
+  return looksLikeTaskId(query) ? [...shownTasks, ...shownOthers] : [...shownOthers, ...shownTasks]
 }

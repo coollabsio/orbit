@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { recurrenceLabel } from '@orbit/api/recurrence'
 import { openURL } from 'expo-linking'
 import { router, useLocalSearchParams } from 'expo-router'
 import { type ReactNode, useMemo, useState } from 'react'
@@ -15,6 +16,7 @@ import {
   MenuChoices,
   PeopleChoices,
   PriorityChoices,
+  RecurrenceForm,
   SourceForm,
   StatusChoices,
   TaskChoices,
@@ -26,6 +28,7 @@ import { relativeAgo } from '../../../data/format'
 import { keys } from '../../../data/keys'
 import { markdownToText } from '../../../data/markdown'
 import { mentionedUserIds } from '../../../data/mentions'
+import { linkTaskIdsInMarkdown } from '../../../data/taskIds'
 import * as api from '../../../data/orbit'
 import * as taskApi from '../../../data/task-api'
 import {
@@ -55,7 +58,7 @@ import { Avatar, Button, ErrorView, Icon, IconButton, type IconName, KeyboardSpa
 
 /** The one sheet of the page and what it shows. */
 type TaskSheet =
-  | { kind: 'status' | 'priority' | 'assignees' | 'labels' | 'due' | 'source' | 'parent-menu' | 'relation-menu' | 'attach' }
+  | { kind: 'status' | 'priority' | 'assignees' | 'labels' | 'due' | 'repeat' | 'source' | 'parent-menu' | 'relation-menu' | 'attach' }
   | { kind: 'pick-task'; purpose: 'parent' | 'sub-issue' | RelationKind }
 
 function sheetTitle(sheet: TaskSheet | null, subject: string): string {
@@ -71,6 +74,8 @@ function sheetTitle(sheet: TaskSheet | null, subject: string): string {
       return 'Labels'
     case 'due':
       return 'Due date'
+    case 'repeat':
+      return 'Repeat'
     case 'source':
       return 'Source'
     case 'parent-menu':
@@ -93,7 +98,7 @@ let draftFileCount = 0
 
 export default function TaskScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
-  const { client, workspaceId, user } = useOrbit()
+  const { client, workspaceId, user, session } = useOrbit()
   const queryClient = useQueryClient()
   const { colors } = useTheme()
   const projects = useProjects()
@@ -131,7 +136,9 @@ export default function TaskScreen() {
 
   const mentionable = useMentionPeople()
   const sendComment = useMutation({
-    mutationFn: (body: string) => api.addComment(client, workspaceId, id, body, mentionedUserIds(body, mentionable)),
+    // a typed task ID goes as a link to the task, as the web's "#" inserts it
+    mutationFn: (body: string) =>
+      api.addComment(client, workspaceId, id, linkTaskIdsInMarkdown(body, (projects.data ?? []).map((project) => project.key), session.server), mentionedUserIds(body, mentionable)),
     onSuccess: (comment) => {
       setDraft('')
       setDraftFiles([])
@@ -413,6 +420,14 @@ export default function TaskScreen() {
                 </Chip>
               </View>
             </PropertyGroup>
+            <PropertyGroup title="Repeat">
+              <View className="-ml-2 flex-row">
+                <Chip label="Repeat" onPress={() => sheets.open({ kind: 'repeat' })}>
+                  <Icon name="repeat" size={14} color={current.recurrence ? colors.foreground : colors.mutedForeground} />
+                  <ChipText muted={!current.recurrence}>{recurrenceLabel(current.recurrence)}</ChipText>
+                </Chip>
+              </View>
+            </PropertyGroup>
           </View>
 
           <View>
@@ -483,6 +498,19 @@ export default function TaskScreen() {
             onChange={(due) => {
               sheets.close()
               write.mutate({ due_at: due?.end ?? null, due_start_at: due?.start ?? null })
+            }}
+          />
+        ) : null}
+        {sheet?.kind === 'repeat' ? (
+          <RecurrenceForm
+            value={current.recurrence}
+            onSave={(recurrence) => {
+              sheets.close()
+              write.mutate({ recurrence })
+            }}
+            onStop={() => {
+              sheets.close()
+              write.mutate({ recurrence: null })
             }}
           />
         ) : null}
@@ -719,7 +747,7 @@ function CommentComposer({
   const [focused, setFocused] = useState(false)
   const seesProject = useSeesProject(projectId)
   const mentionPeople = useMentionPeople()
-  const mention = useMentionField({ text: value, setText: onChangeText, people: mentionPeople.filter((person) => seesProject(person.id)) })
+  const mention = useMentionField({ text: value, setText: onChangeText, people: mentionPeople.filter((person) => seesProject(person.id)), tasks: true })
   return (
     <View className={`mt-3 rounded-lg border bg-card/50 ${focused ? 'border-ring/50' : 'border-border'}`}>
       <MentionSuggestions suggestions={mention.suggestions} onPick={mention.pick} />

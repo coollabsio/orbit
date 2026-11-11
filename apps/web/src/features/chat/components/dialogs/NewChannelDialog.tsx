@@ -1,8 +1,9 @@
 import { useId, useState } from 'react'
 import { Hashtag, Lock } from 'reicon-react'
+import { InfoTip } from '@/components/common/InfoTip'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Field, FieldDescription, FieldError, FieldLabel, FieldLegend, FieldSet } from '@/components/ui/field'
+import { Field, FieldError, FieldLabel, FieldLegend, FieldSet } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -89,7 +90,9 @@ function NewChannelForm({ defaultCategoryId, defaultName, onDone }: { defaultCat
       }}
     >
       <Field data-invalid={nameTaken || undefined}>
-        <FieldLabel htmlFor={nameId}>Name</FieldLabel>
+        <FieldLabel htmlFor={nameId}>
+          Name <InfoTip text="Lowercase, with hyphens in place of spaces." />
+        </FieldLabel>
         <InputGroup>
           <InputGroupAddon>
             <Hashtag aria-hidden />
@@ -111,7 +114,7 @@ function NewChannelForm({ defaultCategoryId, defaultName, onDone }: { defaultCat
             }}
           />
         </InputGroup>
-        {nameTaken ? <FieldError>A channel with this name already exists.</FieldError> : <FieldDescription>Lowercase, with hyphens in place of spaces.</FieldDescription>}
+        {nameTaken ? <FieldError>A channel with this name already exists.</FieldError> : null}
       </Field>
 
       <Field>
@@ -167,9 +170,10 @@ function NewChannelForm({ defaultCategoryId, defaultName, onDone }: { defaultCat
 
       {kind === 'private' ? (
         <Field>
-          <FieldLabel>Add people</FieldLabel>
+          <FieldLabel>
+            Add people <InfoTip text="You are a member already. You can add more people later." />
+          </FieldLabel>
           <MemberPicker label="Add people" people={pickablePeople(members, currentUserId)} selectedIds={memberIds} onChange={setMemberIds} />
-          <FieldDescription>You are a member already. You can add more people later.</FieldDescription>
         </Field>
       ) : null}
 
