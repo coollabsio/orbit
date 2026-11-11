@@ -31,7 +31,7 @@ function PageEmbed({ preview }: { preview: LinkPreview }) {
       rel="noopener noreferrer"
       data-slot="link-embed"
       data-kind="link"
-      className="flex w-full max-w-md min-w-0 flex-col overflow-hidden rounded-lg border bg-card text-[13px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/50 hover-fine:hover:bg-muted/50"
+      className="flex w-full max-w-md min-w-0 flex-col overflow-hidden rounded-lg border bg-card text-[0.8125rem] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/50 hover-fine:hover:bg-muted/50"
     >
       {preview.largeImage ? <EmbedImage src={preview.imageUrl} className="aspect-[1.91/1] w-full border-b bg-muted object-cover" /> : null}
       <div className="flex min-w-0 items-start gap-3 p-2.5">
@@ -94,7 +94,7 @@ function PostEmbed({ preview }: { preview: LinkPreview }) {
     <div
       data-slot="link-embed"
       data-kind="x"
-      className="relative flex w-full max-w-md min-w-0 flex-col gap-2 rounded-lg border bg-card p-3 text-[13px] text-foreground has-[[data-slot=link-embed-link]:focus-visible]:ring-2 has-[[data-slot=link-embed-link]:focus-visible]:ring-ring/50 hover-fine:has-[[data-slot=link-embed-link]:hover]:bg-muted/50"
+      className="relative flex w-full max-w-md min-w-0 flex-col gap-2 rounded-lg border bg-card p-3 text-[0.8125rem] text-foreground has-[[data-slot=link-embed-link]:focus-visible]:ring-2 has-[[data-slot=link-embed-link]:focus-visible]:ring-ring/50 hover-fine:has-[[data-slot=link-embed-link]:hover]:bg-muted/50"
     >
       <div className="flex min-w-0 items-center gap-2">
         <EmbedImage src={preview.authorAvatarUrl} className="size-8 shrink-0 rounded-full bg-muted" />
@@ -136,7 +136,7 @@ function PostEmbed({ preview }: { preview: LinkPreview }) {
 function VideoEmbed({ preview }: { preview: LinkPreview }) {
   const [playing, setPlaying] = useState(false)
   return (
-    <div data-slot="link-embed" data-kind="youtube" className="flex w-full max-w-md min-w-0 flex-col overflow-hidden rounded-lg border bg-card text-[13px] text-foreground">
+    <div data-slot="link-embed" data-kind="youtube" className="flex w-full max-w-md min-w-0 flex-col overflow-hidden rounded-lg border bg-card text-[0.8125rem] text-foreground">
       {playing ? (
         <iframe
           src={`https://www.youtube-nocookie.com/embed/${preview.videoId}?autoplay=1`}

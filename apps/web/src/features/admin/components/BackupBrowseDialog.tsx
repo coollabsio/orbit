@@ -111,7 +111,7 @@ export function BackupBrowseDialog({ backup, onClose }: { backup: BackupSummary;
           ) : items.data.length === 0 ? (
             <p className="py-6 text-sm text-muted-foreground">{search ? `No ${noun} match “${search}”.` : `No ${noun} in this workspace.`}</p>
           ) : (
-            <ul aria-label={kind === 'page' ? 'Pages' : 'Tasks'} className="-mx-1 flex max-h-[50vh] flex-col divide-y overflow-y-auto text-[13px]">
+            <ul aria-label={kind === 'page' ? 'Pages' : 'Tasks'} className="-mx-1 flex max-h-[50vh] flex-col divide-y overflow-y-auto text-[0.8125rem]">
               {items.data.map((item) => (
                 <BackupItemRow
                   key={item.id}

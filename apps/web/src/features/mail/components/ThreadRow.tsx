@@ -31,7 +31,7 @@ export function ThreadRow({ thread, active, onOpen }: ThreadRowProps) {
         // drag image: a small pill with the subject, not the whole translucent row
         const ghost = document.createElement('div')
         ghost.className =
-          'fixed top-[-100px] left-[-100px] z-100 max-w-[260px] overflow-hidden rounded-[8px] border bg-card px-2.5 py-1.5 text-[12px] font-medium text-ellipsis whitespace-nowrap text-foreground shadow-[0_12px_32px_rgba(0,0,0,0.16)]'
+          'fixed top-[-100px] left-[-100px] z-100 max-w-[260px] overflow-hidden rounded-[8px] border bg-card px-2.5 py-1.5 text-[0.75rem] font-medium text-ellipsis whitespace-nowrap text-foreground shadow-[0_12px_32px_rgba(0,0,0,0.16)]'
         ghost.textContent = `✉️ ${thread.subject}`
         document.body.appendChild(ghost)
         e.dataTransfer.setDragImage(ghost, 12, 12)
@@ -52,13 +52,13 @@ export function ThreadRow({ thread, active, onOpen }: ThreadRowProps) {
       <UserAvatar user={null} name={sender.name} size={32} />
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <div className="flex items-baseline gap-2">
-          <span className="min-w-0 truncate text-[13px] font-normal text-foreground group-data-[unread]/row:font-semibold">
+          <span className="min-w-0 truncate text-[0.8125rem] font-normal text-foreground group-data-[unread]/row:font-semibold">
             {sender.name}
           </span>
           <span className="flex-1" />
           <span className="shrink-0 text-xs text-muted-foreground/70">{relativeTime(thread.updatedAt)}</span>
         </div>
-        <div className="truncate text-[13px] text-foreground group-data-[unread]/row:font-semibold">{thread.subject}</div>
+        <div className="truncate text-[0.8125rem] text-foreground group-data-[unread]/row:font-semibold">{thread.subject}</div>
         <div className="truncate text-xs text-muted-foreground/70">{thread.snippet}</div>
       </div>
       <div className="flex shrink-0 flex-col items-center gap-1 text-muted-foreground/70" onClick={(e) => e.stopPropagation()}>

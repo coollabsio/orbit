@@ -11,7 +11,7 @@ import { LinkifiedText } from './LinkifiedText'
 export const taskTextVariants = cva('w-full border-0 bg-transparent p-0 text-foreground outline-none placeholder:text-muted-foreground', {
   variants: {
     field: {
-      title: 'text-2xl leading-8 font-semibold max-[899px]:text-xl max-[899px]:leading-[26px] md:text-2xl md:max-[899px]:text-xl',
+      title: 'text-2xl leading-8 font-semibold max-[899px]:text-xl max-[899px]:leading-[1.625rem] md:text-2xl md:max-[899px]:text-xl',
     },
     mode: {
       read: 'whitespace-pre-wrap [overflow-wrap:anywhere]',

@@ -117,7 +117,7 @@ function CellButton({ className, ...props }: React.ComponentProps<'button'>) {
       type="button"
       data-slot="timeline-label-button"
       className={cn(
-        'flex h-full min-w-0 flex-1 items-center gap-2 text-left text-[13px] outline-none focus-visible:bg-accent',
+        'flex h-full min-w-0 flex-1 items-center gap-2 text-left text-[0.8125rem] outline-none focus-visible:bg-accent',
         'max-[899px]:ml-2 max-[899px]:h-6 max-[899px]:w-max max-[899px]:flex-none max-[899px]:rounded-md max-[899px]:bg-background/90 max-[899px]:px-2 max-[899px]:shadow-sm',
         className,
       )}

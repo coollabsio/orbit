@@ -100,7 +100,7 @@ export function TaskCommentComposer({
     return (
       <button
         type="button"
-        className="w-full cursor-text py-1 text-left text-[13px] text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+        className="w-full cursor-text py-1 text-left text-[0.8125rem] text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
         onClick={() => {
           focusOnMount.current = true
           setActive(true)
@@ -130,7 +130,7 @@ export function TaskCommentComposer({
             uploadFile={uploadFile}
             mentions={mentions}
             sideMenu={false}
-            className="[&_.bn-editor]:min-h-6 [&_.bn-editor]:text-[13px]! [&_.bn-trailing-block]:hidden!"
+            className="[&_.bn-editor]:min-h-6 [&_.bn-editor]:text-[0.8125rem]! [&_.bn-trailing-block]:hidden!"
           />
         </Suspense>
       </div>

@@ -132,7 +132,7 @@ export function PageTrashPane({ workspaceId }: { workspaceId: string }) {
               <span className="inline-flex w-[18px] shrink-0 items-center justify-center text-muted-foreground/70">
                 {page.icon ? <Emoji value={page.icon} /> : <FileText className="size-[15px]" />}
               </span>
-              <span className="min-w-0 flex-1 truncate text-[13px] text-foreground">{pageTitle(page)}</span>
+              <span className="min-w-0 flex-1 truncate text-[0.8125rem] text-foreground">{pageTitle(page)}</span>
             </button>
             <span className="flex max-w-40 min-w-0 shrink items-center gap-1 text-xs text-muted-foreground/70" data-space-label>
               {spaceKey(page) === PRIVATE_SPACE ? <Lock className="size-3 shrink-0" aria-hidden="true" /> : null}

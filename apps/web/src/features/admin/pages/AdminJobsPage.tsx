@@ -84,7 +84,7 @@ function JobLimitsForm({ kinds }: { kinds: JobLimitView[] }) {
             const label = KIND_LABELS[kind.kind] ?? kind.kind
             return (
               <SettingsRow key={kind.kind}>
-                <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-[13px]">
+                <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-[0.8125rem]">
                   <span className="font-medium text-foreground">{label}</span>
                   <span className="text-xs text-muted-foreground">
                     Default: {shown(kind.default_concurrency)} on all servers, {shown(kind.default_workspace_concurrency)} per workspace

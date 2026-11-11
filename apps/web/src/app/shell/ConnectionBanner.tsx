@@ -50,7 +50,7 @@ export function ConnectionBanner({ live }: { live: boolean }) {
     <div
       data-slot="connection-banner"
       role="status"
-      className="pointer-events-none absolute top-2 left-1/2 z-30 flex max-w-[calc(100%-1rem)] -translate-x-1/2 items-center gap-1.5 rounded-full border border-border bg-popover px-2.5 py-0.5 text-[11px] text-muted-foreground shadow-sm duration-200 animate-in fade-in"
+      className="pointer-events-none absolute top-2 left-1/2 z-30 flex max-w-[calc(100%-1rem)] -translate-x-1/2 items-center gap-1.5 rounded-full border border-border bg-popover px-2.5 py-0.5 text-[0.6875rem] text-muted-foreground shadow-sm duration-200 animate-in fade-in"
     >
       <WifiOff className="size-3 shrink-0" />
       <span className="min-w-0 truncate">Reconnecting…</span>

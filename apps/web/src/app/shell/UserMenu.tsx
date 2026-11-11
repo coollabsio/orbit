@@ -63,13 +63,13 @@ export function UserMenu({ collapsed = false, topbar = false }: { collapsed?: bo
         {/* the pink tint of the sidebar it opens from */}
         <DropdownMenuContent side={topbar ? 'bottom' : 'top'} align={topbar ? 'end' : 'start'} sideOffset={4} className="w-52 max-w-[calc(100vw-32px)] rounded-[10px] dark:bg-sidebar-popover dark:ring-sidebar-tint/22 dark:**:data-[slot$=-item]:focus:bg-sidebar-tint/10 dark:**:data-[slot$=-item]:data-highlighted:bg-sidebar-tint/10">
           <div className="min-w-0 px-2 py-1.5">
-            <div className="truncate text-[13px] font-semibold text-foreground">{userName}</div>
+            <div className="truncate text-[0.8125rem] font-semibold text-foreground">{userName}</div>
             {hasCustomStatus ? (
-              <div className="truncate text-[11px] text-muted-foreground">
+              <div className="truncate text-[0.6875rem] text-muted-foreground">
                 <CustomStatusText emoji={status.emoji} text={status.text} />
               </div>
             ) : (
-              <div className="truncate text-[11px] text-muted-foreground/70">{me?.email}</div>
+              <div className="truncate text-[0.6875rem] text-muted-foreground/70">{me?.email}</div>
             )}
           </div>
           <DropdownMenuSeparator />
