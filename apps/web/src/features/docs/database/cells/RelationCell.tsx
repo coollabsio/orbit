@@ -143,7 +143,7 @@ export function RelationEditor({ property, row, anchor, onCommit, onClose }: Cel
   return (
     <Popover open onOpenChange={onOpenChange}>
       <PopoverContent anchor={anchor} align="start" className="w-72 gap-0 p-0">
-        <Command label={property.name} shouldFilter={false} loop>
+        <Command label={property.name} shouldFilter={false} loop onKeyDown={(event) => event.stopPropagation()}>
           <CommandInput
             autoFocus
             aria-label={`Search ${property.name}`}
@@ -151,7 +151,6 @@ export function RelationEditor({ property, row, anchor, onCommit, onClose }: Cel
             value={query}
             onValueChange={setQuery}
             onKeyDown={(event) => {
-              event.stopPropagation()
               if (event.key === 'Tab') {
                 event.preventDefault()
                 onClose(event.shiftKey ? 'previous' : 'next')

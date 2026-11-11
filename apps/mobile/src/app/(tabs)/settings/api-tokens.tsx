@@ -12,7 +12,7 @@ import { useApiTokens, useApiTokenWrites } from '../../../hooks/workspace-settin
 import { useOrbit } from '../../../orbit-context'
 import { useProjects } from '../../../queries'
 import { useTheme } from '../../../theme'
-import { Button, Icon, Input, Text } from '../../../ui'
+import { Button, Icon, Input, Text, LabelTip } from '../../../ui'
 
 const LEVELS: { value: AccessLevel; label: string }[] = [
   { value: 'none', label: 'No access' },
@@ -107,9 +107,8 @@ function CreateToken({ canManage }: { canManage: boolean }) {
         </View>
         {canManage ? (
           <View className="gap-2">
-            <FieldLabel>Token type</FieldLabel>
+            {kindDescription ? <LabelTip label="Token type" text={kindDescription} /> : <FieldLabel>Token type</FieldLabel>}
             <Select label="Token type" value={kind} options={TOKEN_KINDS} onChange={setKind} />
-            <Text className="text-[14px] leading-[20px] text-muted-foreground">{kindDescription}</Text>
           </View>
         ) : null}
         {access ? (
@@ -125,9 +124,8 @@ function CreateToken({ canManage }: { canManage: boolean }) {
               <View className="pt-0.5">
                 <Checkbox checked={serviceAccount} />
               </View>
-              <View className="flex-1 gap-1.5">
-                <Text className="font-noto-medium text-[14px] leading-[19.25px]">Use a service account</Text>
-                <Text className="text-[14px] leading-[21px] text-muted-foreground">For bots, such as a Discord bot. Changes show as made by this account, not by you. Tokens with the same name share one account.</Text>
+              <View className="flex-1">
+                <LabelTip label="Use a service account" text="For bots, such as a Discord bot. Changes show as made by this account, not by you. Tokens with the same name share one account." />
               </View>
             </Pressable>
             <AccessPicker resources={tokenResources(serviceAccount)} scopes={scopes} onChange={setScopes} details={{ Tasks: projectPicker }} />
@@ -218,9 +216,8 @@ function AccessPicker({ resources, scopes, onChange, details }: { resources: Sco
       {resources.map((resource) => (
         <View key={resource.name} className="gap-3">
           <View className="flex-row items-center justify-between gap-3">
-            <View className="min-w-0 flex-1 gap-0.5">
-              <Text className="font-noto-medium text-[14px] leading-[20px]">{resource.name}</Text>
-              <Text className="text-[12px] leading-[16px] text-muted-foreground">{resource.hint}</Text>
+            <View className="min-w-0 flex-1">
+              <LabelTip label={resource.name} text={resource.hint} className="font-noto-medium text-[14px] leading-[20px]" />
             </View>
             <Toggles
               filled

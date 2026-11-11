@@ -1,5 +1,6 @@
 import { toast } from 'sonner'
 import { ApiProblem } from '@orbit/api/problem'
+import { InfoTip } from '@/components/common/InfoTip'
 import { SettingsCard } from '@/components/common/SettingsCard'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
@@ -25,12 +26,10 @@ function RegistrationCard({ open, emailReady }: { open: boolean; emailReady: boo
     <SettingsCard title="Registration" description="Who can create an account on this Orbit." flush>
       <SettingsRow className="flex-nowrap">
         <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-[13px]">
-          <span className="font-medium text-foreground">Open registration</span>
-          <span className="text-xs text-muted-foreground">
-            {emailReady
-              ? 'On: anyone can create an account with a link sent to their email. Off: people join only by invitation.'
-              : 'Set up a mail server in Email first: the sign-up link goes out by email.'}
-          </span>
+          {emailReady
+            ? <span className="inline-flex items-center gap-1.5 font-medium text-foreground">Open registration <InfoTip text="On: anyone can create an account with a link sent to their email. Off: people join only by invitation." /></span>
+            : <span className="font-medium text-foreground">Open registration</span>}
+          {emailReady ? null : <span className="text-xs text-muted-foreground">Set up a mail server in Email first: the sign-up link goes out by email.</span>}
         </div>
         <Switch
           aria-label="Open registration"

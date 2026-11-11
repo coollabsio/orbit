@@ -206,8 +206,11 @@ function TextEditor({ property, anchor, initial, onCommit, onClose }: CellEditor
   )
 }
 
-function newOptionId(): string {
-  return crypto.randomUUID()
+/** `list` with a new option named `name` (a status option starts in "To do"), and that option. */
+export function withNewOption(property: Property, list: readonly SelectOption[], name: string): { next: SelectOption[]; option: SelectOption } {
+  const option = { id: crypto.randomUUID(), name: name.trim().slice(0, 200), color: OPTION_COLORS[(list.length % (OPTION_COLORS.length - 1)) + 1] }
+  const next = property.type === 'status' ? [...list, { ...option, group: 'todo' as const }] : [...list, option]
+  return { next, option }
 }
 
 function ChoiceEditor({ property, row, anchor, onCommit, onOptions, onClose }: CellEditorProps) {
@@ -217,7 +220,10 @@ function ChoiceEditor({ property, row, anchor, onCommit, onOptions, onClose }: C
   const selected = value?.kind === 'choices' ? value.ids : value?.kind === 'choice' ? [value.id] : []
   const list = options(property)
   const trimmed = query.trim()
-  const canCreate = onOptions && trimmed !== '' && !list.some((option) => option.name.toLowerCase() === trimmed.toLowerCase())
+  const search = trimmed.toLowerCase()
+  // Orbit filters, not cmdk: cmdk hides a group with no matching option, and the Create row with it.
+  const shown = search === '' ? list : list.filter((option) => option.name.toLowerCase().includes(search))
+  const canCreate = onOptions && trimmed !== '' && !list.some((option) => option.name.toLowerCase() === search)
   const onOpenChange = usePopoverClose(anchor, onClose)
 
   const pick = (id: string) => {
@@ -235,8 +241,7 @@ function ChoiceEditor({ property, row, anchor, onCommit, onOptions, onClose }: C
   }
   const create = async () => {
     if (!onOptions) return
-    const option = { id: newOptionId(), name: trimmed.slice(0, 200), color: OPTION_COLORS[(list.length % (OPTION_COLORS.length - 1)) + 1] }
-    const next = property.type === 'status' ? [...list, { ...option, group: 'todo' as const }] : [...list, option]
+    const { next, option } = withNewOption(property, list, trimmed)
     try {
       await onOptions(next)
     } catch {
@@ -248,7 +253,7 @@ function ChoiceEditor({ property, row, anchor, onCommit, onOptions, onClose }: C
   return (
     <Popover open onOpenChange={onOpenChange}>
       <PopoverContent anchor={anchor} align="start" className="w-64 gap-0 p-0">
-        <Command label={property.name} loop>
+        <Command label={property.name} loop shouldFilter={false} onKeyDown={(event) => event.stopPropagation()}>
           <CommandInput
             autoFocus
             aria-label={`Search ${property.name}`}
@@ -256,7 +261,6 @@ function ChoiceEditor({ property, row, anchor, onCommit, onOptions, onClose }: C
             value={query}
             onValueChange={setQuery}
             onKeyDown={(event) => {
-              event.stopPropagation()
               if (event.key === 'Tab') {
                 event.preventDefault()
                 onClose(event.shiftKey ? 'previous' : 'next')
@@ -266,11 +270,10 @@ function ChoiceEditor({ property, row, anchor, onCommit, onOptions, onClose }: C
           <CommandList>
             <CommandEmpty className="py-3 text-center text-xs text-muted-foreground">No options</CommandEmpty>
             <CommandGroup>
-              {list.map((option) => (
+              {shown.map((option) => (
                 <CommandItem
                   key={option.id}
                   value={option.id}
-                  keywords={[option.name]}
                   data-checked={selected.includes(option.id) || undefined}
                   onSelect={() => pick(option.id)}
                   className="group/option"
@@ -281,7 +284,7 @@ function ChoiceEditor({ property, row, anchor, onCommit, onOptions, onClose }: C
                 </CommandItem>
               ))}
               {canCreate ? (
-                <CommandItem value={`create:${trimmed}`} keywords={[trimmed]} forceMount onSelect={() => void create()}>
+                <CommandItem value="create" onSelect={() => void create()}>
                   <span className="text-muted-foreground">Create</span>
                   <Pill color="default">{trimmed}</Pill>
                 </CommandItem>
@@ -295,7 +298,7 @@ function ChoiceEditor({ property, row, anchor, onCommit, onOptions, onClose }: C
 }
 
 /** Rename, recolor or delete one option. It saves the property's whole option list. */
-function OptionMenu({ option, list, onOptions }: { option: SelectOption; list: readonly SelectOption[]; onOptions: (options: SelectOption[]) => Promise<void> }) {
+export function OptionMenu({ option, list, onOptions }: { option: SelectOption; list: readonly SelectOption[]; onOptions: (options: SelectOption[]) => Promise<void> }) {
   const [name, setName] = useState(option.name)
   const save = (change: Partial<SelectOption>) =>
     void onOptions(list.map((other) => (other.id === option.id ? { ...other, ...change } : other))).catch(() => undefined)
@@ -469,8 +472,8 @@ function PersonEditor({ property, anchor, ids, onCommit, onClose }: CellEditorPr
   return (
     <Popover open onOpenChange={onOpenChange}>
       <PopoverContent anchor={anchor} align="start" className="w-64 gap-0 p-0">
-        <Command label={property.name} loop>
-          <CommandInput autoFocus aria-label={`Search ${property.name}`} placeholder="Search people…" onKeyDown={(event) => event.stopPropagation()} />
+        <Command label={property.name} loop onKeyDown={(event) => event.stopPropagation()}>
+          <CommandInput autoFocus aria-label={`Search ${property.name}`} placeholder="Search people…" />
           <CommandList>
             <CommandEmpty className="py-3 text-center text-xs text-muted-foreground">No people</CommandEmpty>
             <CommandGroup>

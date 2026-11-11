@@ -5,6 +5,8 @@ const workspace = (workspaceId: string) => ['workspace', workspaceId] as const
 export const queryKeys = {
   setup: ['setup-status'] as const,
   currentUser: ['current-user'] as const,
+  /** Orbit Cloud: the caller's trial, which every workspace they create shares. */
+  accountTrial: ['account-trial'] as const,
   sessions: ['sessions'] as const,
   /** Whether the authenticator app is on and how many recovery codes are left. */
   twoFactor: ['two-factor'] as const,
@@ -45,8 +47,12 @@ export const queryKeys = {
   /** The workspace's own S3 bucket for its files. */
   workspaceBucket: (workspaceId: string) => [...workspace(workspaceId), 'storage', 'bucket'] as const,
   projects: (workspaceId: string) => [...workspace(workspaceId), 'projects'] as const,
+  /** The member's own sidebar order of the projects. */
+  projectOrder: (workspaceId: string) => [...workspace(workspaceId), 'project-order'] as const,
   statuses: (workspaceId: string, projectId: string) =>
     [...workspace(workspaceId), 'projects', projectId, 'statuses'] as const,
+  projectMembers: (workspaceId: string, projectId: string) =>
+    [...workspace(workspaceId), 'projects', projectId, 'members'] as const,
   comments: (workspaceId: string, taskId: string) =>
     [...workspace(workspaceId), 'tasks', 'detail', taskId, 'comments'] as const,
   taskActivity: (workspaceId: string, taskId: string) =>

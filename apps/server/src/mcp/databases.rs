@@ -1,4 +1,5 @@
-//! Database tools (spec P3 14.3) over [`crate::token_api`], with the scopes of docs.
+//! Database tools (spec P3 14.3) over [`crate::token_api`], with the scopes of docs: read and
+//! query, write rows, and change the schema (properties and their options).
 use rmcp::ErrorData;
 use rmcp::model::{CallToolRequestParams, Tool};
 use schemars::JsonSchema;
@@ -7,7 +8,7 @@ use serde_json::{Map, Value, json};
 
 use super::{arguments, definition, parse_id, write_definition};
 use crate::repositories::api_tokens::ApiTokenScope;
-use crate::repositories::databases::AgentQuery;
+use crate::repositories::databases::{AgentPropertyChanges, AgentQuery};
 use crate::token_api::{Authorized, DatabaseRowPatch, NewDatabaseRow, TokenApiError};
 
 #[derive(Deserialize, JsonSchema)]
@@ -82,12 +83,70 @@ struct TrashRowsArgs {
     row_ids: Vec<String>,
 }
 
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct CreatePropertyArgs {
+    database_id: String,
+    /// 1 to 200 characters.
+    name: String,
+    /// text, number, select, multi_select, status, date, person, checkbox, url, email, phone,
+    /// files, unique_id, relation, rollup, created_time, created_by, last_edited_time,
+    /// last_edited_by, button or formula. A database has exactly one title property.
+    #[serde(rename = "type")]
+    property_type: String,
+    /// The type's config. Select, multi-select and status: `{"options": ["Todo", {"name":
+    /// "Done", "color": "green", "group": "done"}]}` (colors: default, gray, brown, orange,
+    /// yellow, green, blue, purple, pink, red; `group` todo, in_progress or done, only for a
+    /// status). Omitted: the type's default (a status gets Not started, In progress and Done).
+    config: Option<Value>,
+    /// Index among the properties; omitted appends it. Every view shows the new property.
+    position: Option<i64>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct UpdatePropertyArgs {
+    database_id: String,
+    /// The property's name or id.
+    property: String,
+    /// The new name, 1 to 200 characters.
+    name: Option<String>,
+    /// A new type converts the values (or clears them where they cannot convert) and gives the
+    /// type's default config; send `config` in a later call. The title cannot change type.
+    #[serde(rename = "type")]
+    property_type: Option<String>,
+    /// The whole new config (see `create_database_property`). Options left out are removed from
+    /// every row; an option sent by name only keeps the id, color and group it has. To only add
+    /// options, use `add_options`.
+    config: Option<Value>,
+    /// Options to add after the current ones, by name or as `{name, color, group}`. Names the
+    /// property already has (in any letter case) are skipped. Not with `config`.
+    #[serde(default)]
+    add_options: Vec<Value>,
+    /// The new index among the properties.
+    position: Option<i64>,
+    /// Returns what the change would do (`converted` and `cleared` values) without saving it.
+    #[serde(default)]
+    dry_run: bool,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct DeletePropertyArgs {
+    database_id: String,
+    /// The property's name or id. The title property cannot be deleted.
+    property: String,
+}
+
 pub(super) fn scope(name: &str) -> Option<ApiTokenScope> {
     match name {
         "get_database" | "query_database" => Some(ApiTokenScope::DocsRead),
-        "create_database_row" | "update_database_row" | "trash_database_rows" => {
-            Some(ApiTokenScope::DocsWrite)
-        }
+        "create_database_row"
+        | "update_database_row"
+        | "trash_database_rows"
+        | "create_database_property"
+        | "update_database_property"
+        | "delete_database_property" => Some(ApiTokenScope::DocsWrite),
         _ => None,
     }
 }
@@ -115,6 +174,21 @@ pub(super) fn tools() -> Vec<Tool> {
         write_definition::<TrashRowsArgs>(
             "trash_database_rows",
             "Move database rows to the trash for 30 days.",
+            true,
+        ),
+        write_definition::<CreatePropertyArgs>(
+            "create_database_property",
+            "Add a property (column) to a visible database, such as a select with its options. Returns the property with its config.",
+            false,
+        ),
+        write_definition::<UpdatePropertyArgs>(
+            "update_database_property",
+            "Rename, retype, reconfigure or move a database property, by name or id. add_options adds select, multi-select or status options; config replaces the whole config. Returns the property and how many values changed.",
+            true,
+        ),
+        write_definition::<DeletePropertyArgs>(
+            "delete_database_property",
+            "Delete a database property, by name or id, with its values in every row. This cannot be undone.",
             true,
         ),
     ]
@@ -196,6 +270,50 @@ pub(super) async fn call(
                     .trash_database_rows(parse_id(&a.database_id)?, &row_ids)
                     .await
                     .map(|trashed| json!({ "trashed": trashed })))
+            };
+            run.await
+        }
+        "create_database_property" => {
+            let run = async {
+                let a: CreatePropertyArgs = arguments(request)?;
+                Ok(api
+                    .create_database_property(
+                        parse_id(&a.database_id)?,
+                        &a.name,
+                        &a.property_type,
+                        a.config,
+                        a.position,
+                    )
+                    .await
+                    .map(|property| json!(property)))
+            };
+            run.await
+        }
+        "update_database_property" => {
+            let run = async {
+                let a: UpdatePropertyArgs = arguments(request)?;
+                let changes = AgentPropertyChanges {
+                    name: a.name,
+                    property_type: a.property_type,
+                    config: a.config,
+                    add_options: a.add_options,
+                    position: a.position,
+                    dry_run: a.dry_run,
+                };
+                Ok(api
+                    .update_database_property(parse_id(&a.database_id)?, &a.property, changes)
+                    .await
+                    .map(|update| json!(update)))
+            };
+            run.await
+        }
+        "delete_database_property" => {
+            let run = async {
+                let a: DeletePropertyArgs = arguments(request)?;
+                Ok(api
+                    .delete_database_property(parse_id(&a.database_id)?, &a.property)
+                    .await
+                    .map(|id| json!({ "deleted": id.to_string() })))
             };
             run.await
         }

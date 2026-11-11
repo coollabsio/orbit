@@ -499,7 +499,7 @@ impl Server {
 
     /// Moves the workspace's creation `days` into the past.
     async fn age_workspace(&self, days: i64) {
-        sqlx::query("UPDATE workspaces SET created_at = $1 WHERE id = $2")
+        sqlx::query("UPDATE workspaces SET trial_started_at = $1 WHERE id = $2")
             .bind(TimestampMillis::now().as_millis() - days * DAY_MILLIS)
             .bind(&self.workspace_id)
             .execute(self.database.pool())
@@ -1270,7 +1270,7 @@ async fn the_trial_length_and_limits_come_from_the_config() {
         (&json!(1), &json!({"used": 2, "limit": 2}))
     );
 
-    sqlx::query("UPDATE workspaces SET created_at = $1 WHERE id = $2")
+    sqlx::query("UPDATE workspaces SET trial_started_at = $1 WHERE id = $2")
         .bind(TimestampMillis::now().as_millis() - DAY_MILLIS - 1)
         .bind(&server.workspace_id)
         .execute(server.database.pool())
@@ -1623,7 +1623,7 @@ async fn the_admin_user_summary_counts_accounts_and_trials() {
     let now = TimestampMillis::now().as_millis();
     for (query, id) in [
         (
-            "UPDATE workspaces SET created_at = $1 WHERE id = $2",
+            "UPDATE workspaces SET trial_started_at = $1 WHERE id = $2",
             &workspace_ids[1],
         ),
         (

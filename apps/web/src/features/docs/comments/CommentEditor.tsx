@@ -11,6 +11,9 @@ import {
 } from '@blocknote/react'
 import { cn } from 'cn'
 import { ThemedBlockNoteView } from '../editor/ThemedBlockNoteView'
+import { TaskMenu } from '../editor/MentionMenu'
+import { EditorReferencePreview } from '../editor/EditorReferencePreview'
+import { TabCompletesSuggestion } from '../editor/TabCompletesSuggestion'
 import { insertMention, mentionItems, type CommentEditorInstance } from './mentions'
 import { MentionCandidatesContext } from './mentionContext'
 
@@ -66,6 +69,9 @@ export const CommentEditor = forwardRef<HTMLDivElement, CommentEditorProps>(func
       onBlur={onBlur}
     >
       <FormattingToolbarController formattingToolbar={CommentFormattingToolbar} />
+      {editable ? <TabCompletesSuggestion /> : null}
+      {editable ? <TaskMenu editor={commentEditor} /> : null}
+      <EditorReferencePreview />
       {editable ? (
         <SuggestionMenuController
           triggerCharacter="@"

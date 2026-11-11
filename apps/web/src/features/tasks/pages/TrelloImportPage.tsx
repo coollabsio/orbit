@@ -15,6 +15,7 @@ import { PasswordInput } from '@/components/ui/password-input'
 import { Spinner } from '@/components/ui/spinner'
 import { EmptyState } from '@/components/common/EmptyState'
 import { Pane } from '@/components/common/Pane'
+import { TitleTip } from '@/components/common/TitleTip'
 import { confirmAction } from '@/components/common/confirmAction'
 import { relativeTime } from '@/lib/format'
 import { ApiProblem } from '@orbit/api/problem'
@@ -93,12 +94,12 @@ function ConnectStep({ workspaceId }: { workspaceId: string }) {
       <ImportHeader title={TITLE} />
       <ImportBody>
         <section className="flex flex-col gap-4 rounded-lg border border-border p-5">
-          <div className="flex flex-col gap-1">
-            <h2 className="text-sm font-semibold text-foreground">Connect Trello</h2>
-            <p className="text-sm text-muted-foreground">
-              Orbit needs an API key and a token. It keeps both encrypted only until the import finishes.
-            </p>
-          </div>
+          <TitleTip
+            as="h2"
+            title="Connect Trello"
+            text="Orbit needs an API key and a token. It keeps both encrypted only until the import finishes."
+            className="text-sm font-semibold text-foreground"
+          />
           <form className="flex flex-col gap-4" onSubmit={(event) => void submit(event)} autoComplete="off">
             <div className="grid gap-1.5">
               <Label htmlFor="trello-key">API key</Label>

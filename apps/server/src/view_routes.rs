@@ -7,7 +7,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, put};
 use axum::{Json, Router};
 use orbit_platform::{Id, RequestId};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use crate::repositories::task_filter::ViewState;
@@ -20,8 +20,8 @@ use crate::task_routes::{
     task_problem,
 };
 
-/// Upper bound for one favorites reorder; far above any real sidebar.
-const MAX_FAVORITE_IDS: usize = 500;
+/// Upper bound for one favorites or project reorder; far above any real sidebar.
+const MAX_ORDER_IDS: usize = 500;
 
 pub fn view_router(state: TaskState) -> Router {
     Router::new()
@@ -44,6 +44,10 @@ pub fn view_router(state: TaskState) -> Router {
         .route(
             "/api/v1/workspaces/{workspace_id}/view-preferences/{page_key}",
             get(get_view_preference).put(put_view_preference),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/project-order",
+            get(get_project_order).put(put_project_order),
         )
         .with_state(state)
 }
@@ -274,7 +278,7 @@ async fn reorder_view_favorites(
     let instance = format!("/api/v1/workspaces/{workspace}/view-favorites/order");
     let (workspace_id, actor_id) =
         scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
-    let view_ids = parse_view_ids(&body.view_ids)
+    let view_ids = parse_ids(&body.view_ids, "view_ids")
         .map_err(|error| task_problem(error, instance.clone(), request_id.as_ref()))?;
     state
         .views
@@ -289,16 +293,16 @@ async fn reorder_view_favorites(
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 
-fn parse_view_ids(values: &[String]) -> Result<Vec<Id>, TaskError> {
-    if values.len() > MAX_FAVORITE_IDS {
-        return Err(TaskError::Invalid { field: "view_ids" });
+fn parse_ids(values: &[String], field: &'static str) -> Result<Vec<Id>, TaskError> {
+    if values.len() > MAX_ORDER_IDS {
+        return Err(TaskError::Invalid { field });
     }
     values
         .iter()
         .map(|value| {
             value
                 .parse::<Id>()
-                .map_err(|_| TaskError::Invalid { field: "view_ids" })
+                .map_err(|_| TaskError::Invalid { field })
         })
         .collect()
 }
@@ -343,5 +347,56 @@ async fn put_view_preference(
         .put_preference(workspace_id, actor_id, &page_key, body.state)
         .await
         .map(Json)
+        .map_err(|error| task_problem(error, instance, request_id.as_ref()))
+}
+
+/// The caller's own order of projects in the Tasks sidebar.
+#[derive(Deserialize, Serialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+struct ProjectOrder {
+    /// Live projects in the caller's order. Projects not listed follow them, by name.
+    project_ids: Vec<String>,
+}
+
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/project-order", params(("workspace_id" = String, Path)), responses((status = 200, body = ProjectOrder)))]
+async fn get_project_order(
+    State(state): State<TaskState>,
+    Path(workspace): Path<String>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<Json<ProjectOrder>, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace}/project-order");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    state
+        .views
+        .project_order(workspace_id, actor_id)
+        .await
+        .map(|ids| {
+            Json(ProjectOrder {
+                project_ids: ids.iter().map(ToString::to_string).collect(),
+            })
+        })
+        .map_err(|error| task_problem(error, instance, request_id.as_ref()))
+}
+
+#[utoipa::path(put, path = "/api/v1/workspaces/{workspace_id}/project-order", params(("workspace_id" = String, Path)), request_body = ProjectOrder, responses((status = 204)))]
+async fn put_project_order(
+    State(state): State<TaskState>,
+    Path(workspace): Path<String>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<ProjectOrder>,
+) -> Result<StatusCode, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace}/project-order");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    let project_ids = parse_ids(&body.project_ids, "project_ids")
+        .map_err(|error| task_problem(error, instance.clone(), request_id.as_ref()))?;
+    state
+        .views
+        .set_project_order(workspace_id, actor_id, &project_ids)
+        .await
+        .map(|()| StatusCode::NO_CONTENT)
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }

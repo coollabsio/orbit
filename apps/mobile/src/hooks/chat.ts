@@ -66,6 +66,12 @@ export function useFollowedThreads() {
   return useQuery({ queryKey: chatQueryKeys.followedThreads(workspaceId), queryFn: () => chat.followedThreads(client, workspaceId) })
 }
 
+/** The Unreads view's threads: unread replies, followed or not, in joined conversations that are not muted. */
+export function useUnreadThreads() {
+  const { client, workspaceId } = useOrbit()
+  return useQuery({ queryKey: chatQueryKeys.unreadThreads(workspaceId), queryFn: () => chat.unreadThreads(client, workspaceId) })
+}
+
 export function useThread(rootId: string) {
   const { client, workspaceId } = useOrbit()
   return useInfiniteQuery({

@@ -53,26 +53,44 @@ impl ClickSender {
         }
     }
 
-    /// Sends one click. `Ok(status)` for any answer; `Err(reason)` when there was none.
+    /// Sends one click as a form with the JSON in `payload`, as Slack does.
     async fn send(&self, click: &Click) -> Result<u16, &'static str> {
-        let url = Url::parse(&click.request_url).map_err(|_| "invalid_url")?;
+        let body = url::form_urlencoded::Serializer::new(String::new())
+            .append_pair("payload", &click.payload.to_string())
+            .finish();
+        self.post_signed(
+            &click.request_url,
+            &click.signing_secret,
+            "application/x-www-form-urlencoded",
+            body,
+        )
+        .await
+    }
+
+    /// Posts a body signed with `signing_secret` to a request URL. `Ok(status)` for any answer;
+    /// `Err(reason)` when there was none.
+    pub(crate) async fn post_signed(
+        &self,
+        request_url: &str,
+        signing_secret: &str,
+        content_type: &'static str,
+        body: String,
+    ) -> Result<u16, &'static str> {
+        let url = Url::parse(request_url).map_err(|_| "invalid_url")?;
         if !sendable(&url, self.development) {
             return Err("blocked_address");
         }
         let _permit = self.sends.acquire().await.map_err(|_| "unavailable")?;
-        let body = url::form_urlencoded::Serializer::new(String::new())
-            .append_pair("payload", &click.payload.to_string())
-            .finish();
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs()
             .to_string();
-        let signature = sign(&click.signing_secret, &timestamp, &body);
+        let signature = sign(signing_secret, &timestamp, &body);
         let response = self
             .client
             .post(url)
-            .header("Content-Type", "application/x-www-form-urlencoded")
+            .header("Content-Type", content_type)
             .header("X-Slack-Request-Timestamp", &timestamp)
             .header("X-Slack-Signature", &signature)
             .header("X-Orbit-Request-Timestamp", &timestamp)
@@ -135,8 +153,14 @@ pub(crate) struct ChatActionResult {
 #[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ChatInteractivityBody {
-    /// Where clicks go: https (http and local hosts in development). Null turns clicks off.
+    /// Where clicks go: https (http and local hosts in development). Null turns clicks and
+    /// events off.
     request_url: Option<String>,
+    /// Also send each member's message in the channel to the request URL (`event_callback`),
+    /// and let the webhook's secret read the channel. Needs a request URL.
+    #[serde(default)]
+    #[schema(required = false)]
+    events: bool,
 }
 
 #[derive(Serialize, ToSchema)]
@@ -251,6 +275,7 @@ pub(crate) async fn set_chat_webhook_interactivity(
                 conversation_id,
                 webhook_id,
                 body.request_url.as_deref(),
+                body.events,
                 &key,
                 state.clicks.development,
             )

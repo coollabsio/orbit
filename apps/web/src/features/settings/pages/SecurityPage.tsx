@@ -7,10 +7,11 @@ import type { ConnectedAccount, PasskeyRecord, Provider, TotpSetup } from '@orbi
 import { confirmAction } from '@/components/common/confirmAction'
 import { ProviderMark } from '@/components/common/icons/ProviderMark'
 import { SettingsCard } from '@/components/common/SettingsCard'
+import { InfoTip } from '@/components/common/InfoTip'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field'
+import { Field, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { useAuthOptions, useConnectedAccounts, useCurrentUser, useDisconnectAccount, useStartProviderSignIn } from '@/features/auth/api'
 import { ConfirmWithProvider } from '@/features/auth/components/ConfirmWithProvider'
@@ -377,9 +378,8 @@ function AddPasskeyDialog({ add, onAdd, onClose }: { add: ReturnType<typeof useA
           </DialogHeader>
           <FieldGroup>
             <Field>
-              <FieldLabel htmlFor={nameId}>Name</FieldLabel>
+              <FieldLabel htmlFor={nameId} className="items-center gap-1.5">Name <InfoTip text={'So you can tell your passkeys apart, e.g. "MacBook" or "YubiKey".'} /></FieldLabel>
               <Input id={nameId} required maxLength={64} value={name} onChange={(event) => setName(event.target.value)} />
-              <FieldDescription>So you can tell your passkeys apart, e.g. "MacBook" or "YubiKey".</FieldDescription>
             </Field>
             {/* Only the password check fails while the dialog is open. */}
             <CurrentPassword returnTo={SECURITY_PATH} hasPassword={hasPassword} value={password} onChange={setPassword} error={add.error} fallback="The passkey could not be added." />

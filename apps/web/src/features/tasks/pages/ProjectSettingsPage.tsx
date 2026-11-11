@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
-import { ArrowLeft, Check, Lock, MoreH as MoreHorizontal, Edit as Pencil, Add as Plus, TaskSquare as SquareCheck, Trash as Trash2 } from 'reicon-react'
+import { ArrowLeft, Check, Lock, UserAdd, MoreH as MoreHorizontal, Edit as Pencil, Add as Plus, TaskSquare as SquareCheck, Trash as Trash2 } from 'reicon-react'
 import { Button } from '@/components/ui/button'
 import { Tip } from '@/components/common/Tip'
 import { Input } from '@/components/ui/input'
@@ -19,7 +19,14 @@ import { TaskStatusIcon } from '@/features/tasks/components/TaskStatusIcon'
 import { CATEGORY_LABEL, CATEGORY_ORDER, PROJECT_COLORS, STATUS_COLORS, defaultStatusOf, projectStatuses } from '@/features/tasks/taskMeta'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import type { Project, StatusCategory, TaskStatusDef } from '@/features/tasks/api/models'
-import { useCreateStatus, useDeleteProject, useDeleteStatus, useProjectStatuses, useProjects, useReorderStatuses, useUpdateProject, useUpdateStatus } from '@/features/tasks/api/projects'
+import { useAddProjectMembers, useCreateStatus, useDeleteProject, useDeleteStatus, useProjectMembers, useProjectStatuses, useProjects, useRemoveProjectMember, useReorderStatuses, useUpdateProject, useUpdateStatus } from '@/features/tasks/api/projects'
+import { ProjectVisibilityChoice } from '@/features/tasks/components/ProjectVisibilityChoice'
+import { useCurrentUser } from '@/features/auth/api'
+import { useTeamMembers } from '@/features/workspaces/api'
+import { UserAvatar } from '@/components/common/UserAvatar'
+import { confirmAction } from '@/components/common/confirmAction'
+import { MemberPicker } from '@/features/chat/components/dialogs/MemberPicker'
+import { pickablePeople } from '@/features/chat/components/dialogs/channelLib'
 import { useTasks } from '@/features/tasks/api/tasks'
 import { ConfirmDeleteModal } from '@/components/common/ConfirmDeleteModal'
 import { SettingsCard } from '@/components/common/SettingsCard'
@@ -249,6 +256,8 @@ export function ProjectSettingsPage() {
                 {statusesSaving ? <p role="status">Saving statuses…</p> : null}
               </SettingsCard>
 
+              <ProjectAccessCard project={project} />
+
               <ProjectLabelsCard projectId={project.id} />
 
               <ProjectGithubCard workspaceId={workspace.id} projectId={project.id} onPendingChange={setGithubPending} />
@@ -372,6 +381,105 @@ function ProjectGeneralCard({ project, onPendingChange }: { project: Project; on
   )
 }
 
+/**
+ * Workspace or Private, saved on choice like the sub-issue switches. A private project lists its members; owners and
+ * admins see it without being listed. Leaving a project you cannot see otherwise takes you back to Tasks.
+ */
+function ProjectAccessCard({ project }: { project: Project }) {
+  const { workspace } = useWorkspace()
+  const navigate = useNavigate()
+  const currentUserId = useCurrentUser().data?.id ?? null
+  const refetchProjects = useProjects(workspace.id).refetch
+  const updateProject = useUpdateProject(workspace.id, project.id)
+  const membersQuery = useProjectMembers(workspace.id, project.id, project.private)
+  const team = useTeamMembers(workspace.id).data ?? []
+  const addMembers = useAddProjectMembers(workspace.id, project.id)
+  const removeMember = useRemoveProjectMember(workspace.id, project.id)
+  const [adding, setAdding] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const seesEveryProject = workspace.role === 'owner' || workspace.role === 'admin'
+  const isPrivate = updateProject.isPending ? (updateProject.variables?.private ?? project.private) : project.private
+  const memberIds = membersQuery.data?.map((member) => member.user_id) ?? []
+  const listed = memberIds.flatMap((id) => team.find((person) => person.id === id) ?? []).sort((a, b) => a.name.localeCompare(b.name))
+
+  const choose = (next: boolean) => {
+    if (next === project.private || updateProject.isPending) return
+    updateProject.mutate(
+      { name: project.name, key: project.key, color: project.color, expected_version: project.version, private: next },
+      // a stale version (409) or a failure leaves the saved choice; the fresh record makes the next try current
+      { onError: () => void refetchProjects() },
+    )
+  }
+
+  const remove = async (userId: string) => {
+    const leaving = userId === currentUserId && !seesEveryProject
+    if (leaving && !(await confirmAction({ title: 'Leave this project?', description: `You will no longer see "${project.name}" or its tasks until someone adds you again.`, confirmLabel: 'Leave project', danger: true }))) return
+    removeMember.mutate(userId, { onSuccess: () => { if (leaving) navigate('/tasks') } })
+  }
+
+  const add = () => {
+    if (selectedIds.length === 0 || addMembers.isPending) return
+    addMembers.mutate(selectedIds, {
+      onSuccess: () => {
+        setAdding(false)
+        setSelectedIds([])
+      },
+    })
+  }
+
+  return (
+    <SettingsCard
+      title="Access"
+      description="Who can see this project and its tasks."
+      actions={isPrivate && project.private ? (
+        <Popover open={adding} onOpenChange={(open) => { setAdding(open); if (!open) setSelectedIds([]) }}>
+          <PopoverTrigger render={<Button variant="outline" size="sm"><UserAdd className="size-3.5" />Add people</Button>} />
+          <PopoverContent align="end" className="w-80">
+            <MemberPicker autoFocus label={`Add people to ${project.name}`} people={pickablePeople(team, null, memberIds)} selectedIds={selectedIds} onChange={setSelectedIds} />
+            <Button disabled={selectedIds.length === 0 || addMembers.isPending} onClick={add}>
+              {selectedIds.length > 1 ? `Add ${selectedIds.length} people` : 'Add people'}
+            </Button>
+          </PopoverContent>
+        </Popover>
+      ) : undefined}
+    >
+      <div className="flex flex-col gap-4">
+        <ProjectVisibilityChoice isPrivate={isPrivate} disabled={updateProject.isPending} onChange={choose} />
+        {updateProject.isError ? <p role="alert" className="text-xs text-destructive">Couldn’t change who can see this project. Try again.</p> : null}
+        {isPrivate && project.private ? (
+          <div className="flex flex-col gap-2">
+            <span className="text-xs text-muted-foreground">Workspace owners and admins always have access, also when they are not listed.</span>
+            {membersQuery.isPending ? (
+              <p role="status" className="text-sm text-muted-foreground">Loading members…</p>
+            ) : membersQuery.isError ? (
+              <p role="alert" className="text-sm text-destructive">The members could not be loaded. <Button variant="ghost" size="xs" onClick={() => void membersQuery.refetch()}>Retry</Button></p>
+            ) : listed.length === 0 ? (
+              <p className="text-sm text-muted-foreground">Nobody is listed yet. Add the people who should see this project.</p>
+            ) : (
+              <ul aria-label="Project members" className="flex flex-col divide-y divide-border">
+                {listed.map((person) => (
+                  <li key={person.id} className="flex items-center gap-3 py-2">
+                    <UserAvatar user={person} size={28} />
+                    <span className="flex min-w-0 flex-1 flex-col">
+                      <span className="truncate text-sm font-medium text-foreground">{person.id === currentUserId ? `${person.name} (you)` : person.name}</span>
+                      <span className="truncate text-xs text-muted-foreground">@{person.handle}</span>
+                    </span>
+                    <Button variant="ghost" size="sm" className="text-muted-foreground" aria-label={person.id === currentUserId ? 'Leave project' : `Remove ${person.name}`} disabled={removeMember.isPending} onClick={() => void remove(person.id)}>
+                      {person.id === currentUserId ? 'Leave' : 'Remove'}
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {addMembers.isError ? <p role="alert" className="text-xs text-destructive">Couldn’t add these people. Guests and suspended members cannot join a project.</p> : null}
+            {removeMember.isError ? <p role="alert" className="text-xs text-destructive">Couldn’t remove this person. Try again.</p> : null}
+          </div>
+        ) : null}
+      </div>
+    </SettingsCard>
+  )
+}
+
 const SUB_ISSUE_SETTINGS = [
   { field: 'auto_close_parent', label: 'Close parent when all sub-issues are done', description: 'When every sub-issue is closed and at least one is done, the parent moves to its first done status.' },
   { field: 'auto_close_sub_issues', label: 'Close open sub-issues when parent is closed', description: 'Open sub-issues at every level move to done, or to cancelled when the parent is cancelled.' },
@@ -437,10 +545,10 @@ function SubIssueSettingsCard({ project }: { project: Project }) {
       <div className="flex flex-col divide-y divide-border">
         {SUB_ISSUE_SETTINGS.map((setting) => (
           <div key={setting.field} className="flex items-start justify-between gap-4 py-3 first:pt-0 last:pb-0">
-            <div className="flex min-w-0 flex-col gap-0.5">
-              <span className="text-sm font-medium text-foreground">{setting.label}</span>
-              <span className="text-xs text-muted-foreground">{setting.description}</span>
-            </div>
+            <span className="inline-flex min-w-0 items-center gap-1.5 text-sm font-medium text-foreground">
+              {setting.label}
+              <InfoTip text={setting.description} />
+            </span>
             <Switch aria-label={setting.label} checked={value(setting.field)} onCheckedChange={(checked: boolean) => save(setting.field, checked)} />
           </div>
         ))}

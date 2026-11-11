@@ -2,7 +2,8 @@ import { useId, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { DialogFooter, DialogClose } from '@/components/ui/dialog'
-import { Field, FieldLabel } from '@/components/ui/field'
+import { Field, FieldLabel, FieldLegend, FieldSet } from '@/components/ui/field'
+import { ProjectVisibilityChoice } from './ProjectVisibilityChoice'
 import { Modal } from '@/components/common/Modal'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import type { Project } from '@/features/tasks/api/models'
@@ -12,6 +13,7 @@ export function NewProjectModal({ onClose, onCreated }: { onClose: () => void; o
   const { workspace } = useWorkspace()
   const createProject = useCreateProject(workspace.id)
   const [name, setName] = useState('')
+  const [isPrivate, setIsPrivate] = useState(false)
   const inputId = useId()
 
   const submit = async (event: React.FormEvent) => {
@@ -19,7 +21,7 @@ export function NewProjectModal({ onClose, onCreated }: { onClose: () => void; o
     const projectName = name.trim()
     if (!projectName || createProject.isPending) return
     try {
-      onCreated(await createProject.mutateAsync(projectName))
+      onCreated(await createProject.mutateAsync({ name: projectName, isPrivate }))
     } catch {
       // Keep the modal and draft open so the user can retry.
     }
@@ -32,6 +34,10 @@ export function NewProjectModal({ onClose, onCreated }: { onClose: () => void; o
           <FieldLabel htmlFor={inputId}>Project name <span className="font-semibold text-primary">*</span></FieldLabel>
           <Input id={inputId} autoFocus required value={name} disabled={createProject.isPending} onChange={(event) => setName(event.target.value)} />
         </Field>
+        <FieldSet className="gap-0">
+          <FieldLegend variant="label">Access</FieldLegend>
+          <ProjectVisibilityChoice isPrivate={isPrivate} disabled={createProject.isPending} onChange={setIsPrivate} />
+        </FieldSet>
         {createProject.isError ? <p role="alert" className="text-xs text-destructive">Project creation failed. Try again.</p> : null}
         <DialogFooter>
           <DialogClose render={<Button type="button" variant="outline" disabled={createProject.isPending} />}>Cancel</DialogClose>

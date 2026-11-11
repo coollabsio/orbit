@@ -19,6 +19,7 @@ export const chatKeys = {
   thread: (workspaceId: string, rootId: string) => ['chat', workspaceId, 'thread', rootId] as const,
   threads: (workspaceId: string, conversationId: string) => ['chat', workspaceId, 'threads', conversationId] as const,
   followedThreads: (workspaceId: string) => ['chat', workspaceId, 'followed-threads'] as const,
+  unreadThreads: (workspaceId: string) => ['chat', workspaceId, 'unread-threads'] as const,
   pins: (workspaceId: string, conversationId: string) => ['chat', workspaceId, 'pins', conversationId] as const,
   files: (workspaceId: string, conversationId: string) => ['chat', workspaceId, 'files', conversationId] as const,
   searches: (workspaceId: string) => ['chat', workspaceId, 'search'] as const,
