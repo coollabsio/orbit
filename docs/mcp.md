@@ -307,11 +307,14 @@ Service-account tokens support tasks only; docs and chat require a personal iden
 | Chat read | `list_conversations`, `list_messages`, `get_thread`, `search_messages` |
 
 Task create takes `project_id`, `status_id`, `title`, optional markdown `description`,
-`priority`, `parent_task_id` (creates a sub-issue) and `assignee_ids`. Task update takes `task_id`,
-`expected_version`, and optional title, description, status, priority, `assignee_ids` or
-`parent_task_id`: a task ID or identifier moves the task under that task, and `null` detaches it.
+`priority`, `parent_task_id` (creates a sub-issue), `assignee_ids` and `label_ids`. Task update
+takes `task_id`, `expected_version`, and optional title, description, status, priority,
+`assignee_ids`, `label_ids` or `parent_task_id`: a task ID or identifier moves the task under that
+task, and `null` detaches it.
 `assignee_ids` replaces the whole list with member user IDs from `list_members` or `get_me`, and
 `[]` unassigns everyone; to claim a task, send the current list plus your own `get_me` user ID.
+`label_ids` replaces the whole list with label IDs of the task's project from `list_labels`, and
+`[]` removes all labels. A label of another project, or the same label twice, is refused.
 `create_project` works only for a connection approved for all projects (choose all projects at
 consent, or when you create the token): a connection for chosen projects could not use the new
 project. `key` is the identifier prefix (1 to 20 letters, digits or underscores, unique in the
