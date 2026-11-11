@@ -246,7 +246,7 @@ function EmailChangeDialog({ onClose }: { onClose: () => void }) {
 function DeleteAccountCard() {
   const { user } = useOrbit()
   const [open, setOpen] = useState(false)
-  if (user.root) return <SettingsCard title="Delete account" description="The root account cannot be deleted." danger>{null}</SettingsCard>
+  if (user.root) return <SettingsCard title="Delete account" danger><Note>The root account cannot be deleted.</Note></SettingsCard>
   return (
     <SettingsCard title="Delete account" description={'Delete your account for good. What you wrote stays, without your name.'} danger>
       <View className="items-start">
