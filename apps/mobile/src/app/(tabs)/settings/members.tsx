@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Pressable, Share, View } from 'react-native'
 import { TextInput } from '../../../ui/scaled'
 
+import { ListPager, usePagedList } from '../../../components/settings/ListPager'
 import { ActionSheet, ConfirmDialog, type ConfirmRequest, type SheetAction } from '../../../components/settings/Dialog'
 import { Badge, FieldLabel, InitialAvatar, Note, RowText, Select, SettingsCard, SettingsRow, SettingsShell, SmallOutlineButton, WORKSPACE_NAV } from '../../../components/settings/Shell'
 import { filterMembers, type InviteRole, invitationProblem, type MemberAction, memberActions, roleLabel } from '../../../data/account-api'
@@ -28,7 +29,6 @@ const SORTS: { value: Sort; label: string }[] = [
   { value: 'email_asc', label: 'Email A–Z' },
   { value: 'role', label: 'Role' },
 ]
-const PAGE_SIZES = [10, 25, 50, 100].map((size) => ({ value: String(size), label: String(size) }))
 
 /** The web's role filter and sort over the searched members. */
 function sortedMembers(members: MemberRecord[], role: string, sort: Sort): MemberRecord[] {
@@ -51,12 +51,8 @@ export default function MembersScreen() {
   const [confirm, setConfirm] = useState<ConfirmRequest | null>(null)
   const [roleFilter, setRoleFilter] = useState('all')
   const [sort, setSort] = useState<Sort>('name_asc')
-  const [perPage, setPerPage] = useState(10)
-  const [page, setPage] = useState(1)
   const list = sortedMembers(filterMembers(members.data ?? [], search), roleFilter, sort)
-  const lastPage = Math.max(1, Math.ceil(list.length / perPage))
-  const currentPage = Math.min(page, lastPage)
-  const visible = list.slice((currentPage - 1) * perPage, currentPage * perPage)
+  const { visible, pager, resetPage } = usePagedList(list)
   const writeError = [writes.changeRole, writes.remove, writes.transfer].find((write) => write.isError)?.error
 
   const run = (member: MemberRecord, action: MemberAction) => {
@@ -87,7 +83,7 @@ export default function MembersScreen() {
               value={search}
               onChangeText={(text) => {
                 setSearch(text)
-                setPage(1)
+                resetPage()
               }}
               autoCapitalize="none"
               autoCorrect={false}
@@ -95,8 +91,8 @@ export default function MembersScreen() {
             />
             {search ? <IconButton icon="close" label="Clear search" size={22} iconSize={12} color={colors.mutedForeground} onPress={() => setSearch('')} /> : null}
           </View>
-          <Select label="Filter by role" value={roleFilter} options={ROLE_FILTERS} onChange={(value) => { setRoleFilter(value); setPage(1) }} />
-          <Select label="Sort members" value={sort} options={SORTS} onChange={(value) => { setSort(value); setPage(1) }} />
+          <Select label="Filter by role" value={roleFilter} options={ROLE_FILTERS} onChange={(value) => { setRoleFilter(value); resetPage() }} />
+          <Select label="Sort members" value={sort} options={SORTS} onChange={(value) => { setSort(value); resetPage() }} />
         </View>
         {members.isPending ? <View className="p-4"><Note loading>Loading workspace members…</Note></View> : null}
         {members.isError ? <View className="p-4"><Note error>Workspace members could not be loaded.</Note></View> : null}
@@ -127,20 +123,7 @@ export default function MembersScreen() {
             </View>
           )
         })}
-        {list.length > 0 ? (
-          <View className="min-h-11 flex-row items-center justify-between px-4">
-            <View className="flex-row items-center gap-3">
-              <Text className="text-[11px] text-muted-foreground/70">{`${(currentPage - 1) * perPage + 1}-${Math.min(currentPage * perPage, list.length)} of ${list.length}`}</Text>
-              <View className="w-16">
-                <Select label="Items per page" size="sm" value={String(perPage)} options={PAGE_SIZES} onChange={(value) => { setPerPage(Number(value)); setPage(1) }} />
-              </View>
-            </View>
-            <View className="flex-row items-center gap-1">
-              <PageButton previous label="Previous page" disabled={currentPage <= 1} onPress={() => setPage(currentPage - 1)} />
-              <PageButton label="Next page" disabled={currentPage >= lastPage} onPress={() => setPage(currentPage + 1)} />
-            </View>
-          </View>
-        ) : null}
+        {list.length > 0 ? <ListPager {...pager} /> : null}
         {writeError ? <View className="p-4"><Note error>{errorMessage(writeError)}</Note></View> : null}
       </SettingsCard>
 
@@ -154,23 +137,6 @@ export default function MembersScreen() {
 }
 
 /** The web's `outline` `icon-sm` pager button. */
-function PageButton({ previous = false, label, disabled, onPress }: { previous?: boolean; label: string; disabled: boolean; onPress: () => void }) {
-  const { colors } = useTheme()
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      disabled={disabled}
-      onPress={onPress}
-      className={`size-7 items-center justify-center rounded-md border border-border bg-background active:bg-muted dark:border-input dark:bg-input/30 ${disabled ? 'opacity-50' : ''}`}
-    >
-      <View className={previous ? 'rotate-180' : ''}>
-        <Icon name="arrowRight" size={14} color={colors.foreground} />
-      </View>
-    </Pressable>
-  )
-}
-
 function Invite() {
   const { invite } = useMemberWrites()
   const emailEnabled = useAuthOptions().data?.email_enabled ?? false
