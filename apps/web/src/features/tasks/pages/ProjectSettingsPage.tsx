@@ -437,10 +437,10 @@ function SubIssueSettingsCard({ project }: { project: Project }) {
       <div className="flex flex-col divide-y divide-border">
         {SUB_ISSUE_SETTINGS.map((setting) => (
           <div key={setting.field} className="flex items-start justify-between gap-4 py-3 first:pt-0 last:pb-0">
-            <div className="flex min-w-0 flex-col gap-0.5">
-              <span className="text-sm font-medium text-foreground">{setting.label}</span>
-              <span className="text-xs text-muted-foreground">{setting.description}</span>
-            </div>
+            <span className="inline-flex min-w-0 items-center gap-1.5 text-sm font-medium text-foreground">
+              {setting.label}
+              <InfoTip text={setting.description} />
+            </span>
             <Switch aria-label={setting.label} checked={value(setting.field)} onCheckedChange={(checked: boolean) => save(setting.field, checked)} />
           </div>
         ))}

@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from 'bun:test'
 import { act, fireEvent, render } from '@testing-library/react'
-import { setCustomTheme } from '@/lib/customTheme'
+import { DEFAULT_APP_LOOKS, setAppLook, setCustomTheme, setOpenPage } from '@/lib/customTheme'
 import { ThemeProvider } from './theme'
 import { useTheme } from './themeContext'
 
@@ -22,6 +22,7 @@ afterEach(() => {
   document.documentElement.removeAttribute('data-flat')
   document.documentElement.removeAttribute('data-floating')
   setCustomTheme(null)
+  setOpenPage(null)
 })
 
 test('a choice is saved and applied to the page', () => {
@@ -76,4 +77,39 @@ test('a custom theme replaces the chosen theme on every page, and turning it off
   expect(view.getByTestId('theme').textContent).toBe('dark')
   expect(root.classList.contains('dark')).toBe(true)
   expect(root.style.getPropertyValue('--background')).toBe('')
+})
+
+test('per app colours docs, chat and tasks each in their own way, and other pages keep the chosen theme', () => {
+  const root = document.documentElement
+  localStorage.setItem('theme', 'light')
+  const view = render(<ThemeProvider><Controls /></ThemeProvider>)
+  act(() => setCustomTheme({ apps: DEFAULT_APP_LOOKS }))
+
+  const page = (pathname: string) => {
+    act(() => setOpenPage(pathname))
+    return [view.getByTestId('theme').textContent, root.style.getPropertyValue('--background')]
+  }
+  expect(page('/tasks/ORB-1')).toEqual(['dark', '#16171a'])
+  expect(page('/views/abc')).toEqual(['dark', '#16171a'])
+  expect(page('/docs/page-1')).toEqual(['light', '#ffffff'])
+  expect(page('/chat/general')).toEqual(['light', '#ffffff'])
+  expect(page('/profile/appearance')).toEqual(['light', ''])
+  expect(page('/tasks-trash')).toEqual(['light', ''])
+})
+
+test('each part of the app can take other colours, or the chosen theme, and the mix is saved', () => {
+  localStorage.setItem('theme', 'light')
+  const view = render(<ThemeProvider><Controls /></ThemeProvider>)
+  act(() => setAppLook('docs', { sidebar: '#0e0f11', selected: '#24252a', accent: '#5e6ad2', chat: '#16171a' }))
+  act(() => setAppLook('chat', null))
+
+  expect(JSON.parse(localStorage.getItem('orbit:chat:theme')!.slice('apps:'.length))).toEqual({
+    docs: '#0e0f11,#24252a,#5e6ad2,#16171a',
+    chat: null,
+    tasks: '#0e0f11,#24252a,#5e6ad2,#16171a',
+  })
+  act(() => setOpenPage('/docs'))
+  expect([view.getByTestId('theme').textContent, document.documentElement.style.getPropertyValue('--background')]).toEqual(['dark', '#16171a'])
+  act(() => setOpenPage('/chat'))
+  expect([view.getByTestId('theme').textContent, document.documentElement.style.getPropertyValue('--background')]).toEqual(['light', ''])
 })

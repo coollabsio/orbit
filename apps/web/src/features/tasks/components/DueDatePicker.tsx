@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { Calendar } from 'reicon-react'
 import { cn } from 'cn'
+import { recurrenceLabel } from '@orbit/api/recurrence'
+import { fullDate } from '@/lib/format'
 import { Button } from '@/components/ui/button'
 import { Tip } from '@/components/common/Tip'
 import { DatePicker } from '@/components/common/DatePicker'
@@ -11,7 +13,8 @@ import { DueDateChip } from './TaskPropertyChips'
 
 /**
  * Due-date chip that opens the date picker in place (list rows and board cards). Every pick saves at once and the
- * picker stays open (to extend a day to a range or change the time); Clear saves and closes. Without a date it shows
+ * picker stays open (to extend a day to a range or change the time); Clear saves and closes. A repeating task's
+ * tooltip names its rule. Without a date it shows
  * a quiet "No date" placeholder, or only a calendar glyph (`empty="icon"`). Font size comes from `className`.
  * `onOpenChange` tells the caller when the picker opens and closes (also when it unmounts while open), so a caller
  * that places the chip by whether the task has a date can keep this one mounted until the picking is over.
@@ -37,7 +40,7 @@ export function DueDatePicker({ task, status, empty = 'label', className, onOpen
   return (
     <div className={cn('flex', className)} onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
       <Popover open={open} onOpenChange={setOpen}>
-        <Tip label={task.dueAt ? undefined : 'Set due date'}>
+        <Tip label={task.dueAt ? (task.recurrence ? `Due ${fullDate(task.dueAt)} · ${recurrenceLabel(task.recurrence)}` : undefined) : 'Set due date'}>
           <PopoverTrigger
             render={
               <Button

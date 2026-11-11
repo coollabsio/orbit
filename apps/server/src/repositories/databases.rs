@@ -21,6 +21,7 @@ use super::tasks::{TaskError, require_access_tx};
 use crate::audit::{self, AuditOutcome};
 
 mod agent;
+mod agent_schema;
 mod board;
 mod buttons;
 mod calendar;
@@ -61,6 +62,7 @@ pub(super) use files::FileCopies;
 pub use unique_id::UniqueIdConfig;
 pub(super) use unique_id::renumber_copy;
 pub use agent::{AgentDatabase, AgentQuery, AgentRow, AgentRowPage, invalid_detail};
+pub use agent_schema::AgentPropertyChanges;
 pub use forms::{FormAccess, FormConfig, FormQuestion, FormSubmission, MAX_SUBMISSIONS_PER_HOUR};
 pub use formula::{
     FormulaConfig, FormulaPreview, FormulaProblem, FormulaSample, checked as check_formula,

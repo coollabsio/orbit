@@ -34,6 +34,7 @@ use crate::live::LiveHub;
 
 const INVITATION_LIFETIME_MILLIS: i64 = 7 * 24 * 60 * 60 * 1_000;
 const WORKSPACE_TRASH_RETENTION_MILLIS: i64 = 30 * 24 * 60 * 60 * 1_000;
+const SESSION_IDLE_RETENTION_MILLIS: i64 = 30 * 24 * 60 * 60 * 1_000;
 const AUDIT_RETENTION_MILLIS: i64 = 365 * 24 * 60 * 60 * 1_000;
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
@@ -2089,6 +2090,11 @@ impl WorkspaceRepository {
         // Chat files that were uploaded and never sent with a message.
         sqlx::query("DELETE FROM chat_message_files WHERE message_id IS NULL AND created_at <= $1")
             .bind(now.as_millis().saturating_sub(24 * 60 * 60 * 1000))
+            .execute(&mut *transaction)
+            .await?;
+        // Sessions not used for 30 days, revoked or not. Their push subscriptions cascade.
+        sqlx::query("DELETE FROM sessions WHERE last_activity_at <= $1")
+            .bind(now.as_millis().saturating_sub(SESSION_IDLE_RETENTION_MILLIS))
             .execute(&mut *transaction)
             .await?;
         let expired = sqlx::query_scalar::<_, String>(

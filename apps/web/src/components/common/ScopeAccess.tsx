@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { cn } from 'cn'
+import { InfoTip } from '@/components/common/InfoTip'
 import { buttonVariants } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
@@ -31,10 +32,7 @@ export function AccessPicker<S extends string>({ id, resources, scopes, onChange
       const level = accessLevel(resource, scopes)
       return <div key={resource.name} className="grid gap-3">
       <div className="flex items-center justify-between gap-3">
-        <div className="grid gap-0.5">
-          <span className="text-sm font-medium">{resource.name}</span>
-          <span className="text-xs text-muted-foreground">{resource.hint}</span>
-        </div>
+        <span className="inline-flex items-center gap-1.5 text-sm font-medium">{resource.name} <InfoTip text={resource.hint} /></span>
         <ToggleGroup aria-label={resource.name} variant="outline" size="sm" spacing={0} value={[level]} onValueChange={(value) => {
           const next = value.at(-1)
           if (next === 'none' || next === 'read' || next === 'write') onChange(withAccessLevel(resource, scopes, next))

@@ -36,7 +36,7 @@ import { MobileDock } from './MobileDock'
 import { DonationReminder } from './DonationReminder'
 import { ProfilePopoverProvider } from './ProfilePopover'
 import { NoWorkspaceShell } from './NoWorkspaceShell'
-import { useAppSidebarTheme } from '@/lib/customTheme'
+import { setOpenPage, useAppSidebarTheme } from '@/lib/customTheme'
 import { MenuSurfaceContext } from '@/components/ui/menuSurface'
 import { useSidebarMenuSurface } from './sidebarMenu'
 import { hostsPageList, SidebarSlotContext } from './sidebarSlot'
@@ -102,6 +102,11 @@ function Shell() {
   const [pageListSlot, setPageListSlot] = useState<HTMLElement | null>(null)
   // Account settings → Appearance → Custom colours the sidebar too, not only chat
   const sidebarTheme = useAppSidebarTheme()
+  // Appearance → Per app colours docs, chat and tasks each in their own way; before paint, so no page shows wrong colours
+  useLayoutEffect(() => {
+    setOpenPage(pathname)
+    return () => setOpenPage(null)
+  }, [pathname])
   // the sidebar menus share one look and the custom theme
   const menuSurface = useSidebarMenuSurface()
 

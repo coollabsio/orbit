@@ -24,6 +24,7 @@ use crate::repositories::api_tokens::{
 };
 use crate::repositories::pages::PageSummary;
 use crate::repositories::pages::{PageError, PageRepository};
+use crate::repositories::task_recurrences::TaskRecurrence;
 use crate::repositories::tasks::{
     CommentRecord, LabelRecord, ProjectRecord, SortOrder, StatusRecord, TaskError, TaskRepository,
     TaskSort,
@@ -93,6 +94,14 @@ pub fn router(state: PublicApiState) -> Router {
         .route(
             "/docs/{page_id}/database/query",
             post(databases::query_database),
+        )
+        .route(
+            "/docs/{page_id}/database/properties",
+            post(databases::create_property),
+        )
+        .route(
+            "/docs/{page_id}/database/properties/{property}",
+            patch(databases::update_property).delete(databases::delete_property),
         )
         .route("/docs/{page_id}/rows", post(databases::create_row))
         .route("/docs/{page_id}/rows/trash", post(databases::trash_rows))
@@ -725,6 +734,11 @@ struct UpdateTaskBody {
     /// its sub-issue; `null` detaches it.
     #[serde(default, deserialize_with = "present")]
     parent_task_id: Option<Option<String>>,
+    /// Makes the task repeat: completing it creates the next occurrence. Every occurrence of the
+    /// series shares the rule. `null` stops repeating.
+    #[serde(default, deserialize_with = "present")]
+    #[schema(value_type = Option<TaskRecurrence>)]
+    recurrence: Option<Option<TaskRecurrence>>,
 }
 
 /// A field that is present, `null` included: `null` clears the value, a missing field keeps it.
@@ -1175,6 +1189,7 @@ async fn update_task(
                 Some(parent) => Some(api.optional_task_id(parent.as_deref()).await?),
                 None => None,
             },
+            recurrence: body.recurrence,
         };
         api.update_task(&task, body.expected_version, patch).await
     }
