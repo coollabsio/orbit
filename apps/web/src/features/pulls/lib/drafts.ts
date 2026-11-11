@@ -1,18 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import type { CommentTarget, PullRef } from '@orbit/api/github'
 
-const prefix = (workspaceId: string, ref: PullRef) => `orbit:pulls:draft:${workspaceId}:${ref.owner}/${ref.repo}#${ref.number}`
-const lineKey = (side: 'LEFT' | 'RIGHT', line: number) => `${side[0]}${line}`
-
-/** Where a comment draft is kept: one key for each pull request, file and line range. */
-export function draftKey(workspaceId: string, ref: PullRef, target: CommentTarget): string {
-  const range = target.start_line != null && target.start_side ? `${lineKey(target.start_side, target.start_line)}-${lineKey(target.side, target.line)}` : lineKey(target.side, target.line)
-  return `${prefix(workspaceId, ref)}:${target.path}:${range}`
-}
-
-export function replyDraftKey(workspaceId: string, ref: PullRef, threadId: string): string {
-  return `${prefix(workspaceId, ref)}:reply:${threadId}`
-}
+export { draftKey, replyDraftKey } from '@orbit/api/github'
 
 function read(key: string): string {
   try { return localStorage.getItem(key) ?? '' } catch { return '' }

@@ -7,12 +7,13 @@ import { Pressable, ScrollView, View } from 'react-native'
 
 import { ConnectGithubPrompt } from '../../../../../../../components/github/ConnectGithubPrompt'
 import { GithubAvatar, PullStateBadge } from '../../../../../../../components/pulls/PullBits'
+import { MergeSheet, ReviewSheet } from '../../../../../../../components/pulls/PullSheets'
 import { relativeAgo } from '../../../../../../../data/format'
 import { markdownToText } from '../../../../../../../data/markdown'
 import { fileHref, githubPromptStatus, isNotFound } from '../../../../../../../data/pulls-api'
 import { usePull, usePullConversation, usePullFiles, usePullThreads, useSetViewed } from '../../../../../../../hooks/pulls'
 import { useTheme } from '../../../../../../../theme'
-import { ErrorView, Icon, IconButton, LoadingView, PaneHeader, PullRefresh, SafeAreaView, Text } from '../../../../../../../ui'
+import { Button, ErrorView, Icon, IconButton, LoadingView, PaneHeader, PullRefresh, SafeAreaView, Text } from '../../../../../../../ui'
 
 const CHECK: Record<string, { label: string; dot: string }> = {
   success: { label: 'Checks passed', dot: 'bg-emerald-500' },
@@ -55,11 +56,14 @@ export default function PullScreen() {
 function PullBody({ pull, refetch, comment }: { pull: GithubPullDetail; refetch: () => Promise<unknown>; comment: number | null }) {
   const ref = useMemo(() => { const [owner = '', repo = ''] = pull.repository.split('/'); return { owner, repo, number: pull.number } }, [pull.repository, pull.number])
   const [tab, setTab] = useState<'files' | 'overview'>('files')
+  const [sheet, setSheet] = useState<'review' | 'merge' | null>(null)
   const files = usePullFiles(ref)
   const threads = usePullThreads(ref)
   const conversation = usePullConversation(ref, tab === 'overview')
   const setViewed = useSetViewed(ref)
   const check = CHECK[pull.checks.state]
+  const pending = threads.data?.pending_review?.comment_count ?? 0
+  const open = pull.state === 'open' || pull.state === 'draft'
   const allThreads = threads.data?.threads ?? []
   const outside = threadsOutsideDiff(allThreads, files.data ?? [])
   const countOf = (path: string) => allThreads.filter((thread) => thread.path === path && thread.line != null).length
@@ -109,6 +113,14 @@ function PullBody({ pull, refetch, comment }: { pull: GithubPullDetail; refetch:
           </View>
         ) : null}
       </View>
+      {open && (pull.viewer.can_review || pending > 0 || pull.viewer.can_merge) ? (
+        <View className="flex-row gap-2">
+          {pull.viewer.can_review || pending > 0 ? <Button label={pending > 0 ? `Review (${pending} pending)` : 'Review'} variant={pending > 0 ? 'primary' : 'outline'} onPress={() => setSheet('review')} /> : null}
+          {pull.viewer.can_merge ? <Button label="Merge" variant="outline" onPress={() => setSheet('merge')} /> : null}
+        </View>
+      ) : null}
+      <ReviewSheet pullRef={ref} pull={pull} pending={pending} visible={sheet === 'review'} onClose={() => setSheet(null)} />
+      <MergeSheet pullRef={ref} pull={pull} visible={sheet === 'merge'} onClose={() => setSheet(null)} />
       <View className="flex-row rounded-lg bg-muted p-0.5">
         {(['files', 'overview'] as const).map((value) => (
           <Pressable key={value} accessibilityRole="tab" accessibilityState={{ selected: tab === value }} onPress={() => setTab(value)} className={`h-8 flex-1 items-center justify-center rounded-md ${tab === value ? 'bg-background' : ''}`}>

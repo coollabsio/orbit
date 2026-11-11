@@ -1,6 +1,15 @@
 /** Pull requests, read from GitHub with the member's own account (the web's `features/pulls/api.ts`). No React. */
 import {
+  createGithubReviewComment,
+  deleteGithubPullBranch,
+  deleteGithubReviewComment,
+  discardGithubReview,
   getGithubPull,
+  mergeGithubPull,
+  replyGithubReviewThread,
+  resolveGithubReviewThread,
+  submitGithubReview,
+  unresolveGithubReviewThread,
   listGithubLinks,
   listGithubProjectPulls,
   listGithubPullConversation,
@@ -9,8 +18,8 @@ import {
   markGithubFileViewed,
   unmarkGithubFileViewed,
 } from '@orbit/api/generated/sdk.gen'
-import type { GithubLink, GithubPullDetail, GithubPullFile, GithubPullList, GithubPullThreads, GithubPullTimelineItem } from '@orbit/api/generated/types.gen'
-import type { PullRef } from '@orbit/api/github'
+import type { GithubLink, GithubMergePull, GithubMergeResult, GithubPullDetail, GithubPullFile, GithubPullList, GithubPullThreads, GithubPullTimelineItem, GithubReviewComment, GithubReviewThread, GithubSubmitReview } from '@orbit/api/generated/types.gen'
+import type { CommentTarget, PullRef } from '@orbit/api/github'
 import { ApiProblem } from '@orbit/api/problem'
 
 import type { OrbitClient } from './orbit'
@@ -89,4 +98,42 @@ export function fileHref(pull: Pick<GithubPullDetail, 'repository' | 'number'>, 
   const [owner = '', repo = ''] = pull.repository.split('/')
   const query = `path=${encodeURIComponent(path)}${thread ? `&thread=${encodeURIComponent(thread)}` : ''}`
   return `/tasks/pulls/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${pull.number}/file?${query}`
+}
+
+export async function addComment(client: OrbitClient, workspaceId: string, ref: PullRef, target: CommentTarget, body: string, mode: 'pending' | 'single'): Promise<GithubReviewThread> {
+  return (await createGithubReviewComment({ client, path: path(workspaceId, ref), body: { ...target, start_side: target.start_side ?? null, start_line: target.start_line ?? null, body, mode }, throwOnError: true })).data
+}
+
+export async function reply(client: OrbitClient, workspaceId: string, ref: PullRef, threadId: string, body: string): Promise<GithubReviewComment> {
+  return (await replyGithubReviewThread({ client, path: { ...path(workspaceId, ref), thread_id: threadId }, body: { body }, throwOnError: true })).data
+}
+
+export async function deleteComment(client: OrbitClient, workspaceId: string, ref: PullRef, commentId: string): Promise<void> {
+  await deleteGithubReviewComment({ client, path: { ...path(workspaceId, ref), comment_id: commentId }, throwOnError: true })
+}
+
+export async function setResolved(client: OrbitClient, workspaceId: string, ref: PullRef, threadId: string, resolved: boolean): Promise<GithubReviewThread> {
+  const options = { client, path: { ...path(workspaceId, ref), thread_id: threadId }, throwOnError: true } as const
+  return (await (resolved ? resolveGithubReviewThread(options) : unresolveGithubReviewThread(options))).data
+}
+
+export async function submitReview(client: OrbitClient, workspaceId: string, ref: PullRef, review: GithubSubmitReview): Promise<void> {
+  await submitGithubReview({ client, path: path(workspaceId, ref), body: review, throwOnError: true })
+}
+
+export async function discardReview(client: OrbitClient, workspaceId: string, ref: PullRef): Promise<void> {
+  await discardGithubReview({ client, path: path(workspaceId, ref), throwOnError: true })
+}
+
+export async function merge(client: OrbitClient, workspaceId: string, ref: PullRef, body: GithubMergePull): Promise<GithubMergeResult> {
+  return (await mergeGithubPull({ client, path: path(workspaceId, ref), body, throwOnError: true })).data
+}
+
+export async function deleteBranch(client: OrbitClient, workspaceId: string, ref: PullRef): Promise<void> {
+  await deleteGithubPullBranch({ client, path: path(workspaceId, ref), throwOnError: true })
+}
+
+/** GitHub's own words when it refuses, or `fallback`. */
+export function githubMessage(error: unknown, fallback: string): string {
+  return error instanceof ApiProblem && error.problem.detail ? error.problem.detail : fallback
 }

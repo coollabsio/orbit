@@ -93,3 +93,16 @@ export function mergeDisabledReason(pull: PullForMerge): string | null {
 export function squashDefaults(pull: Pick<PullForMerge, 'title' | 'number' | 'body'>): { title: string; message: string } {
   return { title: `${pull.title} (#${pull.number})`, message: pull.body }
 }
+
+const draftPrefix = (workspaceId: string, ref: PullRef) => `orbit:pulls:draft:${workspaceId}:${ref.owner}/${ref.repo}#${ref.number}`
+const lineKey = (side: 'LEFT' | 'RIGHT', line: number) => `${side[0]}${line}`
+
+/** Where a comment draft is kept: one key for each pull request, file and line range. */
+export function draftKey(workspaceId: string, ref: PullRef, target: CommentTarget): string {
+  const range = target.start_line != null && target.start_side ? `${lineKey(target.start_side, target.start_line)}-${lineKey(target.side, target.line)}` : lineKey(target.side, target.line)
+  return `${draftPrefix(workspaceId, ref)}:${target.path}:${range}`
+}
+
+export function replyDraftKey(workspaceId: string, ref: PullRef, threadId: string): string {
+  return `${draftPrefix(workspaceId, ref)}:reply:${threadId}`
+}

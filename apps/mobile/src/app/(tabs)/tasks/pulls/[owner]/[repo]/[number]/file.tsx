@@ -1,17 +1,19 @@
-import { toGitPatch } from '@orbit/api/github'
+import { type CommentTarget, toGitPatch } from '@orbit/api/github'
 import { openURL } from 'expo-linking'
 import { router, useLocalSearchParams } from 'expo-router'
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { View } from 'react-native'
 
 import { PullDiffView } from '../../../../../../../components/pulls/PullDiffView'
+import { CommentSheet, ThreadSheet } from '../../../../../../../components/pulls/PullSheets'
 import { usePull, usePullFiles, usePullThreads } from '../../../../../../../hooks/pulls'
 import { useTheme } from '../../../../../../../theme'
 import { Button, IconButton, LoadingView, PaneHeader, SafeAreaView, Text } from '../../../../../../../ui'
 
-/** One file's diff (unified: a phone is too narrow for split). Lines and threads open native sheets (plan 3). */
+/** One file's diff (unified: a phone is too narrow for split). A line or a range opens the comment sheet, a thread
+ *  its own sheet; `thread` (from a notification) opens that thread. */
 export default function PullFileScreen() {
-  const params = useLocalSearchParams<{ owner: string; repo: string; number: string; path: string }>()
+  const params = useLocalSearchParams<{ owner: string; repo: string; number: string; path: string; thread?: string }>()
   const ref = useMemo(() => ({ owner: params.owner, repo: params.repo, number: Number(params.number) }), [params.owner, params.repo, params.number])
   const { colors } = useTheme()
   const pull = usePull(ref)
@@ -20,6 +22,10 @@ export default function PullFileScreen() {
   const file = files.data?.find((item) => item.path === params.path)
   const patch = file ? toGitPatch(file) : null
   const name = params.path.slice(params.path.lastIndexOf('/') + 1)
+  const [target, setTarget] = useState<CommentTarget | null>(null)
+  const [threadId, setThreadId] = useState<string | null>(params.thread ?? null)
+  const thread = threads.data?.threads.find((item) => item.id === threadId) ?? null
+  const canComment = pull.data?.viewer.can_comment ?? false
   return (
     <SafeAreaView edges={['top', 'left', 'right']} className="flex-1 bg-background">
       <PaneHeader className="min-h-12 px-3">
@@ -45,8 +51,10 @@ export default function PullFileScreen() {
           <Button label="Open on GitHub" variant="outline" onPress={() => void openURL(`${pull.data!.html_url}/files`)} />
         </View>
       ) : (
-        <PullDiffView path={file.path} patch={patch} threads={threads.data?.threads ?? []} onThreadPress={() => {}} onLinesSelected={() => {}} />
+        <PullDiffView path={file.path} patch={patch} threads={threads.data?.threads ?? []} onThreadPress={setThreadId} onLinesSelected={(selected) => { if (canComment) setTarget(selected) }} />
       )}
+    <CommentSheet pullRef={ref} target={target} onClose={() => setTarget(null)} />
+      <ThreadSheet pullRef={ref} thread={thread} onClose={() => setThreadId(null)} />
     </SafeAreaView>
   )
 }

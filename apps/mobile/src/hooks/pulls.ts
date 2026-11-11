@@ -1,6 +1,6 @@
 /** Pull request queries and writes, over `data/pulls-api.ts`. */
-import type { GithubPullFile } from '@orbit/api/generated/types.gen'
-import type { PullRef } from '@orbit/api/github'
+import type { GithubMergePull, GithubPullFile, GithubSubmitReview } from '@orbit/api/generated/types.gen'
+import type { CommentTarget, PullRef } from '@orbit/api/github'
 import { ApiProblem } from '@orbit/api/problem'
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
@@ -64,4 +64,59 @@ export function useSetViewed(ref: PullRef) {
 export function useTaskGithubLinks(taskId: string) {
   const { client, workspaceId } = useOrbit()
   return useQuery({ queryKey: api.pullKeys.taskLinks(workspaceId, taskId), queryFn: () => api.taskGithubLinks(client, workspaceId, taskId) })
+}
+
+/** Writes that change the threads (and the pending count): they refresh them from GitHub. */
+function useThreadWrite<V, R>(ref: PullRef, write: (variables: V) => Promise<R>) {
+  const { workspaceId } = useOrbit()
+  const queryClient = useQueryClient()
+  return useMutation({ mutationFn: write, onSuccess: () => void queryClient.invalidateQueries({ queryKey: api.pullKeys.threads(workspaceId, ref) }) })
+}
+
+export function useAddComment(ref: PullRef) {
+  const { client, workspaceId } = useOrbit()
+  return useThreadWrite(ref, ({ target, body, mode }: { target: CommentTarget; body: string; mode: 'pending' | 'single' }) => api.addComment(client, workspaceId, ref, target, body, mode))
+}
+
+export function useReply(ref: PullRef) {
+  const { client, workspaceId } = useOrbit()
+  return useThreadWrite(ref, ({ threadId, body }: { threadId: string; body: string }) => api.reply(client, workspaceId, ref, threadId, body))
+}
+
+export function useDeleteComment(ref: PullRef) {
+  const { client, workspaceId } = useOrbit()
+  return useThreadWrite(ref, (commentId: string) => api.deleteComment(client, workspaceId, ref, commentId))
+}
+
+export function useResolveThread(ref: PullRef) {
+  const { client, workspaceId } = useOrbit()
+  return useThreadWrite(ref, ({ threadId, resolved }: { threadId: string; resolved: boolean }) => api.setResolved(client, workspaceId, ref, threadId, resolved))
+}
+
+export function useSubmitReview(ref: PullRef) {
+  const { client, workspaceId } = useOrbit()
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (review: GithubSubmitReview) => api.submitReview(client, workspaceId, ref, review),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: api.pullKeys.pull(workspaceId, ref) }),
+  })
+}
+
+export function useDiscardReview(ref: PullRef) {
+  const { client, workspaceId } = useOrbit()
+  return useThreadWrite(ref, () => api.discardReview(client, workspaceId, ref))
+}
+
+export function useMerge(ref: PullRef) {
+  const { client, workspaceId } = useOrbit()
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: GithubMergePull) => api.merge(client, workspaceId, ref, body),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: api.pullKeys.pull(workspaceId, ref) }),
+  })
+}
+
+export function useDeleteBranch(ref: PullRef) {
+  const { client, workspaceId } = useOrbit()
+  return useMutation({ mutationFn: () => api.deleteBranch(client, workspaceId, ref) })
 }
