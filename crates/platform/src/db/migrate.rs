@@ -627,12 +627,17 @@ impl MigrationRunner {
                 ),
                 Migration::new(
                     96,
-                    include_str!("../../../../apps/server/migrations/0096_owner_trials.sql"),
+                    include_str!("../../../../apps/server/migrations/0096_chat_thread_unreads.sql"),
                     false,
                 ),
                 Migration::new(
                     97,
-                    include_str!("../../../../apps/server/migrations/0097_used_trials.sql"),
+                    include_str!("../../../../apps/server/migrations/0097_owner_trials.sql"),
+                    false,
+                ),
+                Migration::new(
+                    98,
+                    include_str!("../../../../apps/server/migrations/0098_used_trials.sql"),
                     false,
                 ),
             ],
@@ -940,12 +945,19 @@ impl MigrationRunner {
             ),
             Migration::new(
                 96,
-                include_str!("../../../../apps/server/migrations/postgres/0096_owner_trials.sql"),
+                include_str!(
+                    "../../../../apps/server/migrations/postgres/0096_chat_thread_unreads.sql"
+                ),
                 false,
             ),
             Migration::new(
                 97,
-                include_str!("../../../../apps/server/migrations/postgres/0097_used_trials.sql"),
+                include_str!("../../../../apps/server/migrations/postgres/0097_owner_trials.sql"),
+                false,
+            ),
+            Migration::new(
+                98,
+                include_str!("../../../../apps/server/migrations/postgres/0098_used_trials.sql"),
                 false,
             ),
         ];

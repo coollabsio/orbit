@@ -93,6 +93,8 @@ export interface ChatClient {
   listThreads(conversationId: string): Promise<Message[]>
   /** Unread first, then newest reply first. */
   listFollowedThreads(): Promise<FollowedThread[]>
+  /** Threads with unread replies, followed or not, in joined conversations that are not muted. Newest reply first. */
+  listUnreadThreads(): Promise<FollowedThread[]>
   listPins(conversationId: string): Promise<Message[]>
   /** Messages that have attachments, newest first. */
   listFiles(conversationId: string): Promise<Message[]>

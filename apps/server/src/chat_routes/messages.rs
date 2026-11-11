@@ -358,6 +358,25 @@ pub(crate) async fn list_followed_chat_threads(
     )
 }
 
+/// The threads with unread replies, followed or not, in the conversations the caller is a member
+/// of and has not muted: newest reply first (at most 200). The Unreads view lists them.
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/chat/unread-threads", params(("workspace_id" = String, Path)), responses((status = 200, body = Vec<FollowedThreadRecord>)))]
+pub(crate) async fn list_unread_chat_threads(
+    State(state): State<ChatState>,
+    Path(workspace): Path<String>,
+    headers: HeaderMap,
+    uri: Uri,
+    request_id: RequestIdExtension,
+) -> Result<Json<Vec<FollowedThreadRecord>>, ApiError> {
+    let call = Call::enter(&state, &headers, &uri, &workspace, &request_id).await?;
+    call.read(
+        state
+            .chat
+            .list_unread_threads(call.workspace_id, call.actor_id)
+            .await,
+    )
+}
+
 /// A root message, a page of its replies and the caller's state in the thread.
 #[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/chat/threads/{root_id}", params(ChatMessageQuery, ("workspace_id" = String, Path), ("root_id" = String, Path)), responses((status = 200, body = ThreadPage)))]
 pub(crate) async fn get_chat_thread(

@@ -623,7 +623,12 @@ turns its routes, navigation and shortcuts off.
   group), shared categories, personal favorites. `#general` has every member.
 - Threads are the only reply model (side pane and full view), with follow state for each member.
 - Reactions, pins, files, mentions (`@user`, `@channel`, `@here`, `#channel`), search, the
-  Unreads and Threads views, a notify level for each conversation.
+  Unreads and Threads views, a notify level for each conversation. Unreads also has a group for each thread with
+  unread replies, followed or not, in a joined conversation that is not muted (`GET …/chat/unread-threads`,
+  `unreadGroups` in `lib/sidebar.ts`). Following only decides notifications and the Threads view. In a thread with no
+  `chat_thread_members` row, the replies after the later of `chat_members.joined_at` and `threads_read_to` (migration
+  0094: the newest message at upgrade) are unread; reading the thread or "Mark all as read" writes a row that does not
+  follow. A reply also sent to the channel shows in the channel's group only.
 - Unread and mention counts come from the server (counters, not count queries).
 - Live updates, typing and presence come over the workspace's live socket
   (`GET /api/v1/workspaces/{id}/live`).
