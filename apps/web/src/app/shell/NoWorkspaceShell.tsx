@@ -52,7 +52,7 @@ export function NoWorkspaceShell() {
         <MenuSurfaceContext value={menuSurface}>
           {/* the workspace switcher's look, with Orbit in place of a workspace name */}
           <div className="mb-2 flex h-12 shrink-0 items-center px-1.5">
-            <Link to={home} className="truncate text-[17px] font-bold tracking-[-0.02em] text-foreground">Orbit</Link>
+            <Link to={home} className="truncate text-[1.0625rem] font-bold tracking-[-0.02em] text-foreground">Orbit</Link>
           </div>
           {createWorkspace}
           {links}
@@ -68,7 +68,7 @@ export function NoWorkspaceShell() {
             <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted">
               <img src="/logo.svg" alt="" className="size-[18px]" />
             </span>
-            <span className="truncate text-[13px] font-semibold text-foreground">Orbit</span>
+            <span className="truncate text-[0.8125rem] font-semibold text-foreground">Orbit</span>
           </Link>
           <div className="flex shrink-0 items-center gap-1">
             <UserMenu topbar />

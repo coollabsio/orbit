@@ -107,7 +107,7 @@ function Devices() {
         <SettingsRow key={device.id} className="flex-nowrap">
           <RowIcon>{/Android|iOS|iPadOS/.test(device.label) ? <Smartphone /> : <Monitor />}</RowIcon>
           <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-            <span className="flex items-center gap-2 text-[13px] font-medium text-foreground">
+            <span className="flex items-center gap-2 text-[0.8125rem] font-medium text-foreground">
               <span className="truncate">{device.label}</span>
               {device.endpoint === endpoint.data ? <Badge>This device</Badge> : null}
             </span>

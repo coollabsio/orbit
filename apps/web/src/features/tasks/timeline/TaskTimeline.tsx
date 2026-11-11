@@ -320,7 +320,7 @@ export function TaskTimeline({ tasks, projects, statuses, users, groupBy, proper
                   <div aria-hidden="true" className="pointer-events-none absolute top-1 h-6 rounded-md border border-dashed border-primary/50 bg-primary/10" style={{ left: ghost.day * pxPerDay, width: pxPerDay }} />
                 ) : null}
                 {live && span ? (
-                  <span className="pointer-events-none absolute -top-5 z-30 rounded bg-popover px-1.5 text-[11px] leading-5 whitespace-nowrap text-popover-foreground shadow-md tabular-nums" style={{ left: xOf(range, span.start, pxPerDay) }}>
+                  <span className="pointer-events-none absolute -top-5 z-30 rounded bg-popover px-1.5 text-[0.6875rem] leading-5 whitespace-nowrap text-popover-foreground shadow-md tabular-nums" style={{ left: xOf(range, span.start, pxPerDay) }}>
                     {spanLabel(span)}
                   </span>
                 ) : null}

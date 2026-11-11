@@ -31,7 +31,7 @@ export function GuestChannelsField({ value, onChange }: { value: readonly string
         <ul aria-labelledby="guest-channels-label" className="flex max-h-48 flex-col gap-px overflow-y-auto rounded-md border p-1">
           {channels.map((channel) => (
             <li key={channel.id}>
-              <label className="flex h-8 cursor-pointer items-center gap-2 rounded-sm px-2 text-[13px] hover:bg-muted">
+              <label className="flex h-8 cursor-pointer items-center gap-2 rounded-sm px-2 text-[0.8125rem] hover:bg-muted">
                 <Checkbox checked={value.includes(channel.id)} onCheckedChange={(checked) => toggle(channel.id, checked)} />
                 <Hashtag className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
                 <span className="truncate">{channel.name}</span>

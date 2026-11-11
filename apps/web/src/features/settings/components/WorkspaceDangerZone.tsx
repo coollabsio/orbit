@@ -49,14 +49,14 @@ export function WorkspaceDangerZone() {
     {open ? (
       <Modal title="Delete workspace?" description={`Deleting "${workspace.name}" removes access to its projects and tasks for everyone.`} onClose={() => setOpen(false)} dismissible={!deletion.isPending} className="sm:max-w-120">
         <form onSubmit={(event) => { event.preventDefault(); void deleteConfirmed() }}>
-          {workspaces.length === 1 ? <p className="my-3 text-[13px] text-destructive">This is your last workspace. After deletion, you will have no workspace access.</p> : null}
-          {subscribed ? <p className="my-3 text-[13px] text-destructive">Deleting cancels the subscription at once, with no refund for the rest of the billing period. The workspace stays in the trash for 30 days; restoring it does not restore the subscription.</p> : null}
+          {workspaces.length === 1 ? <p className="my-3 text-[0.8125rem] text-destructive">This is your last workspace. After deletion, you will have no workspace access.</p> : null}
+          {subscribed ? <p className="my-3 text-[0.8125rem] text-destructive">Deleting cancels the subscription at once, with no refund for the rest of the billing period. The workspace stays in the trash for 30 days; restoring it does not restore the subscription.</p> : null}
           <Field>
             <FieldLabel htmlFor={inputId}>Confirm workspace name</FieldLabel>
             <FieldDescription>Type <strong>{workspace.name}</strong> to confirm deletion.</FieldDescription>
             <Input id={inputId} autoComplete="off" required value={confirmation} readOnly={deletion.isPending} onChange={(event) => setConfirmation(event.target.value)} />
           </Field>
-          {deletion.isError ? <p role="alert" className="my-3 text-[13px] text-destructive">Workspace deletion failed. Try again, or refresh the page if the workspace has changed.</p> : null}
+          {deletion.isError ? <p role="alert" className="my-3 text-[0.8125rem] text-destructive">Workspace deletion failed. Try again, or refresh the page if the workspace has changed.</p> : null}
           <DialogFooter className="mt-4">
             <DialogClose render={<Button type="button" variant="ghost" disabled={deletion.isPending} />}>Cancel</DialogClose>
             <Button type="submit" variant="destructive" className="aria-disabled:cursor-not-allowed aria-disabled:opacity-50" disabled={confirmation !== workspace.name} aria-disabled={deletion.isPending || undefined}>{deletion.isPending ? 'Deleting…' : 'Delete workspace'}</Button>

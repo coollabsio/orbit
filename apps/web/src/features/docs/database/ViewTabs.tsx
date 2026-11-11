@@ -191,7 +191,7 @@ function ViewKindGrid({ onPick }: { onPick: (type: DatabaseView['type'], name: s
             <Icon className="size-5" aria-hidden="true" />
             <span className="text-center leading-tight">
               {kind.label}
-              {kind.type === null ? <span className="block text-[10px] text-muted-foreground/70">Soon</span> : null}
+              {kind.type === null ? <span className="block text-[0.625rem] text-muted-foreground/70">Soon</span> : null}
             </span>
           </button>
         )

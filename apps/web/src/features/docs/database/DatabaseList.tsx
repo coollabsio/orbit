@@ -151,7 +151,7 @@ function ListLine({ row, title, properties, draggable, dragging, drop, onOpen, o
     >
       <div className="flex min-w-0 flex-1">{title ? <CellView property={title} row={row} width={PROPERTY_WIDTH * 2} wrap={false} /> : null}</div>
       {filled.length > 0 ? (
-        <div className="flex min-w-0 shrink items-center justify-end gap-3 overflow-hidden text-[13px] text-muted-foreground">
+        <div className="flex min-w-0 shrink items-center justify-end gap-3 overflow-hidden text-[0.8125rem] text-muted-foreground">
           {filled.map((property) => (
             <div key={property.id} className="flex max-w-60 min-w-0 shrink-0 items-center" title={property.name}>
               <CellView property={property} row={row} width={PROPERTY_WIDTH} wrap={false} />

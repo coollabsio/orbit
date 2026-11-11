@@ -57,7 +57,7 @@ export function EmailChangeDialog({ currentEmail, hasPassword, onClose }: { curr
             </Field>
             <CurrentPassword returnTo="/profile" autoFocus={false} hasPassword={hasPassword} value={password} onChange={setPassword} error={place === 'password' ? request.error : null} fallback="The email could not be changed." />
           </FieldGroup>
-          {place === 'form' ? <p role="alert" className="text-[13px] text-destructive">{detail}</p> : null}
+          {place === 'form' ? <p role="alert" className="text-[0.8125rem] text-destructive">{detail}</p> : null}
           <DialogFooter>
             <DialogClose render={<Button type="button" variant="ghost" disabled={request.isPending} />}>Cancel</DialogClose>
             <Button type="submit" disabled={request.isPending || !email.trim() || (hasPassword && !password)}>{request.isPending ? 'Sending…' : 'Send link'}</Button>

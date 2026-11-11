@@ -359,7 +359,7 @@ function ResultStep({ workspaceId, item }: { workspaceId: string; item: Obsidian
             <ul className="flex flex-col border-t border-border">
               {report.failures.map((failure) => (
                 <li key={failure.path} className="flex flex-col gap-0.5 border-b border-border px-1 py-2">
-                  <span className="text-[13px] text-foreground">{failure.title.trim() ? failure.title : failure.path}</span>
+                  <span className="text-[0.8125rem] text-foreground">{failure.title.trim() ? failure.title : failure.path}</span>
                   <span className="text-xs text-muted-foreground">{failure.error}</span>
                 </li>
               ))}

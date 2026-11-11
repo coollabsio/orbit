@@ -44,7 +44,7 @@ export function InboxPage() {
       <Pane>
         <PaneHeader>
           <PaneTitle>Activity</PaneTitle>
-          {unreadCount > 0 ? <Badge className="h-4 min-w-4 px-1 text-[10px] tabular-nums">{unreadCount}</Badge> : null}
+          {unreadCount > 0 ? <Badge className="h-4 min-w-4 px-1 text-[0.625rem] tabular-nums">{unreadCount}</Badge> : null}
           <span className="flex-1" />
           <Button
             variant="ghost"
@@ -61,7 +61,7 @@ export function InboxPage() {
               <TabsTrigger
                 key={item}
                 value={item}
-                className="h-7 flex-none px-2.5 text-[13px]"
+                className="h-7 flex-none px-2.5 text-[0.8125rem]"
               >
                 {item === 'all' ? 'All' : item === 'unread' ? 'Unread' : 'Mentions'}
               </TabsTrigger>

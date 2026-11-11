@@ -15,7 +15,7 @@ export function EphemeralMessages({ conversationId }: { conversationId: string }
   return (
     <div data-slot="ephemeral-messages" className="grid max-h-[40vh] gap-1 overflow-y-auto px-4 pb-2 max-[899px]:px-3">
       {messages.map((message) => (
-        <div key={message.id} data-slot="ephemeral-message" className="flex gap-3 rounded-lg bg-muted/50 px-3 py-2 text-[15px] max-[899px]:text-sm">
+        <div key={message.id} data-slot="ephemeral-message" className="flex gap-3 rounded-lg bg-muted/50 px-3 py-2 text-[0.9375rem] max-[899px]:text-sm">
           {message.bot ? <BotAvatar bot={message.bot} size={32} /> : null}
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">

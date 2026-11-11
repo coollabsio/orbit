@@ -259,7 +259,7 @@ function SubIssueComposer({ inputRef, parent, siblings, statuses, currentUserId,
           onClose()
         }}
         // borderless: the form row carries the fill and the focus ring
-        className="h-8 min-w-0 flex-1 rounded-none border-0 bg-transparent px-0 text-[13px] focus-visible:ring-0 md:text-[13px] dark:bg-transparent"
+        className="h-8 min-w-0 flex-1 rounded-none border-0 bg-transparent px-0 text-[0.8125rem] focus-visible:ring-0 md:text-[0.8125rem] dark:bg-transparent"
       />
       {createTask.isError ? <span role="alert" className="shrink-0 text-xs text-destructive">Couldn’t create the sub-issue.</span> : null}
     </form>

@@ -100,7 +100,7 @@ export function ThreadHeader({
         <ArrowLeft className="size-5" />
       </Button>
       <Breadcrumb className="min-w-0 flex-1">
-        <BreadcrumbList className="flex-nowrap text-[13px]">
+        <BreadcrumbList className="flex-nowrap text-[0.8125rem]">
           <BreadcrumbItem className="shrink-0">
             {/* The channel crumb opens the channel at the root message. */}
             <BreadcrumbLink

@@ -26,7 +26,7 @@ function RegistrationCard({ open, emailReady, locked }: { open: boolean; emailRe
   return (
     <SettingsCard title="Registration" description="Who can create an account on this Orbit." flush>
       <SettingsRow className="flex-nowrap">
-        <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-[13px]">
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-[0.8125rem]">
           {emailReady
             ? <span className="inline-flex items-center gap-1.5 font-medium text-foreground">Open registration <InfoTip text="On: anyone can create an account with a link sent to their email. Off: people join only by invitation." /></span>
             : <span className="font-medium text-foreground">Open registration</span>}

@@ -38,7 +38,7 @@ export function ExportPage() {
       }
       flush
     >
-      <div className="flex flex-col divide-y text-[13px]">
+      <div className="flex flex-col divide-y text-[0.8125rem]">
         {exports.isError ? <SettingsRow role="alert">Exports could not be loaded. <Button variant="ghost" onClick={() => void exports.refetch()}>Retry</Button></SettingsRow> : null}
         {exports.data?.length === 0 ? <SettingsRow className="text-muted-foreground">No exports yet.</SettingsRow> : null}
         {exports.data?.map((item) => <ExportRow key={item.id} workspaceId={workspace.id} item={item} />)}

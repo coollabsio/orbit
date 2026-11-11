@@ -177,7 +177,7 @@ export function TaskBoard({ tasks, users, labels, statuses, projects, display, g
       >
         {/* status · id · blocked … [set due date] · assignees · priority (status, due date, assignees and priority change in place) */}
         {showTop ? (
-          <div className="flex min-h-5 items-center justify-between gap-2 text-[11px] text-muted-foreground/70">
+          <div className="flex min-h-5 items-center justify-between gap-2 text-[0.6875rem] text-muted-foreground/70">
             <span className="flex min-w-0 items-center gap-1">
               {has('status') ? <StatusPicker task={task} statuses={statuses} size={12} className="-m-1 size-5" onRequestDuplicate={() => setDuplicateTask(task)} /> : null}
               {has('id') ? <span className="whitespace-nowrap tabular-nums">{task.identifier}</span> : null}
@@ -202,7 +202,7 @@ export function TaskBoard({ tasks, users, labels, statuses, projects, display, g
           <Button
             type="button"
             variant="link"
-            className="-mb-1 h-auto max-w-full min-w-0 shrink gap-1 self-start p-0 text-[11px] font-normal text-muted-foreground hover:text-foreground"
+            className="-mb-1 h-auto max-w-full min-w-0 shrink gap-1 self-start p-0 text-[0.6875rem] font-normal text-muted-foreground hover:text-foreground"
             onClick={(event) => {
               event.stopPropagation()
               onOpen(task.parent!.id)
@@ -212,14 +212,14 @@ export function TaskBoard({ tasks, users, labels, statuses, projects, display, g
             <span aria-hidden className="shrink-0 text-muted-foreground/50">›</span>
           </Button>
         ) : null}
-        <h3 className="text-[13px] leading-[18px] font-medium text-foreground">{task.title || 'Untitled'}</h3>
+        <h3 className="text-[0.8125rem] leading-[1.125rem] font-medium text-foreground">{task.title || 'Untitled'}</h3>
         {cardLabels.length > 0 ? (
           <div className="flex flex-wrap gap-1">
             {cardLabels.map((label) => <LabelPill key={label.id} label={label} />)}
           </div>
         ) : null}
         {showMeta ? (
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground/70">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[0.6875rem] text-muted-foreground/70">
             {showProgress ? <SubIssueProgress closed={task.subIssueClosedCount ?? 0} total={task.subIssueCount ?? 0} color={completedStatusColor(statuses, task.projectId)} /> : null}
             {has('project') ? <ProjectChip project={projectById.get(task.projectId)} /> : null}
             {showDue ? <DueDatePicker task={task} status={status} /> : null}

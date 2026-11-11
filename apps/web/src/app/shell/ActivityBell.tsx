@@ -115,7 +115,7 @@ function ActivityPanel({ onNavigate }: { onNavigate: () => void }) {
     <>
       <div className="flex h-11 shrink-0 items-center gap-2 pr-2 pl-3">
         <PopoverTitle className="text-sm">Activity</PopoverTitle>
-        {unreadCount > 0 ? <Badge className="h-4 min-w-4 px-1 text-[10px] tabular-nums">{countLabel}</Badge> : null}
+        {unreadCount > 0 ? <Badge className="h-4 min-w-4 px-1 text-[0.625rem] tabular-nums">{countLabel}</Badge> : null}
         <span className="flex-1" />
         <Button variant="ghost" size="xs" type="button" disabled={unreadCount === 0 || markAll.isPending} onClick={() => markAll.mutate()}>
           {marking ? 'Marking…' : 'Mark all read'}
@@ -123,8 +123,8 @@ function ActivityPanel({ onNavigate }: { onNavigate: () => void }) {
       </div>
       <Tabs className="shrink-0 gap-0" value={tab} onValueChange={(value) => setTab(value as PanelTab)}>
         <TabsList variant="line" className="min-h-9 w-full justify-start gap-1 border-b px-2 group-data-horizontal/tabs:h-auto">
-          <TabsTrigger value="all" className="h-7 flex-none px-2 text-[13px]">All</TabsTrigger>
-          <TabsTrigger value="unread" className="h-7 flex-none gap-1.5 px-2 text-[13px]">
+          <TabsTrigger value="all" className="h-7 flex-none px-2 text-[0.8125rem]">All</TabsTrigger>
+          <TabsTrigger value="unread" className="h-7 flex-none gap-1.5 px-2 text-[0.8125rem]">
             Unread
             {unreadCount > 0 ? <span className="text-xs text-muted-foreground tabular-nums">{countLabel}</span> : null}
           </TabsTrigger>
@@ -166,7 +166,7 @@ function ActivityPanel({ onNavigate }: { onNavigate: () => void }) {
       <Link
         to={pagePath}
         onClick={onNavigate}
-        className="group/all flex h-10 shrink-0 items-center gap-1.5 border-t px-3 text-[13px] text-muted-foreground transition-colors outline-none hover:bg-muted hover:text-foreground focus-visible:bg-muted focus-visible:text-foreground"
+        className="group/all flex h-10 shrink-0 items-center gap-1.5 border-t px-3 text-[0.8125rem] text-muted-foreground transition-colors outline-none hover:bg-muted hover:text-foreground focus-visible:bg-muted focus-visible:text-foreground"
       >
         View all activity
         <ArrowRight className="size-3.5 transition-transform duration-150 ease-out group-hover/all:translate-x-0.5 motion-reduce:transition-none" />

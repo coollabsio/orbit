@@ -117,10 +117,10 @@ function SourcePreview({ editor, id, language }: { editor: CodeBlockEditor; id: 
             className="transition-opacity duration-150 focus-within:opacity-100 hover-fine:opacity-0 hover-fine:group-hover:opacity-100"
           >
             <TabsList className="group-data-horizontal/tabs:h-7">
-              <TabsTrigger value="edit" className="px-2 text-[11px]">
+              <TabsTrigger value="edit" className="px-2 text-[0.6875rem]">
                 Edit
               </TabsTrigger>
-              <TabsTrigger value="view" className="px-2 text-[11px]">
+              <TabsTrigger value="view" className="px-2 text-[0.6875rem]">
                 View
               </TabsTrigger>
             </TabsList>

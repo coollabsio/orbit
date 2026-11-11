@@ -30,11 +30,11 @@ export function MessagePreview({ message, people, clamp = false, className }: { 
         <div className="flex items-baseline gap-2">
           {bot ? (
             <>
-              <span className="truncate text-[13px] font-semibold text-foreground">{bot.name}</span>
+              <span className="truncate text-[0.8125rem] font-semibold text-foreground">{bot.name}</span>
               <BotBadge />
             </>
           ) : (
-            <ProfileTrigger userId={clamp ? null : author?.id} name={author?.name ?? 'Unknown'} className="truncate text-[13px] font-semibold text-foreground">
+            <ProfileTrigger userId={clamp ? null : author?.id} name={author?.name ?? 'Unknown'} className="truncate text-[0.8125rem] font-semibold text-foreground">
               {author?.name ?? 'Unknown'}
             </ProfileTrigger>
           )}
@@ -43,9 +43,9 @@ export function MessagePreview({ message, people, clamp = false, className }: { 
           </time>
         </div>
         {message.deleted ? (
-          <p className="text-[13px] text-muted-foreground italic">This message was deleted</p>
+          <p className="text-[0.8125rem] text-muted-foreground italic">This message was deleted</p>
         ) : (
-          <div className="min-w-0 text-[13px] in-data-clamp:max-h-10 in-data-clamp:overflow-hidden max-[899px]:text-sm">
+          <div className="min-w-0 text-[0.8125rem] in-data-clamp:max-h-10 in-data-clamp:overflow-hidden max-[899px]:text-sm">
             <MessageBody message={message} />
           </div>
         )}

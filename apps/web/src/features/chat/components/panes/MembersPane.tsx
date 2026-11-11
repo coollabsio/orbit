@@ -95,7 +95,7 @@ export function MembersPane({ conversationId }: { conversationId: string }) {
                       <Tip label={person.id === currentUserId ? 'Message yourself' : `Message ${person.name}`}>
                         <Button
                           variant="ghost"
-                          className="h-[42px] min-w-0 flex-1 justify-start gap-3 px-2 text-[15px] font-medium text-muted-foreground group-focus-within:text-foreground hover:bg-transparent hover-fine:group-hover:text-foreground dark:hover:bg-transparent"
+                          className="h-[42px] min-w-0 flex-1 justify-start gap-3 px-2 text-[0.9375rem] font-medium text-muted-foreground group-focus-within:text-foreground hover:bg-transparent hover-fine:group-hover:text-foreground dark:hover:bg-transparent"
                           onClick={() => message(person)}
                         >
                           <UserAvatar user={person} size={32} status={shown.status} />

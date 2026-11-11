@@ -21,7 +21,7 @@ function PresenceAvatar({ person }: { person: Collaborator }) {
       }}
     >
       {person.avatarUrl ? <AvatarImage src={person.avatarUrl} alt="" /> : null}
-      <AvatarFallback className="text-[10px] font-semibold" style={{ backgroundColor: person.color, color: inkOn(person.color) }}>
+      <AvatarFallback className="text-[0.625rem] font-semibold" style={{ backgroundColor: person.color, color: inkOn(person.color) }}>
         {initials(person.name) || '?'}
       </AvatarFallback>
     </Avatar>
@@ -74,7 +74,7 @@ export function PresenceAvatars({
           <TooltipTrigger
             render={
               <AvatarGroupCount
-                className="size-6 text-[10px] font-semibold"
+                className="size-6 text-[0.625rem] font-semibold"
                 aria-label={`${rest.length} more: ${rest.map((person) => person.name).join(', ')}`}
                 tabIndex={0}
               />
