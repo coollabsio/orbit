@@ -123,7 +123,10 @@ async fn postgres_restore_replaces_the_database_and_attachments() {
     assert_eq!(initialized, 1);
     let migrations: i64 = fixture
         .database
-        .scalar("SELECT COUNT(*) FROM schema_migrations WHERE version = 98")
+        .scalar(&format!(
+            "SELECT COUNT(*) FROM schema_migrations WHERE version = {}",
+            MigrationRunner::embedded(env!("CARGO_PKG_VERSION")).latest_version()
+        ))
         .await
         .unwrap();
     assert_eq!(migrations, 1);
@@ -230,7 +233,10 @@ async fn snapshot_manifest_checksums_the_database_and_attachment() {
     let snapshot = fixture.service.create(&fixture.database).await.unwrap();
 
     assert_eq!(snapshot.manifest.kind, BackupKind::Snapshot);
-    assert_eq!(snapshot.manifest.schema_version, 98);
+    assert_eq!(
+        snapshot.manifest.schema_version,
+        MigrationRunner::embedded(env!("CARGO_PKG_VERSION")).latest_version()
+    );
     assert_eq!(
         snapshot.manifest.application_version,
         env!("CARGO_PKG_VERSION")
@@ -279,7 +285,7 @@ async fn verify_and_restore_reject_a_newer_schema_before_touching_the_target() {
     let fixture = Fixture::new().await;
     let snapshot = fixture.service.create(&fixture.database).await.unwrap();
     let mut manifest = snapshot.manifest;
-    manifest.schema_version = 999;
+    manifest.schema_version = 99_999_999_999_999;
     fs::write(
         snapshot.path.join("manifest.json"),
         serde_json::to_vec(&manifest).unwrap(),
