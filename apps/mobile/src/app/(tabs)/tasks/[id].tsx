@@ -750,7 +750,7 @@ function CommentComposer({
   const mention = useMentionField({ text: value, setText: onChangeText, people: mentionPeople.filter((person) => seesProject(person.id)), tasks: true })
   return (
     <View className={`mt-3 rounded-lg border bg-card/50 ${focused ? 'border-ring/50' : 'border-border'}`}>
-      <MentionSuggestions suggestions={mention.suggestions} onPick={mention.pick} />
+      <MentionSuggestions suggestions={mention.suggestions} onPick={mention.pick} loading={mention.searchingTasks} />
       <TextInput
         {...mention.inputProps}
         value={value}

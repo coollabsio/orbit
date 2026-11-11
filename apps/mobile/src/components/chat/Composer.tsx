@@ -250,7 +250,7 @@ export function Composer({ state, placeholder, nameOf, alsoSendTo }: { state: Co
             ))}
           </ScrollView>
         ) : null}
-        <MentionSuggestions suggestions={mention.suggestions} onPick={mention.pick} />
+        <MentionSuggestions suggestions={mention.suggestions} onPick={mention.pick} loading={mention.searchingTasks} />
         <TextInput
           {...mention.inputProps}
           value={draft}

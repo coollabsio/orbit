@@ -65,6 +65,8 @@ export function useMentionAutocomplete<Person extends MentionPerson>(
   const tasks: MentionSuggestion[] = fresh
     ? (taskResults.data ?? []).map((task) => ({ id: `task_${task.id}`, label: task.title, username: task.identifier, task, kind: 'task' as const }))
     : []
+  // a task search is still on its way: the popup stays open (and says so) even before anything matches
+  const searchingTasks = taskQuery !== null && (!fresh || taskResults.isPending)
 
   const all: MentionSuggestion[] =
     mentionState?.trigger === '#'
@@ -84,7 +86,7 @@ export function useMentionAutocomplete<Person extends MentionPerson>(
       : all
   )
   const suggestions = mixSuggestions(matching, tasks, query)
-  const open = mentionState !== null && suggestions.length > 0
+  const open = mentionState !== null && (suggestions.length > 0 || searchingTasks)
   // task hits arrive later and can shorten the list under the highlight
   const active = Math.max(0, Math.min(activeIndex, suggestions.length - 1))
 
@@ -138,6 +140,13 @@ export function useMentionAutocomplete<Person extends MentionPerson>(
   function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>): boolean {
     // During IME composition the keys belong to the IME.
     if (!open || e.nativeEvent.isComposing) return false
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      setMentionState(null)
+      return true
+    }
+    // only "Searching tasks…" so far: the other keys keep their usual meaning
+    if (suggestions.length === 0) return false
     if (e.key === 'ArrowDown') {
       e.preventDefault()
       setActiveIndex((active + 1) % suggestions.length)
@@ -153,11 +162,6 @@ export function useMentionAutocomplete<Person extends MentionPerson>(
       insert(suggestions[active])
       return true
     }
-    if (e.key === 'Escape') {
-      e.preventDefault()
-      setMentionState(null)
-      return true
-    }
     return false
   }
 
@@ -170,6 +174,7 @@ export function useMentionAutocomplete<Person extends MentionPerson>(
     insert,
     close,
     handleKeyDown,
+    searchingTasks,
     /** "#" with nothing typed yet and tasks on offer: the popup can say how to find a task. */
     emptyTaskQuery: Boolean(taskWorkspaceId) && mentionState?.trigger === '#' && query === '',
   }

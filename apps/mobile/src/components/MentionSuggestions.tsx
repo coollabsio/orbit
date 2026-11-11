@@ -69,6 +69,8 @@ export function useMentionField({
         taskText,
       )
     : []
+  // a task search is still on its way: the list says so, also before anything matches
+  const searchingTasks = taskText !== null && (search.isPending || search.isPlaceholderData)
   const suggestions = shown ? mixSuggestions(mentionSuggestions(shown, people, channels), taskSuggestions, shown.query) : []
 
   const place = (next: { text: string; cursor: number }) => {
@@ -87,6 +89,7 @@ export function useMentionField({
       onSelectionChange: (event: TextInputSelectionChangeEvent) => setCursor(event.nativeEvent.selection.end),
     },
     suggestions,
+    searchingTasks,
     pick: (suggestion: MentionSuggestion) => {
       if (!shown) return
       const next = applyMention(text, shown, suggestion)
@@ -105,9 +108,18 @@ export function useMentionField({
  * The web's mention popup as a list above the field: people (avatar, name, handle), tasks (status, ID, title, project)
  * and channels, each under its heading.
  */
-export function MentionSuggestions({ suggestions, onPick }: { suggestions: readonly MentionSuggestion[]; onPick: (suggestion: MentionSuggestion) => void }) {
+export function MentionSuggestions({
+  suggestions,
+  onPick,
+  loading = false,
+}: {
+  suggestions: readonly MentionSuggestion[]
+  onPick: (suggestion: MentionSuggestion) => void
+  /** A task search is still running: a "Searching tasks…" line shows, also with no rows yet. */
+  loading?: boolean
+}) {
   const { colors } = useTheme()
-  if (suggestions.length === 0) return null
+  if (suggestions.length === 0 && !loading) return null
   return (
     <View className="max-h-56 border-b border-border py-1.5">
       <ScrollView keyboardShouldPersistTaps="always" nestedScrollEnabled>
@@ -164,6 +176,7 @@ export function MentionSuggestions({ suggestions, onPick }: { suggestions: reado
             </Pressable>
           </View>
         ))}
+        {loading ? <Text className="px-3 py-1.5 text-[12px] text-muted-foreground">Searching tasks…</Text> : null}
       </ScrollView>
     </View>
   )
