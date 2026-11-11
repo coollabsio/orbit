@@ -1142,10 +1142,10 @@ impl PushService {
                 url,
                 tag: format!("inbox:{id}"),
                 sound: kind.sound(),
-                icon: row
-                    .get::<String, _>("actor_user_id")
-                    .parse()
-                    .ok()
+                // A GitHub notice whose actor has no Orbit account stores the recipient as the actor: no picture then.
+                icon: Some(row.get::<String, _>("actor_user_id"))
+                    .filter(|actor| *actor != row.get::<String, _>("recipient_user_id"))
+                    .and_then(|actor| actor.parse().ok())
                     .and_then(|actor_id| avatar_url(actor_id, row.get("avatar_updated_at"))),
             };
             self.notify(user_id, kind, &notice).await?;

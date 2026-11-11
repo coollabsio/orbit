@@ -19,6 +19,13 @@ export function notificationTarget(notification: NotificationRecord): string | n
   return notification.task_id ? `/tasks/${notification.task_id}` : null
 }
 
+/** The second line of a notice (the web's `notificationLine`): the Orbit actor and the body, except for imports (the
+ *  user's own) and GitHub notices (their title names the GitHub account, which may have no Orbit account). */
+export function notificationLine(notification: NotificationRecord, body: string, actorName: string | undefined): string {
+  if (!actorName || notification.import_id || notification.kind.startsWith('github_')) return body
+  return `${actorName} · ${body}`
+}
+
 /** The Activity "Mentions" tab. */
 export const isMention = (notification: NotificationRecord) =>
   ['comment_mentioned', 'description_mentioned', 'page_comment_mentioned', 'page_mentioned', 'chat_mentioned'].includes(notification.kind)

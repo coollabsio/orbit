@@ -186,3 +186,18 @@ async fn a_push_tells_open_viewers_which_pull_request_changed() {
     let events = orbit_server::realtime::replay(&fixture.database, fixture.workspace_id, Some(0)).await.unwrap();
     assert_eq!(events.github_pulls, vec!["acme/repo#12".to_owned(), "acme/repo#13".to_owned()]);
 }
+
+#[tokio::test]
+async fn live_refresh_rows_stay_out_of_the_audit_log_and_check_runs_make_none() {
+    let (fixture, _) = setup().await;
+    let run = delivery("completed", json!({ "check_run": { "pull_requests": [{ "number": 12 }] } }));
+    assert!(fixture.webhook("check_run", "d-1", run).await.status().is_success());
+    let events = orbit_server::realtime::replay(&fixture.database, fixture.workspace_id, Some(0)).await.unwrap();
+    assert!(events.github_pulls.is_empty(), "a check run makes no live event (its check suite does)");
+    let suite = delivery("completed", json!({ "check_suite": { "pull_requests": [{ "number": 12 }] } }));
+    assert!(fixture.webhook("check_suite", "d-2", suite).await.status().is_success());
+    let (listed, _) = orbit_server::audit::list(&fixture.database, fixture.workspace_id, None, 100).await.unwrap();
+    assert!(listed.iter().all(|event| event.resource_type != "github_pull"), "the audit log hides live refresh rows");
+    let (global, _) = orbit_server::audit::list_global(&fixture.database, Some(fixture.workspace_id), None, None, 100).await.unwrap();
+    assert!(global.iter().all(|event| event.resource_type != "github_pull"));
+}

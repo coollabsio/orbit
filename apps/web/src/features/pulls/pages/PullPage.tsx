@@ -36,20 +36,17 @@ export function PullPage() {
 function PullView({ workspaceId, pullRef, pull }: { workspaceId: string; pullRef: PullRef; pull: GithubPullDetail }) {
   const [tab, setTab] = useState<'files' | 'overview'>('files')
   const [diffStyle, setDiffStyle] = useDiffStyle()
-  const files = usePullFiles(workspaceId, pullRef)
+  // The files shown belong to one head commit. A push refetches the header (live events), not the files: a bar
+  // offers Refresh, so the diff never changes under the reader.
+  const [shownHead, setShownHead] = useState(pull.head_sha)
+  const files = usePullFiles(workspaceId, pullRef, shownHead)
   const threads = usePullThreads(workspaceId, pullRef)
   const conversation = usePullConversation(workspaceId, pullRef, tab === 'overview')
-  const setViewed = useSetViewed(workspaceId, pullRef)
+  const setViewed = useSetViewed(workspaceId, pullRef, shownHead)
   const [params] = useSearchParams()
   const [active, setActive] = useState<string | null>(null)
   const list = useRef<HTMLDivElement>(null)
-  // The files shown belong to one head commit. A push refetches the header (live events), not the files: a bar
-  // offers Refresh, so the diff never changes under the reader.
-  const head = useRef(pull.head_sha)
-  head.current = pull.head_sha
-  const [filesHead, setFilesHead] = useState(pull.head_sha)
-  useEffect(() => { if (files.dataUpdatedAt) setFilesHead(head.current) }, [files.dataUpdatedAt])
-  const newCommits = files.data !== undefined && pull.head_sha !== filesHead
+  const newCommits = pull.head_sha !== shownHead
   // the diff list shows the files in the tree's order
   const ordered = useMemo(() => treeOrder(buildFileTree(files.data ?? [])), [files.data])
   const allThreads = useMemo(() => threads.data?.threads ?? [], [threads.data])
@@ -120,7 +117,7 @@ function PullView({ workspaceId, pullRef, pull }: { workspaceId: string; pullRef
     </div>
     {newCommits ? <div role="status" className="flex items-center gap-3 border-b bg-primary/8 px-4 py-1.5 text-[13px]">
       <span>New commits were pushed.</span>
-      <Button size="xs" variant="outline" onClick={() => { void files.refetch(); void threads.refetch() }}>Refresh</Button>
+      <Button size="xs" variant="outline" onClick={() => { setShownHead(pull.head_sha); void threads.refetch() }}>Refresh</Button>
     </div> : null}
     {onFiles ? <div className="flex min-h-0 flex-1">
       <aside className="flex w-72 shrink-0 flex-col border-r max-[899px]:hidden">

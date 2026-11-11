@@ -120,6 +120,13 @@ export function notificationTarget(notification: NotificationRecord): string | n
   return notification.task_id ? taskPath({ id: notification.task_id }) : null
 }
 
+/** The second line of a notice: the Orbit actor and the body. Imports are the user's own, and a GitHub notice names
+ *  the GitHub account in its title (it may have no Orbit account), so those show the body alone. */
+export function notificationLine(notification: NotificationRecord, body: string, actorName: string | undefined): string {
+  if (!actorName || notification.import_id || notification.kind.startsWith('github_')) return body
+  return `${actorName} · ${body}`
+}
+
 /** Mentions in task comments and descriptions, page comments, page bodies and chat. */
 export function isMention(notification: NotificationRecord): boolean {
   return ['comment_mentioned', 'description_mentioned', 'page_comment_mentioned', 'page_mentioned', 'chat_mentioned'].includes(

@@ -135,7 +135,8 @@ pub async fn notify_pull_event(state: &IntegrationState, workspace: &Id, event: 
     tx.commit().await
 }
 
-/// The pull requests a webhook delivery changes for an open viewer: `owner/repo#n`, lower-case.
+/// The pull requests a webhook delivery changes for an open viewer: `owner/repo#n`, lower-case. Check runs are left
+/// out: their check suite reports the same change once, not once for each CI job.
 #[must_use]
 pub fn changed_pulls(event: &str, payload: &Value) -> Vec<String> {
     let Some(repository) = payload["repository"]["full_name"].as_str().map(str::to_lowercase) else { return Vec::new() };
@@ -146,7 +147,6 @@ pub fn changed_pulls(event: &str, payload: &Value) -> Vec<String> {
         | ("pull_request_review_comment", _)
         | ("pull_request_review_thread", _) => payload["pull_request"]["number"].as_i64().into_iter().collect(),
         ("check_suite", "completed") => payload["check_suite"]["pull_requests"].as_array().map(|list| list.iter().filter_map(|pull| pull["number"].as_i64()).collect()).unwrap_or_default(),
-        ("check_run", "completed") => payload["check_run"]["pull_requests"].as_array().map(|list| list.iter().filter_map(|pull| pull["number"].as_i64()).collect()).unwrap_or_default(),
         _ => Vec::new(),
     };
     numbers.into_iter().take(20).map(|number| format!("{repository}#{number}")).collect()

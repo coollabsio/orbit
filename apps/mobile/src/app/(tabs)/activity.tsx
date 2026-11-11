@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { Alert, FlatList, Pressable, View } from 'react-native'
 
 import { relativeTime } from '../../data/format'
-import { isMention, notificationCopy, notificationTarget } from '../../data/inbox'
+import { isMention, notificationCopy, notificationLine, notificationTarget } from '../../data/inbox'
 import * as api from '../../data/orbit'
 import { useOrbit } from '../../orbit-context'
 import { useNotifications, usePages, usePeople } from '../../queries'
@@ -103,6 +103,9 @@ export default function ActivityScreen() {
                   {/* an import notice is the user's own: the import glyph, not their initial */}
                   {item.import_id ? (
                     <Icon name="import" size={16} color={colors.mutedForeground} />
+                  ) : item.kind.startsWith('github_') && item.actor_user_id === item.recipient_user_id ? (
+                    // who acted on GitHub has no Orbit account: a code glyph, not the reader's own initial
+                    <Icon name="code" size={16} color={colors.mutedForeground} />
                   ) : (
                     <Text className="text-[14px] leading-[20px] text-muted-foreground">{(actor?.name ?? '?').charAt(0).toUpperCase()}</Text>
                   )}
@@ -112,7 +115,7 @@ export default function ActivityScreen() {
                     {copy.title}
                   </Text>
                   <Text numberOfLines={1} className="text-[12px] leading-[16px] text-muted-foreground/70">
-                    {actor && !item.import_id ? `${actor.name} · ${copy.body}` : copy.body}
+                    {notificationLine(item, copy.body, actor?.name)}
                   </Text>
                 </View>
                 <Text className="text-[12px] leading-[16px] text-muted-foreground/70">{relativeTime(item.created_at)}</Text>

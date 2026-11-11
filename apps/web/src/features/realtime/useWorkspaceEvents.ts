@@ -63,16 +63,20 @@ export function useWorkspaceEvents(workspaceId: string) {
       pendingViewsOnly = true
       pendingGithubOnly = true
       pendingPulls = new Set()
-      try {
-        // An open pull request refetches its header and threads; its files wait for the reader's Refresh.
+      // An open pull request refetches its header and threads; its files wait for the reader's Refresh. Best effort:
+      // GitHub may refuse (no connection, an outage), and that must never hold back the workspace refresh.
+      const refetchPulls = () => {
         for (const pull of pulls) {
           const match = /^([^/#]+)\/([^/#]+)#(\d+)$/.exec(pull)
           if (!match) continue
           const ref = { owner: match[1], repo: match[2], number: Number(match[3]) }
-          await client.invalidateQueries({ queryKey: pullKeys.pull(workspaceId, ref), exact: true }, { throwOnError: true })
-          await client.invalidateQueries({ queryKey: pullKeys.threads(workspaceId, ref), exact: true }, { throwOnError: true })
+          void client.invalidateQueries({ queryKey: pullKeys.pull(workspaceId, ref), exact: true }).catch(() => {})
+          void client.invalidateQueries({ queryKey: pullKeys.threads(workspaceId, ref), exact: true }).catch(() => {})
         }
+      }
+      try {
         if (githubOnly) {
+          refetchPulls()
           cursor = next
           refreshDelay = 1000
           return
@@ -91,11 +95,13 @@ export function useWorkspaceEvents(workspaceId: string) {
         if (refreshProfile) {
           await client.invalidateQueries({ queryKey: queryKeys.currentUser }, { throwOnError: true })
         }
+        refetchPulls()
         cursor = next
         refreshDelay = 1000
       } catch {
         pendingViewsOnly = pending === undefined ? viewsOnly : pendingViewsOnly && viewsOnly
         pendingGithubOnly = pending === undefined ? githubOnly : pendingGithubOnly && githubOnly
+        // the workspace refresh failed before the pull requests ran: keep them for the retry
         for (const pull of pulls) pendingPulls.add(pull)
         pending ??= next
         pendingWorkspaces ||= refreshWorkspaces

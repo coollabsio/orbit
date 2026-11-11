@@ -129,6 +129,8 @@ async fn record_scoped(
     Ok(())
 }
 
+/// The workspace's audit log, newest first. `github_pull` rows only carry live refresh for open pull requests (see
+/// `github::notify::record_pull_changes`), so they are left out.
 pub async fn list(
     database: &Database,
     workspace_id: Id,
@@ -139,7 +141,8 @@ pub async fn list(
         "SELECT audit_events.id, workspace_id, actor_id, users.display_name AS actor_name, action, outcome, \
          resource_type, resource_id, request_id, metadata_json, occurred_at FROM audit_events \
          LEFT JOIN users ON users.id = audit_events.actor_id \
-         WHERE workspace_id = $1 AND ($2 IS NULL OR audit_events.id < $3) ORDER BY audit_events.id DESC LIMIT $4",
+         WHERE workspace_id = $1 AND ($2 IS NULL OR audit_events.id < $3) AND resource_type <> 'github_pull' \
+         ORDER BY audit_events.id DESC LIMIT $4",
     )
     .bind(workspace_id.to_string())
     .bind(cursor.map(|id| id.to_string()))
@@ -162,7 +165,7 @@ pub async fn list_global(
          resource_type, resource_id, request_id, metadata_json, occurred_at FROM audit_events \
          LEFT JOIN users ON users.id = audit_events.actor_id \
          WHERE ($1 IS NULL OR workspace_id = $2) AND ($3 IS NULL OR action = $4) \
-         AND ($5 IS NULL OR audit_events.id < $6) ORDER BY audit_events.id DESC LIMIT $7",
+         AND ($5 IS NULL OR audit_events.id < $6) AND resource_type <> 'github_pull' ORDER BY audit_events.id DESC LIMIT $7",
     )
     .bind(workspace_id.map(|id| id.to_string()))
     .bind(workspace_id.map(|id| id.to_string()))

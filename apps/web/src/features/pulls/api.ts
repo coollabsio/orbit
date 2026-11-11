@@ -15,7 +15,8 @@ export const pullKeys = {
   all: (workspaceId: string) => ['github-pulls', workspaceId] as const,
   list: (workspaceId: string, projectId: string, filter: PullFilter, search: string) => ['github-pulls', workspaceId, 'list', projectId, filter, search] as const,
   pull: (workspaceId: string, ref: PullRef) => ['github-pulls', workspaceId, ref.owner.toLowerCase(), ref.repo.toLowerCase(), ref.number] as const,
-  files: (workspaceId: string, ref: PullRef) => [...pullKeys.pull(workspaceId, ref), 'files'] as const,
+  /** The files of one head commit: a push never swaps the files under the reader (see `PullPage`). */
+  files: (workspaceId: string, ref: PullRef, head: string) => [...pullKeys.pull(workspaceId, ref), 'files', head] as const,
   threads: (workspaceId: string, ref: PullRef) => [...pullKeys.pull(workspaceId, ref), 'threads'] as const,
   conversation: (workspaceId: string, ref: PullRef) => [...pullKeys.pull(workspaceId, ref), 'conversation'] as const,
   contents: (workspaceId: string, ref: PullRef, path: string, sha: string) => [...pullKeys.pull(workspaceId, ref), 'contents', path, sha] as const,
@@ -43,8 +44,16 @@ export function usePull(workspaceId: string, ref: PullRef) {
   return useQuery({ ...shared, queryKey: pullKeys.pull(workspaceId, ref), queryFn: async () => (await getGithubPull({ client: apiClient, path: path(workspaceId, ref), throwOnError: true })).data })
 }
 
-export function usePullFiles(workspaceId: string, ref: PullRef, enabled = true) {
-  return useQuery({ ...shared, enabled, queryKey: pullKeys.files(workspaceId, ref), queryFn: async () => (await listGithubPullFiles({ client: apiClient, path: path(workspaceId, ref), throwOnError: true })).data })
+export function usePullFiles(workspaceId: string, ref: PullRef, head: string, enabled = true) {
+  return useQuery({
+    ...shared,
+    enabled,
+    // the diff changes only when the reader asks for it (Refresh), never on focus or reconnect
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    queryKey: pullKeys.files(workspaceId, ref, head),
+    queryFn: async () => (await listGithubPullFiles({ client: apiClient, path: path(workspaceId, ref), throwOnError: true })).data,
+  })
 }
 
 export function usePullThreads(workspaceId: string, ref: PullRef, enabled = true) {
@@ -67,9 +76,9 @@ export function useFileContents(workspaceId: string, ref: PullRef, file: string,
 }
 
 /** Marks a file viewed on GitHub; the tick changes at once and goes back when GitHub refuses. */
-export function useSetViewed(workspaceId: string, ref: PullRef) {
+export function useSetViewed(workspaceId: string, ref: PullRef, head: string) {
   const queryClient = useQueryClient()
-  const key = pullKeys.files(workspaceId, ref)
+  const key = pullKeys.files(workspaceId, ref, head)
   return useMutation({
     mutationFn: async ({ file, viewed }: { file: string; viewed: boolean }) => {
       const options = { client: apiClient, path: path(workspaceId, ref), body: { path: file }, throwOnError: true } as const

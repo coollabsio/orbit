@@ -1,3 +1,4 @@
+import { ProviderMark } from '@/components/common/icons/ProviderMark'
 import { useLocation, useNavigate, useSearchParams } from 'react-router'
 import { Notification as Bell, Import } from 'reicon-react'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
@@ -10,7 +11,7 @@ import { VirtualList } from '@/components/common/VirtualList'
 import { Pane, PaneHeader, PaneTitle } from '@/components/common/Pane'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { useMembers } from '@/features/workspaces/api'
-import { isMention, notificationCopy, notificationTarget, useMarkAllNotificationsRead, useMarkNotificationRead, useNotifications } from '@/features/inbox/api'
+import { isMention, notificationCopy, notificationLine, notificationTarget, useMarkAllNotificationsRead, useMarkNotificationRead, useNotifications } from '@/features/inbox/api'
 import { usePageTree } from '@/features/docs/api/pages'
 import { useSlowPending } from '@/lib/useDebouncedValue'
 import { ProfileTrigger } from '@/components/common/ProfileTrigger'
@@ -121,7 +122,7 @@ export function InboxPage() {
                     <span className="truncate text-[13px] text-foreground data-unread:font-semibold" data-unread={!notification.read_at || undefined}>
                       {copy.title}
                     </span>
-                    <span className="truncate text-xs text-muted-foreground/70">{actor && !notification.import_id ? `${actor.name} · ${copy.body}` : copy.body}</span>
+                    <span className="truncate text-xs text-muted-foreground/70">{notificationLine(notification, copy.body, actor?.name)}</span>
                   </span>
                   <span className="shrink-0 text-xs text-muted-foreground/70">
                     {relativeTime(notification.created_at)}
@@ -131,6 +132,11 @@ export function InboxPage() {
                 {notification.import_id ? (
                   <span aria-hidden="true" className="pointer-events-none absolute top-1/2 left-[30px] flex size-7 -translate-y-1/2 items-center justify-center rounded-full bg-muted">
                     <Import className="size-4 text-muted-foreground" />
+                  </span>
+                ) : notification.kind.startsWith('github_') && notification.actor_user_id === notification.recipient_user_id ? (
+                  // who acted on GitHub has no Orbit account: the GitHub mark, not the reader's own avatar
+                  <span aria-hidden="true" className="pointer-events-none absolute top-1/2 left-[30px] flex size-7 -translate-y-1/2 items-center justify-center rounded-full bg-muted text-foreground [&_svg]:size-4">
+                    <ProviderMark provider="github" />
                   </span>
                 ) : (
                 <ProfileTrigger userId={actor?.id} name={actor?.name ?? 'Unknown'} kind="avatar" className="absolute top-1/2 left-[30px] flex -translate-y-1/2">
