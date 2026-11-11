@@ -31,6 +31,7 @@ use crate::auth_routes::{CookieMode, request_session};
 use crate::billing::WorkspaceAccess;
 use crate::repositories::billing;
 use crate::repositories::identity::IdentityRepository;
+use crate::repositories::project_access::user_sees_project_sql;
 use crate::socket_ticket::SocketTickets;
 
 /// Query parameters y-websocket appends (`params`).
@@ -320,7 +321,7 @@ impl Connection {
 }
 
 /// `None` when the session is valid, the user is a member of the workspace and the page is live
-/// and visible to them (a task: live, in a live project).
+/// and visible to them (a task: live, in a live project the user sees).
 async fn check_access(
     pool: &AnyPool,
     workspace_id: Id,
@@ -330,18 +331,19 @@ async fn check_access(
 ) -> Result<Option<Denied>, sqlx::Error> {
     let now = TimestampMillis::now().as_millis();
     let state = match key.kind {
-        DocKind::Page => {
-            "(SELECT CASE WHEN deleted_at IS NOT NULL THEN 2 \
+        DocKind::Page => "(SELECT CASE WHEN deleted_at IS NOT NULL THEN 2 \
                           WHEN teamspace_id IS NULL AND owner_id IS DISTINCT FROM $2 THEN 1 \
                           WHEN kind = 'database' THEN 3 ELSE 0 END \
               FROM pages WHERE id = $4 AND workspace_id = $3)"
-        }
-        DocKind::Task => {
+            .to_owned(),
+        // A task in a project the user does not see answers like one in the trash.
+        DocKind::Task => format!(
             "(SELECT CASE WHEN tasks.deleted_at IS NOT NULL OR projects.deleted_at IS NOT NULL \
-                          THEN 2 ELSE 0 END \
+                          OR NOT {} THEN 2 ELSE 0 END \
               FROM tasks JOIN projects ON projects.id = tasks.project_id \
-              WHERE tasks.id = $4 AND tasks.workspace_id = $3)"
-        }
+              WHERE tasks.id = $4 AND tasks.workspace_id = $3)",
+            user_sees_project_sql("tasks.project_id", "$2")
+        ),
     };
     let row = sqlx::query(sqlx::AssertSqlSafe(format!(
         "SELECT \

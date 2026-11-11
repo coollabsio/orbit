@@ -17,6 +17,7 @@ import { useCollabSession } from '@/features/docs/collab/useCollabSession'
 import { pageMentionCandidates } from '@/features/docs/editor/pageMentions'
 import { useTeamMembers } from '@/features/workspaces/api'
 import type { Task } from '@/features/tasks/api/models'
+import { useProjectAudience, useProjects } from '@/features/tasks/api/projects'
 import { uploadInlineFile } from '@/features/tasks/api/inlineFiles'
 import { EditorFallback, PageEditor } from './lazyEditor'
 // Type-only imports: erased at build time, so the BlockNote chunk stays lazy.
@@ -29,6 +30,8 @@ export interface TaskDescriptionHandle {
 type Notice = 'too-large' | 'protocol' | null
 
 const editorSpinner = <EditorFallback />
+
+const NO_MEMBERS: never[] = []
 
 /**
  * The task description, co-edited live like a docs page (`/tasks/{id}/collab`). Until the first sync it shows the
@@ -48,6 +51,8 @@ export function TaskDescriptionEditor({
   const me = useCurrentUser()
   const selfId = me.data?.id ?? null
   const members = useTeamMembers(workspaceId).data
+  const project = useProjects(workspaceId).data?.find((candidate) => candidate.id === task.projectId)
+  const audience = useProjectAudience(workspaceId, project, members ?? NO_MEMBERS)
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const editorRef = useRef<PageEditorHandle>(null)
@@ -141,8 +146,8 @@ export function TaskDescriptionEditor({
   const onOpenPage = useCallback((pageId: string) => navigate(`/docs/${pageId}`), [navigate])
   const mentions = {
     members: members ?? null,
-    // everyone in the workspace sees every task; yourself last
-    candidates: pageMentionCandidates(members ?? [], { teamspace_id: workspaceId }, selfId),
+    // the people who see the task's project; yourself last
+    candidates: pageMentionCandidates(audience, { teamspace_id: workspaceId }, selfId),
     privatePage: false,
   }
   const fileScope = useMemo(() => ({ workspaceId, taskId: task.id }), [workspaceId, task.id])

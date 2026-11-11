@@ -69,6 +69,7 @@ impl Fixture {
                 "Private".into(),
                 "PRV".into(),
                 "#ff0000".into(),
+                false,
                 "test",
                 now,
             )

@@ -4668,6 +4668,11 @@ export type PageProjectRecord = {
         id: string;
         key: string;
         name: string;
+        /**
+         * Only the project's members, and workspace owners and admins, see a private project and
+         * what is in it. Everyone else gets the answers of a missing project.
+         */
+        private: boolean;
         updated_at: string;
         version: number;
         workspace_id: string;
@@ -4908,6 +4913,23 @@ export type ProjectBody = {
     color: string;
     key: string;
     name: string;
+    /**
+     * Only the project's members see it; the creator becomes the first member. Absent: false.
+     */
+    private?: boolean;
+};
+
+export type ProjectMemberBody = {
+    /**
+     * An active workspace member who is not a guest.
+     */
+    user_id: string;
+};
+
+export type ProjectMemberRecord = {
+    created_at: string;
+    project_id: string;
+    user_id: string;
 };
 
 export type ProjectRecord = {
@@ -4925,6 +4947,11 @@ export type ProjectRecord = {
     id: string;
     key: string;
     name: string;
+    /**
+     * Only the project's members, and workspace owners and admins, see a private project and
+     * what is in it. Everyone else gets the answers of a missing project.
+     */
+    private: boolean;
     updated_at: string;
     version: number;
     workspace_id: string;
@@ -4943,6 +4970,10 @@ export type ProjectUpdateBody = {
     expected_version: number;
     key: string;
     name: string;
+    /**
+     * Absent: unchanged. Making a project private adds the caller to its members.
+     */
+    private?: boolean | null;
 };
 
 export type Provider = 'google' | 'github';
@@ -26187,6 +26218,180 @@ export type UpdateLabelResponses = {
 };
 
 export type UpdateLabelResponse = UpdateLabelResponses[keyof UpdateLabelResponses];
+
+export type ListProjectMembersData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        project_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/projects/{project_id}/members';
+};
+
+export type ListProjectMembersErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ListProjectMembersError = ListProjectMembersErrors[keyof ListProjectMembersErrors];
+
+export type ListProjectMembersResponses = {
+    200: Array<ProjectMemberRecord>;
+};
+
+export type ListProjectMembersResponse = ListProjectMembersResponses[keyof ListProjectMembersResponses];
+
+export type AddProjectMemberData = {
+    body: ProjectMemberBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        project_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/projects/{project_id}/members';
+};
+
+export type AddProjectMemberErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type AddProjectMemberError = AddProjectMemberErrors[keyof AddProjectMemberErrors];
+
+export type AddProjectMemberResponses = {
+    201: ProjectMemberRecord;
+};
+
+export type AddProjectMemberResponse = AddProjectMemberResponses[keyof AddProjectMemberResponses];
+
+export type RemoveProjectMemberData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        project_id: string;
+        user_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/projects/{project_id}/members/{user_id}';
+};
+
+export type RemoveProjectMemberErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type RemoveProjectMemberError = RemoveProjectMemberErrors[keyof RemoveProjectMemberErrors];
+
+export type RemoveProjectMemberResponses = {
+    204: void;
+};
+
+export type RemoveProjectMemberResponse = RemoveProjectMemberResponses[keyof RemoveProjectMemberResponses];
 
 export type PurgeProjectData = {
     body?: never;
