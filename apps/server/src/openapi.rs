@@ -173,6 +173,14 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::github_user_routes::delete_github_connection,
         crate::github_user_routes::github_connection_callback,
         crate::github_user_routes::finish_github_connection,
+        crate::github_pull_routes::list_github_project_pulls,
+        crate::github_pull_routes::get_github_pull,
+        crate::github_pull_routes::list_github_pull_files,
+        crate::github_pull_routes::get_github_pull_contents,
+        crate::github_pull_routes::list_github_pull_threads,
+        crate::github_pull_routes::list_github_pull_conversation,
+        crate::github_pull_routes::mark_github_file_viewed,
+        crate::github_pull_routes::unmark_github_file_viewed,
         crate::task_routes::list_projects,
         crate::task_routes::create_project,
         crate::task_routes::update_project,
@@ -907,6 +915,26 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
         }
         "github_connection" | "delete_github_connection" => {
             add_code(&mut responses, "404", "github_workspace_not_found");
+        }
+        "list_github_project_pulls"
+        | "get_github_pull"
+        | "list_github_pull_files"
+        | "get_github_pull_contents"
+        | "list_github_pull_threads"
+        | "list_github_pull_conversation"
+        | "mark_github_file_viewed"
+        | "unmark_github_file_viewed" => {
+            add_code(&mut responses, "403", "github_forbidden");
+            add_code(&mut responses, "404", "github_workspace_not_found");
+            add_code(&mut responses, "404", "github_project_not_found");
+            add_code(&mut responses, "404", "pull_not_found");
+            add_code(&mut responses, "409", "github_not_connected");
+            add_code(&mut responses, "409", "github_reconnect");
+            add_code(&mut responses, "409", "github_app_missing");
+            add_code(&mut responses, "409", "github_app_recreate");
+            add_code(&mut responses, "422", "github_refused");
+            add_code(&mut responses, "429", "github_rate_limited");
+            add_code(&mut responses, "502", "github_unavailable");
         }
         "finish_github_connection" => {
             add_code(&mut responses, "403", "github_connect_mismatch");

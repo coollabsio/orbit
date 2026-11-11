@@ -214,6 +214,35 @@ pub fn integration_router(state: IntegrationState) -> Router {
                 .delete(delete_github_connection),
         )
         .route(
+            "/api/v1/workspaces/{workspace_id}/projects/{project_id}/github/pulls",
+            get(crate::github_pull_routes::list_github_project_pulls),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/github/pulls/{owner}/{repo}/{number}",
+            get(crate::github_pull_routes::get_github_pull),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/github/pulls/{owner}/{repo}/{number}/files",
+            get(crate::github_pull_routes::list_github_pull_files),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/github/pulls/{owner}/{repo}/{number}/contents",
+            get(crate::github_pull_routes::get_github_pull_contents),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/github/pulls/{owner}/{repo}/{number}/threads",
+            get(crate::github_pull_routes::list_github_pull_threads),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/github/pulls/{owner}/{repo}/{number}/conversation",
+            get(crate::github_pull_routes::list_github_pull_conversation),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/github/pulls/{owner}/{repo}/{number}/viewed",
+            axum::routing::put(crate::github_pull_routes::mark_github_file_viewed)
+                .delete(crate::github_pull_routes::unmark_github_file_viewed),
+        )
+        .route(
             "/api/v1/workspaces/{workspace_id}/github/me/finish",
             post(finish_github_connection),
         )
@@ -361,7 +390,7 @@ pub(crate) async fn github_workspace_access(
     Ok((workspace_id, actor.can(Permission::IntegrationsManage)))
 }
 
-async fn github_project_access(
+pub(crate) async fn github_project_access(
     state: &IntegrationState,
     headers: &HeaderMap,
     workspace: &str,

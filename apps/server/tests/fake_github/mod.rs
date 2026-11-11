@@ -55,6 +55,8 @@ pub struct FakeState {
     pub expiring: bool,
     /// Extra routes for later test files: (method, path) → (status, body). The path is relative to `/github/api/`.
     pub api: HashMap<(String, String), (u16, Value)>,
+    /// GraphQL answers: the first entry whose text is in the query answers it (status 200, the value as the body).
+    pub graphql: Vec<(String, Value)>,
     /// Every API request: (method, path with query, authorization header, body).
     pub api_requests: Vec<(String, String, String, Value)>,
 }
@@ -100,6 +102,37 @@ impl FakeGithub {
                 .tokens
                 .insert(token.to_owned(), (user.0, user.1.to_owned()))
         });
+    }
+
+    /// Answers GraphQL queries that contain `needle` with `{"data": data}`.
+    pub fn graphql(&self, needle: &str, data: Value) {
+        self.with(|state| {
+            state
+                .graphql
+                .push((needle.to_owned(), json!({ "data": data })))
+        });
+    }
+
+    /// Answers GraphQL queries that contain `needle` with a raw body (for `errors`).
+    pub fn graphql_raw(&self, needle: &str, body: Value) {
+        self.with(|state| state.graphql.push((needle.to_owned(), body)));
+    }
+
+    /// The GraphQL requests seen so far: (query, variables).
+    pub fn graphql_requests(&self) -> Vec<(String, Value)> {
+        self.with(|state| {
+            state
+                .api_requests
+                .iter()
+                .filter(|request| request.1 == "graphql")
+                .map(|request| {
+                    (
+                        request.3["query"].as_str().unwrap_or("").to_owned(),
+                        request.3["variables"].clone(),
+                    )
+                })
+                .collect()
+        })
     }
 
     pub fn respond(&self, method: &str, path: &str, status: u16, body: Value) {
@@ -201,9 +234,26 @@ async fn api(State(state): State<Shared>, request: Request<Body>) -> Response {
         .query()
         .map_or_else(|| path.to_owned(), |query| format!("{path}?{query}"));
     let mut state = state.lock().unwrap();
+    let query = body["query"].as_str().unwrap_or("").to_owned();
+    // REST answers are canned; a token GitHub does not know gets 401 everywhere, as on GitHub.
+    let known = auth.is_empty() || state.tokens.contains_key(auth.strip_prefix("Bearer ").unwrap_or(""));
     state
         .api_requests
         .push((method.clone(), with_query.clone(), auth, body));
+    if !known {
+        return (StatusCode::UNAUTHORIZED, Json(json!({ "message": "Bad credentials" }))).into_response();
+    }
+    if path == "graphql" {
+        let reply = state
+            .graphql
+            .iter()
+            .find(|(needle, _)| query.contains(needle.as_str()))
+            .map(|(_, body)| body.clone());
+        return match reply {
+            Some(body) => Json(body).into_response(),
+            None => Json(json!({ "errors": [{ "type": "NOT_FOUND", "message": "no fake answer" }] })).into_response(),
+        };
+    }
     let reply = state
         .api
         .get(&(method.clone(), with_query))
@@ -481,6 +531,10 @@ impl GithubFixture {
             .oneshot(builder.body(body).unwrap())
             .await
             .unwrap()
+    }
+
+    pub fn with_requests<R>(&self, read: impl FnOnce(&[(String, String, String, Value)]) -> R) -> R {
+        self.github.with(|state| read(&state.api_requests))
     }
 
     pub async fn get(&self, path: &str) -> Response {
