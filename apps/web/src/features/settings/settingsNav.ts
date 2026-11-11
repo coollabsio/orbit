@@ -69,6 +69,7 @@ const AREAS: Record<SettingsAreaName, SettingsArea> = {
           { to: '/settings/agentic', label: 'Agentic', icon: RobotIcon },
           // every member but a guest may create a personal export token there
           { to: '/settings/api-tokens', label: 'API tokens', icon: Key, permission: 'workspace.export_personal' },
+          { to: '/settings/webhooks', label: 'Webhooks', icon: Global, permission: 'integrations.manage' },
         ],
       },
       {

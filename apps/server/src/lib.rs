@@ -58,6 +58,7 @@ pub mod token_api;
 pub mod trello;
 pub mod trello_import_routes;
 pub mod view_routes;
+pub mod webhooks;
 pub mod workspace_export;
 pub mod workspace_export_routes;
 pub mod workspace_routes;

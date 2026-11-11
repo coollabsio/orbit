@@ -455,6 +455,11 @@ impl App {
             orbit_imports.clone(),
             workspace_exports.clone(),
             billing.clone(),
+            crate::webhooks::Deliverer::new(
+                database.clone(),
+                app_key,
+                config.environment == orbit_platform::EnvironmentMode::Development,
+            ),
             config.jobs.concurrency,
         )
         .await?;
@@ -633,6 +638,12 @@ impl App {
                 )
                 .with_health(Arc::clone(&mail_status), mail_dns)
                 .with_inbound_opt(provider_intake),
+                webhooks: crate::webhooks::routes::WebhookState::new(
+                    Arc::clone(&identity),
+                    cookie_mode,
+                    app_key,
+                    config.environment == orbit_platform::EnvironmentMode::Development,
+                ),
             },
             health,
             assets,
@@ -1146,6 +1157,7 @@ async fn initialize_production_services(
     orbit_imports: OrbitImportService,
     workspace_exports: WorkspaceExportService,
     billing: Option<crate::billing::Billing>,
+    webhooks: crate::webhooks::Deliverer,
     concurrency: usize,
 ) -> Result<ProductionServices, AppError> {
     let store = JobStore::new(database.clone());
@@ -1328,6 +1340,7 @@ async fn initialize_production_services(
         })
         .and_then(|worker| crate::workspace_export::register_job(worker, workspace_exports))
         .and_then(|worker| crate::import_people::register_job(worker, database.clone()))
+        .and_then(|worker| crate::webhooks::delivery::register_job(worker, webhooks))
         .and_then(|worker| match billing {
             Some(billing) => crate::billing::register_jobs(worker, billing),
             None => Ok(worker),

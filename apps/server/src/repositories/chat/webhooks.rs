@@ -173,7 +173,7 @@ fn webhook_from_row(row: &AnyRow) -> Result<WebhookRecord, ChatError> {
 /// A request URL Orbit may send clicks to: https on a public host. `development` also takes http
 /// and local hosts, so a receiver on the developer's machine can be tested. The address of a name
 /// is checked again for each click (`PublicResolver`).
-fn clean_request_url(url: &str, development: bool) -> Result<String, ChatError> {
+pub(crate) fn clean_request_url(url: &str, development: bool) -> Result<String, ChatError> {
     let invalid = ChatError::Invalid {
         field: "request_url",
     };

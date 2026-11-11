@@ -51,6 +51,7 @@ import { MailMailboxesPage } from '@/features/settings/pages/mail/MailMailboxesP
 import { MailLabelsPage } from '@/features/settings/pages/mail/MailLabelsPage'
 import { FailedMailPage } from '@/features/settings/pages/mail/FailedMailPage'
 import { MailPage } from '@/features/mail/pages/MailPage'
+import { WebhooksPage } from '@/features/settings/pages/WebhooksPage'
 import { FileStoragePage } from '@/features/settings/pages/FileStoragePage'
 import { ProfilePage } from '@/features/profile/pages/ProfilePage'
 import { AppearancePage } from '@/features/profile/pages/AppearancePage'
@@ -195,6 +196,7 @@ export default function App() {
                   <Route path="mail/mailboxes" element={<MailMailboxesPage />} />
                   <Route path="mail/labels" element={<MailLabelsPage />} />
                   <Route path="mail/failed" element={<FailedMailPage />} />
+                  <Route path="webhooks" element={<WebhooksPage />} />
                   <Route path="file-storage" element={<FileStoragePage />} />
                 </Route>
                 <Route path="*" element={<Navigate to="/tasks" replace />} />
