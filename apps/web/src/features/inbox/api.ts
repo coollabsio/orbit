@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { pullPath } from '@orbit/api/github'
 import { apiClient } from '@/api/client'
 import { queryKeys } from '@/api/queryKeys'
 import {
@@ -95,6 +96,10 @@ const IMPORTS: Record<string, { name: string; page: string }> = {
 
 /** Where a notification leads: the task, the page with the comment thread open, the page at the mention, the chat message, or the import. */
 export function notificationTarget(notification: NotificationRecord): string | null {
+  if (notification.kind.startsWith('github_')) {
+    const [owner, repo] = (notification.github_repository ?? '').split('/')
+    return owner && repo && notification.github_pull_number ? pullPath({ owner, repo, number: notification.github_pull_number }) : null
+  }
   if (notification.kind === 'import_finished') {
     const source = IMPORTS[notification.import_source ?? '']
     return source && notification.import_id ? `${source.page}/${notification.import_id}` : null
@@ -123,6 +128,16 @@ export function isMention(notification: NotificationRecord): boolean {
 }
 
 export function notificationCopy(notification: NotificationRecord, pageTitle?: string, actorName?: string): { title: string; body: string } {
+  if (notification.kind.startsWith('github_')) {
+    // the GitHub login: who acted may have no Orbit account
+    const who = notification.github_actor_login ?? 'Someone'
+    const body = `${notification.github_repository ?? ''}#${notification.github_pull_number ?? ''}`
+    if (notification.kind === 'github_review_requested') return { title: `${who} asked for your review`, body }
+    if (notification.kind === 'github_merged') return { title: `${who} merged your pull request`, body }
+    if (notification.github_review_state === 'approved') return { title: `${who} approved your pull request`, body }
+    if (notification.github_review_state === 'changes_requested') return { title: `${who} requested changes`, body }
+    return { title: `${who} commented on your pull request`, body }
+  }
   if (notification.kind === 'import_finished') {
     const name = IMPORTS[notification.import_source ?? '']?.name ?? 'An'
     return notification.import_status === 'failed'

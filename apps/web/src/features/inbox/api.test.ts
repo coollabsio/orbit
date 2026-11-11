@@ -36,3 +36,14 @@ test('an import notice opens its import and names how it ended', () => {
   expect(notificationTarget({ ...done, import_source: 'asana' })).toBe('/tasks-import/imp-1')
   expect(isMention(done)).toBe(false)
 })
+
+test('GitHub notices open the pull request and say who did what', () => {
+  const github = { kind: 'github_review', github_repository: 'acme/repo', github_pull_number: 12, github_actor_login: 'octo', github_review_state: 'approved' } as NotificationRecord
+  expect(notificationTarget(github)).toBe('/tasks/pulls/acme/repo/12')
+  expect(notificationCopy(github)).toEqual({ title: 'octo approved your pull request', body: 'acme/repo#12' })
+  expect(notificationCopy({ ...github, github_review_state: 'changes_requested' }).title).toBe('octo requested changes')
+  expect(notificationCopy({ ...github, github_review_state: 'commented' }).title).toBe('octo commented on your pull request')
+  expect(notificationCopy({ ...github, kind: 'github_review_requested', github_review_state: null }).title).toBe('octo asked for your review')
+  expect(notificationCopy({ ...github, kind: 'github_merged', github_review_state: null }).title).toBe('octo merged your pull request')
+  expect(isMention(github)).toBe(false)
+})

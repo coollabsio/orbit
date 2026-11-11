@@ -1,4 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
+import { parseGithubPullUrl } from '@orbit/api/github'
+import { GithubPullCard } from '@/features/pulls/components/GithubPullCard'
 import { Navigate, useNavigate } from 'react-router'
 import { Lock, Message } from 'reicon-react'
 import { EmptyState } from '@/components/common/EmptyState'
@@ -194,6 +196,9 @@ export function ChatPage() {
 
   const host: ChatHost = {
     renderLinkCard: (url) => {
+      // a GitHub pull request: a card for a reader whose GitHub account can see it, else nothing (no generic preview)
+      const pullRef = guest ? null : parseGithubPullUrl(url)
+      if (pullRef) return <GithubPullCard workspaceId={workspaceId} pullRef={pullRef} />
       const target = guest ? null : orbitLinkTarget(url, window.location.origin)
       return target ? <ChatLinkCard kind={target.kind} id={target.id} /> : null
     },
