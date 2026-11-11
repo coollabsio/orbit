@@ -36,3 +36,9 @@ export function toGitPatch(file: { path: string; previous_path?: string | null; 
   }
   return `${lines.join('\n')}\n${file.patch.replace(/\n$/, '')}\n`
 }
+
+/** Review threads the diff cannot show on a line: outdated, on a whole file, or on a file without a diff. */
+export function threadsOutsideDiff<T extends { path: string; line?: number | null }>(threads: T[], files: { path: string; patch?: string | null }[]): T[] {
+  const shown = new Set(files.filter((file) => file.patch != null).map((file) => file.path))
+  return threads.filter((thread) => thread.line == null || !shown.has(thread.path))
+}

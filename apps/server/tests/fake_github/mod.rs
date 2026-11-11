@@ -57,6 +57,8 @@ pub struct FakeState {
     pub api: HashMap<(String, String), (u16, Value)>,
     /// GraphQL answers: the first entry whose text is in the query answers it (status 200, the value as the body).
     pub graphql: Vec<(String, Value)>,
+    /// The `Accept` header of every GraphQL request.
+    pub graphql_accepts: Vec<String>,
     /// Every API request: (method, path with query, authorization header, body).
     pub api_requests: Vec<(String, String, String, Value)>,
 }
@@ -225,6 +227,12 @@ async fn api(State(state): State<Shared>, request: Request<Body>) -> Response {
     let method = request.method().to_string();
     let uri = request.uri().clone();
     let auth = bearer(request.headers());
+    let accept = request
+        .headers()
+        .get(header::ACCEPT)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("")
+        .to_owned();
     let body = to_bytes(request.into_body(), usize::MAX).await.unwrap();
     let body: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
     let Some(path) = uri.path().strip_prefix("/github/api/") else {
@@ -244,6 +252,7 @@ async fn api(State(state): State<Shared>, request: Request<Body>) -> Response {
         return (StatusCode::UNAUTHORIZED, Json(json!({ "message": "Bad credentials" }))).into_response();
     }
     if path == "graphql" {
+        state.graphql_accepts.push(accept);
         let reply = state
             .graphql
             .iter()

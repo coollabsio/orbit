@@ -2550,6 +2550,13 @@ export type GithubManifestStart = {
     manifest: unknown;
 };
 
+export type GithubMergeBase = {
+    /**
+     * The commit GitHub diffs the pull request against (the old side of every file).
+     */
+    sha: string;
+};
+
 export type GithubMergeInfo = {
     /**
      * Why merging is not possible now, for the person.
@@ -21257,6 +21264,79 @@ export type ListGithubPullFilesResponses = {
 };
 
 export type ListGithubPullFilesResponse = ListGithubPullFilesResponses[keyof ListGithubPullFilesResponses];
+
+export type GetGithubPullMergeBaseData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        owner: string;
+        repo: string;
+        number: number;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/github/pulls/{owner}/{repo}/{number}/merge-base';
+};
+
+export type GetGithubPullMergeBaseErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * github_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * github_workspace_not_found, github_project_not_found, pull_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch, github_not_connected, github_reconnect, github_app_missing, github_app_recreate
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * github_refused
+     */
+    422: WorkspaceProblem;
+    /**
+     * github_rate_limited
+     */
+    429: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * github_unavailable
+     */
+    502: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type GetGithubPullMergeBaseError = GetGithubPullMergeBaseErrors[keyof GetGithubPullMergeBaseErrors];
+
+export type GetGithubPullMergeBaseResponses = {
+    200: GithubMergeBase;
+};
+
+export type GetGithubPullMergeBaseResponse = GetGithubPullMergeBaseResponses[keyof GetGithubPullMergeBaseResponses];
 
 export type ListGithubPullThreadsData = {
     body?: never;

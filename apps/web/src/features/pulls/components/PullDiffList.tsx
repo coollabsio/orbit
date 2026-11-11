@@ -1,12 +1,13 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { forwardRef, useCallback, useMemo } from 'react'
-import { PatchDiff, Virtualizer, type FileDiffMetadata, type FileDiffOptions } from '@pierre/diffs/react'
-import { getGithubPullContents } from '@orbit/api/generated/sdk.gen'
+import { forwardRef, useMemo, useRef } from 'react'
+import { PatchDiff, Virtualizer, type FileDiffOptions } from '@pierre/diffs/react'
+import { getGithubPullContents, getGithubPullMergeBase } from '@orbit/api/generated/sdk.gen'
 import type { GithubPullDetail, GithubPullFile, GithubReviewThread } from '@orbit/api/generated/types.gen'
 import { toGitPatch, type PullRef } from '@orbit/api/github'
 import { apiClient } from '@/api/client'
 import { pullKeys } from '@/features/pulls/api'
 import { threadAnnotations } from '@/features/pulls/lib/annotations'
+import { makeDiffFilesLoader } from '@/features/pulls/lib/diffFiles'
 import { ThreadView } from '@/features/pulls/components/ThreadView'
 import type { DiffStyle } from '@/features/pulls/useDiffStyle'
 import { useTheme } from '@/lib/themeContext'
@@ -27,23 +28,27 @@ export const PullDiffList = forwardRef<HTMLDivElement, {
 }>(function PullDiffList({ workspaceId, pullRef, pull, files, threads, diffStyle, highlightedThread }, ref) {
   const { theme } = useTheme()
   const queryClient = useQueryClient()
-  // Expanding hidden lines needs both whole files: loaded once, on the first expand.
-  const loadDiffFiles = useCallback(async (diff: FileDiffMetadata) => {
-    const file = files.find((item) => item.path === diff.name) ?? files.find((item) => item.previous_path === diff.prevName)
-    const load = async (path: string, sha: string) => {
-      const data = await queryClient.fetchQuery({
+  // Expanding hidden lines needs both whole files: loaded once, on the first expand. The loader reads the files
+  // through a ref, so a viewed tick does not hand every diff new options.
+  const filesRef = useRef(files)
+  filesRef.current = files
+  const loadDiffFiles = useMemo(() => {
+    const pathParams = { workspace_id: workspaceId, owner: pullRef.owner, repo: pullRef.repo, number: pullRef.number }
+    return makeDiffFilesLoader({
+      files: () => filesRef.current,
+      headSha: pull.head_sha,
+      mergeBase: async () => (await queryClient.fetchQuery({
+        queryKey: [...pullKeys.pull(workspaceId, pullRef), 'merge-base', pull.base_sha, pull.head_sha],
+        staleTime: Infinity,
+        queryFn: async () => (await getGithubPullMergeBase({ client: apiClient, path: pathParams, throwOnError: true })).data,
+      })).sha,
+      load: async (path, sha) => (await queryClient.fetchQuery({
         queryKey: pullKeys.contents(workspaceId, pullRef, path, sha),
         staleTime: Infinity,
-        queryFn: async () => (await getGithubPullContents({ client: apiClient, path: { workspace_id: workspaceId, owner: pullRef.owner, repo: pullRef.repo, number: pullRef.number }, query: { path, ref: sha }, throwOnError: true })).data,
-      })
-      if (data.text == null) throw new Error('This file cannot be shown in full.')
-      return { name: path, contents: data.text }
-    }
-    const newPath = file?.path ?? diff.name
-    const oldPath = file?.previous_path ?? newPath
-    const [oldFile, newFile] = await Promise.all([load(oldPath, pull.base_sha), load(newPath, pull.head_sha)])
-    return { oldFile, newFile }
-  }, [files, pull.base_sha, pull.head_sha, pullRef, queryClient, workspaceId])
+        queryFn: async () => (await getGithubPullContents({ client: apiClient, path: pathParams, query: { path, ref: sha }, throwOnError: true })).data,
+      })).text ?? null,
+    })
+  }, [pull.base_sha, pull.head_sha, pullRef, queryClient, workspaceId])
 
   const options = useMemo((): FileDiffOptions<GithubReviewThread, undefined> => ({
     diffStyle,

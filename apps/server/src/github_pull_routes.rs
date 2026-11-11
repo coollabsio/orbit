@@ -225,6 +225,21 @@ pub(crate) async fn list_github_pull_conversation(
     }
 }
 
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/github/pulls/{owner}/{repo}/{number}/merge-base", params(("workspace_id" = String, Path), ("owner" = String, Path), ("repo" = String, Path), ("number" = i64, Path)), responses((status = 200, body = pulls::MergeBase)))]
+pub(crate) async fn get_github_pull_merge_base(
+    State(state): State<IntegrationState>,
+    Path((workspace, owner, repo, number)): PullPath,
+    headers: HeaderMap,
+    request: Option<Extension<RequestId>>,
+) -> Result<Json<pulls::MergeBase>, ApiError> {
+    let id = request_id(request.as_ref());
+    let access = pull_access(&state, &headers, &workspace, &owner, &repo, number, id).await?;
+    match pulls::merge_base(&github(&state, id)?, &access.token.token, &access.pull).await {
+        Ok(base) => Ok(Json(base)),
+        Err(error) => Err(github_failed(&state, &access, error, id).await),
+    }
+}
+
 #[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 #[schema(as = GithubViewedFile)]
@@ -302,7 +317,8 @@ pub(crate) async fn list_github_project_pulls(
     let label: String = connection.get("label");
     // The label tells the projects of one repository apart; a repository with one project lists all its PRs.
     let shared: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM github_project_connections WHERE workspace_id = $1 AND lower(repository) = lower($2)",
+        "SELECT COUNT(*) FROM github_project_connections c JOIN projects p ON p.id = c.project_id \
+         WHERE c.workspace_id = $1 AND lower(c.repository) = lower($2) AND p.deleted_at IS NULL",
     )
     .bind(&workspace)
     .bind(&repository)

@@ -25,6 +25,8 @@ const outdated = { id: 'T1', path: 'src/login.ts', side: 'RIGHT', line: null, st
   comments: [{ id: 'C1', database_id: 5, author: actor, body: 'Old remark', created_at: Date.now(), pending: false, can_edit: false }] }
 const problem = (status: number, code: string) => new Response(JSON.stringify({ type: 'about:blank', title: 'x', status, code, detail: 'x', instance: '/', request_id: 'r' }), { status, headers: { 'content-type': 'application/problem+json' } })
 
+const onLockfile = { ...outdated, id: 'T2', path: 'yarn.lock', line: 3, is_outdated: false, comments: [{ ...outdated.comments[0], id: 'C2', database_id: 6, body: 'Why this bump?' }] }
+
 function serve({ pull = () => Response.json(detail), writes = [] as Array<{ method: string; path: string; body: unknown }> } = {}) {
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const request = input as Request
@@ -33,7 +35,7 @@ function serve({ pull = () => Response.json(detail), writes = [] as Array<{ meth
     if (path.endsWith('/github/me')) return Response.json({ status: 'disconnected', login: null })
     if (path.endsWith('/acme/repo/12')) return pull()
     if (path.endsWith('/files')) return Response.json(files)
-    if (path.endsWith('/threads')) return Response.json({ threads: [outdated], pending_review: null })
+    if (path.endsWith('/threads')) return Response.json({ threads: [outdated, onLockfile], pending_review: null })
     if (path.endsWith('/conversation')) return Response.json([])
     return Response.json({})
   }) as typeof fetch
@@ -92,4 +94,12 @@ test('a pull request GitHub hides says so', async () => {
   serve({ pull: () => problem(404, 'pull_not_found') })
   const view = page()
   expect(await view.findByText('Pull request not found')).toBeTruthy()
+})
+
+test('comments on a file the diff cannot show are in the Overview tab', async () => {
+  serve()
+  const view = page()
+  await userEvent.click(await view.findByRole('tab', { name: 'Overview' }))
+  expect(await view.findByText('Why this bump?')).toBeTruthy()
+  expect(view.getByRole('region', { name: 'Comments not in the diff' })).toBeTruthy()
 })

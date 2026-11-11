@@ -234,6 +234,10 @@ pub fn integration_router(state: IntegrationState) -> Router {
             get(crate::github_pull_routes::list_github_pull_threads),
         )
         .route(
+            "/api/v1/workspaces/{workspace_id}/github/pulls/{owner}/{repo}/{number}/merge-base",
+            get(crate::github_pull_routes::get_github_pull_merge_base),
+        )
+        .route(
             "/api/v1/workspaces/{workspace_id}/github/pulls/{owner}/{repo}/{number}/conversation",
             get(crate::github_pull_routes::list_github_pull_conversation),
         )

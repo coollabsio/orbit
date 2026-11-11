@@ -179,6 +179,7 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::github_pull_routes::get_github_pull_contents,
         crate::github_pull_routes::list_github_pull_threads,
         crate::github_pull_routes::list_github_pull_conversation,
+        crate::github_pull_routes::get_github_pull_merge_base,
         crate::github_pull_routes::mark_github_file_viewed,
         crate::github_pull_routes::unmark_github_file_viewed,
         crate::task_routes::list_projects,
@@ -922,6 +923,7 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
         | "get_github_pull_contents"
         | "list_github_pull_threads"
         | "list_github_pull_conversation"
+        | "get_github_pull_merge_base"
         | "mark_github_file_viewed"
         | "unmark_github_file_viewed" => {
             add_code(&mut responses, "403", "github_forbidden");

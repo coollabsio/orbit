@@ -188,7 +188,7 @@ async fn list_filters_build_search_query() {
     fixture.github.respond("GET", "search/issues", 200, json!({ "total_count": 1, "items": [{
         "number": 12, "title": "Fix it", "state": "open", "draft": false, "comments": 2, "updated_at": "2026-11-10T10:00:00Z",
         "user": { "login": "hubot", "avatar_url": "https://avatars.test/hubot" },
-        "pull_request": { "merged_at": null }
+        "repository_url": "https://api.github.com/repos/acme/repo", "pull_request": { "merged_at": null }
     }] }));
     let path = format!(
         "/api/v1/workspaces/{}/projects/{}/github/pulls?filter=review",
@@ -291,4 +291,64 @@ async fn conversation_merges_comments_and_reviews_by_time() {
     assert_eq!(body[0]["kind"], "review");
     assert_eq!(body[0]["review_state"], "approved");
     assert_eq!(body[1]["body"], "Second");
+}
+
+fn search_item(number: i64, repository: &str) -> Value {
+    json!({
+        "number": number, "title": format!("PR {number}"), "state": "open", "draft": false, "comments": 0,
+        "updated_at": "2026-11-10T10:00:00Z", "user": { "login": "hubot", "avatar_url": "" },
+        "repository_url": format!("https://api.github.com/repos/{repository}"), "pull_request": { "merged_at": null }
+    })
+}
+
+#[tokio::test]
+async fn search_text_cannot_reach_other_repositories() {
+    let fixture = connected().await;
+    fixture.github.respond("GET", "search/issues", 200, json!({ "total_count": 2, "items": [
+        search_item(1, "acme/repo"), search_item(2, "acme/secret")
+    ] }));
+    let path = format!(
+        "/api/v1/workspaces/{}/projects/{}/github/pulls?q=repo:acme/secret%20login",
+        fixture.workspace(),
+        fixture.project_id
+    );
+    let body = json_body(fixture.get(&path).await).await;
+    let numbers: Vec<i64> = body["items"].as_array().unwrap().iter().map(|item| item["number"].as_i64().unwrap()).collect();
+    assert_eq!(numbers, vec![1]);
+    let q = search_q(&fixture.with_requests(|requests| requests[0].1.clone()));
+    assert!(!q.contains("acme/secret"), "{q}");
+    assert!(q.contains("login"), "{q}");
+}
+
+#[tokio::test]
+async fn a_trashed_project_does_not_turn_on_the_label_filter() {
+    let fixture = connected().await;
+    fixture.github.respond("GET", "search/issues", 200, json!({ "total_count": 0, "items": [] }));
+    let other = orbit_platform::Id::new_v7().to_string();
+    sqlx::query("INSERT INTO projects (id, workspace_id, name, project_key, color, created_at, updated_at, deleted_at) VALUES ($1, $2, 'Old', 'OLD', '#ff0000', 0, 0, 1)")
+        .bind(&other).bind(fixture.workspace()).execute(fixture.database.pool()).await.unwrap();
+    sqlx::query("INSERT INTO github_project_connections (project_id, workspace_id, installation_id, repository, label) VALUES ($1, $2, 1234, 'acme/repo', 'Old')")
+        .bind(&other).bind(fixture.workspace()).execute(fixture.database.pool()).await.unwrap();
+    let path = format!("/api/v1/workspaces/{}/projects/{}/github/pulls", fixture.workspace(), fixture.project_id);
+    assert_eq!(fixture.get(&path).await.status(), StatusCode::OK);
+    assert!(!search_q(&fixture.with_requests(|requests| requests[0].1.clone())).contains("label:"));
+}
+
+#[tokio::test]
+async fn merge_base_comes_from_the_compare_of_base_and_head() {
+    let fixture = connected().await;
+    fixture.github.graphql("query PullDetail", detail("CLEAN"));
+    fixture.github.respond("GET", "repos/acme/repo/compare/b0...h1?per_page=1", 200, json!({ "merge_base_commit": { "sha": "m0" }, "files": [] }));
+    let response = fixture.get(&pull_path(&fixture, "/merge-base")).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(json_body(response).await["sha"], "m0");
+}
+
+#[tokio::test]
+async fn graphql_asks_for_merge_state_previews() {
+    let fixture = connected().await;
+    fixture.github.graphql("query PullDetail", detail("CLEAN"));
+    assert_eq!(fixture.get(&pull_path(&fixture, "")).await.status(), StatusCode::OK);
+    let accepts = fixture.github.with(|state| state.graphql_accepts.clone());
+    assert!(accepts.iter().all(|accept| accept.contains("application/vnd.github.merge-info-preview+json")), "{accepts:?}");
 }

@@ -311,7 +311,9 @@ fn search_query(repository: &str, label: Option<&str>, filter: PullFilter, text:
         }
         .to_owned(),
     );
-    let text = text.trim();
+    // Free text only: a qualifier (`repo:`, `org:`, `-repo:`…) could widen the search past this repository.
+    let words: Vec<&str> = text.split_whitespace().filter(|word| !word.contains(':')).collect();
+    let text = words.join(" ");
     if !text.is_empty() {
         parts.push(text.chars().take(200).collect());
     }
@@ -336,11 +338,18 @@ pub async fn list(
         .append_pair("page", &page.to_string());
     let path = format!("search/issues?{}", url.query().unwrap_or_default());
     let reply: Value = github.rest(token, Method::GET, &path, None).await?;
+    let own = format!("/repos/{repository}");
     let items: Vec<PullSummary> = reply["items"]
         .as_array()
         .map(Vec::as_slice)
         .unwrap_or_default()
         .iter()
+        // only this repository's pull requests, whatever the search matched
+        .filter(|item| {
+            item["repository_url"]
+                .as_str()
+                .is_some_and(|url| url.to_lowercase().ends_with(&own))
+        })
         .map(|item| PullSummary {
             repository: repository.to_owned(),
             number: int(&item["number"]),
@@ -356,9 +365,10 @@ pub async fn list(
         })
         .collect();
     let total = reply["total_count"].as_i64().unwrap_or(0);
+    let returned = reply["items"].as_array().map_or(0, Vec::len);
     // GitHub search returns at most 1,000 results.
     let seen = i64::from(page * LIST_PAGE_SIZE);
-    let more = seen < total.min(1000) && items.len() == LIST_PAGE_SIZE as usize;
+    let more = seen < total.min(1000) && returned == LIST_PAGE_SIZE as usize;
     Ok(PullList {
         items,
         next_cursor: more.then(|| (page + 1).to_string()),
@@ -729,4 +739,36 @@ pub async fn set_viewed(
         .graphql(token, query, json!({ "pullId": id, "path": path }))
         .await?;
     Ok(())
+}
+
+#[derive(Serialize, ToSchema)]
+#[schema(as = GithubMergeBase)]
+pub struct MergeBase {
+    /// The commit GitHub diffs the pull request against (the old side of every file).
+    sha: String,
+}
+
+/// The merge base of the pull request: the old side of its diff (the base branch may have moved on since).
+pub async fn merge_base(github: &GithubClient, token: &str, pull: &PullRef) -> Result<MergeBase, GithubError> {
+    let detail = detail(github, token, pull).await?;
+    let valid = |sha: &str| !sha.is_empty() && sha.bytes().all(|c| c.is_ascii_alphanumeric());
+    if !valid(&detail.base_sha) || !valid(&detail.head_sha) {
+        return Err(GithubError::NotFound);
+    }
+    let reply: Value = github
+        .rest(
+            token,
+            Method::GET,
+            &format!(
+                "repos/{}/{}/compare/{}...{}?per_page=1",
+                pull.owner, pull.repo, detail.base_sha, detail.head_sha
+            ),
+            None,
+        )
+        .await?;
+    let sha = text(&reply["merge_base_commit"]["sha"]);
+    if sha.is_empty() {
+        return Err(GithubError::NotFound);
+    }
+    Ok(MergeBase { sha })
 }

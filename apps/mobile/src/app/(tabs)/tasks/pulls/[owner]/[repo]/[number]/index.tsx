@@ -1,4 +1,5 @@
 import type { GithubPullDetail, GithubPullFile, GithubReviewThread } from '@orbit/api/generated/types.gen'
+import { threadsOutsideDiff } from '@orbit/api/github'
 import { openURL } from 'expo-linking'
 import { router, useLocalSearchParams } from 'expo-router'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -60,7 +61,7 @@ function PullBody({ pull, refetch, comment }: { pull: GithubPullDetail; refetch:
   const setViewed = useSetViewed(ref)
   const check = CHECK[pull.checks.state]
   const allThreads = threads.data?.threads ?? []
-  const outdated = allThreads.filter((thread) => thread.line == null)
+  const outside = threadsOutsideDiff(allThreads, files.data ?? [])
   const countOf = (path: string) => allThreads.filter((thread) => thread.path === path && thread.line != null).length
   // a notification opens its thread's file once
   const opened = useRef(false)
@@ -69,7 +70,7 @@ function PullBody({ pull, refetch, comment }: { pull: GithubPullDetail; refetch:
     const thread = threads.data.threads.find((item) => item.comments.some((entry) => entry.database_id === comment))
     if (!thread) return
     opened.current = true
-    if (thread.line == null) setTab('overview')
+    if (threadsOutsideDiff([thread], files.data ?? []).length > 0) setTab('overview')
     else router.push(fileHref(pull, thread.path, thread.id) as never)
   }, [comment, threads.data, pull])
 
@@ -128,7 +129,7 @@ function PullBody({ pull, refetch, comment }: { pull: GithubPullDetail; refetch:
           </View>
         )
       ) : (
-        <Overview pull={pull} timeline={conversation.data ?? []} outdated={outdated} />
+        <Overview pull={pull} timeline={conversation.data ?? []} outside={outside} />
       )}
     </ScrollView>
   )
@@ -168,15 +169,15 @@ function FileRow({ file, first, threads, onOpen, onViewed }: { file: GithubPullF
 
 const REVIEW: Record<string, string> = { approved: 'approved', changes_requested: 'requested changes', commented: 'reviewed' }
 
-function Overview({ pull, timeline, outdated }: { pull: GithubPullDetail; timeline: { kind: string; author: { login: string; avatar_url: string }; body: string; created_at: number; review_state?: string | null }[]; outdated: GithubReviewThread[] }) {
+function Overview({ pull, timeline, outside }: { pull: GithubPullDetail; timeline: { kind: string; author: { login: string; avatar_url: string }; body: string; created_at: number; review_state?: string | null }[]; outside: GithubReviewThread[] }) {
   return (
     <View className="gap-3">
       <Card login={pull.author.login} avatar={pull.author} meta={null} body={pull.body.trim() ? markdownToText(pull.body) : 'No description.'} />
       {timeline.map((item, index) => (
         <Card key={`${item.created_at}-${index}`} login={item.author.login} avatar={item.author} meta={[item.review_state ? REVIEW[item.review_state] ?? 'reviewed' : null, relativeAgo(new Date(item.created_at).toISOString())].filter(Boolean).join(' · ')} body={markdownToText(item.body)} />
       ))}
-      {outdated.length > 0 ? <Text className="mt-2 font-noto-semibold text-[12px] text-muted-foreground">Outdated comments</Text> : null}
-      {outdated.map((thread) => (
+      {outside.length > 0 ? <Text className="mt-2 font-noto-semibold text-[12px] text-muted-foreground">Comments not in the diff</Text> : null}
+      {outside.map((thread) => (
         <Card key={thread.id} login={thread.comments[0]?.author.login ?? 'ghost'} avatar={thread.comments[0]?.author ?? { login: 'ghost', avatar_url: '' }} meta={thread.path} body={thread.comments.map((entry) => `${entry.author.login}: ${markdownToText(entry.body)}`).join('\n\n')} />
       ))}
     </View>

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useSearchParams } from 'react-router'
 import { MessageText } from 'reicon-react'
 import type { GithubPullDetail } from '@orbit/api/generated/types.gen'
-import type { PullRef } from '@orbit/api/github'
+import { threadsOutsideDiff, type PullRef } from '@orbit/api/github'
 import { ApiProblem } from '@orbit/api/problem'
 import { EmptyState } from '@/components/common/EmptyState'
 import { Button } from '@/components/ui/button'
@@ -44,7 +44,7 @@ function PullView({ workspaceId, pullRef, pull }: { workspaceId: string; pullRef
   // the diff list shows the files in the tree's order
   const ordered = useMemo(() => treeOrder(buildFileTree(files.data ?? [])), [files.data])
   const allThreads = useMemo(() => threads.data?.threads ?? [], [threads.data])
-  const outdated = useMemo(() => allThreads.filter((thread) => thread.line == null), [allThreads])
+  const outside = useMemo(() => threadsOutsideDiff(allThreads, files.data ?? []), [allThreads, files.data])
   const commentId = Number(params.get('comment'))
   const highlighted = allThreads.find((thread) => thread.comments.some((comment) => comment.database_id === commentId))?.id ?? null
 
@@ -61,7 +61,7 @@ function PullView({ workspaceId, pullRef, pull }: { workspaceId: string; pullRef
     const thread = allThreads.find((item) => item.id === highlighted)
     if (!thread || !files.data) return
     opened.current = highlighted
-    if (thread.line == null) { setTab('overview'); return }
+    if (threadsOutsideDiff([thread], files.data).length > 0) { setTab('overview'); return }
     openFile(thread.path)
     window.setTimeout(() => document.querySelector(`[data-thread-id="${CSS.escape(highlighted)}"]`)?.scrollIntoView({ block: 'center' }), 300)
   }, [highlighted, allThreads, files.data, openFile])
@@ -115,6 +115,6 @@ function PullView({ workspaceId, pullRef, pull }: { workspaceId: string; pullRef
           : files.data ? <PullDiffList ref={list} workspaceId={workspaceId} pullRef={pullRef} pull={pull} files={ordered} threads={allThreads} diffStyle={diffStyle} highlightedThread={highlighted} />
           : <p className="p-4 text-sm text-muted-foreground">Loading the changes…</p>}
       </main>
-    </div> : <div className="min-h-0 flex-1 overflow-y-auto"><PullOverview pull={pull} timeline={conversation.data ?? []} outdated={outdated} /></div>}
+    </div> : <div className="min-h-0 flex-1 overflow-y-auto"><PullOverview pull={pull} timeline={conversation.data ?? []} outside={outside} /></div>}
   </div>
 }

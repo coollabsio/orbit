@@ -18,6 +18,7 @@ use crate::integration_routes::ApiError;
 
 /// The REST API version Orbit is written against.
 const API_VERSION: &str = "2026-03-10";
+const GRAPHQL_ACCEPT: &str = "application/vnd.github+json, application/vnd.github.merge-info-preview+json";
 
 /// Where GitHub is. Production is github.com; tests point both URLs at one local fake.
 #[derive(Clone, Debug)]
@@ -286,7 +287,10 @@ impl GithubClient {
             message: String,
         }
         let body = serde_json::json!({ "query": query, "variables": variables });
-        let response = self.send(token, Method::POST, "graphql", Some(&body)).await?;
+        // `mergeStateStatus` has been behind this preview; asking for it is harmless where it is not.
+        let response = self
+            .send_with(token, Method::POST, "graphql", Some(&body), GRAPHQL_ACCEPT)
+            .await?;
         let reply: Reply<T> = response.json().await.map_err(|_| GithubError::Network)?;
         if let Some(error) = reply.errors.into_iter().next() {
             return Err(match error.kind.as_str() {
@@ -308,6 +312,18 @@ impl GithubClient {
         path: &str,
         body: Option<&Value>,
     ) -> Result<reqwest::Response, GithubError> {
+        self.send_with(token, method, path, body, "application/vnd.github+json")
+            .await
+    }
+
+    async fn send_with(
+        &self,
+        token: &str,
+        method: Method,
+        path: &str,
+        body: Option<&Value>,
+        accept: &str,
+    ) -> Result<reqwest::Response, GithubError> {
         let url = self
             .endpoints
             .api
@@ -320,7 +336,7 @@ impl GithubClient {
         let mut request = self
             .http
             .request(method, url)
-            .header("Accept", "application/vnd.github+json")
+            .header("Accept", accept)
             .header("X-GitHub-Api-Version", API_VERSION);
         if !token.is_empty() {
             request = request.bearer_auth(token);
