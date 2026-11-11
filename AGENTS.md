@@ -46,7 +46,7 @@ Every change must work on both.
   makes a SQLite and a Postgres file with the same UTC timestamp version, so parallel worktrees do not collide. Write
   the same change in both files. `crates/platform/build.rs` finds the files and refuses a new 4-digit number, a
   duplicate version or a missing Postgres file. Do not add migrations by hand to a list, and never rename or edit
-  0001–0098.
+  0001–0099.
 - **Tests:** run the tests that cover your change on both databases:
   `cargo test -p orbit-server --test <name>`, then the same with
   `ORBIT_TEST_POSTGRES_URL=postgres://orbit:orbit@127.0.0.1:15432/orbit`. Tests that only make sense on SQLite

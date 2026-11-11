@@ -10,7 +10,7 @@ use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::{env, fs};
 
-const LAST_SEQUENTIAL_VERSION: i64 = 98;
+const LAST_SEQUENTIAL_VERSION: i64 = 99;
 /// The Postgres catalog starts with one baseline at this version.
 const POSTGRES_BASELINE_VERSION: i64 = 46;
 

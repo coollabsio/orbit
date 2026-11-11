@@ -37,7 +37,7 @@ export function AppearancePage() {
   const { appearance, setAppearance } = useTheme()
   const choice = useCustomThemeChoice()
   const appLooks = choice && 'apps' in choice ? choice.apps : null
-  const customTheme = choice && !appLooks ? choice : null
+  const customTheme = choice && !('apps' in choice) ? choice : null
   // the colour editor: for the whole app (Custom), or for one part of it (Per app)
   const [editing, setEditing] = useState<'all' | AppSection | null>(null)
 

@@ -4946,6 +4946,16 @@ export type ProjectMemberRecord = {
     user_id: string;
 };
 
+/**
+ * The caller's own order of projects in the Tasks sidebar.
+ */
+export type ProjectOrder = {
+    /**
+     * Live projects in the caller's order. Projects not listed follow them, by name.
+     */
+    project_ids: Array<string>;
+};
+
 export type ProjectRecord = {
     /**
      * Close a task automatically when all its sub-issues are done (rule A).
@@ -25489,6 +25499,122 @@ export type PutMemberNoteResponses = {
 };
 
 export type PutMemberNoteResponse = PutMemberNoteResponses[keyof PutMemberNoteResponses];
+
+export type GetProjectOrderData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/project-order';
+};
+
+export type GetProjectOrderErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type GetProjectOrderError = GetProjectOrderErrors[keyof GetProjectOrderErrors];
+
+export type GetProjectOrderResponses = {
+    200: ProjectOrder;
+};
+
+export type GetProjectOrderResponse = GetProjectOrderResponses[keyof GetProjectOrderResponses];
+
+export type PutProjectOrderData = {
+    body: ProjectOrder;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/project-order';
+};
+
+export type PutProjectOrderErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * validation_failed
+     */
+    422: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type PutProjectOrderError = PutProjectOrderErrors[keyof PutProjectOrderErrors];
+
+export type PutProjectOrderResponses = {
+    204: void;
+};
+
+export type PutProjectOrderResponse = PutProjectOrderResponses[keyof PutProjectOrderResponses];
 
 export type ListProjectsData = {
     body?: never;
