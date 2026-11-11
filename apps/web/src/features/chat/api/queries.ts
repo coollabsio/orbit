@@ -1,5 +1,5 @@
 import { type InfiniteData, useInfiniteQuery, useQuery } from '@tanstack/react-query'
-import { type ChatBadges, chatBadges, type UnreadConversation, unreadConversations } from '../lib/sidebar'
+import { type ChatBadges, chatBadges, type UnreadGroup, unreadGroups } from '../lib/sidebar'
 import { useChatContext } from './chatContext'
 import type { ChatClient, MessageCursor, SearchInput } from './client'
 import { chatKeys } from './keys'
@@ -210,6 +210,17 @@ export function useFollowedThreads() {
   return useQuery(followedThreadsOptions(client, workspaceId))
 }
 
+/** The Unreads view's threads: unread replies, followed or not, in joined conversations that are not muted. */
+export function useUnreadThreads() {
+  const { client, workspaceId } = useChatContext()
+  return useQuery({
+    ...LIVE,
+    queryKey: chatKeys.unreadThreads(workspaceId),
+    queryFn: () => requireClient(client).listUnreadThreads(),
+    enabled: client !== null,
+  })
+}
+
 /** The user's state in one followed thread (for the reply summary row); `undefined` when the thread is not followed. */
 export function useThreadState(rootId: string | null | undefined) {
   const { client, workspaceId } = useChatContext()
@@ -278,9 +289,10 @@ export function useChatBadges(): ChatBadges {
   return chatBadges(conversations ?? [], states ?? [], threads ?? [])
 }
 
-/** The groups of the Unreads view: unread, not muted, newest activity first. */
-export function useUnreadConversations(): UnreadConversation[] {
+/** The groups of the Unreads view: unread conversations and threads, not muted, newest activity first. */
+export function useUnreadGroups(): UnreadGroup[] {
   const conversations = useConversations().data
   const states = useConversationStates().data
-  return unreadConversations(conversations ?? [], states ?? [])
+  const threads = useUnreadThreads().data
+  return unreadGroups(conversations ?? [], states ?? [], threads ?? [])
 }

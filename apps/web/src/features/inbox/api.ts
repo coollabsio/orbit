@@ -33,6 +33,25 @@ export function useNotifications(workspaceId: string, unread = false) {
   })
 }
 
+/** The newest notifications (or the newest unread ones), for the bell's popover: one page, not the whole list. */
+/** `more` is true when the server has more after this page. */
+export function useLatestNotifications(workspaceId: string, { unread = false, limit }: { unread?: boolean; limit: number }) {
+  return useQuery({
+    // under the list's key, so what refreshes the inbox refreshes this
+    queryKey: [...queryKeys.notifications(workspaceId, unread), 'latest', limit] as const,
+    queryFn: async () => {
+      const { data } = await listNotifications({
+        client: apiClient,
+        path: { workspace_id: workspaceId },
+        query: { unread, limit },
+        throwOnError: true,
+      })
+      const page = required(data, 'Notifications response was empty.')
+      return { items: page.items, more: Boolean(page.next_cursor) }
+    },
+  })
+}
+
 /** Whether the inbox has an unread notification: one row is enough to know. */
 /** `enabled` is off for a guest: it has no Activity. */
 export function useHasUnreadNotifications(workspaceId: string, enabled = true) {
@@ -63,7 +82,22 @@ export function useMarkNotificationRead(workspaceId: string) {
       })
       return required(data, 'Read notification response was empty.')
     },
-    onSuccess: () => {
+    // the dot goes at once in every list (the page, the bell's popover); the refresh after it confirms it
+    onMutate: async (notificationId) => {
+      const lists = { queryKey: [...queryKeys.workspace(workspaceId), 'notifications'] }
+      // a refresh already on its way would bring the dot back
+      await queryClient.cancelQueries(lists)
+      const readAt = new Date().toISOString()
+      const read = (items: NotificationRecord[]) =>
+        items.map((item) => (item.id === notificationId && !item.read_at ? { ...item, read_at: readAt } : item))
+      queryClient.setQueriesData(lists, (data: unknown) => {
+        if (Array.isArray(data)) return read(data as NotificationRecord[])
+        if (data && typeof data === 'object' && 'items' in data) return { ...data, items: read((data as { items: NotificationRecord[] }).items) }
+        return data
+      })
+    },
+    // after a failure too: the refresh puts the dot back
+    onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.workspace(workspaceId) })
     },
   })

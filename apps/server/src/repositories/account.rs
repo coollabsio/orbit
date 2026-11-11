@@ -122,6 +122,8 @@ impl IdentityRepository {
         .bind(&id)
         .execute(&mut *transaction)
         .await?;
+        crate::repositories::billing::remember_trial(self.database(), &mut transaction, user_id)
+            .await?;
         let email = deleted_email(user_id);
         sqlx::query(
             "UPDATE users SET display_name = $1, email = $2, normalized_email = $2, password_hash = $3, \
@@ -360,6 +362,8 @@ impl IdentityRepository {
         if taken != 0 {
             return Ok(false);
         }
+        crate::repositories::billing::remember_trial(self.database(), transaction, change.user_id)
+            .await?;
         sqlx::query(
             "UPDATE users SET email = $1, normalized_email = $2, email_verified_at = $3, \
              version = version + 1, updated_at = $3 WHERE id = $4",

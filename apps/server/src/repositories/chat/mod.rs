@@ -1288,18 +1288,15 @@ struct ThreadMember {
 }
 
 impl ThreadMember {
-    /// A thread that is not followed has nothing unread.
+    /// Replies after the cursor are unread whether the member follows the thread or not (the
+    /// Unreads view shows both). Mentions count only while the member follows.
     fn state(&self, root: &MessageRecord) -> ThreadStateRecord {
         ThreadStateRecord {
             root_id: root.id,
             conversation_id: root.conversation_id,
             following: self.following,
             last_read_reply_id: self.last_read_reply_id,
-            unread_replies: if self.following {
-                (root.reply_count - self.read_reply_count).max(0)
-            } else {
-                0
-            },
+            unread_replies: (root.reply_count - self.read_reply_count).max(0),
             mention_count: if self.following {
                 self.mention_count
             } else {
@@ -1331,6 +1328,72 @@ async fn load_thread_member(
         })
     })
     .transpose()
+}
+
+/// The lowest message id of the millisecond `millis`: a UUIDv7 starts with its time.
+fn first_id_at(millis: i64) -> String {
+    let millis = u64::try_from(millis).unwrap_or(0);
+    format!(
+        "{:08x}-{:04x}-0000-0000-000000000000",
+        millis >> 16,
+        millis & 0xffff
+    )
+}
+
+/// For a member with no state in a thread, the replies after this id are unread: the later of
+/// the member's join and its `threads_read_to`.
+fn thread_baseline(joined_at: i64, threads_read_to: Option<String>) -> String {
+    let joined = first_id_at(joined_at);
+    match threads_read_to {
+        Some(id) if id > joined => id,
+        _ => joined,
+    }
+}
+
+/// The member's state in a thread. Without a row it comes from the member's thread baseline:
+/// `None` when nothing is unread there or the user is not a member of the conversation.
+async fn thread_state(
+    conn: &mut AnyConnection,
+    root: &MessageRecord,
+    user_id: Id,
+) -> Result<Option<ThreadStateRecord>, ChatError> {
+    if let Some(member) = load_thread_member(conn, root.id, user_id).await? {
+        return Ok(Some(member.state(root)));
+    }
+    let Some(member) = sqlx::query(
+        "SELECT joined_at, threads_read_to FROM chat_members \
+         WHERE conversation_id = $1 AND user_id = $2",
+    )
+    .bind(root.conversation_id.to_string())
+    .bind(user_id.to_string())
+    .fetch_optional(&mut *conn)
+    .await?
+    else {
+        return Ok(None);
+    };
+    let baseline = thread_baseline(member.get("joined_at"), member.get("threads_read_to"));
+    let row = sqlx::query(
+        "SELECT (SELECT MAX(id) FROM chat_messages WHERE thread_root_id = $1 AND id <= $2) AS cursor, \
+         (SELECT COUNT(*) FROM chat_messages WHERE thread_root_id = $1 AND id > $2 \
+          AND author_id <> $3) AS unread",
+    )
+    .bind(root.id.to_string())
+    .bind(baseline)
+    .bind(user_id.to_string())
+    .fetch_one(&mut *conn)
+    .await?;
+    let unread: i64 = row.get("unread");
+    if unread == 0 {
+        return Ok(None);
+    }
+    Ok(Some(ThreadStateRecord {
+        root_id: root.id,
+        conversation_id: root.conversation_id,
+        following: false,
+        last_read_reply_id: parse_optional_id(row.get("cursor"))?,
+        unread_replies: unread,
+        mention_count: 0,
+    }))
 }
 
 /// The users a body mentions with `<@id>`, in order, each once. Tokens that are not ids are text.

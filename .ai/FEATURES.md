@@ -34,7 +34,7 @@ Mail still uses isolated frontend seed data, and `/mail` redirects to `/tasks`. 
 Core files: `TasksPage.tsx`, `components/TaskList.tsx`, `components/TaskBoard.tsx`, `components/TaskDetail.tsx`, `ProjectSettingsPage.tsx`.
 
 - Project rail: color square, project name, hover settings gear.
-- Sidebar project order is per member (`project_positions`, migration 0096, `GET`/`PUT /project-order`): drag a project row or press Alt+Arrow on it (web), long-press → Move up / Move down (mobile drawer). Projects not placed yet follow by name; the API project list stays by name.
+- Sidebar project order is per member (`project_positions`, migration 0099, `GET`/`PUT /project-order`): drag a project row or press Alt+Arrow on it (web), long-press → Move up / Move down (mobile drawer). Projects not placed yet follow by name; the API project list stays by name.
 - The task-list title is a project picker: All tasks or any project can be selected without opening the project rail.
 - List and Kanban layouts share filtering and sorting.
 - Sorting: manual, priority, created, updated, title.
@@ -624,7 +624,12 @@ turns its routes, navigation and shortcuts off.
   group), shared categories, personal favorites. `#general` has every member.
 - Threads are the only reply model (side pane and full view), with follow state for each member.
 - Reactions, pins, files, mentions (`@user`, `@channel`, `@here`, `#channel`), search, the
-  Unreads and Threads views, a notify level for each conversation.
+  Unreads and Threads views, a notify level for each conversation. Unreads also has a group for each thread with
+  unread replies, followed or not, in a joined conversation that is not muted (`GET …/chat/unread-threads`,
+  `unreadGroups` in `lib/sidebar.ts`). Following only decides notifications and the Threads view. In a thread with no
+  `chat_thread_members` row, the replies after the later of `chat_members.joined_at` and `threads_read_to` (migration
+  0094: the newest message at upgrade) are unread; reading the thread or "Mark all as read" writes a row that does not
+  follow. A reply also sent to the channel shows in the channel's group only.
 - Unread and mention counts come from the server (counters, not count queries).
 - Live updates, typing and presence come over the workspace's live socket
   (`GET /api/v1/workspaces/{id}/live`).
