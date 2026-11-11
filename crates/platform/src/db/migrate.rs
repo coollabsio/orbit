@@ -630,6 +630,11 @@ impl MigrationRunner {
                     include_str!("../../../../apps/server/migrations/0096_owner_trials.sql"),
                     false,
                 ),
+                Migration::new(
+                    97,
+                    include_str!("../../../../apps/server/migrations/0097_used_trials.sql"),
+                    false,
+                ),
             ],
         );
         runner.postgres = vec![
@@ -936,6 +941,11 @@ impl MigrationRunner {
             Migration::new(
                 96,
                 include_str!("../../../../apps/server/migrations/postgres/0096_owner_trials.sql"),
+                false,
+            ),
+            Migration::new(
+                97,
+                include_str!("../../../../apps/server/migrations/postgres/0097_used_trials.sql"),
                 false,
             ),
         ];
