@@ -77,7 +77,7 @@ export function OAuthConsentPage() {
   if (user.isPending) return <LoadingScreen />
   if (user.data === null) return <Navigate to={loginPath(`/oauth/consent?request=${request}`)} replace />
   const workspaceProjects = consent.data?.projects.filter((project) => project.workspace_id === workspace) ?? []
-  const workspaces = [...new Map(consent.data?.projects.map((project) => [project.workspace_id, project.workspace_name])).entries()]
+  const workspaces = consent.data?.workspaces ?? []
   return <AuthCard><div className="grid gap-5">
     <AuthBrand />
     <h1 className="text-xl font-semibold">Connect to Orbit</h1>
@@ -85,10 +85,10 @@ export function OAuthConsentPage() {
       <p><strong>{consent.data.client_name}</strong> wants to connect to the workspace and projects you select.</p>
       <p className="text-sm text-muted-foreground">Signed in as {user.data?.display_name}.</p>
       <Label>Workspace<Select value={workspace} onValueChange={(value) => { setWorkspace(value ?? ''); setSelected([]) }}>
-        <SelectTrigger><SelectValue placeholder="Select a workspace">{workspaces.find(([id]) => id === workspace)?.[1] ?? 'Select a workspace'}</SelectValue></SelectTrigger>
-        <SelectContent>{workspaces.map(([id, name]) => <SelectItem key={id} value={id}>{name}</SelectItem>)}</SelectContent>
+        <SelectTrigger><SelectValue placeholder="Select a workspace">{workspaces.find(({ id }) => id === workspace)?.name ?? 'Select a workspace'}</SelectValue></SelectTrigger>
+        <SelectContent>{workspaces.map(({ id, name }) => <SelectItem key={id} value={id}>{name}</SelectItem>)}</SelectContent>
       </Select></Label>
-      <AccessPicker id="consent-access" resources={RESOURCES.map((resource) => resource.name === 'Tasks' ? { ...resource, details: <ProjectPicker id="consent-projects" projects={workspaceProjects} selected={selected} onChange={setSelected} all={allProjects} onAllChange={setAllProjects} empty={workspaces.length ? undefined : 'No active projects are available to your account.'} /> } : resource)} scopes={scopes} onChange={setScopes} />
+      <AccessPicker id="consent-access" resources={RESOURCES.map((resource) => resource.name === 'Tasks' ? { ...resource, details: <ProjectPicker id="consent-projects" projects={workspaceProjects} selected={selected} onChange={setSelected} all={allProjects} onAllChange={setAllProjects} empty={!workspaces.length ? 'No workspaces are available to your account.' : workspace && !workspaceProjects.length ? 'This workspace has no projects yet. Allow all projects to include the projects you create later.' : undefined} /> } : resource)} scopes={scopes} onChange={setScopes} />
       <div className="flex items-center gap-1.5">
         <Label className="flex items-center gap-2">
           <Checkbox checked={remote} disabled={approve.isPending} onCheckedChange={(checked) => setRemote(Boolean(checked))} />

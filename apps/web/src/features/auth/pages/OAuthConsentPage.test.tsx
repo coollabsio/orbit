@@ -40,7 +40,7 @@ for (const approved of [true, false]) {
         body = JSON.parse(init.body as string)
         return Response.json({ redirect_uri: callback })
       }
-      return Response.json({ client_name: 'Remote client', redirect_to: '127.0.0.1', csrf_token: 'nonce', scope: 'tasks:read', projects: [{ id: 'project-1', name: 'Project One', workspace_id: 'workspace-1', workspace_name: 'Workspace One' }] })
+      return Response.json({ client_name: 'Remote client', redirect_to: '127.0.0.1', csrf_token: 'nonce', scope: 'tasks:read', workspaces: [{ id: 'workspace-1', name: 'Workspace One' }], projects: [{ id: 'project-1', name: 'Project One', workspace_id: 'workspace-1', workspace_name: 'Workspace One' }] })
     }, { preconnect: originalFetch.preconnect })
     const view = render(<Providers><OAuthConsentPage /></Providers>)
     await view.findByText('Remote client')
@@ -85,7 +85,7 @@ test('select all projects and a permission preset send every project and scope',
       body = JSON.parse(init.body as string)
       return Response.json({ redirect_uri: 'http://localhost:9999/callback?code=x' })
     }
-    return Response.json({ client_name: 'Client', redirect_to: '127.0.0.1', csrf_token: 'nonce', scope: 'tasks:read', projects: [
+    return Response.json({ client_name: 'Client', redirect_to: '127.0.0.1', csrf_token: 'nonce', scope: 'tasks:read', workspaces: [{ id: 'w1', name: 'Workspace One' }, { id: 'w2', name: 'Workspace Two' }], projects: [
       { id: 'p1', name: 'One', workspace_id: 'w1', workspace_name: 'Workspace One' },
       { id: 'p2', name: 'Two', workspace_id: 'w1', workspace_name: 'Workspace One' },
       { id: 'p3', name: 'Other', workspace_id: 'w2', workspace_name: 'Workspace Two' },
@@ -106,4 +106,20 @@ test('select all projects and a permission preset send every project and scope',
   fireEvent.click(view.getByRole('button', { name: 'Allow selected access' }))
   await view.findByRole('textbox', { name: 'Callback URL' })
   expect(body).toEqual({ csrf_token: 'nonce', approved: true, workspace_id: 'w1', project_ids: ['p1', 'p2'], all_projects: false, scopes: ['tasks:write', 'chat:read'] })
+})
+
+test('a workspace without projects can be picked and says it has no projects', async () => {
+  const { fireEvent } = await import('@testing-library/react')
+  const userEvent = (await import('@testing-library/user-event')).default.setup()
+  window.history.replaceState(null, '', `/oauth/consent?request=${'e'.repeat(43)}`)
+  globalThis.fetch = Object.assign(async (input: RequestInfo | URL) => {
+    const path = new URL(input instanceof Request ? input.url : String(input), window.location.origin).pathname
+    if (path === '/api/v1/auth/me') return Response.json({ id: 'user-1', display_name: 'Ada' })
+    return Response.json({ client_name: 'Client', redirect_to: '127.0.0.1', csrf_token: 'nonce', scope: 'tasks:read', workspaces: [{ id: 'w1', name: 'Empty' }], projects: [] })
+  }, { preconnect: originalFetch.preconnect })
+  const view = render(<Providers><OAuthConsentPage /></Providers>)
+  await view.findByText('Client')
+  fireEvent.click(view.getByRole('combobox', { name: /Workspace/ }))
+  await userEvent.click(await view.findByRole('option', { name: 'Empty' }))
+  expect(view.getByText(/This workspace has no projects yet/)).toBeTruthy()
 })
