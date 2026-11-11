@@ -20,23 +20,23 @@ export default function AdminGeneralScreen() {
         </SettingsCard>
       ) : null}
       {settings.data ? (
-        <RegistrationCard open={settings.data.registration_open} emailReady={settings.data.smtp != null} locked={settings.data.environment.registration_open} />
+        <RegistrationCard open={settings.data.registration_open} ready={settings.data.registration_ready} locked={settings.data.environment.registration_open} />
       ) : null}
     </AdminShell>
   )
 }
 
-function RegistrationCard({ open, emailReady, locked }: { open: boolean; emailReady: boolean; locked: boolean }) {
+function RegistrationCard({ open, ready, locked }: { open: boolean; ready: boolean; locked: boolean }) {
   const setRegistration = useSetRegistration()
   return (
     <SettingsCard title="Registration" description="Who can create an account on this Orbit." flush>
       <SettingsRow first>
-        <OptionText title="Open registration" help={emailReady ? 'On: anyone can create an account with a link sent to their email. Off: people join only by invitation.' : undefined}>
-          {emailReady ? null : <OptionHint>Set up a mail server in Email first: the sign-up link goes out by email.</OptionHint>}
+        <OptionText title="Open registration" help={ready ? 'On: anyone can create an account, with a link sent to their email or with a sign-in provider. Off: people join only by invitation.' : undefined}>
+          {ready ? null : <OptionHint>Set up a mail server in Email or a sign-in provider first: it confirms the email of a new account.</OptionHint>}
           {locked ? <SetByEnvironment variable="ORBIT_OPEN_REGISTRATION" /> : null}
           {setRegistration.isError ? <OptionHint error>{errorMessage(setRegistration.error)}</OptionHint> : null}
         </OptionText>
-        <Toggle label="Open registration" value={open} disabled={locked || (!emailReady && !open) || setRegistration.isPending} onChange={(checked) => setRegistration.mutate(checked)} />
+        <Toggle label="Open registration" value={open} disabled={locked || (!ready && !open) || setRegistration.isPending} onChange={(checked) => setRegistration.mutate(checked)} />
       </SettingsRow>
     </SettingsCard>
   )

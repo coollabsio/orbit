@@ -2726,6 +2726,10 @@ export type InstanceSettingsView = {
     limits: LimitsView;
     registration_open: boolean;
     /**
+     * Registration can open: a mail server or (not on Orbit Cloud) a sign-in provider confirms new emails.
+     */
+    registration_ready: boolean;
+    /**
      * The Google and GitHub OAuth clients that are saved. A provider that is not listed is off.
      */
     sign_in_providers: Array<SignInProviderView>;

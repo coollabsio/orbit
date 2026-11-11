@@ -462,3 +462,35 @@ async fn a_recorded_bucket_without_credentials_stays_until_the_operator_forgets_
     .unwrap();
     assert_eq!(audited, 1);
 }
+
+#[tokio::test]
+async fn a_mover_that_saw_attachments_off_keeps_the_record_once_they_are_on_again() {
+    use orbit_server::repositories::instance_settings::InstanceSettingsRepository;
+
+    let fixture = fixture().await;
+    let repository = InstanceSettingsRepository::new((*fixture.database).clone());
+    let (status, _) = fixture
+        .call("PUT", "/api/v1/admin/settings/s3", Some(s3_body().await))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let options = |attachments: bool| {
+        json!({"attachments_in_s3": attachments, "backups_in_s3": false, "backup_schedule": "off"})
+    };
+    let (status, _) = fixture
+        .call("PUT", "/api/v1/admin/settings/storage", Some(options(true)))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let recorded = repository.files_bucket().await.unwrap().unwrap();
+
+    // The mover checked the empty bucket while attachments were off; the root user turned them on before it
+    // cleared the record.
+    assert!(!repository.files_bucket_emptied(&recorded, true).await.unwrap());
+    assert_eq!(repository.files_bucket().await.unwrap(), Some(recorded.clone()));
+
+    let (status, _) = fixture
+        .call("PUT", "/api/v1/admin/settings/storage", Some(options(false)))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(repository.files_bucket_emptied(&recorded, true).await.unwrap());
+    assert_eq!(repository.files_bucket().await.unwrap(), None);
+}

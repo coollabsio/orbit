@@ -547,6 +547,12 @@ async fn safety_backup(
 }
 
 async fn attachments(config: Config, command: &AttachmentsCommand) -> Result<String, CliError> {
+    if let AttachmentsCommand::ForgetBucket { yes: false } = command {
+        return Err(CliError::Operation(
+            "forget-bucket requires --yes: attachment files still in the bucket are not used again"
+                .to_owned(),
+        ));
+    }
     let database = Database::open(&DatabaseConfig::for_data(&config.data))
         .await
         .map_err(|error| match error {
@@ -566,13 +572,7 @@ async fn attachments(config: Config, command: &AttachmentsCommand) -> Result<Str
         UploadLimits::default(),
     );
     match command {
-        AttachmentsCommand::ForgetBucket { yes } => {
-            if !yes {
-                return Err(CliError::Operation(
-                    "forget-bucket requires --yes: attachment files still in the bucket are not used again"
-                        .to_owned(),
-                ));
-            }
+        AttachmentsCommand::ForgetBucket { .. } => {
             let forgotten =
                 orbit_server::repositories::instance_settings::InstanceSettingsRepository::new(
                     database.clone(),

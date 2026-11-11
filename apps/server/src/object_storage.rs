@@ -12,6 +12,7 @@ use orbit_platform::{
 };
 use tokio_util::sync::CancellationToken;
 
+use crate::repositories::environment_settings::EnvironmentSettings;
 use crate::repositories::instance_settings::{
     BackupSchedule, BucketLocation, InstanceSettingsRepository, S3Settings, StorageSettings,
 };
@@ -278,8 +279,13 @@ async fn track_files_bucket(database: &Database, storage: &ObjectStorage) -> Res
     {
         return Ok(());
     }
+    // Attachments may be turned on again (on any server) after the check: the record then stays. With
+    // `ORBIT_S3_ATTACHMENTS` set, nobody can turn them on, and the saved setting does not count.
+    let unless_attachments_saved_on = EnvironmentSettings::of(database)
+        .attachments_in_s3
+        .is_none();
     repository
-        .files_bucket_emptied(&location)
+        .files_bucket_emptied(&location, unless_attachments_saved_on)
         .await
         .map_err(|error| error.to_string())?;
     Ok(())

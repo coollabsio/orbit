@@ -38,7 +38,7 @@ use crate::repositories::identity::{
 use crate::repositories::instance_settings::{
     BackupSchedule, InstanceLimits, InstanceSettingsError, InstanceSettingsRepository,
     PasswordChange, S3Settings, SmtpSecurity, SmtpSettings, StorageSettingsError,
-    adjustable_job_kinds,
+    adjustable_job_kinds, can_confirm_sign_up,
 };
 use crate::repositories::sign_in_providers::SaveSignInProviderError;
 use crate::repositories::workspace_storage::{WorkspaceStorageError, WorkspaceStorageRepository};
@@ -1825,6 +1825,8 @@ struct StorageView {
 #[derive(Serialize, ToSchema)]
 struct InstanceSettingsView {
     registration_open: bool,
+    /// Registration can open: a mail server or (not on Orbit Cloud) a sign-in provider confirms new emails.
+    registration_ready: bool,
     /// `null` until a mail server is saved.
     smtp: Option<SmtpView>,
     storage: StorageView,
@@ -1942,7 +1944,13 @@ async fn settings_view(
     let sign_in_providers = repository
         .sign_in_providers()
         .await
-        .map_err(|_| internal(instance, request_id))?
+        .map_err(|_| internal(instance, request_id))?;
+    let registration_ready = can_confirm_sign_up(
+        state.identity.database(),
+        settings.smtp.is_some(),
+        !sign_in_providers.is_empty(),
+    );
+    let sign_in_providers = sign_in_providers
         .into_iter()
         .map(|saved| SignInProviderView {
             provider: saved.provider,
@@ -1977,6 +1985,7 @@ async fn settings_view(
         },
         limits: limits.into(),
         registration_open: settings.registration_open,
+        registration_ready,
         smtp: settings.smtp.map(|smtp| SmtpView {
             host: smtp.host,
             port: smtp.port,

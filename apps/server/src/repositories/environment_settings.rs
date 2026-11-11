@@ -173,7 +173,7 @@ impl EnvironmentSettings {
             return Err(refuse("files are still in it"));
         }
         repository
-            .files_bucket_emptied(&recorded)
+            .files_bucket_emptied(&recorded, false)
             .await
             .map_err(unavailable)?;
         Ok(())

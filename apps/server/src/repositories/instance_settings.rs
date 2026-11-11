@@ -140,6 +140,12 @@ pub struct JobKindLimits {
     pub defaults: JobLimits,
 }
 
+/// Sign-up needs a way to prove the email: an emailed link, or a sign-in provider that verified it.
+/// Orbit Cloud needs the mail server even with a provider.
+pub(crate) fn can_confirm_sign_up(database: &Database, smtp: bool, sign_in_provider: bool) -> bool {
+    smtp || (sign_in_provider && !super::billing::enabled(database))
+}
+
 #[derive(Clone, Debug)]
 pub struct InstanceSettingsRepository {
     pub(super) database: Database,
@@ -186,7 +192,7 @@ impl InstanceSettingsRepository {
         })
     }
 
-    /// Opening registration needs a mail server: the sign-up link goes out by email.
+    /// Opening registration needs a way to confirm the email of a new account (see [`can_confirm_sign_up`]).
     pub async fn set_registration_open(
         &self,
         actor_id: Id,
@@ -195,12 +201,13 @@ impl InstanceSettingsRepository {
         now: TimestampMillis,
     ) -> Result<(), InstanceSettingsError> {
         let mut transaction = self.database.immediate_transaction().await?;
-        // Sign-up needs a way to prove the email: an emailed link, or a sign-in provider that verified it.
-        // Orbit Cloud needs the mail server even with a provider.
         let environment = EnvironmentSettings::of(&self.database);
         let billing = super::billing::enabled(&self.database);
-        let set_by_environment =
-            environment.smtp.is_some() || (!billing && !environment.sign_in_providers.is_empty());
+        let set_by_environment = can_confirm_sign_up(
+            &self.database,
+            environment.smtp.is_some(),
+            !environment.sign_in_providers.is_empty(),
+        );
         if open && !set_by_environment {
             let configured = sqlx::query_scalar::<_, i64>(
                 if billing {
@@ -619,18 +626,23 @@ impl InstanceSettingsRepository {
         transaction.commit().await
     }
 
-    /// No attachment files are left in the bucket at `location`. False when another bucket is recorded.
+    /// No attachment files are left in the bucket at `location`. False when another bucket is recorded, or when
+    /// `unless_attachments_saved_on` and the saved setting sends attachments to S3 again: turning them on records
+    /// the bucket in the same transaction, so this one statement cannot clear a record that new uploads need.
     pub async fn files_bucket_emptied(
         &self,
         location: &BucketLocation,
+        unless_attachments_saved_on: bool,
     ) -> Result<bool, sqlx::Error> {
         let cleared = sqlx::query(
             "UPDATE instance_settings SET files_s3_endpoint = NULL, files_s3_bucket = NULL, files_s3_prefix = NULL \
-             WHERE id = 1 AND files_s3_endpoint = $1 AND files_s3_bucket = $2 AND files_s3_prefix = $3",
+             WHERE id = 1 AND files_s3_endpoint = $1 AND files_s3_bucket = $2 AND files_s3_prefix = $3 \
+             AND ($4 = 0 OR attachments_in_s3 = 0)",
         )
         .bind(&location.endpoint)
         .bind(&location.bucket)
         .bind(&location.prefix)
+        .bind(i64::from(unless_attachments_saved_on))
         .execute(self.database.pool())
         .await?
         .rows_affected();

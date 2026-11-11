@@ -236,6 +236,14 @@ impl App {
         let storage_settings = crate::object_storage::load_saved(&database)
             .await
             .map_err(|error| AppError::Database(error.to_string()))?;
+        // Record the bucket only after it builds: a bad endpoint must not stay recorded.
+        crate::object_storage::apply_and_keep(
+            &database,
+            &object_storage,
+            &storage_settings,
+            app_key.as_ref(),
+        )
+        .map_err(|error| AppError::Config(format!("object storage: {error}")))?;
         if let Some(s3) = storage_settings
             .installation
             .s3
@@ -251,13 +259,6 @@ impl App {
             .await
             .map_err(|error| AppError::Database(error.to_string()))?;
         }
-        crate::object_storage::apply_and_keep(
-            &database,
-            &object_storage,
-            &storage_settings,
-            app_key.as_ref(),
-        )
-        .map_err(|error| AppError::Config(format!("object storage: {error}")))?;
         let backups = BackupService::new(&config.data.backups, &config.data.attachments)
             .with_object_storage(object_storage.clone());
         let blob_store = TieredBlobStore::new(

@@ -18,25 +18,25 @@ export function AdminSettingsPage() {
   const settings = useInstanceSettings()
   if (settings.isPending) return <SettingsCard title="General"><p><LoadingText>Loading settings…</LoadingText></p></SettingsCard>
   if (settings.isError) return <SettingsCard title="General"><p role="alert">Settings could not be loaded. <Button variant="ghost" onClick={() => void settings.refetch()}>Retry</Button></p></SettingsCard>
-  return <RegistrationCard open={settings.data.registration_open} emailReady={settings.data.smtp != null} locked={settings.data.environment.registration_open} />
+  return <RegistrationCard open={settings.data.registration_open} ready={settings.data.registration_ready} locked={settings.data.environment.registration_open} />
 }
 
-function RegistrationCard({ open, emailReady, locked }: { open: boolean; emailReady: boolean; locked: boolean }) {
+function RegistrationCard({ open, ready, locked }: { open: boolean; ready: boolean; locked: boolean }) {
   const setRegistration = useSetRegistration()
   return (
     <SettingsCard title="Registration" description="Who can create an account on this Orbit." flush>
       <SettingsRow className="flex-nowrap">
         <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-[0.8125rem]">
-          {emailReady
-            ? <span className="inline-flex items-center gap-1.5 font-medium text-foreground">Open registration <InfoTip text="On: anyone can create an account with a link sent to their email. Off: people join only by invitation." /></span>
+          {ready
+            ? <span className="inline-flex items-center gap-1.5 font-medium text-foreground">Open registration <InfoTip text="On: anyone can create an account, with a link sent to their email or with a sign-in provider. Off: people join only by invitation." /></span>
             : <span className="font-medium text-foreground">Open registration</span>}
-          {emailReady ? null : <span className="text-xs text-muted-foreground">Set up a mail server in Email first: the sign-up link goes out by email.</span>}
+          {ready ? null : <span className="text-xs text-muted-foreground">Set up a mail server in Email or a sign-in provider first: it confirms the email of a new account.</span>}
           {locked ? <SetByEnvironment variable="ORBIT_OPEN_REGISTRATION" /> : null}
         </div>
         <Switch
           aria-label="Open registration"
           checked={open}
-          disabled={locked || (!emailReady && !open) || setRegistration.isPending}
+          disabled={locked || (!ready && !open) || setRegistration.isPending}
           onCheckedChange={(checked: boolean) => setRegistration.mutate(checked, {
             onSuccess: () => toast(checked ? 'Registration is open' : 'Registration is closed'),
             onError: (error) => toast.error(problemText(error, 'Registration could not be changed.')),
