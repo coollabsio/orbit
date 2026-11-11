@@ -34,6 +34,7 @@ Mail still uses isolated frontend seed data, and `/mail` redirects to `/tasks`. 
 Core files: `TasksPage.tsx`, `components/TaskList.tsx`, `components/TaskBoard.tsx`, `components/TaskDetail.tsx`, `ProjectSettingsPage.tsx`.
 
 - Project rail: color square, project name, hover settings gear.
+- Sidebar project order is per member (`project_positions`, migration 0099, `GET`/`PUT /project-order`): drag a project row or press Alt+Arrow on it (web), long-press → Move up / Move down (mobile drawer). Projects not placed yet follow by name; the API project list stays by name.
 - The task-list title is a project picker: All tasks or any project can be selected without opening the project rail.
 - List and Kanban layouts share filtering and sorting.
 - Sorting: manual, priority, created, updated, title.

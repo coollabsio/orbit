@@ -44,6 +44,8 @@ export const queryKeys = {
   /** The workspace's own S3 bucket for its files. */
   workspaceBucket: (workspaceId: string) => [...workspace(workspaceId), 'storage', 'bucket'] as const,
   projects: (workspaceId: string) => [...workspace(workspaceId), 'projects'] as const,
+  /** The member's own sidebar order of the projects. */
+  projectOrder: (workspaceId: string) => [...workspace(workspaceId), 'project-order'] as const,
   statuses: (workspaceId: string, projectId: string) =>
     [...workspace(workspaceId), 'projects', projectId, 'statuses'] as const,
   projectMembers: (workspaceId: string, projectId: string) =>
