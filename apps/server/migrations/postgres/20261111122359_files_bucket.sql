@@ -1,4 +1,4 @@
--- As in migrations/0093_files_bucket.sql. The bucket that may hold the installation's attachment files (`blobs/`): set when attachments go to S3, cleared
+-- As in apps/server/migrations/20261111122359_files_bucket.sql. The bucket that may hold the installation's attachment files (`blobs/`): set when attachments go to S3, cleared
 -- when the mover finds none left in it. Orbit refuses to start with another bucket while files may be in this one,
 -- also when the bucket comes from `ORBIT_S3_*`, which is never saved. Only the location: no credentials.
 ALTER TABLE instance_settings ADD COLUMN files_s3_endpoint TEXT;

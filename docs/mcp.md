@@ -303,7 +303,7 @@ Service-account tokens support tasks only; docs and chat require a personal iden
 | Task write | `create_task`, `update_task`, `delete_task`, `create_comment`, `create_project` |
 | None | `get_me` |
 | Docs read | `list_docs`, `get_doc`, `get_database`, `query_database` |
-| Docs write | `create_doc`, `update_doc`, `create_database_row`, `update_database_row`, `trash_database_rows` |
+| Docs write | `create_doc`, `update_doc`, `create_database_row`, `update_database_row`, `trash_database_rows`, `create_database_property`, `update_database_property`, `delete_database_property` |
 | Chat read | `list_conversations`, `list_messages`, `get_thread`, `search_messages` |
 
 Task create takes `project_id`, `status_id`, `title`, optional markdown `description`,
@@ -365,6 +365,18 @@ counts the others) and unique IDs as `"PREFIX-12"`; a unique ID filter takes `"P
 `12`. An invalid value or filter fails with "Invalid database input", its field, such as
 `values.Status`, and what the field needs. A write has at most 50 values. See
 [Databases in the public API](public-api.md#databases) for every value shape.
+The schema tools change a database's properties (columns) as the connected person, who must be
+able to edit the database. `create_database_property` takes `database_id`, `name`, `type` and
+optional `config` and `position`. `update_database_property` takes `database_id`, `property` (a
+name or ID) and one or more of `name`, `type`, `config`, `add_options` and `position`, and
+optional `dry_run`; it returns the property with `converted` and `cleared` value counts. A new
+type converts the values and gives the type's default config; send `config` in a later call.
+`config` replaces the whole config: options left out are removed from every row. Select,
+multi-select and status options can be plain names or `{name, color, group}` objects; an option
+sent by name only keeps the ID, color and group of the option with that name, so its values stay.
+`add_options` appends options and skips names the property already has; it cannot be sent with
+`config`. `delete_database_property` takes `database_id` and `property` and deletes the property
+with its values; the title property cannot be deleted or change its type.
 Chat message and thread tools accept `before` and `limit` (1–100) for pagination.
 `search_messages` takes `query` (up to 500 characters; every word must match, the last one as a
 prefix) and optional `conversation_id`, `author_id`, `has_file` and `cursor` filters. It returns

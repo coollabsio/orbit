@@ -8,6 +8,7 @@ import { SettingsCard } from '@/components/common/SettingsCard'
 import { useSlowPending } from '@/lib/useDebouncedValue'
 import { RowIcon, SettingsRow } from '@/features/settings/components/SettingsParts'
 import { LoadingText } from '@/components/ui/spinner'
+import { ListPager, usePagedList } from '@/components/common/ListPager'
 
 /** Account view: the current user's signed-in devices. */
 export function SessionsPage() {
@@ -16,6 +17,9 @@ export function SessionsPage() {
   const revoking = useSlowPending(revokeSessions.isPending)
   const sessions = sessionsQuery.data ?? []
   const others = sessions.filter((s) => !s.current)
+  // The current session stays first, so it is always on page 1.
+  const ordered = [...sessions.filter((s) => s.current), ...others]
+  const { visible, pager } = usePagedList(ordered)
   const failure = revokeSessions.error instanceof SessionRevocationError ? revokeSessions.error : null
 
   return (
@@ -35,7 +39,7 @@ export function SessionsPage() {
         <div className="flex flex-col divide-y">
           {sessionsQuery.isPending ? <SettingsRow><LoadingText>Loading sessions…</LoadingText></SettingsRow> : null}
           {sessionsQuery.isError ? <SettingsRow role="alert">Sessions could not be loaded. <Button variant="ghost" onClick={() => void sessionsQuery.refetch()}>Retry</Button></SettingsRow> : null}
-          {sessions.map((session) => {
+          {visible.map((session) => {
             return (
               <SettingsRow key={session.id} className="flex-nowrap">
                 <RowIcon>
@@ -65,6 +69,7 @@ export function SessionsPage() {
           {revokeSessions.isError ? <SettingsRow role="alert">{failure ? `${failure.failedIds.length} of ${failure.total} sessions could not be revoked.` : 'Session revocation failed.'} <Button variant="ghost" onClick={() => revokeSessions.mutate(failure?.failedIds ?? revokeSessions.variables ?? [])}>{failure ? 'Retry failed sessions' : 'Retry'}</Button></SettingsRow> : null}
           {revoking ? <SettingsRow role="status">Revoking {revokeSessions.variables?.length ?? 1} session{revokeSessions.variables?.length === 1 ? '' : 's'}…</SettingsRow> : null}
         </div>
+        {pager.lastPage > 1 ? <ListPager {...pager} /> : null}
       </SettingsCard>
     </>
   )

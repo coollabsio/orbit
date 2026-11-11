@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { S3Body, S3View } from '@orbit/api/generated/types.gen'
 import { SettingsCard } from '@/components/common/SettingsCard'
+import { InfoTip } from '@/components/common/InfoTip'
 import { Button } from '@/components/ui/button'
 import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
@@ -80,10 +81,13 @@ export function S3BucketForm({ s3, title, description, endpointPlaceholder, savi
         </FieldGrid>
         {children}
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-          <label className="flex items-center gap-2 text-[13px]">
-            <Switch checked={draft.path_style} disabled={disabled} onCheckedChange={(checked: boolean) => setDraft((current) => ({ ...current, path_style: checked }))} />
-            Path-style URLs (MinIO and some other S3-compatible services)
-          </label>
+          <div className="flex items-center gap-1.5">
+            <label className="flex items-center gap-2 text-[13px]">
+              <Switch checked={draft.path_style} disabled={disabled} onCheckedChange={(checked: boolean) => setDraft((current) => ({ ...current, path_style: checked }))} />
+              Path-style URLs
+            </label>
+            <InfoTip text="For MinIO and some other S3-compatible services." />
+          </div>
           <div className="flex items-center gap-2">
             {onRemove ? <Button type="button" variant="ghost" className="text-destructive" disabled={disabled || removing} onClick={onRemove}>Remove</Button> : null}
             <Button type="submit" disabled={disabled || saving}>{saving ? 'Testing bucket…' : 'Save bucket'}</Button>

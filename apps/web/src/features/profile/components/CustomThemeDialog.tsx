@@ -3,9 +3,10 @@ import { toast } from 'sonner'
 import { cn } from 'cn'
 import { useTheme, type Theme } from '@/lib/themeContext'
 import { Copy, Hashtag } from 'reicon-react'
+import { InfoTip } from '@/components/common/InfoTip'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Field, FieldDescription, FieldError, FieldLabel } from '@/components/ui/field'
+import { Field, FieldError, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '@/components/ui/input-group'
 import {
@@ -16,8 +17,6 @@ import {
   readableOn,
   parseCustomTheme,
   serializeCustomTheme,
-  setCustomTheme,
-  useCustomTheme,
   type CustomTheme,
 } from '@/lib/customTheme'
 
@@ -31,24 +30,46 @@ const COLOR_FIELDS: readonly { key: keyof CustomTheme; label: string; hint: stri
   { key: 'chat', label: 'Pages', hint: 'Every page, menus, dialogs' },
 ]
 
-/** The custom theme editor: presets, four colours, a live preview, and a code to share. Saved for this browser. */
-export function CustomThemeDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+/**
+ * The colour editor: presets, four colours, a live preview, and a code to share. For the whole app (Custom) or for one
+ * part of it (Per app). "Orbit" (`null`) is the Light, System or Dark theme.
+ */
+export function CustomThemeDialog({
+  open,
+  onOpenChange,
+  title,
+  description,
+  value,
+  onSave,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  title: string
+  description: string
+  value: CustomTheme | null
+  onSave: (theme: CustomTheme | null) => void
+}) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="overflow-y-auto sm:max-w-3xl">
         <DialogHeader>
-          <DialogTitle>Custom theme</DialogTitle>
-          <DialogDescription>Colours of the whole app, in place of Light, System or Dark. Only you see them, and text stays readable on every colour.</DialogDescription>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
-        <CustomThemeForm onDone={() => onOpenChange(false)} />
+        <CustomThemeForm
+          value={value}
+          onSave={(theme) => {
+            onSave(theme)
+            onOpenChange(false)
+          }}
+        />
       </DialogContent>
     </Dialog>
   )
 }
 
-function CustomThemeForm({ onDone }: { onDone: () => void }) {
-  const saved = useCustomTheme()
-  const [theme, setTheme] = useState<CustomTheme | null>(saved)
+function CustomThemeForm({ value, onSave }: { value: CustomTheme | null; onSave: (theme: CustomTheme | null) => void }) {
+  const [theme, setTheme] = useState<CustomTheme | null>(value)
   // Changes when the colours come from a preset or a pasted code, so the hex fields take the new values.
   const [revision, setRevision] = useState(0)
   const [codeError, setCodeError] = useState(false)
@@ -68,8 +89,7 @@ function CustomThemeForm({ onDone }: { onDone: () => void }) {
       className="grid gap-5"
       onSubmit={(event) => {
         event.preventDefault()
-        setCustomTheme(theme)
-        onDone()
+        onSave(theme)
       }}
     >
       <div className="grid gap-6 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
@@ -115,8 +135,8 @@ function CustomThemeForm({ onDone }: { onDone: () => void }) {
           </section>
 
           <Field data-invalid={codeError || undefined} className="gap-1.5">
-            <FieldLabel htmlFor={codeId} className="text-xs font-medium text-muted-foreground">
-              Share code
+            <FieldLabel htmlFor={codeId} className="items-center gap-1.5 text-xs font-medium text-muted-foreground">
+              Share code <InfoTip text="Paste a code that someone shared, or copy yours." />
             </FieldLabel>
             <InputGroup>
               <InputGroupInput
@@ -126,7 +146,7 @@ function CustomThemeForm({ onDone }: { onDone: () => void }) {
                 spellCheck={false}
                 autoComplete="off"
                 aria-invalid={codeError || undefined}
-                aria-describedby={`${codeId}-hint`}
+                aria-describedby={codeError ? `${codeId}-hint` : undefined}
                 className="font-mono text-xs"
                 onChange={(event) => {
                   const parsed = parseCustomTheme(event.target.value)
@@ -151,11 +171,7 @@ function CustomThemeForm({ onDone }: { onDone: () => void }) {
             </InputGroup>
             {codeError ? (
               <FieldError id={`${codeId}-hint`}>A code is four hex colours, for example #3f0e40,#1164a3,#ecb22e,#ffffff.</FieldError>
-            ) : (
-              <FieldDescription id={`${codeId}-hint`} className="text-xs">
-                Paste a code that someone shared, or copy yours.
-              </FieldDescription>
-            )}
+            ) : null}
           </Field>
         </div>
       </div>
@@ -253,10 +269,10 @@ function ColorField({ label, hint, value, onChange }: { label: string; hint: str
           }}
         />
       </label>
-      <label htmlFor={id} className="flex min-w-0 flex-1 flex-col leading-tight">
-        <span className="truncate text-sm">{label}</span>
-        <span className="truncate text-xs text-muted-foreground">{hint}</span>
-      </label>
+      <div className="flex min-w-0 flex-1 items-center gap-1.5">
+        <label htmlFor={id} className="truncate text-sm leading-tight">{label}</label>
+        <InfoTip text={hint} />
+      </div>
       <Input
         id={id}
         value={text}

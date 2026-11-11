@@ -110,6 +110,19 @@ impl Actor {
         matches!(self.role, WorkspaceRole::Guest)
     }
 
+    /// Owners and admins see every project of the workspace, private ones too.
+    #[must_use]
+    pub const fn sees_all_projects(self) -> bool {
+        Policy::can_see_project(self.role, true, false)
+    }
+
+    /// See [`Policy::can_see_project`]. Whoever sees a project may do everything in it, also
+    /// change who sees it.
+    #[must_use]
+    pub const fn can_see_project(self, private: bool, member: bool) -> bool {
+        Policy::can_see_project(self.role, private, member)
+    }
+
     /// Only the author rewrites a task comment. `author_id` is `None` for a comment that a
     /// service account wrote: no member is its author.
     #[must_use]
@@ -285,6 +298,18 @@ impl Policy {
                 matches!(role, WorkspaceRole::Owner | WorkspaceRole::Admin)
             }
             Permission::WorkspaceExportPersonal => !matches!(role, WorkspaceRole::Guest),
+        }
+    }
+
+    /// The one rule for project visibility: a workspace-wide project is open to every member, a
+    /// private one to the people on its member list (`member`) and to owners and admins. Guests
+    /// see no project.
+    #[must_use]
+    pub const fn can_see_project(role: WorkspaceRole, private: bool, member: bool) -> bool {
+        match role {
+            WorkspaceRole::Owner | WorkspaceRole::Admin => true,
+            WorkspaceRole::Member => !private || member,
+            WorkspaceRole::Guest => false,
         }
     }
 

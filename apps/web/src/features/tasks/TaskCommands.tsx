@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
 import type { BulkItem, LabelRecord } from '@orbit/api/generated/types.gen'
+import { ProjectLock } from '@/features/tasks/components/ProjectLock'
 import { ColorDot } from '@/components/common/ColorDot'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import { Command, CommandDialog, CommandEmpty, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
@@ -150,6 +151,7 @@ export function TaskCommands({ tasks, users, labels, statuses, groupContext, cur
             }}>
               <ColorDot color={project.color} className="size-2" />
               <span className="flex-1 truncate">{project.name}</span>
+              <ProjectLock project={project} />
               <span className="text-xs text-muted-foreground tabular-nums">{project.key}</span>
             </CommandItem>
           )) : null}

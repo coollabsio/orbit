@@ -2,6 +2,9 @@
  * A task's Activity feed, as the web builds it (`api/models.ts` and `tasksLib.ts`): audit events become sentences,
  * one per changed field, and interleave with comment threads by time. No React.
  */
+import type { TaskRecurrence } from '@orbit/api/generated/types.gen'
+import { recurrenceChangeText } from '@orbit/api/recurrence'
+
 import { shortDate } from './format'
 import type { CommentRecord, TaskActivityEvent } from './orbit'
 import { PRIORITY_LABEL, type Priority } from './tasks'
@@ -99,6 +102,7 @@ function changeRows(metadata: Record<string, unknown>, context: ActivityContext)
   return Object.entries(changes as Record<string, unknown>).flatMap(([field, value]) => {
     if (field === 'description') return [{ field, text: 'updated the description' }]
     if (field === 'source_url') return [{ field, text: 'updated the source link' }]
+    if (field === 'recurrence') return [{ field, text: recurrenceChangeText(value as TaskRecurrence | null) }]
     if (typeof value !== 'object' || value === null) return []
     const change = value as Record<string, unknown>
     const from = string(change.from) ?? ''

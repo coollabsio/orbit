@@ -6,7 +6,7 @@ import { Pressable, ScrollView, Switch, View } from 'react-native'
 import { useOrbit } from '../../orbit-context'
 import { guestMayOpen } from '../../data/guest'
 import { alpha, cssColors, useButtonStyle, useTheme } from '../../theme'
-import { Icon, type IconName, KeyboardSpace, PaneHeader, PickerSheet, type Presence, PullRefresh, SafeAreaView, Spinner, StatusMark, Text } from '../../ui'
+import { Icon, type IconName, KeyboardSpace, LabelTip, PaneHeader, PickerSheet, type Presence, PullRefresh, SafeAreaView, Spinner, StatusMark, Text } from '../../ui'
 
 export interface SettingsNavItem {
   href: Href & string
@@ -123,10 +123,9 @@ export function AdminShell({ children, onRefresh }: { children: ReactNode; onRef
 
 /**
  * The web `SettingsCard`: a title strip (with its actions on the right) on the card surface, the body on a panel below
- * a hairline. A description hides behind the dotted-underlined title (the web's tooltip); tapping the title shows it.
+ * a hairline. A description hides behind the underlined title (the web's tooltip); tapping the title shows it.
  */
 export function SettingsCard({ title, description, actions, flush = false, danger = false, children }: { title: string; description?: string; actions?: ReactNode; flush?: boolean; /** Delete account: a destructive ring and title, and a body without its own fill. */ danger?: boolean; children?: ReactNode }) {
-  const { colors } = useTheme()
   const [open, setOpen] = useState(false)
   return (
     <View className={`rounded-lg bg-card ${danger ? 'shadow-[0_0_0_1px_var(--color-destructive)]' : 'shadow-[0_0_0_1px_var(--color-border)]'}`}>
@@ -138,8 +137,6 @@ export function SettingsCard({ title, description, actions, flush = false, dange
               accessibilityHint={description}
               onPress={description ? () => setOpen((value) => !value) : undefined}
               className={`font-noto-medium text-[14px] leading-[20px] ${danger ? 'text-destructive' : 'text-foreground'} ${description ? 'underline' : ''}`}
-              // dotted and muted like the web's `decoration-dotted decoration-muted-foreground` (no class for these)
-              style={description ? { textDecorationStyle: 'dotted', textDecorationColor: colors.mutedForeground } : undefined}
             >
               {title}
             </Text>
@@ -229,11 +226,11 @@ export function RowText({ title, subtitle, badges }: { title: string; subtitle?:
   )
 }
 
-/** A switch row's title and its explanation lines, which may wrap (unlike `RowText`'s two-line subtitle). */
-export function OptionText({ title, children }: { title: string; children?: ReactNode }) {
+/** A switch row's title (with optional `help` behind an info icon) and its explanation lines, which may wrap (unlike `RowText`'s two-line subtitle). */
+export function OptionText({ title, help, children }: { title: string; help?: string; children?: ReactNode }) {
   return (
     <View className="flex-1 min-w-0 gap-0.5">
-      <Text className="font-noto-medium text-[13px]">{title}</Text>
+      {help ? <LabelTip label={title} text={help} className="font-noto-medium text-[13px]" /> : <Text className="font-noto-medium text-[13px]">{title}</Text>}
       {children}
     </View>
   )

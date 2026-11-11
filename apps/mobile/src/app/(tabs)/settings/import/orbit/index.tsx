@@ -7,12 +7,12 @@ import { useRef, useState } from 'react'
 import { Pressable, ScrollView, View } from 'react-native'
 
 import { type FlowSource, ImportFlow, NoteLine, ResultStep } from '../../../../../components/import/Flow'
-import { Checkbox, ChoiceRow, ChooserFooter, ConnectError, ConnectSection, ImportBody, ImportScreen, Paragraph, RecentImports, SectionLabel, Strong } from '../../../../../components/import/Parts'
+import { Checkbox, ChoiceRow, ChooserFooter, ConnectError, ConnectSection, ImportBody, ImportScreen, Paragraph, RecentImports, Strong } from '../../../../../components/import/Parts'
 import { createOrbit, importErrorMessage, importNotes, isImportInProgress, plural, uploadOrbit } from '../../../../../data/import-api'
 import { useConnectImport, useStartImport } from '../../../../../hooks/imports'
 import { useOrbit } from '../../../../../orbit-context'
 import { useTheme } from '../../../../../theme'
-import { Button, Icon, Input, Spinner, Text } from '../../../../../ui'
+import { Button, Icon, Input, Spinner, Text, LabelTip } from '../../../../../ui'
 import { uploadPart } from '../../../../../upload-part'
 
 const HOME = '/settings/import/orbit'
@@ -87,14 +87,11 @@ function ConnectStep() {
       <ImportBody>
         <ConnectSection
           title="Connect another Orbit"
-          gap="gap-2"
+          help="Copy projects, pages and chats from another Orbit instance into this workspace. Nobody is notified."
           intro={
-            <>
-              <Paragraph>Copy projects, pages and chats from another Orbit instance into this workspace. Nobody is notified.</Paragraph>
-              <Paragraph>
-                On the other instance, open <Strong>Settings → API tokens</Strong> and create a token with <Strong>Workspace export</Strong> (owners and administrators: the whole workspace) or <Strong>Personal export</Strong> (any member: your private pages, channels and direct messages). Orbit keeps the token encrypted only until the export is downloaded.
-              </Paragraph>
-            </>
+            <Paragraph>
+              On the other instance, open <Strong>Settings → API tokens</Strong> and create a token with <Strong>Workspace export</Strong> (owners and administrators: the whole workspace) or <Strong>Personal export</Strong> (any member: your private pages, channels and direct messages). Orbit keeps the token encrypted only until the export is downloaded.
+            </Paragraph>
           }
         >
           <View className="gap-3">
@@ -106,7 +103,7 @@ function ConnectStep() {
             </View>
           </View>
         </ConnectSection>
-        <ConnectSection title="Or upload an export" intro={<Paragraph>Download an export ZIP on the other instance in <Strong>Settings → Export</Strong> and upload it here.</Paragraph>}>
+        <ConnectSection title="Or upload an export" help="Download an export ZIP on the other instance in Settings → Export and upload it here.">
           {upload ? (
             <View accessibilityLiveRegion="polite" className="gap-2">
               <View className="flex-row items-center gap-2">
@@ -245,8 +242,7 @@ function Result({ item }: { item: OrbitImport }) {
     >
       {report && report.unmatched_users.length > 0 ? (
         <View accessibilityLabel="People with no member here" className="gap-2">
-          <SectionLabel>People with no member here</SectionLabel>
-          <Paragraph>No member here has their email, so their tasks are unassigned.</Paragraph>
+          <LabelTip label="People with no member here" text="No member here has their email, so their tasks are unassigned." className="font-noto-medium text-[12px] leading-[16px] text-muted-foreground" />
           <View className="border-t border-border">
             {report.unmatched_users.map((user) => (
               <View key={user.email ?? user.name} className="flex-row items-center gap-3 border-b border-border px-1 py-2">

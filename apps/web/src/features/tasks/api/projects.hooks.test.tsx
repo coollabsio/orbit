@@ -11,7 +11,7 @@ afterEach(() => { globalThis.fetch = originalFetch })
 
 const project: ProjectRecord = {
   id: 'project-1', workspace_id: 'workspace-1', name: 'Launch', key: 'ORB', color: '#e0457b',
-  created_at: '', updated_at: '', version: 1, auto_close_parent: true, auto_close_sub_issues: true,
+  created_at: '', updated_at: '', version: 1, auto_close_parent: true, auto_close_sub_issues: true, private: false,
 }
 
 function withClient(client: QueryClient) {
