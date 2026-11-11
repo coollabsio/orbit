@@ -604,7 +604,7 @@ MessageItem,MailHtmlFrame,SafetyBanner,MailSearch}.tsx`), settings in `features/
 Design: `docs/superpowers/specs/2026-10-23-mail-slice-1-design.md` (local file). Operator guide:
 `docs/operations.md#mail`.
 
-Slice 1 receives and reads mail; it does not send. Server (migration 0096):
+Slice 1 receives and reads mail; it does not send. Server (migration 0097):
 
 - Provider intake (`mail_delivery.rs`, `mail_routes/{inbound,providers}.rs`, `crates/mail/src/inbound/`): Cloudflare,
   Postmark, Mailgun, Resend and SES post to `/api/v1/mail/inbound/{kind}/{id}`; instance and workspace providers
@@ -672,7 +672,12 @@ turns its routes, navigation and shortcuts off.
   group), shared categories, personal favorites. `#general` has every member.
 - Threads are the only reply model (side pane and full view), with follow state for each member.
 - Reactions, pins, files, mentions (`@user`, `@channel`, `@here`, `#channel`), search, the
-  Unreads and Threads views, a notify level for each conversation.
+  Unreads and Threads views, a notify level for each conversation. Unreads also has a group for each thread with
+  unread replies, followed or not, in a joined conversation that is not muted (`GET …/chat/unread-threads`,
+  `unreadGroups` in `lib/sidebar.ts`). Following only decides notifications and the Threads view. In a thread with no
+  `chat_thread_members` row, the replies after the later of `chat_members.joined_at` and `threads_read_to` (migration
+  0094: the newest message at upgrade) are unread; reading the thread or "Mark all as read" writes a row that does not
+  follow. A reply also sent to the channel shows in the channel's group only.
 - Unread and mention counts come from the server (counters, not count queries).
 - Live updates, typing and presence come over the workspace's live socket
   (`GET /api/v1/workspaces/{id}/live`).

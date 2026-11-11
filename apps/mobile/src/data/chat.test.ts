@@ -29,7 +29,8 @@ import {
   splitByRanges,
   type ThreadPages,
   toggleReaction,
-  unreadConversations,
+  inChannelGroup,
+  unreadGroups,
   unreadMessages,
   unreadThreadCount,
   upsertMessage,
@@ -268,9 +269,9 @@ test('unreads: unread, unmuted conversations by activity, and the unread message
     state('random', { unread_count: 3, notify: 'muted' }),
     state('design', { unread_count: 0 }),
   ]
-  expect(unreadConversations(CONVERSATIONS, states, 'me').map((group) => group.conversation.id)).toEqual(['dm-bob', 'general'])
+  expect(unreadGroups(CONVERSATIONS, states, [], 'me').map((group) => group.conversation.id)).toEqual(['dm-bob', 'general'])
   const messages = [message('01', {}), message('02', { author_id: 'me' }), message('03', {}), message('04', { kind: 'join' }), message('05', {})]
-  expect(unreadMessages(messages, state('general', { last_read_message_id: '01' }), 'me').map((item) => item.id)).toEqual(['03', '05'])
+  expect(unreadMessages(messages, '01', 'me').map((item) => item.id)).toEqual(['03', '05'])
 })
 
 const followed = (id: string, unread: number, lastReply: string, following = true): FollowedThreadRecord => ({
@@ -278,6 +279,39 @@ const followed = (id: string, unread: number, lastReply: string, following = tru
   root: message(id, { last_reply_at: lastReply }),
   last_reply: null,
   state: { conversation_id: 'c1', root_id: id, following, unread_replies: unread, mention_count: 0, last_read_reply_id: null },
+})
+
+test('unreads: threads with unread replies join, followed or not, by last reply; none of muted, archived, left or unknown conversations', () => {
+  const states = [state('general', { unread_count: 2 }), state('random', { notify: 'muted' }), state('old', {}), state('left', {}), state('dm-bob', {})]
+  const inConversation = (id: string, conversation_id: string, unread: number, lastReply: string, following = true): FollowedThreadRecord => ({
+    ...followed(id, unread, lastReply, following),
+    conversation_id,
+  })
+  const threads = [
+    inConversation('t-bob', 'dm-bob', 1, '2026-10-24T09:00:00Z'),
+    inConversation('t-general', 'general', 3, '2026-09-01T09:00:00Z'),
+    inConversation('t-read', 'general', 0, '2026-10-25T09:00:00Z'),
+    inConversation('t-unfollowed', 'general', 2, '2026-10-25T09:00:00Z', false),
+    inConversation('t-muted', 'random', 4, '2026-10-25T09:00:00Z'),
+    inConversation('t-old', 'old', 4, '2026-10-25T09:00:00Z'),
+    inConversation('t-left', 'left', 4, '2026-10-25T09:00:00Z'),
+    inConversation('t-gone', 'missing', 4, '2026-10-25T09:00:00Z'),
+  ]
+  const groups = unreadGroups(CONVERSATIONS, states, threads, 'me')
+  expect(groups.map((group) => (group.kind === 'thread' ? group.thread.root.id : group.conversation.id))).toEqual(['t-unfollowed', 't-bob', 'general', 't-general'])
+  // A thread knows the state of its conversation only when that conversation has a group too.
+  const channelOf = (rootId: string) => groups.flatMap((group) => (group.kind === 'thread' && group.thread.root.id === rootId ? [group.channel] : []))[0]
+  expect(channelOf('t-general')?.conversation_id).toBe('general')
+  expect(channelOf('t-bob')).toBeNull()
+})
+
+test('unreads: a reply also sent to the channel shows in the channel group only while that group shows it', () => {
+  const reply = message('05', { also_in_channel: true })
+  expect(inChannelGroup(reply, state('general', { last_read_message_id: '04', unread_count: 1 }))).toBe(true)
+  expect(inChannelGroup(reply, state('general', { unread_count: 1 }))).toBe(true)
+  expect(inChannelGroup(reply, state('general', { last_read_message_id: '05' }))).toBe(false)
+  expect(inChannelGroup(reply, null)).toBe(false)
+  expect(inChannelGroup(message('05', {}), state('general', { last_read_message_id: '04', unread_count: 1 }))).toBe(false)
 })
 
 test('threads: unread first, then newest reply; unfollowed ones leave', () => {

@@ -628,7 +628,12 @@ impl MigrationRunner {
                 ),
                 Migration::new(
                     96,
-                    include_str!("../../../../apps/server/migrations/0096_mail.sql"),
+                    include_str!("../../../../apps/server/migrations/0096_chat_thread_unreads.sql"),
+                    false,
+                ),
+                Migration::new(
+                    97,
+                    include_str!("../../../../apps/server/migrations/0097_mail.sql"),
                     false,
                 ),
             ],
@@ -936,7 +941,14 @@ impl MigrationRunner {
             ),
             Migration::new(
                 96,
-                include_str!("../../../../apps/server/migrations/postgres/0096_mail.sql"),
+                include_str!(
+                    "../../../../apps/server/migrations/postgres/0096_chat_thread_unreads.sql"
+                ),
+                false,
+            ),
+            Migration::new(
+                97,
+                include_str!("../../../../apps/server/migrations/postgres/0097_mail.sql"),
                 false,
             ),
         ];
