@@ -12,6 +12,8 @@ import { Tip } from '@/components/common/Tip'
 import { ColorDot } from '@/components/common/ColorDot'
 import { useQuery } from '@tanstack/react-query'
 import { useProjects } from '@/features/tasks/api/projects'
+import { useGithubWorkspaceSettings } from '@/features/tasks/api/github'
+import { ProviderMark } from '@/components/common/icons/ProviderMark'
 import { ProjectLock } from '@/features/tasks/components/ProjectLock'
 import { NewProjectModal } from '@/features/tasks/components/NewProjectModal'
 import { savedViewsQueryOptions } from '@/features/views/api/views'
@@ -217,6 +219,8 @@ function TasksAreaNav({ onNavigate, onBack }: { onNavigate?: () => void; onBack?
   const [creating, setCreating] = useState(false)
   const workspaceId = useContext(WorkspaceContext)?.workspace.id ?? ''
   const projects = useProjects(workspaceId, workspaceId !== '').data ?? []
+  // projects with a GitHub repository get a link to their pull requests
+  const withPulls = new Set(useGithubWorkspaceSettings(workspaceId, workspaceId !== '' && projects.length > 0).data?.connected_projects ?? [])
   const favorites = (useQuery({ ...savedViewsQueryOptions(workspaceId), enabled: workspaceId !== '' }).data ?? [])
     .filter((saved) => saved.is_favorite)
     .sort((a, b) => (a.favorite_position ?? 0) - (b.favorite_position ?? 0))
@@ -245,7 +249,19 @@ function TasksAreaNav({ onNavigate, onBack }: { onNavigate?: () => void; onBack?
           <SidebarNavItem to={tasksPath({ project: null })} active={onTasks && !project} icon={Folder} label="All projects" onClick={onNavigate} />
           {projects.map((item) => (
             <div key={item.id} className="group/project relative">
-              <SidebarNavItem to={tasksPath({ project: item.id })} active={onTasks && project === item.id} icon={dotIcon(item.color)} label={item.name} aria-label={item.private ? `${item.name}, private` : item.name} trailing={item.private ? <ProjectLock project={item} className="text-sidebar-nav" /> : undefined} className="pr-8" onClick={onNavigate} />
+              <SidebarNavItem to={tasksPath({ project: item.id })} active={onTasks && project === item.id} icon={dotIcon(item.color)} label={item.name} aria-label={item.private ? `${item.name}, private` : item.name} trailing={item.private ? <ProjectLock project={item} className="text-sidebar-nav" /> : undefined} className={withPulls.has(item.id) ? 'pr-14' : 'pr-8'} onClick={onNavigate} />
+              {collapsed || !withPulls.has(item.id) ? null : (
+                <Tip label="Pull requests" side="right">
+                  <Link
+                    to={`/tasks/projects/${item.id}/pulls`}
+                    aria-label={`${item.name} pull requests`}
+                    className="absolute top-1/2 right-7 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-sidebar-nav opacity-0 transition-opacity outline-none group-hover/project:opacity-100 hover:bg-black/5 hover:text-sidebar-nav-active focus-visible:opacity-100 pointer-coarse:opacity-100 dark:hover:bg-white/8"
+                    onClick={onNavigate}
+                  >
+                    <ProviderMark provider="github" className="size-3.5" />
+                  </Link>
+                </Tip>
+              )}
               {collapsed ? null : (
                 <Tip label="Project settings" side="right">
                   <Link

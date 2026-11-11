@@ -49,7 +49,8 @@ test('related pull requests stay in GitHub without a duplicate issue row', async
   ])) as unknown as typeof fetch
   const view = render(<TaskDetail task={task} project={undefined} state={state} onClose={() => {}} />, { wrapper: Wrapper })
   const region = await view.findByRole('region', { name: 'GitHub links' })
-  expect(region.querySelectorAll('a')).toHaveLength(1)
+  // one row: the viewer in Orbit and its "Open on GitHub" link
+  expect([...region.querySelectorAll('a')].map((link) => link.getAttribute('href'))).toEqual(['/tasks/pulls/acme/repo/20', 'https://github.com/acme/repo/pull/20'])
   expect(region.textContent).toContain('Fix task')
   expect(region.textContent).not.toContain('acme/repo#12')
   expect(view.getByRole('link', { name: 'github.com' })).toHaveProperty('href', 'https://github.com/acme/repo/issues/12')

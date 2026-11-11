@@ -60140,6 +60140,7 @@
       "GithubWorkspaceSettings": {
         "type": "object",
         "required": [
+          "connected_projects",
           "repositories",
           "can_manage",
           "key_configured",
@@ -60154,6 +60155,13 @@
           },
           "can_manage": {
             "type": "boolean"
+          },
+          "connected_projects": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The projects with a connected repository that the member sees (for their pull request lists)."
           },
           "install_url": {
             "type": [

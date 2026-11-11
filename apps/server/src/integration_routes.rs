@@ -274,6 +274,8 @@ pub struct GithubProjectSettings {
 
 #[derive(Serialize, ToSchema)]
 pub struct GithubWorkspaceSettings {
+    /// The projects with a connected repository that the member sees (for their pull request lists).
+    connected_projects: Vec<String>,
     app_slug: Option<String>,
     install_url: Option<String>,
     repositories: Vec<GithubRepositoryOption>,
@@ -472,8 +474,20 @@ pub(crate) async fn github_workspace_settings(
 ) -> Result<Json<GithubWorkspaceSettings>, ApiError> {
     let id = request_id.as_ref().map(|Extension(id)| id);
     let (_, can_manage) = github_workspace_access(&state, &headers, &workspace, id).await?;
+    let user = github_session_user(&state, &headers, id).await?;
     let (app, needs_recreate) = github_app_slug(&state, &workspace, id).await?;
+    let connected_projects: Vec<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+        "SELECT c.project_id FROM github_project_connections c JOIN projects p ON p.id = c.project_id \
+         WHERE c.workspace_id = $1 AND p.deleted_at IS NULL AND {} ORDER BY c.project_id",
+        user_sees_project_sql("p.id", "$2")
+    )))
+    .bind(&workspace)
+    .bind(user.to_string())
+    .fetch_all(state.tasks.database().pool())
+    .await
+    .map_err(|_| ApiError::internal(id))?;
     Ok(Json(GithubWorkspaceSettings {
+        connected_projects,
         needs_recreate,
         install_url: app
             .as_ref()

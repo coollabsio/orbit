@@ -641,3 +641,20 @@ async fn paths_cannot_leave_the_api_root() {
     assert!(matches!(result, Err(GithubError::NotFound)));
     assert!(fixture.github.with(|state| state.api_requests.is_empty()));
 }
+
+#[tokio::test]
+async fn workspace_settings_list_the_connected_projects_the_member_sees() {
+    let fixture = fixture().await;
+    fixture.seed_app(true).await;
+    let path = format!("/api/v1/workspaces/{}/github", fixture.workspace());
+    let settings = json_body(fixture.get(&path).await).await;
+    assert_eq!(settings["connected_projects"], json!([fixture.project_id.to_string()]));
+    let (_, cookie) = fixture.add_member("member@example.com").await;
+    sqlx::query("UPDATE projects SET private = 1 WHERE id = $1")
+        .bind(fixture.project_id.to_string())
+        .execute(fixture.database.pool())
+        .await
+        .unwrap();
+    let settings = json_body(fixture.send("GET", &path, &cookie, None).await).await;
+    assert_eq!(settings["connected_projects"], json!([]));
+}

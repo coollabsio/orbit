@@ -2753,6 +2753,10 @@ export type GithubViewedFile = {
 export type GithubWorkspaceSettings = {
     app_slug?: string | null;
     can_manage: boolean;
+    /**
+     * The projects with a connected repository that the member sees (for their pull request lists).
+     */
+    connected_projects: Array<string>;
     install_url?: string | null;
     key_configured: boolean;
     /**

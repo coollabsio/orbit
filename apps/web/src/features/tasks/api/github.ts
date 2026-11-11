@@ -6,8 +6,9 @@ import { queryKeys } from '@/api/queryKeys'
 
 const key = (workspaceId: string, projectId: string) => [...queryKeys.workspace(workspaceId), 'github-project', projectId] as const
 
-export function useGithubWorkspaceSettings(workspaceId: string) {
+export function useGithubWorkspaceSettings(workspaceId: string, enabled = true) {
   return useQuery({
+    enabled,
     queryKey: [...queryKeys.workspace(workspaceId), 'github-workspace'],
     queryFn: async () => {
       const { data } = await githubWorkspaceSettings({ client: apiClient, path: { workspace_id: workspaceId }, throwOnError: true })
@@ -46,7 +47,10 @@ export function useSaveGithubProjectConnection(workspaceId: string, projectId: s
       if (!data) throw new Error('GitHub settings response was empty.')
       return data
     },
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: key(workspaceId, projectId) }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: key(workspaceId, projectId) })
+      void queryClient.invalidateQueries({ queryKey: [...queryKeys.workspace(workspaceId), 'github-workspace'] })
+    },
   })
 }
 
@@ -56,6 +60,9 @@ export function useDeleteGithubProjectConnection(workspaceId: string, projectId:
     mutationFn: async () => {
       await deleteGithubProjectConnection({ client: apiClient, path: { workspace_id: workspaceId, project_id: projectId }, throwOnError: true })
     },
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: key(workspaceId, projectId) }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: key(workspaceId, projectId) })
+      void queryClient.invalidateQueries({ queryKey: [...queryKeys.workspace(workspaceId), 'github-workspace'] })
+    },
   })
 }
