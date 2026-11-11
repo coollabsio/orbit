@@ -42,8 +42,11 @@ Every change must work on both.
   branch on `database.backend()` (`Backend::Sqlite` / `Backend::Postgres`).
 - **Transactions:** writes use `immediate_transaction()`. It serializes writers on both databases. On Postgres, an
   error ends the whole transaction, so do not catch a database error and continue in the same transaction.
-- **Migrations:** a new SQLite migration in `apps/server/migrations/` also needs the same change in the Postgres
-  schema in `apps/server/migrations/postgres/` (see `.ai/lessons.md` for the other places to update).
+- **Migrations:** make a new one with `just new-migration <name>` (add `destructive` if it needs a backup first). It
+  makes a SQLite and a Postgres file with the same UTC timestamp version, so parallel worktrees do not collide. Write
+  the same change in both files. `crates/platform/build.rs` finds the files and refuses a new 4-digit number, a
+  duplicate version or a missing Postgres file. Do not add migrations by hand to a list, and never rename or edit
+  0001–0099.
 - **Tests:** run the tests that cover your change on both databases:
   `cargo test -p orbit-server --test <name>`, then the same with
   `ORBIT_TEST_POSTGRES_URL=postgres://orbit:orbit@127.0.0.1:15432/orbit`. Tests that only make sense on SQLite
