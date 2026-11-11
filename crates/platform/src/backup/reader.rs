@@ -1,10 +1,13 @@
 //! Reads rows out of a verified snapshot without restoring it: an SQLite `database.sqlite`
 //! opened read-only, or the `COPY` files of a Postgres snapshot. Columns are picked by name and
 //! every value comes back as text, so callers do not depend on the column order or the types of
-//! the snapshot's schema version. Rows stream through a filter; only the kept rows are held.
+//! the snapshot's schema version. Rows stream through a filter; only the kept rows are held. An
+//! encrypted snapshot is read with its data key ([`super::BackupService::snapshot_reader`]): the
+//! SQLite file is decrypted into a temporary directory that goes with the reader, and `COPY` files
+//! and attachments are decrypted as they are read.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use futures_util::TryStreamExt;
@@ -13,8 +16,10 @@ use sqlx::sqlite::{SqliteConnectOptions, SqliteConnection};
 use sqlx::{ConnectOptions, Row};
 use tokio::io::{AsyncBufReadExt, BufReader};
 
+use super::crypto::{self, DataKey};
 use super::{BackupError, BackupSnapshot, DATABASE_FILE, io_error, postgres};
 use crate::Backend;
+use crate::LocalBlobStore;
 
 const TABLES_FILE: &str = "tables.json";
 
@@ -53,14 +58,47 @@ enum Source {
 #[derive(Debug)]
 pub struct SnapshotReader {
     source: Source,
+    /// The snapshot directory, for its `attachments/`.
+    root: PathBuf,
+    /// The data key of an encrypted snapshot.
+    key: Option<DataKey>,
+    /// The decrypted SQLite file of an encrypted snapshot; removed with the reader.
+    _decrypted: Option<tempfile::TempDir>,
+}
+
+/// `bytes` of the snapshot file `path`, decrypted with `key`.
+fn opened(key: &DataKey, path: &str, bytes: &[u8]) -> Result<Vec<u8>, BackupError> {
+    let mut opener = key.opener(path);
+    let mut plain = Vec::with_capacity(bytes.len());
+    opener.update(bytes, &mut plain)?;
+    opener.finish(&mut plain)?;
+    Ok(plain)
 }
 
 impl SnapshotReader {
-    /// A reader of `snapshot`, which the caller has verified. Nothing in the snapshot is written.
+    /// A reader of an unencrypted `snapshot`, which the caller has verified. Nothing in the
+    /// snapshot is written. An encrypted one needs [`super::BackupService::snapshot_reader`].
     pub fn open(snapshot: &BackupSnapshot) -> Result<Self, BackupError> {
+        if snapshot.manifest.encryption.is_some() {
+            return Err(BackupError::KeyRequired {
+                id: snapshot.manifest.id.clone(),
+            });
+        }
+        Self::open_with(snapshot, None, None)
+    }
+
+    /// With `key`, `decrypted` holds the SQLite file that [`Self::decrypt_database`] wrote.
+    pub(super) fn open_with(
+        snapshot: &BackupSnapshot,
+        key: Option<DataKey>,
+        decrypted: Option<tempfile::TempDir>,
+    ) -> Result<Self, BackupError> {
         let source = match snapshot.manifest.database {
             Backend::Sqlite => {
-                let path = snapshot.path.join(DATABASE_FILE);
+                let path = match &decrypted {
+                    Some(directory) => directory.path().join(DATABASE_FILE),
+                    None => snapshot.path.join(DATABASE_FILE),
+                };
                 if !path.is_file() {
                     return Err(BackupError::InvalidSnapshot(
                         "the snapshot has no SQLite database".to_owned(),
@@ -71,7 +109,15 @@ impl SnapshotReader {
             Backend::Postgres => {
                 let directory = snapshot.path.join(postgres::DATABASE_DIRECTORY);
                 let path = directory.join(TABLES_FILE);
-                let contents = std::fs::read(&path).map_err(|source| io_error(&path, source))?;
+                let mut contents =
+                    std::fs::read(&path).map_err(|source| io_error(&path, source))?;
+                if let Some(key) = &key {
+                    contents = opened(
+                        key,
+                        &format!("{}/{TABLES_FILE}", postgres::DATABASE_DIRECTORY),
+                        &contents,
+                    )?;
+                }
                 let copies: Vec<TableCopy> = serde_json::from_slice(&contents)
                     .map_err(|source| BackupError::Manifest { path, source })?;
                 Source::Postgres {
@@ -83,7 +129,59 @@ impl SnapshotReader {
                 }
             }
         };
-        Ok(Self { source })
+        Ok(Self {
+            source,
+            root: snapshot.path.clone(),
+            key,
+            _decrypted: decrypted,
+        })
+    }
+
+    /// Decrypts the SQLite file of an encrypted SQLite snapshot into a new directory below
+    /// `scratch`; `None` for other snapshots.
+    pub(super) fn decrypt_database(
+        snapshot: &BackupSnapshot,
+        key: &DataKey,
+        scratch: &Path,
+    ) -> Result<Option<tempfile::TempDir>, BackupError> {
+        if snapshot.manifest.database != Backend::Sqlite {
+            return Ok(None);
+        }
+        std::fs::create_dir_all(scratch).map_err(|source| io_error(scratch, source))?;
+        let directory =
+            tempfile::tempdir_in(scratch).map_err(|source| io_error(scratch, source))?;
+        crypto::decrypt_file(
+            &snapshot.path.join(DATABASE_FILE),
+            &directory.path().join(DATABASE_FILE),
+            key,
+            DATABASE_FILE,
+        )?;
+        Ok(Some(directory))
+    }
+
+    /// The bytes of the snapshot's blob `storage_key` (decrypted), or `None` when the snapshot
+    /// does not have it.
+    pub async fn attachment(&self, storage_key: &str) -> Result<Option<Vec<u8>>, BackupError> {
+        let store = LocalBlobStore::new(self.root.join("attachments"));
+        let Ok(path) = store.path(storage_key) else {
+            return Ok(None);
+        };
+        let bytes = match tokio::fs::read(&path).await {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(io_error(&path, error)),
+        };
+        match &self.key {
+            None => Ok(Some(bytes)),
+            Some(key) => {
+                let relative = path
+                    .strip_prefix(&self.root)
+                    .map_err(|_| BackupError::InvalidSnapshot("attachment path".to_owned()))?
+                    .to_string_lossy()
+                    .replace(std::path::MAIN_SEPARATOR, "/");
+                opened(key, &relative, &bytes).map(Some)
+            }
+        }
     }
 
     /// The columns of `table`, or `None` when the snapshot has no such table.
@@ -160,7 +258,7 @@ impl SnapshotReader {
                 }
             }
             Source::Postgres { directory, .. } => {
-                let file = postgres::open_table(directory, table).await?;
+                let file = postgres::open_table(directory, table, self.key.as_ref()).await?;
                 let mut lines = BufReader::new(file);
                 let mut line = Vec::new();
                 loop {

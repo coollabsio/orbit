@@ -294,9 +294,15 @@ pub(in crate::repositories) async fn renumber_copy(
     .map_err(page_error)?
     .is_empty()
     {
-        refresh_search_text(tx, workspace_id, database_id, &properties, SearchRows::One(page_id))
-            .await
-            .map_err(page_error)?;
+        refresh_search_text(
+            tx,
+            workspace_id,
+            database_id,
+            &properties,
+            SearchRows::One(page_id),
+        )
+        .await
+        .map_err(page_error)?;
     }
     Ok(())
 }

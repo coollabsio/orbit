@@ -6,12 +6,13 @@ import { Button } from '@/components/ui/button'
 import { Tip } from '@/components/common/Tip'
 import { Input } from '@/components/ui/input'
 import { applyRebind, findConflict, findConflicts, isReserved, parseKeys, resolveBindings } from '@/shortcuts/bindings'
-import { COMMANDS, type Command, type Group } from '@/shortcuts/commands'
+import { COMMANDS, isMailCommand, type Command, type Group } from '@/shortcuts/commands'
+import { useMailEnabled } from '@/features/mail/enabled'
 import { KeyRecorder } from '@/shortcuts/KeyRecorder'
 import { ShortcutKeys } from '@/shortcuts/Shortcut'
 import { useShortcutBindings } from '@/shortcuts/useShortcutBindings'
 
-const GROUPS: Group[] = ['General', 'Navigation', 'List', 'Task', 'Docs', 'Chat']
+const GROUPS: Group[] = ['General', 'Navigation', 'List', 'Task', 'Docs', 'Chat', 'Mail']
 const ALL: readonly Command[] = COMMANDS
 
 /** What the page says under a row after a recording that could not be saved as it is. */
@@ -26,7 +27,8 @@ export function ShortcutsPage() {
   const [notice, setNotice] = useState<Notice | null>(null)
 
   const needle = query.trim().toLowerCase()
-  const shown = ALL.filter((command) => !needle || command.title.toLowerCase().includes(needle) || (bindings[command.id] ?? '').toLowerCase().includes(needle))
+  const mail = useMailEnabled()
+  const shown = ALL.filter((command) => (mail || !isMailCommand(command.id))).filter((command) => !needle || command.title.toLowerCase().includes(needle) || (bindings[command.id] ?? '').toLowerCase().includes(needle))
   const changed = Object.keys(overrides).length > 0
 
   const record = (command: Command, keys: string) => {

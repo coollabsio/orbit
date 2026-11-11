@@ -23,21 +23,20 @@ test('a guest opens only chat and its own account settings', () => {
   }
 })
 
-test('tasks are the landing page, docs are enabled and mock product routes are disabled', () => {
+test('tasks are the landing page, and docs and mail are enabled', () => {
   expect(primaryProductPath).toBe('/tasks')
   expect(coreSettingsPaths).toEqual(['/settings', '/settings/members', '/settings/sessions', '/settings/danger-zone', '/tasks-trash'])
 
-  expect(isDisabledProductPath('/mail/thread')).toBeTrue()
-  for (const path of ['/tasks', '/tasks/one', '/tasks-trash', '/docs', '/docs/one', '/docs/trash', '/settings', '/profile', '/activity']) {
+  for (const path of ['/tasks', '/tasks/one', '/tasks-trash', '/docs', '/docs/one', '/docs/trash', '/mail', '/mail/t/thread', '/settings', '/profile', '/activity']) {
     expect(isDisabledProductPath(path)).toBeFalse()
   }
 })
 
 test('chat is a product only while it is turned on, and direct messages are not a product of their own', () => {
-  expect(disabledProductPathsFor(false)).toEqual(['/mail', '/chat'])
-  expect(mobileDockPathsFor(false)).toEqual(['/', '/tasks', '/docs', '/settings'])
-  expect(disabledProductPathsFor(true)).toEqual(['/mail'])
-  expect(mobileDockPathsFor(true)).toEqual(['/', '/tasks', '/docs', '/chat', '/settings'])
+  expect(disabledProductPathsFor(false)).toEqual(['/chat'])
+  expect(mobileDockPathsFor(false)).toEqual(['/', '/tasks', '/docs', '/mail', '/settings'])
+  expect(disabledProductPathsFor(true)).toEqual([])
+  expect(mobileDockPathsFor(true)).toEqual(['/', '/tasks', '/docs', '/chat', '/mail', '/settings'])
 
   // this build follows its own setting
   expect(disabledProductPaths).toEqual(disabledProductPathsFor(chatEnabled))

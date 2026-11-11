@@ -291,17 +291,20 @@ impl AttachmentRepository {
                 "UPDATE attachment_blobs SET quarantine_until = MAX(quarantine_until, $1) \
                  WHERE id = $2 AND NOT EXISTS (SELECT 1 FROM attachment_references WHERE blob_id = $3) \
                  AND NOT EXISTS (SELECT 1 FROM page_files WHERE blob_id = $4) \
-                 AND NOT EXISTS (SELECT 1 FROM chat_message_files WHERE blob_id = $5)"
+                 AND NOT EXISTS (SELECT 1 FROM chat_message_files WHERE blob_id = $5) \
+                 AND NOT EXISTS (SELECT 1 FROM mail_receipts WHERE blob_id = $6)"
             }
             Backend::Postgres => {
                 "UPDATE attachment_blobs SET quarantine_until = GREATEST(quarantine_until, $1) \
                  WHERE id = $2 AND NOT EXISTS (SELECT 1 FROM attachment_references WHERE blob_id = $3) \
                  AND NOT EXISTS (SELECT 1 FROM page_files WHERE blob_id = $4) \
-                 AND NOT EXISTS (SELECT 1 FROM chat_message_files WHERE blob_id = $5)"
+                 AND NOT EXISTS (SELECT 1 FROM chat_message_files WHERE blob_id = $5) \
+                 AND NOT EXISTS (SELECT 1 FROM mail_receipts WHERE blob_id = $6)"
             }
         };
         sqlx::query(quarantine)
             .bind(now.as_millis().saturating_add(DAY_MILLIS))
+            .bind(&blob_id)
             .bind(&blob_id)
             .bind(&blob_id)
             .bind(&blob_id)

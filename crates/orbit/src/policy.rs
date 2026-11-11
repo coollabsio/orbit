@@ -41,6 +41,10 @@ pub enum Permission {
     /// members, and delete other members' chat messages.
     #[serde(rename = "chat.manage")]
     ChatManage,
+    /// Manage the workspace's mail: domains, mailboxes and their addresses and members, labels
+    /// and failed receipts.
+    #[serde(rename = "mail.manage")]
+    MailManage,
     /// Subscribe and manage the workspace's Orbit Cloud plan.
     #[serde(rename = "billing.manage")]
     BillingManage,
@@ -57,7 +61,7 @@ pub enum Permission {
 }
 
 impl Permission {
-    pub const ALL: [Self; 16] = [
+    pub const ALL: [Self; 17] = [
         Self::WorkspaceUpdate,
         Self::WorkspaceDelete,
         Self::WorkspaceTransfer,
@@ -70,6 +74,7 @@ impl Permission {
         Self::ViewsManageShared,
         Self::CommentsModerate,
         Self::ChatManage,
+        Self::MailManage,
         Self::BillingManage,
         Self::StorageManage,
         Self::WorkspaceExport,
@@ -293,6 +298,7 @@ impl Policy {
             | Permission::ViewsManageShared
             | Permission::CommentsModerate
             | Permission::ChatManage
+            | Permission::MailManage
             | Permission::StorageManage
             | Permission::WorkspaceExport => {
                 matches!(role, WorkspaceRole::Owner | WorkspaceRole::Admin)

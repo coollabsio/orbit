@@ -63,7 +63,7 @@ function MobileDockItem({ to, label, icon: Icon, enabled, badge = 0, unread = fa
  * The phone's bottom navigation. A chat conversation is a full screen, so the dock is not shown there.
  * It also hides while the keyboard is open, so the field being typed in keeps the space.
  */
-export function MobileDock({ chatEnabled: chat = chatEnabled, chatBadge = 0, chatUnread = false }: { chatEnabled?: boolean; /** Unread count on the Chat item. */ chatBadge?: number; /** Chat has an unread message, with or without a count. */ chatUnread?: boolean }) {
+export function MobileDock({ chatEnabled: chat = chatEnabled, chatBadge = 0, chatUnread = false, mailBadge = 0, mailEnabled = false }: { chatEnabled?: boolean; /** Mail is on for the server; off, Mail shows disabled, like an upcoming section. */ mailEnabled?: boolean; /** Unread count on the Chat item. */ chatBadge?: number; /** Chat has an unread message, with or without a count. */ chatUnread?: boolean; /** Unread Inbox threads on the Mail item. */ mailBadge?: number }) {
   const { pathname } = useLocation()
   const guest = useIsGuest()
   if (isChatConversationPath(pathname)) return null
@@ -75,7 +75,7 @@ export function MobileDock({ chatEnabled: chat = chatEnabled, chatBadge = 0, cha
       aria-label="Mobile navigation"
     >
       {links.map((link) => (
-        <MobileDockItem key={link.to} {...link} enabled={paths.includes(link.to)} badge={link.to === '/chat' ? chatBadge : 0} unread={link.to === '/chat' && chatUnread} />
+        <MobileDockItem key={link.to} {...link} enabled={paths.includes(link.to) && (link.to !== '/mail' || mailEnabled)} badge={link.to === '/chat' ? chatBadge : link.to === '/mail' ? mailBadge : 0} unread={link.to === '/chat' && chatUnread} />
       ))}
     </nav>
   )

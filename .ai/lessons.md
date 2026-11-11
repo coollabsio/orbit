@@ -35,6 +35,9 @@
   (Python's SQLite 3.46.1 also says ok). It made the weekly integrity job (which runs at App start in tests) stop the
   server once `page_search` rows were updated. `IntegrityService::full` now confirms such findings with FTS5's own check
   (2026-09-25). Check new virtual tables against `integrity_check` with the bundled SQLite, not the system one.
+- A contentless FTS5 table (`content = ''`) refuses `DELETE` unless it is created with `contentless_delete = 1`
+  (SQLite 3.43+); then `DELETE … WHERE rowid = …` works and reads the same as on the Postgres twin table
+  (`mail_search`, 2026-10-23).
 
 ## Project visibility
 - Projects can be private (#37). Every new query that reads projects, tasks or anything inside them (comments, labels, files, notifications, counts or titles of related tasks) must filter with `repositories/project_access.rs` (`ProjectScope::of(actor)`, or `user_sees_*_sql` for other users), never with `workspace_id` alone. Server-side work (integrations, automation) uses `ProjectScope::All` on purpose.
@@ -80,6 +83,7 @@
 - Typecheck the web app with `bunx tsc -b` (what `build` runs). `tsc --noEmit -p .` checks nothing: the root `tsconfig.json` only has references, so it passes on broken code.
 - In `apps/web`, run `bun test src` (the `test` script), not bare `bun test`: bare `bun test` also loads the Playwright e2e files and reports false failures.
 - `cargo test --workspace` stops at the first failing test binary; use `--no-fail-fast` to see the whole suite.
+- JavaScript packages install once at the repository root (Bun workspace, hoisted linker). An old `apps/web/node_modules` from before that layout shadows the root copies; two copies of `prosemirror-view` make the editor tests fail with `this.members[i].localsInner`. Delete it and run `bun install --frozen-lockfile` at the root.
 - Playwright rewrites the tracked `apps/web/test-results/.last-run.json` on every run — restore it with `git checkout --` and never commit it.
 - If the Agent Browser fails with a `SingletonLock: File exists` profile error, another session holds the profile. Do not delete the lock; drive the dev server with `playwright-core` from `apps/web/node_modules` instead (script in `/tmp`).
 - If Playwright's pinned headless shell is not installed, set `PLAYWRIGHT_CHROMIUM_EXECUTABLE` to an installed one under `~/.cache/ms-playwright/` (`playwright.config.ts` reads it) instead of downloading browsers.

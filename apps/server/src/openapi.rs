@@ -395,6 +395,60 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::chat_routes::stickers::create_chat_sticker,
         crate::chat_routes::stickers::delete_chat_sticker,
         crate::chat_routes::stickers::get_chat_sticker_image,
+        crate::mail_routes::domains::list_mail_domains,
+        crate::mail_routes::domains::create_mail_domain,
+        crate::mail_routes::domains::get_mail_domain,
+        crate::mail_routes::domains::delete_mail_domain,
+        crate::mail_routes::domains::check_mail_domain,
+        crate::mail_routes::domains::set_mail_domain_catch_all,
+        crate::mail_routes::domains::set_mail_domain_route,
+        crate::mail_routes::providers::list_instance_mail_providers,
+        crate::mail_routes::providers::create_instance_mail_provider,
+        crate::mail_routes::providers::update_instance_mail_provider,
+        crate::mail_routes::providers::delete_instance_mail_provider,
+        crate::mail_routes::providers::list_workspace_mail_providers,
+        crate::mail_routes::providers::create_workspace_mail_provider,
+        crate::mail_routes::providers::update_workspace_mail_provider,
+        crate::mail_routes::providers::delete_workspace_mail_provider,
+        crate::mail_routes::domains::set_mail_domain_enabled,
+        crate::mail_routes::domains::move_mail_domain,
+        crate::mail_routes::mailboxes::list_mailboxes,
+        crate::mail_routes::mailboxes::create_mailbox,
+        crate::mail_routes::mailboxes::get_mailbox,
+        crate::mail_routes::mailboxes::update_mailbox,
+        crate::mail_routes::mailboxes::delete_mailbox,
+        crate::mail_routes::mailboxes::set_mailbox_status,
+        crate::mail_routes::mailboxes::add_mailbox_member,
+        crate::mail_routes::mailboxes::remove_mailbox_member,
+        crate::mail_routes::mailboxes::add_mailbox_alias,
+        crate::mail_routes::mailboxes::remove_mailbox_address,
+        crate::mail_routes::mailboxes::preview_personal_mailboxes,
+        crate::mail_routes::mailboxes::create_personal_mailboxes,
+        crate::mail_routes::labels::list_mail_labels,
+        crate::mail_routes::labels::create_mail_label,
+        crate::mail_routes::labels::update_mail_label,
+        crate::mail_routes::labels::delete_mail_label,
+        crate::mail_routes::threads::list_mail_threads,
+        crate::mail_routes::threads::get_mail_thread,
+        crate::mail_routes::threads::update_mail_thread,
+        crate::mail_routes::threads::update_mail_threads,
+        crate::mail_routes::threads::get_mail_counts,
+        crate::mail_routes::threads::search_mail,
+        crate::mail_routes::threads::get_mail_me,
+        crate::mail_routes::content::create_mail_view_url,
+        crate::mail_routes::content::get_mail_content,
+        crate::mail_routes::content::get_mail_part,
+        crate::mail_routes::inbound::post_inbound,
+        crate::mail_routes::content::get_mail_image,
+        crate::mail_routes::content::download_mail_attachment,
+        crate::mail_routes::content::download_mail_message,
+        crate::mail_routes::content::set_mail_sender_pref,
+        crate::mail_routes::admin::get_mail_admin,
+        crate::mail_routes::admin::set_mail_admin,
+        crate::mail_routes::admin::create_mail_test_address,
+        crate::mail_routes::admin::get_mail_test_address,
+        crate::mail_routes::admin::list_failed_mail_receipts,
+        crate::mail_routes::admin::retry_mail_receipt,
         crate::chat_routes::hooks::list_chat_webhooks,
         crate::chat_routes::hooks::create_chat_webhook,
         crate::chat_routes::hooks::update_chat_webhook,
@@ -538,7 +592,7 @@ impl Modify for ProblemDetails {
 }
 
 fn problem_schema(route: &str) -> &'static str {
-    if route.contains("/integrations/discord") {
+    if route.contains("/integrations/discord") || route.contains("/mail/") {
         "TaskProblem"
     } else if route.contains("/attachments") {
         "AttachmentProblem"
@@ -552,6 +606,7 @@ fn problem_schema(route: &str) -> &'static str {
         || route.contains("/teamspaces")
         || route.contains("/imports/")
         || route.contains("/chat/")
+        || route.contains("/mail/")
         || route.contains("/billing")
         || route.contains("/webhooks")
     {
@@ -580,6 +635,10 @@ fn public_operation(operation_id: &str) -> bool {
             | "post_action_response"
             | "read_hook_messages"
             | "github_manifest_callback"
+            | "get_mail_content"
+            | "get_mail_part"
+            | "get_mail_image"
+            | "post_inbound"
             | "stripe_webhook"
             | "provider_callback"
             | "link_provider_sign_in"
@@ -1196,7 +1255,17 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
         id if database_operation(id) => database_errors(id, &mut responses),
         id if teamspace_operation(id) => teamspace_errors(id, &mut responses),
         id if id.contains("chat") => chat_errors(id, &mut responses),
+        id if id.contains("mail_domain") => mail_domain_errors(id, &mut responses),
+        id if id.contains("mail_provider") => mail_provider_errors(id, &mut responses),
+        id if id.contains("mailbox") || id.contains("mail_label") => {
+            mailbox_errors(id, &mut responses);
+        }
+        id if mail_thread_operation(id) => mail_thread_errors(id, &mut responses),
+        id if mail_content_operation(id) => mail_content_errors(id, &mut responses),
         _ => {}
+    }
+    if workspace_mail_operation(operation_id) {
+        add_code(&mut responses, "403", "mail_disabled");
     }
     // Orbit Cloud: these creates and restores are refused at the trial's limits.
     if matches!(
@@ -2099,6 +2168,181 @@ fn chat_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec<&'
         ))
     {
         add_code(responses, "403", "chat_forbidden");
+    }
+}
+
+/// Mail domain routes need `mail.manage`; an outsider of the workspace gets `mail_not_found`.
+fn mail_domain_errors(
+    operation_id: &str,
+    responses: &mut BTreeMap<&'static str, Vec<&'static str>>,
+) {
+    if matches!(
+        operation_id,
+        "create_mail_domain"
+            | "set_mail_domain_catch_all"
+            | "set_mail_domain_enabled"
+            | "set_mail_domain_route"
+            | "move_mail_domain"
+    ) {
+        add_code(responses, "400", "invalid_request");
+    }
+    if operation_id == "move_mail_domain" {
+        add_code(responses, "403", "installation_admin_required");
+        add_code(responses, "404", "mail_not_found");
+        add_code(responses, "409", "domain_has_mailboxes");
+        add_code(responses, "409", "domain_claimed");
+        add_code(responses, "422", "validation_failed");
+        return;
+    }
+    add_code(responses, "403", "mail_forbidden");
+    add_code(responses, "404", "mail_not_found");
+    match operation_id {
+        "create_mail_domain" => {
+            add_code(responses, "409", "domain_claimed");
+            add_code(responses, "409", "domain_exists");
+            add_code(responses, "422", "validation_failed");
+        }
+        "delete_mail_domain" => add_code(responses, "409", "domain_has_mailboxes"),
+        "set_mail_domain_catch_all" | "set_mail_domain_route" => {
+            add_code(responses, "422", "validation_failed");
+        }
+        _ => {}
+    }
+}
+
+/// Mail provider routes: the root user's instance providers, or a workspace's (`mail.manage`).
+fn mail_provider_errors(
+    operation_id: &str,
+    responses: &mut BTreeMap<&'static str, Vec<&'static str>>,
+) {
+    if operation_id.contains("instance") {
+        add_code(responses, "403", "installation_admin_required");
+    } else {
+        add_code(responses, "403", "mail_forbidden");
+    }
+    add_code(responses, "404", "mail_not_found");
+    if operation_id.starts_with("create_") || operation_id.starts_with("update_") {
+        add_code(responses, "400", "invalid_request");
+        add_code(responses, "422", "validation_failed");
+    }
+    if operation_id == "create_workspace_mail_provider" {
+        add_code(responses, "403", "workspace_providers_disabled");
+    }
+    if operation_id.starts_with("delete_") {
+        add_code(responses, "409", "provider_in_use");
+    }
+}
+
+/// Mailbox and mail label routes: reads for members (outsiders get `mail_not_found`), changes
+/// need `mail.manage`.
+fn mailbox_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec<&'static str>>) {
+    add_code(responses, "404", "mail_not_found");
+    if matches!(
+        operation_id,
+        "list_mailboxes" | "get_mailbox" | "list_mail_labels"
+    ) {
+        return;
+    }
+    add_code(responses, "403", "mail_forbidden");
+    if !operation_id.starts_with("delete_") && !operation_id.starts_with("remove_") {
+        add_code(responses, "400", "invalid_request");
+        add_code(responses, "422", "validation_failed");
+    }
+    match operation_id {
+        "create_mailbox" => {
+            add_code(responses, "409", "address_taken");
+            add_code(responses, "409", "member_has_mailbox");
+        }
+        "add_mailbox_alias" => add_code(responses, "409", "address_taken"),
+        "remove_mailbox_address" => add_code(responses, "409", "address_primary"),
+        "add_mailbox_member" | "remove_mailbox_member" => {
+            add_code(responses, "409", "mailbox_personal");
+        }
+        "set_mailbox_status" => add_code(responses, "409", "mailbox_owner_left"),
+        "create_mail_label" | "update_mail_label" => {
+            add_code(responses, "409", "label_exists");
+        }
+        _ => {}
+    }
+}
+
+/// The workspace mail routes, refused with `mail_disabled` while Mail is off for the instance (not
+/// the root user's routes, nor the content-token routes of the message frame).
+fn workspace_mail_operation(operation_id: &str) -> bool {
+    let instance_route = operation_id == "move_mail_domain" || operation_id.contains("instance");
+    let token_route = matches!(
+        operation_id,
+        "get_mail_content" | "get_mail_part" | "get_mail_image"
+    );
+    let mail_route = operation_id.contains("mail_domain")
+        || operation_id.contains("mail_provider")
+        || operation_id.contains("mailbox")
+        || operation_id.contains("mail_label")
+        || operation_id.contains("mail_receipt")
+        || mail_thread_operation(operation_id)
+        || mail_content_operation(operation_id);
+    mail_route && !instance_route && !token_route
+}
+
+fn mail_thread_operation(operation_id: &str) -> bool {
+    matches!(
+        operation_id,
+        "list_mail_threads"
+            | "get_mail_thread"
+            | "update_mail_thread"
+            | "update_mail_threads"
+            | "get_mail_counts"
+            | "search_mail"
+            | "get_mail_me"
+    )
+}
+
+/// Thread routes are for mailbox members; anyone else gets `mail_not_found`.
+fn mail_thread_errors(
+    operation_id: &str,
+    responses: &mut BTreeMap<&'static str, Vec<&'static str>>,
+) {
+    add_code(responses, "404", "mail_not_found");
+    if matches!(
+        operation_id,
+        "list_mail_threads" | "update_mail_thread" | "update_mail_threads" | "search_mail"
+    ) {
+        add_code(responses, "400", "invalid_request");
+        add_code(responses, "422", "validation_failed");
+    }
+}
+
+fn mail_content_operation(operation_id: &str) -> bool {
+    matches!(
+        operation_id,
+        "create_mail_view_url"
+            | "get_mail_content"
+            | "get_mail_part"
+            | "get_mail_image"
+            | "download_mail_attachment"
+            | "download_mail_message"
+            | "set_mail_sender_pref"
+    )
+}
+
+/// Content routes are for mailbox members; a bad, expired or foreign content token is
+/// `mail_not_found` too.
+fn mail_content_errors(
+    operation_id: &str,
+    responses: &mut BTreeMap<&'static str, Vec<&'static str>>,
+) {
+    add_code(responses, "404", "mail_not_found");
+    match operation_id {
+        "create_mail_view_url" | "set_mail_sender_pref" => {
+            add_code(responses, "400", "invalid_request");
+            add_code(responses, "422", "validation_failed");
+        }
+        "get_mail_image" => {
+            add_code(responses, "400", "invalid_request");
+            add_code(responses, "502", "mail_image_unavailable");
+        }
+        "download_mail_attachment" => add_code(responses, "400", "invalid_request"),
+        _ => {}
     }
 }
 

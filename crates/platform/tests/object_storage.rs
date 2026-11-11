@@ -520,10 +520,14 @@ async fn backups_go_to_s3_and_restore_from_it() {
         ..Default::default()
     });
     let backups_root = root.path().join("backups");
-    let service = BackupService::new(&backups_root, &attachments).with_object_storage(storage);
+    let service = BackupService::new(&backups_root, &attachments)
+        .with_object_storage(storage)
+        .with_app_key(Some([5; 32]));
 
     let snapshot = service.create(&database).await.unwrap();
     assert!(snapshot.in_object_storage);
+    // The encrypted files go to the bucket as they are and come back through the download cache.
+    assert!(snapshot.manifest.encryption.is_some());
     assert!(!backups_root.join("snapshots").join(&snapshot.id).exists());
     let listed = service.list().await.unwrap();
     assert_eq!(listed.len(), 1);

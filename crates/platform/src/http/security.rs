@@ -95,6 +95,10 @@ impl OriginPolicy {
             // Machine-to-machine: the secret in the path is the credential, and no cookie is read.
             return true;
         }
+        if uri.path().starts_with("/api/v1/mail/inbound/") {
+            // webhooks from servers: no Origin, and the handler checks their signature
+            return true;
+        }
         if matches!(
             *method,
             Method::GET | Method::HEAD | Method::OPTIONS | Method::TRACE
@@ -291,22 +295,31 @@ pub(crate) fn add_security_headers(
     let policy = format!(
         "default-src 'self'; {script_source}style-src 'self' 'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='; style-src-attr 'unsafe-inline'; img-src 'self' data: blob: https:; frame-src blob: https://www.youtube-nocookie.com https://player.vimeo.com; media-src 'self' https:; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'self' https://github.com"
     );
-    headers.insert(
-        CONTENT_SECURITY_POLICY,
-        HeaderValue::from_str(&policy).expect("validated CSP values form a valid header"),
-    );
+    // A handler that sets its own policy keeps it (the sandboxed mail view document).
+    let handler_policy = headers.contains_key(CONTENT_SECURITY_POLICY);
+    if !handler_policy {
+        headers.insert(
+            CONTENT_SECURITY_POLICY,
+            HeaderValue::from_str(&policy).expect("validated CSP values form a valid header"),
+        );
+    }
     headers.insert(X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
-    // For browsers without CSP `frame-ancestors`. Provider sign-in is a full-page redirect, not a
-    // popup, so `same-origin` breaks no opener.
-    headers.insert(X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
+    // For browsers without CSP `frame-ancestors`. A handler with its own policy (the sandboxed
+    // mail view document, which the app frames) keeps its framing rules. Provider sign-in is a
+    // full-page redirect, not a popup, so `same-origin` breaks no opener.
+    if !handler_policy {
+        headers.insert(X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
+    }
     headers.insert(
         HeaderName::from_static("cross-origin-opener-policy"),
         HeaderValue::from_static("same-origin"),
     );
-    headers.insert(
-        REFERRER_POLICY,
-        HeaderValue::from_static("strict-origin-when-cross-origin"),
-    );
+    if !headers.contains_key(REFERRER_POLICY) {
+        headers.insert(
+            REFERRER_POLICY,
+            HeaderValue::from_static("strict-origin-when-cross-origin"),
+        );
+    }
     headers.insert(
         HeaderName::from_static("permissions-policy"),
         HeaderValue::from_static("camera=(), microphone=(), geolocation=(), payment=()"),
