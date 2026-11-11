@@ -6,6 +6,10 @@ export interface WorkspaceEvent {
   profile_changed?: boolean
   /** Every change since the last event is a saved-view write; missing means false. */
   views_only?: boolean
+  /** GitHub pull requests that changed (`owner/repo#12`): open viewers refetch them. */
+  github_pulls?: string[]
+  /** Every change since the last event is a GitHub pull request change; missing means false. */
+  github_only?: boolean
 }
 
 export function parseEvent(raw: string): WorkspaceEvent | null {
@@ -15,7 +19,9 @@ export function parseEvent(raw: string): WorkspaceEvent | null {
       || typeof value.sequence !== 'string' || !/^(0|[1-9][0-9]*)$/.test(value.sequence)
       || (value.workspaces_changed !== undefined && typeof value.workspaces_changed !== 'boolean')
       || (value.profile_changed !== undefined && typeof value.profile_changed !== 'boolean')
-      || (value.views_only !== undefined && typeof value.views_only !== 'boolean')) return null
+      || (value.views_only !== undefined && typeof value.views_only !== 'boolean')
+      || (value.github_only !== undefined && typeof value.github_only !== 'boolean')
+      || (value.github_pulls !== undefined && !(Array.isArray(value.github_pulls) && value.github_pulls.every((pull: unknown) => typeof pull === 'string')))) return null
     return value
   } catch { return null }
 }

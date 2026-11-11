@@ -43,6 +43,13 @@ function PullView({ workspaceId, pullRef, pull }: { workspaceId: string; pullRef
   const [params] = useSearchParams()
   const [active, setActive] = useState<string | null>(null)
   const list = useRef<HTMLDivElement>(null)
+  // The files shown belong to one head commit. A push refetches the header (live events), not the files: a bar
+  // offers Refresh, so the diff never changes under the reader.
+  const head = useRef(pull.head_sha)
+  head.current = pull.head_sha
+  const [filesHead, setFilesHead] = useState(pull.head_sha)
+  useEffect(() => { if (files.dataUpdatedAt) setFilesHead(head.current) }, [files.dataUpdatedAt])
+  const newCommits = files.data !== undefined && pull.head_sha !== filesHead
   // the diff list shows the files in the tree's order
   const ordered = useMemo(() => treeOrder(buildFileTree(files.data ?? [])), [files.data])
   const allThreads = useMemo(() => threads.data?.threads ?? [], [threads.data])
@@ -111,6 +118,10 @@ function PullView({ workspaceId, pullRef, pull }: { workspaceId: string; pullRef
         </TabsList>
       </Tabs> : null}
     </div>
+    {newCommits ? <div role="status" className="flex items-center gap-3 border-b bg-primary/8 px-4 py-1.5 text-[13px]">
+      <span>New commits were pushed.</span>
+      <Button size="xs" variant="outline" onClick={() => { void files.refetch(); void threads.refetch() }}>Refresh</Button>
+    </div> : null}
     {onFiles ? <div className="flex min-h-0 flex-1">
       <aside className="flex w-72 shrink-0 flex-col border-r max-[899px]:hidden">
         {files.data ? <PullFileTree files={files.data} active={active} onOpen={openFile} onViewed={(path, viewed) => setViewed.mutate({ file: path, viewed })} /> : <p className="p-3 text-xs text-muted-foreground">Loading files…</p>}

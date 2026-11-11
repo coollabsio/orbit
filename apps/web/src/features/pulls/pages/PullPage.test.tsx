@@ -1,5 +1,7 @@
 import { afterEach, expect, test } from 'bun:test'
-import { waitFor } from '@testing-library/react'
+import { act, waitFor } from '@testing-library/react'
+import { QueryClient } from '@tanstack/react-query'
+import { pullKeys } from '@/features/pulls/api'
 import userEvent from '@testing-library/user-event'
 import { Route, Routes } from 'react-router'
 import { renderWithWorkspace } from '@/test/renderWithWorkspace'
@@ -102,4 +104,27 @@ test('comments on a file the diff cannot show are in the Overview tab', async ()
   await userEvent.click(await view.findByRole('tab', { name: 'Overview' }))
   expect(await view.findByText('Why this bump?')).toBeTruthy()
   expect(view.getByRole('region', { name: 'Comments not in the diff' })).toBeTruthy()
+})
+
+test('new commits show a bar; the files load again only on Refresh', async () => {
+  let head = 'h1'
+  let fileLoads = 0
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const path = new URL((input as Request).url).pathname
+    if (path.endsWith('/acme/repo/12')) return Response.json({ ...detail, head_sha: head })
+    if (path.endsWith('/files')) { fileLoads += 1; return Response.json(files) }
+    if (path.endsWith('/threads')) return Response.json({ threads: [], pending_review: null })
+    return Response.json([])
+  }) as typeof fetch
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const view = renderWithWorkspace(<Routes><Route path="/tasks/pulls/:owner/:repo/:number" element={<PullPage />} /></Routes>, { path: '/tasks/pulls/acme/repo/12', client })
+  await view.findByRole('tree', { name: 'Changed files' })
+  expect(fileLoads).toBe(1)
+  head = 'h2'
+  await act(() => client.invalidateQueries({ queryKey: pullKeys.pull('workspace-1', { owner: 'acme', repo: 'repo', number: 12 }), exact: true }))
+  expect(await view.findByText('New commits were pushed.')).toBeTruthy()
+  expect(fileLoads).toBe(1)
+  await userEvent.click(view.getByRole('button', { name: 'Refresh' }))
+  await waitFor(() => expect(fileLoads).toBe(2))
+  await waitFor(() => expect(view.queryAllByText('New commits were pushed.').length).toBe(0))
 })

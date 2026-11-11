@@ -88,6 +88,10 @@ pub struct Events {
     pub profile_changed: bool,
     /// Every change in the range is a saved-view write, so clients refresh only their views.
     pub views_only: bool,
+    /// GitHub pull requests that changed in the range (`owner/repo#12`): open viewers refetch them.
+    pub github_pulls: Vec<String>,
+    /// Every change in the range is a GitHub pull request change: clients refetch only those pull requests.
+    pub github_only: bool,
 }
 
 pub async fn replay(
@@ -113,7 +117,36 @@ pub async fn replay(
     let valid = after.is_some_and(|n| {
         n >= 0 && n <= latest && (n == latest || oldest.is_some_and(|first| n >= first - 1))
     });
+    let mut github_pulls = Vec::new();
+    let mut github_only = false;
     let (workspaces_changed, profile_changed, views_only) = if valid && after != Some(latest) {
+        let pulls: Vec<String> = sqlx::query_scalar(
+            "SELECT a.metadata_json FROM outbox_events e JOIN audit_events a ON a.id = e.id \
+             WHERE e.scope = $1 AND e.sequence > $2 AND e.sequence <= $3 AND a.resource_type = 'github_pull' LIMIT 200",
+        )
+        .bind(workspace.to_string())
+        .bind(after.unwrap_or_default())
+        .bind(latest)
+        .fetch_all(&mut *tx)
+        .await?;
+        let others: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM outbox_events e LEFT JOIN audit_events a ON a.id = e.id \
+             WHERE e.scope = $1 AND e.sequence > $2 AND e.sequence <= $3 \
+             AND (a.resource_type IS NULL OR a.resource_type <> 'github_pull')",
+        )
+        .bind(workspace.to_string())
+        .bind(after.unwrap_or_default())
+        .bind(latest)
+        .fetch_one(&mut *tx)
+        .await?;
+        github_pulls = pulls
+            .iter()
+            .filter_map(|json| serde_json::from_str::<serde_json::Value>(json).ok())
+            .filter_map(|value| value["pull"].as_str().map(str::to_owned))
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        github_only = !github_pulls.is_empty() && others == 0;
         // LEFT JOIN: an event without its audit row counts as "not a view change"
         let (workspace, profile, views): (i64, i64, i64) = sqlx::query_as(
             "SELECT COALESCE(MAX(CASE WHEN a.resource_type IN ('workspace', 'membership') \
@@ -147,6 +180,8 @@ pub async fn replay(
         workspaces_changed,
         profile_changed,
         views_only,
+        github_pulls,
+        github_only,
     })
 }
 

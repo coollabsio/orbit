@@ -135,6 +135,54 @@ pub async fn notify_pull_event(state: &IntegrationState, workspace: &Id, event: 
     tx.commit().await
 }
 
+/// The pull requests a webhook delivery changes for an open viewer: `owner/repo#n`, lower-case.
+#[must_use]
+pub fn changed_pulls(event: &str, payload: &Value) -> Vec<String> {
+    let Some(repository) = payload["repository"]["full_name"].as_str().map(str::to_lowercase) else { return Vec::new() };
+    let action = payload["action"].as_str().unwrap_or("");
+    let numbers: Vec<i64> = match (event, action) {
+        ("pull_request", "synchronize" | "edited" | "closed" | "reopened" | "ready_for_review" | "converted_to_draft")
+        | ("pull_request_review", _)
+        | ("pull_request_review_comment", _)
+        | ("pull_request_review_thread", _) => payload["pull_request"]["number"].as_i64().into_iter().collect(),
+        ("check_suite", "completed") => payload["check_suite"]["pull_requests"].as_array().map(|list| list.iter().filter_map(|pull| pull["number"].as_i64()).collect()).unwrap_or_default(),
+        ("check_run", "completed") => payload["check_run"]["pull_requests"].as_array().map(|list| list.iter().filter_map(|pull| pull["number"].as_i64()).collect()).unwrap_or_default(),
+        _ => Vec::new(),
+    };
+    numbers.into_iter().take(20).map(|number| format!("{repository}#{number}")).collect()
+}
+
+/// Tells the workspace's open viewers which pull requests changed: one `github_pull` audit row each, which the
+/// realtime stream reports in `github_pulls`. Only for repositories connected to a project of the workspace.
+pub async fn record_pull_changes(state: &IntegrationState, workspace: &Id, pulls: &[String], request_id: &str) -> Result<(), sqlx::Error> {
+    let Some(repository) = pulls.first().and_then(|pull| pull.split('#').next()) else { return Ok(()) };
+    let connected: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM github_project_connections WHERE workspace_id = $1 AND lower(repository) = $2")
+        .bind(workspace.to_string())
+        .bind(repository)
+        .fetch_one(state.database().pool())
+        .await?;
+    if connected == 0 {
+        return Ok(());
+    }
+    let mut tx = state.database().immediate_transaction().await?;
+    for pull in pulls {
+        crate::audit::record(
+            &mut tx,
+            *workspace,
+            None,
+            "github.pull.changed",
+            crate::audit::AuditOutcome::Success,
+            "github_pull",
+            None,
+            request_id,
+            serde_json::json!({ "pull": pull }),
+            TimestampMillis::now(),
+        )
+        .await?;
+    }
+    tx.commit().await
+}
+
 /// `true` for the events that can make a notice (the webhook calls `notify_pull_event` for them).
 #[must_use]
 pub fn is_notice_event(event: &str) -> bool {

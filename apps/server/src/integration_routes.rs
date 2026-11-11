@@ -1137,10 +1137,18 @@ async fn github_webhook_from_database(
         return Ok(StatusCode::OK);
     }
     let workspace_id: Id = workspace.parse().map_err(|_| ApiError::internal(id))?;
-    if crate::github::notify::is_notice_event(&event) && !read_only(state, workspace_id, id).await? {
-        // A notice failure must not fail the delivery: GitHub would retry it and the task sync below.
-        if let Err(error) = crate::github::notify::notify_pull_event(state, &workspace_id, &event, &delivery, &payload).await {
+    let changed = crate::github::notify::changed_pulls(&event, &payload);
+    let notice = crate::github::notify::is_notice_event(&event);
+    if (notice || !changed.is_empty()) && !read_only(state, workspace_id, id).await? {
+        // A notice or refresh failure must not fail the delivery: GitHub would retry it and the task sync below.
+        if notice
+            && let Err(error) = crate::github::notify::notify_pull_event(state, &workspace_id, &event, &delivery, &payload).await
+        {
             tracing::warn!(%workspace_id, event, %error, "GitHub notice not written");
+        }
+        let request = id.map_or("github-webhook", RequestId::as_str);
+        if let Err(error) = crate::github::notify::record_pull_changes(state, &workspace_id, &changed, request).await {
+            tracing::warn!(%workspace_id, event, %error, "GitHub pull request change not sent to viewers");
         }
     }
     if !matches!(event.as_str(), "issues" | "pull_request") {

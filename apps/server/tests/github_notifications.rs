@@ -175,3 +175,14 @@ async fn closed_without_merge_is_not_a_notice() {
     assert!(fixture.webhook("pull_request", "d-1", body).await.status().is_success());
     assert!(notices(&fixture).await.is_empty());
 }
+
+#[tokio::test]
+async fn a_push_tells_open_viewers_which_pull_request_changed() {
+    let (fixture, _) = setup().await;
+    let body = delivery("synchronize", json!({ "pull_request": pull((2, "mia")), "sender": { "id": 2, "login": "mia" } }));
+    assert!(fixture.webhook("pull_request", "d-1", body).await.status().is_success());
+    let check = delivery("completed", json!({ "check_suite": { "pull_requests": [{ "number": 12 }, { "number": 13 }] } }));
+    assert!(fixture.webhook("check_suite", "d-2", check).await.status().is_success());
+    let events = orbit_server::realtime::replay(&fixture.database, fixture.workspace_id, Some(0)).await.unwrap();
+    assert_eq!(events.github_pulls, vec!["acme/repo#12".to_owned(), "acme/repo#13".to_owned()]);
+}

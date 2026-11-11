@@ -8,8 +8,7 @@ import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
 import { testWorkspace } from '@/test/workspace'
 
 /** Renders `ui` inside a query client, a router at `path`, the test workspace with `role`, and a toaster. */
-export function renderWithWorkspace(ui: ReactNode, { role = 'owner', path = '/' }: { role?: WorkspaceRole; path?: string } = {}) {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+export function renderWithWorkspace(ui: ReactNode, { role = 'owner', path = '/', client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } }) }: { role?: WorkspaceRole; path?: string; client?: QueryClient } = {}) {
   const workspace = testWorkspace(role)
   return render(<QueryClientProvider client={client}>
     <MemoryRouter initialEntries={[path]}>
