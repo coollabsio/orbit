@@ -47,15 +47,14 @@ for (const approved of [true, false]) {
     expect(view.getByText('127.0.0.1').tagName).toBe('STRONG')
     await userEvent.click(view.getByRole('checkbox', { name: 'Client runs on a remote server' }))
     if (approved) {
-      fireEvent.click(view.getByRole('combobox', { name: /Workspace/ }))
-      await userEvent.click(await view.findByRole('option', { name: 'Workspace One' }))
+      expect(view.queryByRole('combobox', { name: /Workspace/ })).toBeNull()
       await userEvent.click(view.getByRole('checkbox', { name: 'Project One' }))
     }
     fireEvent.click(view.getByRole('button', { name: approved ? 'Allow read access' : 'Deny' }))
     const field = await view.findByRole('textbox', { name: 'Callback URL' }) as HTMLTextAreaElement
     expect(field.value).toBe(callback)
     expect(window.location.pathname).toBe('/oauth/consent')
-    expect(body).toEqual({ csrf_token: 'nonce', approved, workspace_id: approved ? 'workspace-1' : null, project_ids: approved ? ['project-1'] : [], all_projects: false, scopes: [] })
+    expect(body).toEqual({ csrf_token: 'nonce', approved, workspace_id: 'workspace-1', project_ids: approved ? ['project-1'] : [], all_projects: false, scopes: [] })
     expect(view.queryAllByRole('button', { name: 'Allow read access' }).length).toBe(0)
     const clipboard = navigator.clipboard
     const originalWrite = clipboard.writeText
@@ -108,9 +107,7 @@ test('select all projects and a permission preset send every project and scope',
   expect(body).toEqual({ csrf_token: 'nonce', approved: true, workspace_id: 'w1', project_ids: ['p1', 'p2'], all_projects: false, scopes: ['tasks:write', 'chat:read'] })
 })
 
-test('a workspace without projects can be picked and says it has no projects', async () => {
-  const { fireEvent } = await import('@testing-library/react')
-  const userEvent = (await import('@testing-library/user-event')).default.setup()
+test('a single workspace without projects shows its name and no projects', async () => {
   window.history.replaceState(null, '', `/oauth/consent?request=${'e'.repeat(43)}`)
   globalThis.fetch = Object.assign(async (input: RequestInfo | URL) => {
     const path = new URL(input instanceof Request ? input.url : String(input), window.location.origin).pathname
@@ -119,7 +116,20 @@ test('a workspace without projects can be picked and says it has no projects', a
   }, { preconnect: originalFetch.preconnect })
   const view = render(<Providers><OAuthConsentPage /></Providers>)
   await view.findByText('Client')
-  fireEvent.click(view.getByRole('combobox', { name: /Workspace/ }))
-  await userEvent.click(await view.findByRole('option', { name: 'Empty' }))
-  expect(view.getByText(/This workspace has no projects yet/)).toBeTruthy()
+  expect(view.getByText('Empty')).toBeTruthy()
+  expect(view.getByText('No projects available.')).toBeTruthy()
+})
+
+test('without a workspace only the note and Deny show', async () => {
+  window.history.replaceState(null, '', `/oauth/consent?request=${'n'.repeat(43)}`)
+  globalThis.fetch = Object.assign(async (input: RequestInfo | URL) => {
+    const path = new URL(input instanceof Request ? input.url : String(input), window.location.origin).pathname
+    if (path === '/api/v1/auth/me') return Response.json({ id: 'user-1', display_name: 'Ada' })
+    return Response.json({ client_name: 'Client', redirect_to: '127.0.0.1', csrf_token: 'nonce', scope: 'tasks:read', workspaces: [], projects: [] })
+  }, { preconnect: originalFetch.preconnect })
+  const view = render(<Providers><OAuthConsentPage /></Providers>)
+  await view.findByText(/No workspaces available/)
+  expect(view.getByRole('button', { name: 'Deny' })).toBeTruthy()
+  expect(view.queryByRole('checkbox', { name: 'Client runs on a remote server' })).toBeNull()
+  expect(view.queryByRole('button', { name: /Allow/ })).toBeNull()
 })

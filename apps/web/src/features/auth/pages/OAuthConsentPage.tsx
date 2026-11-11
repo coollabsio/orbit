@@ -34,7 +34,7 @@ export function OAuthConsentPage() {
   const [remote, setRemote] = useState(false)
   const [callback, setCallback] = useState<{ url: string; approved: boolean } | null>(null)
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
-  const [workspace, setWorkspace] = useState('')
+  const [pickedWorkspace, setWorkspace] = useState('')
   const [selected, setSelected] = useState<string[]>([])
   const [allProjects, setAllProjects] = useState(false)
   const [scopes, setScopes] = useState<Scope[]>([])
@@ -45,6 +45,9 @@ export function OAuthConsentPage() {
     retry: false,
     refetchOnWindowFocus: false,
   })
+  const workspaces = consent.data?.workspaces ?? []
+  // A single workspace needs no picker.
+  const workspace = workspaces.length === 1 ? workspaces[0].id : pickedWorkspace
   const approve = useMutation({
     mutationFn: async (approved: boolean) => {
       const result = await oauthRequest<{ redirect_uri: string }>(`/api/v1/oauth/consent/${encodeURIComponent(request)}`, {
@@ -77,31 +80,30 @@ export function OAuthConsentPage() {
   if (user.isPending) return <LoadingScreen />
   if (user.data === null) return <Navigate to={loginPath(`/oauth/consent?request=${request}`)} replace />
   const workspaceProjects = consent.data?.projects.filter((project) => project.workspace_id === workspace) ?? []
-  const workspaces = consent.data?.workspaces ?? []
   return <AuthCard><div className="grid gap-5">
     <AuthBrand />
     <h1 className="text-xl font-semibold">Connect to Orbit</h1>
     {user.isError || consent.isError || !/^[A-Za-z0-9_-]{43}$/.test(request) ? <p role="alert">This request is not available. Restart the connection from your MCP client.</p> : consent.data ? <>
       <p><strong>{consent.data.client_name}</strong> wants to connect to the workspace and projects you select.</p>
       <p className="text-sm text-muted-foreground">Signed in as {user.data?.display_name}.</p>
-      <Label>Workspace<Select value={workspace} onValueChange={(value) => { setWorkspace(value ?? ''); setSelected([]) }}>
+      {workspaces.length > 1 ? <Label>Workspace<Select value={workspace} onValueChange={(value) => { setWorkspace(value ?? ''); setSelected([]) }}>
         <SelectTrigger><SelectValue placeholder="Select a workspace">{workspaces.find(({ id }) => id === workspace)?.name ?? 'Select a workspace'}</SelectValue></SelectTrigger>
         <SelectContent>{workspaces.map(({ id, name }) => <SelectItem key={id} value={id}>{name}</SelectItem>)}</SelectContent>
-      </Select></Label>
-      <AccessPicker id="consent-access" resources={RESOURCES.map((resource) => resource.name === 'Tasks' ? { ...resource, details: <ProjectPicker id="consent-projects" projects={workspaceProjects} selected={selected} onChange={setSelected} all={allProjects} onAllChange={setAllProjects} empty={!workspaces.length ? 'No workspaces are available to your account.' : workspace && !workspaceProjects.length ? 'This workspace has no projects yet. Allow all projects to include the projects you create later.' : undefined} /> } : resource)} scopes={scopes} onChange={setScopes} />
-      <div className="flex items-center gap-1.5">
+      </Select></Label> : workspaces.length ? <p className="text-sm">Workspace: <strong>{workspaces[0].name}</strong></p> : <p className="text-sm text-muted-foreground">No workspaces available. Create a workspace in Orbit, then restart the connection.</p>}
+      {workspaces.length ? <AccessPicker id="consent-access" resources={RESOURCES.map((resource) => resource.name === 'Tasks' ? { ...resource, details: <ProjectPicker id="consent-projects" projects={workspaceProjects} selected={selected} onChange={setSelected} all={allProjects} onAllChange={setAllProjects} empty={workspace && !workspaceProjects.length ? 'No projects available.' : undefined} /> } : resource)} scopes={scopes} onChange={setScopes} /> : null}
+      {workspaces.length ? <div className="flex items-center gap-1.5">
         <Label className="flex items-center gap-2">
           <Checkbox checked={remote} disabled={approve.isPending} onCheckedChange={(checked) => setRemote(Boolean(checked))} />
           Client runs on a remote server
         </Label>
         <InfoTip text="Use --no-browser when you start sign-in in Claude or Codex. Orbit will show a callback URL to paste into that terminal." />
-      </div>
+      </div> : null}
       {approve.isError ? <p role="alert" className="text-sm text-destructive">{approve.error.message}</p> : null}
       <div className="flex gap-3">
         <Button variant="outline" disabled={approve.isPending} onClick={() => approve.mutate(false)}>Deny</Button>
-        <Button disabled={!workspace || (!allProjects && (!selected.length || selected.length > 100)) || approve.isPending} onClick={() => approve.mutate(true)}>{scopes.length ? 'Allow selected access' : 'Allow read access'}</Button>
+        {workspaces.length ? <Button disabled={!workspace || (!allProjects && (!selected.length || selected.length > 100)) || approve.isPending} onClick={() => approve.mutate(true)}>{scopes.length ? 'Allow selected access' : 'Allow read access'}</Button> : null}
       </div>
-      <p className="text-xs text-muted-foreground">Allowing will redirect to <strong className="break-words font-medium text-foreground">{consent.data.redirect_to}</strong>.</p>
+      {workspaces.length ? <p className="text-xs text-muted-foreground">Allowing will redirect to <strong className="break-words font-medium text-foreground">{consent.data.redirect_to}</strong>.</p> : null}
     </> : <p><LoadingText>Loading connection…</LoadingText></p>}
   </div></AuthCard>
 }
