@@ -424,6 +424,7 @@ pub(crate) async fn ensure_project(
                 name.clone(),
                 key,
                 project.color.to_owned(),
+                false,
                 project.request_id,
                 TimestampMillis::now(),
             )

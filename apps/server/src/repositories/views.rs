@@ -12,6 +12,7 @@ use sqlx::any::AnyRow;
 use utoipa::ToSchema;
 
 use super::membership;
+use super::project_access::user_sees_project_sql;
 use super::task_filter::{ViewState, parse_view_state, preset_filter, validate_view_state};
 use super::tasks::{TaskError, parse_id, record_mutation};
 use crate::audit::{self, AuditOutcome};
@@ -488,12 +489,14 @@ impl ViewRepository {
         load_caller(&mut *tx, workspace_id, actor_id).await?;
         // Only live projects of this workspace get a row, so made-up ids cannot pile up rows.
         if let Some(project_id) = page_key.strip_prefix("project:") {
-            let Flag(exists) = sqlx::query_scalar(
+            let Flag(exists) = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
                 "SELECT EXISTS(SELECT 1 FROM projects \
-                 WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL)",
-            )
+                 WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL AND {})",
+                user_sees_project_sql("projects.id", "$3")
+            )))
             .bind(project_id)
             .bind(workspace_id.to_string())
+            .bind(actor_id.to_string())
             .fetch_one(&mut *tx)
             .await?;
             if !exists {

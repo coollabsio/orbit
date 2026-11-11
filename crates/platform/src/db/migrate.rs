@@ -615,6 +615,11 @@ impl MigrationRunner {
                     include_str!("../../../../apps/server/migrations/0093_task_recurrences.sql"),
                     false,
                 ),
+                Migration::new(
+                    94,
+                    include_str!("../../../../apps/server/migrations/0094_private_projects.sql"),
+                    false,
+                ),
             ],
         );
         runner.postgres = vec![
@@ -901,6 +906,13 @@ impl MigrationRunner {
                 93,
                 include_str!(
                     "../../../../apps/server/migrations/postgres/0093_task_recurrences.sql"
+                ),
+                false,
+            ),
+            Migration::new(
+                94,
+                include_str!(
+                    "../../../../apps/server/migrations/postgres/0094_private_projects.sql"
                 ),
                 false,
             ),
