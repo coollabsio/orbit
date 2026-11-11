@@ -33,7 +33,7 @@ const message: MessageRecord = {
   reply_count: 2,
   last_reply_at: '2026-10-02T08:02:00.000Z',
   reply_user_ids: ['u1'],
-  last_reply: { author_id: 'u1', body: 'Thanks', sticker: false, created_at: '2026-10-02T08:02:00.000Z' },
+  last_reply: { author_id: 'u1', body: 'Thanks', sticker: false, created_at: '2026-10-02T08:02:00.000Z', bot_name: null },
 }
 
 const conversation: ConversationRecord = {
@@ -82,7 +82,7 @@ test('a wire message becomes a chat message with millisecond times', () => {
       replyCount: 2,
       lastReplyAt: Date.UTC(2026, 9, 2, 8, 2),
       replyUserIds: ['u1'],
-      lastReply: { authorId: 'u1', body: 'Thanks', sticker: false, createdAt: Date.UTC(2026, 9, 2, 8, 2) },
+      lastReply: { authorId: 'u1', body: 'Thanks', sticker: false, createdAt: Date.UTC(2026, 9, 2, 8, 2), botName: null },
     },
   })
 })

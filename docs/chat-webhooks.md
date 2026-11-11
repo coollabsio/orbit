@@ -7,6 +7,10 @@ Orbit's webhooks take the payload of Slack incoming webhooks. A tool that posts 
 to Orbit when you replace the URL. See [Slack compatibility](#slack-compatibility) for the few
 differences.
 
+A webhook can also be a two-way chat app (a bot): with [events](#events) on, it gets the members'
+messages in its channel, reads the channel and its threads, and answers in a thread. It has its own
+name and avatar, and it needs no member's login.
+
 ## Make a webhook
 
 1. Open the channel, then select **⋯ > Edit channel > Integrations**.
@@ -41,8 +45,9 @@ JSON in the `payload` field.
 | `username` | string | The author name of this message only. Cut to 80 characters. |
 | `icon_url` | string | The avatar of this message only: an `https://` image. Other URLs are ignored. |
 | `icon_emoji` | string | The avatar of this message only, as an emoji (`:ghost:`). It wins over `icon_url`. |
+| `thread_ts` | string | The id of a root message in the webhook's channel. The message is then a reply in that thread. Another id gives `422 validation_failed`. |
 
-Orbit ignores other fields (`channel`, `thread_ts`, `unfurl_links`, …).
+Orbit ignores other fields (`channel`, `unfurl_links`, …).
 
 ### Text formatting
 
@@ -139,8 +144,9 @@ example Bolt) works with Orbit after you change its URLs and signing secret.
 3. Select **Reveal** and copy the signing secret into your integration.
 
 The request URL must be https on a public address. (A development server, `ORBIT_ENV=development`,
-also takes `http` and local addresses.) **Make new secret** changes the secret at once. **Turn off**
-disables the buttons again. **Last clicks** shows the answers of the last 20 clicks.
+also takes `http` and local addresses.) **Make new** changes the signing secret at once. **Remove
+request URL** disables the buttons again. **Last deliveries** shows the answers of the last 20 clicks
+and events.
 
 ### The click
 
@@ -211,6 +217,106 @@ class Handler(BaseHTTPRequestHandler):
 HTTPServer(("0.0.0.0", 3000), Handler).serve_forever()
 ```
 
+## Events
+
+With events on, Orbit sends each new message of a member in the webhook's channel to the request
+URL, as the Slack Events API does. A bot uses this to answer when a member names it.
+
+### Turn on events
+
+1. Open **⋯ > Edit channel > Integrations**, then select **⋯ > Interactivity** on the webhook.
+2. Type the request URL and select **Save**.
+3. Turn on **Send messages as events**. The change is saved at once.
+4. Select **Reveal** and copy the signing secret into your integration.
+
+Events need a request URL: **Remove request URL** stops clicks and events. With events on, the secret of the
+webhook URL also [reads the channel](#read-the-channel). Without events, a webhook URL can only post,
+so a URL in a CI configuration cannot read your messages.
+
+### The event
+
+Orbit sends `POST <request URL>` with `Content-Type: application/json`, signed as a
+[click](#the-click) is (`X-Slack-Signature` over the raw JSON body), within 3 seconds, one time,
+without redirects. The member's message is saved first and does not wait for the integration.
+
+```json
+{
+  "type": "event_callback",
+  "team_id": "<workspace id>",
+  "api_app_id": "<webhook id>",
+  "event_id": "Ev<message id>",
+  "event_time": 1793917200,
+  "event": {
+    "type": "app_mention",
+    "channel": "<channel id>",
+    "user": "<user id>",
+    "user_profile": {"name": "Ana", "display_name": "Ana", "real_name": "Ana"},
+    "text": "@Assistant sum up this thread",
+    "ts": "<message id>",
+    "event_ts": "<message id>",
+    "thread_ts": "<root message id>"
+  }
+}
+```
+
+- `event.type` is `app_mention` when the text contains `@` and the webhook's name (any letter
+  case, for example `@assistant`), and `message` for all other messages. Orbit sends one event for
+  each message.
+- `thread_ts` is there only for a reply in a thread.
+- `event_id` is the same each time for the same message (for example when the member's app sends
+  it again). Use it to answer one time only.
+- `text` is Markdown with mention tokens (`<@user_id>`, `<#channel_id>`).
+- Messages of integrations (also the webhook's own), edits, deletes and system rows send no event.
+- Orbit does not send Slack's `url_verification` request, and does not try again. **Last
+  deliveries** shows the answers of the last 20 clicks and events.
+
+### Answer in the thread
+
+Post to the webhook URL with `thread_ts`. For a mention in the channel, use the message's `ts`; for
+a mention in a thread, use its `thread_ts`:
+
+```bash
+curl -X POST -H 'Content-Type: application/json' \
+  -d '{"text": "Here is the summary…", "thread_ts": "<root message id>"}' \
+  'https://orbit.example.com/api/v1/hooks/chat/<webhook_id>/<secret>'
+```
+
+The reply shows the webhook's name and avatar. The member who made the webhook does not follow the
+thread because of it; the root's author and the thread's followers see it as unread.
+
+### Read the channel
+
+```bash
+curl -sS -H 'Authorization: Bearer <secret>' \
+  'https://orbit.example.com/api/v1/hooks/chat/<webhook_id>/messages?thread_ts=<root message id>'
+```
+
+`<secret>` is the last part of the webhook URL. The answer:
+
+```json
+{
+  "ok": true,
+  "messages": [
+    {"type": "message", "ts": "<message id>", "thread_ts": "<root id>", "user": "<user id>",
+     "username": "Ana", "text": "also the budget"},
+    {"type": "message", "ts": "<message id>", "thread_ts": "<root id>", "user": "<user id>",
+     "username": "Assistant", "bot_id": "<webhook id>", "text": "Here is the summary…"}
+  ],
+  "next_before": null
+}
+```
+
+| Parameter | Effect |
+|---|---|
+| `thread_ts` | The replies of this root message, oldest first. Without it: the channel's main list. |
+| `before` | Messages older than this message id. Send `next_before` of the last answer for the older page. |
+| `limit` | 1–100 messages. The default is 50. |
+
+A root with replies has `thread_ts` (its own id) and `reply_count`. A deleted message has an empty
+`text`. A webhook without events, an unknown id and a wrong secret all give `404 webhook_not_found`;
+a `thread_ts` that is no root of the channel gives `422 validation_failed`. The webhook reads only its
+own channel. Reads count against the webhook's rate limit.
+
 ## Slack compatibility
 
 What does not carry over from Slack:
@@ -218,8 +324,10 @@ What does not carry over from Slack:
 - Only buttons are interactive. Menus, date pickers and other interactive elements are left out,
   and there are no modals (`trigger_id` is sent but cannot open anything).
 - Slack user, user group and channel ids name nobody in Orbit. Use Orbit ids.
-- `thread_ts` (replies in a thread) and `channel` (another channel) are ignored: a webhook posts to
-  its own channel.
+- `channel` (another channel) is ignored: a webhook posts to its own channel. `thread_ts` must be an
+  Orbit message id.
+- Events cover messages only (`message` and `app_mention`), with no `url_verification` and no
+  retries. Read the channel with [`GET …/messages`](#read-the-channel), not `conversations.history`.
 - Errors are JSON (`application/problem+json`) with an Orbit `code`, not Slack's plain-text codes
   (`invalid_payload`, `no_text`, …). The status codes are close to Slack's.
 
