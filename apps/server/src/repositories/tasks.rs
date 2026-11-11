@@ -146,6 +146,12 @@ pub struct TaskRecord {
     pub position: i64,
     #[schema(value_type = Option<String>)]
     pub creator_id: Option<Id>,
+    /// When the task entered a completed or cancelled status. Only the token API shows it.
+    #[serde(skip)]
+    pub completed_at: Option<TimestampMillis>,
+    /// The source tool's ID of an imported task (`tasks:import`). Only the token API shows it.
+    #[serde(skip)]
+    pub external_id: Option<String>,
     #[schema(value_type = Option<String>)]
     pub creator_service_account_id: Option<Id>,
     pub creator_service_account_name: Option<String>,
@@ -226,6 +232,9 @@ pub struct CommentRecord {
     pub author_service_account_name: Option<String>,
     #[schema(value_type = Option<String>)]
     pub parent_id: Option<Id>,
+    /// The source tool's ID of an imported comment (`tasks:import`). Only the token API shows it.
+    #[serde(skip)]
+    pub external_id: Option<String>,
     /// Markdown copy of `body_json`.
     pub body: String,
     /// BlockNote blocks, the comment's source; null for a comment written before rich text.
@@ -317,14 +326,51 @@ pub struct CreateTask {
     pub parent_task_id: Option<Id>,
 }
 
+/// What an imported task keeps from the source tool; `None` takes Orbit's value (the import
+/// time, the next number, the importing member).
+#[derive(Clone, Debug, Default)]
+pub struct ImportedTask {
+    /// Kept when the status is closed.
+    pub completed_at: Option<TimestampMillis>,
+    pub created_at: Option<TimestampMillis>,
+    /// `created_at` when unset.
+    pub updated_at: Option<TimestampMillis>,
+    /// Must be free in the project (`Conflict` otherwise); later tasks are numbered after it.
+    pub number: Option<i64>,
+    /// An active member who is not a guest.
+    pub creator_id: Option<Id>,
+    /// The source tool's ID, unique in the workspace (`Conflict` otherwise).
+    pub external_id: Option<String>,
+}
+
+impl ImportedTask {
+    #[must_use]
+    pub fn completed(completed_at: Option<TimestampMillis>) -> Self {
+        Self {
+            completed_at,
+            ..Self::default()
+        }
+    }
+}
+
+/// What an imported comment keeps from the source tool; `None` takes Orbit's value.
+#[derive(Clone, Debug, Default)]
+pub struct ImportedComment {
+    /// An active member who is not a guest.
+    pub author_id: Option<Id>,
+    pub created_at: Option<TimestampMillis>,
+    /// `created_at` when unset.
+    pub updated_at: Option<TimestampMillis>,
+    /// The source tool's ID, unique in the workspace (`Conflict` otherwise).
+    pub external_id: Option<String>,
+}
+
 /// How `insert_task` creates a task: as a person does (notifications, sub-issue automation), or
 /// silently for an import.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 enum CreateMode {
     Interactive,
-    Import {
-        completed_at: Option<TimestampMillis>,
-    },
+    Import(ImportedTask),
 }
 
 #[derive(Clone, Debug)]
@@ -534,6 +580,8 @@ pub struct TaskRepository {
     token: Option<TokenActor>,
     /// `expected_version` of task updates and deletes is the task's [`revision`].
     revisions: bool,
+    /// An import (`tasks:import` token): writes notify nobody and run no sub-issue automation.
+    importing: bool,
 }
 
 impl TaskRepository {
@@ -562,6 +610,15 @@ impl TaskRepository {
         }
     }
 
+    /// Writes copy another tool's state: no notifications, no sub-issue automation.
+    #[must_use]
+    pub fn with_import(self) -> Self {
+        Self {
+            importing: true,
+            ..self
+        }
+    }
+
     /// The task's version when `expected` proves that the caller saw `current`: `expected` is
     /// the version, or with [`Self::with_revisions`] the revision.
     fn expected_version(&self, expected: u64, current: &TaskRecord) -> Result<u64, TaskError> {
@@ -582,9 +639,9 @@ impl TaskRepository {
     }
 
     /// Whether the write notifies members. A service account's write does not: a notification
-    /// names a member as the actor, and no member did it.
+    /// names a member as the actor, and no member did it. An import does not either.
     fn notifies(&self) -> bool {
-        self.service_account().is_none()
+        !self.importing && self.service_account().is_none()
     }
 
     fn service_account(&self) -> Option<(Id, &str)> {
@@ -734,6 +791,7 @@ impl TaskRepository {
             project_grant: None,
             token: None,
             revisions: false,
+            importing: false,
         }
     }
 
@@ -1544,6 +1602,28 @@ impl TaskRepository {
         })
     }
 
+    /// A status of the project, for a partial update (the token API).
+    pub async fn status(
+        &self,
+        workspace_id: Id,
+        project_id: Id,
+        status_id: Id,
+    ) -> Result<StatusRecord, TaskError> {
+        let mut tx = self.database.pool().begin().await?;
+        status_in_tx(&mut tx, workspace_id, project_id, status_id).await
+    }
+
+    /// A label of the project, for a partial update (the token API).
+    pub async fn label(
+        &self,
+        workspace_id: Id,
+        project_id: Id,
+        label_id: Id,
+    ) -> Result<LabelRecord, TaskError> {
+        let mut tx = self.database.pool().begin().await?;
+        label_in_tx(&mut tx, workspace_id, project_id, label_id).await
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub async fn delete_status(
         &self,
@@ -1983,8 +2063,8 @@ impl TaskRepository {
     /// Creates a task copied from another tool under a caller-chosen `id` (recorded before the
     /// call, so a restarted import can tell whether it already exists). Unlike `create_task` it
     /// notifies nobody (assignees, mentions) and runs no sub-issue automation: the source
-    /// already decided each task's state. `completed_at` is kept when the status is closed.
-    /// The audit record is written as usual.
+    /// already decided each task's state. `source` keeps the source tool's dates, number,
+    /// creator and ID (see [`ImportedTask`]). The audit record is written as usual.
     #[allow(clippy::too_many_arguments)]
     pub async fn import_task(
         &self,
@@ -1992,7 +2072,7 @@ impl TaskRepository {
         workspace_id: Id,
         actor_id: Id,
         input: CreateTask,
-        completed_at: Option<TimestampMillis>,
+        source: ImportedTask,
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<TaskRecord, TaskError> {
@@ -2001,7 +2081,7 @@ impl TaskRepository {
             workspace_id,
             actor_id,
             input,
-            CreateMode::Import { completed_at },
+            CreateMode::Import(source),
             request_id,
             now,
         )
@@ -2064,18 +2144,38 @@ impl TaskRepository {
             sub_issues::validate_parent_in_tx(&mut tx, scope, workspace_id, None, parent_id)
                 .await?;
         }
-        let completed_at = match mode {
-            CreateMode::Import { completed_at } => completed_at,
-            CreateMode::Interactive => None,
+        let source = match &mode {
+            CreateMode::Import(source) => source.clone(),
+            CreateMode::Interactive => ImportedTask::default(),
         };
+        if let Some(creator_id) = source.creator_id {
+            validate_member(&mut tx, workspace_id, creator_id, "creator_id").await?;
+        }
+        if let Some(number) = source.number {
+            // Any task holds its number for good, trashed ones included (`tasks_project_number`).
+            let taken: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM tasks WHERE project_id = $1 AND number = $2",
+            )
+            .bind(input.project_id.to_string())
+            .bind(number)
+            .fetch_one(&mut *tx)
+            .await?;
+            if taken > 0 {
+                return Err(TaskError::Conflict);
+            }
+        }
+        // A member named as the creator replaces the token's service account.
+        let service_account = self
+            .service_account()
+            .filter(|_| source.creator_id.is_none());
         let blocks = insert_task_rows_in_tx(
             &mut tx,
             id,
             workspace_id,
             actor_id,
-            self.service_account().map(|(id, _)| id),
+            service_account.map(|(id, _)| id),
             &input,
-            completed_at,
+            &source,
             None,
             now,
         )
@@ -2612,7 +2712,8 @@ impl TaskRepository {
             request_id,
             now,
         };
-        if let (Some(before), Some(after)) = (before, after) {
+        // An import write runs no automation: the source already decided each task's state.
+        if let (Some(before), Some(after), false) = (before, after, self.importing) {
             sub_issues::run_automation_in_tx(
                 &mut tx,
                 actor,
@@ -2623,7 +2724,9 @@ impl TaskRepository {
             )
             .await?;
         }
-        task_recurrences::spawn_next_in_tx(&self.database, &mut tx, actor).await?;
+        if !self.importing {
+            task_recurrences::spawn_next_in_tx(&self.database, &mut tx, actor).await?;
+        }
         // Re-read: the automation may have changed this task's sub-issue counts.
         let task = task_in_tx(&mut tx, scope, workspace_id, update.id, false).await?;
         tx.commit().await?;
@@ -3381,6 +3484,18 @@ impl TaskRepository {
         Ok(())
     }
 
+    pub async fn comment(
+        &self,
+        workspace_id: Id,
+        task_id: Id,
+        comment_id: Id,
+        actor_id: Id,
+    ) -> Result<CommentRecord, TaskError> {
+        let mut tx = self.database.pool().begin().await?;
+        let actor = require_task_tx(&mut tx, workspace_id, task_id, actor_id).await?;
+        comment_in_tx(&mut tx, workspace_id, task_id, comment_id, actor).await
+    }
+
     pub async fn comments(
         &self,
         workspace_id: Id,
@@ -3395,7 +3510,7 @@ impl TaskRepository {
         let after = cursor_i64_pair(cursor, &fingerprint)?;
         let mut query = SqlBuilder::new(
             "SELECT task_comments.id, task_comments.workspace_id, task_id, author_id, author_service_account_id, \
-             service_accounts.name AS author_service_account_name, parent_id, body, body_json, task_comments.version, \
+             service_accounts.name AS author_service_account_name, parent_id, task_comments.external_id, body, body_json, task_comments.version, \
              task_comments.created_at, task_comments.updated_at FROM task_comments \
              LEFT JOIN service_accounts ON service_accounts.id = task_comments.author_service_account_id \
              WHERE task_comments.workspace_id = ",
@@ -3444,6 +3559,33 @@ impl TaskRepository {
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<CommentRecord, TaskError> {
+        self.import_comment(
+            workspace_id,
+            task_id,
+            actor_id,
+            parent_id,
+            content,
+            ImportedComment::default(),
+            request_id,
+            now,
+        )
+        .await
+    }
+
+    /// Writes a comment copied from another tool: `source` keeps its author, dates and ID (see
+    /// [`ImportedComment`]). Notifies nobody when the repository is [`Self::with_import`].
+    #[allow(clippy::too_many_arguments)]
+    pub async fn import_comment(
+        &self,
+        workspace_id: Id,
+        task_id: Id,
+        actor_id: Id,
+        parent_id: Option<Id>,
+        content: CommentContent,
+        source: ImportedComment,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<CommentRecord, TaskError> {
         let id = Id::new_v7();
         let mut tx = self.database.immediate_transaction().await?;
         let actor = require_task_tx(&mut tx, workspace_id, task_id, actor_id).await?;
@@ -3475,9 +3617,23 @@ impl TaskRepository {
                 mentioned_user_ids, ..
             } => mentioned_user_ids,
         };
-        let service_account = self.service_account();
-        sqlx::query("INSERT INTO task_comments (id, workspace_id, task_id, author_id, parent_id, body, body_json, version, created_at, updated_at, author_service_account_id) VALUES ($1, $2, $3, $4, $5, $6, $7, 0, $8, $9, $10)")
-            .bind(id.to_string()).bind(workspace_id.to_string()).bind(task_id.to_string()).bind(actor_id.to_string()).bind(parent_id.map(|id| id.to_string())).bind(&body).bind(Value::Array(blocks.clone()).to_string()).bind(now.as_millis()).bind(now.as_millis()).bind(service_account.map(|(id, _)| id.to_string())).execute(&mut *tx).await?;
+        if let Some(author_id) = source.author_id {
+            validate_member(&mut tx, workspace_id, author_id, "author_id").await?;
+        }
+        // A member named as the author replaces the token's service account.
+        let author_id = source.author_id.unwrap_or(actor_id);
+        let service_account = self
+            .service_account()
+            .filter(|_| source.author_id.is_none());
+        let created_at = source.created_at.unwrap_or(now);
+        let updated_at = source.updated_at.unwrap_or(created_at);
+        let inserted = sqlx::query("INSERT INTO task_comments (id, workspace_id, task_id, author_id, parent_id, body, body_json, version, created_at, updated_at, author_service_account_id, external_id) VALUES ($1, $2, $3, $4, $5, $6, $7, 0, $8, $9, $10, $11)")
+            .bind(id.to_string()).bind(workspace_id.to_string()).bind(task_id.to_string()).bind(author_id.to_string()).bind(parent_id.map(|id| id.to_string())).bind(&body).bind(Value::Array(blocks.clone()).to_string()).bind(created_at.as_millis()).bind(updated_at.as_millis()).bind(service_account.map(|(id, _)| id.to_string())).bind(source.external_id.as_deref()).execute(&mut *tx).await;
+        // Another request wrote the same `external_id` first.
+        if is_unique_violation(&inserted) {
+            return Err(TaskError::Conflict);
+        }
+        inserted?;
         if self.notifies() {
             notify_users(
                 &mut tx,
@@ -3509,17 +3665,18 @@ impl TaskRepository {
             id,
             workspace_id,
             task_id,
-            author_id: actor_id,
+            author_id,
             author_service_account_id: service_account.map(|(id, _)| id),
             author_service_account_name: service_account.map(|(_, name)| name.to_owned()),
             parent_id,
+            external_id: source.external_id,
             body,
             body_json: Some(blocks),
-            can_edit: actor.can_edit_comment(service_account.is_none().then_some(actor_id)),
-            can_delete: actor.can_delete_comment(service_account.is_none().then_some(actor_id)),
+            can_edit: actor.can_edit_comment(service_account.is_none().then_some(author_id)),
+            can_delete: actor.can_delete_comment(service_account.is_none().then_some(author_id)),
             version: 0,
-            created_at: now,
-            updated_at: now,
+            created_at,
+            updated_at,
         })
     }
 
@@ -3760,7 +3917,7 @@ pub(super) async fn insert_task_rows_in_tx(
     actor_id: Id,
     creator_service_account_id: Option<Id>,
     input: &CreateTask,
-    completed_at: Option<TimestampMillis>,
+    source: &ImportedTask,
     recurrence_id: Option<&str>,
     now: TimestampMillis,
 ) -> Result<Option<Vec<Value>>, TaskError> {
@@ -3795,10 +3952,11 @@ pub(super) async fn insert_task_rows_in_tx(
     let description_json = blocks
         .as_ref()
         .map(|blocks| Value::Array(blocks.clone()).to_string());
-    sqlx::query(
-        "INSERT INTO tasks (id, workspace_id, project_id, status_id, title, description, source_url, priority, position, creator_id, due_start_at, due_at, parent_task_id, version, created_at, updated_at, description_json, creator_service_account_id, completed_at, recurrence_id) \
+    let created_at = source.created_at.unwrap_or(now);
+    let inserted = sqlx::query(
+        "INSERT INTO tasks (id, workspace_id, project_id, status_id, title, description, source_url, priority, position, creator_id, due_start_at, due_at, parent_task_id, version, created_at, updated_at, description_json, creator_service_account_id, completed_at, recurrence_id, number, external_id) \
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 0, $14, $15, $16, $17, \
-         CASE WHEN EXISTS (SELECT 1 FROM task_statuses WHERE id = $18 AND category IN ('completed', 'cancelled')) THEN $19 END, $20)",
+         CASE WHEN EXISTS (SELECT 1 FROM task_statuses WHERE id = $18 AND category IN ('completed', 'cancelled')) THEN $19 END, $20, $21, $22)",
     )
     .bind(id.to_string())
     .bind(workspace_id.to_string())
@@ -3809,19 +3967,26 @@ pub(super) async fn insert_task_rows_in_tx(
     .bind(&input.source_url)
     .bind(&input.priority)
     .bind(position)
-    .bind(actor_id.to_string())
+    .bind(source.creator_id.unwrap_or(actor_id).to_string())
     .bind(input.due_start_at.map(TimestampMillis::as_millis))
     .bind(input.due_at.map(TimestampMillis::as_millis))
     .bind(input.parent_task_id.map(|id| id.to_string()))
-    .bind(now.as_millis())
-    .bind(now.as_millis())
+    .bind(created_at.as_millis())
+    .bind(source.updated_at.unwrap_or(created_at).as_millis())
     .bind(description_json)
     .bind(creator_service_account_id.map(|id| id.to_string()))
     .bind(input.status_id.to_string())
-    .bind(completed_at.map(TimestampMillis::as_millis))
+    .bind(source.completed_at.map(TimestampMillis::as_millis))
     .bind(recurrence_id)
+    .bind(source.number)
+    .bind(source.external_id.as_deref())
     .execute(&mut **tx)
-    .await?;
+    .await;
+    // Another request wrote the same `external_id` first.
+    if is_unique_violation(&inserted) {
+        return Err(TaskError::Conflict);
+    }
+    inserted?;
     replace_assignees(tx, id, &input.assignee_ids).await?;
     replace_labels(tx, id, &input.label_ids).await?;
     Ok(blocks)
@@ -4475,6 +4640,22 @@ async fn validate_project_status(
     }
 }
 
+/// `user_id` is an active member of the workspace who is not a guest.
+async fn validate_member(
+    tx: &mut Transaction<'_, Any>,
+    workspace_id: Id,
+    user_id: Id,
+    field: &'static str,
+) -> Result<(), TaskError> {
+    let exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM memberships JOIN users ON users.id = memberships.user_id WHERE memberships.workspace_id = $1 AND memberships.user_id = $2 AND memberships.role <> 'guest' AND users.suspended_at IS NULL")
+        .bind(workspace_id.to_string()).bind(user_id.to_string()).fetch_one(&mut **tx).await?;
+    if exists == 1 {
+        Ok(())
+    } else {
+        Err(TaskError::Invalid { field })
+    }
+}
+
 async fn validate_assignees(
     tx: &mut Transaction<'_, Any>,
     workspace_id: Id,
@@ -4489,13 +4670,7 @@ async fn validate_assignees(
         });
     }
     for id in ids {
-        let exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM memberships JOIN users ON users.id = memberships.user_id WHERE memberships.workspace_id = $1 AND memberships.user_id = $2 AND memberships.role <> 'guest' AND users.suspended_at IS NULL")
-            .bind(workspace_id.to_string()).bind(id.to_string()).fetch_one(&mut **tx).await?;
-        if exists != 1 {
-            return Err(TaskError::Invalid {
-                field: "assignee_ids",
-            });
-        }
+        validate_member(tx, workspace_id, *id, "assignee_ids").await?;
     }
     Ok(())
 }
@@ -5244,7 +5419,7 @@ async fn comment_in_tx(
     comment_id: Id,
     actor: Actor,
 ) -> Result<CommentRecord, TaskError> {
-    let row = sqlx::query("SELECT task_comments.id, task_comments.workspace_id, task_id, author_id, author_service_account_id, service_accounts.name AS author_service_account_name, parent_id, body, body_json, task_comments.version, task_comments.created_at, task_comments.updated_at FROM task_comments LEFT JOIN service_accounts ON service_accounts.id = task_comments.author_service_account_id WHERE task_comments.id = $1 AND task_comments.workspace_id = $2 AND task_id = $3")
+    let row = sqlx::query("SELECT task_comments.id, task_comments.workspace_id, task_id, author_id, author_service_account_id, service_accounts.name AS author_service_account_name, parent_id, task_comments.external_id, body, body_json, task_comments.version, task_comments.created_at, task_comments.updated_at FROM task_comments LEFT JOIN service_accounts ON service_accounts.id = task_comments.author_service_account_id WHERE task_comments.id = $1 AND task_comments.workspace_id = $2 AND task_id = $3")
         .bind(comment_id.to_string()).bind(workspace_id.to_string()).bind(task_id.to_string()).fetch_optional(&mut **tx).await?.ok_or(TaskError::NotFound)?;
     comment_from_row(row, actor)
 }
@@ -5403,7 +5578,7 @@ fn task_columns(backend: Backend, rich: bool, scope: ProjectScope) -> String {
          COALESCE((SELECT epoch FROM task_collab_docs WHERE task_collab_docs.task_id = tasks.id), \
          (SELECT generation FROM page_collab_meta WHERE page_collab_meta.id = 1), '') AS collab_epoch, \
          tasks.source_url, tasks.priority, tasks.position, tasks.creator_id, \
-         tasks.creator_service_account_id, \
+         tasks.completed_at, tasks.external_id, tasks.creator_service_account_id, \
          (SELECT name FROM service_accounts WHERE id = tasks.creator_service_account_id) AS creator_service_account_name, \
          tasks.due_start_at, tasks.due_at, {} AS recurrence_json, \
          tasks.version, tasks.deleted_at, tasks.created_at, tasks.updated_at, \
@@ -5503,6 +5678,10 @@ fn task_record_from_row(
         } else {
             Some(parse_id(row.get("creator_id"))?)
         },
+        completed_at: row
+            .get::<Option<i64>, _>("completed_at")
+            .map(TimestampMillis::from_millis),
+        external_id: row.get("external_id"),
         creator_service_account_id,
         creator_service_account_name: row.get("creator_service_account_name"),
         assignee_ids,
@@ -5580,6 +5759,7 @@ fn comment_from_row(row: sqlx::any::AnyRow, actor: Actor) -> Result<CommentRecor
             .get::<Option<String>, _>("parent_id")
             .map(parse_id)
             .transpose()?,
+        external_id: row.get("external_id"),
         body: row.get("body"),
         body_json: row
             .get::<Option<String>, _>("body_json")

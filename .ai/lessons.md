@@ -9,6 +9,8 @@
 - utoipa silently keeps one schema when two `ToSchema` types share a name: the databases `FilterOperator` replaced the task filter's in `openapi.json` (2026-11-09). After `just api`, diff `components.schemas` against `HEAD` and give new types a unique `#[schema(as = …)]` name.
 - A rebuilt table becomes the *newest* FK child, and SQLite runs parent-delete cascades newest-child first. A `RESTRICT` reference to the rebuilt table (e.g. `tasks.status_id`) can then block a cascade that used to work. Hard deletes must delete the restricting children explicitly first.
 
+- `cargo fmt -p orbit-server` also reformats files that `main` left unformatted. Check `git status` after it and revert the files that the task did not touch, so the diff stays reviewable.
+
 ## Two database backends (SQLite + Postgres)
 - All SQL goes through sqlx `Any`: write `$1, $2, …` (SQLite binds them by number too), import `orbit_platform::Row` (not `sqlx::Row`) so 0/1 flags decode as `bool`, decode boolean scalars as `Flag`, bind `i64` (never `bool`/`u32`), and build dynamic SQL with `SqlBuilder`. SQLite silently ignores extra bound values, so clashing `$N` numbers in `format!`-glued fragments only fail on Postgres.
 - Run the whole suite on Postgres with `ORBIT_TEST_POSTGRES_URL=postgres://orbit:orbit@127.0.0.1:15432/orbit`; each test database maps from its SQLite path.

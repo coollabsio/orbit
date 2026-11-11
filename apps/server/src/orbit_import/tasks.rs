@@ -12,7 +12,9 @@ use super::{Item, OrbitImportService, Run};
 use crate::notion::files::sanitize_file_name;
 use crate::notion::import::clamp;
 use crate::repositories::task_relations::NewTaskRelationType;
-use crate::repositories::tasks::{CommentContent, CreateTask, TaskChanges, TaskError, TaskUpdate};
+use crate::repositories::tasks::{
+    CommentContent, CreateTask, ImportedTask, TaskChanges, TaskError, TaskUpdate,
+};
 use crate::repositories::teamspaces::TeamspaceError;
 use crate::task_import::{
     Attached, Failure, LABEL_COLORS, NewProject, PROJECT_COLORS, attach_once, attachment_url,
@@ -593,7 +595,7 @@ async fn create_task(
                 run.workspace_id,
                 actor_id,
                 input.clone(),
-                completed_at,
+                ImportedTask::completed(completed_at),
                 &run.request_id,
                 created_at,
             )
@@ -608,7 +610,7 @@ async fn create_task(
                     run.workspace_id,
                     actor_id,
                     input,
-                    completed_at,
+                    ImportedTask::completed(completed_at),
                     &run.request_id,
                     created_at,
                 )

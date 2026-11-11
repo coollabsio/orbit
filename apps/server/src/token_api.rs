@@ -21,6 +21,7 @@ use crate::repositories::chat::{
     ChatError, ChatRepository, ConversationRecord, MessageCursor, MessagePage, SearchInput,
     SearchPage, ThreadPage,
 };
+use crate::repositories::membership;
 use crate::repositories::pages::{
     CreatePage, MarkdownContent, PageChanges, PageError, PageList, PageRecord, PageRepository,
     SpaceRequest, revision,
@@ -31,18 +32,29 @@ use crate::repositories::task_filter::{
 };
 use crate::repositories::task_recurrences::TaskRecurrence;
 use crate::repositories::tasks::{
-    CommentContent, CommentRecord, CreateTask, LabelRecord, Page, ProjectRecord, SortOrder,
-    StatusRecord, TaskChanges, TaskError, TaskFilter, TaskRecord, TaskRepository, TaskSort,
-    TaskUpdate, TokenActor, normalize_project_key, parse_task_identifier,
+    CommentContent, CommentRecord, CreateTask, ImportedComment, ImportedTask, LabelRecord, Page,
+    ProjectRecord, SortOrder, StatusRecord, TaskChanges, TaskError, TaskFilter, TaskRecord,
+    TaskRepository, TaskSort, TaskUpdate, TokenActor, normalize_project_key, parse_task_identifier,
 };
 use crate::repositories::workspaces::{WorkspaceError, WorkspaceRepository};
+use crate::task_import::escape_markdown;
+use orbit_domain::Permission;
 
 mod databases;
+mod relations;
+mod setup;
 pub use databases::{DatabaseRowPatch, NewDatabaseRow};
+pub use setup::StatusPatch;
 
 const PRIORITIES: [&str; 5] = ["none", "low", "medium", "high", "urgent"];
 /// The web app's second project color, indigo.
 const DEFAULT_PROJECT_COLOR: &str = "#6366f1";
+/// Find an imported task or comment by `external_id` (bind order: workspace, external ID).
+const EXTERNAL_TASK: &str = "SELECT id, id AS task_id, deleted_at FROM tasks \
+     WHERE workspace_id = $1 AND external_id = $2";
+const EXTERNAL_COMMENT: &str = "SELECT task_comments.id, task_comments.task_id, tasks.deleted_at \
+     FROM task_comments JOIN tasks ON tasks.id = task_comments.task_id \
+     WHERE task_comments.workspace_id = $1 AND task_comments.external_id = $2";
 
 #[derive(Debug)]
 pub enum TokenApiError {
@@ -59,6 +71,8 @@ pub enum TokenApiError {
     /// Creating a project takes a credential for all projects: one limited to chosen projects
     /// could not use the new project.
     AllProjectsRequired,
+    /// A `tasks:import` credential whose creator is no longer a workspace owner or admin.
+    ImportForbidden,
     Task(TaskError),
     Page(PageError),
     /// A database refusal other than not found (see `databases`).
@@ -128,6 +142,18 @@ pub struct ReadTask {
     pub created_at: TimestampMillis,
     #[schema(value_type = String, format = DateTime)]
     pub updated_at: TimestampMillis,
+    /// When the task entered a completed or cancelled status; `null` while it is open.
+    #[schema(value_type = Option<String>, format = DateTime, required = true)]
+    pub completed_at: Option<TimestampMillis>,
+    /// The member who created the task; `null` when a service account did.
+    #[schema(value_type = Option<String>, required = true)]
+    pub creator_id: Option<Id>,
+    /// Set when a service account created the task; show it as the creator then.
+    #[schema(required = true)]
+    pub creator_service_account: Option<Named>,
+    /// The source tool's ID of an imported task (`tasks:import`); `null` otherwise.
+    #[schema(required = true)]
+    pub external_id: Option<String>,
     /// The task's revision: an opaque number below 2^53 that changes with every change, live
     /// edits of the description included. Compare it for equality only, and send it back as
     /// `expected_version`.
@@ -182,6 +208,13 @@ impl TaskView {
                 recurrence: task.recurrence,
                 created_at: task.created_at,
                 updated_at: task.updated_at,
+                completed_at: task.completed_at,
+                creator_id: task.creator_id,
+                creator_service_account: task.creator_service_account_id.map(|id| Named {
+                    id,
+                    name: task.creator_service_account_name.unwrap_or_default(),
+                }),
+                external_id: task.external_id,
                 version: revision(task.version, task.updated_at),
             },
             parent_task_id,
@@ -241,7 +274,7 @@ pub struct TokenInfo {
     pub expires_at: Option<TimestampMillis>,
 }
 
-#[derive(Debug, Serialize, ToSchema)]
+#[derive(Clone, Debug, Serialize, ToSchema)]
 #[schema(as = PublicNamed)]
 pub struct Named {
     #[schema(value_type = String)]
@@ -292,6 +325,34 @@ pub struct NewTask {
     pub parent_task_id: Option<Id>,
     pub due_start_at: Option<TimestampMillis>,
     pub due_at: Option<TimestampMillis>,
+    /// What the source tool kept; needs `tasks:import`.
+    pub import: Option<ImportedTask>,
+}
+
+#[derive(Debug)]
+pub struct NewComment {
+    /// Markdown.
+    pub body: String,
+    /// A comment of the same task: the new comment is its reply.
+    pub parent_id: Option<Id>,
+    /// What the source tool kept; needs `tasks:import`.
+    pub import: Option<CommentImport>,
+}
+
+/// The source tool's comment: [`ImportedComment`], or an author who is not a member, shown as a
+/// bold first line (as the built-in importers do).
+#[derive(Debug, Default)]
+pub struct CommentImport {
+    pub source: ImportedComment,
+    pub author_name: Option<String>,
+}
+
+/// A write that is not repeated: `created` is false when an earlier write with the same
+/// `external_id` made `value`.
+#[derive(Debug)]
+pub struct Written<T> {
+    pub value: T,
+    pub created: bool,
 }
 
 /// A doc with its content also as Markdown, the format that doc writes take. `version` is the
@@ -384,6 +445,8 @@ pub struct TaskPatch {
     pub parent_task_id: Option<Option<Id>>,
     /// `Some(None)` stops repeating.
     pub recurrence: Option<Option<TaskRecurrence>>,
+    /// `Some(Some(id))` marks the task as a duplicate of `id`; `Some(None)` unmarks it.
+    pub duplicate_of_id: Option<Option<Id>>,
 }
 
 #[derive(Clone)]
@@ -440,6 +503,21 @@ impl TokenApi {
                 Ok(WorkspaceAccess::ReadOnly) => return Err(TokenApiError::ReadOnly),
                 Ok(_) => {}
                 Err(_) => return Err(TokenApiError::BillingUnavailable),
+            }
+        }
+        // Import writes can backdate work and name other members as its authors, so they stay
+        // with owners and admins: checked on each write, as the creator's role can change.
+        if scope == ApiTokenScope::TasksWrite
+            && principal.scopes.contains(&ApiTokenScope::TasksImport)
+        {
+            let actor = membership::actor(
+                self.tasks.database().pool(),
+                principal.workspace_id,
+                principal.actor_id,
+            )
+            .await?;
+            if !actor.is_some_and(|actor| actor.can(Permission::ApiTokensManage)) {
+                return Err(TokenApiError::ImportForbidden);
             }
         }
         Ok(Authorized {
@@ -530,10 +608,20 @@ impl Authorized<'_> {
         self.principal.project_ids.contains(&project_id)
     }
 
+    /// A `tasks:import` credential: its writes notify nobody and run no automation, and may
+    /// keep the source tool's dates, numbers, authors and IDs.
+    fn importing(&self) -> bool {
+        self.principal.scopes.contains(&ApiTokenScope::TasksImport)
+    }
+
     /// The task repository limited to the token's projects, attributing writes to the token.
     fn granted(&self) -> TaskRepository {
-        self.api
-            .tasks
+        let tasks = if self.importing() {
+            self.api.tasks.as_ref().clone().with_import()
+        } else {
+            self.api.tasks.as_ref().clone()
+        };
+        tasks
             .with_project_grant(self.principal.project_ids.clone())
             .with_token(TokenActor {
                 token_id: self.principal.token_id,
@@ -657,13 +745,7 @@ impl Authorized<'_> {
         let key = normalize_project_key(key).ok_or(TokenApiError::Invalid(
             "A project key has 1 to 20 letters, digits or underscores",
         ))?;
-        let color = color.unwrap_or_else(|| DEFAULT_PROJECT_COLOR.to_owned());
-        if !(color.len() == 7
-            && color.starts_with('#')
-            && color[1..].bytes().all(|byte| byte.is_ascii_hexdigit()))
-        {
-            return Err(TokenApiError::Invalid("A project color is #rrggbb"));
-        }
+        let color = valid_color(color, DEFAULT_PROJECT_COLOR)?;
         let p = self.principal;
         self.granted()
             .create_project(
@@ -671,7 +753,7 @@ impl Authorized<'_> {
                 p.actor_id,
                 name,
                 key,
-                color.to_ascii_lowercase(),
+                color,
                 false,
                 self.request_id,
                 TimestampMillis::now(),
@@ -830,7 +912,9 @@ impl Authorized<'_> {
         self.view(task).await
     }
 
-    pub async fn create_task(&self, input: NewTask) -> Result<TaskView> {
+    /// Creates a task. With `import`, a task that an earlier write with the same `external_id`
+    /// made is returned instead (`created` is false), so a restarted import does not repeat it.
+    pub async fn create_task(&self, input: NewTask) -> Result<Written<TaskView>> {
         self.need(ApiTokenScope::TasksWrite)?;
         validate_task_input(
             Some(&input.title),
@@ -840,32 +924,110 @@ impl Authorized<'_> {
         if !self.approved(input.project_id) {
             return Err(TokenApiError::NotAvailable);
         }
+        let source = self.import_input(input.import)?;
+        if let Some(source) = &source {
+            validate_import(
+                source.created_at,
+                source.updated_at,
+                source.external_id.as_deref(),
+            )?;
+            if source
+                .number
+                .is_some_and(|number| !(1..=i64::from(i32::MAX)).contains(&number))
+            {
+                return Err(TokenApiError::Invalid("A task number is 1 to 2147483647"));
+            }
+            if let Some((id, _)) = self
+                .external(EXTERNAL_TASK, source.external_id.as_deref())
+                .await?
+            {
+                let task = self.task(&id.to_string()).await?;
+                return Ok(Written {
+                    value: self.view(task).await?,
+                    created: false,
+                });
+            }
+        }
         let p = self.principal;
-        let outcome = self
-            .granted()
-            .create_task(
-                p.workspace_id,
-                p.actor_id,
-                CreateTask {
-                    project_id: input.project_id,
-                    status_id: input.status_id,
-                    title: input.title,
-                    description: input.description,
-                    description_json: None,
-                    source_url: None,
-                    priority: input.priority,
-                    position: None,
-                    assignee_ids: input.assignee_ids,
-                    label_ids: input.label_ids,
-                    due_start_at: input.due_start_at,
-                    due_at: input.due_at,
-                    parent_task_id: input.parent_task_id,
-                },
-                self.request_id,
-                TimestampMillis::now(),
-            )
+        let create = CreateTask {
+            project_id: input.project_id,
+            status_id: input.status_id,
+            title: input.title,
+            description: input.description,
+            description_json: None,
+            source_url: None,
+            priority: input.priority,
+            position: None,
+            assignee_ids: input.assignee_ids,
+            label_ids: input.label_ids,
+            due_start_at: input.due_start_at,
+            due_at: input.due_at,
+            parent_task_id: input.parent_task_id,
+        };
+        let (tasks, now) = (self.granted(), TimestampMillis::now());
+        // An import token creates every task as an import: no notifications, no automation.
+        let task = if self.importing() {
+            let source = source.unwrap_or_default();
+            tasks
+                .import_task(
+                    Id::new_v7(),
+                    p.workspace_id,
+                    p.actor_id,
+                    create,
+                    source,
+                    self.request_id,
+                    now,
+                )
+                .await?
+        } else {
+            tasks
+                .create_task(p.workspace_id, p.actor_id, create, self.request_id, now)
+                .await?
+                .task
+        };
+        Ok(Written {
+            value: self.view(task).await?,
+            created: true,
+        })
+    }
+
+    /// The import fields of a write: refused without `tasks:import`.
+    fn import_input<T>(&self, import: Option<T>) -> Result<Option<T>> {
+        match import {
+            Some(_) if !self.importing() => Err(TokenApiError::MissingScope),
+            import => Ok(import),
+        }
+    }
+
+    /// The task or comment ([`EXTERNAL_TASK`], [`EXTERNAL_COMMENT`]) that holds `external_id`,
+    /// with its task. One whose task is in the trash keeps the ID, so the write conflicts.
+    async fn external(
+        &self,
+        sql: &'static str,
+        external_id: Option<&str>,
+    ) -> Result<Option<(Id, Id)>> {
+        let Some(external_id) = external_id else {
+            return Ok(None);
+        };
+        let row = sqlx::query(sql)
+            .bind(self.principal.workspace_id.to_string())
+            .bind(external_id)
+            .fetch_optional(self.api.tasks.database().pool())
             .await?;
-        self.view(outcome.task).await
+        match row {
+            None => Ok(None),
+            Some(row) if row.get::<Option<i64>, _>("deleted_at").is_some() => {
+                Err(TaskError::Conflict.into())
+            }
+            Some(row) => {
+                let id = |column: &str| {
+                    row.get::<String, _>(column)
+                        .parse::<Id>()
+                        .map_err(|_| TokenApiError::Internal)
+                };
+                Ok(Some((id("id")?, id("task_id")?)))
+            }
+        }
     }
 
     pub async fn update_task(
@@ -886,6 +1048,14 @@ impl Authorized<'_> {
             .transpose()?;
         let p = self.principal;
         let id = self.task_id(task_ref).await?;
+        if let Some(Some(original)) = patch.duplicate_of_id
+            && self.task(&original.to_string()).await.is_err()
+        {
+            return Err(TaskError::Invalid {
+                field: "duplicate_of_id",
+            }
+            .into());
+        }
         let outcome = self
             .granted()
             .update_task(
@@ -905,6 +1075,7 @@ impl Authorized<'_> {
                         due_at: patch.due_at,
                         parent_task_id: patch.parent_task_id,
                         recurrence,
+                        duplicate_of_id: patch.duplicate_of_id,
                         ..Default::default()
                     },
                 },
@@ -1012,28 +1183,77 @@ impl Authorized<'_> {
             .await?)
     }
 
-    pub async fn create_comment(&self, task_ref: &str, body: String) -> Result<CommentRecord> {
+    /// Comments on a task. With `import`, a comment that an earlier write with the same
+    /// `external_id` made is returned instead (`created` is false).
+    pub async fn create_comment(
+        &self,
+        task_ref: &str,
+        comment: NewComment,
+    ) -> Result<Written<CommentRecord>> {
         self.need(ApiTokenScope::TasksWrite)?;
+        let mut body = comment.body;
         if body.trim().is_empty() || body.chars().count() > 100_000 || body.len() > 100_000 {
             return Err(TokenApiError::Invalid("Invalid comment body"));
         }
+        let task = self.task(task_ref).await?;
         let p = self.principal;
-        let id = self.task_id(task_ref).await?;
-        Ok(self
+        let mut source = ImportedComment::default();
+        if let Some(import) = self.import_input(comment.import)? {
+            source = import.source;
+            validate_import(
+                source.created_at,
+                source.updated_at,
+                source.external_id.as_deref(),
+            )?;
+            if let Some(name) = import.author_name {
+                if source.author_id.is_some() {
+                    return Err(TokenApiError::Invalid(
+                        "Send author_id or author_name, not both",
+                    ));
+                }
+                let name =
+                    valid_name(&name.replace(['\r', '\n'], " "), 200, "Invalid author_name")?;
+                body = format!("**{}**\n\n{}", escape_markdown(&name), body.trim());
+            }
+            if let Some((id, task_id)) = self
+                .external(EXTERNAL_COMMENT, source.external_id.as_deref())
+                .await?
+            {
+                // The ID names a comment of another task.
+                if task_id != task.id {
+                    return Err(TaskError::Conflict.into());
+                }
+                let value = self
+                    .api
+                    .tasks
+                    .comment(p.workspace_id, task.id, id, p.actor_id)
+                    .await?;
+                return Ok(Written {
+                    value,
+                    created: false,
+                });
+            }
+        }
+        let value = self
             .granted()
-            .create_comment(
+            .import_comment(
                 p.workspace_id,
-                id,
+                task.id,
                 p.actor_id,
-                None,
+                comment.parent_id,
                 CommentContent::Markdown {
                     body,
                     mentioned_user_ids: Vec::new(),
                 },
+                source,
                 self.request_id,
                 TimestampMillis::now(),
             )
-            .await?)
+            .await?;
+        Ok(Written {
+            value,
+            created: true,
+        })
     }
 
     /// Docs and chat act as the token's creator, so they need a personal token.
@@ -1300,6 +1520,47 @@ fn message_cursor(before: Option<Id>, limit: Option<usize>) -> Result<MessageCur
         limit,
         ..Default::default()
     })
+}
+
+/// A trimmed name of 1 to `max` characters.
+fn valid_name(name: &str, max: usize, invalid: &'static str) -> Result<String> {
+    let name = name.trim();
+    if name.is_empty() || name.chars().count() > max {
+        return Err(TokenApiError::Invalid(invalid));
+    }
+    Ok(name.to_owned())
+}
+
+/// `#rrggbb` in lower case, or `default` when unset.
+fn valid_color(color: Option<String>, default: &str) -> Result<String> {
+    let color = color.unwrap_or_else(|| default.to_owned());
+    if color.len() == 7
+        && color.starts_with('#')
+        && color[1..].bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        Ok(color.to_ascii_lowercase())
+    } else {
+        Err(TokenApiError::Invalid("A color is #rrggbb"))
+    }
+}
+
+/// The import fields both tasks and comments take.
+fn validate_import(
+    created_at: Option<TimestampMillis>,
+    updated_at: Option<TimestampMillis>,
+    external_id: Option<&str>,
+) -> Result<()> {
+    if updated_at.is_some_and(|updated| created_at.is_none_or(|created| updated < created)) {
+        return Err(TokenApiError::Invalid(
+            "updated_at needs created_at and must not be before it",
+        ));
+    }
+    if external_id.is_some_and(|id| id.trim().is_empty() || id.chars().count() > 200) {
+        return Err(TokenApiError::Invalid(
+            "An external_id has 1 to 200 characters",
+        ));
+    }
+    Ok(())
 }
 
 fn validate_task_input(

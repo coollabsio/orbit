@@ -643,6 +643,7 @@ impl AttachmentRepository {
                 author_service_account_id: None,
                 author_service_account_name: None,
                 parent_id: None,
+                external_id: None,
                 body: String::new(),
                 body_json: None,
                 can_edit: true,
