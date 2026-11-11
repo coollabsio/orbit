@@ -84,6 +84,16 @@ function Github({ settings, refetch }: { settings: GithubWorkspaceSettings; refe
         </View>
       ) : (
         <View className="items-start gap-3">
+          {settings.needs_recreate ? (
+            <View className="self-stretch items-start gap-2 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2.5">
+              <Body>This GitHub App is from an older Orbit version. Re-create it to review pull requests in Orbit. You must then install it again and connect each project to its repository again.</Body>
+              {settings.can_manage ? (
+                <Button label="Re-create GitHub App" variant="outline" disabled={!settings.key_configured || register.isPending} onPress={() => register.mutate()} />
+              ) : (
+                <Body muted>Ask a workspace owner or admin to re-create it.</Body>
+              )}
+            </View>
+          ) : null}
           <Body>App: {settings.app_slug}</Body>
           {settings.can_manage && settings.install_url ? <Button label="Install or change repositories" variant="outline" onPress={() => void install(settings.install_url!)} /> : null}
           <View className="self-stretch">

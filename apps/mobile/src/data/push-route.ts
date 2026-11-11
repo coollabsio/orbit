@@ -38,6 +38,8 @@ export function pushRoute(url: string): string | null {
       return '/activity'
     case 'profile':
     case 'settings':
+      // the account GitHub page; `/settings/github` is the workspace's GitHub App
+      if (section === 'profile' && first === 'github') return '/settings/github-account'
       if (first && ACCOUNT_PAGES.has(first)) return `/settings/${first}`
       return section === 'profile' && (!first || first === 'general') ? '/settings/profile' : '/settings'
     default:
