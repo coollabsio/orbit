@@ -293,6 +293,7 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::workspace_export_routes::create_workspace_export,
         crate::workspace_export_routes::list_workspace_exports,
         crate::workspace_export_routes::download_workspace_export,
+        crate::billing::routes::get_account_trial,
         crate::billing::routes::get_billing,
         crate::billing::routes::billing_checkout,
         crate::billing::routes::billing_portal,

@@ -108,7 +108,7 @@ export function renewal(billing: BillingView): string | null {
 export function billingDescription(billing: BillingView): string {
   if (billing.exempt) return 'This workspace is included with Orbit and needs no plan.'
   if (billing.trial_days > 0) {
-    return `Each workspace has its own plan. A new workspace starts with a ${billing.trial_days}-day trial. Without an active plan after it, the workspace is read-only: everything stays readable and exportable.`
+    return `Each workspace has its own plan. Your account has one ${billing.trial_days}-day trial: it starts with your first workspace, and every workspace you create shares its end. Without an active plan after it, a workspace is read-only: everything stays readable and exportable.`
   }
   return 'Each workspace has its own plan. Without an active plan, the workspace is read-only: everything stays readable and exportable.'
 }

@@ -1,7 +1,9 @@
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { apiClient, PAYMENT_REQUIRED_EVENT } from '@/api/client'
 import { queryKeys } from '@/api/queryKeys'
-import { billingCheckout, billingPortal, getBilling } from '@orbit/api/generated/sdk.gen'
+import { billingCheckout, billingPortal, getAccountTrial, getBilling } from '@orbit/api/generated/sdk.gen'
+import type { AccountTrial } from '@orbit/api/generated/types.gen'
+import { fullDate } from '@/lib/format'
 import { useAuthOptions } from '@/features/auth/api'
 import { useWorkspace } from './workspaceContext'
 
@@ -23,6 +25,34 @@ export function useWorkspaceBilling() {
       return data
     },
   })
+}
+
+/** Orbit Cloud: the caller's trial, which every workspace they create shares. Not fetched on a self-hosted server. */
+export function useAccountTrial() {
+  const enabled = useBillingEnabled()
+  return useQuery({
+    queryKey: queryKeys.accountTrial,
+    enabled,
+    queryFn: async () => {
+      const { data } = await getAccountTrial({ client: apiClient, throwOnError: true })
+      if (!data) throw new Error('Trial response was empty.')
+      return data
+    },
+  })
+}
+
+/** What creating one more workspace means for the caller's trial; `null` when there is nothing to say. */
+export function newWorkspaceTrialNote(trial: AccountTrial | undefined, now = Date.now()): string | null {
+  if (!trial) return null
+  if (!trial.ends_at) {
+    return trial.days > 0
+      ? `This workspace starts your ${trial.days}-day free trial. Later workspaces share it.`
+      : 'This workspace needs a plan before you can add to it.'
+  }
+  const date = fullDate(trial.ends_at)
+  return Date.parse(trial.ends_at) > now
+    ? `This workspace shares your free trial, which ends on ${date}.`
+    : `Your free trial ended on ${date}. This workspace stays read-only until it has a plan.`
 }
 
 /** The workspace has no subscription that grants access: it can be read but not changed. */

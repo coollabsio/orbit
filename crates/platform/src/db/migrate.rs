@@ -633,7 +633,17 @@ impl MigrationRunner {
                 ),
                 Migration::new(
                     97,
-                    include_str!("../../../../apps/server/migrations/0097_mail.sql"),
+                    include_str!("../../../../apps/server/migrations/0097_owner_trials.sql"),
+                    false,
+                ),
+                Migration::new(
+                    98,
+                    include_str!("../../../../apps/server/migrations/0098_used_trials.sql"),
+                    false,
+                ),
+                Migration::new(
+                    99,
+                    include_str!("../../../../apps/server/migrations/0099_mail.sql"),
                     false,
                 ),
             ],
@@ -948,7 +958,17 @@ impl MigrationRunner {
             ),
             Migration::new(
                 97,
-                include_str!("../../../../apps/server/migrations/postgres/0097_mail.sql"),
+                include_str!("../../../../apps/server/migrations/postgres/0097_owner_trials.sql"),
+                false,
+            ),
+            Migration::new(
+                98,
+                include_str!("../../../../apps/server/migrations/postgres/0098_used_trials.sql"),
+                false,
+            ),
+            Migration::new(
+                99,
+                include_str!("../../../../apps/server/migrations/postgres/0099_mail.sql"),
                 false,
             ),
         ];

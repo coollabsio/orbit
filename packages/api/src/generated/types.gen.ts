@@ -19,6 +19,20 @@ export type AcceptanceRecord = {
 };
 
 /**
+ * The caller's trial, which every workspace the caller creates shares.
+ */
+export type AccountTrial = {
+    /**
+     * How long a trial lasts; 0 when new workspaces have none.
+     */
+    days: number;
+    /**
+     * When the trial ends (or ended); `null` when the caller has had no trial, so a new workspace starts one.
+     */
+    ends_at?: string | null;
+};
+
+/**
  * An interactive element. Only buttons; Slack's menus, date pickers and the like are left out.
  */
 export type ActionElement = ButtonElement & {
@@ -14795,6 +14809,54 @@ export type StripeWebhookResponses = {
      */
     200: unknown;
 };
+
+export type GetAccountTrialData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/billing/trial';
+};
+
+export type GetAccountTrialErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type GetAccountTrialError = GetAccountTrialErrors[keyof GetAccountTrialErrors];
+
+export type GetAccountTrialResponses = {
+    200: AccountTrial;
+};
+
+export type GetAccountTrialResponse = GetAccountTrialResponses[keyof GetAccountTrialResponses];
 
 export type ReadHookMessagesData = {
     body?: never;
