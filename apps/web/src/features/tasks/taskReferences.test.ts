@@ -50,3 +50,29 @@ test('searchTaskReferences always lists the task a full ID names, even when the 
     globalThis.fetch = original
   }
 })
+
+test('searchTaskReferences finds an older title hit behind many newer description hits', async () => {
+  const { QueryClient } = await import('@tanstack/react-query')
+  const { searchTaskReferences } = await import('./taskReferences')
+  const record = (id: string, number: number, title: string) => ({
+    id, number, title, workspace_id: 'w1', project_id: 'p1', status_id: 's1', description: 'send an email', position: 0, priority: 'none',
+    assignee_ids: [], creator_id: 'u1', label_ids: [], created_at: '2026-11-01T00:00:00Z', updated_at: '2026-11-01T00:00:00Z', version: 1,
+  })
+  const original = globalThis.fetch
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = new URL(String(input instanceof Request ? input.url : input))
+    if (url.pathname.endsWith('/statuses')) return Response.json({ items: [], next_cursor: null })
+    if (url.pathname.endsWith('/projects')) return Response.json({ items: [{ id: 'p1', key: 'ENG', name: 'Engineering', color: '#888', version: 1 }], next_cursor: null })
+    // the server's latest-first order: 20 description hits, then the task with "Mail" in its title
+    const limit = Number(url.searchParams.get('limit'))
+    const items = [...Array.from({ length: 20 }, (_, index) => record(`t${index}`, index + 1, `Other task ${index}`)), record('mail', 99, 'Mail client')]
+    return Response.json({ items: items.slice(0, limit), next_cursor: null })
+  }) as unknown as typeof fetch
+  try {
+    const references = await searchTaskReferences(new QueryClient(), 'w1', 'Mail')
+    expect(references[0]!.identifier).toBe('ENG-99')
+    expect(references).toHaveLength(8)
+  } finally {
+    globalThis.fetch = original
+  }
+})
