@@ -3,7 +3,7 @@ use axum::Json;
 use axum::extract::rejection::JsonRejection;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use axum::response::Response;
+use axum::response::{IntoResponse, Response};
 use orbit_platform::{Id, Problem};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -12,7 +12,8 @@ use utoipa::ToSchema;
 use super::{Ctx, PublicApiState, Responder, problem_response};
 use crate::repositories::api_tokens::ApiTokenScope;
 use crate::repositories::databases::{
-    AgentDatabase, AgentQuery, AgentRow, AgentRowPage, DatabaseError, invalid_detail,
+    AgentDatabase, AgentPropertyChanges, AgentQuery, AgentRow, AgentRowPage, DatabaseError,
+    DatabaseProperty, PropertyUpdate, invalid_detail,
 };
 use crate::token_api::{DatabaseRowPatch, NewDatabaseRow, TokenApiError};
 
@@ -87,6 +88,50 @@ pub(super) struct Trashed {
     trashed: u64,
 }
 
+/// See `create_database_property` in `docs/mcp.md` for the config shapes.
+#[derive(Deserialize, ToSchema)]
+#[schema(as = PublicCreateDatabasePropertyBody)]
+#[serde(deny_unknown_fields)]
+pub(super) struct CreatePropertyBody {
+    /// 1 to 200 characters.
+    name: String,
+    /// Any type but `title`, such as `select`, `status`, `number` or `date`.
+    #[serde(rename = "type")]
+    property_type: String,
+    /// The type's config. Select, multi-select and status take `{"options": [...]}` with option
+    /// names or `{name, color, group}` objects. Omitted: the type's default.
+    #[schema(value_type = Option<Object>)]
+    config: Option<Value>,
+    /// Index among the properties; omitted appends it.
+    position: Option<i64>,
+}
+
+/// Send at least one of `name`, `type`, `config`, `add_options` or `position`.
+#[derive(Deserialize, ToSchema)]
+#[schema(as = PublicUpdateDatabasePropertyBody)]
+#[serde(deny_unknown_fields)]
+pub(super) struct UpdatePropertyBody {
+    /// 1 to 200 characters.
+    name: Option<String>,
+    /// A new type converts the values and gives the type's default config.
+    #[serde(rename = "type")]
+    property_type: Option<String>,
+    /// The whole config. Options left out are removed from every row; an option sent by name
+    /// only keeps its id, color and group.
+    #[schema(value_type = Option<Object>)]
+    config: Option<Value>,
+    /// Options to add after the current ones, by name or as `{name, color, group}`; names the
+    /// property already has are skipped. Not with `config`.
+    #[serde(default)]
+    #[schema(value_type = Vec<Object>)]
+    add_options: Vec<Value>,
+    /// The new index among the properties.
+    position: Option<i64>,
+    /// Returns what the change would do without saving it.
+    #[serde(default)]
+    dry_run: bool,
+}
+
 impl Responder {
     pub(super) fn database_problem(&self, error: DatabaseError) -> Problem {
         let (status, code, title, detail) = match error {
@@ -109,6 +154,25 @@ impl Responder {
                 "Doc locked",
                 "The database is locked.",
             ),
+            DatabaseError::PropertyLimit => (
+                StatusCode::CONFLICT,
+                "database_property_limit",
+                "Database property limit",
+                "A database holds at most 100 properties.",
+            ),
+            DatabaseError::TitleProperty => (
+                StatusCode::CONFLICT,
+                "database_title_property",
+                "Title property",
+                "The title property cannot be deleted or change its type.",
+            ),
+            DatabaseError::FormulaInvalid(problem) => {
+                return Problem::validation(
+                    &self.request_id,
+                    &self.instance,
+                    [("config.expression", problem.message.as_str())],
+                );
+            }
             _ => return self.not_found(),
         };
         self.problem(status, code, title, detail)
@@ -281,4 +345,109 @@ pub(super) async fn trash_rows(
     }
     .await;
     ctx.reply(StatusCode::OK, result)
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/public/v1/workspaces/{workspace_id}/docs/{page_id}/database/properties",
+    operation_id = "public_create_database_property",
+    tag = "public-api",
+    summary = "Add a property to a database",
+    params(("workspace_id" = String, Path, description = "The token's workspace, from `GET /me`."), ("page_id" = String, Path, description = "The database's page id.")),
+    request_body = CreatePropertyBody,
+    responses((status = 201, description = "The new property", body = DatabaseProperty)),
+    security(("bearerAuth" = []))
+)]
+pub(super) async fn create_property(
+    State(s): State<PublicApiState>,
+    ctx: Ctx,
+    Path((_workspace, page)): Path<(String, String)>,
+    body: Result<Json<CreatePropertyBody>, JsonRejection>,
+) -> Response {
+    let page = path_id!(ctx, page);
+    let body = input!(ctx, ApiTokenScope::DocsWrite, body);
+    let result = async {
+        let api = s
+            .api
+            .authorize(&ctx.principal, ApiTokenScope::DocsWrite, &ctx.request_id)
+            .await?;
+        api.create_database_property(
+            page,
+            &body.name,
+            &body.property_type,
+            body.config,
+            body.position,
+        )
+        .await
+    }
+    .await;
+    ctx.reply(StatusCode::CREATED, result)
+}
+
+#[utoipa::path(
+    patch,
+    path = "/api/public/v1/workspaces/{workspace_id}/docs/{page_id}/database/properties/{property}",
+    operation_id = "public_update_database_property",
+    tag = "public-api",
+    summary = "Rename, retype, reconfigure or move a database property",
+    params(("workspace_id" = String, Path, description = "The token's workspace, from `GET /me`."), ("page_id" = String, Path, description = "The database's page id."), ("property" = String, Path, description = "The property's name or id.")),
+    request_body = UpdatePropertyBody,
+    responses((status = 200, description = "The property, with the values the change converted or cleared", body = PropertyUpdate)),
+    security(("bearerAuth" = []))
+)]
+pub(super) async fn update_property(
+    State(s): State<PublicApiState>,
+    ctx: Ctx,
+    Path((_workspace, page, property)): Path<(String, String, String)>,
+    body: Result<Json<UpdatePropertyBody>, JsonRejection>,
+) -> Response {
+    let page = path_id!(ctx, page);
+    let body = input!(ctx, ApiTokenScope::DocsWrite, body);
+    let result = async {
+        let api = s
+            .api
+            .authorize(&ctx.principal, ApiTokenScope::DocsWrite, &ctx.request_id)
+            .await?;
+        let changes = AgentPropertyChanges {
+            name: body.name,
+            property_type: body.property_type,
+            config: body.config,
+            add_options: body.add_options,
+            position: body.position,
+            dry_run: body.dry_run,
+        };
+        api.update_database_property(page, &property, changes).await
+    }
+    .await;
+    ctx.reply(StatusCode::OK, result)
+}
+
+#[utoipa::path(
+    delete,
+    path = "/api/public/v1/workspaces/{workspace_id}/docs/{page_id}/database/properties/{property}",
+    operation_id = "public_delete_database_property",
+    tag = "public-api",
+    summary = "Delete a database property with its values",
+    params(("workspace_id" = String, Path, description = "The token's workspace, from `GET /me`."), ("page_id" = String, Path, description = "The database's page id."), ("property" = String, Path, description = "The property's name or id.")),
+    responses((status = 204, description = "Deleted")),
+    security(("bearerAuth" = []))
+)]
+pub(super) async fn delete_property(
+    State(s): State<PublicApiState>,
+    ctx: Ctx,
+    Path((_workspace, page, property)): Path<(String, String, String)>,
+) -> Response {
+    let page = path_id!(ctx, page);
+    let result = async {
+        let api = s
+            .api
+            .authorize(&ctx.principal, ApiTokenScope::DocsWrite, &ctx.request_id)
+            .await?;
+        api.delete_database_property(page, &property).await
+    }
+    .await;
+    match result {
+        Ok(_) => StatusCode::NO_CONTENT.into_response(),
+        Err(error) => ctx.error(error),
+    }
 }

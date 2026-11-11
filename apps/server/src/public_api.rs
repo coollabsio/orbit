@@ -94,6 +94,14 @@ pub fn router(state: PublicApiState) -> Router {
             "/docs/{page_id}/database/query",
             post(databases::query_database),
         )
+        .route(
+            "/docs/{page_id}/database/properties",
+            post(databases::create_property),
+        )
+        .route(
+            "/docs/{page_id}/database/properties/{property}",
+            patch(databases::update_property).delete(databases::delete_property),
+        )
         .route("/docs/{page_id}/rows", post(databases::create_row))
         .route("/docs/{page_id}/rows/trash", post(databases::trash_rows))
         .route(

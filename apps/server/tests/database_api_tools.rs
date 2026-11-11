@@ -466,7 +466,10 @@ async fn each_tool_and_endpoint_needs_its_docs_scope() {
             "query_database",
             "create_database_row",
             "update_database_row",
-            "trash_database_rows"
+            "trash_database_rows",
+            "create_database_property",
+            "update_database_property",
+            "delete_database_property"
         ]
     );
     for (name, arguments) in reads.iter().chain(&writes) {
@@ -1291,4 +1294,128 @@ async fn rows_get_a_markdown_body_or_a_template_and_read_as_docs() {
         .await;
     assert_eq!(plain["database_id"], Value::Null);
     assert_eq!(plain.get("values"), None);
+}
+
+#[tokio::test]
+async fn schema_tools_keep_options_that_agents_send_by_name() {
+    let f = Fixture::new().await;
+    let write = f.token(&[ApiTokenScope::DocsWrite]).await;
+    let s = f.seed(&write).await;
+    let db = s.db.as_str();
+    let stage = f.web("GET", &format!("databases/{db}"), json!({})).await["properties"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["id"] == s.stage)
+        .unwrap()["config"]["options"]
+        .clone();
+    let id_of = |options: &Value, name: &str| -> Value {
+        options
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|option| option["name"] == name)
+            .unwrap_or_else(|| panic!("{name} in {options}"))["id"]
+            .clone()
+    };
+
+    // add_options skips a name the property has (in any letter case) and appends the rest.
+    let added = f
+        .tool_ok(
+            &write,
+            "update_database_property",
+            json!({"database_id": db, "property": "stage", "add_options": ["doing", {"name": "Blocked", "color": "red"}]}),
+        )
+        .await;
+    let options = &added["property"]["config"]["options"];
+    let names: Vec<&str> = options
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|option| option["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["Idea", "Doing", "Done", "Blocked"]);
+    assert_eq!(options[3]["color"], "red");
+
+    // A config by names keeps each option's id, so values stay; a left-out option is removed.
+    let replaced = f
+        .tool_ok(
+            &write,
+            "update_database_property",
+            json!({"database_id": db, "property": s.stage, "config": {"options": ["Doing", "Blocked", "Idea"]}}),
+        )
+        .await;
+    let options = &replaced["property"]["config"]["options"];
+    assert_eq!(id_of(options, "Doing"), id_of(&stage, "Doing"));
+    assert_eq!(id_of(options, "Idea"), id_of(&stage, "Idea"));
+    assert_eq!(options[1]["color"], "red");
+    assert_eq!(replaced["cleared"], 1, "Gamma's Done");
+    let rows = f
+        .tool_ok(&write, "query_database", json!({"database_id": db}))
+        .await;
+    let stages: Vec<&Value> = rows["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| &row["values"]["Stage"])
+        .collect();
+    assert_eq!(
+        stages,
+        [
+            &json!("Idea"),
+            &json!("Doing"),
+            &Value::Null,
+            &json!("Doing"),
+            &Value::Null
+        ]
+    );
+
+    let created = f
+        .tool_ok(
+            &write,
+            "create_database_property",
+            json!({"database_id": db, "name": "Size", "type": "select", "config": {"options": ["S", "M"]}}),
+        )
+        .await;
+    assert_eq!(created["config"]["options"][1]["name"], "M");
+    let deleted = f
+        .tool_ok(
+            &write,
+            "delete_database_property",
+            json!({"database_id": db, "property": "Size"}),
+        )
+        .await;
+    assert_eq!(deleted["deleted"], created["id"]);
+
+    for (arguments, field) in [
+        (json!({"property": "Nope", "name": "X"}), "property"),
+        (json!({"property": "Stage"}), "changes"),
+        (
+            json!({"property": "Points", "add_options": ["A"]}),
+            "add_options",
+        ),
+        (
+            json!({"property": "Stage", "config": {}, "add_options": ["A"]}),
+            "add_options",
+        ),
+    ] {
+        let mut arguments = arguments;
+        arguments["database_id"] = json!(db);
+        let response = f.tool(&write, "update_database_property", arguments).await;
+        assert!(
+            tool_error(&response).starts_with(&format!("Invalid database input {field}.")),
+            "{response}"
+        );
+    }
+    let title = f
+        .tool(
+            &write,
+            "delete_database_property",
+            json!({"database_id": db, "property": "Name"}),
+        )
+        .await;
+    assert_eq!(
+        tool_error(&title),
+        "The title property cannot be deleted or change its type"
+    );
 }

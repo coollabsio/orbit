@@ -486,6 +486,59 @@ curl -sS -X PATCH "$ORBIT_WS/docs/$DATABASE_ID/rows/$ROW_ID" -H "Authorization: 
   -d '{"values":{"Status":"Done","Owner":["ada@example.com"],"Due":"2026-11-20"}}'
 ```
 
+#### Database schema
+
+The schema endpoints add, change and delete a database's properties (its
+columns). They need `docs:write` and act as the token's creator, who must be
+able to edit the database. A locked database refuses them (`423`
+`page_locked`). `{property}` is a property name or ID, with the same matching
+as value keys.
+
+`POST /workspaces/{workspace_id}/docs/{page_id}/database/properties`. Body:
+`name` (1 to 200 characters), `type` (any type but `title`: `text`, `number`,
+`select`, `multi_select`, `status`, `date`, `person`, `checkbox`, `url`,
+`email`, `phone`, `files`, `unique_id`, `relation`, `rollup`, `created_time`,
+`created_by`, `last_edited_time`, `last_edited_by`, `button` or `formula`), and
+optional `config` and `position` (index among the properties; omitted appends
+it). Select, multi-select and status options in `config` can be names or
+`{name, color, group}` objects. Colors: `default`, `gray`, `brown`, `orange`,
+`yellow`, `green`, `blue`, `purple`, `pink`, `red`. `group` (`todo`,
+`in_progress` or `done`) is only for a status. Without `config`, a type gets its
+default (a status gets Not started, In progress and Done). Every view shows the
+new property. Response: `201` with the property (`id`, `name`, `type`, `config`,
+`position`). A database holds at most 100 properties (`409`
+`database_property_limit`).
+
+`PATCH /workspaces/{workspace_id}/docs/{page_id}/database/properties/{property}`.
+Body: one or more of `name`, `type`, `config`, `add_options` and `position`,
+and optional `dry_run`.
+
+- `type` converts the values (it clears the values that cannot convert) and
+  gives the type's default config. To set the config too, send it in a later
+  request.
+- `config` replaces the whole config. Options left out are removed from every
+  row. An option sent by name only keeps the ID, color and group of the option
+  with that name, so its values stay.
+- `add_options` adds options after the current ones and skips names the
+  property already has (in any letter case). Send it without `config`.
+- `dry_run: true` returns the result without saving it.
+
+Response: `200` with `{property, converted, cleared}`: the counts of values
+that a type change converted, and of values that a type change or a removed
+option cleared. The title property cannot change its type (`409`
+`database_title_property`).
+
+`DELETE /workspaces/{workspace_id}/docs/{page_id}/database/properties/{property}`.
+Deletes the property and its values in every row. You cannot undo this. The
+title property cannot be deleted (`409` `database_title_property`). Response:
+`204`.
+
+```bash
+curl -sS -X PATCH "$ORBIT_WS/docs/$DATABASE_ID/database/properties/Status" \
+  -H "Authorization: Bearer $ORBIT_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"add_options":["Blocked",{"name":"Shipped","color":"green"}]}'
+```
+
 ### Exports
 
 An export is a ZIP archive that another Orbit instance can import. The export

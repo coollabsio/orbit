@@ -800,6 +800,12 @@ fn database_detail(error: DatabaseError) -> String {
         DatabaseError::TemplateNotFound => "Database template is not available".to_owned(),
         DatabaseError::RowLimit => "A database holds at most 5,000 rows".to_owned(),
         DatabaseError::Locked => "Database is locked".to_owned(),
+        DatabaseError::PropertyNotFound => "Database property is not available".to_owned(),
+        DatabaseError::PropertyLimit => "A database holds at most 100 properties".to_owned(),
+        DatabaseError::TitleProperty => {
+            "The title property cannot be deleted or change its type".to_owned()
+        }
+        DatabaseError::FormulaInvalid(problem) => format!("Invalid formula: {}", problem.message),
         _ => "Database is not available".to_owned(),
     }
 }

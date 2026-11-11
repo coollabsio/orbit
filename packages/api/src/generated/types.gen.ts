@@ -4910,6 +4910,31 @@ export type PublicCommentBody = {
     body: string;
 };
 
+/**
+ * See `create_database_property` in `docs/mcp.md` for the config shapes.
+ */
+export type PublicCreateDatabasePropertyBody = {
+    /**
+     * The type's config. Select, multi-select and status take `{"options": [...]}` with option
+     * names or `{name, color, group}` objects. Omitted: the type's default.
+     */
+    config?: {
+        [key: string]: unknown;
+    } | null;
+    /**
+     * 1 to 200 characters.
+     */
+    name: string;
+    /**
+     * Index among the properties; omitted appends it.
+     */
+    position?: number | null;
+    /**
+     * Any type but `title`, such as `select`, `status`, `number` or `date`.
+     */
+    type: string;
+};
+
 export type PublicCreateDatabaseRowBody = {
     /**
      * The body as GitHub-flavored Markdown; with a template, it replaces the template's body.
@@ -5297,6 +5322,42 @@ export type PublicTrashedDatabaseRows = {
      * Rows moved to the trash.
      */
     trashed: number;
+};
+
+/**
+ * Send at least one of `name`, `type`, `config`, `add_options` or `position`.
+ */
+export type PublicUpdateDatabasePropertyBody = {
+    /**
+     * Options to add after the current ones, by name or as `{name, color, group}`; names the
+     * property already has are skipped. Not with `config`.
+     */
+    add_options?: Array<{
+        [key: string]: unknown;
+    }>;
+    /**
+     * The whole config. Options left out are removed from every row; an option sent by name
+     * only keeps its id, color and group.
+     */
+    config?: {
+        [key: string]: unknown;
+    } | null;
+    /**
+     * Returns what the change would do without saving it.
+     */
+    dry_run?: boolean;
+    /**
+     * 1 to 200 characters.
+     */
+    name?: string | null;
+    /**
+     * The new index among the properties.
+     */
+    position?: number | null;
+    /**
+     * A new type converts the values and gives the type's default config.
+     */
+    type?: string | null;
 };
 
 /**
@@ -7701,6 +7762,230 @@ export type PublicGetDatabaseResponses = {
 };
 
 export type PublicGetDatabaseResponse = PublicGetDatabaseResponses[keyof PublicGetDatabaseResponses];
+
+export type PublicCreateDatabasePropertyData = {
+    body: PublicCreateDatabasePropertyBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        /**
+         * The token's workspace, from `GET /me`.
+         */
+        workspace_id: string;
+        /**
+         * The database's page id.
+         */
+        page_id: string;
+    };
+    query?: never;
+    url: '/api/public/v1/workspaces/{workspace_id}/docs/{page_id}/database/properties';
+};
+
+export type PublicCreateDatabasePropertyErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: Problem;
+    /**
+     * unauthorized
+     */
+    401: Problem;
+    /**
+     * insufficient_scope
+     */
+    403: Problem;
+    /**
+     * not_found
+     */
+    404: Problem;
+    /**
+     * contract_mismatch
+     */
+    409: Problem;
+    /**
+     * request_too_large
+     */
+    413: Problem;
+    /**
+     * rate_limit_exceeded
+     */
+    429: Problem;
+    /**
+     * internal_error
+     */
+    500: Problem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: Problem;
+};
+
+export type PublicCreateDatabasePropertyError = PublicCreateDatabasePropertyErrors[keyof PublicCreateDatabasePropertyErrors];
+
+export type PublicCreateDatabasePropertyResponses = {
+    /**
+     * The new property
+     */
+    201: DatabaseProperty;
+};
+
+export type PublicCreateDatabasePropertyResponse = PublicCreateDatabasePropertyResponses[keyof PublicCreateDatabasePropertyResponses];
+
+export type PublicDeleteDatabasePropertyData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        /**
+         * The token's workspace, from `GET /me`.
+         */
+        workspace_id: string;
+        /**
+         * The database's page id.
+         */
+        page_id: string;
+        /**
+         * The property's name or id.
+         */
+        property: string;
+    };
+    query?: never;
+    url: '/api/public/v1/workspaces/{workspace_id}/docs/{page_id}/database/properties/{property}';
+};
+
+export type PublicDeleteDatabasePropertyErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: Problem;
+    /**
+     * unauthorized
+     */
+    401: Problem;
+    /**
+     * insufficient_scope
+     */
+    403: Problem;
+    /**
+     * not_found
+     */
+    404: Problem;
+    /**
+     * contract_mismatch
+     */
+    409: Problem;
+    /**
+     * request_too_large
+     */
+    413: Problem;
+    /**
+     * rate_limit_exceeded
+     */
+    429: Problem;
+    /**
+     * internal_error
+     */
+    500: Problem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: Problem;
+};
+
+export type PublicDeleteDatabasePropertyError = PublicDeleteDatabasePropertyErrors[keyof PublicDeleteDatabasePropertyErrors];
+
+export type PublicDeleteDatabasePropertyResponses = {
+    /**
+     * Deleted
+     */
+    204: void;
+};
+
+export type PublicDeleteDatabasePropertyResponse = PublicDeleteDatabasePropertyResponses[keyof PublicDeleteDatabasePropertyResponses];
+
+export type PublicUpdateDatabasePropertyData = {
+    body: PublicUpdateDatabasePropertyBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        /**
+         * The token's workspace, from `GET /me`.
+         */
+        workspace_id: string;
+        /**
+         * The database's page id.
+         */
+        page_id: string;
+        /**
+         * The property's name or id.
+         */
+        property: string;
+    };
+    query?: never;
+    url: '/api/public/v1/workspaces/{workspace_id}/docs/{page_id}/database/properties/{property}';
+};
+
+export type PublicUpdateDatabasePropertyErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: Problem;
+    /**
+     * unauthorized
+     */
+    401: Problem;
+    /**
+     * insufficient_scope
+     */
+    403: Problem;
+    /**
+     * not_found
+     */
+    404: Problem;
+    /**
+     * contract_mismatch
+     */
+    409: Problem;
+    /**
+     * request_too_large
+     */
+    413: Problem;
+    /**
+     * rate_limit_exceeded
+     */
+    429: Problem;
+    /**
+     * internal_error
+     */
+    500: Problem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: Problem;
+};
+
+export type PublicUpdateDatabasePropertyError = PublicUpdateDatabasePropertyErrors[keyof PublicUpdateDatabasePropertyErrors];
+
+export type PublicUpdateDatabasePropertyResponses = {
+    /**
+     * The property, with the values the change converted or cleared
+     */
+    200: DatabasePropertyUpdate;
+};
+
+export type PublicUpdateDatabasePropertyResponse = PublicUpdateDatabasePropertyResponses[keyof PublicUpdateDatabasePropertyResponses];
 
 export type PublicQueryDatabaseData = {
     body: PublicQueryDatabaseBody;

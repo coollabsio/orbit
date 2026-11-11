@@ -9,8 +9,8 @@ use super::{Authorized, DocPatch, Result, TokenApiError, hidden_page, validate_d
 use crate::collab::markdown_merge::{MAX_BLOCKS, block_count};
 use crate::repositories::api_tokens::ApiTokenScope;
 use crate::repositories::databases::{
-    AgentDatabase, AgentQuery, AgentRow, AgentRowPage, DatabaseError, DatabaseRepository, NewRow,
-    RowPlacement,
+    AgentDatabase, AgentPropertyChanges, AgentQuery, AgentRow, AgentRowPage, DatabaseError,
+    DatabaseProperty, DatabaseRepository, NewRow, PropertyUpdate, RowPlacement,
 };
 use crate::repositories::pages::{PageChanges, PageError, PageRecord, revision};
 
@@ -226,6 +226,70 @@ impl Authorized<'_> {
                 database_id,
                 p.actor_id,
                 row_ids,
+                self.request_id,
+                TimestampMillis::now(),
+            )
+            .await?)
+    }
+
+    /// Adds a property (any type but `title`); options may be plain names.
+    pub async fn create_database_property(
+        &self,
+        database_id: Id,
+        name: &str,
+        property_type: &str,
+        config: Option<Value>,
+        position: Option<i64>,
+    ) -> Result<DatabaseProperty> {
+        let databases = self.databases(ApiTokenScope::DocsWrite)?;
+        let p = self.principal;
+        Ok(databases
+            .agent_create_property(
+                p.workspace_id,
+                database_id,
+                p.actor_id,
+                name,
+                property_type,
+                config,
+                position,
+                self.request_id,
+                TimestampMillis::now(),
+            )
+            .await?)
+    }
+
+    /// Renames, retypes, reconfigures or moves the property `key` names (its name or id).
+    pub async fn update_database_property(
+        &self,
+        database_id: Id,
+        key: &str,
+        changes: AgentPropertyChanges,
+    ) -> Result<PropertyUpdate> {
+        let databases = self.databases(ApiTokenScope::DocsWrite)?;
+        let p = self.principal;
+        Ok(databases
+            .agent_update_property(
+                p.workspace_id,
+                database_id,
+                p.actor_id,
+                key,
+                changes,
+                self.request_id,
+                TimestampMillis::now(),
+            )
+            .await?)
+    }
+
+    /// Deletes the property `key` names with its values; returns its id.
+    pub async fn delete_database_property(&self, database_id: Id, key: &str) -> Result<Id> {
+        let databases = self.databases(ApiTokenScope::DocsWrite)?;
+        let p = self.principal;
+        Ok(databases
+            .agent_delete_property(
+                p.workspace_id,
+                database_id,
+                p.actor_id,
+                key,
                 self.request_id,
                 TimestampMillis::now(),
             )
