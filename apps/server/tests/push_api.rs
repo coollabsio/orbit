@@ -388,7 +388,10 @@ async fn a_notice_goes_to_the_active_tab_or_else_to_every_browser_and_respects_t
             None,
         )
         .await;
-    assert_eq!(stored, prefs);
+    // an app from before GitHub notices sends no `github`: it stays on
+    let mut expected = prefs.clone();
+    expected["github"] = json!(true);
+    assert_eq!(stored, expected);
     push.notify(owner, PushKind::DirectMessages, &notice())
         .await
         .unwrap();
@@ -756,4 +759,46 @@ async fn phones_register_with_apns_get_pushes_and_go_with_their_token_or_session
         .await
         .unwrap();
     assert_eq!(left, 0);
+}
+
+async fn github_notice(fixture: &Fixture, recipient: orbit_platform::Id, kind: &str, state: Option<&str>) {
+    sqlx::query("INSERT INTO notifications (id, workspace_id, recipient_user_id, actor_user_id, kind, dedupe_key, created_at, github_repository, github_pull_number, github_actor_login, github_review_state) VALUES ($1, $2, $3, $4, $5, $6, 1, 'acme/repo', 12, 'octo', $7)")
+        .bind(orbit_platform::Id::new_v7().to_string())
+        .bind(fixture.workspace_id.to_string())
+        .bind(recipient.to_string())
+        .bind(fixture.owner_id.to_string())
+        .bind(kind)
+        .bind(orbit_platform::Id::new_v7().to_string())
+        .bind(state)
+        .execute(fixture.database.pool())
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn github_notices_are_pushed_with_a_link_to_the_pull_request() {
+    let fixture = Fixture::new().await;
+    let (ada, ada_cookie) = fixture.member("ada").await;
+    fixture.subscribe(&ada_cookie, "https://web.push.apple.com/ada").await;
+    github_notice(&fixture, ada, "github_review", Some("approved")).await;
+    fixture.push.push_inbox().await.unwrap();
+    let sent = fixture.sent();
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0].1["title"], "octo approved your pull request");
+    assert_eq!(sent[0].1["body"], "acme/repo#12");
+    assert_eq!(sent[0].1["url"], "/tasks/pulls/acme/repo/12");
+}
+
+#[tokio::test]
+async fn github_push_can_be_turned_off() {
+    let fixture = Fixture::new().await;
+    let (ada, ada_cookie) = fixture.member("ada").await;
+    fixture.subscribe(&ada_cookie, "https://web.push.apple.com/ada").await;
+    let prefs = json!({ "direct_messages": true, "chat_mentions": true, "thread_replies": true,
+        "channel_messages": true, "task_assigned": true, "mentions": true, "github": false });
+    let (status, _) = fixture.send("PUT", "/api/v1/notification-preferences", &ada_cookie, Some(prefs)).await;
+    assert_eq!(status, StatusCode::OK);
+    github_notice(&fixture, ada, "github_merged", None).await;
+    fixture.push.push_inbox().await.unwrap();
+    assert!(fixture.sent().is_empty());
 }

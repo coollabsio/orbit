@@ -64742,6 +64742,10 @@
           "direct_messages": {
             "type": "boolean"
           },
+          "github": {
+            "type": "boolean",
+            "description": "GitHub pull request notices. Missing in a request from an older app: on."
+          },
           "mentions": {
             "type": "boolean",
             "description": "Mentions in task comments, pages and page comments."
@@ -64793,6 +64797,34 @@
             "type": "string",
             "format": "date-time"
           },
+          "github_actor_login": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Who acted on GitHub (their GitHub login; they may have no Orbit account)."
+          },
+          "github_pull_number": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "github_repository": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "GitHub notices (`github_review_requested`, `github_review`, `github_merged`): the repository (`owner/repo`)\nand the pull request number."
+          },
+          "github_review_state": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A `github_review`'s result: `approved`, `changes_requested` or `commented`."
+          },
           "id": {
             "type": "string"
           },
@@ -64819,7 +64851,7 @@
           },
           "kind": {
             "type": "string",
-            "description": "`task_assigned`, `comment_mentioned` (task comment), `description_mentioned` (task\ndescription), `page_comment_mentioned`, `page_mentioned` (an @mention in a page body) or\n`chat_mentioned` (a chat message) or `import_finished` (a long import ended)."
+            "description": "`task_assigned`, `comment_mentioned` (task comment), `description_mentioned` (task\ndescription), `page_comment_mentioned`, `page_mentioned` (an @mention in a page body) or\n`chat_mentioned` (a chat message), `import_finished` (a long import ended), or a GitHub pull request notice:\n`github_review_requested`, `github_review`, `github_merged`."
           },
           "page_block_id": {
             "type": [
@@ -67615,6 +67647,34 @@
                   "type": "string",
                   "format": "date-time"
                 },
+                "github_actor_login": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Who acted on GitHub (their GitHub login; they may have no Orbit account)."
+                },
+                "github_pull_number": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "format": "int64"
+                },
+                "github_repository": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "GitHub notices (`github_review_requested`, `github_review`, `github_merged`): the repository (`owner/repo`)\nand the pull request number."
+                },
+                "github_review_state": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "A `github_review`'s result: `approved`, `changes_requested` or `commented`."
+                },
                 "id": {
                   "type": "string"
                 },
@@ -67641,7 +67701,7 @@
                 },
                 "kind": {
                   "type": "string",
-                  "description": "`task_assigned`, `comment_mentioned` (task comment), `description_mentioned` (task\ndescription), `page_comment_mentioned`, `page_mentioned` (an @mention in a page body) or\n`chat_mentioned` (a chat message) or `import_finished` (a long import ended)."
+                  "description": "`task_assigned`, `comment_mentioned` (task comment), `description_mentioned` (task\ndescription), `page_comment_mentioned`, `page_mentioned` (an @mention in a page body) or\n`chat_mentioned` (a chat message), `import_finished` (a long import ended), or a GitHub pull request notice:\n`github_review_requested`, `github_review`, `github_merged`."
                 },
                 "page_block_id": {
                   "type": [

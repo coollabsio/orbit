@@ -1,6 +1,7 @@
 //! GitHub for PR review: where GitHub is, one HTTP client, and its errors. Everything here acts with a person's
 //! GitHub App user token (see [`user_tokens`]); GitHub then applies that person's own permissions.
 
+pub mod notify;
 pub mod pulls;
 pub mod reviews;
 pub mod user_tokens;

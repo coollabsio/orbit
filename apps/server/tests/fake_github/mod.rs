@@ -554,6 +554,27 @@ impl GithubFixture {
         self.github.with(|state| read(&state.api_requests))
     }
 
+    /// A GitHub webhook delivery for app 77, signed with its secret ("hook-secret").
+    pub async fn webhook(&self, event: &str, delivery: &str, body: Value) -> Response {
+        use hmac::{Hmac, Mac};
+        let body = body.to_string();
+        let mut mac = <Hmac<sha2::Sha256> as Mac>::new_from_slice(b"hook-secret").unwrap();
+        mac.update(body.as_bytes());
+        let signature: String = mac.finalize().into_bytes().iter().map(|byte| format!("{byte:02x}")).collect();
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/v1/integrations/github/webhook")
+            .header(header::CONTENT_TYPE, "application/json")
+            .header("x-github-event", event)
+            .header("x-github-delivery", delivery)
+            .header("x-hub-signature-256", format!("sha256={signature}"))
+            .header("x-github-hook-installation-target-type", "integration")
+            .header("x-github-hook-installation-target-id", "77")
+            .body(Body::from(body))
+            .unwrap();
+        self.app.clone().oneshot(request).await.unwrap()
+    }
+
     pub async fn get(&self, path: &str) -> Response {
         self.send("GET", path, &self.session_cookie, None).await
     }

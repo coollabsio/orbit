@@ -3704,6 +3704,10 @@ export type NotificationPrefs = {
     chat_mentions: boolean;
     direct_messages: boolean;
     /**
+     * GitHub pull request notices. Missing in a request from an older app: on.
+     */
+    github?: boolean;
+    /**
      * Mentions in task comments, pages and page comments.
      */
     mentions: boolean;
@@ -3723,6 +3727,20 @@ export type NotificationRecord = {
      */
     comment_id?: string | null;
     created_at: string;
+    /**
+     * Who acted on GitHub (their GitHub login; they may have no Orbit account).
+     */
+    github_actor_login?: string | null;
+    github_pull_number?: number | null;
+    /**
+     * GitHub notices (`github_review_requested`, `github_review`, `github_merged`): the repository (`owner/repo`)
+     * and the pull request number.
+     */
+    github_repository?: string | null;
+    /**
+     * A `github_review`'s result: `approved`, `changes_requested` or `commented`.
+     */
+    github_review_state?: string | null;
     id: string;
     /**
      * The import of an `import_finished` notification.
@@ -3740,7 +3758,8 @@ export type NotificationRecord = {
     /**
      * `task_assigned`, `comment_mentioned` (task comment), `description_mentioned` (task
      * description), `page_comment_mentioned`, `page_mentioned` (an @mention in a page body) or
-     * `chat_mentioned` (a chat message) or `import_finished` (a long import ended).
+     * `chat_mentioned` (a chat message), `import_finished` (a long import ended), or a GitHub pull request notice:
+     * `github_review_requested`, `github_review`, `github_merged`.
      */
     kind: string;
     /**
@@ -4868,6 +4887,20 @@ export type PageNotificationRecord = {
          */
         comment_id?: string | null;
         created_at: string;
+        /**
+         * Who acted on GitHub (their GitHub login; they may have no Orbit account).
+         */
+        github_actor_login?: string | null;
+        github_pull_number?: number | null;
+        /**
+         * GitHub notices (`github_review_requested`, `github_review`, `github_merged`): the repository (`owner/repo`)
+         * and the pull request number.
+         */
+        github_repository?: string | null;
+        /**
+         * A `github_review`'s result: `approved`, `changes_requested` or `commented`.
+         */
+        github_review_state?: string | null;
         id: string;
         /**
          * The import of an `import_finished` notification.
@@ -4885,7 +4918,8 @@ export type PageNotificationRecord = {
         /**
          * `task_assigned`, `comment_mentioned` (task comment), `description_mentioned` (task
          * description), `page_comment_mentioned`, `page_mentioned` (an @mention in a page body) or
-         * `chat_mentioned` (a chat message) or `import_finished` (a long import ended).
+         * `chat_mentioned` (a chat message), `import_finished` (a long import ended), or a GitHub pull request notice:
+         * `github_review_requested`, `github_review`, `github_merged`.
          */
         kind: string;
         /**

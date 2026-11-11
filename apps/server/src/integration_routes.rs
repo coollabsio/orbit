@@ -1026,6 +1026,14 @@ async fn github_webhook_from_database(
         .and_then(|value| value.to_str().ok())
         .unwrap_or("")
         .to_owned();
+    let delivery = request
+        .headers()
+        .get("x-github-delivery")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("")
+        .chars()
+        .take(100)
+        .collect::<String>();
     let event = request
         .headers()
         .get("x-github-event")
@@ -1128,10 +1136,16 @@ async fn github_webhook_from_database(
         update_github_installation(state, &workspace, &payload, &event, action, id).await?;
         return Ok(StatusCode::OK);
     }
+    let workspace_id: Id = workspace.parse().map_err(|_| ApiError::internal(id))?;
+    if crate::github::notify::is_notice_event(&event) && !read_only(state, workspace_id, id).await? {
+        // A notice failure must not fail the delivery: GitHub would retry it and the task sync below.
+        if let Err(error) = crate::github::notify::notify_pull_event(state, &workspace_id, &event, &delivery, &payload).await {
+            tracing::warn!(%workspace_id, event, %error, "GitHub notice not written");
+        }
+    }
     if !matches!(event.as_str(), "issues" | "pull_request") {
         return Ok(StatusCode::ACCEPTED);
     }
-    let workspace_id: Id = workspace.parse().map_err(|_| ApiError::internal(id))?;
     if read_only(state, workspace_id, id).await? {
         // A 2xx keeps GitHub from disabling the hook; the change is dropped.
         tracing::info!(%workspace_id, event, "GitHub event dropped: the workspace is read-only");

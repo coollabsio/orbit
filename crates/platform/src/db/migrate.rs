@@ -627,6 +627,11 @@ impl MigrationRunner {
                     ),
                     false,
                 ),
+                Migration::new(
+                    96,
+                    include_str!("../../../../apps/server/migrations/0096_github_notifications.sql"),
+                    false,
+                ),
             ],
         );
         runner.postgres = vec![
@@ -927,6 +932,13 @@ impl MigrationRunner {
                 95,
                 include_str!(
                     "../../../../apps/server/migrations/postgres/0095_github_user_connections.sql"
+                ),
+                false,
+            ),
+            Migration::new(
+                96,
+                include_str!(
+                    "../../../../apps/server/migrations/postgres/0096_github_notifications.sql"
                 ),
                 false,
             ),
