@@ -26,8 +26,13 @@ const FILTERS: { value: PullFilter; label: string; empty: string }[] = [
 
 /** A project's pull requests, read live from GitHub with the member's own account. */
 export function PullListPage() {
-  const { workspace } = useWorkspace()
   const { projectId = '' } = useParams()
+  // another project starts fresh: its own first page, the Open filter, no search
+  return <ProjectPulls key={projectId} projectId={projectId} />
+}
+
+function ProjectPulls({ projectId }: { projectId: string }) {
+  const { workspace } = useWorkspace()
   const project = useProjects(workspace.id).data?.find((item) => item.id === projectId)
   const [filter, setFilter] = useState<PullFilter>('open')
   const [search, setSearch] = useState('')

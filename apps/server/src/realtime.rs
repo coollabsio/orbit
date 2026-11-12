@@ -78,6 +78,27 @@ pub async fn authorized(
     Ok(found)
 }
 
+/// The pull requests (`owner/repo#n`) of repositories connected to a project the session's member can see. The others
+/// stay hidden: a private project's repository and pull request numbers are not for every member of the workspace.
+pub async fn visible_pulls(database: &Database, workspace: Id, session: Id, pulls: Vec<String>) -> Result<Vec<String>, sqlx::Error> {
+    if pulls.is_empty() {
+        return Ok(pulls);
+    }
+    let repositories: Vec<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+        "SELECT DISTINCT lower(c.repository) FROM github_project_connections c JOIN projects p ON p.id = c.project_id \
+         JOIN sessions s ON s.id = $2 WHERE c.workspace_id = $1 AND p.deleted_at IS NULL AND {}",
+        crate::repositories::project_access::user_sees_project_sql("p.id", "s.user_id")
+    )))
+    .bind(workspace.to_string())
+    .bind(session.to_string())
+    .fetch_all(database.pool())
+    .await?;
+    Ok(pulls
+        .into_iter()
+        .filter(|pull| pull.split('#').next().is_some_and(|repository| repositories.iter().any(|seen| seen == repository)))
+        .collect())
+}
+
 #[derive(Debug, serde::Serialize)]
 pub struct Events {
     pub version: u8,
@@ -212,11 +233,14 @@ async fn serve(
                 if ours && !authorized(&database, workspace, session).await.unwrap_or(false) { break; }
             }
             _ = tick.tick() => {
-                let Ok(event) = replay(&database, workspace, after).await else { break; };
+                let Ok(mut event) = replay(&database, workspace, after).await else { break; };
                 let sequence = event.sequence.parse::<i64>().ok();
                 if after != sequence || event.kind == "resync_required" {
                     // Recheck after reading the batch, before releasing any notification.
                     if !authorized(&database, workspace, session).await.unwrap_or(false) { break; }
+                    let pulls = std::mem::take(&mut event.github_pulls);
+                    let Ok(pulls) = visible_pulls(&database, workspace, session, pulls).await else { break; };
+                    event.github_pulls = pulls;
                     if !send(&mut socket, Message::Text(serde_json::to_string(&event).unwrap().into())).await { break; }
                     after = sequence;
                 }

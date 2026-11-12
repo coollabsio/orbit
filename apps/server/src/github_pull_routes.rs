@@ -201,14 +201,14 @@ pub(crate) async fn list_github_pull_threads(
 ) -> Result<Json<PullThreads>, ApiError> {
     let id = request_id(request.as_ref());
     let access = pull_access(&state, &headers, &workspace, &owner, &repo, number, id).await?;
-    match pulls::threads(&github(&state, id)?, &access.token.token, &access.pull).await {
-        Ok(threads) => {
-            let pending = reviews::pending_review(&github(&state, id)?, &access.token.token, &access.pull).await;
-            match pending {
-                Ok(pending_review) => Ok(Json(PullThreads { threads, pending_review })),
-                Err(error) => Err(github_failed(&state, &access, error, id).await),
-            }
-        }
+    let client = github(&state, id)?;
+    // two independent GitHub queries: asked at the same time
+    let (threads, pending) = tokio::join!(
+        pulls::threads(&client, &access.token.token, &access.pull),
+        reviews::pending_review(&client, &access.token.token, &access.pull),
+    );
+    match threads.and_then(|threads| pending.map(|pending_review| PullThreads { threads, pending_review })) {
+        Ok(result) => Ok(Json(result)),
         Err(error) => Err(github_failed(&state, &access, error, id).await),
     }
 }
@@ -405,6 +405,18 @@ fn check_body(body: &CommentBody, request_id: Option<&RequestId>) -> Result<(), 
     Ok(())
 }
 
+/// The comment or thread `node` must belong to the pull request in the URL, whose project the member can see.
+async fn check_node(state: &IntegrationState, access: &PullAccess, node: &str, id: Option<&RequestId>) -> Result<(), ApiError> {
+    if !valid_node_id(node) {
+        return Err(not_found(id));
+    }
+    match reviews::node_in_pull(&github(state, id)?, &access.token.token, &access.pull, node).await {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(not_found(id)),
+        Err(error) => Err(github_failed(state, access, error, id).await),
+    }
+}
+
 #[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/github/pulls/{owner}/{repo}/{number}/threads/{thread_id}/replies", params(("workspace_id" = String, Path), ("owner" = String, Path), ("repo" = String, Path), ("number" = i64, Path), ("thread_id" = String, Path)), request_body = CommentBody, responses((status = 200, body = ReviewComment)))]
 pub(crate) async fn reply_github_review_thread(
     State(state): State<IntegrationState>,
@@ -415,9 +427,7 @@ pub(crate) async fn reply_github_review_thread(
 ) -> Result<Json<ReviewComment>, ApiError> {
     let id = request_id(request.as_ref());
     let access = pull_access(&state, &headers, &workspace, &owner, &repo, number, id).await?;
-    if !valid_node_id(&thread) {
-        return Err(not_found(id));
-    }
+    check_node(&state, &access, &thread, id).await?;
     check_body(&body, id)?;
     match reviews::reply(&github(&state, id)?, &access.token.token, &access.pull, &thread, &body.body).await {
         Ok(comment) => Ok(Json(comment)),
@@ -435,9 +445,7 @@ pub(crate) async fn update_github_review_comment(
 ) -> Result<Json<ReviewComment>, ApiError> {
     let id = request_id(request.as_ref());
     let access = pull_access(&state, &headers, &workspace, &owner, &repo, number, id).await?;
-    if !valid_node_id(&comment) {
-        return Err(not_found(id));
-    }
+    check_node(&state, &access, &comment, id).await?;
     check_body(&body, id)?;
     match reviews::update_comment(&github(&state, id)?, &access.token.token, &comment, &body.body).await {
         Ok(comment) => Ok(Json(comment)),
@@ -454,9 +462,7 @@ pub(crate) async fn delete_github_review_comment(
 ) -> Result<StatusCode, ApiError> {
     let id = request_id(request.as_ref());
     let access = pull_access(&state, &headers, &workspace, &owner, &repo, number, id).await?;
-    if !valid_node_id(&comment) {
-        return Err(not_found(id));
-    }
+    check_node(&state, &access, &comment, id).await?;
     match reviews::delete_comment(&github(&state, id)?, &access.token.token, &comment).await {
         Ok(()) => Ok(StatusCode::NO_CONTENT),
         Err(error) => Err(github_failed(&state, &access, error, id).await),
@@ -472,9 +478,7 @@ async fn set_resolved(
 ) -> Result<Json<ReviewThread>, ApiError> {
     let id = request_id(request.as_ref());
     let access = pull_access(&state, &headers, &workspace, &owner, &repo, number, id).await?;
-    if !valid_node_id(&thread) {
-        return Err(not_found(id));
-    }
+    check_node(&state, &access, &thread, id).await?;
     match reviews::set_resolved(&github(&state, id)?, &access.token.token, &thread, resolved).await {
         Ok(thread) => Ok(Json(thread)),
         Err(error) => Err(github_failed(&state, &access, error, id).await),

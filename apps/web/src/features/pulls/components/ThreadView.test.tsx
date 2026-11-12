@@ -39,6 +39,17 @@ test('a reply is posted to the thread', async () => {
   await waitFor(() => expect(calls).toContainEqual({ method: 'POST', path: `${base}/threads/T_1/replies`, body: { body: 'Done' } }))
 })
 
+test('Close hides a reply draft and keeps it; Continue reply brings it back', async () => {
+  serve([])
+  const view = renderWithWorkspace(<ThreadView thread={thread} actions={{ workspaceId: 'workspace-1', pullRef: ref }} />)
+  await userEvent.click(view.getByRole('button', { name: 'Reply' }))
+  await userEvent.type(view.getByRole('textbox', { name: 'Reply to the thread' }), 'Half a thought')
+  await userEvent.click(view.getByRole('button', { name: 'Close' }))
+  expect(view.queryAllByRole('textbox', { name: 'Reply to the thread' }).length).toBe(0)
+  await userEvent.click(view.getByRole('button', { name: 'Continue reply' }))
+  expect((view.getByRole('textbox', { name: 'Reply to the thread' }) as HTMLTextAreaElement).value).toBe('Half a thought')
+})
+
 test('resolve marks the thread resolved on GitHub', async () => {
   const calls: Array<{ method: string; path: string; body: unknown }> = []
   serve(calls)

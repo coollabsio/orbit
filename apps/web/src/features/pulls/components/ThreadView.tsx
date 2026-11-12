@@ -62,8 +62,9 @@ function Comment({ comment, actions }: { comment: GithubReviewComment; actions?:
 }
 
 function ThreadActions({ thread, actions }: { thread: GithubReviewThread; actions: Actions }) {
-  const [replying, setReplying] = useState(false)
   const [text, setText, clear] = useDraft(replyDraftKey(actions.workspaceId, actions.pullRef, thread.id))
+  // a saved draft opens the box again; Close hides it and keeps the draft
+  const [replying, setReplying] = useState(() => text !== '')
   const reply = useReply(actions.workspaceId, actions.pullRef)
   const resolve = useResolveThread(actions.workspaceId, actions.pullRef)
   const id = useId()
@@ -72,19 +73,19 @@ function ThreadActions({ thread, actions }: { thread: GithubReviewThread; action
     reply.mutate({ threadId: thread.id, body: text }, { onSuccess: () => { clear(); setReplying(false) } })
   }
   return <div className="flex flex-col gap-1.5 border-t pt-2">
-    {replying || text ? <>
+    {replying ? <>
       <label htmlFor={id} className="sr-only">Reply to the thread</label>
       <Textarea id={id} autoFocus value={text} onChange={(event) => setText(event.target.value)} placeholder="Reply" className="min-h-14 text-[13px]"
         onKeyDown={(event) => { if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); send() } }} />
       {reply.isError ? <p role="alert" className="text-xs text-destructive">{githubMessage(reply.error, 'GitHub did not take the reply. Try again.')}</p> : null}
     </> : null}
     <div className="flex flex-wrap gap-1.5">
-      {thread.can_reply ? (replying || text
+      {thread.can_reply ? (replying
         ? <>
           <Button size="sm" disabled={!text.trim() || reply.isPending} onClick={send}>Send reply</Button>
           <Button size="sm" variant="ghost" onClick={() => setReplying(false)}>Close</Button>
         </>
-        : <Button size="sm" variant="outline" onClick={() => setReplying(true)}>Reply</Button>) : null}
+        : <Button size="sm" variant="outline" onClick={() => setReplying(true)}>{text ? 'Continue reply' : 'Reply'}</Button>) : null}
       {thread.can_resolve ? <Button size="sm" variant="ghost" className="ml-auto" disabled={resolve.isPending} onClick={() => resolve.mutate({ threadId: thread.id, resolved: !thread.is_resolved })}>{thread.is_resolved ? 'Unresolve' : 'Resolve'}</Button> : null}
     </div>
     {resolve.isError ? <p role="alert" className="text-xs text-destructive">{githubMessage(resolve.error, 'GitHub did not change the thread.')}</p> : null}

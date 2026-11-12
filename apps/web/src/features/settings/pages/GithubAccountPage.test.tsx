@@ -68,6 +68,14 @@ test('back from GitHub, the page finishes the connection as the signed-in member
   expect(seen.body).toEqual({ token: 't1' })
 })
 
+test('the connection finishes in the workspace the flow started in', async () => {
+  const seen: { path?: string; body?: unknown } = {}
+  serveFinish(Response.json({ status: 'connected', login: 'octo' }), seen)
+  const view = renderWithWorkspace(<GithubAccountPage />, { path: '/profile/github?github=finish&token=t1&workspace=workspace-2' })
+  expect(await view.findByText('GitHub connected')).toBeTruthy()
+  expect(seen.path).toBe('/api/v1/workspaces/workspace-2/github/me/finish')
+})
+
 test('a GitHub account of another member is refused with a clear message', async () => {
   serveFinish(problem(409, 'github_account_taken'), {})
   const view = renderWithWorkspace(<GithubAccountPage />, { path: '/profile/github?github=finish&token=t1' })

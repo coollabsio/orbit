@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router'
 import { toast } from 'sonner'
 import { confirmAction } from '@/components/common/confirmAction'
@@ -30,9 +30,11 @@ export function GithubAccountPage() {
   const query = useGithubConnection(workspace.id)
   const connect = useConnectGithub(workspace.id)
   const disconnect = useDisconnectGithub(workspace.id)
-  const finish = useFinishGithub(workspace.id)
-  const finishOnce = finish.mutate
   const [params, setParams] = useSearchParams()
+  // the flow finishes in the workspace it started in (the member may have switched workspace on the way)
+  const [finishIn] = useState(() => params.get('workspace') ?? workspace.id)
+  const finish = useFinishGithub(finishIn)
+  const finishOnce = finish.mutate
   const result = params.get('github')
   const token = params.get('token')
   const finished = useRef<string | null>(null)

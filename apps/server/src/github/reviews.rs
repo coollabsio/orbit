@@ -18,6 +18,20 @@ pub fn valid_node_id(id: &str) -> bool {
     (1..=100).contains(&id.len()) && id.bytes().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'_' | b'-' | b'='))
 }
 
+const NODE_PULL: &str = "query NodePull($id: ID!) { node(id: $id) { __typename \
+  ... on PullRequestReviewComment { pullRequest { number repository { nameWithOwner } } } \
+  ... on PullRequestReviewThread { pullRequest { number repository { nameWithOwner } } } } }";
+
+/// Whether a review comment or thread (a node id from the client) belongs to this pull request. Orbit checks the
+/// pull request in the URL against the member's projects, so a node of another pull request must not pass.
+pub async fn node_in_pull(github: &GithubClient, token: &str, pull: &PullRef, id: &str) -> Result<bool, GithubError> {
+    let data: Value = github.graphql(token, NODE_PULL, json!({ "id": id })).await?;
+    let pr = &data["node"]["pullRequest"];
+    let repository = format!("{}/{}", pull.owner, pull.repo);
+    Ok(pr["number"].as_i64() == Some(pull.number)
+        && pr["repository"]["nameWithOwner"].as_str().is_some_and(|name| name.eq_ignore_ascii_case(&repository)))
+}
+
 /// What a write needs to know about the pull request.
 pub struct Basics {
     pub id: String,

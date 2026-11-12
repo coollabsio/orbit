@@ -166,6 +166,8 @@ async fn merged_notifies_author() {
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].0, member.to_string());
     assert_eq!(rows[0].1, "github_merged");
+    // dedupe keys are unique across workspaces: another workspace connected to the same repository gets its own
+    assert!(rows[0].4.starts_with(&format!("{}:", fixture.workspace())), "{}", rows[0].4);
 }
 
 #[tokio::test]
@@ -200,4 +202,32 @@ async fn live_refresh_rows_stay_out_of_the_audit_log_and_check_runs_make_none() 
     assert!(listed.iter().all(|event| event.resource_type != "github_pull"), "the audit log hides live refresh rows");
     let (global, _) = orbit_server::audit::list_global(&fixture.database, Some(fixture.workspace_id), None, None, 100).await.unwrap();
     assert!(global.iter().all(|event| event.resource_type != "github_pull"));
+}
+
+#[tokio::test]
+async fn a_member_who_cannot_see_the_project_is_not_told_its_pull_requests() {
+    let (fixture, member) = setup().await;
+    let session = |user: Id| {
+        let pool = fixture.database.pool();
+        async move {
+            sqlx::query_scalar::<_, String>("SELECT id FROM sessions WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1")
+                .bind(user.to_string())
+                .fetch_one(pool)
+                .await
+                .unwrap()
+                .parse::<Id>()
+                .unwrap()
+        }
+    };
+    let pulls = vec!["acme/repo#12".to_owned(), "other/repo#1".to_owned()];
+    let visible = |session: Id| orbit_server::realtime::visible_pulls(&fixture.database, fixture.workspace_id, session, pulls.clone());
+    // a repository no project is connected to is never named
+    assert_eq!(visible(session(member).await).await.unwrap(), vec!["acme/repo#12".to_owned()]);
+    sqlx::query("UPDATE projects SET private = 1 WHERE id = $1")
+        .bind(fixture.project_id.to_string())
+        .execute(fixture.database.pool())
+        .await
+        .unwrap();
+    assert_eq!(visible(session(member).await).await.unwrap(), Vec::<String>::new());
+    assert_eq!(visible(session(fixture.user_id).await).await.unwrap(), vec!["acme/repo#12".to_owned()]);
 }

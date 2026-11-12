@@ -249,6 +249,8 @@ async fn connect_round_trip_stores_encrypted_token() {
     let state = query_param(&authorize, "state").unwrap();
     let back = callback(&fixture, "code-1", &state).await;
     assert!(back.starts_with("https://orbit.test/profile/github?github=finish&token="));
+    // the page finishes in the workspace the flow started in, even if the member switched since
+    assert_eq!(query_param(&back, "workspace"), Some(fixture.workspace()));
     // the callback alone connects nothing: the signed-in member must finish
     assert_eq!(json_body(fixture.get(&me(&fixture)).await).await["status"], "disconnected");
     let (code, body) = finish(&fixture, &back, &fixture.session_cookie).await;

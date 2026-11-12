@@ -25,10 +25,13 @@ const REASON: Record<AsideReason, string> = { lockfile: 'Lockfile', generated: '
 
 /** All changed files in one scroll list: the files to review, then the files set aside, each folded to one row until
  *  it is opened. Pierre renders only what is on screen, so large pull requests stay fast. */
-export function PullDiffList({ workspaceId, pullRef, pull, review, aside, opened, onOpen, threads, diffStyle, highlightedThread }: {
+export function PullDiffList({ workspaceId, pullRef, pull, headSha, review, aside, opened, onOpen, threads, diffStyle, highlightedThread }: {
   workspaceId: string
   pullRef: PullRef
   pull: GithubPullDetail
+  /** The head commit of the files on screen. After a push it stays the old one until Refresh: comments and the
+   *  whole files for expanded lines must match the diff the reader sees, not the newest commit. */
+  headSha: string
   review: GithubPullFile[]
   aside: GithubPullFile[]
   /** Files opened by hand: set-aside files, and viewed files that stay unfolded. */
@@ -49,9 +52,9 @@ export function PullDiffList({ workspaceId, pullRef, pull, review, aside, opened
     const pathParams = { workspace_id: workspaceId, owner: pullRef.owner, repo: pullRef.repo, number: pullRef.number }
     return makeDiffFilesLoader({
       files: () => filesRef.current,
-      headSha: pull.head_sha,
+      headSha,
       mergeBase: async () => (await queryClient.fetchQuery({
-        queryKey: [...pullKeys.pull(workspaceId, pullRef), 'merge-base', pull.base_sha, pull.head_sha],
+        queryKey: [...pullKeys.pull(workspaceId, pullRef), 'merge-base', pull.base_sha, headSha],
         staleTime: Infinity,
         queryFn: async () => (await getGithubPullMergeBase({ client: apiClient, path: pathParams, throwOnError: true })).data,
       })).sha,
@@ -61,7 +64,7 @@ export function PullDiffList({ workspaceId, pullRef, pull, review, aside, opened
         queryFn: async () => (await getGithubPullContents({ client: apiClient, path: pathParams, query: { path, ref: sha }, throwOnError: true })).data,
       })).text ?? null,
     })
-  }, [pull.base_sha, pull.head_sha, pullRef, queryClient, workspaceId])
+  }, [pull.base_sha, headSha, pullRef, queryClient, workspaceId])
 
   const canComment = pull.viewer.can_comment
   // one comment box at a time; the line under the pointer is where M opens it
@@ -92,7 +95,7 @@ export function PullDiffList({ workspaceId, pullRef, pull, review, aside, opened
         composer={composer?.path === file.path ? composer : null}
         onComment={canComment ? setComposer : null}
         onHover={setHovered}
-        renderComposer={(target) => <CommentComposer key={draftKey(workspaceId, pullRef, target)} workspaceId={workspaceId} pullRef={pullRef} headSha={pull.head_sha} target={target} onDone={closeComposer} />}
+        renderComposer={(target) => <CommentComposer key={draftKey(workspaceId, pullRef, target)} workspaceId={workspaceId} pullRef={pullRef} headSha={headSha} target={target} onDone={closeComposer} />}
         actions={canComment ? actions : undefined}
       />
   return <Virtualizer className="h-full overflow-y-auto" contentClassName="flex flex-col gap-3 p-3 sm:p-4">

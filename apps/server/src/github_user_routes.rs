@@ -188,6 +188,8 @@ pub(crate) async fn delete_github_connection(
 
 /// Where the browser goes after GitHub's callback: `github=finish&token=…`, or `github=failed`.
 struct Return {
+    /// The workspace the flow started in: the member may have switched workspace since.
+    workspace: Option<String>,
     client: String,
     return_url: Option<String>,
     origin: String,
@@ -218,6 +220,7 @@ pub(crate) async fn github_connection_callback(
     Query(query): Query<CallbackQuery>,
 ) -> Redirect {
     let fallback = Return {
+        workspace: None,
         client: "web".to_owned(),
         return_url: None,
         origin: state.public_origin().to_owned(),
@@ -228,7 +231,10 @@ pub(crate) async fn github_connection_callback(
         return fallback.to("github=failed");
     };
     match keep_code(&state, &token, &code).await {
-        Some((back, finish)) => back.to(&format!("github=finish&token={finish}")),
+        Some((back, finish)) => {
+            let workspace = back.workspace.clone().unwrap_or_default();
+            back.to(&format!("github=finish&token={finish}&workspace={workspace}"))
+        }
         None => fallback.to("github=failed"),
     }
 }
@@ -242,7 +248,7 @@ async fn keep_code(state: &IntegrationState, token: &str, code: &str) -> Option<
     let finish_hash: [u8; 32] = Sha256::digest(finish.as_bytes()).into();
     let mut tx = state.database().immediate_transaction().await.ok()?;
     let row = sqlx::query(
-        "SELECT a.client, a.return_url, g.callback_origin FROM github_user_authorizations a \
+        "SELECT a.workspace_id, a.client, a.return_url, g.callback_origin FROM github_user_authorizations a \
          JOIN github_apps g ON g.workspace_id = a.workspace_id \
          WHERE a.state_hash = $1 AND a.code_encrypted IS NULL AND a.expires_at > $2",
     )
@@ -267,8 +273,10 @@ async fn keep_code(state: &IntegrationState, token: &str, code: &str) -> Option<
     }
     tx.commit().await.ok()?;
     let origin: Option<String> = row.get("callback_origin");
+    let workspace: String = row.get("workspace_id");
     Some((
         Return {
+            workspace: Some(workspace),
             client: row.get("client"),
             return_url: row.get("return_url"),
             origin: origin.unwrap_or_else(|| state.public_origin().to_owned()),

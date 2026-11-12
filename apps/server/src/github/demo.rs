@@ -1273,6 +1273,21 @@ fn graphql(demo: &mut Demo, viewer: &str, body: &Value) -> Response {
                 .collect();
             data(json!({ "repository": { "pullRequest": { "reviews": { "nodes": nodes } } } }))
         }
+        "NodePull" => {
+            let thread = node(&vars["id"], "PRRT_demo_");
+            let comment = node(&vars["id"], "PRRC_demo_");
+            let number = demo
+                .threads
+                .iter()
+                .find(|item| {
+                    Some(item.id) == thread
+                        || item.comments.iter().any(|entry| Some(entry.id) == comment)
+                })
+                .map(|item| item.number);
+            data(
+                json!({ "node": number.map(|number| json!({ "pullRequest": { "number": number, "repository": { "nameWithOwner": DEMO_REPOSITORY } } })) }),
+            )
+        }
         "MarkViewed" | "UnmarkViewed" => {
             let (Some(number), Some(path)) = (number, vars["path"].as_str()) else {
                 return graphql_error("NOT_FOUND", "no such file");

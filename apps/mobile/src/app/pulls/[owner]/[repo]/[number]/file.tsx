@@ -26,6 +26,10 @@ export default function PullFileScreen() {
   const [threadId, setThreadId] = useState<string | null>(params.thread ?? null)
   const thread = threads.data?.threads.find((item) => item.id === threadId) ?? null
   const canComment = pull.data?.viewer.can_comment ?? false
+  // The head commit of the diff on screen: the one current when the files loaded. A push refreshes the header (live
+  // events) and not the files, and a comment must land on the lines the reader sees (the server refuses a stale head).
+  const [shown, setShown] = useState<{ at: number; head: string } | null>(null)
+  if (files.data && pull.data && shown?.at !== files.dataUpdatedAt) setShown({ at: files.dataUpdatedAt, head: pull.data.head_sha })
   return (
     <SafeAreaView edges={['top', 'left', 'right']} className="flex-1 bg-background">
       <PaneHeader className="min-h-12 px-3">
@@ -53,7 +57,7 @@ export default function PullFileScreen() {
       ) : (
         <PullDiffView path={file.path} patch={patch} threads={threads.data?.threads ?? []} onThreadPress={setThreadId} onLinesSelected={(selected) => { if (canComment) setTarget(selected) }} />
       )}
-    <CommentSheet pullRef={ref} headSha={pull.data?.head_sha ?? ''} reviewing={(threads.data?.pending_review ?? null) !== null} target={target} onClose={() => setTarget(null)} />
+    <CommentSheet pullRef={ref} headSha={shown?.head ?? pull.data?.head_sha ?? ''} reviewing={(threads.data?.pending_review ?? null) !== null} target={target} onClose={() => setTarget(null)} />
       <ThreadSheet pullRef={ref} thread={thread} onClose={() => setThreadId(null)} />
     </SafeAreaView>
   )

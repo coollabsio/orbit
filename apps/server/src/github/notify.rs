@@ -122,7 +122,8 @@ pub async fn notify_pull_event(state: &IntegrationState, workspace: &Id, event: 
     // the actor column needs an Orbit user: the recipient stands in for a GitHub account without one
     .bind(actor.as_deref().unwrap_or(&recipient))
     .bind(notice.kind)
-    .bind(&notice.dedupe_key)
+    // `dedupe_key` is unique across workspaces; two workspaces can connect the same repository
+    .bind(format!("{workspace}:{}", notice.dedupe_key))
     .bind(TimestampMillis::now().as_millis())
     .bind(&repository)
     .bind(number)

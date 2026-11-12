@@ -17,6 +17,8 @@ async fn connected() -> GithubFixture {
     fixture
         .connect(fixture.user_id, (1, "octo"), "ghu_user", None, None)
         .await;
+    // every comment and thread the tests name belongs to acme/repo#12
+    fixture.github.graphql("query NodePull", json!({ "node": { "pullRequest": { "number": 12, "repository": { "nameWithOwner": "acme/repo" } } } }));
     fixture
 }
 
@@ -367,4 +369,25 @@ async fn comment_on_the_head_the_member_saw_is_placed() {
     body["head_sha"] = json!("h1");
     let response = fixture.send("POST", &pull_path(&fixture, "/comments"), &fixture.session_cookie, Some(body)).await;
     assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn a_comment_or_thread_of_another_pull_request_is_refused() {
+    // The URL names a pull request the member's project shows; the node belongs to another repository. Orbit checks
+    // the URL's pull request, so the node must not let a write slip past that check.
+    let fixture = fixture().await;
+    fixture.seed_app(true).await;
+    fixture.connect(fixture.user_id, (1, "octo"), "ghu_user", None, None).await;
+    fixture.github.graphql("query NodePull", json!({ "node": { "pullRequest": { "number": 12, "repository": { "nameWithOwner": "acme/internal" } } } }));
+    for (method, rest, body) in [
+        ("POST", "/threads/T_9/replies", Some(json!({ "body": "x" }))),
+        ("PATCH", "/comments/C_9", Some(json!({ "body": "x" }))),
+        ("DELETE", "/comments/C_9", None),
+        ("PUT", "/threads/T_9/resolved", None),
+        ("DELETE", "/threads/T_9/resolved", None),
+    ] {
+        let response = fixture.send(method, &pull_path(&fixture, rest), &fixture.session_cookie, body).await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND, "{method} {rest}");
+    }
+    assert_eq!(count(&fixture, "mutation"), 0);
 }

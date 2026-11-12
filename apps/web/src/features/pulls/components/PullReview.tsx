@@ -209,6 +209,7 @@ function ReviewBody({ workspaceId, pullRef, pull, commentId, onClose }: { worksp
             workspaceId={workspaceId}
             pullRef={pullRef}
             pull={pull}
+            headSha={shownHead}
             review={review}
             aside={aside}
             opened={opened}

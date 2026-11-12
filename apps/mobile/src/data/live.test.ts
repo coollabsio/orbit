@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 
-import { chatActions, LiveCursor, parseLiveFrame, parseWorkspaceEvent, socketUrl, workspaceEventKeys } from './live'
+import { chatActions, githubPullKeys, LiveCursor, parseLiveFrame, parseWorkspaceEvent, socketUrl, workspaceEventKeys } from './live'
 import type { MessageRecord } from './orbit'
 
 test('socket urls swap the scheme and encode the query', () => {
@@ -57,4 +57,23 @@ test('the live cursor resumes after the last event of the same epoch', () => {
   // a restored database starts a new epoch: the old number means nothing there
   cursor.read({ type: 'hello', epoch: 'e2', seq: 3 })
   expect(cursor.query()).toEqual({})
+})
+
+test('a GitHub-only event refreshes just the open pull requests, not the workspace data', () => {
+  const event = parseWorkspaceEvent('{"version":1,"kind":"workspace.changed","sequence":"3","github_only":true,"github_pulls":["acme/orbit#482","bad"]}')!
+  expect(workspaceEventKeys(event, 'w')).toEqual([])
+  // header, threads and conversation; the files wait for the reader (a push must not change the diff under them)
+  expect(githubPullKeys(event, 'w')).toEqual([
+    ['github-pulls', 'w', 'acme', 'orbit', 482],
+    ['github-pulls', 'w', 'acme', 'orbit', 482, 'threads'],
+    ['github-pulls', 'w', 'acme', 'orbit', 482, 'conversation'],
+  ])
+})
+
+test('a mixed event refreshes the workspace data and the pull requests; a resync is never GitHub-only', () => {
+  const mixed = parseWorkspaceEvent('{"version":1,"kind":"workspace.changed","sequence":"3","github_pulls":["acme/orbit#1"]}')!
+  expect(workspaceEventKeys(mixed, 'w').length).toBeGreaterThan(5)
+  expect(githubPullKeys(mixed, 'w').length).toBe(3)
+  const resync = parseWorkspaceEvent('{"version":1,"kind":"resync_required","sequence":"3","github_only":true}')!
+  expect(workspaceEventKeys(resync, 'w').length).toBeGreaterThan(5)
 })
