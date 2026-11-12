@@ -48,7 +48,7 @@ pub(super) async fn idempotency(
     };
     let Some(principal) = request.extensions().get::<ApiTokenPrincipal>().cloned() else {
         return out.error(TokenApiError::Internal(
-            "the API token principal is missing".to_owned(),
+            "the API token principal is missing".into(),
         ));
     };
     // The handler answers 403 and reads no body.
@@ -96,8 +96,9 @@ pub(super) async fn idempotency(
             return response;
         }
         Err(error) => {
-            tracing::error!(%error, "public API idempotency claim failed");
-            return out.error(TokenApiError::Internal(error.to_string()));
+            return out.error(TokenApiError::Internal(format!(
+                "public API idempotency claim failed: {error}"
+            )));
         }
     }
 
@@ -106,7 +107,7 @@ pub(super) async fn idempotency(
     let Ok(bytes) = to_bytes(body, MAX_BODY_BYTES).await else {
         release(&state, &principal, &key).await;
         return out.error(TokenApiError::Internal(
-            "the response body could not be read".to_owned(),
+            "the response body is too large to keep".into(),
         ));
     };
     // Only a success is kept: after an error nothing was made, so a retry may run again.

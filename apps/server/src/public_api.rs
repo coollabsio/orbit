@@ -788,6 +788,8 @@ struct CycleOut {
     completed_count: i64,
     estimate_total: i64,
     estimate_completed: i64,
+    /// Live tasks moved out of this cycle to a later one and not back in it; not in `task_count`.
+    carried_over_count: i64,
 }
 
 impl From<CycleView> for CycleOut {
@@ -805,6 +807,7 @@ impl From<CycleView> for CycleOut {
             completed_count: c.completed_count,
             estimate_total: c.estimate_total,
             estimate_completed: c.estimate_completed,
+            carried_over_count: c.carried_over_count,
         }
     }
 }
@@ -853,6 +856,16 @@ impl From<CommentRecord> for CommentOut {
             updated_at: c.updated_at,
         }
     }
+}
+
+#[derive(Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+#[serde(deny_unknown_fields)]
+struct DocsQuery {
+    /// An approved project: only the global docs, the docs of this project's teamspace and
+    /// private docs.
+    #[param(value_type = Option<String>)]
+    project_id: Option<Id>,
 }
 
 #[derive(Deserialize, IntoParams)]
@@ -1693,18 +1706,23 @@ async fn delete_task(
     operation_id = "public_list_docs",
     tag = "public-api",
     summary = "The docs that the token's creator can see",
-    params(("workspace_id" = String, Path, description = "The token's workspace, from `GET /me`.")),
+    params(("workspace_id" = String, Path, description = "The token's workspace, from `GET /me`."), DocsQuery),
     responses((status = 200, description = "Every visible doc; `next_cursor` is `null`", body = List<PageSummary>)),
     security(("bearerAuth" = []))
 )]
-async fn docs(State(s): State<PublicApiState>, ctx: Ctx) -> Response {
+async fn docs(
+    State(s): State<PublicApiState>,
+    ctx: Ctx,
+    query: Result<Query<DocsQuery>, QueryRejection>,
+) -> Response {
+    let query = input!(ctx, ApiTokenScope::DocsRead, query);
     let result = async {
         let api = s
             .api
             .authorize(&ctx.principal, ApiTokenScope::DocsRead, &ctx.request_id)
             .await?;
         Ok(List {
-            items: api.list_docs().await?.items,
+            items: api.list_docs(query.project_id).await?.items,
             next_cursor: None,
         })
     }

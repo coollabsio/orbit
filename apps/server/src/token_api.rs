@@ -1539,14 +1539,35 @@ impl Authorized<'_> {
         repository.as_ref().ok_or(TokenApiError::NotAvailable)
     }
 
-    /// Each doc's `version` is its [`revision`], as in [`DocView`].
-    pub async fn list_docs(&self) -> Result<PageList> {
+    /// Each doc's `version` is its [`revision`], as in [`DocView`]. With `project_id` (an
+    /// approved project), only the global docs, the project's teamspace and private docs: the
+    /// docs of teamspaces linked to other projects are left out.
+    pub async fn list_docs(&self, project_id: Option<Id>) -> Result<PageList> {
         let pages = self.content(ApiTokenScope::DocsRead, &self.api.pages)?;
         let p = self.principal;
+        if project_id.is_some_and(|id| !self.approved(id)) {
+            return Err(TaskError::NotFound.into());
+        }
         let mut list = pages
             .pages(p.workspace_id, p.actor_id)
             .await
             .map_err(hidden_page)?;
+        if let Some(project_id) = project_id {
+            let other: HashSet<Id> = sqlx::query_scalar::<_, String>(
+                "SELECT id FROM teamspaces WHERE workspace_id = $1 AND project_id IS NOT NULL \
+                 AND project_id <> $2",
+            )
+            .bind(p.workspace_id.to_string())
+            .bind(project_id.to_string())
+            .fetch_all(self.api.tasks.database().pool())
+            .await
+            .map_err(TaskError::from)?
+            .iter()
+            .filter_map(|id| id.parse().ok())
+            .collect();
+            list.items
+                .retain(|page| !page.teamspace_id.is_some_and(|id| other.contains(&id)));
+        }
         for page in &mut list.items {
             page.version = revision(page.version, page.updated_at);
         }
@@ -1599,7 +1620,7 @@ impl Authorized<'_> {
         })
     }
 
-    /// `blocks` as Markdown, with links to the pages that the actor can see.
+    /// `blocks` of the doc `page_id` as Markdown, with links to the pages that the actor can see.
     async fn markdown(
         &self,
         pages: &PageRepository,

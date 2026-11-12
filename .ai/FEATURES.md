@@ -92,8 +92,9 @@ Core files: `TasksPage.tsx`, `components/TaskList.tsx`, `components/TaskBoard.ts
   "Duplicate" state lands on Cancelled until its duplicate relation moves it. Issues keep the markdown description, title,
   priority (0-4 → none/urgent/high/medium/low), labels (`Group/Name` for grouped labels), assignee matched by email (else a
   description line), due date (12:00 UTC), completed or canceled time, URL as source, sub-issues (five levels; deeper ones
-  and ones whose parent is in another team go to the top level with a "Parent" line). Linear project, cycle, milestone,
-  estimate and SLA become description lines; linked attachments a Links section. Uploads (`uploads.linear.app`) in the
+  and ones whose parent is in another team go to the top level with a "Parent" line). Linear project milestones (named
+  `<Linear project> / <milestone>`), cycles and estimates become real milestones, cycles and estimates; the Linear
+  project and SLA become description lines; linked attachments a Links section. Uploads (`uploads.linear.app`) in the
   description and comments are downloaded with the key, attached, and their URLs rewritten. Comments are written by the
   importer with author and time, replies flattened in time order. Relations: blocks, related and duplicate (similar is
   skipped); a relation Orbit cannot hold (one per pair of tasks, one duplicate per task, no chains) is checked before the
@@ -157,6 +158,25 @@ Core files: `apps/server/src/repositories/sub_issues.rs` (parent checks, tree wa
 - Deleting a task trashes its subtree; restoring it restores what was trashed with it. A task restored alone under a trashed
   parent comes back top-level.
 
+### Milestones, cycles and estimates
+
+Core files: server `repositories/tasks/milestones.rs`, `repositories/tasks/cycles.rs` (migrations `20261111122213`,
+`20261112175306`); web `ProjectMilestonesCard.tsx`, `ProjectCyclesCard.tsx`, `PlanningPickers.tsx`, `planningLib.ts`,
+`timeline/`; mobile `tasks/settings/[projectId].tsx`.
+
+- Both belong to one project. A task has at most one milestone (`milestone_id`) and one cycle (`cycle_id`), independent of
+  each other and of sub-issues: a milestone is the "what" (a workstream; it spans cycles), a cycle the "when".
+- Milestone: name, description, `target_at`, order; "Late" when the target passed and a task is open. Cycle: number,
+  optional name, `[starts_at, ends_at)` in epoch ms (the client picks days in its local time zone); overlapping cycles of a
+  project → 409 `cycle_overlap`.
+- Progress (`plan_progress_sql`): live tasks without cancelled and duplicate ones, each sub-issue counted as its own
+  task; done = `completed` category; points sum the estimates (0-1000).
+- "Move unfinished tasks to next cycle" (409 `no_next_cycle`) moves open tasks to the first later cycle and writes a
+  `task_cycle_carryovers` row per task; the old cycle's `carried_over_count` keeps them, so a past cycle does not look
+  done. There is no cycle close state and no "back to backlog" policy (bulk-clear the cycle instead).
+- Moving a task to another project keeps the milestone only when that project has one with the same name, and always
+  clears the cycle. Recurrence keeps the milestone and estimate, not the cycle.
+
 ### Project workflows
 
 - Statuses are per-project entities, not a fixed enum.
@@ -180,6 +200,13 @@ favorites through `/pages/favorites` (list), `/pages/{page_id}/favorite` (PUT/DE
   Each workspace starts with a default teamspace "General"; new root pages go there unless created in another space.
   The default is derived: the first teamspace by position (with several teamspaces its header shows a small "Default"
   label with a tooltip), so moving another teamspace to the top makes it the default.
+- Project docs (#64): a teamspace can hold the docs of one project (`teamspaces.project_id`, `PATCH /teamspaces/{id}`
+  `{ project_id }`, `null` = global docs; a project has at most one teamspace: 409 `project_has_teamspace`; a project
+  the member does not see or a trashed one: 422 `project_not_found`). Project settings → "Docs" card picks the teamspace,
+  creates one named after the project, or opens its first page. The docs sidebar shows the project (color dot + name)
+  after the teamspace name, only for projects the member sees. MCP `list_docs` and `GET /docs` take `project_id` to list
+  only the global docs, that project's docs and private docs (a filter, not a permission). A deleted project leaves a
+  global teamspace (`ON DELETE SET NULL`). Workspace export/import does not carry the link.
 - Sidebar: 48px "Documents" header (its "+" creates a page in the default teamspace), a "Teamspaces" label with "+" (create
   dialog), one collapsible section per teamspace (hover "+" adds a page there; "…" menu: Rename inline, Change icon (emoji
   picker anchored to the header; "Remove" returns to the default people glyph), Move up / Move down, Delete teamspace for
