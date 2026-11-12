@@ -402,6 +402,16 @@ impl App {
             origin_policy = origin_policy.trust_proxy(*proxy);
         }
         let metrics = Metrics::default();
+        // Development only: sample pull requests from a local stand-in for GitHub (`ORBIT_DEV_DEMO_GITHUB=1`).
+        let github_endpoints = if config.environment == orbit_platform::EnvironmentMode::Development
+            && crate::github::demo::enabled()
+        {
+            let base = crate::github::demo::start_demo_github().await;
+            tracing::info!(%base, "demo GitHub with sample pull requests");
+            crate::github::GithubEndpoints::local(&base)
+        } else {
+            crate::github::GithubEndpoints::production()
+        };
         let oauth = crate::oauth::OAuthState::new(
             Arc::clone(&identity),
             cookie_mode,
@@ -508,6 +518,7 @@ impl App {
                     config.environment == orbit_platform::EnvironmentMode::Development,
                     app_key,
                 )
+                .with_github_endpoints(github_endpoints)
                 .with_native_redirects(&config.http.dev_native_redirects),
                 imports: ImportState::new(Arc::clone(&identity), notion_imports, cookie_mode),
                 asana_imports: AsanaImportState::new(

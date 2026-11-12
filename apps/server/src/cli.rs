@@ -423,7 +423,7 @@ async fn migrate(config: Config, command: &MigrateCommand) -> Result<String, Cli
     let mut output = format!("applied {count} migration(s)");
     if seed {
         output.push('\n');
-        output.push_str(&install_seed_data(database).await?);
+        output.push_str(&install_seed_data(database, app_key_bytes(&config)).await?);
     }
     Ok(output)
 }
@@ -624,7 +624,7 @@ async fn seed(config: Config) -> Result<String, CliError> {
     require_development(&config)?;
     let database = open_database(&config.data).await?;
     migrate_implicitly(&config, &database).await?;
-    install_seed_data(database).await
+    install_seed_data(database, app_key_bytes(&config)).await
 }
 
 async fn root(config: Config, command: &RootCommand) -> Result<String, CliError> {
@@ -896,7 +896,14 @@ async fn seed_chat(
     Ok(())
 }
 
-async fn install_seed_data(database: Database) -> Result<String, CliError> {
+fn app_key_bytes(config: &Config) -> Option<[u8; 32]> {
+    config.app_key.as_ref().map(|key| *key.bytes())
+}
+
+async fn install_seed_data(
+    database: Database,
+    app_key: Option<[u8; 32]>,
+) -> Result<String, CliError> {
     const EMAIL: &str = "test@example.com";
     const SECOND_EMAIL: &str = "member@example.com";
     const PASSWORD_HASH: &str = "$argon2id$v=19$m=19456,t=2,p=1$WUH9bzy7j6QyIqQ+iO+WUA$E+J7gy74Md7ZnwnccCH7oMqGdoj/u2SDc5QLvOzKMpA";
@@ -1081,6 +1088,7 @@ async fn install_seed_data(database: Database) -> Result<String, CliError> {
     .execute(database.pool())
     .await
     .map_err(operation)?;
+    let demo_database = database.clone();
     if already_seeded == 0 {
         let status_id: String = sqlx::query_scalar(
             "SELECT id FROM task_statuses WHERE project_id = $1 ORDER BY position LIMIT 1",
@@ -1114,10 +1122,28 @@ async fn install_seed_data(database: Database) -> Result<String, CliError> {
             .await
             .map_err(operation)?;
     }
-    Ok(
-        "development seed data installed\nusers: test@example.com, member@example.com\npassword: password\nregistration: open\nmail: Mailpit at 127.0.0.1:11025 unless a mail server is set"
-            .to_owned(),
-    )
+    let mut output = "development seed data installed\nusers: test@example.com, member@example.com\npassword: password\nregistration: open\nmail: Mailpit at 127.0.0.1:11025 unless a mail server is set"
+        .to_owned();
+    if orbit_server::github::demo::enabled() {
+        output.push_str(&match app_key {
+            Some(key) => match orbit_server::github::demo::seed_demo(
+                &demo_database,
+                &key,
+                workspace_id,
+                project_id,
+                user_id,
+                member_id,
+            )
+            .await
+            .map_err(operation)?
+            {
+                true => "\ngithub: demo pull requests on acme/orbit (both users connected)",
+                false => "\ngithub: demo skipped, the workspace has another GitHub App",
+            },
+            None => "\ngithub: demo skipped, it needs ORBIT_APP_KEY",
+        });
+    }
+    Ok(output)
 }
 
 fn effective_config(cli: &Cli, env: BTreeMap<String, String>) -> Result<Config, CliError> {
