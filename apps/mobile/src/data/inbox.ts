@@ -1,6 +1,5 @@
-import { pullPath } from '@orbit/api/github'
-
 import type { NotificationRecord } from './orbit'
+import { pullRoute } from './pull-route'
 
 const IMPORT_NAMES: Record<string, string> = { asana: 'Asana', linear: 'Linear', trello: 'Trello', notion: 'Notion', obsidian: 'Obsidian' }
 
@@ -8,7 +7,7 @@ const IMPORT_NAMES: Record<string, string> = { asana: 'Asana', linear: 'Linear',
 export function notificationTarget(notification: NotificationRecord): string | null {
   if (notification.kind.startsWith('github_')) {
     const [owner, repo] = (notification.github_repository ?? '').split('/')
-    return owner && repo && notification.github_pull_number ? pullPath({ owner, repo, number: notification.github_pull_number }) : null
+    return owner && repo && notification.github_pull_number ? pullRoute({ owner, repo, number: notification.github_pull_number }) : null
   }
   if (notification.kind === 'import_finished') {
     const source = notification.import_source ?? ''

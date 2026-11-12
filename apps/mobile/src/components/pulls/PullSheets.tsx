@@ -182,69 +182,61 @@ function ThreadBody({ pullRef, thread }: { pullRef: PullRef; thread: GithubRevie
 }
 
 type Event = 'COMMENT' | 'APPROVE' | 'REQUEST_CHANGES'
-const EVENTS: { value: Event; label: string; hint: string }[] = [
-  { value: 'COMMENT', label: 'Comment', hint: 'Feedback without approval.' },
-  { value: 'APPROVE', label: 'Approve', hint: 'Give your approval to merge.' },
-  { value: 'REQUEST_CHANGES', label: 'Request changes', hint: 'Feedback that must be addressed first.' },
-]
 
-/** The web's Review panel. */
+/** The web's Review panel: a summary, and one tap to comment, request changes or approve. The member's pending
+ *  comments go with it. GitHub refuses an empty comment or change request; an approval may be empty. The author can
+ *  only comment. */
 export function ReviewSheet({ pullRef, pull, pending, visible, onClose }: { pullRef: PullRef; pull: GithubPullDetail; pending: number; visible: boolean; onClose: () => void }) {
-  const { colors } = useTheme()
-  const [event, setEvent] = useState<Event>('COMMENT')
   const [body, setBody] = useState('')
+  const [sending, setSending] = useState<Event | null>(null)
   const submit = useSubmitReview(pullRef)
   const discard = useDiscardReview(pullRef)
-  const events = EVENTS.filter((item) => !pull.viewer.is_author || item.value === 'COMMENT')
-  const empty = event !== 'APPROVE' && !body.trim() && pending === 0
+  const decide = pull.viewer.can_review && !pull.viewer.is_author
+  const empty = !body.trim() && pending === 0
+  const send = (event: Event) => {
+    if ((event !== 'APPROVE' && empty) || submit.isPending) return
+    setSending(event)
+    submit.mutate(
+      { event, body },
+      {
+        onSuccess: () => {
+          setBody('')
+          onClose()
+        },
+        onSettled: () => setSending(null),
+      },
+    )
+  }
   return (
     <PageSheet title="Review" visible={visible} onClose={onClose}>
       <ScrollView contentContainerClassName="gap-3 p-4" keyboardShouldPersistTaps="handled">
-        <Field label="Review summary" value={body} onChangeText={setBody} />
-        {events.map((item) => (
-          <Pressable key={item.value} accessibilityRole="radio" accessibilityState={{ checked: event === item.value }} accessibilityLabel={item.label} onPress={() => setEvent(item.value)} className="flex-row items-start gap-2.5 rounded-lg p-2 active:bg-muted">
-            <View className={`mt-0.5 size-4 items-center justify-center rounded-full border ${event === item.value ? 'border-primary' : 'border-border'}`}>{event === item.value ? <View className="size-2 rounded-full bg-primary" /> : null}</View>
-            <View className="flex-1">
-              <Text className="font-noto-medium text-[14px]">{item.label}</Text>
-              <Text className="text-[12px] text-muted-foreground">{item.hint}</Text>
-            </View>
-          </Pressable>
-        ))}
-        {pending > 0 ? <Text className="text-[12px] text-muted-foreground">{`${pending} pending ${pending === 1 ? 'comment goes' : 'comments go'} with the review.`}</Text> : null}
-        {empty ? <Text className="text-[12px] text-muted-foreground">Write a summary or add comments first.</Text> : null}
+        <Field label={decide ? 'Summary (optional for an approval)' : 'Summary'} value={body} onChangeText={setBody} autoFocus />
+        {pending > 0 ? <Text className="text-[12px] text-muted-foreground">{`Your ${pending} pending ${pending === 1 ? 'comment goes' : 'comments go'} with the review.`}</Text> : null}
+        {empty && !decide ? <Text className="text-[12px] text-muted-foreground">Write a summary or add comments first.</Text> : null}
         {submit.isError ? <Text className="text-[12px] text-destructive">{githubMessage(submit.error, 'GitHub did not take the review. Try again.')}</Text> : null}
-        <Button
-          label="Submit review"
-          disabled={empty}
-          loading={submit.isPending}
-          onPress={() =>
-            submit.mutate(
-              { event, body },
-              {
-                onSuccess: () => {
-                  setBody('')
-                  onClose()
-                },
-              },
-            )
-          }
-        />
-        {pending > 0 ? (
-          <Pressable
-            accessibilityRole="button"
-            onPress={() =>
-              Alert.alert('Discard your pending review?', 'Your pending comments are deleted on GitHub too.', [
-                { text: 'Cancel', style: 'cancel' },
-                { text: 'Discard', style: 'destructive', onPress: () => discard.mutate(undefined, { onSuccess: onClose }) },
-              ])
-            }
-            className="items-center py-2"
-          >
-            <Text className="text-[13px]" style={{ color: colors.destructive }}>
-              Discard pending review
-            </Text>
-          </Pressable>
-        ) : null}
+        <View className="flex-row flex-wrap items-center justify-end gap-2">
+          {pending > 0 ? (
+            <Button
+              label="Discard"
+              variant="destructive"
+              loading={discard.isPending}
+              onPress={() =>
+                Alert.alert('Discard your pending review?', `Your ${pending} pending ${pending === 1 ? 'comment is' : 'comments are'} deleted on GitHub too.`, [
+                  { text: 'Cancel', style: 'cancel' },
+                  { text: 'Discard', style: 'destructive', onPress: () => discard.mutate(undefined, { onSuccess: onClose }) },
+                ])
+              }
+            />
+          ) : null}
+          <View className="flex-1" />
+          <Button label="Comment" variant="ghost" disabled={empty || submit.isPending} loading={sending === 'COMMENT'} onPress={() => send('COMMENT')} />
+          {decide ? (
+            <>
+              <Button label="Request changes" variant="outline" disabled={empty || submit.isPending} loading={sending === 'REQUEST_CHANGES'} onPress={() => send('REQUEST_CHANGES')} />
+              <Button label="Approve" disabled={submit.isPending} loading={sending === 'APPROVE'} onPress={() => send('APPROVE')} />
+            </>
+          ) : null}
+        </View>
       </ScrollView>
     </PageSheet>
   )

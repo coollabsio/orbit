@@ -37,9 +37,10 @@ export function usePullThreads(ref: PullRef) {
   return useQuery({ ...shared, queryKey: api.pullKeys.threads(workspaceId, ref), queryFn: () => api.pullThreads(client, workspaceId, ref) })
 }
 
-export function usePullConversation(ref: PullRef, enabled: boolean) {
+/** The conversation: the summary's reviews read it, so it loads with the pull request (not only on Overview). */
+export function usePullConversation(ref: PullRef) {
   const { client, workspaceId } = useOrbit()
-  return useQuery({ ...shared, enabled, queryKey: api.pullKeys.conversation(workspaceId, ref), queryFn: () => api.pullConversation(client, workspaceId, ref) })
+  return useQuery({ ...shared, queryKey: api.pullKeys.conversation(workspaceId, ref), queryFn: () => api.pullConversation(client, workspaceId, ref) })
 }
 
 /** Marks a file viewed on GitHub; the tick changes at once and goes back when GitHub refuses. */

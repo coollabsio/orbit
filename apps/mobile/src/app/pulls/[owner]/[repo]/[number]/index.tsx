@@ -1,28 +1,26 @@
 import type { GithubPullDetail, GithubPullFile, GithubReviewThread } from '@orbit/api/generated/types.gen'
-import { threadsOutsideDiff } from '@orbit/api/github'
+import { asideReason, type AsideReason, reviewSummary, threadsOutsideDiff, threadWaitsFor } from '@orbit/api/github'
 import { openURL } from 'expo-linking'
 import { router, useLocalSearchParams } from 'expo-router'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Pressable, ScrollView, View } from 'react-native'
 
-import { ConnectGithubPrompt } from '../../../../../../../components/github/ConnectGithubPrompt'
-import { GithubAvatar, PullStateBadge } from '../../../../../../../components/pulls/PullBits'
-import { MergeSheet, ReviewSheet } from '../../../../../../../components/pulls/PullSheets'
-import { relativeAgo } from '../../../../../../../data/format'
-import { markdownToText } from '../../../../../../../data/markdown'
-import { fileHref, githubPromptStatus, isNotFound } from '../../../../../../../data/pulls-api'
-import { usePull, usePullConversation, usePullFiles, usePullThreads, useSetViewed } from '../../../../../../../hooks/pulls'
-import { useTheme } from '../../../../../../../theme'
-import { Button, ErrorView, Icon, IconButton, LoadingView, PaneHeader, PullRefresh, SafeAreaView, Text } from '../../../../../../../ui'
+import { ConnectGithubPrompt } from '../../../../../components/github/ConnectGithubPrompt'
+import { GithubAvatar, PullStateBadge } from '../../../../../components/pulls/PullBits'
+import { MergeSheet, ReviewSheet } from '../../../../../components/pulls/PullSheets'
+import { PullSummary } from '../../../../../components/pulls/PullSummary'
+import { relativeAgo } from '../../../../../data/format'
+import { markdownToText } from '../../../../../data/markdown'
+import { fileHref } from '../../../../../data/pull-route'
+import { githubPromptStatus, isNotFound } from '../../../../../data/pulls-api'
+import { usePull, usePullConversation, usePullFiles, usePullThreads, useSetViewed } from '../../../../../hooks/pulls'
+import { useTheme } from '../../../../../theme'
+import { Button, ErrorView, Icon, IconButton, LoadingView, PaneHeader, PullRefresh, SafeAreaView, Text } from '../../../../../ui'
 
-const CHECK: Record<string, { label: string; dot: string }> = {
-  success: { label: 'Checks passed', dot: 'bg-emerald-500' },
-  failure: { label: 'Checks failed', dot: 'bg-red-500' },
-  pending: { label: 'Checks running', dot: 'bg-amber-500' },
-  neutral: { label: 'Checks done', dot: 'bg-muted-foreground' },
-}
+const REASON: Record<AsideReason, string> = { lockfile: 'Lockfile', generated: 'Generated', snapshot: 'Snapshot' }
 
-/** The web's pull request viewer on a phone: the header, then the changed files or the conversation. */
+/** The web's pull request overlay on a phone, a full-screen modal over the tab it was opened from: the header, the
+ *  summary, then the changed files or the conversation. */
 export default function PullScreen() {
   const params = useLocalSearchParams<{ owner: string; repo: string; number: string; comment?: string }>()
   const ref = useMemo(() => ({ owner: params.owner, repo: params.repo, number: Number(params.number) }), [params.owner, params.repo, params.number])
@@ -32,7 +30,7 @@ export default function PullScreen() {
   return (
     <SafeAreaView edges={['top', 'left', 'right']} className="flex-1 bg-background">
       <PaneHeader className="min-h-12 px-3">
-        <IconButton icon="back" label="Back" color={colors.mutedForeground} onPress={() => router.back()} />
+        <IconButton icon="close" label="Close" color={colors.mutedForeground} onPress={() => router.back()} />
         <Text numberOfLines={1} className="flex-1 text-[13px] text-muted-foreground">
           {ref.owner}/{ref.repo} #{ref.number}
         </Text>
@@ -54,19 +52,35 @@ export default function PullScreen() {
 }
 
 function PullBody({ pull, refetch, comment }: { pull: GithubPullDetail; refetch: () => Promise<unknown>; comment: number | null }) {
+  const { colors } = useTheme()
   const ref = useMemo(() => { const [owner = '', repo = ''] = pull.repository.split('/'); return { owner, repo, number: pull.number } }, [pull.repository, pull.number])
   const [tab, setTab] = useState<'files' | 'overview'>('files')
   const [sheet, setSheet] = useState<'review' | 'merge' | null>(null)
   const files = usePullFiles(ref)
   const threads = usePullThreads(ref)
-  const conversation = usePullConversation(ref, tab === 'overview')
+  const conversation = usePullConversation(ref)
   const setViewed = useSetViewed(ref)
-  const check = CHECK[pull.checks.state]
+  const [asideOpen, setAsideOpen] = useState(false)
   const pending = threads.data?.pending_review?.comment_count ?? 0
   const open = pull.state === 'open' || pull.state === 'draft'
-  const allThreads = threads.data?.threads ?? []
-  const outside = threadsOutsideDiff(allThreads, files.data ?? [])
-  const countOf = (path: string) => allThreads.filter((thread) => thread.path === path && thread.line != null).length
+  const allThreads = useMemo(() => threads.data?.threads ?? [], [threads.data])
+  const allFiles = useMemo(() => files.data ?? [], [files.data])
+  const outside = threadsOutsideDiff(allThreads, allFiles)
+  const review = allFiles.filter((file) => asideReason(file.path) === null)
+  const aside = allFiles.filter((file) => asideReason(file.path) !== null)
+  const summary = useMemo(() => reviewSummary({ files: allFiles, threads: allThreads, timeline: conversation.data ?? [], viewer: pull.viewer.login, author: pull.author.login }), [allFiles, allThreads, conversation.data, pull.viewer.login, pull.author.login])
+  // the web's thread count: open threads on the file's lines
+  const countOf = (path: string) => allThreads.filter((thread) => thread.path === path && thread.line != null && !thread.is_resolved).length
+  const openThread = (thread: GithubReviewThread) => {
+    if (threadsOutsideDiff([thread], allFiles).length > 0) setTab('overview')
+    else router.push(fileHref(pull, thread.path, thread.id) as never)
+  }
+  // "N open": the first thread that waits for the member, else the first open one
+  const nextThread = () => {
+    const unresolved = allThreads.filter((thread) => !thread.is_resolved)
+    const next = unresolved.find((thread) => threadWaitsFor(thread, pull.viewer.login, pull.author.login)) ?? unresolved[0]
+    if (next) openThread(next)
+  }
   // a notification opens its thread's file once
   const opened = useRef(false)
   useEffect(() => {
@@ -74,12 +88,11 @@ function PullBody({ pull, refetch, comment }: { pull: GithubPullDetail; refetch:
     const thread = threads.data.threads.find((item) => item.comments.some((entry) => entry.database_id === comment))
     if (!thread) return
     opened.current = true
-    if (threadsOutsideDiff([thread], files.data ?? []).length > 0) setTab('overview')
-    else router.push(fileHref(pull, thread.path, thread.id) as never)
+    openThread(thread)
   }, [comment, threads.data, pull])
 
   return (
-    <ScrollView refreshControl={<PullRefresh onRefresh={() => Promise.all([refetch(), files.refetch(), threads.refetch()])} />} contentContainerClassName="gap-4 p-4 pb-10">
+    <ScrollView refreshControl={<PullRefresh onRefresh={() => Promise.all([refetch(), files.refetch(), threads.refetch(), conversation.refetch()])} />} contentContainerClassName="gap-4 p-4 pb-10">
       <View className="gap-2">
         <Text className="font-noto-semibold text-[18px] leading-[24px]">{pull.title}</Text>
         <View className="flex-row flex-wrap items-center gap-2">
@@ -90,21 +103,13 @@ function PullBody({ pull, refetch, comment }: { pull: GithubPullDetail; refetch:
             {pull.head_ref} → {pull.base_ref}
           </Text>
         </View>
-        <View className="flex-row flex-wrap items-center gap-3">
-          <Text className="text-[12px]">
-            <Text className="text-[12px] text-emerald-700 dark:text-emerald-400">+{pull.additions}</Text> <Text className="text-[12px] text-red-700 dark:text-red-400">−{pull.deletions}</Text>
-          </Text>
-          {check ? (
-            <View className="flex-row items-center gap-1.5">
-              <View className={`size-2 rounded-full ${check.dot}`} />
-              <Text className="text-[12px] text-muted-foreground">{check.label}</Text>
-            </View>
-          ) : null}
-        </View>
+        <Text className="text-[12px]">
+          <Text className="text-[12px] text-emerald-700 dark:text-emerald-400">+{pull.additions}</Text> <Text className="text-[12px] text-red-700 dark:text-red-400">−{pull.deletions}</Text>
+        </Text>
         {pull.tasks.length > 0 ? (
           <View className="flex-row flex-wrap gap-1.5">
             {pull.tasks.map((task) => (
-              <Pressable key={task.task_id} accessibilityRole="link" onPress={() => router.push(`/tasks/${task.task_id}`)} className="h-7 flex-row items-center rounded-md border border-border px-2 active:bg-muted">
+              <Pressable key={task.task_id} accessibilityRole="link" onPress={() => router.dismissTo(`/tasks/${task.task_id}`)} className="h-7 flex-row items-center rounded-md border border-border px-2 active:bg-muted">
                 <Text numberOfLines={1} className="max-w-56 text-[12px]">
                   {task.title}
                 </Text>
@@ -113,6 +118,7 @@ function PullBody({ pull, refetch, comment }: { pull: GithubPullDetail; refetch:
           </View>
         ) : null}
       </View>
+      <PullSummary pull={pull} summary={summary} onNextThread={nextThread} />
       {open && (pull.viewer.can_review || pending > 0 || pull.viewer.can_merge) ? (
         <View className="flex-row gap-2">
           {pull.viewer.can_review || pending > 0 ? <Button label={pending > 0 ? `Review (${pending} pending)` : 'Review'} variant={pending > 0 ? 'primary' : 'outline'} onPress={() => setSheet('review')} /> : null}
@@ -135,9 +141,22 @@ function PullBody({ pull, refetch, comment }: { pull: GithubPullDetail; refetch:
           <Text className="text-[13px] text-muted-foreground">Loading files…</Text>
         ) : (
           <View className="overflow-hidden rounded-lg border border-border">
-            {files.data.map((file, index) => (
+            {review.map((file, index) => (
               <FileRow key={file.path} file={file} first={index === 0} threads={countOf(file.path)} onOpen={() => router.push(fileHref(pull, file.path) as never)} onViewed={() => setViewed.mutate({ file: file.path, viewed: !file.viewed })} />
             ))}
+            {aside.length > 0 ? (
+              <>
+                <Pressable accessibilityRole="button" accessibilityState={{ expanded: asideOpen }} accessibilityLabel={`Set aside, ${aside.length} files`} onPress={() => setAsideOpen(!asideOpen)} className={`min-h-10 flex-row items-center gap-1.5 border-border px-3 active:bg-muted ${review.length > 0 ? 'border-t' : ''}`}>
+                  <Icon name={asideOpen ? 'chevronDown' : 'chevronRight'} size={12} color={colors.mutedForeground} />
+                  <Text className="text-[12px] text-muted-foreground">{`Set aside ${aside.length}`}</Text>
+                </Pressable>
+                {asideOpen
+                  ? aside.map((file) => (
+                      <FileRow key={file.path} file={file} first={false} note={REASON[asideReason(file.path) ?? 'generated']} threads={countOf(file.path)} onOpen={() => router.push(fileHref(pull, file.path) as never)} onViewed={() => setViewed.mutate({ file: file.path, viewed: !file.viewed })} />
+                    ))
+                  : null}
+              </>
+            ) : null}
           </View>
         )
       ) : (
@@ -147,7 +166,7 @@ function PullBody({ pull, refetch, comment }: { pull: GithubPullDetail; refetch:
   )
 }
 
-function FileRow({ file, first, threads, onOpen, onViewed }: { file: GithubPullFile; first: boolean; threads: number; onOpen: () => void; onViewed: () => void }) {
+function FileRow({ file, first, note, threads, onOpen, onViewed }: { file: GithubPullFile; first: boolean; note?: string; threads: number; onOpen: () => void; onViewed: () => void }) {
   const { colors } = useTheme()
   const name = file.path.slice(file.path.lastIndexOf('/') + 1)
   const folder = file.path.includes('/') ? file.path.slice(0, file.path.lastIndexOf('/')) : ''
@@ -166,10 +185,11 @@ function FileRow({ file, first, threads, onOpen, onViewed }: { file: GithubPullF
           </Text>
         ) : null}
       </Pressable>
+      {note ? <Text className="text-[11px] text-muted-foreground">{note}</Text> : null}
       {threads > 0 ? (
-        <View className="flex-row items-center gap-0.5">
-          <Icon name="messages2" size={12} color={colors.mutedForeground} />
-          <Text className="text-[11px] text-muted-foreground">{threads}</Text>
+        <View accessibilityLabel={`${threads} open ${threads === 1 ? 'thread' : 'threads'}`} className="flex-row items-center gap-0.5">
+          <Icon name="messages2" size={12} color={colors.primary} />
+          <Text className="text-[11px] text-primary">{threads}</Text>
         </View>
       ) : null}
       <Text className="text-[11px]">

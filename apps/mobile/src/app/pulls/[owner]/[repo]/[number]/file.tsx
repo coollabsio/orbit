@@ -4,11 +4,11 @@ import { router, useLocalSearchParams } from 'expo-router'
 import { useMemo, useState } from 'react'
 import { View } from 'react-native'
 
-import { PullDiffView } from '../../../../../../../components/pulls/PullDiffView'
-import { CommentSheet, ThreadSheet } from '../../../../../../../components/pulls/PullSheets'
-import { usePull, usePullFiles, usePullThreads } from '../../../../../../../hooks/pulls'
-import { useTheme } from '../../../../../../../theme'
-import { Button, IconButton, LoadingView, PaneHeader, SafeAreaView, Text } from '../../../../../../../ui'
+import { PullDiffView } from '../../../../../components/pulls/PullDiffView'
+import { CommentSheet, ThreadSheet } from '../../../../../components/pulls/PullSheets'
+import { usePull, usePullFiles, usePullThreads } from '../../../../../hooks/pulls'
+import { useTheme } from '../../../../../theme'
+import { Button, IconButton, LoadingView, PaneHeader, SafeAreaView, Text } from '../../../../../ui'
 
 /** One file's diff (unified: a phone is too narrow for split). A line or a range opens the comment sheet, a thread
  *  its own sheet; `thread` (from a notification) opens that thread. */

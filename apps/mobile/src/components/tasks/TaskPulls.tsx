@@ -1,8 +1,9 @@
-import { parseGithubPullUrl, pullPath } from '@orbit/api/github'
+import { parseGithubPullUrl } from '@orbit/api/github'
 import { openURL } from 'expo-linking'
 import { router } from 'expo-router'
 import { Pressable, View } from 'react-native'
 
+import { pullRoute } from '../../data/pull-route'
 import { useTaskGithubLinks } from '../../hooks/pulls'
 import { useTheme } from '../../theme'
 import { Icon, Text } from '../../ui'
@@ -22,7 +23,7 @@ export function TaskPulls({ taskId }: { taskId: string }) {
           const ref = parseGithubPullUrl(link.url)
           return (
             <View key={link.url} className={`min-h-11 flex-row items-center gap-2 border-border pl-3 ${index === 0 ? '' : 'border-t'}`}>
-              <Pressable accessibilityRole="link" accessibilityLabel={link.title} onPress={() => (ref ? router.push(pullPath(ref) as never) : void openURL(link.url))} className="min-w-0 flex-1 flex-row items-center gap-2 py-2.5 active:opacity-60">
+              <Pressable accessibilityRole="link" accessibilityLabel={link.title} onPress={() => (ref ? router.push(pullRoute(ref) as never) : void openURL(link.url))} className="min-w-0 flex-1 flex-row items-center gap-2 py-2.5 active:opacity-60">
                 <Icon name="link2" size={14} color={colors.mutedForeground} />
                 <Text numberOfLines={1} className="flex-1 text-[13px]">
                   {link.title}

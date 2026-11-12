@@ -93,13 +93,6 @@ export function githubPromptStatus(error: unknown): 'disconnected' | 'broken' | 
 
 export const isNotFound = (error: unknown) => error instanceof ApiProblem && error.status === 404
 
-/** The diff screen of one file; `thread` is the thread to show (from a notification). */
-export function fileHref(pull: Pick<GithubPullDetail, 'repository' | 'number'>, path: string, thread?: string): string {
-  const [owner = '', repo = ''] = pull.repository.split('/')
-  const query = `path=${encodeURIComponent(path)}${thread ? `&thread=${encodeURIComponent(thread)}` : ''}`
-  return `/tasks/pulls/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${pull.number}/file?${query}`
-}
-
 export async function addComment(client: OrbitClient, workspaceId: string, ref: PullRef, target: CommentTarget, body: string, mode: 'pending' | 'single', headSha: string): Promise<GithubReviewThread> {
   return (await createGithubReviewComment({ client, path: path(workspaceId, ref), body: { ...target, start_side: target.start_side ?? null, start_line: target.start_line ?? null, body, mode, head_sha: headSha }, throwOnError: true })).data
 }

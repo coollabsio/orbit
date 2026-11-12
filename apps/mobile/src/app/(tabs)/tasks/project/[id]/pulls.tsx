@@ -1,4 +1,3 @@
-import { pullPath } from '@orbit/api/github'
 import type { GithubPullSummary } from '@orbit/api/generated/types.gen'
 import { router, useLocalSearchParams } from 'expo-router'
 import { useState } from 'react'
@@ -7,6 +6,7 @@ import { FlatList, Pressable, ScrollView, View } from 'react-native'
 import { ConnectGithubPrompt } from '../../../../../components/github/ConnectGithubPrompt'
 import { GithubAvatar, PullStateBadge } from '../../../../../components/pulls/PullBits'
 import { relativeAgo } from '../../../../../data/format'
+import { pullRoute } from '../../../../../data/pull-route'
 import { githubPromptStatus, PULL_FILTERS, type PullFilter } from '../../../../../data/pulls-api'
 import { usePullList } from '../../../../../hooks/pulls'
 import { useProjects } from '../../../../../queries'
@@ -73,7 +73,7 @@ export default function ProjectPullsScreen() {
 function PullRow({ item }: { item: GithubPullSummary }) {
   const [owner = '', repo = ''] = item.repository.split('/')
   return (
-    <Pressable accessibilityRole="link" accessibilityLabel={`${item.title} #${item.number}`} onPress={() => router.push(pullPath({ owner, repo, number: item.number }) as never)} className="gap-1.5 border-b border-border px-4 py-3 active:bg-muted">
+    <Pressable accessibilityRole="link" accessibilityLabel={`${item.title} #${item.number}`} onPress={() => router.push(pullRoute({ owner, repo, number: item.number }) as never)} className="gap-1.5 border-b border-border px-4 py-3 active:bg-muted">
       <View className="flex-row items-center gap-2">
         <PullStateBadge state={item.state} />
         <Text numberOfLines={2} className="flex-1 font-noto-medium text-[14px] leading-[19px]">

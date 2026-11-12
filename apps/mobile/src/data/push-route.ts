@@ -3,6 +3,8 @@
  * screen that shows the same thing. No React.
  */
 
+import { pullRoute } from './pull-route'
+
 /** The `/profile/*` pages the app has, under Settings. */
 const ACCOUNT_PAGES = new Set(['notifications', 'security', 'sessions', 'appearance', 'agentic'])
 
@@ -28,13 +30,13 @@ export function pushRoute(url: string): string | null {
       return thread ? `/chat/thread/${thread}` : `/chat/${first}`
     }
     case 'tasks': {
-      // `/tasks/pulls/<owner>/<repo>/<number>[?comment=<id>]`: a pull request (from a review notification)
+      // `/tasks/pulls/<owner>/<repo>/<number>[?comment=<id>]`: a pull request (from a review notification), which the
+      // app opens over the current tab
       if (first === 'pulls') {
         const fourth = parts[4]
         if (!second || !third || !fourth || !/^\d+$/.test(fourth)) return '/tasks'
         const comment = /(?:^|&)comment=(\d+)/.exec(match?.[2] ?? '')?.[1]
-        const base = `/tasks/pulls/${encodeURIComponent(second)}/${encodeURIComponent(third)}/${fourth}`
-        return comment ? `${base}?comment=${comment}` : base
+        return pullRoute({ owner: second, repo: third, number: Number(fourth) }, comment ? Number(comment) : undefined)
       }
       if (first === 'projects') return second && third === 'pulls' ? `/tasks/project/${encodeURIComponent(second)}/pulls` : '/tasks'
       return first ? `/tasks/${first}` : '/tasks'
