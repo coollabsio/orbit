@@ -314,8 +314,8 @@ Service-account tokens support tasks only; docs and chat require a personal iden
 | Task read | `list_projects`, `list_tasks`, `get_task`, `list_task_statuses`, `list_labels`, `list_milestones`, `list_cycles`, `list_members`, `list_comments` |
 | Task write | `create_task`, `update_task`, `delete_task`, `create_comment`, `create_project` |
 | None | `get_me` |
-| Docs read | `list_docs`, `get_doc`, `get_database`, `query_database` |
-| Docs write | `create_doc`, `update_doc`, `create_database_row`, `update_database_row`, `trash_database_rows`, `create_database_property`, `update_database_property`, `delete_database_property` |
+| Docs read | `list_docs`, `get_doc`, `get_database`, `query_database`, `list_database_views` |
+| Docs write | `create_doc`, `update_doc`, `create_database_row`, `update_database_row`, `trash_database_rows`, `create_database_property`, `update_database_property`, `delete_database_property`, `create_database`, `create_database_view`, `update_database_view`, `delete_database_view`, `create_database_link`, `delete_database_link` |
 | Chat read | `list_conversations`, `list_messages`, `get_thread`, `search_messages` |
 
 Task create takes `project_id`, `status_id`, `title`, optional markdown `description`,
@@ -394,6 +394,15 @@ sent by name only keeps the ID, color and group of the option with that name, so
 `add_options` appends options and skips names the property already has; it cannot be sent with
 `config`. `delete_database_property` takes `database_id` and `property` and deletes the property
 with its values; the title property cannot be deleted or change its type.
+`create_database` takes optional `title`, `icon`, `parent_id`, `teamspace_id` or `private`, `properties`
+(`{name, type, config}` after the title property "Name") and `views`, and writes the database in one
+step. A view is `{name, type, filter, sorts, columns, group_by}` with property and option names, as
+in `query_database`. `list_database_views`, `create_database_view`, `update_database_view` and
+`delete_database_view` work on a database's views, or on a linked view block's views with `link_id`.
+`update_database_view` replaces only the fields you send. `create_database_link` takes
+`database_id` and `host_page_id` and shows the database in that doc as a linked view block at the
+end of the doc, with views of its own; it returns `link_id`. `delete_database_link` removes the
+block and its views. See [Public API](public-api.md#views) for the rules and limits.
 Chat message and thread tools accept `before` and `limit` (1–100) for pagination.
 `search_messages` takes `query` (up to 500 characters; every word must match, the last one as a
 prefix) and optional `conversation_id`, `author_id`, `has_file` and `cursor` filters. It returns

@@ -114,6 +114,21 @@ impl DatabaseRepository {
         })
     }
 
+    /// The page whose block shows `link_id`, for a caller that can read the database.
+    pub async fn link_host(
+        &self,
+        workspace_id: Id,
+        database_id: Id,
+        link_id: Id,
+        actor_id: Id,
+    ) -> Result<Id, DatabaseError> {
+        let mut tx = self.database.transaction().await?;
+        open(&mut tx, workspace_id, database_id, actor_id).await?;
+        let host = require_link(&mut tx, database_id, link_id).await;
+        tx.rollback().await?;
+        host
+    }
+
     /// Deletes a link and its views (cleanup tools; the editor never calls it).
     pub async fn delete_link(
         &self,
@@ -184,6 +199,34 @@ async fn insert_link(
     .execute(&mut **tx)
     .await?;
     Ok(())
+}
+
+/// The `database` block that shows `link_id` of `database_id`, for the end of a document.
+#[must_use]
+pub fn link_block(database_id: Id, link_id: Id) -> Value {
+    json!({
+        "id": Id::new_v7().to_string(),
+        "type": "database",
+        "props": {"databaseId": database_id.to_string(), "linkId": link_id.to_string()},
+        "children": [],
+    })
+}
+
+/// `blocks` without the `database` blocks that show `link_id`, nested blocks included.
+#[must_use]
+pub fn without_link_blocks(blocks: &[Value], link_id: Id) -> Vec<Value> {
+    let link = link_id.to_string();
+    blocks
+        .iter()
+        .filter(|block| !(block["type"] == "database" && block["props"]["linkId"] == link))
+        .map(|block| {
+            let mut block = block.clone();
+            if let Some(children) = block["children"].as_array() {
+                block["children"] = Value::Array(without_link_blocks(children, link_id));
+            }
+            block
+        })
+        .collect()
 }
 
 /// The `linkId`s of the `database` blocks in `blocks`, nested blocks included, first seen first.
@@ -278,6 +321,21 @@ pub(in crate::repositories) async fn copy_links(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn without_link_blocks_drops_nested_blocks_of_that_link_only() {
+        let (gone, kept) = (Id::new_v7(), Id::new_v7());
+        let database = Id::new_v7();
+        let blocks = vec![
+            link_block(database, gone),
+            json!({"type": "paragraph", "children": [link_block(database, gone), link_block(database, kept)]}),
+            link_block(database, kept),
+        ];
+        let left = without_link_blocks(&blocks, gone);
+        assert_eq!(block_links(&left), vec![kept]);
+        assert_eq!(left.len(), 2);
+        assert_eq!(left[0]["children"].as_array().map(Vec::len), Some(1));
+    }
 
     #[test]
     fn block_links_finds_nested_links_once_in_document_order() {

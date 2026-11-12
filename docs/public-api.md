@@ -75,8 +75,8 @@ scopes, which MCP does not use.
 | `tasks:read` | Tasks: **Read** | `GET` projects, statuses, labels, members, tasks and comments |
 | `tasks:write` | Tasks: **Write** | Create, update and delete tasks, add comments, link tasks, create and change projects, statuses and labels, `POST /integrations/discord/events` |
 | `tasks:import` | Tasks: **Write** with **Import mode** | With `tasks:write`: the import fields of new tasks and comments. See [Import from another tool](#import-from-another-tool). |
-| `docs:read` | Docs: **Read** | `GET /docs`, `GET /docs/{page_id}`, `GET /docs/{page_id}/versions`, `GET /docs/{page_id}/versions/{version_id}`, `GET /docs/{page_id}/database`, `POST /docs/{page_id}/database/query` |
-| `docs:write` | Docs: **Write** | `POST /docs`, `PATCH /docs/{page_id}`, `POST /docs/{page_id}/move`, `DELETE /docs/{page_id}`, `POST /docs/{page_id}/rows`, `PATCH /docs/{page_id}/rows/{row_id}`, `POST /docs/{page_id}/rows/trash` |
+| `docs:read` | Docs: **Read** | `GET /docs`, `GET /docs/{page_id}`, `GET /docs/{page_id}/versions`, `GET /docs/{page_id}/versions/{version_id}`, `GET /docs/{page_id}/database`, `POST /docs/{page_id}/database/query`, `GET /docs/{page_id}/database/views` and `…/views/{view_id}` |
+| `docs:write` | Docs: **Write** | `POST /docs`, `PATCH /docs/{page_id}`, `POST /docs/{page_id}/move`, `DELETE /docs/{page_id}`, `POST /docs/{page_id}/rows`, `PATCH /docs/{page_id}/rows/{row_id}`, `POST /docs/{page_id}/rows/trash`, `POST /databases`, the schema, view and linked view endpoints under `/docs/{page_id}/database` |
 | `chat:read` | Chat: **Read** | None. Chat is available through MCP only. A bot that reads and writes one channel uses a [chat webhook with events](chat-webhooks.md#events). |
 | `workspace:export` | **Workspace export** | `POST /exports` with `mode: "full"`, `GET /exports/{export_id}`, `GET /exports/{export_id}/download` |
 | `workspace:export:personal` | **Personal export** | The same, with `mode: "personal"` |
@@ -738,6 +738,75 @@ curl -sS -X PATCH "$ORBIT_WS/docs/$DATABASE_ID/database/properties/Status" \
   -H "Authorization: Bearer $ORBIT_TOKEN" -H 'Content-Type: application/json' \
   -d '{"add_options":["Blocked",{"name":"Shipped","color":"green"}]}'
 ```
+
+#### Create a database
+
+`POST /workspaces/{workspace_id}/databases`. Scope: `docs:write`. Body:
+
+- `title` (up to 500 characters), `icon`, and where it goes, as for `POST /docs`: `parent_id`, or
+  `teamspace_id`, or `private: true`. A database cannot go directly under another database
+  (`409` `database_in_database`).
+- `properties` (optional): the properties after the title property "Name", each
+  `{name, type, config}` as in `POST …/database/properties`. Types: `text`, `number`, `select`,
+  `multi_select`, `status`, `date`, `person`, `checkbox`, `url`, `email`, `phone`, `files`,
+  `created_time`, `created_by`, `last_edited_time`, `last_edited_by`. Add relations, rollups,
+  formulas, buttons and unique IDs afterwards. Omitted: a "Tags" multi-select.
+- `views` (optional, 1 to 50): each as in [Views](#views). Their filters, sorts, columns and group
+  name the properties above and their options. Omitted: one "Table" view.
+
+Response: `201` with the database, as `GET …/database` shows it. The whole database is written
+in one step: if a property or view is invalid, nothing is created (`422`).
+
+#### Views
+
+A database has views (table, board, list, calendar, gallery, timeline, form) with a filter, sorts
+and visible columns. These endpoints read and change them with property and option **names**, as
+`query_database` does. They need `docs:write` (read: `docs:read`) and an editable, unlocked
+database (`423` `page_locked`). Add `?link_id=` to work on the views of a [linked view
+block](#linked-views) instead of the database's own views.
+
+- `GET /workspaces/{workspace_id}/docs/{page_id}/database/views` lists the views, and `GET
+  …/views/{view_id}` returns one.
+- `POST …/views` adds a view. Body: `name` (1 to 200 characters), `type` (default `table`),
+  `filter` (an AND/OR group as in `query_database`, `property_id` is a property name or ID and
+  `value` takes option names), `sorts` (up to 10 `{property_id, direction}`), `columns` (the
+  visible properties in order; the others are hidden; the title always shows) and `group_by` (a
+  board's select, status, multi-select or person property). Omitted fields give every row, no
+  sorts and every property. Response: `201`. A database holds at most 50 views and a linked view
+  block at most 20 (`409` `database_view_limit`, `database_link_view_limit`).
+- `PATCH …/views/{view_id}` changes `name`, `position`, `filter`, `sorts`, `columns` or
+  `group_by`. A field you send replaces what the view has; other fields stay. Send
+  `{"op": "and", "children": []}` to clear the filter and `[]` to clear the sorts. The view's
+  type cannot change: add a view of the new type. Last write wins: there is no `expected_version`.
+- `DELETE …/views/{view_id}` returns `204`. The last view of a database or of a linked view block
+  stays (`409` `database_last_view`).
+
+A view returned by the API has `id`, `name`, `type`, `position`, `filter`, `sorts`, `columns` and,
+for a board, `group_by`. A property that shares its name with another is shown by ID.
+
+```bash
+curl -sS -X POST "$ORBIT_WS/docs/$DATABASE_ID/database/views" \
+  -H "Authorization: Bearer $ORBIT_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"name":"Dessert","filter":{"property_id":"Type","operator":"is","value":"Dessert"}}'
+```
+
+#### Linked views
+
+A linked view block shows an existing database inside a doc, with views of its own. The rows are
+not copied, and its filters and columns do not change the database's own views.
+
+`POST /workspaces/{workspace_id}/docs/{page_id}/database/links`, where `{page_id}` is the
+database. Scope: `docs:write`. Body: `host_page_id` (the doc that shows the database; you must be
+able to edit it) and optional `from_view_id` (an own view whose type and config the block's first
+view copies; default: the first view). Orbit adds the block at the end of the host doc, so the
+request fails with `409 conflict` if someone changed the doc at the same time (send it again), and
+with `423 page_locked` for a locked doc. Response: `201` with `link_id`, `database_id`,
+`host_page_id` and the block's `views`. Use `link_id` as `?link_id=` in the view endpoints above.
+`GET /docs/{host_page_id}` shows the block as a `database` block in `content` with the same
+`linkId`.
+
+`DELETE …/database/links/{link_id}` removes the block from its doc and deletes its views. The
+database and its rows stay. Response: `204`.
 
 ### Exports
 

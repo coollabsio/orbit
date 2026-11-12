@@ -903,6 +903,12 @@ fn database_detail(error: DatabaseError) -> String {
         DatabaseError::Locked => "Database is locked".to_owned(),
         DatabaseError::PropertyNotFound => "Database property is not available".to_owned(),
         DatabaseError::PropertyLimit => "A database holds at most 100 properties".to_owned(),
+        DatabaseError::LinkNotFound => "Linked view block is not available".to_owned(),
+        DatabaseError::ViewLimit => "A database holds at most 50 views".to_owned(),
+        DatabaseError::LinkViewLimit => "A linked view block holds at most 20 views".to_owned(),
+        DatabaseError::LastView => {
+            "A database or a linked view block keeps at least one view".to_owned()
+        }
         DatabaseError::TitleProperty => {
             "The title property cannot be deleted or change its type".to_owned()
         }

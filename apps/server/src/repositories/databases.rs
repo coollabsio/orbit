@@ -22,6 +22,7 @@ use crate::audit::{self, AuditOutcome};
 
 mod agent;
 mod agent_schema;
+mod agent_views;
 mod board;
 mod buttons;
 mod calendar;
@@ -53,6 +54,7 @@ mod view_config;
 mod views;
 pub use agent::{AgentDatabase, AgentQuery, AgentRow, AgentRowPage, invalid_detail};
 pub use agent_schema::AgentPropertyChanges;
+pub use agent_views::{AgentPropertySpec, AgentViewChanges, AgentViewDetail, AgentViewSpec};
 pub use buttons::{ButtonAction, ButtonConfig, ButtonPress, CreatedRow, MAX_ACTIONS};
 pub use calendar::CalendarMode;
 pub use computed::{ComputeScope, RelatedPage, is_computed};
@@ -70,7 +72,7 @@ pub use gallery::{CardPreview, CardSize, RowPreview};
 pub use import::{
     CsvImport, ImportColumn, ImportColumnResult, ImportResult, ImportTarget, MAX_IMPORT_COLUMNS,
 };
-pub use links::{DatabaseLink, LinkedViews, MAX_LINK_VIEWS};
+pub use links::{DatabaseLink, LinkedViews, MAX_LINK_VIEWS, link_block, without_link_blocks};
 pub(super) use links::{LinkCopy, block_links, copy_links, linked_databases};
 pub use model::{
     DateConfig, DateFormat, NumberConfig, NumberFormat, OptionColor, PropertyKind, PropertyType,

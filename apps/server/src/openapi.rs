@@ -171,6 +171,14 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::public_api::databases::create_property,
         crate::public_api::databases::update_property,
         crate::public_api::databases::delete_property,
+        crate::public_api::database_views::create_database,
+        crate::public_api::database_views::views,
+        crate::public_api::database_views::view,
+        crate::public_api::database_views::create_view,
+        crate::public_api::database_views::update_view,
+        crate::public_api::database_views::delete_view,
+        crate::public_api::database_views::create_link,
+        crate::public_api::database_views::delete_link,
         crate::public_api::create_export,
         crate::public_api::get_export,
         crate::public_api::download_export,
@@ -731,6 +739,12 @@ fn public_api_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             | "public_create_database_row"
             | "public_update_database_row"
             | "public_trash_database_rows"
+            | "public_create_database"
+            | "public_create_database_view"
+            | "public_update_database_view"
+            | "public_delete_database_view"
+            | "public_create_database_link"
+            | "public_delete_database_link"
     );
     if write {
         add_code(&mut responses, "400", "invalid_request");
@@ -740,7 +754,10 @@ fn public_api_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
     }
     if matches!(
         operation_id,
-        "public_create_task" | "public_create_doc" | "public_create_database_row"
+        "public_create_task"
+            | "public_create_doc"
+            | "public_create_database_row"
+            | "public_create_database"
     ) {
         add_code(&mut responses, "402", "trial_limit_reached");
     }
@@ -762,6 +779,10 @@ fn public_api_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             | "public_create_database_row"
             | "public_update_database_row"
             | "public_trash_database_rows"
+            | "public_create_database"
+            | "public_create_database_view"
+            | "public_update_database_view"
+            | "public_create_database_link"
     ) {
         add_code(&mut responses, "422", "validation_failed");
     }
@@ -800,6 +821,7 @@ fn public_api_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             add_code(&mut responses, "423", "page_locked");
             add_code(&mut responses, "503", "page_busy");
         }
+        "public_create_database" => add_code(&mut responses, "409", "database_in_database"),
         "public_move_doc" => {
             add_code(&mut responses, "403", "workspace_action_forbidden");
             add_code(&mut responses, "409", "database_in_database");
@@ -812,6 +834,23 @@ fn public_api_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
         }
         "public_update_database_row" => {
             add_code(&mut responses, "409", "conflict");
+            add_code(&mut responses, "423", "page_locked");
+            add_code(&mut responses, "503", "page_busy");
+        }
+        "public_create_database_view" => {
+            add_code(&mut responses, "409", "database_view_limit");
+            add_code(&mut responses, "409", "database_link_view_limit");
+            add_code(&mut responses, "423", "page_locked");
+        }
+        "public_update_database_view" => add_code(&mut responses, "423", "page_locked"),
+        "public_delete_database_view" => {
+            add_code(&mut responses, "409", "database_last_view");
+            add_code(&mut responses, "423", "page_locked");
+        }
+        // The host doc changed after it was read, or is locked or too large for one more block.
+        "public_create_database_link" | "public_delete_database_link" => {
+            add_code(&mut responses, "409", "conflict");
+            add_code(&mut responses, "413", "doc_too_large");
             add_code(&mut responses, "423", "page_locked");
             add_code(&mut responses, "503", "page_busy");
         }

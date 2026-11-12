@@ -457,7 +457,7 @@ async fn each_tool_and_endpoint_needs_its_docs_scope() {
     );
     assert_eq!(
         listed(&f.rpc(&read, "tools/list", json!({})).await),
-        ["get_database", "query_database"]
+        ["get_database", "query_database", "list_database_views"]
     );
     assert_eq!(
         listed(&f.rpc(&write, "tools/list", json!({})).await),
@@ -469,7 +469,14 @@ async fn each_tool_and_endpoint_needs_its_docs_scope() {
             "trash_database_rows",
             "create_database_property",
             "update_database_property",
-            "delete_database_property"
+            "delete_database_property",
+            "create_database",
+            "list_database_views",
+            "create_database_view",
+            "update_database_view",
+            "delete_database_view",
+            "create_database_link",
+            "delete_database_link"
         ]
     );
     for (name, arguments) in reads.iter().chain(&writes) {
@@ -1417,5 +1424,202 @@ async fn schema_tools_keep_options_that_agents_send_by_name() {
     assert_eq!(
         tool_error(&title),
         "The title property cannot be deleted or change its type"
+    );
+}
+
+#[tokio::test]
+async fn an_agent_sets_up_recipes_with_filtered_views_and_embeds_it_in_a_doc() {
+    let f = Fixture::new().await;
+    let write = f.token(&[ApiTokenScope::DocsWrite]).await;
+    let read = f.token(&[ApiTokenScope::DocsRead]).await;
+
+    let (status, created) = f
+        .api(
+            &write,
+            "POST",
+            "databases",
+            Some(json!({
+                "title": "Recipes",
+                "properties": [
+                    {"name": "Type", "type": "select", "config": {"options": ["Main", "Dessert"]}},
+                    {"name": "Tags", "type": "multi_select", "config": {"options": ["Low GI"]}}
+                ],
+                "views": [
+                    {"name": "All"},
+                    {"name": "Main", "columns": ["Type"], "sorts": [{"property_id": "Name", "direction": "desc"}],
+                     "filter": {"property_id": "Type", "operator": "is", "value": "Main"}},
+                    {"name": "Low GI", "type": "board", "group_by": "Type",
+                     "filter": {"property_id": "Tags", "operator": "contains", "value": ["Low GI"]}}
+                ]
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let db = created["id"].as_str().unwrap().to_owned();
+    let names: Vec<&str> = created["properties"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|property| property["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["Name", "Type", "Tags"]);
+
+    // Views read back with names; a view filters rows through `view_id`.
+    let (status, views) = f
+        .api(&read, "GET", &format!("docs/{db}/database/views"), None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{views}");
+    let main = &views["items"][1];
+    assert_eq!(main["columns"], json!(["Name", "Type"]));
+    assert_eq!(main["filter"]["children"][0]["value"], json!(["Main"]));
+    assert_eq!(views["items"][2]["group_by"], "Type");
+    let (status, _) = f
+        .api(
+            &write,
+            "POST",
+            &format!("docs/{db}/rows"),
+            Some(json!({"title": "Pasta", "values": {"Type": "Main"}})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let (_, cake) = f
+        .api(
+            &write,
+            "POST",
+            &format!("docs/{db}/rows"),
+            Some(json!({"title": "Cake", "values": {"Type": "Dessert"}})),
+        )
+        .await;
+    let (_, rows) = f
+        .api(
+            &write,
+            "POST",
+            &format!("docs/{db}/database/query"),
+            Some(json!({"view_id": main["id"]})),
+        )
+        .await;
+    assert_eq!(titles(&rows), ["Pasta"]);
+    assert_eq!(cake["title"], "Cake");
+
+    // A new view, a change and the last-view rule; reads need no write scope, writes do.
+    let (status, dessert) = f
+        .api(
+            &write,
+            "POST",
+            &format!("docs/{db}/database/views"),
+            Some(json!({"name": "Dessert", "type": "list",
+                "filter": {"property_id": "Type", "operator": "is", "value": "Dessert"}})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{dessert}");
+    let path = format!(
+        "docs/{db}/database/views/{}",
+        dessert["id"].as_str().unwrap()
+    );
+    let (status, renamed) = f
+        .api(
+            &write,
+            "PATCH",
+            &path,
+            Some(json!({"name": "Sweet", "columns": ["Name"]})),
+        )
+        .await;
+    assert_eq!(
+        (status, renamed["name"].as_str()),
+        (StatusCode::OK, Some("Sweet"))
+    );
+    assert_eq!(
+        renamed["filter"]["children"][0]["value"],
+        json!(["Dessert"])
+    );
+    let (status, _) = f
+        .api(&read, "PATCH", &path, Some(json!({"name": "No"})))
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, problem) = f.api(&write, "PATCH", &path, Some(json!({}))).await;
+    assert_eq!(
+        (status, problem["code"].as_str()),
+        (StatusCode::UNPROCESSABLE_ENTITY, Some("validation_failed"))
+    );
+    let (status, problem) = f
+        .api(
+            &write,
+            "POST",
+            &format!("docs/{db}/database/views"),
+            Some(json!({"name": "Bad", "columns": ["Nope"]})),
+        )
+        .await;
+    assert_eq!(
+        (status, problem["errors"]["columns[0]"].is_array()),
+        (StatusCode::UNPROCESSABLE_ENTITY, true)
+    );
+
+    // A linked view block in another doc: its views are its own and the rows are not copied.
+    let (_, host) = f
+        .api(
+            &write,
+            "POST",
+            "docs",
+            Some(json!({"title": "Menu", "markdown": "# Menu"})),
+        )
+        .await;
+    let host_id = host["id"].as_str().unwrap();
+    let (status, linked) = f
+        .api(
+            &write,
+            "POST",
+            &format!("docs/{db}/database/links"),
+            Some(json!({"host_page_id": host_id})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{linked}");
+    let link = linked["link_id"].as_str().unwrap();
+    let (_, doc) = f.api(&write, "GET", &format!("docs/{host_id}"), None).await;
+    let block = doc["content"].as_array().unwrap().last().unwrap();
+    assert_eq!(block["type"], "database");
+    assert_eq!(block["props"]["linkId"], link);
+    assert_eq!(block["props"]["databaseId"], db);
+    let link_view = format!(
+        "docs/{db}/database/views/{}?link_id={link}",
+        linked["views"][0]["id"].as_str().unwrap()
+    );
+    let (status, _) = f
+        .api(
+            &write,
+            "PATCH",
+            &link_view,
+            Some(json!({"filter": {"property_id": "Type", "operator": "is", "value": "Main"}})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, own) = f
+        .api(&read, "GET", &format!("docs/{db}/database/views"), None)
+        .await;
+    assert_eq!(
+        own["items"][0]["filter"]["children"],
+        json!([]),
+        "own views stay"
+    );
+    let (status, problem) = f.api(&write, "DELETE", &link_view, None).await;
+    assert_eq!(
+        (status, problem["code"].as_str()),
+        (StatusCode::CONFLICT, Some("database_last_view"))
+    );
+    let (status, _) = f
+        .api(
+            &write,
+            "DELETE",
+            &format!("docs/{db}/database/links/{link}"),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (_, doc) = f.api(&write, "GET", &format!("docs/{host_id}"), None).await;
+    assert!(
+        doc["content"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|block| block["type"] != "database")
     );
 }

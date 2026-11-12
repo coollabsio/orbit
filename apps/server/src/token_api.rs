@@ -45,7 +45,7 @@ use orbit_domain::Permission;
 mod databases;
 mod relations;
 mod setup;
-pub use databases::{DatabaseRowPatch, NewDatabaseRow};
+pub use databases::{DatabaseRowPatch, LinkedDatabase, NewDatabase, NewDatabaseRow};
 pub use setup::StatusPatch;
 
 const PRIORITIES: [&str; 5] = ["none", "low", "medium", "high", "urgent"];

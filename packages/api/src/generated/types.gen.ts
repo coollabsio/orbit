@@ -6207,6 +6207,52 @@ export type PublicCommentBody = {
     updated_at?: string | null;
 };
 
+export type PublicCreateDatabaseBody = {
+    /**
+     * Up to 64 characters.
+     */
+    icon?: string | null;
+    /**
+     * The database goes under this doc, in its space.
+     */
+    parent_id?: string | null;
+    /**
+     * Root databases only: `true` puts the database in the token creator's private space.
+     */
+    private?: boolean | null;
+    /**
+     * The properties after the title property "Name", up to 99. Omitted: a "Tags" multi-select.
+     * Relations, rollups, formulas, buttons and unique IDs come afterwards, with
+     * `POST …/database/properties`.
+     */
+    properties?: Array<PublicDatabasePropertySpec> | null;
+    /**
+     * Root databases only: the teamspace of the database.
+     */
+    teamspace_id?: string | null;
+    /**
+     * Up to 500 characters.
+     */
+    title?: string;
+    /**
+     * 1 to 50 views. Omitted: one "Table" view. A view's filter, sorts, columns and group name
+     * the properties above and their options.
+     */
+    views?: Array<PublicDatabaseViewSpec> | null;
+};
+
+export type PublicCreateDatabaseLinkBody = {
+    /**
+     * An own view of the database whose type and config the block's first view copies.
+     * Omitted: the first view.
+     */
+    from_view_id?: string | null;
+    /**
+     * The doc that shows the database. The block goes at the end of the doc.
+     */
+    host_page_id: string;
+};
+
 /**
  * See `create_database_property` in `docs/mcp.md` for the config shapes.
  */
@@ -6503,6 +6549,29 @@ export type PublicDatabaseProperty = {
     type: DatabasePropertyType;
 };
 
+/**
+ * A property of a new database, besides its title property "Name".
+ */
+export type PublicDatabasePropertySpec = {
+    /**
+     * The type's config. Select, multi-select and status take `{"options": [...]}` with option
+     * names or `{name, color, group}` objects.
+     */
+    config?: {
+        [key: string]: unknown;
+    } | null;
+    /**
+     * 1 to 200 characters.
+     */
+    name: string;
+    /**
+     * `text`, `number`, `select`, `multi_select`, `status`, `date`, `person`, `checkbox`, `url`,
+     * `email`, `phone`, `files`, `created_time`, `created_by`, `last_edited_time` or
+     * `last_edited_by`. Add relations, rollups, formulas, buttons and unique IDs afterwards.
+     */
+    type: string;
+};
+
 export type PublicDatabaseRow = {
     created_at: string;
     created_by: PublicDatabasePerson;
@@ -6554,6 +6623,111 @@ export type PublicDatabaseView = {
 };
 
 /**
+ * A change of a view; send at least one field. `filter`, `sorts`, `columns` and `group_by`
+ * replace what the view has; fields left out stay.
+ */
+export type PublicDatabaseViewChanges = {
+    /**
+     * As in a new view.
+     */
+    columns?: Array<string> | null;
+    /**
+     * As in a new view. An empty group (`{"op": "and", "children": []}`) clears the filter.
+     */
+    filter?: {
+        [key: string]: unknown;
+    } | null;
+    /**
+     * As in a new view.
+     */
+    group_by?: string | null;
+    /**
+     * 1 to 200 characters.
+     */
+    name?: string | null;
+    /**
+     * The new index among the views.
+     */
+    position?: number | null;
+    /**
+     * As in a new view. An empty list clears the sorts.
+     */
+    sorts?: Array<{
+        [key: string]: unknown;
+    }> | null;
+};
+
+/**
+ * A view as agents read it: the same names that `AgentViewSpec` takes.
+ */
+export type PublicDatabaseViewDetail = {
+    /**
+     * The visible properties in order.
+     */
+    columns: Array<string>;
+    /**
+     * As `query_database` takes it; a property that two properties share is shown by id.
+     */
+    filter: {
+        [key: string]: unknown;
+    };
+    /**
+     * Board only.
+     */
+    group_by?: string | null;
+    id: string;
+    name: string;
+    /**
+     * Index among the views.
+     */
+    position: number;
+    sorts: Array<{
+        [key: string]: unknown;
+    }>;
+    type: DatabaseViewType;
+};
+
+/**
+ * A view as agents write it, for a new view and for a view of a new database.
+ */
+export type PublicDatabaseViewSpec = {
+    /**
+     * The visible properties, in order, by name or id. The other properties are hidden. The title
+     * always shows, first unless listed. Omitted: every property.
+     */
+    columns?: Array<string> | null;
+    /**
+     * An AND/OR group of rules, as in `query_database`; `property_id` takes a property name or
+     * id and `value` option names. Omitted: every row.
+     */
+    filter?: {
+        [key: string]: unknown;
+    } | null;
+    /**
+     * Board only: the `select`, `status`, `multi_select` or `person` property of the columns.
+     */
+    group_by?: string | null;
+    /**
+     * 1 to 200 characters.
+     */
+    name: string;
+    /**
+     * Up to 10 `{property_id, direction}` with names or ids.
+     */
+    sorts?: Array<{
+        [key: string]: unknown;
+    }> | null;
+    /**
+     * `table` (default), `board`, `list`, `calendar`, `gallery`, `timeline` or `form`.
+     */
+    type?: DatabaseViewType;
+};
+
+export type PublicDatabaseViews = {
+    items: Array<PublicDatabaseViewDetail>;
+};
+
+/**
  * A doc record. `version` is an opaque number below 2^53 that changes with every change, live edits included: compare it for equality only, and send it back as `expected_version`.
  */
 export type PublicDoc = Page & {
@@ -6585,6 +6759,22 @@ export type PublicLabel = {
     name: string;
     project_id: string;
     version: number;
+};
+
+/**
+ * A linked view block that a doc now shows.
+ */
+export type PublicLinkedDatabase = {
+    database_id: string;
+    /**
+     * The doc that shows the block.
+     */
+    host_page_id: string;
+    /**
+     * The block's `linkId`; send it as `link_id` to read and change the block's views.
+     */
+    link_id: string;
+    views: Array<PublicDatabaseViewDetail>;
 };
 
 export type PublicMe = {
@@ -9334,6 +9524,86 @@ export type PublicGetMeResponses = {
 
 export type PublicGetMeResponse = PublicGetMeResponses[keyof PublicGetMeResponses];
 
+export type PublicCreateDatabaseData = {
+    body: PublicCreateDatabaseBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        /**
+         * The token's workspace, from `GET /me`.
+         */
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/public/v1/workspaces/{workspace_id}/databases';
+};
+
+export type PublicCreateDatabaseErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: Problem;
+    /**
+     * unauthorized
+     */
+    401: Problem;
+    /**
+     * workspace_read_only, trial_limit_reached
+     */
+    402: Problem;
+    /**
+     * insufficient_scope, origin_forbidden
+     */
+    403: Problem;
+    /**
+     * not_found
+     */
+    404: Problem;
+    /**
+     * contract_mismatch, database_in_database
+     */
+    409: Problem;
+    /**
+     * request_too_large
+     */
+    413: Problem;
+    /**
+     * validation_failed
+     */
+    422: Problem;
+    /**
+     * rate_limit_exceeded
+     */
+    429: Problem;
+    /**
+     * internal_error
+     */
+    500: Problem;
+    /**
+     * service_unavailable
+     */
+    503: Problem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: Problem;
+};
+
+export type PublicCreateDatabaseError = PublicCreateDatabaseErrors[keyof PublicCreateDatabaseErrors];
+
+export type PublicCreateDatabaseResponses = {
+    /**
+     * The new database
+     */
+    201: PublicDatabase;
+};
+
+export type PublicCreateDatabaseResponse = PublicCreateDatabaseResponses[keyof PublicCreateDatabaseResponses];
+
 export type PublicListDocsData = {
     body?: never;
     headers?: {
@@ -9790,6 +10060,179 @@ export type PublicGetDatabaseResponses = {
 
 export type PublicGetDatabaseResponse = PublicGetDatabaseResponses[keyof PublicGetDatabaseResponses];
 
+export type PublicCreateDatabaseLinkData = {
+    body: PublicCreateDatabaseLinkBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        /**
+         * The token's workspace, from `GET /me`.
+         */
+        workspace_id: string;
+        /**
+         * The database's page id.
+         */
+        page_id: string;
+    };
+    query?: never;
+    url: '/api/public/v1/workspaces/{workspace_id}/docs/{page_id}/database/links';
+};
+
+export type PublicCreateDatabaseLinkErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: Problem;
+    /**
+     * unauthorized
+     */
+    401: Problem;
+    /**
+     * workspace_read_only
+     */
+    402: Problem;
+    /**
+     * insufficient_scope, origin_forbidden
+     */
+    403: Problem;
+    /**
+     * not_found
+     */
+    404: Problem;
+    /**
+     * contract_mismatch, conflict
+     */
+    409: Problem;
+    /**
+     * request_too_large, doc_too_large
+     */
+    413: Problem;
+    /**
+     * validation_failed
+     */
+    422: Problem;
+    /**
+     * page_locked
+     */
+    423: Problem;
+    /**
+     * rate_limit_exceeded
+     */
+    429: Problem;
+    /**
+     * internal_error
+     */
+    500: Problem;
+    /**
+     * service_unavailable, page_busy
+     */
+    503: Problem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: Problem;
+};
+
+export type PublicCreateDatabaseLinkError = PublicCreateDatabaseLinkErrors[keyof PublicCreateDatabaseLinkErrors];
+
+export type PublicCreateDatabaseLinkResponses = {
+    /**
+     * The linked view block with its first view
+     */
+    201: PublicLinkedDatabase;
+};
+
+export type PublicCreateDatabaseLinkResponse = PublicCreateDatabaseLinkResponses[keyof PublicCreateDatabaseLinkResponses];
+
+export type PublicDeleteDatabaseLinkData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        /**
+         * The token's workspace, from `GET /me`.
+         */
+        workspace_id: string;
+        /**
+         * The database's page id.
+         */
+        page_id: string;
+        link_id: string;
+    };
+    query?: never;
+    url: '/api/public/v1/workspaces/{workspace_id}/docs/{page_id}/database/links/{link_id}';
+};
+
+export type PublicDeleteDatabaseLinkErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: Problem;
+    /**
+     * unauthorized
+     */
+    401: Problem;
+    /**
+     * workspace_read_only
+     */
+    402: Problem;
+    /**
+     * insufficient_scope, origin_forbidden
+     */
+    403: Problem;
+    /**
+     * not_found
+     */
+    404: Problem;
+    /**
+     * contract_mismatch, conflict
+     */
+    409: Problem;
+    /**
+     * request_too_large, doc_too_large
+     */
+    413: Problem;
+    /**
+     * page_locked
+     */
+    423: Problem;
+    /**
+     * rate_limit_exceeded
+     */
+    429: Problem;
+    /**
+     * internal_error
+     */
+    500: Problem;
+    /**
+     * service_unavailable, page_busy
+     */
+    503: Problem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: Problem;
+};
+
+export type PublicDeleteDatabaseLinkError = PublicDeleteDatabaseLinkErrors[keyof PublicDeleteDatabaseLinkErrors];
+
+export type PublicDeleteDatabaseLinkResponses = {
+    /**
+     * Deleted
+     */
+    204: void;
+};
+
+export type PublicDeleteDatabaseLinkResponse = PublicDeleteDatabaseLinkResponses[keyof PublicDeleteDatabaseLinkResponses];
+
 export type PublicCreateDatabasePropertyData = {
     body: PublicCreateDatabasePropertyBody;
     headers?: {
@@ -10089,6 +10532,438 @@ export type PublicQueryDatabaseResponses = {
 };
 
 export type PublicQueryDatabaseResponse = PublicQueryDatabaseResponses[keyof PublicQueryDatabaseResponses];
+
+export type PublicListDatabaseViewsData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        /**
+         * The token's workspace, from `GET /me`.
+         */
+        workspace_id: string;
+        /**
+         * The database's page id.
+         */
+        page_id: string;
+    };
+    query?: {
+        /**
+         * The `link_id` of a linked view block of this database. Omitted: the database's own views.
+         */
+        link_id?: string;
+    };
+    url: '/api/public/v1/workspaces/{workspace_id}/docs/{page_id}/database/views';
+};
+
+export type PublicListDatabaseViewsErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: Problem;
+    /**
+     * unauthorized
+     */
+    401: Problem;
+    /**
+     * insufficient_scope
+     */
+    403: Problem;
+    /**
+     * not_found
+     */
+    404: Problem;
+    /**
+     * contract_mismatch
+     */
+    409: Problem;
+    /**
+     * request_too_large
+     */
+    413: Problem;
+    /**
+     * rate_limit_exceeded
+     */
+    429: Problem;
+    /**
+     * internal_error
+     */
+    500: Problem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: Problem;
+};
+
+export type PublicListDatabaseViewsError = PublicListDatabaseViewsErrors[keyof PublicListDatabaseViewsErrors];
+
+export type PublicListDatabaseViewsResponses = {
+    /**
+     * The views in order
+     */
+    200: PublicDatabaseViews;
+};
+
+export type PublicListDatabaseViewsResponse = PublicListDatabaseViewsResponses[keyof PublicListDatabaseViewsResponses];
+
+export type PublicCreateDatabaseViewData = {
+    body: PublicDatabaseViewSpec;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        /**
+         * The token's workspace, from `GET /me`.
+         */
+        workspace_id: string;
+        /**
+         * The database's page id.
+         */
+        page_id: string;
+    };
+    query?: {
+        /**
+         * The `link_id` of a linked view block of this database. Omitted: the database's own views.
+         */
+        link_id?: string;
+    };
+    url: '/api/public/v1/workspaces/{workspace_id}/docs/{page_id}/database/views';
+};
+
+export type PublicCreateDatabaseViewErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: Problem;
+    /**
+     * unauthorized
+     */
+    401: Problem;
+    /**
+     * workspace_read_only
+     */
+    402: Problem;
+    /**
+     * insufficient_scope, origin_forbidden
+     */
+    403: Problem;
+    /**
+     * not_found
+     */
+    404: Problem;
+    /**
+     * contract_mismatch, database_view_limit, database_link_view_limit
+     */
+    409: Problem;
+    /**
+     * request_too_large
+     */
+    413: Problem;
+    /**
+     * validation_failed
+     */
+    422: Problem;
+    /**
+     * page_locked
+     */
+    423: Problem;
+    /**
+     * rate_limit_exceeded
+     */
+    429: Problem;
+    /**
+     * internal_error
+     */
+    500: Problem;
+    /**
+     * service_unavailable
+     */
+    503: Problem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: Problem;
+};
+
+export type PublicCreateDatabaseViewError = PublicCreateDatabaseViewErrors[keyof PublicCreateDatabaseViewErrors];
+
+export type PublicCreateDatabaseViewResponses = {
+    /**
+     * The new view
+     */
+    201: PublicDatabaseViewDetail;
+};
+
+export type PublicCreateDatabaseViewResponse = PublicCreateDatabaseViewResponses[keyof PublicCreateDatabaseViewResponses];
+
+export type PublicDeleteDatabaseViewData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        /**
+         * The token's workspace, from `GET /me`.
+         */
+        workspace_id: string;
+        /**
+         * The database's page id.
+         */
+        page_id: string;
+        view_id: string;
+    };
+    query?: {
+        /**
+         * The `link_id` of a linked view block of this database. Omitted: the database's own views.
+         */
+        link_id?: string;
+    };
+    url: '/api/public/v1/workspaces/{workspace_id}/docs/{page_id}/database/views/{view_id}';
+};
+
+export type PublicDeleteDatabaseViewErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: Problem;
+    /**
+     * unauthorized
+     */
+    401: Problem;
+    /**
+     * workspace_read_only
+     */
+    402: Problem;
+    /**
+     * insufficient_scope, origin_forbidden
+     */
+    403: Problem;
+    /**
+     * not_found
+     */
+    404: Problem;
+    /**
+     * contract_mismatch, database_last_view
+     */
+    409: Problem;
+    /**
+     * request_too_large
+     */
+    413: Problem;
+    /**
+     * page_locked
+     */
+    423: Problem;
+    /**
+     * rate_limit_exceeded
+     */
+    429: Problem;
+    /**
+     * internal_error
+     */
+    500: Problem;
+    /**
+     * service_unavailable
+     */
+    503: Problem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: Problem;
+};
+
+export type PublicDeleteDatabaseViewError = PublicDeleteDatabaseViewErrors[keyof PublicDeleteDatabaseViewErrors];
+
+export type PublicDeleteDatabaseViewResponses = {
+    /**
+     * Deleted
+     */
+    204: void;
+};
+
+export type PublicDeleteDatabaseViewResponse = PublicDeleteDatabaseViewResponses[keyof PublicDeleteDatabaseViewResponses];
+
+export type PublicGetDatabaseViewData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        /**
+         * The token's workspace, from `GET /me`.
+         */
+        workspace_id: string;
+        /**
+         * The database's page id.
+         */
+        page_id: string;
+        view_id: string;
+    };
+    query?: {
+        /**
+         * The `link_id` of a linked view block of this database. Omitted: the database's own views.
+         */
+        link_id?: string;
+    };
+    url: '/api/public/v1/workspaces/{workspace_id}/docs/{page_id}/database/views/{view_id}';
+};
+
+export type PublicGetDatabaseViewErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: Problem;
+    /**
+     * unauthorized
+     */
+    401: Problem;
+    /**
+     * insufficient_scope
+     */
+    403: Problem;
+    /**
+     * not_found
+     */
+    404: Problem;
+    /**
+     * contract_mismatch
+     */
+    409: Problem;
+    /**
+     * request_too_large
+     */
+    413: Problem;
+    /**
+     * rate_limit_exceeded
+     */
+    429: Problem;
+    /**
+     * internal_error
+     */
+    500: Problem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: Problem;
+};
+
+export type PublicGetDatabaseViewError = PublicGetDatabaseViewErrors[keyof PublicGetDatabaseViewErrors];
+
+export type PublicGetDatabaseViewResponses = {
+    /**
+     * The view
+     */
+    200: PublicDatabaseViewDetail;
+};
+
+export type PublicGetDatabaseViewResponse = PublicGetDatabaseViewResponses[keyof PublicGetDatabaseViewResponses];
+
+export type PublicUpdateDatabaseViewData = {
+    body: PublicDatabaseViewChanges;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        /**
+         * The token's workspace, from `GET /me`.
+         */
+        workspace_id: string;
+        /**
+         * The database's page id.
+         */
+        page_id: string;
+        view_id: string;
+    };
+    query?: {
+        /**
+         * The `link_id` of a linked view block of this database. Omitted: the database's own views.
+         */
+        link_id?: string;
+    };
+    url: '/api/public/v1/workspaces/{workspace_id}/docs/{page_id}/database/views/{view_id}';
+};
+
+export type PublicUpdateDatabaseViewErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: Problem;
+    /**
+     * unauthorized
+     */
+    401: Problem;
+    /**
+     * workspace_read_only
+     */
+    402: Problem;
+    /**
+     * insufficient_scope, origin_forbidden
+     */
+    403: Problem;
+    /**
+     * not_found
+     */
+    404: Problem;
+    /**
+     * contract_mismatch
+     */
+    409: Problem;
+    /**
+     * request_too_large
+     */
+    413: Problem;
+    /**
+     * validation_failed
+     */
+    422: Problem;
+    /**
+     * page_locked
+     */
+    423: Problem;
+    /**
+     * rate_limit_exceeded
+     */
+    429: Problem;
+    /**
+     * internal_error
+     */
+    500: Problem;
+    /**
+     * service_unavailable
+     */
+    503: Problem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: Problem;
+};
+
+export type PublicUpdateDatabaseViewError = PublicUpdateDatabaseViewErrors[keyof PublicUpdateDatabaseViewErrors];
+
+export type PublicUpdateDatabaseViewResponses = {
+    /**
+     * The view
+     */
+    200: PublicDatabaseViewDetail;
+};
+
+export type PublicUpdateDatabaseViewResponse = PublicUpdateDatabaseViewResponses[keyof PublicUpdateDatabaseViewResponses];
 
 export type PublicMoveDocData = {
     body: PublicMoveDocBody;

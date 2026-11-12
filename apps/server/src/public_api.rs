@@ -152,6 +152,25 @@ pub fn router(state: PublicApiState) -> Router {
         .route(
             "/docs/{page_id}/rows/{row_id}",
             patch(databases::update_row),
+        )
+        .route("/databases", post(database_views::create_database))
+        .route(
+            "/docs/{page_id}/database/views",
+            get(database_views::views).post(database_views::create_view),
+        )
+        .route(
+            "/docs/{page_id}/database/views/{view_id}",
+            get(database_views::view)
+                .patch(database_views::update_view)
+                .delete(database_views::delete_view),
+        )
+        .route(
+            "/docs/{page_id}/database/links",
+            post(database_views::create_link),
+        )
+        .route(
+            "/docs/{page_id}/database/links/{link_id}",
+            delete(database_views::delete_link),
         );
     // Exports belong to the token's only workspace, which the token already names.
     let routes = Router::new()
@@ -1178,6 +1197,7 @@ macro_rules! path_id {
     };
 }
 
+pub(crate) mod database_views;
 pub(crate) mod databases;
 mod idempotency;
 pub(crate) mod relations;
