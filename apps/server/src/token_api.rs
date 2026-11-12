@@ -79,13 +79,15 @@ pub enum TokenApiError {
     Page(PageError),
     /// A database refusal other than not found (see `databases`).
     Database(crate::repositories::databases::DatabaseError),
-    Internal,
+    /// Why it failed, for the server log; clients do not see it.
+    Internal(String),
 }
 
 impl From<PageError> for TokenApiError {
     fn from(error: PageError) -> Self {
         match error {
-            PageError::Unavailable(_) | PageError::Corrupt => Self::Internal,
+            PageError::Unavailable(error) => Self::Internal(error.to_string()),
+            error @ PageError::Corrupt => Self::Internal(error.to_string()),
             error => Self::Page(error),
         }
     }
@@ -98,8 +100,8 @@ impl From<TaskError> for TokenApiError {
 }
 
 impl From<sqlx::Error> for TokenApiError {
-    fn from(_: sqlx::Error) -> Self {
-        Self::Internal
+    fn from(error: sqlx::Error) -> Self {
+        Self::Internal(error.to_string())
     }
 }
 
@@ -861,7 +863,8 @@ impl Authorized<'_> {
             .await
             .map_err(|error| match error {
                 WorkspaceError::NotFound => TokenApiError::NotAvailable,
-                _ => TokenApiError::Internal,
+                WorkspaceError::Unavailable(error) => TokenApiError::Internal(error.to_string()),
+                error => TokenApiError::Internal(error.to_string()),
             })?;
         Ok(Page {
             items: members
@@ -1244,7 +1247,7 @@ impl Authorized<'_> {
                 let id = |column: &str| {
                     row.get::<String, _>(column)
                         .parse::<Id>()
-                        .map_err(|_| TokenApiError::Internal)
+                        .map_err(|error| TokenApiError::Internal(error.to_string()))
                 };
                 Ok(Some((id("id")?, id("task_id")?)))
             }
@@ -1809,7 +1812,8 @@ impl Authorized<'_> {
 /// Doc reads tell no refusal apart from a missing doc; a failing database stays an error.
 fn hidden_page(error: PageError) -> TokenApiError {
     match error {
-        PageError::Unavailable(_) | PageError::Corrupt => TokenApiError::Internal,
+        PageError::Unavailable(error) => TokenApiError::Internal(error.to_string()),
+        error @ PageError::Corrupt => TokenApiError::Internal(error.to_string()),
         _ => TokenApiError::NotAvailable,
     }
 }
@@ -1817,7 +1821,8 @@ fn hidden_page(error: PageError) -> TokenApiError {
 /// [`hidden_page`] for chat reads.
 fn hidden_chat(error: ChatError) -> TokenApiError {
     match error {
-        ChatError::Unavailable(_) | ChatError::Upload(_) => TokenApiError::Internal,
+        ChatError::Unavailable(error) => TokenApiError::Internal(error.to_string()),
+        ChatError::Upload(error) => TokenApiError::Internal(error.to_string()),
         _ => TokenApiError::NotAvailable,
     }
 }

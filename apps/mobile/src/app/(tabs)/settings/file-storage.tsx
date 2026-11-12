@@ -5,7 +5,7 @@ import { View } from 'react-native'
 
 import { ConfirmDialog, type ConfirmRequest } from '../../../components/settings/Dialog'
 import { FieldLabel, Note, OptionHint, SettingsCard, SettingsShell, Toggle, WORKSPACE_NAV } from '../../../components/settings/Shell'
-import { bucketMovingText, formatBytes, storageUse, type WorkspaceBucketView } from '../../../data/account-api'
+import { bucketMovedText, bucketMovingText, formatBytes, storageUse, type WorkspaceBucketView } from '../../../data/account-api'
 import { s3Body, s3Draft } from '../../../data/admin-api'
 import { useDeleteStorageFile, useWorkspaceBucket, useWorkspaceBucketWrites, useWorkspaceStorage } from '../../../hooks/account'
 import { useOrbit } from '../../../orbit-context'
@@ -74,6 +74,10 @@ function BucketCard({ view }: { view: WorkspaceBucketView }) {
   const set = (field: 'endpoint' | 'region' | 'bucket' | 'prefix' | 'access_key_id' | 'secret_access_key') => (value: string) => edit({ [field]: value })
   // after a save or a removal the form shows what the server stored
   const stored = { onSuccess: (next: WorkspaceBucketView) => setDraft(s3Draft(next.s3 ?? null)) }
+  // the move the admin started here, so the card says when it is done, even if it was too quick to show progress
+  const [started, setStarted] = useState<'save' | 'remove' | null>(null)
+  const startedBy = (move: 'save' | 'remove') => ({ onSuccess: (next: WorkspaceBucketView) => { stored.onSuccess(next); setStarted(move) } })
+  const moved = bucketMovedText(view, started)
   const ready = draft.endpoint.trim() !== '' && draft.bucket.trim() !== '' && draft.access_key_id.trim() !== '' && (s3 !== null || draft.secret_access_key !== '')
   const moving = bucketMovingText(view)
   const plain = { autoCapitalize: 'none', autoCorrect: false } as const
@@ -89,6 +93,7 @@ function BucketCard({ view }: { view: WorkspaceBucketView }) {
             <OptionHint>{moving}</OptionHint>
           </View>
         ) : null}
+        {moved ? <OptionHint>{moved}</OptionHint> : null}
         {view.move_error ? <OptionHint error>Moving files stopped: {view.move_error} Orbit tries again every ten minutes.</OptionHint> : null}
         <Input label="Endpoint" required placeholder="https://s3.eu-central-1.amazonaws.com" keyboardType="url" {...plain} value={draft.endpoint} onChangeText={set('endpoint')} />
         <Input label="Region" placeholder="us-east-1" {...plain} value={draft.region} onChangeText={set('region')} />
@@ -128,12 +133,12 @@ function BucketCard({ view }: { view: WorkspaceBucketView }) {
                   description: "New files go to Orbit's storage. Files in the bucket move back and are deleted from it.",
                   confirmLabel: 'Remove',
                   danger: true,
-                  onConfirm: () => remove.mutate(undefined, stored),
+                  onConfirm: () => remove.mutate(undefined, startedBy('remove')),
                 })
               }
             />
           ) : null}
-          <Button label={save.isPending ? 'Testing bucket…' : 'Save bucket'} disabled={save.isPending} onPress={() => (ready ? save.mutate(s3Body(draft), stored) : setTried(true))} />
+          <Button label={save.isPending ? 'Testing bucket…' : 'Save bucket'} disabled={save.isPending} onPress={() => (ready ? save.mutate(s3Body(draft), startedBy('save')) : setTried(true))} />
         </View>
       </View>
       <ConfirmDialog request={confirm} onClose={() => setConfirm(null)} />

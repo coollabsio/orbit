@@ -188,6 +188,7 @@ export function useInstanceSettings() {
     // Shows the progress while attachment files move between this server and S3, or images are compressed.
     refetchInterval: (query) => {
       const storage = query.state.data?.storage
+      if (storage?.checking) return 1000
       if (storage?.image_compression?.running) return 2000
       return storage?.files_to_move ? 5000 : false
     },

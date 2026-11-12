@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { toast } from 'sonner'
 import type { BackupSchedule, CompressionStatus, EnvironmentView, S3View, StorageView } from '@orbit/api/generated/types.gen'
 import { ApiProblem } from '@orbit/api/problem'
@@ -88,6 +89,9 @@ function BucketCard({ s3, locked }: { s3: S3View | null; locked: boolean }) {
 function UsageCard({ storage, environment }: { storage: StorageView; environment: EnvironmentView }) {
   const save = useSaveStorageOptions()
   const ready = Boolean(storage.s3)
+  // Set when the admin flips "Files in S3" here, so the row says when the move is done, even if it was too quick
+  // to show any progress.
+  const [watchingMove, setWatchingMove] = useState(false)
   function change(options: Partial<Pick<StorageView, 'attachments_in_s3' | 'backups_in_s3' | 'backup_schedule' | 's3_keep_deleted_days'>>, message: string) {
     save.mutate({
       attachments_in_s3: storage.attachments_in_s3,
@@ -96,15 +100,23 @@ function UsageCard({ storage, environment }: { storage: StorageView; environment
       s3_keep_deleted_days: storage.s3_keep_deleted_days,
       ...options,
     }, {
-      onSuccess: () => toast(message),
+      onSuccess: () => {
+        toast(message)
+        if (options.attachments_in_s3 !== undefined) setWatchingMove(true)
+      },
       onError: (error) => toast.error(problemText(error, 'Storage settings could not be saved.')),
     })
   }
   const keepOptions = [...new Set([...KEEP_DELETED_DAYS, storage.s3_keep_deleted_days])]
     .sort((left, right) => left - right)
     .map((days) => ({ value: String(days), label: daysLabel(days) }))
-  const moving = storage.files_to_move > 0
-    ? `${storage.files_to_move} ${storage.files_to_move === 1 ? 'file' : 'files'} left to move ${storage.attachments_in_s3 ? 'to the bucket' : 'to this server'}.`
+  const moving = storage.checking
+    ? 'Checking which files to move…'
+    : storage.files_to_move > 0
+      ? `${storage.files_to_move} ${storage.files_to_move === 1 ? 'file' : 'files'} left to move ${storage.attachments_in_s3 ? 'to the bucket' : 'to this server'}.`
+      : null
+  const moved = watchingMove && !moving && !storage.move_error
+    ? (storage.attachments_in_s3 ? 'Done. All files are in the bucket.' : 'Done. All files are on this server.')
     : null
   return (
     <SettingsCard title="Usage" description="What Orbit keeps in the bucket, and how often it backs up by itself." flush>
@@ -120,6 +132,7 @@ function UsageCard({ storage, environment }: { storage: StorageView; environment
                 {moving}
               </span>
             ) : null}
+            {moved ? <span role="status" className="text-xs text-muted-foreground">{moved}</span> : null}
             {storage.move_error ? <span role="alert" className="text-xs text-destructive">Moving files stopped: {storage.move_error} Orbit tries again every ten minutes.</span> : null}
             {environment.attachments_in_s3 ? <SetByEnvironment variable="ORBIT_S3_ATTACHMENTS" /> : null}
           </div>

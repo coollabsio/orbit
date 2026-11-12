@@ -93,20 +93,20 @@ impl OAuthState {
         let workspace_id: Id = row
             .get::<String, _>("workspace_id")
             .parse()
-            .map_err(|_| OAuthError::server())?;
+            .map_err(|error| OAuthError::server().cause(error))?;
         // An all-projects grant covers the live projects of today and stays valid without any.
         if row.get::<bool, _>("all_projects") {
             let viewer = row
                 .get::<String, _>("user_id")
                 .parse()
-                .map_err(|_| OAuthError::server())?;
+                .map_err(|error| OAuthError::server().cause(error))?;
             let approved = live_projects(self.database.pool(), workspace_id, Some(viewer))
                 .await
-                .map_err(|_| OAuthError::server())?;
+                .map_err(|error| OAuthError::server().cause(error))?;
             return principal(&row, workspace_id, approved).map(Some);
         }
-        let project_ids: Vec<String> =
-            serde_json::from_str(row.get("project_ids")).map_err(|_| OAuthError::server())?;
+        let project_ids: Vec<String> = serde_json::from_str(row.get("project_ids"))
+            .map_err(|error| OAuthError::server().cause(error))?;
         let mut approved = Vec::new();
         for id in project_ids {
             let Flag(active) = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
@@ -119,7 +119,10 @@ impl OAuthState {
             .fetch_one(self.database.pool())
             .await?;
             if active {
-                approved.push(id.parse().map_err(|_| OAuthError::server())?);
+                approved.push(
+                    id.parse()
+                        .map_err(|error| OAuthError::server().cause(error))?,
+                );
             }
         }
         if approved.is_empty() {
@@ -137,12 +140,12 @@ fn principal(
     let user_id: Id = row
         .get::<String, _>("user_id")
         .parse()
-        .map_err(|_| OAuthError::server())?;
+        .map_err(|error| OAuthError::server().cause(error))?;
     Ok(ApiTokenPrincipal {
         token_id: row
             .get::<String, _>("id")
             .parse()
-            .map_err(|_| OAuthError::server())?,
+            .map_err(|error| OAuthError::server().cause(error))?,
         workspace_id,
         project_ids,
         all_projects: row.get::<bool, _>("all_projects"),
@@ -218,47 +221,63 @@ async fn public_cors(request: Request, next: Next) -> Response {
 pub struct OAuthError {
     status: StatusCode,
     code: &'static str,
+    cause: Option<String>,
 }
 impl OAuthError {
     fn invalid(code: &'static str) -> Self {
         Self {
             status: StatusCode::BAD_REQUEST,
             code,
+            cause: None,
         }
     }
     fn throttled() -> Self {
         Self {
             status: StatusCode::TOO_MANY_REQUESTS,
             code: "temporarily_unavailable",
+            cause: None,
         }
     }
     fn unauthorized() -> Self {
         Self {
             status: StatusCode::UNAUTHORIZED,
             code: "login_required",
+            cause: None,
         }
     }
     fn server() -> Self {
         Self {
             status: StatusCode::INTERNAL_SERVER_ERROR,
             code: "server_error",
+            cause: None,
         }
+    }
+    /// Records why this 500 happened. The HTTP layer logs it with the request ID; the client does not see it.
+    fn cause(mut self, error: impl std::fmt::Display) -> Self {
+        self.cause = Some(error.to_string());
+        self
     }
 }
 impl From<sqlx::Error> for OAuthError {
     fn from(error: sqlx::Error) -> Self {
         tracing::error!(%error, "OAuth persistence failed");
-        Self::server()
+        Self::server().cause(error)
     }
 }
 impl IntoResponse for OAuthError {
     fn into_response(self) -> Response {
-        (
+        let mut response = (
             self.status,
             [(header::CACHE_CONTROL, "no-store")],
             Json(json!({"error": self.code})),
         )
-            .into_response()
+            .into_response();
+        if let Some(cause) = self.cause {
+            response
+                .extensions_mut()
+                .insert(orbit_platform::ErrorCause(cause));
+        }
+        response
     }
 }
 
@@ -473,7 +492,7 @@ async fn authorize(
             .await?;
     let redirects: Vec<String> =
         serde_json::from_str(&redirects.ok_or_else(|| OAuthError::invalid("invalid_client"))?)
-            .map_err(|_| OAuthError::server())?;
+            .map_err(|error| OAuthError::server().cause(error))?;
     if !redirects.contains(&input.redirect_uri) {
         return Err(OAuthError::invalid("invalid_request"));
     }
@@ -484,7 +503,7 @@ async fn authorize(
         )
         .map_err(|_| OAuthError::invalid("invalid_request"))?
         .and_then(|value| value.into_private_value().ok().flatten())
-        .ok_or_else(OAuthError::server)?;
+        .ok_or_else(|| OAuthError::server().cause("PKCE challenge has no stored value"))?;
     let id = generate_opaque_token();
     let now = TimestampMillis::now().as_millis();
     let mut tx = state.database.immediate_transaction().await?;
@@ -606,7 +625,8 @@ async fn approve(
     let row = sqlx::query("SELECT client_id, redirect_uri, state, resource, mcp_scopes FROM oauth_requests WHERE id = $1 AND user_id = $2 AND csrf_hash = $3 AND expires_at > $4 AND code_hash IS NULL")
         .bind(&id).bind(user.to_string()).bind(hash(&input.csrf_token)).bind(now).fetch_optional(&mut *tx).await?
         .ok_or_else(|| OAuthError::invalid("invalid_request"))?;
-    let mut callback = Url::parse(row.get("redirect_uri")).map_err(|_| OAuthError::server())?;
+    let mut callback =
+        Url::parse(row.get("redirect_uri")).map_err(|error| OAuthError::server().cause(error))?;
     if input.approved {
         let workspace = input
             .workspace_id
@@ -879,7 +899,7 @@ async fn disconnect(
     let workspace: Id = workspace
         .ok_or_else(|| OAuthError::invalid("invalid_request"))?
         .parse()
-        .map_err(|_| OAuthError::server())?;
+        .map_err(|error| OAuthError::server().cause(error))?;
     revoke_grant(
         &mut tx,
         &grant.to_string(),

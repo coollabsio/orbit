@@ -173,6 +173,10 @@ fn problem(
                 instance,
                 request_id,
             )
+            .cause(match &error {
+                ImportPeopleError::Unavailable(source) => source.to_string(),
+                _ => error.to_string(),
+            })
         }
     }
 }

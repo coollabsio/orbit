@@ -446,12 +446,15 @@ fn import_problem(
         ),
         OrbitImportError::Unavailable(error) => {
             tracing::error!(error = %error, "Orbit import storage failed");
-            (
+            return ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "internal_error",
                 "Internal server error",
                 "An unexpected error occurred. Use the request ID when contacting support.",
+                instance,
+                request_id,
             )
+            .cause(error);
         }
     };
     ApiError::new(status, code, title, detail, instance, request_id)

@@ -1,7 +1,7 @@
 import { createOrbitClient } from '@orbit/api/client'
 import { expect, test } from 'bun:test'
 
-import { bucketMovingText, bucketPollInterval, confirmsEmail, deleteAccount, filterMembers, formatBytes, invitationProblem, memberActions, ownedWorkspaces, passwordProblem, pickedImageName, requestEmailChange, sortedSessions, storageUse, twoFactorSummary } from './account-api'
+import { bucketMovedText, bucketMovingText, bucketPollInterval, confirmsEmail, deleteAccount, filterMembers, formatBytes, invitationProblem, memberActions, ownedWorkspaces, passwordProblem, pickedImageName, requestEmailChange, sortedSessions, storageUse, twoFactorSummary } from './account-api'
 import type { MemberRecord } from './orbit'
 
 const member = (id: string, fields: Partial<MemberRecord>): MemberRecord => ({
@@ -68,7 +68,7 @@ test('bucketPollInterval polls while files move either way', () => {
   expect(bucketPollInterval({ s3: null, removing: false, checking: false, files_to_move: 0 })).toBe(false)
   expect(bucketPollInterval({ s3: null, removing: false, checking: false, files_to_move: 3 })).toBe(5000)
   expect(bucketPollInterval({ s3: null, removing: true, checking: false, files_to_move: 0 })).toBe(5000)
-  expect(bucketPollInterval({ s3: null, removing: false, checking: true, files_to_move: 0 })).toBe(5000)
+  expect(bucketPollInterval({ s3: null, removing: false, checking: true, files_to_move: 0 })).toBe(1000)
 })
 
 test('bucketMovingText names the direction', () => {
@@ -76,6 +76,16 @@ test('bucketMovingText names the direction', () => {
   expect(bucketMovingText({ removing: false, checking: false, files_to_move: 1 })).toBe('1 file left to move to your bucket.')
   expect(bucketMovingText({ removing: true, checking: false, files_to_move: 12 })).toBe("12 files left to move back to Orbit's storage.")
   expect(bucketMovingText({ removing: false, checking: true, files_to_move: 0 })).toBe('Checking which files to move…')
+})
+
+test('bucketMovedText says done only after a move the admin started', () => {
+  const idle = { removing: false, checking: false, files_to_move: 0, move_error: null }
+  expect(bucketMovedText(idle, null)).toBeNull()
+  expect(bucketMovedText({ ...idle, checking: true }, 'save')).toBeNull()
+  expect(bucketMovedText({ ...idle, removing: true }, 'remove')).toBeNull()
+  expect(bucketMovedText({ ...idle, move_error: 'denied' }, 'save')).toBeNull()
+  expect(bucketMovedText(idle, 'save')).toBe('Done. All files are in your bucket.')
+  expect(bucketMovedText(idle, 'remove')).toBe("Done. All files are back in Orbit's storage.")
 })
 
 test('a guest only becomes a member, and nobody becomes a guest', () => {
