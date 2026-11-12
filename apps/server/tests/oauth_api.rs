@@ -155,7 +155,7 @@ impl Fixture {
         assert_eq!(status, StatusCode::OK, "{consent}");
         // The page shows where the code goes, since the client picks its own name.
         assert_eq!(consent["redirect_to"], "127.0.0.1");
-        let (status, result) = self.send("POST", &format!("/api/v1/oauth/consent/{id}"), json!({"approved":true,"csrf_token":consent["csrf_token"],"workspace_id":self.workspace,"project_ids":[self.project]}), true).await;
+        let (status, result) = self.send("POST", &format!("/api/v1/oauth/consent/{id}"), json!({"approved":true,"csrf_token":consent["csrf_token"],"workspaces":[{"workspace_id":self.workspace,"project_ids":[self.project]}]}), true).await;
         assert_eq!(status, StatusCode::OK, "{result}");
         let callback = url::Url::parse(result["redirect_uri"].as_str().unwrap()).unwrap();
         assert_eq!(
@@ -201,6 +201,44 @@ impl Fixture {
     }
     async fn access(&self, token: &str) -> (StatusCode, Value) {
         decode(self.app.clone().oneshot(Request::post("/mcp").header(header::HOST,"orbit.test").header(header::AUTHORIZATION,format!("Bearer {token}")).header(header::CONTENT_TYPE,"application/json").header(header::ACCEPT,"application/json, text/event-stream").header("mcp-protocol-version","2025-11-25").body(Body::from(json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_projects","arguments":{}}}).to_string())).unwrap()).await.unwrap()).await
+    }
+    async fn call(&self, token: &str, method: &str, params: Value) -> Value {
+        let request = json!({"jsonrpc":"2.0","id":1,"method":method,"params":params});
+        let (status, body) = decode(
+            self.app
+                .clone()
+                .oneshot(
+                    Request::post("/mcp")
+                        .header(header::HOST, "orbit.test")
+                        .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                        .header(header::CONTENT_TYPE, "application/json")
+                        .header(header::ACCEPT, "application/json, text/event-stream")
+                        .header("mcp-protocol-version", "2025-11-25")
+                        .body(Body::from(request.to_string()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        body
+    }
+    /// Approves a pending request for the given workspaces and returns the authorization code.
+    async fn approve(&self, id: &str, body: Value) -> (StatusCode, Value) {
+        let (_, consent) = self
+            .send(
+                "GET",
+                &format!("/api/v1/oauth/consent/{id}"),
+                json!({}),
+                true,
+            )
+            .await;
+        let mut body = body;
+        body["csrf_token"] = consent["csrf_token"].clone();
+        body["approved"] = json!(true);
+        self.send("POST", &format!("/api/v1/oauth/consent/{id}"), body, true)
+            .await
     }
     async fn issue(&self, client: &str, code: &str) -> Value {
         let (status, result) = self
@@ -276,7 +314,8 @@ async fn discovery_and_authorization_code_flow_issue_scoped_read_tokens() {
         .ok()
         .flatten()
         .unwrap();
-    assert_eq!(grant.project_ids, vec![f.project]);
+    assert_eq!(grant.len(), 1);
+    assert_eq!(grant[0].project_ids, vec![f.project]);
     assert_eq!(tokens["scope"], "tasks:read");
     let raw: Vec<u8> = sqlx::query_scalar("SELECT access_hash FROM oauth_tokens")
         .fetch_one(f.db.pool())
@@ -381,7 +420,7 @@ async fn consent_requires_login_nonce_and_valid_projects_and_supports_denial() {
         (json!("wrong"), f.project),
         (consent["csrf_token"].clone(), Id::new_v7()),
     ] {
-        assert_eq!(f.send("POST",&path,json!({"approved":true,"csrf_token":nonce,"workspace_id":f.workspace,"project_ids":[project]}),true).await.0,StatusCode::BAD_REQUEST);
+        assert_eq!(f.send("POST",&path,json!({"approved":true,"csrf_token":nonce,"workspaces":[{"workspace_id":f.workspace,"project_ids":[project]}]}),true).await.0,StatusCode::BAD_REQUEST);
     }
     let (_, denied) = f
         .send(
@@ -780,7 +819,7 @@ async fn optional_scopes_need_consent_and_survive_refresh() {
             true,
         )
         .await;
-    let (status, approval) = f.send("POST", &format!("/api/v1/oauth/consent/{id}"), json!({"approved": true, "csrf_token": consent["csrf_token"], "workspace_id": f.workspace, "project_ids": [f.project], "scopes": ["tasks:write", "docs:read", "docs:write", "chat:read"]}), true).await;
+    let (status, approval) = f.send("POST", &format!("/api/v1/oauth/consent/{id}"), json!({"approved": true, "csrf_token": consent["csrf_token"], "workspaces": [{"workspace_id": f.workspace, "project_ids": [f.project]}], "scopes": ["tasks:write", "docs:read", "docs:write", "chat:read"]}), true).await;
     assert_eq!(status, StatusCode::OK, "{approval}");
     let callback = url::Url::parse(approval["redirect_uri"].as_str().unwrap()).unwrap();
     let code = callback
@@ -807,7 +846,7 @@ async fn optional_scopes_need_consent_and_survive_refresh() {
         ApiTokenScope::DocsWrite,
         ApiTokenScope::ChatRead,
     ] {
-        assert!(principal.scopes.contains(&scope));
+        assert!(principal[0].scopes.contains(&scope));
     }
     let (status, refreshed) = f
         .exchange(&[
@@ -827,7 +866,7 @@ async fn optional_scopes_need_consent_and_survive_refresh() {
         .ok()
         .flatten()
         .unwrap();
-    assert_eq!(principal.scopes, vec![ApiTokenScope::TasksRead]);
+    assert_eq!(principal[0].scopes, vec![ApiTokenScope::TasksRead]);
     let (status, _) = f
         .exchange(&[
             ("grant_type", "refresh_token"),
@@ -837,4 +876,272 @@ async fn optional_scopes_need_consent_and_survive_refresh() {
         ])
         .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+/// A second workspace of the fixture's user, with its own project.
+async fn second_workspace(f: &Fixture) -> (Id, Id) {
+    let workspace =
+        orbit_server::repositories::workspaces::WorkspaceRepository::new((*f.db).clone())
+            .create(f.user, "Second team".into(), "test", TimestampMillis::now())
+            .await
+            .unwrap();
+    let project: String = sqlx::query_scalar("SELECT id FROM projects WHERE workspace_id = $1")
+        .bind(workspace.id.to_string())
+        .fetch_one(f.db.pool())
+        .await
+        .unwrap();
+    (workspace.id, project.parse().unwrap())
+}
+
+fn code_of(approval: &Value) -> String {
+    url::Url::parse(approval["redirect_uri"].as_str().unwrap())
+        .unwrap()
+        .query_pairs()
+        .find(|(k, _)| k == "code")
+        .unwrap()
+        .1
+        .to_string()
+}
+
+fn project_ids(result: &Value) -> Vec<String> {
+    result["result"]["structuredContent"]["items"]
+        .as_array()
+        .map(|items| {
+            items
+                .iter()
+                .map(|p| p["id"].as_str().unwrap().to_owned())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+#[tokio::test]
+async fn one_connection_covers_several_workspaces_and_each_call_picks_one() {
+    let f = Fixture::new().await;
+    let (second, second_project) = second_workspace(&f).await;
+    let client = f.register().await;
+    let id = f.pending(&client).await;
+    let (status, approval) = f
+        .approve(
+            &id,
+            json!({"workspaces": [
+                {"workspace_id": f.workspace, "project_ids": [f.project]},
+                {"workspace_id": second, "all_projects": true},
+            ]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{approval}");
+    let token = f.issue(&client, &code_of(&approval)).await;
+    let access = token["access_token"].as_str().unwrap();
+
+    let principals = f.oauth.authenticate(access).await.ok().flatten().unwrap();
+    assert_eq!(principals.len(), 2);
+
+    // The tools take workspace_id, and a call without it says why it fails.
+    let tools = f.call(access, "tools/list", json!({})).await;
+    assert!(
+        tools["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|t| t["inputSchema"]["properties"]["workspace_id"].is_object()),
+        "{tools}"
+    );
+    let call = |args: Value| {
+        f.call(
+            access,
+            "tools/call",
+            json!({"name": "list_projects", "arguments": args}),
+        )
+    };
+    let missing = call(json!({})).await;
+    assert!(
+        missing["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("workspace_id"),
+        "{missing}"
+    );
+    let first = call(json!({"workspace_id": f.workspace})).await;
+    assert_eq!(project_ids(&first), vec![f.project.to_string()], "{first}");
+    let other = call(json!({"workspace_id": second})).await;
+    assert_eq!(
+        project_ids(&other),
+        vec![second_project.to_string()],
+        "{other}"
+    );
+    // A workspace outside the connection is refused, even one the user belongs to.
+    let stranger = call(json!({"workspace_id": Id::new_v7()})).await;
+    assert!(stranger["error"].is_object(), "{stranger}");
+
+    // get_me lists every workspace and works for an OAuth connection.
+    let me = f
+        .call(
+            access,
+            "tools/call",
+            json!({"name": "get_me", "arguments": {}}),
+        )
+        .await;
+    let listed: Vec<_> = me["result"]["structuredContent"]["workspaces"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|w| w["id"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(
+        listed,
+        vec![f.workspace.to_string(), second.to_string()],
+        "{me}"
+    );
+    assert_eq!(
+        me["result"]["structuredContent"]["user"]["id"],
+        f.user.to_string()
+    );
+
+    // Leaving one workspace ends only its grant: the token and refresh keep working for the other.
+    sqlx::query("UPDATE oauth_grants SET revoked_at = 1 WHERE workspace_id = $1")
+        .bind(f.workspace.to_string())
+        .execute(f.db.pool())
+        .await
+        .unwrap();
+    let remaining = f.oauth.authenticate(access).await.ok().flatten().unwrap();
+    assert_eq!(remaining.len(), 1);
+    assert_eq!(remaining[0].workspace_id, second);
+    let (status, refreshed) = f
+        .exchange(&[
+            ("grant_type", "refresh_token"),
+            ("client_id", &client),
+            ("refresh_token", token["refresh_token"].as_str().unwrap()),
+        ])
+        .await;
+    assert_eq!(status, StatusCode::OK, "{refreshed}");
+    // One workspace left: the tools need no workspace_id again.
+    let alone = f
+        .call(
+            refreshed["access_token"].as_str().unwrap(),
+            "tools/call",
+            json!({"name": "list_projects", "arguments": {}}),
+        )
+        .await;
+    assert_eq!(
+        project_ids(&alone),
+        vec![second_project.to_string()],
+        "{alone}"
+    );
+
+    // Disconnecting the last workspace stops the tokens.
+    let (_, grants) = f.send("GET", "/api/v1/oauth/grants", json!({}), true).await;
+    let grant = grants["items"][0]["id"].as_str().unwrap();
+    assert_eq!(
+        f.send(
+            "DELETE",
+            &format!("/api/v1/oauth/grants/{grant}"),
+            json!({}),
+            true
+        )
+        .await
+        .0,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        f.access(refreshed["access_token"].as_str().unwrap())
+            .await
+            .0,
+        StatusCode::UNAUTHORIZED
+    );
+}
+
+#[tokio::test]
+async fn disconnecting_one_workspace_keeps_the_others_and_revoke_ends_them_all() {
+    let f = Fixture::new().await;
+    let (second, second_project) = second_workspace(&f).await;
+    let client = f.register().await;
+    let id = f.pending(&client).await;
+    let (_, approval) = f
+        .approve(
+            &id,
+            json!({"workspaces": [
+                {"workspace_id": f.workspace, "project_ids": [f.project]},
+                {"workspace_id": second, "project_ids": [second_project]},
+            ]}),
+        )
+        .await;
+    let token = f.issue(&client, &code_of(&approval)).await;
+    let access = token["access_token"].as_str().unwrap();
+    // Each workspace is one row in Connected apps.
+    let (_, grants) = f.send("GET", "/api/v1/oauth/grants", json!({}), true).await;
+    assert_eq!(grants["items"].as_array().unwrap().len(), 2, "{grants}");
+    let first_grant = grants["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|g| g["workspace_name"] == "Orbit")
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_eq!(
+        f.send(
+            "DELETE",
+            &format!("/api/v1/oauth/grants/{first_grant}"),
+            json!({}),
+            true
+        )
+        .await
+        .0,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        f.oauth
+            .authenticate(access)
+            .await
+            .ok()
+            .flatten()
+            .unwrap()
+            .len(),
+        1
+    );
+    // A revocation request from the client ends the whole connection.
+    let response = f
+        .app
+        .clone()
+        .oneshot(
+            Request::post("/oauth/revoke")
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from(format!(
+                    "token={}&client_id={client}",
+                    token["refresh_token"].as_str().unwrap()
+                )))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(f.oauth.authenticate(access).await.ok().flatten().is_none());
+}
+
+#[tokio::test]
+async fn an_approval_names_each_workspace_once_and_only_member_workspaces() {
+    let f = Fixture::new().await;
+    let client = f.register().await;
+    let id = f.pending(&client).await;
+    let twice = json!({"workspaces": [
+        {"workspace_id": f.workspace, "project_ids": [f.project]},
+        {"workspace_id": f.workspace, "all_projects": true},
+    ]});
+    assert_eq!(f.approve(&id, twice).await.0, StatusCode::BAD_REQUEST);
+    let stranger = json!({"workspaces": [
+        {"workspace_id": f.workspace, "project_ids": [f.project]},
+        {"workspace_id": Id::new_v7(), "all_projects": true},
+    ]});
+    assert_eq!(f.approve(&id, stranger).await.0, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        f.approve(&id, json!({"workspaces": []})).await.0,
+        StatusCode::BAD_REQUEST
+    );
+    let granted: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM oauth_grants")
+        .fetch_one(f.db.pool())
+        .await
+        .unwrap();
+    assert_eq!(granted, 0, "a refused approval stores nothing");
 }

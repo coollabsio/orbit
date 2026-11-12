@@ -109,8 +109,8 @@ async fn authenticate(State(state): State<McpState>, mut request: Request, next:
             return unauthorized(&state);
         };
         return match oauth.authenticate(token).await {
-            Ok(Some(principal)) => {
-                request.extensions_mut().insert(principal);
+            Ok(Some(principals)) => {
+                request.extensions_mut().insert(Workspaces(principals));
                 next.run(request).await
             }
             Ok(None) => unauthorized(&state),
@@ -123,7 +123,7 @@ async fn authenticate(State(state): State<McpState>, mut request: Request, next:
         .await
     {
         Ok(principal) => {
-            request.extensions_mut().insert(principal);
+            request.extensions_mut().insert(Workspaces(vec![principal]));
             next.run(request).await
         }
         Err(ApiTokenError::Forbidden) => StatusCode::FORBIDDEN.into_response(),
@@ -145,6 +145,14 @@ fn unauthorized(state: &McpState) -> Response {
     )
         .into_response()
 }
+
+/// The workspaces a request may use, each with its own approved projects: one for an API token,
+/// one or more for an OAuth connection. Never empty.
+#[derive(Clone)]
+struct Workspaces(Vec<ApiTokenPrincipal>);
+
+/// The tool argument that picks the workspace of a connection that covers several.
+const WORKSPACE_ARGUMENT: &str = "workspace_id";
 
 #[derive(Clone)]
 struct TaskTools {
@@ -481,7 +489,7 @@ fn tools() -> Vec<Tool> {
         ),
         definition::<EmptyArgs>(
             "get_me",
-            "Read this connection: its user (null for a service account), workspace, permissions and approved project IDs.",
+            "Read this connection: its user (null for a service account), permissions and approved project IDs, and `workspaces`, every workspace it covers. With several workspaces, every tool needs `workspace_id`.",
         ),
         definition::<CommentsArgs>(
             "list_comments",
@@ -518,12 +526,67 @@ fn arguments<T: serde::de::DeserializeOwned>(
         .map_err(|_| ErrorData::invalid_params("Invalid tool arguments", None))
 }
 
-fn principal(context: &RequestContext<RoleServer>) -> Result<&ApiTokenPrincipal, ErrorData> {
+fn workspaces(context: &RequestContext<RoleServer>) -> Result<&[ApiTokenPrincipal], ErrorData> {
     context
         .extensions
         .get::<axum::http::request::Parts>()
-        .and_then(|parts| parts.extensions.get::<ApiTokenPrincipal>())
+        .and_then(|parts| parts.extensions.get::<Workspaces>())
+        .map(|workspaces| workspaces.0.as_slice())
+        .filter(|workspaces| !workspaces.is_empty())
         .ok_or_else(|| ErrorData::internal_error("Missing request identity", None))
+}
+
+/// With one workspace, that one; the argument is not part of the tools then, so a call that
+/// sends it fails like any unknown argument. With several, takes `workspace_id` out of the
+/// arguments and picks that workspace: `get_me` falls back to the first (it lists them all) and
+/// every other tool asks for the argument.
+fn select_workspace<'a>(
+    workspaces: &'a [ApiTokenPrincipal],
+    request: &mut CallToolRequestParams,
+) -> Result<&'a ApiTokenPrincipal, ErrorData> {
+    if let [only] = workspaces {
+        return Ok(only);
+    }
+    let chosen = request
+        .arguments
+        .as_mut()
+        .and_then(|arguments| arguments.remove(WORKSPACE_ARGUMENT));
+    match chosen {
+        Some(Value::String(raw)) => {
+            let id = parse_id(&raw)?;
+            workspaces
+                .iter()
+                .find(|principal| principal.workspace_id == id)
+                .ok_or_else(|| {
+                    ErrorData::invalid_params(
+                        "Unknown workspace_id; get_me lists the workspaces of this connection",
+                        None,
+                    )
+                })
+        }
+        Some(_) => Err(ErrorData::invalid_params("Invalid workspace_id", None)),
+        None if request.name == "get_me" => Ok(&workspaces[0]),
+        None => Err(ErrorData::invalid_params(
+            "This connection covers several workspaces: pass workspace_id (get_me lists them)",
+            None,
+        )),
+    }
+}
+
+/// A connection that covers several workspaces needs `workspace_id` on every tool call.
+fn with_workspace_argument(mut tool: Tool) -> Tool {
+    let mut schema = (*tool.input_schema).clone();
+    if let Value::Object(properties) = schema
+        .entry("properties")
+        .or_insert_with(|| Value::Object(Default::default()))
+    {
+        properties.insert(
+            WORKSPACE_ARGUMENT.into(),
+            json!({"type": "string", "description": "The workspace to use, from get_me. This connection covers several."}),
+        );
+    }
+    tool.input_schema = Arc::new(schema);
+    tool
 }
 
 fn parse_id(raw: &str) -> Result<Id, ErrorData> {
@@ -547,12 +610,21 @@ impl ServerHandler for TaskTools {
         _: Option<PaginatedRequestParams>,
         context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, ErrorData> {
+        let workspaces = workspaces(&context)?;
         Ok(ListToolsResult::with_all_items(
             tools()
                 .into_iter()
                 .filter(|t| {
-                    principal(&context)
-                        .is_ok_and(|p| required_scope(&t.name).is_none_or(|s| p.allows(s)))
+                    workspaces
+                        .iter()
+                        .any(|p| required_scope(&t.name).is_none_or(|s| p.allows(s)))
+                })
+                .map(|tool| {
+                    if workspaces.len() > 1 {
+                        with_workspace_argument(tool)
+                    } else {
+                        tool
+                    }
                 })
                 .collect(),
         )
@@ -576,13 +648,14 @@ impl ServerHandler for TaskTools {
 impl TaskTools {
     async fn execute(
         &self,
-        request: CallToolRequestParams,
+        mut request: CallToolRequestParams,
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
-        let principal = principal(&context)?;
+        let all = workspaces(&context)?;
+        let principal = select_workspace(all, &mut request)?;
         let Some(scope) = required_scope(&request.name) else {
             let _: EmptyArgs = arguments(&request)?;
-            return match self.api.me(principal).await {
+            return match self.api.me(principal, all).await {
                 Ok(me) => Ok(CallToolResult::structured(json!(me))),
                 Err(error) => tool_error(error),
             };
