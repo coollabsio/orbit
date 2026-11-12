@@ -1226,7 +1226,12 @@ pub(crate) mod setup;
     security(("bearerAuth" = []))
 )]
 async fn me(State(s): State<PublicApiState>, ctx: Ctx) -> Response {
-    ctx.reply(StatusCode::OK, s.api.me(&ctx.principal).await)
+    ctx.reply(
+        StatusCode::OK,
+        s.api
+            .me(&ctx.principal, std::slice::from_ref(&ctx.principal))
+            .await,
+    )
 }
 
 #[utoipa::path(
