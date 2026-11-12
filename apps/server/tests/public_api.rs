@@ -2402,6 +2402,110 @@ async fn doc_markdown_names_visible_sub_pages_and_hides_the_others() {
     assert!(!read.to_string().contains("Secret plans"), "{read}");
 }
 
+#[tokio::test]
+async fn doc_markdown_names_the_sub_pages_of_a_database_row() {
+    let f = Fixture::new().await;
+    let (token, _) = f
+        .token(&[ApiTokenScope::DocsWrite, ApiTokenScope::DocsRead], false)
+        .await;
+    let create = |kind| CreatePage {
+        kind,
+        parent_id: None,
+        space: SpaceRequest {
+            private: None,
+            teamspace_id: None,
+        },
+        title: "Tasks".into(),
+        icon: None,
+        position: None,
+    };
+    let database = f
+        .pages
+        .create_page(
+            f.workspace,
+            f.user,
+            create(orbit_server::repositories::pages::PageKind::Database),
+            "test",
+            TimestampMillis::now(),
+        )
+        .await
+        .unwrap();
+    let (code, row) = f
+        .call(
+            Some(&token),
+            "POST",
+            &format!("/docs/{}/rows", database.id),
+            Some(json!({"title": "Row"})),
+        )
+        .await;
+    assert_eq!(code, StatusCode::CREATED, "{row}");
+    let row_id: Id = row["id"].as_str().unwrap().parse().unwrap();
+    let mut children = Vec::new();
+    for title in ["Row notes", "Trashed notes"] {
+        let (code, child) = f
+            .call(
+                Some(&token),
+                "POST",
+                "/docs",
+                Some(json!({"parent_id": row_id, "title": title})),
+            )
+            .await;
+        assert_eq!(code, StatusCode::CREATED, "{child}");
+        children.push(child["id"].as_str().unwrap().to_owned());
+    }
+    // Rows and their sub-pages are not in the page tree.
+    let (_, list) = f.call(Some(&token), "GET", "/docs", None).await;
+    assert!(!list.to_string().contains(&children[0]), "{list}");
+    let trashed_id: Id = children[1].parse().unwrap();
+    let trashed = f
+        .pages
+        .get_page(f.workspace, trashed_id, f.user)
+        .await
+        .unwrap();
+    f.pages
+        .delete_page(
+            f.workspace,
+            trashed_id,
+            f.user,
+            trashed.version,
+            "test",
+            TimestampMillis::now(),
+        )
+        .await
+        .unwrap();
+    let block =
+        |page_id: &str| json!({"id": page_id, "type": "page", "props": {"pageId": page_id}});
+    let page = f.pages.get_page(f.workspace, row_id, f.user).await.unwrap();
+    f.pages
+        .update_page(
+            f.workspace,
+            row_id,
+            f.user,
+            page.version,
+            PageChanges {
+                content: Some(vec![block(&children[0]), block(&children[1])]),
+                ..PageChanges::default()
+            },
+            "test",
+            TimestampMillis::now(),
+        )
+        .await
+        .unwrap();
+    let (code, read) = f
+        .call(Some(&token), "GET", &format!("/docs/{row_id}"), None)
+        .await;
+    assert_eq!(code, StatusCode::OK, "{read}");
+    // The live sub-page keeps its title; the trashed one stays unnamed.
+    assert_eq!(
+        read["markdown"],
+        format!(
+            "[Row notes](/docs/{})\n\n[Untitled](/docs/{})\n",
+            children[0], children[1]
+        ),
+        "{read}"
+    );
+}
+
 /// A stored attachment of `task`, as an upload leaves it; returns the blob's storage key.
 async fn attach(f: &Fixture, task: Id) -> String {
     let blob = Id::new_v7();
