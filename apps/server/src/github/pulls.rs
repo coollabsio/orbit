@@ -123,6 +123,8 @@ pub struct MergeInfo {
 #[derive(Serialize, ToSchema)]
 #[schema(as = GithubPullViewer)]
 pub struct PullViewer {
+    /// The member's GitHub login.
+    login: String,
     can_comment: bool,
     can_review: bool,
     can_merge: bool,
@@ -516,6 +518,7 @@ pub async fn detail(github: &GithubClient, token: &str, pull: &PullRef) -> Resul
                 .map(str::to_ascii_lowercase),
         },
         viewer: PullViewer {
+            login: text(&data["viewer"]["login"]),
             can_comment: !locked || can_write,
             can_review: (!locked || can_write) && !is_author && open,
             can_merge: can_write && open,

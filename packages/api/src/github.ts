@@ -119,3 +119,88 @@ export function extractPullRefs(text: string, limit = 3): PullRef[] {
   }
   return refs
 }
+
+/** Why a changed file is set aside from the review: machine-made files a reviewer rarely reads. `null` = review it. */
+export type AsideReason = 'lockfile' | 'generated' | 'snapshot'
+
+const LOCKFILES = new Set([
+  'bun.lock', 'bun.lockb', 'package-lock.json', 'npm-shrinkwrap.json', 'yarn.lock', 'pnpm-lock.yaml', 'Cargo.lock',
+  'Gemfile.lock', 'poetry.lock', 'uv.lock', 'Pipfile.lock', 'composer.lock', 'go.sum', 'flake.lock', 'Podfile.lock',
+  'pubspec.lock', 'mix.lock', 'deno.lock',
+])
+
+export function asideReason(path: string): AsideReason | null {
+  const name = path.slice(path.lastIndexOf('/') + 1)
+  if (LOCKFILES.has(name)) return 'lockfile'
+  if (/(^|\/)__snapshots__\//.test(path) || name.endsWith('.snap')) return 'snapshot'
+  if (/(^|\/)(generated|__generated__)\//.test(path) || /\.(gen|generated|pb|min)\.[^.]+$/.test(name) || /_pb2\.py$/.test(name) || name.endsWith('.map')) return 'generated'
+  return null
+}
+
+/** The parts of a pull request the review summary reads (the API types fit). */
+type SummaryFile = { path: string; viewed: boolean }
+type SummaryThread = { is_resolved: boolean; comments: { author: { login: string } }[] }
+type SummaryItem = { kind: string; author: { login: string }; review_state?: string | null; created_at: number }
+
+export type ReviewSummary = {
+  /** Files to review (not set aside), and how many of them the member marked as viewed. */
+  toReview: number
+  viewed: number
+  aside: number
+  openThreads: number
+  resolvedThreads: number
+  /** Open threads waiting for the member: someone else wrote last, and the member wrote in it or owns the pull request. */
+  needYou: number
+  /** Each reviewer's latest decision (a later plain comment does not undo an approval, as on GitHub). */
+  approved: string[]
+  changesRequested: string[]
+}
+
+/** An open thread waits for the member when someone else wrote last, and the member wrote in it or owns the pull
+ *  request. */
+export function threadWaitsFor(thread: SummaryThread, viewer: string, author: string): boolean {
+  const last = thread.comments.at(-1)?.author.login
+  const involved = viewer === author || thread.comments.some((comment) => comment.author.login === viewer)
+  return !thread.is_resolved && last !== undefined && last !== viewer && involved
+}
+
+export function reviewSummary({ files, threads, timeline, viewer, author }: {
+  files: SummaryFile[]
+  threads: SummaryThread[]
+  timeline: SummaryItem[]
+  /** The member's GitHub login, and the pull request author's. */
+  viewer: string
+  author: string
+}): ReviewSummary {
+  const review = files.filter((file) => asideReason(file.path) === null)
+  const open = threads.filter((thread) => !thread.is_resolved)
+  const decisions = new Map<string, string>()
+  for (const item of [...timeline].sort((a, b) => a.created_at - b.created_at)) {
+    if (item.kind === 'review' && (item.review_state === 'approved' || item.review_state === 'changes_requested')) decisions.set(item.author.login, item.review_state)
+  }
+  const who = (state: string) => [...decisions].filter(([, decision]) => decision === state).map(([login]) => login)
+  return {
+    toReview: review.length,
+    viewed: review.filter((file) => file.viewed).length,
+    aside: files.length - review.length,
+    openThreads: open.length,
+    resolvedThreads: threads.length - open.length,
+    needYou: open.filter((thread) => threadWaitsFor(thread, viewer, author)).length,
+    approved: who('approved'),
+    changesRequested: who('changes_requested'),
+  }
+}
+
+/** The `pr` search parameter that opens a pull request over the current page: `owner/repo/number`. */
+export function pullParam(ref: PullRef): string {
+  return `${ref.owner}/${ref.repo}/${ref.number}`
+}
+
+export function parsePullParam(value: string | null): PullRef | null {
+  const match = /^([^/]+)\/([^/]+)\/(\d+)$/.exec(value ?? '')
+  if (!match) return null
+  const [, owner, repo, digits] = match
+  const number = Number(digits)
+  if (!NAME.test(owner) || !NAME.test(repo) || !Number.isSafeInteger(number) || number <= 0) return null
+  return { owner, repo, number }
+}

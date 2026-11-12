@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 
-import { draftKey, extractPullRefs, replyDraftKey, mergeDisabledReason, mergeMethodKey, parseGithubPullUrl, pickMergeMethod, pullPath, squashDefaults, threadsOutsideDiff, toCommentTarget, toGitPatch } from './github'
+import { asideReason, draftKey, parsePullParam, pullParam, reviewSummary, extractPullRefs, replyDraftKey, mergeDisabledReason, mergeMethodKey, parseGithubPullUrl, pickMergeMethod, pullPath, squashDefaults, threadsOutsideDiff, toCommentTarget, toGitPatch } from './github'
 
 test('reads GitHub pull request URLs', () => {
   expect(parseGithubPullUrl('https://github.com/acme/repo/pull/12')).toEqual({ owner: 'acme', repo: 'repo', number: 12 })
@@ -86,4 +86,51 @@ test('the pull requests a message links to, once each, at most three', () => {
   expect(extractPullRefs(text)).toEqual([{ owner: 'acme', repo: 'repo', number: 12 }, { owner: 'acme', repo: 'other', number: 4 }])
   const many = [1, 2, 3, 4].map((n) => `https://github.com/acme/repo/pull/${n}`).join(' ')
   expect(extractPullRefs(many).length).toBe(3)
+})
+
+test('lockfiles, generated files and snapshots are set aside; source and tests are not', () => {
+  expect(asideReason('bun.lock')).toBe('lockfile')
+  expect(asideReason('apps/server/Cargo.lock')).toBe('lockfile')
+  expect(asideReason('packages/api/src/generated/types.gen.ts')).toBe('generated')
+  expect(asideReason('web/app.min.js')).toBe('generated')
+  expect(asideReason('src/__snapshots__/Button.test.tsx.snap')).toBe('snapshot')
+  expect(asideReason('src/lock.ts')).toBeNull()
+  expect(asideReason('apps/server/tests/github_limit.rs')).toBeNull()
+  expect(asideReason('docs/generated-content.md')).toBeNull()
+})
+
+test('the review summary counts files to review, threads that need the member, and each reviewer’s latest decision', () => {
+  const by = (login: string) => ({ author: { login } })
+  const summary = reviewSummary({
+    files: [{ path: 'a.ts', viewed: true }, { path: 'b.ts', viewed: false }, { path: 'bun.lock', viewed: true }],
+    threads: [
+      { is_resolved: false, comments: [by('me'), by('mia')] }, // mia answered me: needs me
+      { is_resolved: false, comments: [by('sam'), by('me')] }, // I answered last
+      { is_resolved: false, comments: [by('sam'), by('mia')] }, // not mine
+      { is_resolved: true, comments: [by('me'), by('mia')] },
+    ],
+    timeline: [
+      { kind: 'review', author: { login: 'mia' }, review_state: 'changes_requested', created_at: 1 },
+      { kind: 'review', author: { login: 'mia' }, review_state: 'approved', created_at: 2 },
+      { kind: 'review', author: { login: 'mia' }, review_state: 'commented', created_at: 3 },
+      { kind: 'review', author: { login: 'sam' }, review_state: 'changes_requested', created_at: 2 },
+      { kind: 'comment', author: { login: 'ann' }, created_at: 4 },
+    ],
+    viewer: 'me',
+    author: 'mia',
+  })
+  expect(summary).toEqual({ toReview: 2, viewed: 1, aside: 1, openThreads: 3, resolvedThreads: 1, needYou: 1, approved: ['mia'], changesRequested: ['sam'] })
+})
+
+test('the pull request author is waiting on every open thread someone else wrote last', () => {
+  const summary = reviewSummary({ files: [], threads: [{ is_resolved: false, comments: [{ author: { login: 'sam' } }] }], timeline: [], viewer: 'mia', author: 'mia' })
+  expect(summary.needYou).toBe(1)
+})
+
+test('the pr parameter round-trips and refuses other shapes', () => {
+  expect(parsePullParam(pullParam({ owner: 'acme', repo: 'orbit', number: 482 }))).toEqual({ owner: 'acme', repo: 'orbit', number: 482 })
+  expect(parsePullParam('acme/orbit')).toBeNull()
+  expect(parsePullParam('acme/../482')).toBeNull()
+  expect(parsePullParam('acme/orbit/0')).toBeNull()
+  expect(parsePullParam(null)).toBeNull()
 })

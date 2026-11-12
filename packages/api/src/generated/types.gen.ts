@@ -2752,6 +2752,10 @@ export type GithubPullViewer = {
     can_merge: boolean;
     can_review: boolean;
     is_author: boolean;
+    /**
+     * The member's GitHub login.
+     */
+    login: string;
 };
 
 export type GithubRepositoryOption = {

@@ -62127,6 +62127,7 @@
       "GithubPullViewer": {
         "type": "object",
         "required": [
+          "login",
           "can_comment",
           "can_review",
           "can_merge",
@@ -62144,6 +62145,10 @@
           },
           "is_author": {
             "type": "boolean"
+          },
+          "login": {
+            "type": "string",
+            "description": "The member's GitHub login."
           }
         }
       },
