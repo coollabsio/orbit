@@ -1,11 +1,11 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { applyChatActions, applyChatEvents, chatQueryKeys } from '../../chat-cache'
-import * as Clipboard from 'expo-clipboard'
 import * as DocumentPicker from 'expo-document-picker'
-import { Directory, File, Paths } from 'expo-file-system'
+import { requireOptionalNativeModule } from 'expo'
+import type { PasteEventPayload, TextInputWrapperViewProps } from 'expo-paste-input'
 import * as ImagePicker from 'expo-image-picker'
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { AppState, Image, Platform, Pressable, ScrollView, type TextInputInstance, View } from 'react-native'
+import { type ComponentType, type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
+import { Image, Platform, Pressable, ScrollView, type TextInputInstance, View } from 'react-native'
 import { TextInput } from '../../ui/scaled'
 
 import { decodeMentions, newNonce, type ThreadPages, upsertThreadMessage } from '../../data/chat'
@@ -189,19 +189,11 @@ export function Composer({ state, placeholder, nameOf, alsoSendTo }: { state: Co
     return () => clearTimeout(timer)
   }, [target])
   const mention = useMentionField({ text: draft, setText: setDraft, people: state.mentionPeople, channels: state.channels, inputRef: input, tasks: true })
-  const clipboardImage = useClipboardImage(focused && mode.kind !== 'edit')
-
-  // React Native's TextInput takes only text: iOS drops a pasted photo (the keyboard's "Paste from Screenshots" too)
-  // without an event. A Paste button next to the field adds the clipboard's image as an attachment instead.
-  const pasteImage = async (image: Clipboard.ClipboardImage | null) => {
-    if (!image) return
-    const folder = new Directory(Paths.cache, 'uploads', String(Date.now()))
-    folder.create({ intermediates: true, idempotent: true })
-    const file = new File(folder, `pasted-${Date.now()}.png`)
-    await file.write(image.data.replace(/^data:[^,]*,/, ''), { encoding: 'base64' })
-    state.addFiles([{ name: file.name, uri: file.uri, image: true, width: image.size.width || undefined, height: image.size.height || undefined }])
+  // A pasted photo (the edit menu's Paste, or the keyboard's "Paste from Screenshots") becomes an attachment.
+  const onPaste = (payload: PasteEventPayload) => {
+    if (payload.type !== 'images' || mode.kind === 'edit') return
+    state.addFiles(payload.uris.map((uri, index) => ({ name: `pasted-${Date.now()}-${index + 1}.${uri.split('.').pop() ?? 'png'}`, uri, image: true })))
   }
-  const onPasteError = (error: unknown) => showError('The image was not pasted', error)
 
   const pickImages = async (camera: boolean) => {
     const options: ImagePicker.ImagePickerOptions = { mediaTypes: ['images', 'videos'], allowsMultipleSelection: !camera, selectionLimit: 10, quality: 0.9 }
@@ -266,43 +258,27 @@ export function Composer({ state, placeholder, nameOf, alsoSendTo }: { state: Co
           </ScrollView>
         ) : null}
         <MentionSuggestions suggestions={mention.suggestions} onPick={mention.pick} loading={mention.searchingTasks} />
-        <TextInput
-          {...mention.inputProps}
-          value={draft}
-          onChangeText={setDraft}
-          onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
-          placeholder={placeholder}
-          placeholderTextColor={colors.mutedForeground}
-          selectionColor={colors.primary}
-          keyboardAppearance={scheme}
-          multiline
-          numberOfLines={1}
-          accessibilityLabel={placeholder}
-          className="min-h-10 max-h-40 px-3 py-2 text-[16px] leading-[24px] font-noto text-foreground"
-        />
+        <PasteField onPaste={onPaste}>
+          <TextInput
+            {...mention.inputProps}
+            value={draft}
+            onChangeText={setDraft}
+            onFocus={() => setFocused(true)}
+            onBlur={() => setFocused(false)}
+            placeholder={placeholder}
+            placeholderTextColor={colors.mutedForeground}
+            selectionColor={colors.primary}
+            keyboardAppearance={scheme}
+            multiline
+            numberOfLines={1}
+            accessibilityLabel={placeholder}
+            className="min-h-10 max-h-40 px-3 py-2 text-[16px] leading-[24px] font-noto text-foreground"
+          />
+        </PasteField>
         <View className="flex-row items-center gap-1 p-1.5">
           <IconButton icon="attach" label="Attach files" size={32} iconSize={20} disabled={mode.kind === 'edit'} onPress={() => setAttachOpen(true)} />
           <IconButton icon="smile" label="Emoji" size={32} iconSize={20} onPress={() => setEmojiOpen(true)} />
           <IconButton icon="at" label="Mention" size={32} iconSize={20} onPress={mention.mention} />
-          {clipboardImage ? (
-            Clipboard.isPasteButtonAvailable ? (
-              <Clipboard.ClipboardPasteButton
-                acceptedContentTypes={['image']}
-                imageOptions={{ format: 'png' }}
-                displayMode="iconAndLabel"
-                cornerStyle="medium"
-                backgroundColor={colors.muted}
-                foregroundColor={colors.foreground}
-                style={{ height: 32, width: 92 }}
-                onPress={(data) => {
-                  if (data.type === 'image') void pasteImage(data).catch(onPasteError)
-                }}
-              />
-            ) : (
-              <IconButton icon="clipboard" label="Paste image" size={32} iconSize={20} onPress={() => void Clipboard.getImageAsync({ format: 'png' }).then(pasteImage).catch(onPasteError)} />
-            )
-          ) : null}
           <View className="flex-1" />
           <Pressable
             accessibilityRole="button"
@@ -345,19 +321,13 @@ export function Composer({ state, placeholder, nameOf, alsoSendTo }: { state: Co
   )
 }
 
-/** Whether the clipboard holds an image, checked while `active`: on focus, when the app comes back, and on a copy. */
-function useClipboardImage(active: boolean) {
-  const [hasImage, setHasImage] = useState(false)
-  useEffect(() => {
-    if (!active || Platform.OS === 'web') return setHasImage(false)
-    const check = () => void Clipboard.hasImageAsync().then(setHasImage, () => setHasImage(false))
-    check()
-    const app = AppState.addEventListener('change', (next) => next === 'active' && check())
-    const copied = Clipboard.addClipboardListener(check)
-    return () => {
-      app.remove()
-      copied.remove()
-    }
-  }, [active])
-  return hasImage
+/**
+ * `expo-paste-input` hands pasted images to JavaScript; React Native's TextInput drops them. It has native code, so
+ * Expo Go lacks it: there the field stays a plain TextInput.
+ */
+const PasteInput: ComponentType<TextInputWrapperViewProps> | null =
+  requireOptionalNativeModule('ExpoPasteInput') ? (require('expo-paste-input') as typeof import('expo-paste-input')).TextInputWrapper : null
+
+function PasteField({ onPaste, children }: { onPaste: (payload: PasteEventPayload) => void; children: ReactNode }) {
+  return PasteInput ? <PasteInput onPaste={onPaste}>{children}</PasteInput> : children
 }
