@@ -510,7 +510,7 @@ async fn setup_status(State(state): State<AuthState>) -> Result<Json<SetupStatus
         .repository
         .setup_complete()
         .await
-        .map_err(|_| ApiError::internal("/api/v1/setup/status", None))?;
+        .map_err(|error| ApiError::internal("/api/v1/setup/status", None).cause(error))?;
     Ok(Json(SetupStatus { complete }))
 }
 
@@ -533,7 +533,9 @@ async fn setup_complete(
         .repository
         .setup_token_valid(&body.token, TimestampMillis::now())
         .await
-        .map_err(|_| ApiError::internal("/api/v1/setup/complete", request_id.as_ref()))?;
+        .map_err(|error| {
+            ApiError::internal("/api/v1/setup/complete", request_id.as_ref()).cause(error)
+        })?;
     if !token_valid {
         state
             .repository
@@ -548,7 +550,9 @@ async fn setup_complete(
                 TimestampMillis::now(),
             )
             .await
-            .map_err(|_| ApiError::internal("/api/v1/setup/complete", request_id.as_ref()))?;
+            .map_err(|error| {
+                ApiError::internal("/api/v1/setup/complete", request_id.as_ref()).cause(error)
+            })?;
         return Err(ApiError::new(
             StatusCode::UNAUTHORIZED,
             "invalid_setup_token",
@@ -668,32 +672,32 @@ async fn user_response(
         .repository
         .is_installation_admin(user.id)
         .await
-        .map_err(|_| ApiError::internal(instance, request_id))?;
+        .map_err(|error| ApiError::internal(instance, request_id).cause(error))?;
     let root = state
         .repository
         .is_root(user.id)
         .await
-        .map_err(|_| ApiError::internal(instance, request_id))?;
+        .map_err(|error| ApiError::internal(instance, request_id).cause(error))?;
     let avatar_updated_at = state
         .repository
         .avatar_updated_at(user.id)
         .await
-        .map_err(|_| ApiError::internal(instance, request_id))?;
+        .map_err(|error| ApiError::internal(instance, request_id).cause(error))?;
     let status = state
         .repository
         .status(user.id, TimestampMillis::now())
         .await
-        .map_err(|_| ApiError::internal(instance, request_id))?;
+        .map_err(|error| ApiError::internal(instance, request_id).cause(error))?;
     let profile = state
         .repository
         .profile_fields(user.id)
         .await
-        .map_err(|_| ApiError::internal(instance, request_id))?;
+        .map_err(|error| ApiError::internal(instance, request_id).cause(error))?;
     let has_password = state
         .repository
         .has_password(user.id)
         .await
-        .map_err(|_| ApiError::internal(instance, request_id))?;
+        .map_err(|error| ApiError::internal(instance, request_id).cause(error))?;
     Ok(AuthUserResponse {
         status,
         profile,
@@ -738,7 +742,9 @@ async fn login(
                     TimestampMillis::now(),
                 )
                 .await
-                .map_err(|_| ApiError::internal("/api/v1/auth/login", request_id.as_ref()))?;
+                .map_err(|error| {
+                    ApiError::internal("/api/v1/auth/login", request_id.as_ref()).cause(error)
+                })?;
             return Err(ApiError::throttled(
                 delay,
                 "/api/v1/auth/login",
@@ -792,7 +798,9 @@ async fn login(
                 TimestampMillis::now(),
             )
             .await
-            .map_err(|_| ApiError::internal("/api/v1/auth/login", request_id.as_ref()))?;
+            .map_err(|error| {
+                ApiError::internal("/api/v1/auth/login", request_id.as_ref()).cause(error)
+            })?;
         return Err(ApiError::new(
             StatusCode::UNAUTHORIZED,
             "invalid_credentials",
@@ -815,7 +823,9 @@ async fn login(
         .repository
         .two_factor_status(user.id)
         .await
-        .map_err(|_| ApiError::internal("/api/v1/auth/login", request_id.as_ref()))?
+        .map_err(|error| {
+            ApiError::internal("/api/v1/auth/login", request_id.as_ref()).cause(error)
+        })?
         .totp_enabled;
     if totp_enabled {
         state.throttler.finish_success(reservation).await;
@@ -954,7 +964,9 @@ async fn logout(
             TimestampMillis::now(),
         )
         .await
-        .map_err(|_| ApiError::internal("/api/v1/auth/logout", request_id.as_ref()))?;
+        .map_err(|error| {
+            ApiError::internal("/api/v1/auth/logout", request_id.as_ref()).cause(error)
+        })?;
     if !revoked {
         return Err(ApiError::internal(
             "/api/v1/auth/logout",
@@ -1152,7 +1164,7 @@ async fn update_me(
             TimestampMillis::now(),
         )
         .await
-        .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?;
+        .map_err(|error| ApiError::internal(instance, request_id.as_ref()).cause(error))?;
     let user = AuthenticatedUser {
         display_name,
         ..session.user
@@ -1214,7 +1226,7 @@ async fn put_status(
         .repository
         .set_status(session.user.id, &status, now)
         .await
-        .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?;
+        .map_err(|error| ApiError::internal(instance, request_id.as_ref()).cause(error))?;
     LiveHub::of(state.repository.database()).set_status(session.user.id, &status);
     Ok(Json(
         user_response(&state, session.user, instance, request_id.as_ref()).await?,
@@ -1256,7 +1268,7 @@ async fn get_shortcuts(
         .repository
         .shortcut_bindings(session.user.id)
         .await
-        .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?;
+        .map_err(|error| ApiError::internal(instance, request_id.as_ref()).cause(error))?;
     // a stored map that no longer parses reads as "no overrides": shortcuts must never lock a user out
     let bindings = stored
         .and_then(|json| serde_json::from_str(&json).ok())
@@ -1284,12 +1296,12 @@ async fn put_shortcuts(
         ));
     }
     let json = serde_json::to_string(&body.bindings)
-        .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?;
+        .map_err(|error| ApiError::internal(instance, request_id.as_ref()).cause(error))?;
     state
         .repository
         .set_shortcut_bindings(session.user.id, &json, TimestampMillis::now())
         .await
-        .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?;
+        .map_err(|error| ApiError::internal(instance, request_id.as_ref()).cause(error))?;
     Ok(Json(body))
 }
 
@@ -1399,7 +1411,7 @@ async fn upload_avatar(
             TimestampMillis::now(),
         )
         .await
-        .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?;
+        .map_err(|error| ApiError::internal(instance, request_id.as_ref()).cause(error))?;
     Ok(Json(
         user_response(&state, session.user, instance, request_id.as_ref()).await?,
     ))
@@ -1421,7 +1433,7 @@ async fn remove_avatar(
             TimestampMillis::now(),
         )
         .await
-        .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?;
+        .map_err(|error| ApiError::internal(instance, request_id.as_ref()).cause(error))?;
     Ok(Json(
         user_response(&state, session.user, instance, request_id.as_ref()).await?,
     ))
@@ -1456,10 +1468,10 @@ async fn user_avatar(
         .repository
         .avatar(uploads, session.user.id, user_id)
         .await
-        .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?
+        .map_err(|error| ApiError::internal(instance, request_id.as_ref()).cause(error))?
         .ok_or_else(not_found)?;
     let content_type = HeaderValue::from_str(&avatar.mime_type)
-        .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?;
+        .map_err(|error| ApiError::internal(instance, request_id.as_ref()).cause(error))?;
     let mut response = avatar.bytes.into_response();
     let response_headers = response.headers_mut();
     response_headers.insert(CONTENT_TYPE, content_type);
@@ -1498,7 +1510,7 @@ async fn change_password(
         .repository
         .find_by_email(&session.user.email)
         .await
-        .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?
+        .map_err(|error| ApiError::internal(instance, request_id.as_ref()).cause(error))?
         .ok_or_else(|| ApiError::internal(instance, request_id.as_ref()))?;
     let valid = match identity.password_hash {
         // Throttled like sign-in, so a stolen session cannot guess the password here.
@@ -1520,7 +1532,7 @@ async fn change_password(
                 .passwords
                 .verify(body.current_password.unwrap_or_default(), password_hash)
                 .await
-                .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?
+                .map_err(|error| ApiError::internal(instance, request_id.as_ref()).cause(error))?
                 .valid;
             if valid {
                 state.throttler.finish_success(reservation).await;
@@ -1559,7 +1571,7 @@ async fn change_password(
                 TimestampMillis::now(),
             )
             .await
-            .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?;
+            .map_err(|error| ApiError::internal(instance, request_id.as_ref()).cause(error))?;
         return Err(ApiError::new(
             StatusCode::UNAUTHORIZED,
             "invalid_credentials",
@@ -1584,7 +1596,7 @@ async fn change_password(
             TimestampMillis::now(),
         )
         .await
-        .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?;
+        .map_err(|error| ApiError::internal(instance, request_id.as_ref()).cause(error))?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -1617,7 +1629,7 @@ async fn recovery_request(
         .repository
         .find_by_email(body.email.trim())
         .await
-        .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?
+        .map_err(|error| ApiError::internal(instance, request_id.as_ref()).cause(error))?
         .filter(|account| !account.suspended);
     if let Some(account) = account {
         let state = state.clone();
@@ -1688,17 +1700,15 @@ async fn auth_options(
 ) -> Result<Json<AuthOptions>, ApiError> {
     let email_enabled = state.mailer().await.is_some();
     let repository = InstanceSettingsRepository::new(state.repository.database().clone());
-    let settings = repository
-        .get()
-        .await
-        .map_err(|_| ApiError::internal("/api/v1/auth/options", request_id.as_ref()))?;
-    let mail_enabled = repository
-        .mail_enabled()
-        .await
-        .map_err(|_| ApiError::internal("/api/v1/auth/options", request_id.as_ref()))?;
-    let providers = providers::configured(&state)
-        .await
-        .map_err(|_| ApiError::internal("/api/v1/auth/options", request_id.as_ref()))?;
+    let settings = repository.get().await.map_err(|error| {
+        ApiError::internal("/api/v1/auth/options", request_id.as_ref()).cause(error)
+    })?;
+    let mail_enabled = repository.mail_enabled().await.map_err(|error| {
+        ApiError::internal("/api/v1/auth/options", request_id.as_ref()).cause(error)
+    })?;
+    let providers = providers::configured(&state).await.map_err(|error| {
+        ApiError::internal("/api/v1/auth/options", request_id.as_ref()).cause(error)
+    })?;
     Ok(Json(AuthOptions {
         registration_open: email_enabled && settings.registration_open,
         email_enabled,
@@ -1741,7 +1751,7 @@ async fn registration_request(
     let open = InstanceSettingsRepository::new(state.repository.database().clone())
         .get()
         .await
-        .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?
+        .map_err(|error| ApiError::internal(instance, request_id.as_ref()).cause(error))?
         .registration_open;
     let mailer = state
         .mailer()
@@ -1752,7 +1762,7 @@ async fn registration_request(
         .repository
         .find_by_email(email)
         .await
-        .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?
+        .map_err(|error| ApiError::internal(instance, request_id.as_ref()).cause(error))?
         .is_some();
     // As with password reset: the email limit, link and email run in the background, so a new
     // address does not answer later than one that already has an account.
@@ -1904,7 +1914,9 @@ async fn recovery_complete(
         .repository
         .recovery_token_valid(&body.token, TimestampMillis::now())
         .await
-        .map_err(|_| ApiError::internal("/api/v1/auth/recovery/complete", request_id.as_ref()))?;
+        .map_err(|error| {
+            ApiError::internal("/api/v1/auth/recovery/complete", request_id.as_ref()).cause(error)
+        })?;
     if !valid {
         state
             .repository
@@ -1974,7 +1986,9 @@ async fn list_sessions(
         .repository
         .list_sessions(session.user.id, TimestampMillis::now())
         .await
-        .map_err(|_| ApiError::internal("/api/v1/auth/sessions", request_id.as_ref()))?;
+        .map_err(|error| {
+            ApiError::internal("/api/v1/auth/sessions", request_id.as_ref()).cause(error)
+        })?;
     for item in &mut sessions {
         item.current = item.id == session.id;
     }
@@ -2015,7 +2029,9 @@ async fn revoke_session(
             TimestampMillis::now(),
         )
         .await
-        .map_err(|_| ApiError::internal("/api/v1/auth/sessions/{id}", request_id.as_ref()))?;
+        .map_err(|error| {
+            ApiError::internal("/api/v1/auth/sessions/{id}", request_id.as_ref()).cause(error)
+        })?;
     if !revoked {
         return Err(ApiError::new(
             StatusCode::NOT_FOUND,
@@ -2157,9 +2173,16 @@ struct ApiError {
     status: StatusCode,
     body: Box<ProblemBody>,
     retry_after: Option<Duration>,
+    cause: Option<String>,
 }
 
 impl ApiError {
+    /// Records why this 500 happened. The HTTP layer logs it with the request ID; the client does not see it.
+    pub(crate) fn cause(mut self, error: impl std::fmt::Display) -> Self {
+        self.cause = Some(error.to_string());
+        self
+    }
+
     fn new(
         status: StatusCode,
         code: &'static str,
@@ -2183,6 +2206,7 @@ impl ApiError {
                 workspaces: None,
             }),
             retry_after: None,
+            cause: None,
         }
     }
 
@@ -2227,6 +2251,11 @@ impl IntoResponse for ApiError {
                 RETRY_AFTER,
                 HeaderValue::from_str(&retry_after.as_secs().max(1).to_string()).unwrap(),
             );
+        }
+        if let Some(cause) = self.cause {
+            response
+                .extensions_mut()
+                .insert(orbit_platform::ErrorCause(cause));
         }
         response
     }

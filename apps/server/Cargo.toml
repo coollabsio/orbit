@@ -60,8 +60,6 @@ p256 = { version = "0.14", features = ["ecdh", "ecdsa", "getrandom"] }
 hkdf = "0.12"
 aes-gcm = "0.10"
 rand_core = { version = "0.6", features = ["getrandom"] }
-webp = { version = "0.3.1", default-features = false }
-image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
 
 [dev-dependencies]
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem", "ring"] }

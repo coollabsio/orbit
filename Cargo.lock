@@ -2871,7 +2871,9 @@ dependencies = [
  "futures-util",
  "hmac 0.12.1",
  "http-body-util",
+ "image",
  "ipnet",
+ "moxcms",
  "orbit-platform",
  "rand 0.8.8",
  "reqwest",
@@ -2890,6 +2892,7 @@ dependencies = [
  "url",
  "utoipa",
  "uuid",
+ "webp",
  "zstd",
 ]
 
@@ -2909,7 +2912,6 @@ dependencies = [
  "http-body-util",
  "hyper",
  "hyper-util",
- "image",
  "include_dir",
  "jiff",
  "lettre",
@@ -2946,7 +2948,6 @@ dependencies = [
  "url",
  "utoipa",
  "webauthn-rs",
- "webp",
  "yrs",
  "zip",
  "zstd",

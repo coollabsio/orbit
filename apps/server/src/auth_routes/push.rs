@@ -31,7 +31,7 @@ pub(super) async fn get_push_key(
     let public_key = PushService::of(state.repository.database())
         .public_key()
         .await
-        .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?;
+        .map_err(|error| ApiError::internal(instance, request_id.as_ref()).cause(error))?;
     Ok(Json(PushKey { public_key }))
 }
 
@@ -47,7 +47,7 @@ pub(super) async fn list_push_subscriptions(
         .subscriptions(session.user.id)
         .await
         .map(Json)
-        .map_err(|_| ApiError::internal(instance, request_id.as_ref()))
+        .map_err(|error| ApiError::internal(instance, request_id.as_ref()).cause(error))
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -97,7 +97,7 @@ pub(super) async fn create_push_subscription(
         )
         .await
         .map(Json)
-        .map_err(|_| ApiError::internal(instance, request_id.as_ref()))
+        .map_err(|error| ApiError::internal(instance, request_id.as_ref()).cause(error))
 }
 
 #[utoipa::path(delete, path = "/api/v1/push/subscriptions/{id}", params(("id" = String, Path)), responses((status = 204), (status = 401, description = "authentication_required", body = ProblemBody, content_type = "application/problem+json")))]
@@ -112,7 +112,7 @@ pub(super) async fn delete_push_subscription(
     PushService::of(state.repository.database())
         .unsubscribe(session.user.id, &id)
         .await
-        .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?;
+        .map_err(|error| ApiError::internal(instance, request_id.as_ref()).cause(error))?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -128,7 +128,7 @@ pub(super) async fn list_apns_devices(
         .apns_devices(session.user.id)
         .await
         .map(Json)
-        .map_err(|_| ApiError::internal(instance, request_id.as_ref()))
+        .map_err(|error| ApiError::internal(instance, request_id.as_ref()).cause(error))
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -183,7 +183,7 @@ pub(super) async fn create_apns_device(
     )
     .await
     .map(Json)
-    .map_err(|_| ApiError::internal(instance, request_id.as_ref()))
+    .map_err(|error| ApiError::internal(instance, request_id.as_ref()).cause(error))
 }
 
 #[utoipa::path(delete, path = "/api/v1/push/apns/{id}", params(("id" = String, Path)), responses((status = 204), (status = 401, description = "authentication_required", body = ProblemBody, content_type = "application/problem+json")))]
@@ -198,7 +198,7 @@ pub(super) async fn delete_apns_device(
     PushService::of(state.repository.database())
         .unregister_apns(session.user.id, &id)
         .await
-        .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?;
+        .map_err(|error| ApiError::internal(instance, request_id.as_ref()).cause(error))?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -227,7 +227,7 @@ pub(super) async fn send_test_push(
     let sent = PushService::of(state.repository.database())
         .push(session.user.id, &notice)
         .await
-        .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?;
+        .map_err(|error| ApiError::internal(instance, request_id.as_ref()).cause(error))?;
     Ok(Json(TestPushResult { sent }))
 }
 
@@ -243,7 +243,7 @@ pub(super) async fn get_notification_preferences(
         .prefs(session.user.id)
         .await
         .map(Json)
-        .map_err(|_| ApiError::internal(instance, request_id.as_ref()))
+        .map_err(|error| ApiError::internal(instance, request_id.as_ref()).cause(error))
 }
 
 #[utoipa::path(put, path = "/api/v1/notification-preferences", request_body = NotificationPrefs, responses((status = 200, body = NotificationPrefs), (status = 401, description = "authentication_required", body = ProblemBody, content_type = "application/problem+json")))]
@@ -258,6 +258,6 @@ pub(super) async fn put_notification_preferences(
     PushService::of(state.repository.database())
         .set_prefs(session.user.id, &body, TimestampMillis::now())
         .await
-        .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?;
+        .map_err(|error| ApiError::internal(instance, request_id.as_ref()).cause(error))?;
     Ok(Json(body))
 }

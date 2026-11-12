@@ -3,8 +3,8 @@
 //!
 //! New blobs go to the active tier; reads try both, so files keep working while the background mover
 //! ([`TieredBlobStore::move_blobs`]) moves them from the other tier. Uploads are always staged on the local disk.
-//! S3 objects are not in backups, so a released S3 blob is kept for [`S3_DELETE_DELAY_MILLIS`]: restoring any
-//! kept backup still finds the files its database references.
+//! S3 objects are not in backups, so a released S3 blob is kept for [`ObjectStorageState::keep_released_millis`]
+//! (by default [`S3_DELETE_DELAY_MILLIS`]): restoring any kept backup still finds the files its database references.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -19,7 +19,8 @@ use super::{
 };
 use crate::AttachmentMutationCoordinator;
 
-/// Longer than backup retention (the last day, 7 daily + 4 weekly snapshots).
+/// The default of [`ObjectStorageState::keep_released_millis`]: longer than backup retention (the last day, 7 daily +
+/// 4 weekly snapshots).
 pub const S3_DELETE_DELAY_MILLIS: i64 = 40 * 24 * 60 * 60 * 1000;
 
 /// Where attachments and backups are stored. Shared by the blob store and the backup service; saving the
@@ -30,7 +31,7 @@ pub struct ObjectStorage {
     changed: Arc<Notify>,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct ObjectStorageState {
     /// The saved bucket. It stays readable when neither switch is on, until no blob is left in it.
     pub bucket: Option<S3Bucket>,
@@ -40,6 +41,20 @@ pub struct ObjectStorageState {
     pub backups: bool,
     /// The buckets that workspaces connected for their own attachment files, by workspace id.
     pub workspace_buckets: HashMap<String, WorkspaceBucket>,
+    /// How long a released S3 blob stays before reconcile deletes it.
+    pub keep_released_millis: i64,
+}
+
+impl Default for ObjectStorageState {
+    fn default() -> Self {
+        Self {
+            bucket: None,
+            attachments: false,
+            backups: false,
+            workspace_buckets: HashMap::new(),
+            keep_released_millis: S3_DELETE_DELAY_MILLIS,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -569,13 +584,13 @@ impl BlobStore for TieredBlobStore {
                     .and_modify(|local| {
                         local.modified_at_millis =
                             local.modified_at_millis.max(object.last_modified_millis);
-                        local.keep_untracked_millis = S3_DELETE_DELAY_MILLIS;
+                        local.keep_untracked_millis = state.keep_released_millis;
                     })
                     .or_insert(BlobObject {
                         storage_key: object.key,
                         path: PathBuf::new(),
                         modified_at_millis: object.last_modified_millis,
-                        keep_untracked_millis: S3_DELETE_DELAY_MILLIS,
+                        keep_untracked_millis: state.keep_released_millis,
                     });
             }
             let mut objects: Vec<_> = objects.into_values().collect();

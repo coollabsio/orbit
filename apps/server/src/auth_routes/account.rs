@@ -165,7 +165,7 @@ pub(super) async fn request_email_change(
         .repository
         .email_taken_by_other(session.user.id, email)
         .await
-        .map_err(|_| ApiError::internal(CHANGE_EMAIL, rid))?;
+        .map_err(|error| ApiError::internal(CHANGE_EMAIL, rid).cause(error))?;
     // The email limit, link and email run in the background, so a free address does not answer
     // later than one another account uses.
     if !taken {

@@ -403,9 +403,18 @@ export const BACKUP_SCHEDULE_OPTIONS: readonly { value: BackupSchedule; label: s
   { value: 'daily', label: 'Every day' },
 ]
 
-/** The Storage page's options with one change, as the server wants all three. */
+/** The Storage page's options with one change, as the server wants all of them. */
 export function storageOptions(storage: StorageView, change: Partial<StorageOptionsBody>): StorageOptionsBody {
-  return { attachments_in_s3: storage.attachments_in_s3, backups_in_s3: storage.backups_in_s3, backup_schedule: storage.backup_schedule, ...change }
+  return { attachments_in_s3: storage.attachments_in_s3, backups_in_s3: storage.backups_in_s3, backup_schedule: storage.backup_schedule, s3_keep_deleted_days: storage.s3_keep_deleted_days, ...change }
+}
+
+const KEEP_DELETED_DAYS = [1, 7, 14, 30, 40, 90, 180, 365]
+
+/** The choices for "Keep deleted files in S3", with the saved value when it is not a usual one. */
+export function keepDeletedOptions(current: number): { value: string; label: string }[] {
+  return [...new Set([...KEEP_DELETED_DAYS, current])]
+    .sort((left, right) => left - right)
+    .map((days) => ({ value: String(days), label: days === 1 ? '1 day' : `${days} days` }))
 }
 
 /** `3 files left to move to the bucket.`, or `null` when nothing is waiting. */

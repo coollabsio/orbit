@@ -3271,9 +3271,16 @@ pub(crate) struct ConflictBody {
 pub(crate) struct ApiError {
     status: StatusCode,
     body: Box<ProblemBody>,
+    cause: Option<String>,
 }
 
 impl ApiError {
+    /// Records why this 500 happened. The HTTP layer logs it with the request ID; the client does not see it.
+    pub(crate) fn cause(mut self, error: impl std::fmt::Display) -> Self {
+        self.cause = Some(error.to_string());
+        self
+    }
+
     /// The same problem with a detail made at run time, such as the position of an invalid value.
     pub(crate) fn with_detail(mut self, detail: String) -> Self {
         self.body.detail = detail.into();
@@ -3304,6 +3311,7 @@ impl ApiError {
                 path: None,
                 formula: None,
             }),
+            cause: None,
         }
     }
 
@@ -3474,6 +3482,11 @@ impl IntoResponse for ApiError {
             CONTENT_TYPE,
             HeaderValue::from_static("application/problem+json"),
         );
+        if let Some(cause) = self.cause {
+            response
+                .extensions_mut()
+                .insert(orbit_platform::ErrorCause(cause));
+        }
         response
     }
 }

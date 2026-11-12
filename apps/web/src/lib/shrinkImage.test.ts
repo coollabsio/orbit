@@ -18,10 +18,11 @@ test('isAnimated finds APNG and animated WebP chunks', () => {
   expect(isAnimated(bytes('\x89PNG\r\n\x1a\n....IHDR........IDAT'))).toBe(false)
 })
 
-test('shrinkImage keeps small files, GIFs and SVGs as they are', async () => {
+test('shrinkImage keeps small files, PNGs, GIFs and SVGs as they are', async () => {
   const large = new Uint8Array(SHRINK_MIN_BYTES + 1)
   for (const file of [
-    new File([new Uint8Array(10)], 'small.png', { type: 'image/png' }),
+    new File([new Uint8Array(10)], 'small.jpg', { type: 'image/jpeg' }),
+    new File([large], 'screenshot.png', { type: 'image/png' }),
     new File([large], 'cat.gif', { type: 'image/gif' }),
     new File([large], 'logo.svg', { type: 'image/svg+xml' }),
     new File([large], 'notes.pdf', { type: 'application/pdf' }),

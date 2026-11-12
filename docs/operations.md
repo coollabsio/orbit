@@ -72,6 +72,7 @@ The variables of one group are set together. For example, `ORBIT_SMTP_HOST` need
 | `ORBIT_S3_ATTACHMENTS` | saved value | `true` or `false`: attachments in S3. `true` requires the `ORBIT_S3_*` bucket. |
 | `ORBIT_S3_BACKUPS` | saved value | `true` or `false`: backups in S3. `true` requires the `ORBIT_S3_*` bucket. |
 | `ORBIT_AUTOMATIC_BACKUPS` | saved value | `off`, `hourly` or `daily`. |
+| `ORBIT_S3_KEEP_DELETED_DAYS` | saved value (40) | 1 to 365: the days a deleted or replaced attachment file stays in S3 before Orbit deletes it. Backups do not contain S3 files, so a restore from a backup older than this can miss files. |
 | `ORBIT_OPEN_REGISTRATION` | saved value | `true` or `false`. `true` requires `ORBIT_SMTP_*` or a provider variable below. On Orbit Cloud, it requires `ORBIT_SMTP_*`. |
 | `ORBIT_GOOGLE_CLIENT_ID`, `ORBIT_GOOGLE_CLIENT_SECRET`, `ORBIT_GOOGLE_CLIENT_SECRET_FILE` | none | The Google OAuth client. Set the ID and the secret together. See [Sign in with Google and GitHub](#sign-in-with-google-and-github). |
 | `ORBIT_GITHUB_CLIENT_ID`, `ORBIT_GITHUB_CLIENT_SECRET`, `ORBIT_GITHUB_CLIENT_SECRET_FILE` | none | The GitHub OAuth client. Set the ID and the secret together. |

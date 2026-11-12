@@ -1009,7 +1009,7 @@ async fn create_invitation(
             ];
             let decision = email_quota::take(state.identity.database(), &quotas, now)
                 .await
-                .map_err(|_| internal(&instance, request_id.as_ref()))?;
+                .map_err(|error| internal(&instance, request_id.as_ref()).cause(error))?;
             if let ThrottleDecision::RetryAfter(delay) = decision {
                 return Err(invitation_email_limited(
                     delay,
@@ -1508,15 +1508,19 @@ async fn get_admin_user_summary(
             request_id.as_ref(),
         )
     };
-    let users = state.identity.count_users().await.map_err(|_| internal())?;
+    let users = state
+        .identity
+        .count_users()
+        .await
+        .map_err(|error| internal().cause(error))?;
     let active = state
         .identity
         .active_user_counts()
         .await
-        .map_err(|_| internal())?;
+        .map_err(|error| internal().cause(error))?;
     let trials = crate::repositories::billing::trial_counts(state.identity.database())
         .await
-        .map_err(|_| internal())?;
+        .map_err(|error| internal().cause(error))?;
     Ok(Json(AdminUserSummary {
         users,
         active,
@@ -1814,6 +1818,8 @@ struct StorageView {
     /// New backups are uploaded to the bucket instead of kept on this server.
     backups_in_s3: bool,
     backup_schedule: BackupSchedule,
+    /// Days a deleted or replaced attachment file stays in S3, so restoring an older backup still finds it.
+    s3_keep_deleted_days: u32,
     /// Attachment files still waiting to move between this server's disk and the bucket.
     files_to_move: u64,
     /// Why moving files stopped last time. Orbit retries every ten minutes.
@@ -1854,6 +1860,8 @@ struct EnvironmentView {
     backups_in_s3: bool,
     /// `ORBIT_AUTOMATIC_BACKUPS`.
     backup_schedule: bool,
+    /// `ORBIT_S3_KEEP_DELETED_DAYS`.
+    s3_keep_deleted_days: bool,
     /// `ORBIT_GOOGLE_*`, `ORBIT_GITHUB_*`.
     sign_in_providers: Vec<Provider>,
 }
@@ -1867,6 +1875,7 @@ impl From<&EnvironmentSettings> for EnvironmentView {
             attachments_in_s3: environment.attachments_in_s3.is_some(),
             backups_in_s3: environment.backups_in_s3.is_some(),
             backup_schedule: environment.backup_schedule.is_some(),
+            s3_keep_deleted_days: environment.s3_keep_deleted_days.is_some(),
             sign_in_providers: environment
                 .sign_in_providers
                 .iter()
@@ -1941,23 +1950,23 @@ async fn settings_view(
     let settings = repository
         .get()
         .await
-        .map_err(|_| internal(instance, request_id))?;
+        .map_err(|error| internal(instance, request_id).cause(error))?;
     let storage = repository
         .storage()
         .await
-        .map_err(|_| internal(instance, request_id))?;
+        .map_err(|error| internal(instance, request_id).cause(error))?;
     let limits = repository
         .limits()
         .await
-        .map_err(|_| internal(instance, request_id))?;
+        .map_err(|error| internal(instance, request_id).cause(error))?;
     let mail_enabled = repository
         .mail_enabled()
         .await
-        .map_err(|_| internal(instance, request_id))?;
+        .map_err(|error| internal(instance, request_id).cause(error))?;
     let sign_in_providers = repository
         .sign_in_providers()
         .await
-        .map_err(|_| internal(instance, request_id))?;
+        .map_err(|error| internal(instance, request_id).cause(error))?;
     let registration_ready = can_confirm_sign_up(
         state.identity.database(),
         settings.smtp.is_some(),
@@ -1992,6 +2001,7 @@ async fn settings_view(
             attachments_in_s3: storage.attachments_in_s3,
             backups_in_s3: storage.backups_in_s3,
             backup_schedule: storage.backup_schedule,
+            s3_keep_deleted_days: storage.s3_keep_deleted_days,
             files_to_move: u64::try_from(moving.remaining).unwrap_or(u64::MAX),
             move_error: moving.error,
             image_compression: state.image_compressor.as_ref().map(ImageCompressor::status),
@@ -2080,7 +2090,7 @@ async fn job_limits_view(
     let kinds = InstanceSettingsRepository::new(state.identity.database().clone())
         .job_limits()
         .await
-        .map_err(|_| internal(instance, request_id))?;
+        .map_err(|error| internal(instance, request_id).cause(error))?;
     Ok(Json(JobLimitsView {
         kinds: kinds
             .into_iter()
@@ -2165,7 +2175,7 @@ async fn save_job_limits(
             TimestampMillis::now(),
         )
         .await
-        .map_err(|_| internal(instance, request_id.as_ref()))?;
+        .map_err(|error| internal(instance, request_id.as_ref()).cause(error))?;
     job_limits_view(&state, instance, request_id.as_ref()).await
 }
 
@@ -2321,7 +2331,7 @@ async fn save_smtp(
             TimestampMillis::now(),
         )
         .await
-        .map_err(|_| internal(instance, request_id.as_ref()))?;
+        .map_err(|error| internal(instance, request_id.as_ref()).cause(error))?;
     settings_view(&state, instance, request_id.as_ref()).await
 }
 
@@ -2441,14 +2451,14 @@ async fn reload_storage(
     let database = state.identity.database();
     let settings = crate::object_storage::load_saved(database)
         .await
-        .map_err(|_| internal(instance, request_id))?;
+        .map_err(|error| internal(instance, request_id).cause(error))?;
     crate::object_storage::apply_and_keep(
         database,
         storage,
         &settings,
         state.mailer.as_ref().and_then(Mailer::app_key),
     )
-    .map_err(|_| internal(instance, request_id))?;
+    .map_err(|error| internal(instance, request_id).cause(error))?;
     // The other servers of the database use them too.
     crate::cluster::Cluster::of(database).send(crate::cluster::Message::StorageChanged);
     Ok(())
@@ -2595,7 +2605,7 @@ async fn remove_sign_in_provider(
             TimestampMillis::now(),
         )
         .await
-        .map_err(|_| internal(instance, rid))?;
+        .map_err(|error| internal(instance, rid).cause(error))?;
     settings_view(&state, instance, rid).await
 }
 
@@ -2754,7 +2764,7 @@ async fn save_s3(
     let saved = repository
         .storage()
         .await
-        .map_err(|_| internal(instance, request_id.as_ref()))?;
+        .map_err(|error| internal(instance, request_id.as_ref()).cause(error))?;
     let secret = match body.secret_access_key.filter(|secret| !secret.is_empty()) {
         Some(secret) => secret,
         None => saved
@@ -2770,7 +2780,7 @@ async fn save_s3(
     let workspaces = WorkspaceStorageRepository::new(state.identity.database().clone())
         .all()
         .await
-        .map_err(|_| internal(instance, request_id.as_ref()))?;
+        .map_err(|error| internal(instance, request_id.as_ref()).cause(error))?;
     if let Some(workspace) = workspaces
         .iter()
         .find(|workspace| crate::object_storage::overlap(&workspace.s3, &s3))
@@ -2790,7 +2800,7 @@ async fn save_s3(
         if moved {
             let in_use = saved.attachments_in_s3
                 || crate::object_storage::saved_bucket(old, Some(key), Owner::Installation)
-                    .map_err(|_| internal(instance, request_id.as_ref()))?
+                    .map_err(|error| internal(instance, request_id.as_ref()).cause(error))?
                     .any("blobs/")
                     .await
                     .map_err(|error| storage_unreachable(error, instance, request_id.as_ref()))?;
@@ -2817,7 +2827,7 @@ async fn save_s3(
             TimestampMillis::now(),
         )
         .await
-        .map_err(|_| internal(instance, request_id.as_ref()))?;
+        .map_err(|error| internal(instance, request_id.as_ref()).cause(error))?;
     reload_storage(&state, instance, request_id.as_ref()).await?;
     settings_view(&state, instance, request_id.as_ref()).await
 }
@@ -2846,7 +2856,7 @@ async fn remove_s3(
     let saved = repository
         .storage()
         .await
-        .map_err(|_| internal(instance, request_id.as_ref()))?;
+        .map_err(|error| internal(instance, request_id.as_ref()).cause(error))?;
     if let Some(s3) = &saved.s3 {
         if saved.attachments_in_s3 {
             return Err(storage_in_use(
@@ -2857,7 +2867,7 @@ async fn remove_s3(
         }
         let app_key = state.mailer.as_ref().and_then(Mailer::app_key);
         let files_left = crate::object_storage::saved_bucket(s3, app_key, Owner::Installation)
-            .map_err(|_| internal(instance, request_id.as_ref()))?
+            .map_err(|error| internal(instance, request_id.as_ref()).cause(error))?
             .any("blobs/")
             .await
             .map_err(|error| storage_unreachable(error, instance, request_id.as_ref()))?;
@@ -2876,7 +2886,7 @@ async fn remove_s3(
             TimestampMillis::now(),
         )
         .await
-        .map_err(|_| internal(instance, request_id.as_ref()))?;
+        .map_err(|error| internal(instance, request_id.as_ref()).cause(error))?;
     reload_storage(&state, instance, request_id.as_ref()).await?;
     settings_view(&state, instance, request_id.as_ref()).await
 }
@@ -3015,7 +3025,7 @@ async fn save_workspace_bucket(
     let installation = InstanceSettingsRepository::new(database.clone())
         .storage()
         .await
-        .map_err(|_| internal(instance, request_id.as_ref()))?;
+        .map_err(|error| internal(instance, request_id.as_ref()).cause(error))?;
     if installation
         .s3
         .as_ref()
@@ -3029,7 +3039,7 @@ async fn save_workspace_bucket(
     }
     if let Some(old) = saved.filter(|old| location_of(&old.s3) != location_of(&s3)) {
         let files_left = crate::object_storage::saved_bucket(&old.s3, Some(key), Owner::Workspace)
-            .map_err(|_| internal(instance, request_id.as_ref()))?
+            .map_err(|error| internal(instance, request_id.as_ref()).cause(error))?
             .any(&format!("blobs/{workspace_id}/"))
             .await
             .map_err(|error| storage_unreachable(error, instance, request_id.as_ref()))?;
@@ -3109,6 +3119,9 @@ struct StorageOptionsBody {
     /// New backups are uploaded to the bucket.
     backups_in_s3: bool,
     backup_schedule: BackupSchedule,
+    /// Days (1–365) a deleted or replaced attachment file stays in S3 before Orbit deletes it. Omitted: unchanged.
+    #[serde(default)]
+    s3_keep_deleted_days: Option<u32>,
 }
 
 /// Saves the limits of a shared installation; `null` or 0 is unlimited. A lower limit refuses new workspaces and
@@ -3149,7 +3162,7 @@ async fn save_limits(
             TimestampMillis::now(),
         )
         .await
-        .map_err(|_| internal(instance, request_id.as_ref()))?;
+        .map_err(|error| internal(instance, request_id.as_ref()).cause(error))?;
     settings_view(&state, instance, request_id.as_ref()).await
 }
 
@@ -3192,11 +3205,33 @@ async fn save_storage_options(
             request_id.as_ref(),
         ));
     }
+    if let (Some(set), Some(wanted)) = (environment.s3_keep_deleted_days, body.s3_keep_deleted_days)
+        && set != wanted
+    {
+        return Err(set_by_environment(
+            "ORBIT_S3_KEEP_DELETED_DAYS",
+            instance,
+            request_id.as_ref(),
+        ));
+    }
+    if body
+        .s3_keep_deleted_days
+        .is_some_and(|days| !(1..=365).contains(&days))
+    {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_keep_deleted_days",
+            "Invalid number of days",
+            "Keep deleted files for 1 to 365 days.",
+            instance,
+            request_id.as_ref(),
+        ));
+    }
     if !body.attachments_in_s3 && crate::cluster::Cluster::of(database).others() > 0 {
         let current = InstanceSettingsRepository::new(database.clone())
             .storage()
             .await
-            .map_err(|_| internal(instance, request_id.as_ref()))?;
+            .map_err(|error| internal(instance, request_id.as_ref()).cause(error))?;
         if current.attachments_in_s3 {
             return Err(ApiError::new(
                 StatusCode::CONFLICT,
@@ -3214,6 +3249,7 @@ async fn save_storage_options(
             body.attachments_in_s3,
             body.backups_in_s3,
             body.backup_schedule,
+            body.s3_keep_deleted_days,
             request_id_value(request_id.as_ref()),
             TimestampMillis::now(),
         )
@@ -4141,9 +4177,16 @@ struct ApiError {
     status: StatusCode,
     body: Box<ProblemBody>,
     retry_after: Option<std::time::Duration>,
+    cause: Option<String>,
 }
 
 impl ApiError {
+    /// Records why this 500 happened. The HTTP layer logs it with the request ID; the client does not see it.
+    pub(crate) fn cause(mut self, error: impl std::fmt::Display) -> Self {
+        self.cause = Some(error.to_string());
+        self
+    }
+
     fn new(
         status: StatusCode,
         code: &'static str,
@@ -4167,6 +4210,7 @@ impl ApiError {
                 conflict: None,
             }),
             retry_after: None,
+            cause: None,
         }
     }
 
@@ -4194,6 +4238,7 @@ impl ApiError {
                 }),
             }),
             retry_after: None,
+            cause: None,
         }
     }
 }
@@ -4210,6 +4255,11 @@ impl IntoResponse for ApiError {
                 RETRY_AFTER,
                 HeaderValue::from_str(&retry_after.as_secs().max(1).to_string()).unwrap(),
             );
+        }
+        if let Some(cause) = self.cause {
+            response
+                .extensions_mut()
+                .insert(orbit_platform::ErrorCause(cause));
         }
         response
     }

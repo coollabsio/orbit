@@ -21,6 +21,12 @@ const SCHEDULE_OPTIONS: { value: BackupSchedule; label: string }[] = [
   { value: 'daily', label: 'Every day' },
 ]
 
+const KEEP_DELETED_DAYS = [1, 7, 14, 30, 40, 90, 180, 365]
+
+function daysLabel(days: number) {
+  return days === 1 ? '1 day' : `${days} days`
+}
+
 function problemText(error: unknown, fallback: string) {
   return error instanceof ApiProblem ? error.detail : fallback
 }
@@ -82,17 +88,21 @@ function BucketCard({ s3, locked }: { s3: S3View | null; locked: boolean }) {
 function UsageCard({ storage, environment }: { storage: StorageView; environment: EnvironmentView }) {
   const save = useSaveStorageOptions()
   const ready = Boolean(storage.s3)
-  function change(options: Partial<Pick<StorageView, 'attachments_in_s3' | 'backups_in_s3' | 'backup_schedule'>>, message: string) {
+  function change(options: Partial<Pick<StorageView, 'attachments_in_s3' | 'backups_in_s3' | 'backup_schedule' | 's3_keep_deleted_days'>>, message: string) {
     save.mutate({
       attachments_in_s3: storage.attachments_in_s3,
       backups_in_s3: storage.backups_in_s3,
       backup_schedule: storage.backup_schedule,
+      s3_keep_deleted_days: storage.s3_keep_deleted_days,
       ...options,
     }, {
       onSuccess: () => toast(message),
       onError: (error) => toast.error(problemText(error, 'Storage settings could not be saved.')),
     })
   }
+  const keepOptions = [...new Set([...KEEP_DELETED_DAYS, storage.s3_keep_deleted_days])]
+    .sort((left, right) => left - right)
+    .map((days) => ({ value: String(days), label: daysLabel(days) }))
   const moving = storage.files_to_move > 0
     ? `${storage.files_to_move} ${storage.files_to_move === 1 ? 'file' : 'files'} left to move ${storage.attachments_in_s3 ? 'to the bucket' : 'to this server'}.`
     : null
@@ -150,6 +160,25 @@ function UsageCard({ storage, environment }: { storage: StorageView; environment
             </SelectContent>
           </Select>
         </SettingsRow>
+        {ready ? (
+          <SettingsRow className="flex-nowrap">
+            <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-[0.8125rem]">
+              <span className="inline-flex items-center gap-1.5 font-medium text-foreground">Keep deleted files in S3 <InfoTip text="A deleted or replaced attachment file (for example an image original after Compress images) stays in the bucket this long, then Orbit deletes it. Backups do not contain S3 files: restoring a backup older than this can miss files. The default, 40 days, covers all kept backups." /></span>
+              {environment.s3_keep_deleted_days ? <SetByEnvironment variable="ORBIT_S3_KEEP_DELETED_DAYS" /> : null}
+            </div>
+            <Select
+              items={keepOptions}
+              value={String(storage.s3_keep_deleted_days)}
+              disabled={environment.s3_keep_deleted_days || save.isPending}
+              onValueChange={(value) => change({ s3_keep_deleted_days: Number(value) }, 'Deleted files setting saved')}
+            >
+              <SelectTrigger aria-label="Keep deleted files in S3" className="w-36"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {keepOptions.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </SettingsRow>
+        ) : null}
       </div>
     </SettingsCard>
   )

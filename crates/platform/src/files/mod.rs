@@ -1,5 +1,6 @@
 #[cfg(any(test, feature = "test-support"))]
 mod fake_s3;
+mod image_shrink;
 mod local;
 mod s3;
 mod tiered;
@@ -14,6 +15,7 @@ use tokio::io::AsyncRead;
 
 #[cfg(any(test, feature = "test-support"))]
 pub use fake_s3::start_fake_s3;
+pub use image_shrink::{SHRINK_MIN_BYTES, shrink_image};
 pub use local::LocalBlobStore;
 pub(crate) use local::TEMPORARY_DIRECTORY;
 pub use s3::{S3Bucket, S3Config, S3Error, S3Object};

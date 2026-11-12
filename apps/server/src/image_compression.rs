@@ -1,24 +1,13 @@
-//! Makes large stored images smaller, the same way the web client does before an upload (long edge at most
-//! 2560 px, lossy WebP). The running server does it from Admin → Storage, for files on the local disk and in S3;
+//! Makes large stored images smaller with [`shrink_image`], as uploads are now (long edge at most 2560 px, lossy
+//! WebP). The running server does it from Admin → Storage, for files on the local disk and in S3;
 //! `orbit attachments compress` does it offline for local files. Each blob keeps its id
 //! ([`UploadService::replace_blob`]), so tasks, pages and chat messages keep their references.
 
-use std::io::Cursor;
 use std::sync::{Arc, Mutex, PoisonError};
 
-use image::imageops::FilterType;
-use image::{DynamicImage, ImageDecoder, ImageFormat, ImageReader};
-use orbit_platform::{Database, Row, UploadError, UploadService};
+use orbit_platform::{Database, Row, SHRINK_MIN_BYTES, UploadError, UploadService, shrink_image};
 use serde::Serialize;
 use utoipa::ToSchema;
-
-/// The same limits as the web client (`apps/web/src/lib/shrinkImage.ts`).
-pub const MAX_IMAGE_EDGE: u32 = 2560;
-pub const SHRINK_MIN_BYTES: i64 = 512 * 1024;
-const QUALITY: f32 = 85.0;
-/// The most decoded pixel bytes one image may take. The header sets the size of the decode buffer, so a small
-/// file that claims a huge size would otherwise make the allocation fail and stop the whole process.
-const MAX_DECODED_BYTES: u64 = 256 * 1024 * 1024;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, ToSchema)]
 pub struct CompressSummary {
@@ -53,49 +42,6 @@ fn megabytes(bytes: u64) -> String {
     format!("{value:.1} MB")
 }
 
-/// Re-encodes `bytes` as a WebP of at most `MAX_IMAGE_EDGE` px. `None` when it is not a still JPEG, PNG or WebP,
-/// cannot be decoded, or would not get smaller.
-fn compress(bytes: &[u8]) -> Option<Vec<u8>> {
-    let format = image::guess_format(bytes).ok()?;
-    if !matches!(
-        format,
-        ImageFormat::Jpeg | ImageFormat::Png | ImageFormat::WebP
-    ) || is_animated(bytes)
-    {
-        return None;
-    }
-    let mut decoder = ImageReader::with_format(Cursor::new(bytes), format)
-        .into_decoder()
-        .ok()?;
-    if decoder.total_bytes() > MAX_DECODED_BYTES {
-        return None;
-    }
-    // Browsers show a photo turned as its EXIF orientation says; the WebP has no EXIF, so turn the pixels.
-    let orientation = decoder.orientation().ok()?;
-    let mut image = DynamicImage::from_decoder(decoder).ok()?;
-    image.apply_orientation(orientation);
-    let fits = image.width().max(image.height()) <= MAX_IMAGE_EDGE;
-    // A WebP that fits is already what this produces: encoding it again only loses quality.
-    if fits && format == ImageFormat::WebP {
-        return None;
-    }
-    if !fits {
-        image = image.resize(MAX_IMAGE_EDGE, MAX_IMAGE_EDGE, FilterType::Lanczos3);
-    }
-    let rgba = image.to_rgba8();
-    let encoded = webp::Encoder::from_rgba(&rgba, rgba.width(), rgba.height()).encode(QUALITY);
-    (encoded.len() < bytes.len()).then(|| encoded.to_vec())
-}
-
-/// Animated PNG (an `acTL` chunk) and animated WebP (an `ANIM` chunk) would lose all frames but the first. Both
-/// chunks come before the image data, near the start of the file.
-fn is_animated(bytes: &[u8]) -> bool {
-    let header = &bytes[..bytes.len().min(4096)];
-    header
-        .windows(4)
-        .any(|chunk| chunk == b"acTL" || chunk == b"ANIM")
-}
-
 /// Compresses every large image blob. With `dry_run`, only reports what would change. `progress` gets the
 /// running totals after each blob.
 pub async fn compress_images(
@@ -107,7 +53,7 @@ pub async fn compress_images(
     let blobs = sqlx::query(
         "SELECT id, storage_key FROM attachment_blobs WHERE byte_size >= $1 AND deleted_at IS NULL ORDER BY created_at, id",
     )
-    .bind(SHRINK_MIN_BYTES)
+    .bind(i64::try_from(SHRINK_MIN_BYTES).unwrap_or(i64::MAX))
     .fetch_all(database.pool())
     .await?;
     let mut summary = CompressSummary::default();
@@ -125,7 +71,7 @@ pub async fn compress_images(
             }
         };
         let original_size = original.len() as u64;
-        let compressed = tokio::task::spawn_blocking(move || compress(&original))
+        let compressed = tokio::task::spawn_blocking(move || shrink_image(&original))
             .await
             .ok()
             .flatten();
@@ -228,64 +174,5 @@ impl ImageCompressor {
 
     fn lock(&self) -> std::sync::MutexGuard<'_, CompressionStatus> {
         self.status.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use image::{ImageBuffer, Rgba};
-
-    fn noisy_png(width: u32, height: u32) -> Vec<u8> {
-        let image = ImageBuffer::from_fn(width, height, |x, y| {
-            Rgba([
-                (x * 7 % 256) as u8,
-                (y * 13 % 256) as u8,
-                ((x ^ y) % 256) as u8,
-                255,
-            ])
-        });
-        let mut bytes = Vec::new();
-        DynamicImage::ImageRgba8(image)
-            .write_to(&mut Cursor::new(&mut bytes), ImageFormat::Png)
-            .unwrap();
-        bytes
-    }
-
-    #[test]
-    fn compress_skips_an_image_whose_header_claims_a_huge_size() {
-        let mut bytes = Vec::new();
-        DynamicImage::ImageRgb8(ImageBuffer::new(8, 8))
-            .write_to(&mut Cursor::new(&mut bytes), ImageFormat::Jpeg)
-            .unwrap();
-        // The baseline frame header (FF C0, length, precision) is followed by the height and the width.
-        let sof = bytes
-            .windows(2)
-            .position(|pair| pair == [0xFF, 0xC0])
-            .unwrap();
-        bytes[sof + 5..sof + 9].copy_from_slice(&[0xFF, 0xFF, 0xFF, 0xFF]);
-        assert!(compress(&bytes).is_none());
-    }
-
-    #[test]
-    fn compress_scales_large_images_to_webp() {
-        let compressed = compress(&noisy_png(3000, 1500)).unwrap();
-        let image = image::load_from_memory(&compressed).unwrap();
-        assert_eq!((image.width(), image.height()), (2560, 1280));
-        assert_eq!(image::guess_format(&compressed).unwrap(), ImageFormat::WebP);
-        // A second run leaves the result alone.
-        assert!(compress(&compressed).is_none());
-    }
-
-    #[test]
-    fn compress_skips_animations_and_other_formats() {
-        let mut animated = noisy_png(64, 64);
-        animated.splice(
-            33..33,
-            b"\0\0\0\x08acTL\0\0\0\x02\0\0\0\0\0\0\0\0".iter().copied(),
-        );
-        assert!(compress(&animated).is_none());
-        assert!(compress(b"GIF89a not really").is_none());
-        assert!(compress(b"%PDF-1.7").is_none());
     }
 }

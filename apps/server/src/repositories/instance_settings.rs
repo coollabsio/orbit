@@ -76,6 +76,8 @@ pub struct StorageSettings {
     pub attachments_in_s3: bool,
     pub backups_in_s3: bool,
     pub backup_schedule: BackupSchedule,
+    /// Days a deleted or replaced attachment file stays in S3.
+    pub s3_keep_deleted_days: u32,
 }
 
 #[derive(Debug, Error)]
@@ -485,7 +487,8 @@ impl InstanceSettingsRepository {
     pub async fn storage(&self) -> Result<StorageSettings, sqlx::Error> {
         let row = sqlx::query(
             "SELECT s3_endpoint, s3_region, s3_bucket, s3_prefix, s3_access_key_id, s3_secret_access_key, \
-             s3_path_style, attachments_in_s3, backups_in_s3, backup_schedule FROM instance_settings WHERE id = 1",
+             s3_path_style, attachments_in_s3, backups_in_s3, backup_schedule, s3_keep_deleted_days FROM instance_settings \
+             WHERE id = 1",
         )
         .fetch_one(self.database.pool())
         .await?;
@@ -524,6 +527,9 @@ impl InstanceSettingsRepository {
             s3,
             backup_schedule: environment.backup_schedule.unwrap_or_else(|| {
                 BackupSchedule::parse(&row.get::<String, _>("backup_schedule")).unwrap_or_default()
+            }),
+            s3_keep_deleted_days: environment.s3_keep_deleted_days.unwrap_or_else(|| {
+                u32::try_from(row.get::<i64, _>("s3_keep_deleted_days")).unwrap_or(40)
             }),
         })
     }
@@ -615,6 +621,7 @@ impl InstanceSettingsRepository {
         attachments_in_s3: bool,
         backups_in_s3: bool,
         backup_schedule: BackupSchedule,
+        s3_keep_deleted_days: Option<u32>,
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<(), StorageSettingsError> {
@@ -637,7 +644,7 @@ impl InstanceSettingsRepository {
         sqlx::query(
             "UPDATE instance_settings SET attachments_in_s3 = COALESCE($1, attachments_in_s3), \
              backups_in_s3 = COALESCE($2, backups_in_s3), backup_schedule = COALESCE($3, backup_schedule), \
-             updated_at = $4 WHERE id = 1",
+             s3_keep_deleted_days = COALESCE($4, s3_keep_deleted_days), updated_at = $5 WHERE id = 1",
         )
         .bind(saved(environment.attachments_in_s3.is_some(), i64::from(attachments_in_s3)))
         .bind(saved(environment.backups_in_s3.is_some(), i64::from(backups_in_s3)))
@@ -646,6 +653,11 @@ impl InstanceSettingsRepository {
                 .backup_schedule
                 .is_none()
                 .then_some(backup_schedule.as_str()),
+        )
+        .bind(
+            s3_keep_deleted_days
+                .filter(|_| environment.s3_keep_deleted_days.is_none())
+                .map(i64::from),
         )
         .bind(now.as_millis())
         .execute(&mut *transaction)
@@ -677,6 +689,7 @@ impl InstanceSettingsRepository {
                 "attachments_in_s3": attachments_in_s3,
                 "backups_in_s3": backups_in_s3,
                 "backup_schedule": backup_schedule.as_str(),
+                "s3_keep_deleted_days": s3_keep_deleted_days,
             }),
             now,
         )
