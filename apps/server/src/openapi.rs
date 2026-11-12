@@ -159,6 +159,10 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::public_api::doc,
         crate::public_api::create_doc,
         crate::public_api::update_doc,
+        crate::public_api::delete_doc,
+        crate::public_api::move_doc,
+        crate::public_api::doc_versions,
+        crate::public_api::doc_version,
         crate::public_api::databases::database,
         crate::public_api::databases::query_database,
         crate::public_api::databases::create_row,
@@ -694,6 +698,7 @@ fn public_api_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             | "public_list_tasks"
             | "public_get_task"
             | "public_list_comments"
+            | "public_list_doc_versions"
             | "public_query_database"
             | "public_create_export"
     ) {
@@ -717,6 +722,7 @@ fn public_api_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             | "public_list_labels"
             | "public_list_tasks"
             | "public_list_comments"
+            | "public_list_doc_versions"
     ) {
         add_code(&mut responses, "400", "invalid_cursor");
     }
@@ -728,6 +734,8 @@ fn public_api_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             | "public_create_comment"
             | "public_create_doc"
             | "public_update_doc"
+            | "public_move_doc"
+            | "public_delete_doc"
             | "public_create_database_row"
             | "public_update_database_row"
             | "public_trash_database_rows"
@@ -766,6 +774,7 @@ fn public_api_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             | "public_create_comment"
             | "public_create_doc"
             | "public_update_doc"
+            | "public_move_doc"
             | "public_query_database"
             | "public_create_database_row"
             | "public_update_database_row"
@@ -779,7 +788,11 @@ fn public_api_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
     }
     if matches!(
         operation_id,
-        "public_update_task" | "public_delete_task" | "public_update_doc"
+        "public_update_task"
+            | "public_delete_task"
+            | "public_update_doc"
+            | "public_move_doc"
+            | "public_delete_doc"
     ) {
         add_code(&mut responses, "409", "conflict");
     }
@@ -809,6 +822,11 @@ fn public_api_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             add_code(&mut responses, "503", "page_busy");
         }
         "public_create_database" => add_code(&mut responses, "409", "database_in_database"),
+        "public_move_doc" => {
+            add_code(&mut responses, "403", "workspace_action_forbidden");
+            add_code(&mut responses, "409", "database_in_database");
+            add_code(&mut responses, "409", "database_row_limit");
+        }
         "public_create_database_row" => {
             add_code(&mut responses, "409", "database_row_limit");
             add_code(&mut responses, "409", "conflict");

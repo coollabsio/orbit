@@ -75,8 +75,8 @@ scopes, which MCP does not use.
 | `tasks:read` | Tasks: **Read** | `GET` projects, statuses, labels, members, tasks and comments |
 | `tasks:write` | Tasks: **Write** | Create, update and delete tasks, add comments, link tasks, create and change projects, statuses and labels, `POST /integrations/discord/events` |
 | `tasks:import` | Tasks: **Write** with **Import mode** | With `tasks:write`: the import fields of new tasks and comments. See [Import from another tool](#import-from-another-tool). |
-| `docs:read` | Docs: **Read** | `GET /docs`, `GET /docs/{page_id}`, `GET /docs/{page_id}/database`, `POST /docs/{page_id}/database/query`, `GET /docs/{page_id}/database/views` and `…/views/{view_id}` |
-| `docs:write` | Docs: **Write** | `POST /docs`, `PATCH /docs/{page_id}`, `POST /docs/{page_id}/rows`, `PATCH /docs/{page_id}/rows/{row_id}`, `POST /docs/{page_id}/rows/trash`, `POST /databases`, the schema, view and linked view endpoints under `/docs/{page_id}/database` |
+| `docs:read` | Docs: **Read** | `GET /docs`, `GET /docs/{page_id}`, `GET /docs/{page_id}/versions`, `GET /docs/{page_id}/versions/{version_id}`, `GET /docs/{page_id}/database`, `POST /docs/{page_id}/database/query`, `GET /docs/{page_id}/database/views` and `…/views/{view_id}` |
+| `docs:write` | Docs: **Write** | `POST /docs`, `PATCH /docs/{page_id}`, `POST /docs/{page_id}/move`, `DELETE /docs/{page_id}`, `POST /docs/{page_id}/rows`, `PATCH /docs/{page_id}/rows/{row_id}`, `POST /docs/{page_id}/rows/trash`, `POST /databases`, the schema, view and linked view endpoints under `/docs/{page_id}/database` |
 | `chat:read` | Chat: **Read** | None. Chat is available through MCP only. A bot that reads and writes one channel uses a [chat webhook with events](chat-webhooks.md#events). |
 | `workspace:export` | **Workspace export** | `POST /exports` with `mode: "full"`, `GET /exports/{export_id}`, `GET /exports/{export_id}/download` |
 | `workspace:export:personal` | **Personal export** | The same, with `mode: "personal"` |
@@ -116,6 +116,18 @@ workspace_action_forbidden`.
 - `limit` is 1 to 100. The default is 50.
 - A task contains no embedded parent, duplicate or ancestor records.
   `parent_task_id` is `null` when the parent is not in an approved project.
+
+- `POST /tasks` and `POST /tasks/{task}/comments` take an optional
+  `Idempotency-Key` header (1 to 255 visible ASCII characters, for example a
+  UUID), so a client can retry after a timeout without a second task or comment.
+  Orbit keeps the first successful response (`200` or `201`) for 24 hours for
+  each token and key. A repeat with the same path and JSON body (the order of
+  fields does not matter) gets that response again, with the header
+  `Idempotent-Replayed: true`. The same key with another path or body gets `422`
+  (`idempotency_key_reused`). If the first request still runs, the repeat gets
+  `409` (`idempotency_request_running`) with `Retry-After: 1`; retry it. Orbit
+  keeps no response of an error, so a retry after an error runs again. Use a
+  new key for each new task or comment.
 
 ## Endpoints
 
@@ -530,6 +542,46 @@ curl -sS -X PATCH "$ORBIT_WS/docs/$PAGE_ID" -H "Authorization: Bearer $ORBIT_TOK
   -H 'Content-Type: application/json' -d '{"expected_version":4503599627370495,"markdown":"Updated."}'
 ```
 
+`POST /workspaces/{workspace_id}/docs/{page_id}/move`. Scope: `docs:write`. Body:
+`expected_version` (required), `parent_id` (required: a doc ID, or `null` for a
+space root) and optional `position`, `teamspace_id` and `private`. The doc and
+its sub-docs go under the new parent and take the parent's space. With
+`parent_id: null`, `teamspace_id` moves the doc to that teamspace and
+`private: true` moves it to the token creator's private space; with neither,
+the doc keeps its space. `position` is the index among the new siblings, from 0;
+without it, or past the last sibling, the doc goes last. A doc that moves into a
+database always goes last. Response: `200` with the doc record, as `GET` shows
+it after the move, and `dropped_values`: how many property values the move
+deleted because the new database cannot hold them. `expected_version` works as
+in `PATCH`: a stale value gets `409`. A move under the doc itself or under one
+of its sub-docs gets `422`; moving a database under a database gets `409`
+(`database_in_database`); moving teamspace docs that others created into a
+private space needs a workspace owner or admin (`403`,
+`workspace_action_forbidden`).
+
+```bash
+curl -sS "$ORBIT_WS/docs/$PAGE_ID/move" -H "Authorization: Bearer $ORBIT_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d "{\"expected_version\":4503599627370495,\"parent_id\":\"$PARENT_ID\",\"position\":0}"
+```
+
+`DELETE /workspaces/{workspace_id}/docs/{page_id}?expected_version=…`. Scope:
+`docs:write`. Moves the doc and its live sub-docs to the trash, where people can
+restore them in Orbit. Deleting forever, and restoring, are not part of the API.
+Response: `204`. A stale `expected_version` gets `409`. Afterwards `GET` on the
+doc answers `404`.
+
+`GET /workspaces/{workspace_id}/docs/{page_id}/versions`. Scope: `docs:read`.
+The history of a doc, newest first, without content: `id`, `kind` (`auto`,
+`restore` or `import`), `title`, `icon`, `created_at` and `created_by`. Query:
+`cursor` and `limit` (1 to 100, default 50), as in other lists. Orbit keeps a
+version when someone edits the title or content, at most one per 10 minutes.
+
+`GET /workspaces/{workspace_id}/docs/{page_id}/versions/{version_id}`. Scope:
+`docs:read`. One version with its `content` and its `markdown`, the format that
+doc writes take. Restoring a version is not part of the API: send the version's
+`markdown` in a `PATCH`.
+
 ### Databases
 
 A database is a doc with `"kind": "database"` in the doc list. Its rows are docs
@@ -842,9 +894,11 @@ Errors are RFC 9457 problem documents (`Content-Type: application/problem+json`)
 | 405 | `method_not_allowed` | The path does not take this HTTP method, for example `PUT /tasks`. The `Allow` header lists the methods that it takes (`GET,HEAD,POST`). Orbit sends this before it checks the token. |
 | 409 | `conflict` | The resource changed after you read it (for docs and task descriptions, also through live edits). `conflict.current_version` has the current version. |
 | 409 | `task_conflict`, `github_content_read_only`, `github_linked_move` | The change conflicts with the task's current state. |
+| 409 | `idempotency_request_running` | The first request with this `Idempotency-Key` has not finished. Retry after the `Retry-After` time. |
 | 409 | `export_not_ready` | The export is queued, running or failed, so there is no archive to download yet. |
 | 413 | `doc_too_large` | The doc would have, or already has, more than 4,000 blocks. Nothing changed. |
 | 422 | `validation_failed`, `parent_cycle`, `parent_invalid` | A value is not valid for the workspace or project, for example an unknown assignee, label, milestone or cycle, or an estimate above 1000. `errors` names the field. |
+| 422 | `idempotency_key_reused` | The `Idempotency-Key` was used for another path or body. |
 | 423 | `page_locked` | The doc is locked. Unlock it in Orbit to change its title, icon or content. |
 | 429 | `rate_limit_exceeded` | Too many requests. Wait as the `Retry-After` header tells (RFC 9110). Orbit sends a number of seconds. |
 | 500 | `internal_error` | Orbit could not complete the request, for example because the database is unavailable. Try again later. |
