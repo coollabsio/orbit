@@ -1,4 +1,5 @@
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use axum::body::to_bytes;
 use axum::extract::{Extension, FromRequest, Path, Query, Request, State};
@@ -21,6 +22,11 @@ use crate::audit::{self, AuditOutcome};
 use crate::auth_routes::{CookieMode, request_session};
 use crate::billing::WorkspaceAccess;
 use crate::billing::guard::READ_ONLY_DETAIL;
+use crate::github::{GithubClient, GithubEndpoints};
+use crate::github_user_routes::{
+    delete_github_connection, finish_github_connection, github_connection, github_connection_callback,
+    start_github_connection,
+};
 use crate::repositories::api_tokens::{ApiTokenError, ApiTokenRepository, ApiTokenScope};
 use crate::repositories::billing;
 use crate::repositories::identity::IdentityRepository;
@@ -29,6 +35,7 @@ use crate::repositories::project_access::user_sees_project_sql;
 use crate::repositories::tasks::{
     DiscordTask, GithubWorkItem, TaskError, TaskRecord, TaskRepository,
 };
+use crate::sign_in_providers::NativeRedirects;
 use crate::secret_box::{
     decrypt_secret as decrypt_github_secret, encrypt_secret as encrypt_github_secret,
 };
@@ -63,11 +70,16 @@ async fn record_github_change(
     .map_err(|error| ApiError::internal(request_id).cause(error))
 }
 
+/// One lock for each (workspace, user) whose GitHub token this process is renewing.
+type RefreshLocks = Arc<Mutex<HashMap<(Id, Id), Arc<tokio::sync::Mutex<()>>>>>;
+
 #[derive(Clone)]
 pub struct IntegrationState {
     tokens: Arc<ApiTokenRepository>,
     tasks: Arc<TaskRepository>,
     github_settings: Option<GithubSettings>,
+    native_redirects: Arc<NativeRedirects>,
+    refresh_locks: RefreshLocks,
 }
 
 #[derive(Clone)]
@@ -77,7 +89,7 @@ struct GithubSettings {
     public_origin: String,
     allow_request_origin: bool,
     encryption_key: Option<[u8; 32]>,
-    client: reqwest::Client,
+    github: GithubClient,
 }
 
 impl IntegrationState {
@@ -87,6 +99,8 @@ impl IntegrationState {
             tokens,
             tasks,
             github_settings: None,
+            native_redirects: Arc::default(),
+            refresh_locks: RefreshLocks::default(),
         }
     }
 
@@ -105,9 +119,69 @@ impl IntegrationState {
             public_origin,
             allow_request_origin,
             encryption_key,
-            client: reqwest::Client::new(),
+            github: GithubClient::default(),
         });
         self
+    }
+
+    /// Points GitHub at other URLs (tests). Call after [`Self::with_github_settings`].
+    #[must_use]
+    pub fn with_github_endpoints(mut self, endpoints: GithubEndpoints) -> Self {
+        if let Some(settings) = self.github_settings.as_mut() {
+            settings.github = GithubClient::new(endpoints);
+        }
+        self
+    }
+
+    /// Return URLs the mobile app may use besides `orbit://auth/callback` (`ORBIT_DEV_NATIVE_REDIRECTS`).
+    #[must_use]
+    pub fn with_native_redirects(mut self, redirects: &[String]) -> Self {
+        self.native_redirects = Arc::new(NativeRedirects::new(redirects));
+        self
+    }
+
+    pub(crate) fn database(&self) -> &orbit_platform::Database {
+        self.tasks.database()
+    }
+
+    pub(crate) fn github_client(&self) -> Option<&GithubClient> {
+        self.github_settings.as_ref().map(|settings| &settings.github)
+    }
+
+    pub(crate) fn encryption_key(&self) -> Option<[u8; 32]> {
+        self.github_settings
+            .as_ref()
+            .and_then(|settings| settings.encryption_key)
+    }
+
+    pub(crate) fn public_origin(&self) -> &str {
+        self.github_settings
+            .as_ref()
+            .map_or("", |settings| settings.public_origin.as_str())
+    }
+
+    pub(crate) fn app_key(&self, request_id: Option<&RequestId>) -> Result<[u8; 32], ApiError> {
+        app_key(github_settings_context(self, request_id)?, request_id)
+    }
+
+    pub(crate) async fn session_user(
+        &self,
+        headers: &HeaderMap,
+        request_id: Option<&RequestId>,
+    ) -> Result<Id, ApiError> {
+        github_session_user(self, headers, request_id).await
+    }
+
+    pub(crate) fn native_redirect_allowed(&self, url: &str) -> bool {
+        self.native_redirects.allows(url)
+    }
+
+    pub(crate) fn refresh_lock(&self, workspace: &Id, user: &Id) -> Arc<tokio::sync::Mutex<()>> {
+        let mut locks = self
+            .refresh_locks
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        Arc::clone(locks.entry((*workspace, *user)).or_default())
     }
 }
 
@@ -133,6 +207,84 @@ pub fn integration_router(state: IntegrationState) -> Router {
             "/api/v1/workspaces/{workspace_id}/github/manifest",
             post(start_github_manifest),
         )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/github/me",
+            get(github_connection)
+                .post(start_github_connection)
+                .delete(delete_github_connection),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/projects/{project_id}/github/pulls",
+            get(crate::github_pull_routes::list_github_project_pulls),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/github/pulls/{owner}/{repo}/{number}",
+            get(crate::github_pull_routes::get_github_pull),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/github/pulls/{owner}/{repo}/{number}/files",
+            get(crate::github_pull_routes::list_github_pull_files),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/github/pulls/{owner}/{repo}/{number}/contents",
+            get(crate::github_pull_routes::get_github_pull_contents),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/github/pulls/{owner}/{repo}/{number}/threads",
+            get(crate::github_pull_routes::list_github_pull_threads),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/github/pulls/{owner}/{repo}/{number}/comments",
+            post(crate::github_pull_routes::create_github_review_comment),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/github/pulls/{owner}/{repo}/{number}/comments/{comment_id}",
+            axum::routing::patch(crate::github_pull_routes::update_github_review_comment)
+                .delete(crate::github_pull_routes::delete_github_review_comment),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/github/pulls/{owner}/{repo}/{number}/threads/{thread_id}/replies",
+            post(crate::github_pull_routes::reply_github_review_thread),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/github/pulls/{owner}/{repo}/{number}/threads/{thread_id}/resolved",
+            axum::routing::put(crate::github_pull_routes::resolve_github_review_thread)
+                .delete(crate::github_pull_routes::unresolve_github_review_thread),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/github/pulls/{owner}/{repo}/{number}/review",
+            post(crate::github_pull_routes::submit_github_review)
+                .delete(crate::github_pull_routes::discard_github_review),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/github/pulls/{owner}/{repo}/{number}/merge",
+            post(crate::github_pull_routes::merge_github_pull),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/github/pulls/{owner}/{repo}/{number}/branch",
+            axum::routing::delete(crate::github_pull_routes::delete_github_pull_branch),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/github/pulls/{owner}/{repo}/{number}/merge-base",
+            get(crate::github_pull_routes::get_github_pull_merge_base),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/github/pulls/{owner}/{repo}/{number}/conversation",
+            get(crate::github_pull_routes::list_github_pull_conversation),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/github/pulls/{owner}/{repo}/{number}/viewed",
+            axum::routing::put(crate::github_pull_routes::mark_github_file_viewed)
+                .delete(crate::github_pull_routes::unmark_github_file_viewed),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/github/me/finish",
+            post(finish_github_connection),
+        )
+        .route(
+            "/api/v1/integrations/github/user/callback",
+            get(github_connection_callback),
+        )
         .with_state(state)
 }
 
@@ -151,15 +303,21 @@ pub struct GithubProjectSettings {
     repositories: Vec<GithubRepositoryOption>,
     can_manage: bool,
     key_configured: bool,
+    /// The app is from before PR review (no OAuth client): an admin must re-create it.
+    needs_recreate: bool,
 }
 
 #[derive(Serialize, ToSchema)]
 pub struct GithubWorkspaceSettings {
+    /// The projects with a connected repository that the member sees (for their pull request lists).
+    connected_projects: Vec<String>,
     app_slug: Option<String>,
     install_url: Option<String>,
     repositories: Vec<GithubRepositoryOption>,
     can_manage: bool,
     key_configured: bool,
+    /// The app is from before PR review (no OAuth client): an admin must re-create it.
+    needs_recreate: bool,
 }
 
 #[derive(Serialize, ToSchema)]
@@ -238,7 +396,7 @@ async fn github_session_user(
     Ok(session.user.id)
 }
 
-async fn github_workspace_access(
+pub(crate) async fn github_workspace_access(
     state: &IntegrationState,
     headers: &HeaderMap,
     workspace: &str,
@@ -269,7 +427,7 @@ async fn github_workspace_access(
     Ok((workspace_id, actor.can(Permission::IntegrationsManage)))
 }
 
-async fn github_project_access(
+pub(crate) async fn github_project_access(
     state: &IntegrationState,
     headers: &HeaderMap,
     workspace: &str,
@@ -351,13 +509,21 @@ pub(crate) async fn github_workspace_settings(
 ) -> Result<Json<GithubWorkspaceSettings>, ApiError> {
     let id = request_id.as_ref().map(|Extension(id)| id);
     let (_, can_manage) = github_workspace_access(&state, &headers, &workspace, id).await?;
-    let app: Option<String> =
-        sqlx::query_scalar("SELECT slug FROM github_apps WHERE workspace_id = $1")
-            .bind(&workspace)
-            .fetch_optional(state.tasks.database().pool())
-            .await
-            .map_err(|error| ApiError::internal(id).cause(error))?;
+    let user = github_session_user(&state, &headers, id).await?;
+    let (app, needs_recreate) = github_app_slug(&state, &workspace, id).await?;
+    let connected_projects: Vec<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+        "SELECT c.project_id FROM github_project_connections c JOIN projects p ON p.id = c.project_id \
+         WHERE c.workspace_id = $1 AND p.deleted_at IS NULL AND {} ORDER BY c.project_id",
+        user_sees_project_sql("p.id", "$2")
+    )))
+    .bind(&workspace)
+    .bind(user.to_string())
+    .fetch_all(state.tasks.database().pool())
+    .await
+    .map_err(|error| ApiError::internal(id).cause(error))?;
     Ok(Json(GithubWorkspaceSettings {
+        connected_projects,
+        needs_recreate,
         install_url: app
             .as_ref()
             .map(|slug| format!("https://github.com/apps/{slug}/installations/new")),
@@ -381,15 +547,11 @@ pub(crate) async fn github_project_settings(
     let request_id = request_id.as_ref().map(|Extension(id)| id);
     let (_, _, can_manage) =
         github_project_access(&state, &headers, &workspace, &project, request_id).await?;
-    let app: Option<String> =
-        sqlx::query_scalar("SELECT slug FROM github_apps WHERE workspace_id = $1")
-            .bind(&workspace)
-            .fetch_optional(state.tasks.database().pool())
-            .await
-            .map_err(|error| ApiError::internal(request_id).cause(error))?;
+    let (app, needs_recreate) = github_app_slug(&state, &workspace, request_id).await?;
     let connection = sqlx::query("SELECT repository, label FROM github_project_connections WHERE workspace_id = $1 AND project_id = $2")
         .bind(&workspace).bind(&project).fetch_optional(state.tasks.database().pool()).await.map_err(|error| ApiError::internal(request_id).cause(error))?;
     Ok(Json(GithubProjectSettings {
+        needs_recreate,
         install_url: app
             .as_ref()
             .map(|slug| format!("https://github.com/apps/{slug}/installations/new")),
@@ -402,6 +564,23 @@ pub(crate) async fn github_project_settings(
             .github_settings
             .as_ref()
             .is_some_and(|settings| settings.encryption_key.is_some()),
+    }))
+}
+
+/// The workspace app's slug, and whether it predates PR review (no OAuth client).
+async fn github_app_slug(
+    state: &IntegrationState,
+    workspace: &str,
+    request_id: Option<&RequestId>,
+) -> Result<(Option<String>, bool), ApiError> {
+    let row = sqlx::query("SELECT slug, client_id FROM github_apps WHERE workspace_id = $1")
+        .bind(workspace)
+        .fetch_optional(state.tasks.database().pool())
+        .await
+        .map_err(|_| ApiError::internal(request_id))?;
+    Ok(row.map_or((None, false), |row| {
+        let client: Option<String> = row.get("client_id");
+        (Some(row.get("slug")), client.is_none())
     }))
 }
 
@@ -594,13 +773,8 @@ pub(crate) async fn start_github_manifest(
             id,
         ));
     }
-    let Flag(exists) =
-        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM github_apps WHERE workspace_id = $1)")
-            .bind(&workspace)
-            .fetch_one(state.tasks.database().pool())
-            .await
-            .map_err(|error| ApiError::internal(id).cause(error))?;
-    if exists {
+    let (app, needs_recreate) = github_app_slug(&state, &workspace, id).await?;
+    if app.is_some() && !needs_recreate {
         return Err(ApiError::new(
             StatusCode::CONFLICT,
             "github_app_exists",
@@ -633,9 +807,16 @@ pub(crate) async fn start_github_manifest(
             "hook_attributes": { "url": format!("{origin}/api/v1/integrations/github/webhook"), "active": true },
             "redirect_url": format!("{origin}/api/v1/integrations/github/manifest/callback"),
             "setup_url": format!("{origin}/settings/github?workspace={workspace}&github=installed"),
+            "callback_urls": [crate::github_user_routes::callback_url(&origin)],
             "public": false,
-            "default_permissions": { "issues": "read", "pull_requests": "read" },
-            "default_events": ["issues", "pull_request"]
+            "default_permissions": {
+                "issues": "read", "pull_requests": "write", "contents": "write",
+                "checks": "read", "statuses": "read", "metadata": "read"
+            },
+            "default_events": [
+                "issues", "pull_request", "pull_request_review", "pull_request_review_comment",
+                "pull_request_review_thread", "check_suite", "check_run", "status"
+            ]
         }),
     }))
 }
@@ -646,6 +827,10 @@ struct GithubManifestConversion {
     slug: String,
     pem: String,
     webhook_secret: String,
+    #[serde(default)]
+    client_id: Option<String>,
+    #[serde(default)]
+    client_secret: Option<String>,
 }
 
 #[utoipa::path(get, path = "/api/v1/integrations/github/manifest/callback", params(("code" = String, Query), ("state" = String, Query)), responses((status = 303, description = "Return to workspace settings")))]
@@ -666,7 +851,14 @@ pub(crate) async fn github_manifest_callback(
     })?;
     let settings = github_settings_context(&state, id)?;
     let key = app_key(settings, id)?;
-    if query.state.len() > 200 || query.code.len() > 200 || query.code.is_empty() {
+    if query.state.len() > 200
+        || query.code.len() > 200
+        || query.code.is_empty()
+        || !query
+            .code
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_')
+    {
         return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
             "invalid_github_registration",
@@ -695,50 +887,34 @@ pub(crate) async fn github_manifest_callback(
     })?;
     let workspace: String = pending.get("workspace_id");
     let registered_origin: String = pending.get("public_origin");
-    let response = settings
-        .client
-        .post(format!(
-            "https://api.github.com/app-manifests/{}/conversions",
-            query.code
-        ))
-        .header("User-Agent", "Orbit")
-        .header("Accept", "application/vnd.github+json")
-        .header("X-GitHub-Api-Version", "2022-11-28")
-        .send()
+    let app: GithubManifestConversion = settings
+        .github
+        .rest(
+            "",
+            reqwest::Method::POST,
+            &format!("app-manifests/{}/conversions", query.code),
+            None,
+        )
         .await
-        .map_err(|_| {
+        .map_err(|error| {
+            let detail = match error {
+                crate::github::GithubError::Network => "Orbit could not contact GitHub.",
+                _ => "GitHub did not accept the registration code.",
+            };
             ApiError::new(
                 StatusCode::BAD_GATEWAY,
                 "github_registration_failed",
                 "GitHub registration failed",
-                "Orbit could not contact GitHub.",
+                detail,
                 id,
             )
         })?;
-    if !response.status().is_success() {
-        return Err(ApiError::new(
-            StatusCode::BAD_GATEWAY,
-            "github_registration_failed",
-            "GitHub registration failed",
-            "GitHub did not accept the registration code.",
-            id,
-        ));
-    }
-    let app: GithubManifestConversion = response.json().await.map_err(|_| {
-        ApiError::new(
-            StatusCode::BAD_GATEWAY,
-            "github_registration_failed",
-            "GitHub registration failed",
-            "GitHub returned an invalid App registration.",
-            id,
-        )
-    })?;
-    store_github_app(&state, &workspace, &hash, &key, &app, id).await?;
     let return_origin = if registered_origin.is_empty() {
         settings.public_origin.as_str()
     } else {
         registered_origin.as_str()
     };
+    store_github_app(&state, &workspace, &hash, &key, &app, return_origin, id).await?;
     Ok(Redirect::to(&format!(
         "{}/settings/github?workspace={workspace}&github=registered",
         return_origin.trim_end_matches('/')
@@ -751,6 +927,7 @@ async fn store_github_app(
     hash: &[u8; 32],
     key: &[u8; 32],
     app: &GithubManifestConversion,
+    callback_origin: &str,
     id: Option<&RequestId>,
 ) -> Result<(), ApiError> {
     if app.id <= 0 || app.slug.is_empty() || app.pem.is_empty() || app.webhook_secret.is_empty() {
@@ -759,6 +936,13 @@ async fn store_github_app(
     let pem = encrypt_github_secret(key, &app.pem)
         .map_err(|()| ApiError::internal(id).cause("could not encrypt the secret"))?;
     let secret = encrypt_github_secret(key, &app.webhook_secret)
+        .map_err(|()| ApiError::internal(id).cause("could not encrypt the secret"))?;
+    let client_secret = app
+        .client_secret
+        .as_deref()
+        .filter(|_| app.client_id.is_some())
+        .map(|value| encrypt_github_secret(key, value))
+        .transpose()
         .map_err(|()| ApiError::internal(id).cause("could not encrypt the secret"))?;
     let mut tx = state
         .tasks
@@ -778,8 +962,17 @@ async fn store_github_app(
             id,
         ));
     }
-    let inserted = sqlx::query("INSERT INTO github_apps (workspace_id, app_id, slug, private_key_encrypted, webhook_secret_encrypted, created_at) VALUES ($1, $2, $3, $4, $5, $6)")
-        .bind(workspace).bind(app.id).bind(&app.slug).bind(pem).bind(secret).bind(TimestampMillis::now().as_millis()).execute(&mut *tx).await;
+    // Re-creating an app from before PR review replaces it; the cascade drops its installations, repository
+    // links, project connections and member connections (all tied to the old app).
+    sqlx::query("DELETE FROM github_apps WHERE workspace_id = $1 AND client_id IS NULL")
+        .bind(workspace)
+        .execute(&mut *tx)
+        .await
+        .map_err(|_| ApiError::internal(id))?;
+    let inserted = sqlx::query("INSERT INTO github_apps (workspace_id, app_id, slug, private_key_encrypted, webhook_secret_encrypted, created_at, client_id, client_secret_encrypted, callback_origin) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)")
+        .bind(workspace).bind(app.id).bind(&app.slug).bind(pem).bind(secret).bind(TimestampMillis::now().as_millis())
+        .bind(app.client_id.as_deref().filter(|_| client_secret.is_some())).bind(client_secret).bind(callback_origin)
+        .execute(&mut *tx).await;
     match inserted {
         Ok(_) => {}
         Err(sqlx::Error::Database(error)) if error.is_unique_violation() => {
@@ -840,6 +1033,14 @@ async fn github_webhook_from_database(
         .and_then(|value| value.to_str().ok())
         .unwrap_or("")
         .to_owned();
+    let delivery = request
+        .headers()
+        .get("x-github-delivery")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("")
+        .chars()
+        .take(100)
+        .collect::<String>();
     let event = request
         .headers()
         .get("x-github-event")
@@ -942,12 +1143,24 @@ async fn github_webhook_from_database(
         update_github_installation(state, &workspace, &payload, &event, action, id).await?;
         return Ok(StatusCode::OK);
     }
+    let workspace_id: Id = workspace.parse().map_err(|error| ApiError::internal(id).cause(error))?;
+    let changed = crate::github::notify::changed_pulls(&event, &payload);
+    let notice = crate::github::notify::is_notice_event(&event);
+    if (notice || !changed.is_empty()) && !read_only(state, workspace_id, id).await? {
+        // A notice or refresh failure must not fail the delivery: GitHub would retry it and the task sync below.
+        if notice
+            && let Err(error) = crate::github::notify::notify_pull_event(state, &workspace_id, &event, &delivery, &payload).await
+        {
+            tracing::warn!(%workspace_id, event, %error, "GitHub notice not written");
+        }
+        let request = id.map_or("github-webhook", RequestId::as_str);
+        if let Err(error) = crate::github::notify::record_pull_changes(state, &workspace_id, &changed, request).await {
+            tracing::warn!(%workspace_id, event, %error, "GitHub pull request change not sent to viewers");
+        }
+    }
     if !matches!(event.as_str(), "issues" | "pull_request") {
         return Ok(StatusCode::ACCEPTED);
     }
-    let workspace_id: Id = workspace
-        .parse()
-        .map_err(|error| ApiError::internal(id).cause(error))?;
     if read_only(state, workspace_id, id).await? {
         // A 2xx keeps GitHub from disabling the hook; the change is dropped.
         tracing::info!(%workspace_id, event, "GitHub event dropped: the workspace is read-only");
@@ -1289,7 +1502,7 @@ fn valid_repository(value: &str) -> bool {
     matches!((parts.next(), parts.next(), parts.next()), (Some(owner), Some(repo), None) if valid(owner) && valid(repo))
 }
 
-pub(crate) struct ApiJson<T>(T);
+pub(crate) struct ApiJson<T>(pub(crate) T);
 
 impl<S, T> FromRequest<S> for ApiJson<T>
 where
@@ -1597,7 +1810,7 @@ impl ApiError {
         self
     }
 
-    fn new(
+    pub(crate) fn new(
         status: StatusCode,
         code: &str,
         title: &str,
@@ -1622,7 +1835,7 @@ impl ApiError {
         }
     }
 
-    fn internal(request_id: Option<&RequestId>) -> Self {
+    pub(crate) fn internal(request_id: Option<&RequestId>) -> Self {
         Self::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             "internal_error",
@@ -1723,6 +1936,8 @@ mod tests {
             slug: "orbit-test".to_owned(),
             pem: "private-key".to_owned(),
             webhook_secret: "hook-secret".to_owned(),
+            client_id: Some("Iv1.abc".to_owned()),
+            client_secret: Some("s3cret".to_owned()),
         };
         assert!(
             store_github_app(
@@ -1731,6 +1946,7 @@ mod tests {
                 &hash,
                 &[7u8; 32],
                 &app,
+                "https://orbit.test",
                 None
             )
             .await

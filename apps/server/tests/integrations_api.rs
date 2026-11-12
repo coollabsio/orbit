@@ -66,7 +66,10 @@ async fn database_github_app_routes_issues_without_orbit_tokens() {
     );
     assert_eq!(
         manifest["manifest"]["default_events"],
-        json!(["issues", "pull_request"])
+        json!([
+            "issues", "pull_request", "pull_request_review", "pull_request_review_comment",
+            "pull_request_review_thread", "check_suite", "check_run", "status"
+        ])
     );
     assert_eq!(manifest["manifest"]["public"], false);
     assert_eq!(

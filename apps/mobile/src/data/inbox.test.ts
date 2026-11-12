@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 
-import { isMention, notificationCopy, notificationTarget } from './inbox'
+import { isMention, notificationCopy, notificationLine, notificationTarget } from './inbox'
 import type { NotificationRecord } from './orbit'
 
 const notification = (fields: Partial<NotificationRecord>): NotificationRecord => ({
@@ -41,4 +41,19 @@ test('an import notice opens its import screen and names how it ended', () => {
   expect(notificationTarget(failed)).toBe('/settings/import/obsidian/imp-2')
   expect(notificationCopy(failed, undefined, 'Me').title).toBe('Obsidian import failed')
   expect(isMention(done)).toBe(false)
+})
+
+test('GitHub notices open the pull request and use the web wording', () => {
+  const github = notification({ kind: 'github_review', github_repository: 'acme/repo', github_pull_number: 12, github_actor_login: 'octo', github_review_state: 'approved' })
+  expect(notificationTarget(github)).toBe('/pulls/acme/repo/12')
+  expect(notificationCopy(github, undefined, undefined)).toEqual({ title: 'octo approved your pull request', body: 'acme/repo#12' })
+  expect(notificationCopy({ ...github, kind: 'github_review_requested' }, undefined, undefined).title).toBe('octo asked for your review')
+  expect(notificationCopy({ ...github, kind: 'github_merged' }, undefined, undefined).title).toBe('octo merged your pull request')
+  expect(isMention(github)).toBe(false)
+})
+
+test('the second line names the Orbit actor, except for imports and GitHub notices', () => {
+  expect(notificationLine(notification({}), 'Body', 'Ada')).toBe('Ada · Body')
+  expect(notificationLine(notification({ kind: 'github_review' }), 'acme/repo#12', 'Bob')).toBe('acme/repo#12')
+  expect(notificationLine(notification({ kind: 'import_finished', import_id: 'i1' }), 'Done', 'Ada')).toBe('Done')
 })

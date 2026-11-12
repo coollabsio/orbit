@@ -15,6 +15,8 @@ import { useProjectOrder, useProjects, useSetProjectOrder } from '@/features/tas
 import { moveProject, orderProjects } from '@orbit/api/projectOrder'
 import type { ProjectRecord } from '@orbit/api/generated/types.gen'
 import { ProjectLock } from '@/features/tasks/components/ProjectLock'
+import { useGithubWorkspaceSettings } from '@/features/tasks/api/github'
+import { ProviderMark } from '@/components/common/icons/ProviderMark'
 import { NewProjectModal } from '@/features/tasks/components/NewProjectModal'
 import { savedViewsQueryOptions } from '@/features/views/api/views'
 import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
@@ -301,6 +303,8 @@ function ProjectLinks({ workspaceId, projects, selected, pathOf, onNavigate }: {
 }) {
   const collapsed = useContext(SidebarNavCollapsed)
   const setOrder = useSetProjectOrder(workspaceId)
+  // projects with a GitHub repository get a link to their pull requests
+  const withPulls = new Set(useGithubWorkspaceSettings(workspaceId, workspaceId !== '' && projects.length > 0).data?.connected_projects ?? [])
   const [dragId, setDragId] = useState<string | null>(null)
   const [overId, setOverId] = useState<string | null>(null)
   const ids = projects.map((item) => item.id)
@@ -350,7 +354,7 @@ function ProjectLinks({ workspaceId, projects, selected, pathOf, onNavigate }: {
           label={item.name}
           aria-label={item.private ? `${item.name}, private` : item.name}
           trailing={item.private ? <ProjectLock project={item} className="text-sidebar-nav" /> : undefined}
-          className="pr-8"
+          className={withPulls.has(item.id) ? 'pr-14' : 'pr-8'}
           // the row is the drag source, not the link (a dragged link carries its URL and a text drag image)
           draggable={false}
           aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
@@ -364,6 +368,19 @@ function ProjectLinks({ workspaceId, projects, selected, pathOf, onNavigate }: {
             requestAnimationFrame(() => link.focus())
           }}
         />
+        {collapsed || !withPulls.has(item.id) ? null : (
+          <Tip label="Pull requests" side="right">
+            <Link
+              to={`/tasks/projects/${item.id}/pulls`}
+              aria-label={`${item.name} pull requests`}
+              draggable={false}
+              className="absolute top-1/2 right-7 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-sidebar-nav opacity-0 transition-opacity outline-none group-hover/project:opacity-100 hover:bg-black/5 hover:text-sidebar-nav-active focus-visible:opacity-100 pointer-coarse:opacity-100 dark:hover:bg-white/8"
+              onClick={onNavigate}
+            >
+              <ProviderMark provider="github" className="size-3.5" />
+            </Link>
+          </Tip>
+        )}
         {collapsed ? null : (
           <Tip label="Project settings" side="right">
             <Link

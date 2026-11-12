@@ -2629,6 +2629,72 @@ export type ForwardedRecord = {
     message_id: string;
 };
 
+export type GithubActor = {
+    avatar_url: string;
+    login: string;
+};
+
+export type GithubCheckRun = {
+    name: string;
+    /**
+     * `success`, `failure`, `pending` or `neutral`.
+     */
+    state: string;
+    url?: string | null;
+};
+
+export type GithubChecksSummary = {
+    runs: Array<GithubCheckRun>;
+    /**
+     * `success`, `failure`, `pending` or `none`.
+     */
+    state: string;
+};
+
+export type GithubCommentBody = {
+    /**
+     * Markdown.
+     */
+    body: string;
+};
+
+export type GithubConnectFinish = {
+    /**
+     * The `token` GitHub's callback put in the return URL.
+     */
+    token: string;
+};
+
+export type GithubConnectStart = {
+    /**
+     * `web` or `mobile`.
+     */
+    client: string;
+    /**
+     * Mobile only: where the browser returns (the app's sign-in redirect URI).
+     */
+    return_url?: string | null;
+};
+
+export type GithubConnectUrl = {
+    authorize_url: string;
+};
+
+export type GithubConnection = {
+    login?: string | null;
+    /**
+     * `connected`, `disconnected`, `broken` (connect again), `unavailable` (no app) or `needs_recreate`.
+     */
+    status: string;
+};
+
+export type GithubFileContents = {
+    /**
+     * `null` for binary files and files over 1 MiB.
+     */
+    text?: string | null;
+};
+
 export type GithubLink = {
     kind: string;
     source: boolean;
@@ -2646,6 +2712,78 @@ export type GithubManifestStart = {
     manifest: unknown;
 };
 
+export type GithubMergeBase = {
+    /**
+     * The commit GitHub diffs the pull request against (the old side of every file).
+     */
+    sha: string;
+};
+
+export type GithubMergeInfo = {
+    /**
+     * Why merging is not possible now, for the person.
+     */
+    blocked_reason?: string | null;
+    default_method?: string | null;
+    /**
+     * `mergeable`, `conflicting` or `unknown` (GitHub still computes it).
+     */
+    mergeable: string;
+    /**
+     * The merge methods the repository allows: `merge`, `squash`, `rebase`.
+     */
+    methods: Array<string>;
+};
+
+export type GithubMergePull = {
+    commit_message?: string | null;
+    commit_title?: string | null;
+    /**
+     * The head commit the member saw; GitHub refuses the merge when new commits came in.
+     */
+    expected_head_sha: string;
+    /**
+     * `merge`, `squash` or `rebase`.
+     */
+    method: string;
+};
+
+export type GithubMergeResult = {
+    /**
+     * The merge commit.
+     */
+    sha: string;
+};
+
+export type GithubNewReviewComment = {
+    /**
+     * Markdown.
+     */
+    body: string;
+    /**
+     * The head commit of the diff the member commented on. When the pull request has moved on, the comment is
+     * refused (409) instead of landing on another line.
+     */
+    head_sha?: string | null;
+    line: number;
+    /**
+     * `pending` (in the member's review, seen when it is submitted) or `single` (posted now).
+     */
+    mode: string;
+    path: string;
+    /**
+     * `LEFT` (old file) or `RIGHT` (new file).
+     */
+    side: string;
+    start_line?: number | null;
+    start_side?: string | null;
+};
+
+export type GithubPendingReview = {
+    comment_count: number;
+    id: string;
+};
+
 export type GithubProjectConnectionBody = {
     installation_id: number;
     label: string;
@@ -2658,8 +2796,121 @@ export type GithubProjectSettings = {
     install_url?: string | null;
     key_configured: boolean;
     label?: string | null;
+    /**
+     * The app is from before PR review (no OAuth client): an admin must re-create it.
+     */
+    needs_recreate: boolean;
     repositories: Array<GithubRepositoryOption>;
     repository?: string | null;
+};
+
+export type GithubPullDetail = {
+    additions: number;
+    author: GithubActor;
+    base_ref: string;
+    base_sha: string;
+    /**
+     * Markdown.
+     */
+    body: string;
+    changed_files: number;
+    checks: GithubChecksSummary;
+    deletions: number;
+    head_ref: string;
+    head_sha: string;
+    html_url: string;
+    merge: GithubMergeInfo;
+    /**
+     * GitHub's node id of the pull request.
+     */
+    node_id: string;
+    number: number;
+    repository: string;
+    /**
+     * `open`, `draft`, `merged` or `closed`.
+     */
+    state: string;
+    /**
+     * Orbit tasks linked to this pull request that the member can see.
+     */
+    tasks: Array<GithubPullTaskRef>;
+    title: string;
+    viewer: GithubPullViewer;
+};
+
+export type GithubPullFile = {
+    additions: number;
+    deletions: number;
+    /**
+     * The unified diff hunks; `null` when GitHub does not send them (binary or very large files).
+     */
+    patch?: string | null;
+    path: string;
+    previous_path?: string | null;
+    /**
+     * GitHub's status: `added`, `removed`, `modified`, `renamed`, `copied`, `changed` or `unchanged`.
+     */
+    status: string;
+    viewed: boolean;
+};
+
+export type GithubPullList = {
+    items: Array<GithubPullSummary>;
+    /**
+     * Pass back as `cursor` for the next page; `null` on the last page.
+     */
+    next_cursor?: string | null;
+};
+
+export type GithubPullSummary = {
+    author: GithubActor;
+    comments: number;
+    number: number;
+    repository: string;
+    /**
+     * `open`, `draft`, `merged` or `closed`.
+     */
+    state: string;
+    title: string;
+    /**
+     * Unix milliseconds.
+     */
+    updated_at: number;
+};
+
+export type GithubPullTaskRef = {
+    task_id: string;
+    title: string;
+};
+
+export type GithubPullThreads = {
+    pending_review?: null | GithubPendingReview;
+    threads: Array<GithubReviewThread>;
+};
+
+export type GithubPullTimelineItem = {
+    author: GithubActor;
+    body: string;
+    created_at: number;
+    /**
+     * `comment` or `review`.
+     */
+    kind: string;
+    /**
+     * For reviews: `approved`, `changes_requested` or `commented`.
+     */
+    review_state?: string | null;
+};
+
+export type GithubPullViewer = {
+    can_comment: boolean;
+    can_merge: boolean;
+    can_review: boolean;
+    is_author: boolean;
+    /**
+     * The member's GitHub login.
+     */
+    login: string;
 };
 
 export type GithubRepositoryOption = {
@@ -2667,11 +2918,79 @@ export type GithubRepositoryOption = {
     repository: string;
 };
 
+export type GithubReviewComment = {
+    author: GithubActor;
+    /**
+     * Markdown.
+     */
+    body: string;
+    can_edit: boolean;
+    /**
+     * Unix milliseconds.
+     */
+    created_at: number;
+    database_id: number;
+    /**
+     * GitHub's node id.
+     */
+    id: string;
+    /**
+     * In the member's pending review (not visible to others yet).
+     */
+    pending: boolean;
+};
+
+export type GithubReviewThread = {
+    can_reply: boolean;
+    can_resolve: boolean;
+    comments: Array<GithubReviewComment>;
+    /**
+     * GitHub's node id.
+     */
+    id: string;
+    is_outdated: boolean;
+    is_resolved: boolean;
+    /**
+     * `null` when the thread is outdated and no longer on a line.
+     */
+    line?: number | null;
+    path: string;
+    /**
+     * `LEFT` (the old file) or `RIGHT` (the new file).
+     */
+    side: string;
+    start_line?: number | null;
+    start_side?: string | null;
+};
+
+export type GithubSubmitReview = {
+    /**
+     * The review summary (markdown); may be empty for an approval.
+     */
+    body: string;
+    /**
+     * `COMMENT`, `APPROVE` or `REQUEST_CHANGES`.
+     */
+    event: string;
+};
+
+export type GithubViewedFile = {
+    path: string;
+};
+
 export type GithubWorkspaceSettings = {
     app_slug?: string | null;
     can_manage: boolean;
+    /**
+     * The projects with a connected repository that the member sees (for their pull request lists).
+     */
+    connected_projects: Array<string>;
     install_url?: string | null;
     key_configured: boolean;
+    /**
+     * The app is from before PR review (no OAuth client): an admin must re-create it.
+     */
+    needs_recreate: boolean;
     repositories: Array<GithubRepositoryOption>;
 };
 
@@ -4484,6 +4803,10 @@ export type NotificationPrefs = {
     chat_mentions: boolean;
     direct_messages: boolean;
     /**
+     * GitHub pull request notices. Missing in a request from an older app: on.
+     */
+    github?: boolean;
+    /**
      * Mentions in task comments, pages and page comments.
      */
     mentions: boolean;
@@ -4503,6 +4826,20 @@ export type NotificationRecord = {
      */
     comment_id?: string | null;
     created_at: string;
+    /**
+     * Who acted on GitHub (their GitHub login; they may have no Orbit account).
+     */
+    github_actor_login?: string | null;
+    github_pull_number?: number | null;
+    /**
+     * GitHub notices (`github_review_requested`, `github_review`, `github_merged`): the repository (`owner/repo`)
+     * and the pull request number.
+     */
+    github_repository?: string | null;
+    /**
+     * A `github_review`'s result: `approved`, `changes_requested` or `commented`.
+     */
+    github_review_state?: string | null;
     id: string;
     /**
      * The import of an `import_finished` notification.
@@ -4520,7 +4857,8 @@ export type NotificationRecord = {
     /**
      * `task_assigned`, `comment_mentioned` (task comment), `description_mentioned` (task
      * description), `page_comment_mentioned`, `page_mentioned` (an @mention in a page body) or
-     * `chat_mentioned` (a chat message) or `import_finished` (a long import ended).
+     * `chat_mentioned` (a chat message), `import_finished` (a long import ended), or a GitHub pull request notice:
+     * `github_review_requested`, `github_review`, `github_merged`.
      */
     kind: string;
     /**
@@ -5648,6 +5986,20 @@ export type PageNotificationRecord = {
          */
         comment_id?: string | null;
         created_at: string;
+        /**
+         * Who acted on GitHub (their GitHub login; they may have no Orbit account).
+         */
+        github_actor_login?: string | null;
+        github_pull_number?: number | null;
+        /**
+         * GitHub notices (`github_review_requested`, `github_review`, `github_merged`): the repository (`owner/repo`)
+         * and the pull request number.
+         */
+        github_repository?: string | null;
+        /**
+         * A `github_review`'s result: `approved`, `changes_requested` or `commented`.
+         */
+        github_review_state?: string | null;
         id: string;
         /**
          * The import of an `import_finished` notification.
@@ -5665,7 +6017,8 @@ export type PageNotificationRecord = {
         /**
          * `task_assigned`, `comment_mentioned` (task comment), `description_mentioned` (task
          * description), `page_comment_mentioned`, `page_mentioned` (an @mention in a page body) or
-         * `chat_mentioned` (a chat message) or `import_finished` (a long import ended).
+         * `chat_mentioned` (a chat message), `import_finished` (a long import ended), or a GitHub pull request notice:
+         * `github_review_requested`, `github_review`, `github_merged`.
          */
         kind: string;
         /**
@@ -7230,6 +7583,11 @@ export type PublicWorkspaceGrant = {
     project_ids: Array<string>;
     scopes: Array<ApiTokenScope>;
 };
+
+/**
+ * The search filters of the project PR list.
+ */
+export type PullFilter = 'open' | 'review' | 'mine' | 'merged' | 'closed';
 
 export type PushKey = {
     /**
@@ -17920,6 +18278,60 @@ export type GithubManifestCallbackResponses = {
 
 export type GithubManifestCallbackResponse = GithubManifestCallbackResponses[keyof GithubManifestCallbackResponses];
 
+export type GithubConnectionCallbackData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: {
+        code?: string;
+        state?: string;
+    };
+    url: '/api/v1/integrations/github/user/callback';
+};
+
+export type GithubConnectionCallbackErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * origin_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type GithubConnectionCallbackError = GithubConnectionCallbackErrors[keyof GithubConnectionCallbackErrors];
+
+export type GithubConnectionCallbackResponses = {
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type GithubConnectionCallbackResponse = GithubConnectionCallbackResponses[keyof GithubConnectionCallbackResponses];
+
 export type GithubWebhookData = {
     body: unknown;
     headers: {
@@ -25123,6 +25535,1597 @@ export type StartGithubManifestResponses = {
 };
 
 export type StartGithubManifestResponse = StartGithubManifestResponses[keyof StartGithubManifestResponses];
+
+export type DeleteGithubConnectionData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/github/me';
+};
+
+export type DeleteGithubConnectionErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * github_workspace_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type DeleteGithubConnectionError = DeleteGithubConnectionErrors[keyof DeleteGithubConnectionErrors];
+
+export type DeleteGithubConnectionResponses = {
+    /**
+     * Disconnected
+     */
+    204: void;
+};
+
+export type DeleteGithubConnectionResponse = DeleteGithubConnectionResponses[keyof DeleteGithubConnectionResponses];
+
+export type GithubConnectionData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/github/me';
+};
+
+export type GithubConnectionErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * github_workspace_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type GithubConnectionError = GithubConnectionErrors[keyof GithubConnectionErrors];
+
+export type GithubConnectionResponses = {
+    200: GithubConnection;
+};
+
+export type GithubConnectionResponse = GithubConnectionResponses[keyof GithubConnectionResponses];
+
+export type StartGithubConnectionData = {
+    body: GithubConnectStart;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/github/me';
+};
+
+export type StartGithubConnectionErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * github_workspace_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch, github_app_missing, github_app_recreate
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * invalid_redirect
+     */
+    422: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * app_key_missing
+     */
+    503: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type StartGithubConnectionError = StartGithubConnectionErrors[keyof StartGithubConnectionErrors];
+
+export type StartGithubConnectionResponses = {
+    200: GithubConnectUrl;
+};
+
+export type StartGithubConnectionResponse = StartGithubConnectionResponses[keyof StartGithubConnectionResponses];
+
+export type FinishGithubConnectionData = {
+    body: GithubConnectFinish;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/github/me/finish';
+};
+
+export type FinishGithubConnectionErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden, github_connect_mismatch
+     */
+    403: WorkspaceProblem;
+    /**
+     * github_workspace_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch, github_account_taken
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * github_connect_failed
+     */
+    422: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * app_key_missing
+     */
+    503: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type FinishGithubConnectionError = FinishGithubConnectionErrors[keyof FinishGithubConnectionErrors];
+
+export type FinishGithubConnectionResponses = {
+    200: GithubConnection;
+};
+
+export type FinishGithubConnectionResponse = FinishGithubConnectionResponses[keyof FinishGithubConnectionResponses];
+
+export type GetGithubPullData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        owner: string;
+        repo: string;
+        number: number;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/github/pulls/{owner}/{repo}/{number}';
+};
+
+export type GetGithubPullErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * github_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * github_workspace_not_found, github_project_not_found, pull_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch, github_not_connected, github_reconnect, github_app_missing, github_app_recreate
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * github_refused
+     */
+    422: WorkspaceProblem;
+    /**
+     * github_rate_limited
+     */
+    429: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * github_unavailable
+     */
+    502: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type GetGithubPullError = GetGithubPullErrors[keyof GetGithubPullErrors];
+
+export type GetGithubPullResponses = {
+    200: GithubPullDetail;
+};
+
+export type GetGithubPullResponse = GetGithubPullResponses[keyof GetGithubPullResponses];
+
+export type DeleteGithubPullBranchData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        owner: string;
+        repo: string;
+        number: number;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/github/pulls/{owner}/{repo}/{number}/branch';
+};
+
+export type DeleteGithubPullBranchErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden, github_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * github_workspace_not_found, github_project_not_found, pull_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch, github_not_connected, github_reconnect, github_app_missing, github_app_recreate
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * github_refused, branch_not_deletable
+     */
+    422: WorkspaceProblem;
+    /**
+     * github_rate_limited
+     */
+    429: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * github_unavailable
+     */
+    502: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type DeleteGithubPullBranchError = DeleteGithubPullBranchErrors[keyof DeleteGithubPullBranchErrors];
+
+export type DeleteGithubPullBranchResponses = {
+    /**
+     * Head branch deleted
+     */
+    204: void;
+};
+
+export type DeleteGithubPullBranchResponse = DeleteGithubPullBranchResponses[keyof DeleteGithubPullBranchResponses];
+
+export type CreateGithubReviewCommentData = {
+    body: GithubNewReviewComment;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        owner: string;
+        repo: string;
+        number: number;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/github/pulls/{owner}/{repo}/{number}/comments';
+};
+
+export type CreateGithubReviewCommentErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden, github_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * github_workspace_not_found, github_project_not_found, pull_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch, github_not_connected, github_reconnect, github_app_missing, github_app_recreate, pull_head_changed
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * github_refused, invalid_review_comment
+     */
+    422: WorkspaceProblem;
+    /**
+     * github_rate_limited
+     */
+    429: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * github_unavailable
+     */
+    502: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type CreateGithubReviewCommentError = CreateGithubReviewCommentErrors[keyof CreateGithubReviewCommentErrors];
+
+export type CreateGithubReviewCommentResponses = {
+    200: GithubReviewThread;
+};
+
+export type CreateGithubReviewCommentResponse = CreateGithubReviewCommentResponses[keyof CreateGithubReviewCommentResponses];
+
+export type DeleteGithubReviewCommentData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        owner: string;
+        repo: string;
+        number: number;
+        comment_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/github/pulls/{owner}/{repo}/{number}/comments/{comment_id}';
+};
+
+export type DeleteGithubReviewCommentErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden, github_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * github_workspace_not_found, github_project_not_found, pull_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch, github_not_connected, github_reconnect, github_app_missing, github_app_recreate
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * github_refused
+     */
+    422: WorkspaceProblem;
+    /**
+     * github_rate_limited
+     */
+    429: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * github_unavailable
+     */
+    502: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type DeleteGithubReviewCommentError = DeleteGithubReviewCommentErrors[keyof DeleteGithubReviewCommentErrors];
+
+export type DeleteGithubReviewCommentResponses = {
+    /**
+     * Deleted on GitHub
+     */
+    204: void;
+};
+
+export type DeleteGithubReviewCommentResponse = DeleteGithubReviewCommentResponses[keyof DeleteGithubReviewCommentResponses];
+
+export type UpdateGithubReviewCommentData = {
+    body: GithubCommentBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        owner: string;
+        repo: string;
+        number: number;
+        comment_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/github/pulls/{owner}/{repo}/{number}/comments/{comment_id}';
+};
+
+export type UpdateGithubReviewCommentErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden, github_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * github_workspace_not_found, github_project_not_found, pull_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch, github_not_connected, github_reconnect, github_app_missing, github_app_recreate
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * github_refused, invalid_review_comment
+     */
+    422: WorkspaceProblem;
+    /**
+     * github_rate_limited
+     */
+    429: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * github_unavailable
+     */
+    502: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type UpdateGithubReviewCommentError = UpdateGithubReviewCommentErrors[keyof UpdateGithubReviewCommentErrors];
+
+export type UpdateGithubReviewCommentResponses = {
+    200: GithubReviewComment;
+};
+
+export type UpdateGithubReviewCommentResponse = UpdateGithubReviewCommentResponses[keyof UpdateGithubReviewCommentResponses];
+
+export type GetGithubPullContentsData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        owner: string;
+        repo: string;
+        number: number;
+    };
+    query: {
+        path: string;
+        ref: string;
+    };
+    url: '/api/v1/workspaces/{workspace_id}/github/pulls/{owner}/{repo}/{number}/contents';
+};
+
+export type GetGithubPullContentsErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * github_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * github_workspace_not_found, github_project_not_found, pull_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch, github_not_connected, github_reconnect, github_app_missing, github_app_recreate
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * github_refused
+     */
+    422: WorkspaceProblem;
+    /**
+     * github_rate_limited
+     */
+    429: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * github_unavailable
+     */
+    502: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type GetGithubPullContentsError = GetGithubPullContentsErrors[keyof GetGithubPullContentsErrors];
+
+export type GetGithubPullContentsResponses = {
+    200: GithubFileContents;
+};
+
+export type GetGithubPullContentsResponse = GetGithubPullContentsResponses[keyof GetGithubPullContentsResponses];
+
+export type ListGithubPullConversationData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        owner: string;
+        repo: string;
+        number: number;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/github/pulls/{owner}/{repo}/{number}/conversation';
+};
+
+export type ListGithubPullConversationErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * github_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * github_workspace_not_found, github_project_not_found, pull_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch, github_not_connected, github_reconnect, github_app_missing, github_app_recreate
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * github_refused
+     */
+    422: WorkspaceProblem;
+    /**
+     * github_rate_limited
+     */
+    429: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * github_unavailable
+     */
+    502: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type ListGithubPullConversationError = ListGithubPullConversationErrors[keyof ListGithubPullConversationErrors];
+
+export type ListGithubPullConversationResponses = {
+    200: Array<GithubPullTimelineItem>;
+};
+
+export type ListGithubPullConversationResponse = ListGithubPullConversationResponses[keyof ListGithubPullConversationResponses];
+
+export type ListGithubPullFilesData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        owner: string;
+        repo: string;
+        number: number;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/github/pulls/{owner}/{repo}/{number}/files';
+};
+
+export type ListGithubPullFilesErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * github_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * github_workspace_not_found, github_project_not_found, pull_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch, github_not_connected, github_reconnect, github_app_missing, github_app_recreate
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * github_refused
+     */
+    422: WorkspaceProblem;
+    /**
+     * github_rate_limited
+     */
+    429: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * github_unavailable
+     */
+    502: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type ListGithubPullFilesError = ListGithubPullFilesErrors[keyof ListGithubPullFilesErrors];
+
+export type ListGithubPullFilesResponses = {
+    200: Array<GithubPullFile>;
+};
+
+export type ListGithubPullFilesResponse = ListGithubPullFilesResponses[keyof ListGithubPullFilesResponses];
+
+export type MergeGithubPullData = {
+    body: GithubMergePull;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        owner: string;
+        repo: string;
+        number: number;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/github/pulls/{owner}/{repo}/{number}/merge';
+};
+
+export type MergeGithubPullErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden, github_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * github_workspace_not_found, github_project_not_found, pull_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch, github_not_connected, github_reconnect, github_app_missing, github_app_recreate, pull_head_changed
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * github_refused, invalid_merge, merge_blocked
+     */
+    422: WorkspaceProblem;
+    /**
+     * github_rate_limited
+     */
+    429: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * github_unavailable
+     */
+    502: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type MergeGithubPullError = MergeGithubPullErrors[keyof MergeGithubPullErrors];
+
+export type MergeGithubPullResponses = {
+    200: GithubMergeResult;
+};
+
+export type MergeGithubPullResponse = MergeGithubPullResponses[keyof MergeGithubPullResponses];
+
+export type GetGithubPullMergeBaseData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        owner: string;
+        repo: string;
+        number: number;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/github/pulls/{owner}/{repo}/{number}/merge-base';
+};
+
+export type GetGithubPullMergeBaseErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * github_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * github_workspace_not_found, github_project_not_found, pull_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch, github_not_connected, github_reconnect, github_app_missing, github_app_recreate
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * github_refused
+     */
+    422: WorkspaceProblem;
+    /**
+     * github_rate_limited
+     */
+    429: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * github_unavailable
+     */
+    502: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type GetGithubPullMergeBaseError = GetGithubPullMergeBaseErrors[keyof GetGithubPullMergeBaseErrors];
+
+export type GetGithubPullMergeBaseResponses = {
+    200: GithubMergeBase;
+};
+
+export type GetGithubPullMergeBaseResponse = GetGithubPullMergeBaseResponses[keyof GetGithubPullMergeBaseResponses];
+
+export type DiscardGithubReviewData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        owner: string;
+        repo: string;
+        number: number;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/github/pulls/{owner}/{repo}/{number}/review';
+};
+
+export type DiscardGithubReviewErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden, github_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * github_workspace_not_found, github_project_not_found, pull_not_found, no_pending_review
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch, github_not_connected, github_reconnect, github_app_missing, github_app_recreate
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * github_refused
+     */
+    422: WorkspaceProblem;
+    /**
+     * github_rate_limited
+     */
+    429: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * github_unavailable
+     */
+    502: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type DiscardGithubReviewError = DiscardGithubReviewErrors[keyof DiscardGithubReviewErrors];
+
+export type DiscardGithubReviewResponses = {
+    /**
+     * Pending review discarded
+     */
+    204: void;
+};
+
+export type DiscardGithubReviewResponse = DiscardGithubReviewResponses[keyof DiscardGithubReviewResponses];
+
+export type SubmitGithubReviewData = {
+    body: GithubSubmitReview;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        owner: string;
+        repo: string;
+        number: number;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/github/pulls/{owner}/{repo}/{number}/review';
+};
+
+export type SubmitGithubReviewErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden, github_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * github_workspace_not_found, github_project_not_found, pull_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch, github_not_connected, github_reconnect, github_app_missing, github_app_recreate
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * github_refused, invalid_review, cannot_review_own_pull, review_empty
+     */
+    422: WorkspaceProblem;
+    /**
+     * github_rate_limited
+     */
+    429: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * github_unavailable
+     */
+    502: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type SubmitGithubReviewError = SubmitGithubReviewErrors[keyof SubmitGithubReviewErrors];
+
+export type SubmitGithubReviewResponses = {
+    /**
+     * Review submitted on GitHub
+     */
+    204: void;
+};
+
+export type SubmitGithubReviewResponse = SubmitGithubReviewResponses[keyof SubmitGithubReviewResponses];
+
+export type ListGithubPullThreadsData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        owner: string;
+        repo: string;
+        number: number;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/github/pulls/{owner}/{repo}/{number}/threads';
+};
+
+export type ListGithubPullThreadsErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * github_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * github_workspace_not_found, github_project_not_found, pull_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch, github_not_connected, github_reconnect, github_app_missing, github_app_recreate
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * github_refused
+     */
+    422: WorkspaceProblem;
+    /**
+     * github_rate_limited
+     */
+    429: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * github_unavailable
+     */
+    502: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type ListGithubPullThreadsError = ListGithubPullThreadsErrors[keyof ListGithubPullThreadsErrors];
+
+export type ListGithubPullThreadsResponses = {
+    200: GithubPullThreads;
+};
+
+export type ListGithubPullThreadsResponse = ListGithubPullThreadsResponses[keyof ListGithubPullThreadsResponses];
+
+export type ReplyGithubReviewThreadData = {
+    body: GithubCommentBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        owner: string;
+        repo: string;
+        number: number;
+        thread_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/github/pulls/{owner}/{repo}/{number}/threads/{thread_id}/replies';
+};
+
+export type ReplyGithubReviewThreadErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden, github_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * github_workspace_not_found, github_project_not_found, pull_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch, github_not_connected, github_reconnect, github_app_missing, github_app_recreate
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * github_refused, invalid_review_comment
+     */
+    422: WorkspaceProblem;
+    /**
+     * github_rate_limited
+     */
+    429: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * github_unavailable
+     */
+    502: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type ReplyGithubReviewThreadError = ReplyGithubReviewThreadErrors[keyof ReplyGithubReviewThreadErrors];
+
+export type ReplyGithubReviewThreadResponses = {
+    200: GithubReviewComment;
+};
+
+export type ReplyGithubReviewThreadResponse = ReplyGithubReviewThreadResponses[keyof ReplyGithubReviewThreadResponses];
+
+export type UnresolveGithubReviewThreadData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        owner: string;
+        repo: string;
+        number: number;
+        thread_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/github/pulls/{owner}/{repo}/{number}/threads/{thread_id}/resolved';
+};
+
+export type UnresolveGithubReviewThreadErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden, github_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * github_workspace_not_found, github_project_not_found, pull_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch, github_not_connected, github_reconnect, github_app_missing, github_app_recreate
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * github_refused
+     */
+    422: WorkspaceProblem;
+    /**
+     * github_rate_limited
+     */
+    429: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * github_unavailable
+     */
+    502: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type UnresolveGithubReviewThreadError = UnresolveGithubReviewThreadErrors[keyof UnresolveGithubReviewThreadErrors];
+
+export type UnresolveGithubReviewThreadResponses = {
+    200: GithubReviewThread;
+};
+
+export type UnresolveGithubReviewThreadResponse = UnresolveGithubReviewThreadResponses[keyof UnresolveGithubReviewThreadResponses];
+
+export type ResolveGithubReviewThreadData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        owner: string;
+        repo: string;
+        number: number;
+        thread_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/github/pulls/{owner}/{repo}/{number}/threads/{thread_id}/resolved';
+};
+
+export type ResolveGithubReviewThreadErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden, github_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * github_workspace_not_found, github_project_not_found, pull_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch, github_not_connected, github_reconnect, github_app_missing, github_app_recreate
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * github_refused
+     */
+    422: WorkspaceProblem;
+    /**
+     * github_rate_limited
+     */
+    429: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * github_unavailable
+     */
+    502: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type ResolveGithubReviewThreadError = ResolveGithubReviewThreadErrors[keyof ResolveGithubReviewThreadErrors];
+
+export type ResolveGithubReviewThreadResponses = {
+    200: GithubReviewThread;
+};
+
+export type ResolveGithubReviewThreadResponse = ResolveGithubReviewThreadResponses[keyof ResolveGithubReviewThreadResponses];
+
+export type UnmarkGithubFileViewedData = {
+    body: GithubViewedFile;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        owner: string;
+        repo: string;
+        number: number;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/github/pulls/{owner}/{repo}/{number}/viewed';
+};
+
+export type UnmarkGithubFileViewedErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden, github_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * github_workspace_not_found, github_project_not_found, pull_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch, github_not_connected, github_reconnect, github_app_missing, github_app_recreate
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * github_refused
+     */
+    422: WorkspaceProblem;
+    /**
+     * github_rate_limited
+     */
+    429: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * github_unavailable
+     */
+    502: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type UnmarkGithubFileViewedError = UnmarkGithubFileViewedErrors[keyof UnmarkGithubFileViewedErrors];
+
+export type UnmarkGithubFileViewedResponses = {
+    /**
+     * Marked as not viewed on GitHub
+     */
+    204: void;
+};
+
+export type UnmarkGithubFileViewedResponse = UnmarkGithubFileViewedResponses[keyof UnmarkGithubFileViewedResponses];
+
+export type MarkGithubFileViewedData = {
+    body: GithubViewedFile;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        owner: string;
+        repo: string;
+        number: number;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/github/pulls/{owner}/{repo}/{number}/viewed';
+};
+
+export type MarkGithubFileViewedErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden, github_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * github_workspace_not_found, github_project_not_found, pull_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch, github_not_connected, github_reconnect, github_app_missing, github_app_recreate
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * github_refused
+     */
+    422: WorkspaceProblem;
+    /**
+     * github_rate_limited
+     */
+    429: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * github_unavailable
+     */
+    502: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type MarkGithubFileViewedError = MarkGithubFileViewedErrors[keyof MarkGithubFileViewedErrors];
+
+export type MarkGithubFileViewedResponses = {
+    /**
+     * Marked as viewed on GitHub
+     */
+    204: void;
+};
+
+export type MarkGithubFileViewedResponse = MarkGithubFileViewedResponses[keyof MarkGithubFileViewedResponses];
 
 export type ListImportPeopleData = {
     body?: never;
@@ -33479,6 +35482,81 @@ export type SaveGithubProjectConnectionResponses = {
 };
 
 export type SaveGithubProjectConnectionResponse = SaveGithubProjectConnectionResponses[keyof SaveGithubProjectConnectionResponses];
+
+export type ListGithubProjectPullsData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        project_id: string;
+    };
+    query?: {
+        filter?: PullFilter;
+        q?: string;
+        cursor?: string;
+    };
+    url: '/api/v1/workspaces/{workspace_id}/projects/{project_id}/github/pulls';
+};
+
+export type ListGithubProjectPullsErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * github_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * github_workspace_not_found, github_project_not_found, pull_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, github_not_connected, github_reconnect, github_app_missing, github_app_recreate
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * github_refused
+     */
+    422: TaskProblem;
+    /**
+     * github_rate_limited
+     */
+    429: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * github_unavailable
+     */
+    502: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ListGithubProjectPullsError = ListGithubProjectPullsErrors[keyof ListGithubProjectPullsErrors];
+
+export type ListGithubProjectPullsResponses = {
+    200: GithubPullList;
+};
+
+export type ListGithubProjectPullsResponse = ListGithubProjectPullsResponses[keyof ListGithubProjectPullsResponses];
 
 export type ListProjectLabelsData = {
     body?: never;

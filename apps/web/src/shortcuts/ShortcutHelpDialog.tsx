@@ -7,7 +7,7 @@ import { COMMANDS, isMailCommand, type Command, type Group } from './commands'
 import { ShortcutKeys } from './Shortcut'
 import { useAvailableCommands, useBindings } from './useCommand'
 
-const GROUPS: Group[] = ['General', 'Navigation', 'List', 'Task', 'Docs', 'Chat', 'Mail']
+const GROUPS: Group[] = ['General', 'Navigation', 'List', 'Task', 'Pull requests', 'Docs', 'Chat', 'Mail']
 
 interface Row { title: string; group: Group; keys: string[]; ids: string[] }
 

@@ -1,0 +1,64 @@
+import { type CommentTarget, toGitPatch } from '@orbit/api/github'
+import { openURL } from 'expo-linking'
+import { router, useLocalSearchParams } from 'expo-router'
+import { useMemo, useState } from 'react'
+import { View } from 'react-native'
+
+import { PullDiffView } from '../../../../../components/pulls/PullDiffView'
+import { CommentSheet, ThreadSheet } from '../../../../../components/pulls/PullSheets'
+import { usePull, usePullFiles, usePullThreads } from '../../../../../hooks/pulls'
+import { useTheme } from '../../../../../theme'
+import { Button, IconButton, LoadingView, PaneHeader, SafeAreaView, Text } from '../../../../../ui'
+
+/** One file's diff (unified: a phone is too narrow for split). A line or a range opens the comment sheet, a thread
+ *  its own sheet; `thread` (from a notification) opens that thread. */
+export default function PullFileScreen() {
+  const params = useLocalSearchParams<{ owner: string; repo: string; number: string; path: string; thread?: string }>()
+  const ref = useMemo(() => ({ owner: params.owner, repo: params.repo, number: Number(params.number) }), [params.owner, params.repo, params.number])
+  const { colors } = useTheme()
+  const pull = usePull(ref)
+  const files = usePullFiles(ref)
+  const threads = usePullThreads(ref)
+  const file = files.data?.find((item) => item.path === params.path)
+  const patch = file ? toGitPatch(file) : null
+  const name = params.path.slice(params.path.lastIndexOf('/') + 1)
+  const [target, setTarget] = useState<CommentTarget | null>(null)
+  const [threadId, setThreadId] = useState<string | null>(params.thread ?? null)
+  const thread = threads.data?.threads.find((item) => item.id === threadId) ?? null
+  const canComment = pull.data?.viewer.can_comment ?? false
+  // The head commit of the diff on screen: the one current when the files loaded. A push refreshes the header (live
+  // events) and not the files, and a comment must land on the lines the reader sees (the server refuses a stale head).
+  const [shown, setShown] = useState<{ at: number; head: string } | null>(null)
+  if (files.data && pull.data && shown?.at !== files.dataUpdatedAt) setShown({ at: files.dataUpdatedAt, head: pull.data.head_sha })
+  return (
+    <SafeAreaView edges={['top', 'left', 'right']} className="flex-1 bg-background">
+      <PaneHeader className="min-h-12 px-3">
+        <IconButton icon="back" label="Back" color={colors.mutedForeground} onPress={() => router.back()} />
+        <View className="min-w-0 flex-1">
+          <Text numberOfLines={1} className="font-noto-semibold text-[13px]">
+            {name}
+          </Text>
+          {file ? (
+            <Text className="text-[11px] text-muted-foreground">
+              +{file.additions} −{file.deletions}
+            </Text>
+          ) : null}
+        </View>
+      </PaneHeader>
+      {!files.data || !pull.data ? (
+        <LoadingView />
+      ) : !file ? (
+        <Text className="p-6 text-center text-[14px] text-muted-foreground">This file is not in the pull request any more.</Text>
+      ) : !patch ? (
+        <View className="items-center gap-3 p-6">
+          <Text className="text-center text-[14px] text-muted-foreground">{file.status === 'renamed' && file.additions + file.deletions === 0 ? 'Renamed, no changes.' : 'Too large to show here.'}</Text>
+          <Button label="Open on GitHub" variant="outline" onPress={() => void openURL(`${pull.data!.html_url}/files`)} />
+        </View>
+      ) : (
+        <PullDiffView path={file.path} patch={patch} threads={threads.data?.threads ?? []} onThreadPress={setThreadId} onLinesSelected={(selected) => { if (canComment) setTarget(selected) }} />
+      )}
+    <CommentSheet pullRef={ref} headSha={shown?.head ?? pull.data?.head_sha ?? ''} reviewing={(threads.data?.pending_review ?? null) !== null} target={target} onClose={() => setTarget(null)} />
+      <ThreadSheet pullRef={ref} thread={thread} onClose={() => setThreadId(null)} />
+    </SafeAreaView>
+  )
+}

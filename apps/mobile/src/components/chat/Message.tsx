@@ -1,3 +1,4 @@
+import { extractPullRefs } from '@orbit/api/github'
 import { File, Paths } from 'expo-file-system'
 import { useState } from 'react'
 import { Image, Modal, Platform, Pressable, Share, useWindowDimensions, View } from 'react-native'
@@ -8,9 +9,10 @@ import type { ChatFileRecord } from '../../data/chat-api'
 import { relativeAgo, timeOfDay } from '../../data/format'
 import type { MessageRecord } from '../../data/orbit'
 import { showError, useServerImage } from '../../hooks/chat'
-import { useOrbit } from '../../orbit-context'
+import { useIsGuest, useOrbit } from '../../orbit-context'
 import { cssColors, useTheme } from '../../theme'
 import { Avatar, Icon, IconButton, Spinner, Text } from '../../ui'
+import { GithubPullCard } from '../pulls/GithubPullCard'
 import { Emoji } from './EmojiPicker'
 
 /** What a message row needs from the screen: names, the shown text of a body, and what a tap does. */
@@ -35,6 +37,8 @@ export interface MessageHandlers {
  */
 export function MessageItem({ message, groupStart, highlighted = false, handlers }: { message: MessageRecord; groupStart: boolean; highlighted?: boolean; handlers: MessageHandlers }) {
   const { colors, scheme } = useTheme()
+  // a guest has no pull request viewer: no GitHub cards
+  const guest = useIsGuest()
   const { user } = useOrbit()
   const author = handlers.nameOf(message.author_id)
   // the web's `data-mentioned` row: it mentions you, `@channel` or `@here`
@@ -95,6 +99,7 @@ export function MessageItem({ message, groupStart, highlighted = false, handlers
               {message.edited_at && !message.deleted ? <Text className="text-[11px] text-muted-foreground"> (edited)</Text> : null}
             </Text>
           ) : null}
+          {message.deleted || guest ? null : extractPullRefs(message.body).map((ref) => <GithubPullCard key={`${ref.owner}/${ref.repo}#${ref.number}`} pullRef={ref} />)}
           {message.sticker ? <Sticker url={message.sticker.url} name={message.sticker.name} /> : message.sticker_id && !message.deleted ? <Text className="text-[12px] text-muted-foreground">Sticker was deleted</Text> : null}
           {!message.deleted && message.attachments.length > 0 ? <Attachments files={message.attachments} hasText={body !== ''} /> : null}
           {!message.deleted && message.reactions.length > 0 ? (

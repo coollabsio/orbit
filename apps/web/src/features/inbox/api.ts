@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { pullPath, type PullRef } from '@orbit/api/github'
 import { apiClient } from '@/api/client'
 import { queryKeys } from '@/api/queryKeys'
 import {
@@ -127,8 +128,19 @@ const IMPORTS: Record<string, { name: string; page: string }> = {
   obsidian: { name: 'Obsidian', page: '/docs/import/obsidian' },
 }
 
+/** The pull request a GitHub notice is about; it opens over the Inbox. */
+export function notificationPull(notification: NotificationRecord): PullRef | null {
+  if (!notification.kind.startsWith('github_')) return null
+  const [owner, repo] = (notification.github_repository ?? '').split('/')
+  return owner && repo && notification.github_pull_number ? { owner, repo, number: notification.github_pull_number } : null
+}
+
 /** Where a notification leads: the task, the page with the comment thread open, the page at the mention, the chat message, or the import. */
 export function notificationTarget(notification: NotificationRecord): string | null {
+  if (notification.kind.startsWith('github_')) {
+    const [owner, repo] = (notification.github_repository ?? '').split('/')
+    return owner && repo && notification.github_pull_number ? pullPath({ owner, repo, number: notification.github_pull_number }) : null
+  }
   if (notification.kind === 'import_finished') {
     const source = IMPORTS[notification.import_source ?? '']
     return source && notification.import_id ? `${source.page}/${notification.import_id}` : null
@@ -149,6 +161,13 @@ export function notificationTarget(notification: NotificationRecord): string | n
   return notification.task_id ? taskPath({ id: notification.task_id }) : null
 }
 
+/** The second line of a notice: the Orbit actor and the body. Imports are the user's own, and a GitHub notice names
+ *  the GitHub account in its title (it may have no Orbit account), so those show the body alone. */
+export function notificationLine(notification: NotificationRecord, body: string, actorName: string | undefined): string {
+  if (!actorName || notification.import_id || notification.kind.startsWith('github_')) return body
+  return `${actorName} · ${body}`
+}
+
 /** Mentions in task comments and descriptions, page comments, page bodies and chat. */
 export function isMention(notification: NotificationRecord): boolean {
   return ['comment_mentioned', 'description_mentioned', 'page_comment_mentioned', 'page_mentioned', 'chat_mentioned'].includes(
@@ -157,6 +176,16 @@ export function isMention(notification: NotificationRecord): boolean {
 }
 
 export function notificationCopy(notification: NotificationRecord, pageTitle?: string, actorName?: string): { title: string; body: string } {
+  if (notification.kind.startsWith('github_')) {
+    // the GitHub login: who acted may have no Orbit account
+    const who = notification.github_actor_login ?? 'Someone'
+    const body = `${notification.github_repository ?? ''}#${notification.github_pull_number ?? ''}`
+    if (notification.kind === 'github_review_requested') return { title: `${who} asked for your review`, body }
+    if (notification.kind === 'github_merged') return { title: `${who} merged your pull request`, body }
+    if (notification.github_review_state === 'approved') return { title: `${who} approved your pull request`, body }
+    if (notification.github_review_state === 'changes_requested') return { title: `${who} requested changes`, body }
+    return { title: `${who} commented on your pull request`, body }
+  }
   if (notification.kind === 'import_finished') {
     const name = IMPORTS[notification.import_source ?? '']?.name ?? 'An'
     return notification.import_status === 'failed'

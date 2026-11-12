@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import type { NotificationRecord } from '@orbit/api/generated/types.gen'
-import { isMention, notificationCopy, notificationTarget } from './api'
+import { isMention, notificationCopy, notificationLine, notificationTarget } from './api'
 
 const base: NotificationRecord = {
   id: 'n1',
@@ -35,4 +35,23 @@ test('an import notice opens its import and names how it ended', () => {
   expect(notificationCopy(failed).title).toBe('Notion import failed')
   expect(notificationTarget({ ...done, import_source: 'asana' })).toBe('/tasks-import/imp-1')
   expect(isMention(done)).toBe(false)
+})
+
+test('GitHub notices open the pull request and say who did what', () => {
+  const github = { kind: 'github_review', github_repository: 'acme/repo', github_pull_number: 12, github_actor_login: 'octo', github_review_state: 'approved' } as NotificationRecord
+  expect(notificationTarget(github)).toBe('/tasks/pulls/acme/repo/12')
+  expect(notificationCopy(github)).toEqual({ title: 'octo approved your pull request', body: 'acme/repo#12' })
+  expect(notificationCopy({ ...github, github_review_state: 'changes_requested' }).title).toBe('octo requested changes')
+  expect(notificationCopy({ ...github, github_review_state: 'commented' }).title).toBe('octo commented on your pull request')
+  expect(notificationCopy({ ...github, kind: 'github_review_requested', github_review_state: null }).title).toBe('octo asked for your review')
+  expect(notificationCopy({ ...github, kind: 'github_merged', github_review_state: null }).title).toBe('octo merged your pull request')
+  expect(isMention(github)).toBe(false)
+})
+
+test('the second line names the Orbit actor, except for imports and GitHub notices (their title names the GitHub account)', () => {
+  const task = { ...base, kind: 'task_assigned' } as NotificationRecord
+  expect(notificationLine(task, 'Body', 'Ada')).toBe('Ada · Body')
+  expect(notificationLine({ ...task, kind: 'github_review' }, 'acme/repo#12', 'Bob')).toBe('acme/repo#12')
+  expect(notificationLine({ ...task, kind: 'import_finished', import_id: 'i1' }, 'Done', 'Ada')).toBe('Done')
+  expect(notificationLine(task, 'Body', undefined)).toBe('Body')
 })

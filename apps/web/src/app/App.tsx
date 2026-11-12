@@ -9,6 +9,8 @@ import { AppShell } from '@/app/shell/AppShell'
 import { chatEnabled } from '@/app/shell/productNavigation'
 import { ChatPage } from '@/features/chat/pages/ChatPage'
 import { ProjectSettingsPage } from '@/features/tasks/pages/ProjectSettingsPage'
+import { PullListPage } from '@/features/pulls/pages/PullListPage'
+import { PullRedirect } from '@/features/pulls/PullOverlay'
 import { TasksPage } from '@/features/tasks/pages/TasksPage'
 import { HomePage } from '@/features/home/pages/HomePage'
 import { TaskTrashPage } from '@/features/tasks/pages/TaskTrashPage'
@@ -38,6 +40,7 @@ import { OrbitImportPage } from '@/features/settings/pages/OrbitImportPage'
 import { BillingPage } from '@/features/settings/pages/BillingPage'
 import { MembersPage } from '@/features/settings/pages/MembersPage'
 import { SecurityPage } from '@/features/settings/pages/SecurityPage'
+import { GithubAccountPage } from '@/features/settings/pages/GithubAccountPage'
 import { SessionsPage } from '@/features/settings/pages/SessionsPage'
 import { AgenticPage } from '@/features/settings/pages/AgenticPage'
 import { ShortcutsPage } from '@/features/settings/pages/ShortcutsPage'
@@ -114,6 +117,8 @@ export default function App() {
                 <Route index element={<HomePage />} />
                 <Route path="tasks" element={<TasksPage />} />
                 <Route path="tasks/projects/:projectId/settings" element={<ProjectSettingsPage />} />
+                <Route path="tasks/projects/:projectId/pulls" element={<PullListPage />} />
+                <Route path="tasks/pulls/:owner/:repo/:number" element={<PullRedirect />} />
                 <Route path="tasks/:taskId" element={<TasksPage />} />
                 <Route path="tasks-trash" element={<TaskTrashPage />} />
                 <Route path="tasks-trash/task/:taskId" element={<TrashedTaskPage />} />
@@ -152,6 +157,7 @@ export default function App() {
                   <Route path="appearance" element={<AppearancePage />} />
                   <Route path="notifications" element={<NotificationsPage />} />
                   <Route path="security" element={<SecurityPage />} />
+                  <Route path="github" element={<GithubAccountPage />} />
                   <Route path="sessions" element={<SessionsPage />} />
                   <Route path="agentic" element={<AgenticPage />} />
                   <Route path="shortcuts" element={<ShortcutsPage />} />

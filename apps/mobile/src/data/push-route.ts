@@ -3,6 +3,8 @@
  * screen that shows the same thing. No React.
  */
 
+import { pullRoute } from './pull-route'
+
 /** The `/profile/*` pages the app has, under Settings. */
 const ACCOUNT_PAGES = new Set(['notifications', 'security', 'sessions', 'appearance', 'agentic'])
 
@@ -27,8 +29,18 @@ export function pushRoute(url: string): string | null {
       const thread = second === 'thread' && third ? third : threadParam && decodeURIComponent(threadParam)
       return thread ? `/chat/thread/${thread}` : `/chat/${first}`
     }
-    case 'tasks':
-      return first && first !== 'projects' ? `/tasks/${first}` : '/tasks'
+    case 'tasks': {
+      // `/tasks/pulls/<owner>/<repo>/<number>[?comment=<id>]`: a pull request (from a review notification), which the
+      // app opens over the current tab
+      if (first === 'pulls') {
+        const fourth = parts[4]
+        if (!second || !third || !fourth || !/^\d+$/.test(fourth)) return '/tasks'
+        const comment = /(?:^|&)comment=(\d+)/.exec(match?.[2] ?? '')?.[1]
+        return pullRoute({ owner: second, repo: third, number: Number(fourth) }, comment ? Number(comment) : undefined)
+      }
+      if (first === 'projects') return second && third === 'pulls' ? `/tasks/project/${encodeURIComponent(second)}/pulls` : '/tasks'
+      return first ? `/tasks/${first}` : '/tasks'
+    }
     case 'views':
       return second ? `/tasks/${second}` : '/tasks'
     case 'docs':
@@ -38,6 +50,8 @@ export function pushRoute(url: string): string | null {
       return '/activity'
     case 'profile':
     case 'settings':
+      // the account GitHub page; `/settings/github` is the workspace's GitHub App
+      if (section === 'profile' && first === 'github') return '/settings/github-account'
       if (first && ACCOUNT_PAGES.has(first)) return `/settings/${first}`
       return section === 'profile' && (!first || first === 'general') ? '/settings/profile' : '/settings'
     default:

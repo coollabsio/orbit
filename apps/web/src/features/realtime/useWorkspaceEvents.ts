@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { queryKeys } from '@/api/queryKeys'
+import { pullKeys } from '@/features/pulls/api'
 import { reportConnection, watchReconnect } from '@/lib/connection'
 import { parseEvent } from './events'
 
@@ -37,6 +38,9 @@ export function useWorkspaceEvents(workspaceId: string) {
     let pendingProfile = false
     /** Every pending event only changed saved views (meaningful while `pending` is set). */
     let pendingViewsOnly = true
+    /** Every pending event only changed GitHub pull requests, and which ones (`owner/repo#12`). */
+    let pendingGithubOnly = true
+    let pendingPulls = new Set<string>()
     let refreshing = false
     let nextRefresh = 0
     let refreshDelay = 1000
@@ -51,11 +55,32 @@ export function useWorkspaceEvents(workspaceId: string) {
       const refreshWorkspaces = pendingWorkspaces
       const refreshProfile = pendingProfile
       const viewsOnly = pendingViewsOnly
+      const githubOnly = pendingGithubOnly
+      const pulls = pendingPulls
       pending = undefined
       pendingWorkspaces = false
       pendingProfile = false
       pendingViewsOnly = true
+      pendingGithubOnly = true
+      pendingPulls = new Set()
+      // An open pull request refetches its header and threads; its files wait for the reader's Refresh. Best effort:
+      // GitHub may refuse (no connection, an outage), and that must never hold back the workspace refresh.
+      const refetchPulls = () => {
+        for (const pull of pulls) {
+          const match = /^([^/#]+)\/([^/#]+)#(\d+)$/.exec(pull)
+          if (!match) continue
+          const ref = { owner: match[1], repo: match[2], number: Number(match[3]) }
+          void client.invalidateQueries({ queryKey: pullKeys.pull(workspaceId, ref), exact: true }).catch(() => {})
+          void client.invalidateQueries({ queryKey: pullKeys.threads(workspaceId, ref), exact: true }).catch(() => {})
+        }
+      }
       try {
+        if (githubOnly) {
+          refetchPulls()
+          cursor = next
+          refreshDelay = 1000
+          return
+        }
         await client.invalidateQueries(viewsOnly
           // the views list key prefixes every view detail key; tasks and preferences stay untouched
           ? { queryKey: queryKeys.views(workspaceId) }
@@ -70,10 +95,14 @@ export function useWorkspaceEvents(workspaceId: string) {
         if (refreshProfile) {
           await client.invalidateQueries({ queryKey: queryKeys.currentUser }, { throwOnError: true })
         }
+        refetchPulls()
         cursor = next
         refreshDelay = 1000
       } catch {
         pendingViewsOnly = pending === undefined ? viewsOnly : pendingViewsOnly && viewsOnly
+        pendingGithubOnly = pending === undefined ? githubOnly : pendingGithubOnly && githubOnly
+        // the workspace refresh failed before the pull requests ran: keep them for the retry
+        for (const pull of pulls) pendingPulls.add(pull)
         pending ??= next
         pendingWorkspaces ||= refreshWorkspaces
         pendingProfile ||= refreshProfile
@@ -94,6 +123,8 @@ export function useWorkspaceEvents(workspaceId: string) {
         const event = parseEvent(message.data)
         if (!event) { socket?.close(); return }
         pendingViewsOnly = (pending === undefined || pendingViewsOnly) && event.kind !== 'resync_required' && event.views_only === true
+        pendingGithubOnly = (pending === undefined || pendingGithubOnly) && event.kind !== 'resync_required' && event.github_only === true
+        for (const pull of event.github_pulls ?? []) pendingPulls.add(pull)
         pending = event.sequence
         pendingWorkspaces ||= event.kind === 'resync_required' || event.workspaces_changed === true
         pendingProfile ||= event.kind === 'resync_required' || event.profile_changed === true

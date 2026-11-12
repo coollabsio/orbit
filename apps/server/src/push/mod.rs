@@ -77,16 +77,19 @@ pub enum PushKind {
     ChannelMessages,
     TaskAssigned,
     Mentions,
+    /// Pull request notices: review requested, a review on your pull request, your pull request merged.
+    Github,
 }
 
 impl PushKind {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::DirectMessages,
         Self::ChatMentions,
         Self::ThreadReplies,
         Self::ChannelMessages,
         Self::TaskAssigned,
         Self::Mentions,
+        Self::Github,
     ];
 
     #[must_use]
@@ -98,6 +101,7 @@ impl PushKind {
             Self::ChannelMessages => "channel_messages",
             Self::TaskAssigned => "task_assigned",
             Self::Mentions => "mentions",
+            Self::Github => "github",
         }
     }
 
@@ -190,6 +194,13 @@ pub struct NotificationPrefs {
     pub task_assigned: bool,
     /// Mentions in task comments, pages and page comments.
     pub mentions: bool,
+    /// GitHub pull request notices. Missing in a request from an older app: on.
+    #[serde(default = "github_default")]
+    pub github: bool,
+}
+
+const fn github_default() -> bool {
+    true
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -574,7 +585,7 @@ impl PushService {
     pub async fn prefs(&self, user_id: Id) -> Result<NotificationPrefs, sqlx::Error> {
         let row = sqlx::query(
             "SELECT direct_messages, chat_mentions, thread_replies, channel_messages, task_assigned, \
-             mentions FROM notification_prefs WHERE user_id = $1",
+             mentions, github FROM notification_prefs WHERE user_id = $1",
         )
         .bind(user_id.to_string())
         .fetch_optional(self.database.pool())
@@ -590,6 +601,7 @@ impl PushService {
             channel_messages: on("channel_messages"),
             task_assigned: on("task_assigned"),
             mentions: on("mentions"),
+            github: on("github"),
         })
     }
 
@@ -601,11 +613,11 @@ impl PushService {
     ) -> Result<(), sqlx::Error> {
         sqlx::query(
             "INSERT INTO notification_prefs (user_id, direct_messages, chat_mentions, thread_replies, \
-             channel_messages, task_assigned, mentions, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) \
+             channel_messages, task_assigned, mentions, updated_at, github) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) \
              ON CONFLICT (user_id) DO UPDATE SET direct_messages = excluded.direct_messages, \
              chat_mentions = excluded.chat_mentions, thread_replies = excluded.thread_replies, \
              channel_messages = excluded.channel_messages, task_assigned = excluded.task_assigned, \
-             mentions = excluded.mentions, updated_at = excluded.updated_at",
+             mentions = excluded.mentions, updated_at = excluded.updated_at, github = excluded.github",
         )
         .bind(user_id.to_string())
         .bind(i64::from(prefs.direct_messages))
@@ -615,6 +627,7 @@ impl PushService {
         .bind(i64::from(prefs.task_assigned))
         .bind(i64::from(prefs.mentions))
         .bind(now.as_millis())
+        .bind(i64::from(prefs.github))
         .execute(self.database.pool())
         .await?;
         Ok(())
@@ -1048,6 +1061,8 @@ impl PushService {
             "SELECT notifications.id, notifications.recipient_user_id, notifications.kind, \
              notifications.actor_user_id, user_avatars.updated_at AS avatar_updated_at, \
              users.display_name AS actor, tasks.title AS task_title, pages.title AS page_title, \
+             notifications.github_repository, notifications.github_pull_number, notifications.github_actor_login, \
+             notifications.github_review_state, \
              CASE WHEN notifications.task_id IS NULL OR {} THEN 1 ELSE 0 END AS visible \
              FROM notifications JOIN users ON users.id = notifications.actor_user_id \
              LEFT JOIN user_avatars ON user_avatars.user_id = users.id \
@@ -1105,7 +1120,24 @@ impl PushService {
                     format!("{actor} mentioned you in a page"),
                     subject("page_title"),
                 ),
+                "github_review_requested" | "github_review" | "github_merged" => {
+                    let who: String = row.get::<Option<String>, _>("github_actor_login").unwrap_or_default();
+                    let title = match (row.get::<String, _>("kind").as_str(), row.get::<Option<String>, _>("github_review_state").as_deref()) {
+                        ("github_review_requested", _) => format!("{who} asked for your review"),
+                        ("github_merged", _) => format!("{who} merged your pull request"),
+                        (_, Some("approved")) => format!("{who} approved your pull request"),
+                        (_, Some("changes_requested")) => format!("{who} requested changes"),
+                        _ => format!("{who} commented on your pull request"),
+                    };
+                    let repository: String = row.get::<Option<String>, _>("github_repository").unwrap_or_default();
+                    let number: i64 = row.get::<Option<i64>, _>("github_pull_number").unwrap_or_default();
+                    (PushKind::Github, title, format!("{repository}#{number}"))
+                }
                 _ => continue,
+            };
+            let url = match (row.get::<Option<String>, _>("github_repository"), row.get::<Option<i64>, _>("github_pull_number")) {
+                (Some(repository), Some(number)) => format!("/tasks/pulls/{repository}/{number}"),
+                _ => "/activity".to_owned(),
             };
             let Ok(user_id) = row.get::<String, _>("recipient_user_id").parse::<Id>() else {
                 continue;
@@ -1113,13 +1145,13 @@ impl PushService {
             let notice = Notice {
                 title,
                 body,
-                url: "/activity".to_owned(),
+                url,
                 tag: format!("inbox:{id}"),
                 sound: kind.sound(),
-                icon: row
-                    .get::<String, _>("actor_user_id")
-                    .parse()
-                    .ok()
+                // A GitHub notice whose actor has no Orbit account stores the recipient as the actor: no picture then.
+                icon: Some(row.get::<String, _>("actor_user_id"))
+                    .filter(|actor| *actor != row.get::<String, _>("recipient_user_id"))
+                    .and_then(|actor| actor.parse().ok())
                     .and_then(|actor_id| avatar_url(actor_id, row.get("avatar_updated_at"))),
             };
             self.notify(user_id, kind, &notice).await?;

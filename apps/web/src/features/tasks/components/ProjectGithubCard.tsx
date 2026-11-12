@@ -79,6 +79,7 @@ function GithubCardContent({ settings, workspaceId, save, remove, onPendingChang
         <p className="text-sm text-muted-foreground">Set up the GitHub App in <Link className="text-primary underline" to={`/settings/github?workspace=${workspaceId}`}>workspace settings</Link> first.</p>
       ) : (
         <>
+          {settings.needs_recreate ? <p role="alert" className="text-sm text-muted-foreground">This workspace's GitHub App is from an older Orbit version. Re-create it in <Link className="text-primary underline" to={`/settings/github?workspace=${workspaceId}`}>workspace settings</Link> to review pull requests in Orbit.</p> : null}
           {settings.repositories.length === 0 ? <p className="text-sm text-muted-foreground">Install the App on a repository in <Link className="text-primary underline" to={`/settings/github?workspace=${workspaceId}`}>workspace settings</Link>, then refresh this page.</p> : null}
           {settings.can_manage ? <>
             <div className="grid gap-1.5">

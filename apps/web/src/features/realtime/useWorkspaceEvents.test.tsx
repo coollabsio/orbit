@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { queryKeys } from '@/api/queryKeys'
+import { pullKeys } from '@/features/pulls/api'
 import { connection } from '@/lib/connection'
 import { focusedDraftBlocksRefresh, REALTIME_SAFE_ATTRIBUTE, useWorkspaceEvents } from './useWorkspaceEvents'
 
@@ -340,6 +341,79 @@ test('back online, an open socket is replaced at once, without waiting for its c
     act(() => { window.dispatchEvent(new Event('online')) })
     expect(sockets.length).toBe(3)
     expect(invalidate).toHaveBeenCalledTimes(4)
+    view.unmount()
+  } finally {
+    globalThis.WebSocket = originalWebSocket
+    client.clear()
+  }
+})
+
+test('a batch of only GitHub pull request changes refetches those pull requests, not the workspace', async () => {
+  const originalWebSocket = globalThis.WebSocket
+  let socket: { onmessage: ((event: MessageEvent) => void) | null } | undefined
+  class FakeWebSocket {
+    onmessage: ((event: MessageEvent) => void) | null = null
+    constructor() { socket = this }
+    close() {}
+  }
+  globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket
+  const client = new QueryClient()
+  const ref = { owner: 'acme', repo: 'repo', number: 12 }
+  const keys = [
+    pullKeys.pull('workspace-1', ref),
+    pullKeys.threads('workspace-1', ref),
+    pullKeys.files('workspace-1', ref, 'h1'),
+    pullKeys.pull('workspace-1', { ...ref, number: 13 }),
+    queryKeys.members('workspace-1'),
+  ]
+  const reset = () => { for (const key of keys) client.setQueryData(key, {}) }
+  const invalidated = () => keys.map((key) => client.getQueryState(key)?.isInvalidated)
+  const send = (data: string) => act(() => socket?.onmessage?.(new MessageEvent('message', { data })))
+  reset()
+  try {
+    const view = renderHook(() => useWorkspaceEvents('workspace-1'), {
+      wrapper: ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
+    })
+    // the detail and threads refetch; the files wait for Refresh (the diff never jumps under the reader)
+    send('{"version":1,"kind":"workspace.changed","sequence":"1","github_pulls":["acme/repo#12"],"github_only":true}')
+    await waitFor(() => expect(invalidated()).toEqual([true, true, false, false, false]))
+    // mixed with other changes, the workspace refreshes too, and the pull requests still do
+    reset()
+    send('{"version":1,"kind":"workspace.changed","sequence":"2","github_pulls":["acme/repo#13"],"github_only":false}')
+    await waitFor(() => expect(invalidated()).toEqual([false, false, false, true, true]))
+    view.unmount()
+  } finally {
+    globalThis.WebSocket = originalWebSocket
+    client.clear()
+  }
+})
+
+test('a pull request refetch that fails does not hold back the workspace refresh', async () => {
+  const originalWebSocket = globalThis.WebSocket
+  let socket: { onmessage: ((event: MessageEvent) => void) | null } | undefined
+  class FakeWebSocket {
+    onmessage: ((event: MessageEvent) => void) | null = null
+    constructor() { socket = this }
+    close() {}
+  }
+  globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket
+  const client = new QueryClient()
+  const calls: string[] = []
+  client.invalidateQueries = (async (filters: { queryKey: readonly unknown[] }) => {
+    calls.push(String(filters.queryKey[0]))
+    if (filters.queryKey[0] === 'github-pulls') throw new Error('GitHub is down')
+  }) as typeof client.invalidateQueries
+  const send = (data: string) => act(() => socket?.onmessage?.(new MessageEvent('message', { data })))
+  try {
+    const view = renderHook(() => useWorkspaceEvents('workspace-1'), {
+      wrapper: ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
+    })
+    send('{"version":1,"kind":"workspace.changed","sequence":"1","github_pulls":["acme/repo#12"],"github_only":false}')
+    await waitFor(() => expect(calls).toContain('workspace'))
+    // the next task change refreshes the workspace again: nothing is stuck behind the failed pull request
+    calls.length = 0
+    send('{"version":1,"kind":"workspace.changed","sequence":"2"}')
+    await waitFor(() => expect(calls).toEqual(['workspace']))
     view.unmount()
   } finally {
     globalThis.WebSocket = originalWebSocket

@@ -16,6 +16,7 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         orbit_platform::Problem,
         orbit_platform::ConflictMetadata,
         crate::task_routes::ProblemBody,
+        crate::github::pulls::PullFilter,
         crate::workspace_routes::ProblemBody,
         crate::attachment_routes::AttachmentProblem,
         crate::repositories::task_filter::FilterGroup,
@@ -190,6 +191,30 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::integration_routes::save_github_project_connection,
         crate::integration_routes::delete_github_project_connection,
         crate::integration_routes::start_github_manifest,
+        crate::github_user_routes::github_connection,
+        crate::github_user_routes::start_github_connection,
+        crate::github_user_routes::delete_github_connection,
+        crate::github_user_routes::github_connection_callback,
+        crate::github_user_routes::finish_github_connection,
+        crate::github_pull_routes::list_github_project_pulls,
+        crate::github_pull_routes::get_github_pull,
+        crate::github_pull_routes::list_github_pull_files,
+        crate::github_pull_routes::get_github_pull_contents,
+        crate::github_pull_routes::list_github_pull_threads,
+        crate::github_pull_routes::list_github_pull_conversation,
+        crate::github_pull_routes::get_github_pull_merge_base,
+        crate::github_pull_routes::create_github_review_comment,
+        crate::github_pull_routes::update_github_review_comment,
+        crate::github_pull_routes::delete_github_review_comment,
+        crate::github_pull_routes::reply_github_review_thread,
+        crate::github_pull_routes::resolve_github_review_thread,
+        crate::github_pull_routes::unresolve_github_review_thread,
+        crate::github_pull_routes::submit_github_review,
+        crate::github_pull_routes::discard_github_review,
+        crate::github_pull_routes::merge_github_pull,
+        crate::github_pull_routes::delete_github_pull_branch,
+        crate::github_pull_routes::mark_github_file_viewed,
+        crate::github_pull_routes::unmark_github_file_viewed,
         crate::task_routes::list_projects,
         crate::task_routes::create_project,
         crate::task_routes::update_project,
@@ -659,6 +684,7 @@ fn public_operation(operation_id: &str) -> bool {
             | "post_action_response"
             | "read_hook_messages"
             | "github_manifest_callback"
+            | "github_connection_callback"
             | "get_mail_content"
             | "get_mail_part"
             | "get_mail_image"
@@ -1074,6 +1100,75 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             add_code(&mut responses, "422", "github_repository_not_installed");
             add_code(&mut responses, "422", "invalid_github_connection");
             add_code(&mut responses, "409", "github_label_conflict");
+        }
+        "github_connection" | "delete_github_connection" => {
+            add_code(&mut responses, "404", "github_workspace_not_found");
+        }
+        "list_github_project_pulls"
+        | "get_github_pull"
+        | "list_github_pull_files"
+        | "get_github_pull_contents"
+        | "list_github_pull_threads"
+        | "list_github_pull_conversation"
+        | "get_github_pull_merge_base"
+        | "create_github_review_comment"
+        | "update_github_review_comment"
+        | "delete_github_review_comment"
+        | "reply_github_review_thread"
+        | "resolve_github_review_thread"
+        | "unresolve_github_review_thread"
+        | "submit_github_review"
+        | "discard_github_review"
+        | "merge_github_pull"
+        | "delete_github_pull_branch"
+        | "mark_github_file_viewed"
+        | "unmark_github_file_viewed" => {
+            add_code(&mut responses, "403", "github_forbidden");
+            add_code(&mut responses, "404", "github_workspace_not_found");
+            add_code(&mut responses, "404", "github_project_not_found");
+            add_code(&mut responses, "404", "pull_not_found");
+            add_code(&mut responses, "409", "github_not_connected");
+            add_code(&mut responses, "409", "github_reconnect");
+            add_code(&mut responses, "409", "github_app_missing");
+            add_code(&mut responses, "409", "github_app_recreate");
+            add_code(&mut responses, "422", "github_refused");
+            add_code(&mut responses, "429", "github_rate_limited");
+            add_code(&mut responses, "502", "github_unavailable");
+            match operation_id {
+                "create_github_review_comment" | "reply_github_review_thread" | "update_github_review_comment" => {
+                    add_code(&mut responses, "422", "invalid_review_comment");
+                    if operation_id == "create_github_review_comment" {
+                        add_code(&mut responses, "409", "pull_head_changed");
+                    }
+                }
+                "submit_github_review" => {
+                    add_code(&mut responses, "422", "invalid_review");
+                    add_code(&mut responses, "422", "cannot_review_own_pull");
+                    add_code(&mut responses, "422", "review_empty");
+                }
+                "discard_github_review" => add_code(&mut responses, "404", "no_pending_review"),
+                "merge_github_pull" => {
+                    add_code(&mut responses, "409", "pull_head_changed");
+                    add_code(&mut responses, "422", "invalid_merge");
+                    add_code(&mut responses, "422", "merge_blocked");
+                }
+                "delete_github_pull_branch" => add_code(&mut responses, "422", "branch_not_deletable"),
+                _ => {}
+            }
+        }
+        "finish_github_connection" => {
+            add_code(&mut responses, "403", "github_connect_mismatch");
+            add_code(&mut responses, "404", "github_workspace_not_found");
+            add_code(&mut responses, "409", "github_account_taken");
+            add_code(&mut responses, "422", "github_connect_failed");
+            add_code(&mut responses, "503", "app_key_missing");
+        }
+        "start_github_connection" => {
+            add_code(&mut responses, "404", "github_workspace_not_found");
+            add_code(&mut responses, "409", "github_app_missing");
+            add_code(&mut responses, "409", "github_app_recreate");
+            add_code(&mut responses, "422", "invalid_redirect");
+            add_code(&mut responses, "503", "app_key_missing");
         }
         "start_github_manifest" => {
             add_code(&mut responses, "403", "github_manager_required");

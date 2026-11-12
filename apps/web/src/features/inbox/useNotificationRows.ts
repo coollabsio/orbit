@@ -4,13 +4,15 @@ import type { NotificationRecord } from '@orbit/api/generated/types.gen'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { useMembers } from '@/features/workspaces/api'
 import { usePageTree } from '@/features/docs/api/pages'
-import { notificationTarget, useMarkNotificationRead } from '@/features/inbox/api'
+import { notificationPull, notificationTarget, useMarkNotificationRead } from '@/features/inbox/api'
+import { useOpenPull } from '@/features/pulls/components/PullLink'
 
 /** What a row needs to show and open notifications: the actors, the page titles and the read mutation, loaded once for the list. */
 export function useNotificationRows(notifications: NotificationRecord[]) {
   const { workspace } = useWorkspace()
   const navigate = useNavigate()
   const location = useLocation()
+  const openPull = useOpenPull()
   const members = useMembers(workspace.id)
   const pageTree = usePageTree(workspace.id, notifications.some((notification) => notification.page_id))
   const markRead = useMarkNotificationRead(workspace.id)
@@ -23,9 +25,16 @@ export function useNotificationRows(notifications: NotificationRecord[]) {
     markRead: (notification: NotificationRecord) => {
       if (!notification.read_at) markRead.mutate(notification.id)
     },
-    /** Marks the notification read and opens what it is about. A task gets a way back to where the user was. */
+    /** Marks the notification read and opens what it is about. A task gets a way back to where the user was; a pull
+     *  request opens over the current page. */
     open: (notification: NotificationRecord) => {
       if (!notification.read_at) markRead.mutate(notification.id)
+      // a pull request opens over the page the reader is on
+      const pull = notificationPull(notification)
+      if (pull) {
+        openPull(pull)
+        return
+      }
       const target = notificationTarget(notification)
       if (!target) return
       if (notification.page_id || notification.chat_conversation_id || notification.import_id) {

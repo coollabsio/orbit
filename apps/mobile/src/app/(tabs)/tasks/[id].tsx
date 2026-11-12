@@ -26,6 +26,7 @@ import {
 } from '../../../components/tasks/pickers'
 import { DuplicateBanner, RelationsSection, SubIssuesSection } from '../../../components/tasks/sections'
 import { Sheet, useSheet } from '../../../components/tasks/Sheet'
+import { TaskPulls } from '../../../components/tasks/TaskPulls'
 import { activityRows, buildFeed, type ActivityRow, type CommentThread, foldRun } from '../../../data/activity'
 import { relativeAgo } from '../../../data/format'
 import { keys } from '../../../data/keys'
@@ -472,6 +473,8 @@ export default function TaskScreen() {
               </View>
             </PropertyGroup>
           </View>
+
+          <TaskPulls taskId={current.id} />
 
           <View>
             <Text className="font-noto-semibold text-[14px] leading-[20px] mb-2">Activity</Text>

@@ -10,7 +10,14 @@ const SEQUENCE_TIMEOUT_MS = 1000
 const OPEN_POPUP = '[role="menu"]:not([data-closed]), [role="dialog"]:not([data-closed]), [role="alertdialog"]:not([data-closed])'
 /** An open menu or dialog owns the keyboard. A list does so only while the focus is in it: a list can be a
  *  lasting part of a page (the page history), and then it must not switch every shortcut off. */
-const popupOpen = () => document.querySelector(OPEN_POPUP) !== null || document.activeElement?.closest('[role="listbox"]') != null
+const listFocused = () => document.activeElement?.closest('[role="listbox"]') != null
+const popupOpen = () => document.querySelector(OPEN_POPUP) !== null || listFocused()
+/** The pull request overlay is a dialog that works like a page: its own keys (and the shortcut help) run while
+ *  nothing is open over it; the keys of the page under it do not. */
+const onlyPullOverlay = () => {
+  const open = [...document.querySelectorAll(OPEN_POPUP)]
+  return open.length > 0 && open.every((node) => node.matches('[data-pull-overlay]')) && !listFocused()
+}
 const MODIFIER_KEYS = ['Shift', 'Control', 'Alt', 'Meta', 'AltGraph']
 
 const hasModifier = (step: string) => /(^|\+)(Mod|Ctrl|Alt)\+/.test(step)
@@ -68,7 +75,8 @@ function Engine({ store, bindings, onPending }: { store: CommandStore; bindings:
       event.defaultPrevented
       // a text field keeps its keys, except for the few commands made to work while typing
       || (isEditable(event.target) && !command.inInputs)
-      || (command.context !== 'new-task' && command.id !== 'palette.open' && popupOpen())
+      || (command.context !== 'new-task' && command.id !== 'palette.open' && popupOpen()
+        && !((command.context === 'pull' || command.id === 'help.open') && onlyPullOverlay()))
 
     const run = (event: KeyboardEvent, commands: Command[]) => {
       // a page command that shadows a global one with the same keys goes first
