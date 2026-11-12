@@ -160,6 +160,24 @@ impl Responder {
                 "Database property limit",
                 "A database holds at most 100 properties.",
             ),
+            DatabaseError::ViewLimit => (
+                StatusCode::CONFLICT,
+                "database_view_limit",
+                "Database view limit",
+                "A database holds at most 50 views.",
+            ),
+            DatabaseError::LinkViewLimit => (
+                StatusCode::CONFLICT,
+                "database_link_view_limit",
+                "Linked view limit",
+                "A linked view block holds at most 20 views.",
+            ),
+            DatabaseError::LastView => (
+                StatusCode::CONFLICT,
+                "database_last_view",
+                "Last database view",
+                "A database or a linked view block keeps at least one view.",
+            ),
             DatabaseError::TitleProperty => (
                 StatusCode::CONFLICT,
                 "database_title_property",

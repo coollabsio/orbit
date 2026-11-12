@@ -134,6 +134,25 @@ pub fn router(state: PublicApiState) -> Router {
         .route(
             "/docs/{page_id}/rows/{row_id}",
             patch(databases::update_row),
+        )
+        .route("/databases", post(database_views::create_database))
+        .route(
+            "/docs/{page_id}/database/views",
+            get(database_views::views).post(database_views::create_view),
+        )
+        .route(
+            "/docs/{page_id}/database/views/{view_id}",
+            get(database_views::view)
+                .patch(database_views::update_view)
+                .delete(database_views::delete_view),
+        )
+        .route(
+            "/docs/{page_id}/database/links",
+            post(database_views::create_link),
+        )
+        .route(
+            "/docs/{page_id}/database/links/{link_id}",
+            delete(database_views::delete_link),
         );
     // Exports belong to the token's only workspace, which the token already names.
     let routes = Router::new()
@@ -510,6 +529,12 @@ impl Responder {
                 "page_locked",
                 "Doc locked",
                 "The doc is locked. Unlock it in Orbit to change its title, icon or content.",
+            ),
+            PageError::DatabaseInDatabase => (
+                StatusCode::CONFLICT,
+                "database_in_database",
+                "Database in database",
+                "A database cannot be a row of another database.",
             ),
             PageError::Busy => (
                 StatusCode::SERVICE_UNAVAILABLE,
@@ -1075,6 +1100,7 @@ macro_rules! path_id {
     };
 }
 
+pub(crate) mod database_views;
 pub(crate) mod databases;
 pub(crate) mod relations;
 pub(crate) mod setup;

@@ -133,7 +133,7 @@ impl DatabaseRepository {
     }
 }
 
-fn property_name(name: &str) -> Result<String, DatabaseError> {
+pub(super) fn property_name(name: &str) -> Result<String, DatabaseError> {
     let name = name.trim();
     if name.is_empty() || name.chars().count() > MAX_NAME_CHARS {
         return Err(DatabaseError::invalid("name"));
@@ -141,11 +141,11 @@ fn property_name(name: &str) -> Result<String, DatabaseError> {
     Ok(name.to_owned())
 }
 
-fn parse_type(raw: &str) -> Result<PropertyType, DatabaseError> {
+pub(super) fn parse_type(raw: &str) -> Result<PropertyType, DatabaseError> {
     PropertyType::parse(raw).ok_or_else(|| DatabaseError::invalid("type"))
 }
 
-fn check_position(position: i64) -> Result<i64, DatabaseError> {
+pub(super) fn check_position(position: i64) -> Result<i64, DatabaseError> {
     if position < 0 {
         return Err(DatabaseError::invalid("position"));
     }
@@ -164,7 +164,7 @@ fn current_options(property: &Property) -> Vec<Map<String, Value>> {
 
 /// `config` with each option completed from the current option of the same id or name: a name
 /// alone keeps that option's id, color and group. A plain string is an option name.
-fn with_known_options(
+pub(super) fn with_known_options(
     mut config: Value,
     current: &[Map<String, Value>],
 ) -> Result<Value, DatabaseError> {

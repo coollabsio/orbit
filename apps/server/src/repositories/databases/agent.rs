@@ -160,15 +160,15 @@ pub struct AgentQuery {
     pub tz: Option<String>,
 }
 
-struct Member {
+pub(super) struct Member {
     id: Id,
     name: String,
     email: String,
 }
 
 /// The schema and the members that turn names into ids, and ids into names.
-struct Names {
-    properties: Vec<Property>,
+pub(super) struct Names {
+    pub(super) properties: Vec<Property>,
     members: Vec<Member>,
     actor_id: Id,
 }
@@ -208,7 +208,15 @@ pub(super) fn property_by_key<'a>(
 }
 
 impl Names {
-    fn property(&self, key: &str, path: &str) -> Result<&Property, DatabaseError> {
+    pub(super) fn new(properties: Vec<Property>, members: Vec<Member>, actor_id: Id) -> Self {
+        Self {
+            properties,
+            members,
+            actor_id,
+        }
+    }
+
+    pub(super) fn property(&self, key: &str, path: &str) -> Result<&Property, DatabaseError> {
         property_by_key(&self.properties, key, path)
     }
 
@@ -302,7 +310,7 @@ impl Names {
             .collect()
     }
 
-    fn filter(&self, raw: &Value) -> Result<FilterGroup, DatabaseError> {
+    pub(super) fn filter(&self, raw: &Value) -> Result<FilterGroup, DatabaseError> {
         let group = match self.filter_node(raw, "filter")? {
             FilterNode::Group(group) => group,
             rule @ FilterNode::Rule(_) => FilterGroup {
@@ -377,7 +385,7 @@ impl Names {
         }))
     }
 
-    fn sorts(&self, raw: &Value) -> Result<Vec<ViewSort>, DatabaseError> {
+    pub(super) fn sorts(&self, raw: &Value) -> Result<Vec<ViewSort>, DatabaseError> {
         let items = raw
             .as_array()
             .filter(|items| items.len() <= MAX_SORTS)
@@ -591,7 +599,9 @@ pub fn invalid_detail(field: &str) -> &'static str {
             "Send one of these types: text, number, select, multi_select, status, date, person, checkbox, url, email, phone, files, unique_id, relation, rollup, created_time, created_by, last_edited_time, last_edited_by, button, formula. The title property cannot be added and cannot change its type."
         }
         "position" => "Send a position of 0 or more.",
-        "changes" => "Send at least one of name, type, config, add_options or position.",
+        "changes" => {
+            "Send at least one field to change: name or position, and for a property type, config or add_options, for a view filter, sorts, columns or group_by."
+        }
         "add_options" => {
             "add_options takes option names or {name, color, group} objects, only for a select, multi-select or status property, and not together with config."
         }
@@ -602,6 +612,23 @@ pub fn invalid_detail(field: &str) -> &'static str {
             "No property has this name or id, or two properties share the name: use the property id."
         }
         _ if field.ends_with(".operator") => "The operator does not fit the property's type.",
+        "group_by" => {
+            "group_by takes the name or id of a select, status, multi-select or person property."
+        }
+        "link_id" => "No linked view of this database has this id.",
+        "host_page_id" => {
+            "host_page_id takes the id of a doc that you can edit; a database page cannot show a linked view."
+        }
+        "from_view_id" => "from_view_id takes the id of one of the database's own views.",
+        _ if field.starts_with("columns") => {
+            "columns takes property names or ids. No property has the name, or two properties share it: use the property id."
+        }
+        _ if field.starts_with("properties") => {
+            "A new database takes at most 99 properties besides its title, each with a name and a type that a new database allows: text, number, select, multi_select, status, date, person, checkbox, url, email, phone, files, created_time, created_by, last_edited_time or last_edited_by. Add other types after the database exists."
+        }
+        _ if field.starts_with("views") => {
+            "A new database takes 1 to 50 views, each with a name, a type and a filter, sorts, columns and group_by that name the database's properties and options."
+        }
         _ => {
             "The value is invalid for this database: an unknown or shared property name, an unknown option or member, or a value of the wrong type."
         }
@@ -663,14 +690,20 @@ fn cursor_offset(cursor: Option<&str>, hash: &str) -> Result<usize, DatabaseErro
 }
 
 impl DatabaseRepository {
-    async fn names(
+    pub(super) async fn names(
         &self,
         workspace_id: Id,
         database_id: Id,
         actor_id: Id,
     ) -> Result<Names, DatabaseError> {
         let properties = self.properties(workspace_id, database_id, actor_id).await?;
-        let members = sqlx::query(
+        let members = self.members(workspace_id).await?;
+        Ok(Names::new(properties, members, actor_id))
+    }
+
+    /// The members of the workspace, for names, emails and `"me"` in filters and values.
+    pub(super) async fn members(&self, workspace_id: Id) -> Result<Vec<Member>, DatabaseError> {
+        Ok(sqlx::query(
             "SELECT users.id, users.display_name, users.email FROM memberships \
              JOIN users ON users.id = memberships.user_id WHERE memberships.workspace_id = $1",
         )
@@ -687,12 +720,7 @@ impl DatabaseRepository {
                 email: row.get::<Option<String>, _>("email").unwrap_or_default(),
             })
         })
-        .collect();
-        Ok(Names {
-            properties,
-            members,
-            actor_id,
-        })
+        .collect())
     }
 
     /// The schema of a database the actor can read.
