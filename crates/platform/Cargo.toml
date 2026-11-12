@@ -15,8 +15,10 @@ cron = "0.15"
 fs2 = "0.4"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 hmac = "0.12"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
 http-body-util = "0.1"
 ipnet = "2"
+moxcms = "0.8"
 rand = "0.8"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
 serde = { version = "1", features = ["derive"] }
@@ -34,6 +36,7 @@ tower = { version = "0.5", features = ["util"] }
 unicode-segmentation = "1"
 url = "2"
 uuid = { version = "1", features = ["v7"] }
+webp = { version = "0.3.1", default-features = false }
 
 [features]
 # Test helpers (the in-memory S3 server) for the test crates; never in a release build.

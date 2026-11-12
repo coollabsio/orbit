@@ -9,12 +9,15 @@ use thiserror::Error;
 use tokio::fs;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 
+use super::image_shrink::{SHRINK_MIN_BYTES, shrink_image};
 use super::{BlobReader, BlobStore, BlobStoreError, StoredObject};
 use crate::{
     AttachmentMutationCoordinator, AttachmentMutationGuard, Database, Id, TimestampMillis,
 };
 
 const HOUR_MILLIS: i64 = 60 * 60 * 1000;
+/// Uploads shrink at most this many images at a time: each decoded image can take hundreds of MB.
+static SHRINKING: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
 const QUARANTINE_MILLIS: i64 = 24 * HOUR_MILLIS;
 const SNIFF_BYTES: usize = 8 * 1024;
 /// References to one blob (bind its id twice): task/comment attachments, docs page files, chat
@@ -478,18 +481,52 @@ impl UploadService {
             .await
     }
 
+    /// [`Self::stage`] that keeps the exact bytes, without [`shrink_image`]: for a restore, which must give back
+    /// the files of the backup.
+    pub async fn stage_original<R>(
+        &self,
+        workspace_id: Id,
+        owner_id: Id,
+        display_name: &str,
+        reader: R,
+    ) -> Result<StagedUpload, UploadError>
+    where
+        R: AsyncRead + Unpin,
+    {
+        self.stage_with(workspace_id, owner_id, display_name, 0, reader, false)
+            .await
+    }
+
+    /// Stages one file of a request. A large JPEG, PNG or WebP is stored as a smaller WebP ([`shrink_image`]),
+    /// as the web client does, so a client that did not shrink it does not store the full size.
     pub async fn stage_in_request<R>(
         &self,
         workspace_id: Id,
         owner_id: Id,
         display_name: &str,
         request_bytes_received: u64,
-        mut reader: R,
+        reader: R,
     ) -> Result<StagedUpload, UploadError>
     where
         R: AsyncRead + Unpin,
     {
-        let display_name = safe_display_name(display_name)?;
+        self.stage_with(workspace_id, owner_id, display_name, request_bytes_received, reader, true)
+            .await
+    }
+
+    async fn stage_with<R>(
+        &self,
+        workspace_id: Id,
+        owner_id: Id,
+        display_name: &str,
+        request_bytes_received: u64,
+        mut reader: R,
+        shrink: bool,
+    ) -> Result<StagedUpload, UploadError>
+    where
+        R: AsyncRead + Unpin,
+    {
+        let mut display_name = safe_display_name(display_name)?;
         if request_bytes_received >= self.limits.max_request_bytes {
             return Err(UploadError::RequestTooLarge {
                 limit: self.limits.max_request_bytes,
@@ -556,10 +593,26 @@ impl UploadService {
                 source,
             })?;
 
+            let mut sha256 = format!("{:x}", digest.finalize());
+            let mut detected_media_type = detect_media_type(&sniffed).to_owned();
+            if shrink
+                && let Some(smaller) =
+                    shrink_staged(&temporary_path, &detected_media_type, size_bytes).await?
+            {
+                fs::write(&temporary_path, &smaller)
+                    .await
+                    .map_err(|source| BlobStoreError::Io {
+                        path: temporary_path.clone(),
+                        source,
+                    })?;
+                sha256 = format!("{:x}", Sha256::digest(&smaller));
+                size_bytes = smaller.len() as u64;
+                detected_media_type = detect_media_type(&smaller).to_owned();
+                display_name = with_extension(&display_name, "webp");
+            }
+
             let id = Id::new_v7();
             let now = self.database.database_now().await?.as_millis();
-            let sha256 = format!("{:x}", digest.finalize());
-            let detected_media_type = detect_media_type(&sniffed).to_owned();
             let size_i64 = i64::try_from(size_bytes).map_err(|_| UploadError::SizeOverflow)?;
             sqlx::query(
                 "INSERT INTO pending_uploads (\
@@ -1003,6 +1056,28 @@ fn safe_display_name(value: &str) -> Result<String, UploadError> {
         return Err(UploadError::InvalidDisplayName);
     }
     Ok(name.to_owned())
+}
+
+/// The staged file as a smaller WebP, when it is a large JPEG, PNG or WebP that [`shrink_image`] can make smaller.
+async fn shrink_staged(
+    path: &std::path::Path,
+    media_type: &str,
+    size_bytes: u64,
+) -> Result<Option<Vec<u8>>, UploadError> {
+    if size_bytes < SHRINK_MIN_BYTES
+        || !matches!(media_type, "image/jpeg" | "image/png" | "image/webp")
+    {
+        return Ok(None);
+    }
+    let bytes = fs::read(path).await.map_err(|source| BlobStoreError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let _permit = SHRINKING.acquire().await;
+    Ok(tokio::task::spawn_blocking(move || shrink_image(&bytes))
+        .await
+        .ok()
+        .flatten())
 }
 
 /// `photo.png` -> `photo.webp`. Keeps the name when the result would be longer than a display name may be.

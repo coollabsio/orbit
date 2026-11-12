@@ -3,8 +3,11 @@ export const MAX_IMAGE_EDGE = 2560
 /** Smaller images are uploaded as they are: re-encoding saves little and loses quality. */
 export const SHRINK_MIN_BYTES = 512 * 1024
 const QUALITY = 0.85
-/** Photo and screenshot types. GIF and SVG are never changed: GIF is often animated, SVG is not pixels. */
-const SHRINKABLE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp'])
+/**
+ * Photo types. The server makes a PNG (most often a screenshot) a lossless WebP, which a canvas cannot encode, so
+ * a PNG is uploaded as it is. GIF and SVG are never changed: GIF is often animated, SVG is not pixels.
+ */
+const SHRINKABLE_TYPES = new Set(['image/jpeg', 'image/webp'])
 
 /** The size an image is drawn at: the long edge at most `MAX_IMAGE_EDGE`, same aspect ratio. */
 export function targetSize(width: number, height: number): { width: number; height: number } {
@@ -12,14 +15,14 @@ export function targetSize(width: number, height: number): { width: number; heig
   return { width: Math.max(1, Math.round(width * scale)), height: Math.max(1, Math.round(height * scale)) }
 }
 
-/** Animated PNG (an `acTL` chunk) and animated WebP (an `ANIM` chunk) would lose all frames but the first. */
+/** Animated WebP (an `ANIM` chunk) would lose all frames but the first; `acTL` marks an animated PNG. */
 export function isAnimated(header: Uint8Array): boolean {
   const text = String.fromCharCode(...header)
   return text.includes('acTL') || text.includes('ANIM')
 }
 
 /**
- * Makes a large photo or screenshot smaller before upload: scales it to `MAX_IMAGE_EDGE` and encodes it as WebP.
+ * Makes a large photo smaller before upload: scales it to `MAX_IMAGE_EDGE` and encodes it as WebP.
  * Returns the original file when it is small, animated, cannot be decoded or encoded, or would not get smaller.
  */
 export async function shrinkImage(file: File): Promise<File> {
