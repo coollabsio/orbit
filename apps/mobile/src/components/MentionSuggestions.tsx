@@ -24,7 +24,7 @@ const SECTION: Record<MentionSuggestion['kind'], string> = { user: 'People', cha
 
 /**
  * `@` (and `#` when `channels` is set) autocomplete for a plain `TextInput`, as the web's `useMentionAutocomplete`.
- * Spread `inputProps` on the field, show `suggestions` with `MentionSuggestions`, and call `mention` from an `@` button.
+ * Spread `inputProps` on the field, show `suggestions` with `MentionSuggestions`, and call `mention` from an `@` or `#` button.
  */
 export function useMentionField({
   text,
@@ -97,10 +97,10 @@ export function useMentionField({
       setClosed({ start: shown.start, query: next.text.slice(shown.start + 1, next.cursor) })
       place(next)
     },
-    /** The `@` button: an `@` at the cursor, which opens the list. */
-    mention: () => {
+    /** The `@` and `#` buttons: the trigger at the cursor, which opens the list. */
+    mention: (trigger: '@' | '#') => {
       setClosed(null)
-      place(insertTrigger(text, cursor))
+      place(insertTrigger(text, cursor, trigger))
     },
   }
 }
