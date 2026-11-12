@@ -36,6 +36,8 @@ export const queryKeys = {
   /** What the profile popover shows of one member beside the members list, with the caller's private note. */
   memberProfile: (workspaceId: string, userId: string) => [...workspace(workspaceId), 'profiles', userId] as const,
   invitations: (workspaceId: string) => [...workspace(workspaceId), 'invitations'] as const,
+  /** The workspace's custom roles and the permissions they may carry. */
+  roles: (workspaceId: string) => [...workspace(workspaceId), 'roles'] as const,
   apiTokens: (workspaceId: string) => [...workspace(workspaceId), 'api-tokens'] as const,
   /** Outgoing webhook subscriptions; each one's deliveries sit under it. */
   webhooks: (workspaceId: string) => [...workspace(workspaceId), 'webhooks'] as const,

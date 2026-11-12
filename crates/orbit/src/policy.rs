@@ -2,14 +2,14 @@ use std::error::Error;
 use std::fmt;
 
 use orbit_platform::Id;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use crate::{Membership, WorkspaceRole};
 
 /// A workspace capability that depends on the member's role. Actions open to
 /// every member (tasks, projects, attachments, docs) are not listed here.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, ToSchema)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, ToSchema)]
 pub enum Permission {
     #[serde(rename = "workspace.update")]
     WorkspaceUpdate,
@@ -58,10 +58,14 @@ pub enum Permission {
     /// only scope is `workspace:export:personal`.
     #[serde(rename = "workspace.export_personal")]
     WorkspaceExportPersonal,
+    /// Create, change and delete the workspace's custom roles, and give them to members. Never
+    /// grantable by a custom role, so a custom role cannot hand out more than it holds.
+    #[serde(rename = "roles.manage")]
+    RolesManage,
 }
 
 impl Permission {
-    pub const ALL: [Self; 17] = [
+    pub const ALL: [Self; 18] = [
         Self::WorkspaceUpdate,
         Self::WorkspaceDelete,
         Self::WorkspaceTransfer,
@@ -79,15 +83,111 @@ impl Permission {
         Self::StorageManage,
         Self::WorkspaceExport,
         Self::WorkspaceExportPersonal,
+        Self::RolesManage,
     ];
+
+    /// The permission's wire name, as in the API.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::WorkspaceUpdate => "workspace.update",
+            Self::WorkspaceDelete => "workspace.delete",
+            Self::WorkspaceTransfer => "workspace.transfer",
+            Self::MembersManage => "members.manage",
+            Self::AuditView => "audit.view",
+            Self::ApiTokensManage => "api_tokens.manage",
+            Self::IntegrationsManage => "integrations.manage",
+            Self::TeamspacesDelete => "teamspaces.delete",
+            Self::PagesPurge => "pages.purge",
+            Self::ViewsManageShared => "views.manage_shared",
+            Self::CommentsModerate => "comments.moderate",
+            Self::ChatManage => "chat.manage",
+            Self::MailManage => "mail.manage",
+            Self::BillingManage => "billing.manage",
+            Self::StorageManage => "storage.manage",
+            Self::WorkspaceExport => "workspace.export",
+            Self::WorkspaceExportPersonal => "workspace.export_personal",
+            Self::RolesManage => "roles.manage",
+        }
+    }
+
+    #[must_use]
+    pub fn parse(name: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|permission| permission.as_str() == name)
+    }
+
+    /// Whether a custom role may carry the permission. The owner's own powers (deleting or
+    /// handing over the workspace, billing), role management, and what every member holds
+    /// already stay out.
+    #[must_use]
+    pub const fn is_grantable(self) -> bool {
+        !matches!(
+            self,
+            Self::WorkspaceDelete
+                | Self::WorkspaceTransfer
+                | Self::BillingManage
+                | Self::RolesManage
+                | Self::WorkspaceExportPersonal
+        )
+    }
+
+    /// The permissions a custom role may carry, in display order.
+    #[must_use]
+    pub fn grantable() -> Vec<Self> {
+        Self::ALL
+            .into_iter()
+            .filter(|permission| permission.is_grantable())
+            .collect()
+    }
+
+    const fn bit(self) -> u32 {
+        1 << self as u32
+    }
+}
+
+/// The permissions a custom role adds to an ordinary member. Only grantable permissions are
+/// ever in a set.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct PermissionSet(u32);
+
+impl PermissionSet {
+    pub const EMPTY: Self = Self(0);
+
+    /// Drops the permissions that a custom role may not carry.
+    #[must_use]
+    pub fn of(permissions: impl IntoIterator<Item = Permission>) -> Self {
+        Self(
+            permissions
+                .into_iter()
+                .filter(|permission| permission.is_grantable())
+                .fold(0, |bits, permission| bits | permission.bit()),
+        )
+    }
+
+    #[must_use]
+    pub const fn contains(self, permission: Permission) -> bool {
+        self.0 & permission.bit() != 0
+    }
+
+    #[must_use]
+    pub fn to_vec(self) -> Vec<Permission> {
+        Permission::ALL
+            .into_iter()
+            .filter(|permission| self.contains(*permission))
+            .collect()
+    }
 }
 
 /// A member acting in one workspace. Every rule about what a member may do is a method here:
 /// `can` for rules that depend only on the role, the rest for rules that also depend on a record.
+/// A member may also hold a custom role, which adds permissions to the member role (`granted`).
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Actor {
     pub user_id: Id,
     pub role: WorkspaceRole,
+    granted: PermissionSet,
 }
 
 /// Why a membership change is refused.
@@ -105,8 +205,33 @@ pub enum MembershipDenied {
 
 impl Actor {
     #[must_use]
+    pub const fn new(user_id: Id, role: WorkspaceRole) -> Self {
+        Self {
+            user_id,
+            role,
+            granted: PermissionSet::EMPTY,
+        }
+    }
+
+    /// Adds the permissions of the member's custom role. Only an ordinary member holds one:
+    /// owners and admins hold every permission already, and guests none.
+    #[must_use]
+    pub const fn with_custom_role(mut self, granted: PermissionSet) -> Self {
+        if matches!(self.role, WorkspaceRole::Member) {
+            self.granted = granted;
+        }
+        self
+    }
+
+    #[must_use]
     pub const fn can(self, permission: Permission) -> bool {
-        Policy::can(self.role, permission)
+        Policy::can(self.role, permission) || self.granted.contains(permission)
+    }
+
+    /// Everything the actor may do, from the role and the custom role.
+    #[must_use]
+    pub fn permissions(self) -> Vec<Permission> {
+        Policy::permissions_with(self.role, self.granted)
     }
 
     /// Guests only see the private chat channels and DMs they belong to.
@@ -195,7 +320,19 @@ impl Actor {
         if role == WorkspaceRole::Owner {
             return Err(MembershipDenied::OwnerProtected);
         }
-        Ok(())
+        self.may_assign(role)
+    }
+
+    /// Only owners and admins make admins, so a custom role that manages members cannot lift
+    /// anyone, itself included, above its own level.
+    fn may_assign(self, role: WorkspaceRole) -> Result<(), MembershipDenied> {
+        if role == WorkspaceRole::Admin
+            && !matches!(self.role, WorkspaceRole::Owner | WorkspaceRole::Admin)
+        {
+            Err(MembershipDenied::RoleForbidden)
+        } else {
+            Ok(())
+        }
     }
 
     pub fn change_member_role(
@@ -213,7 +350,8 @@ impl Actor {
         if new_role == WorkspaceRole::Guest {
             return Err(MembershipDenied::GuestDowngrade);
         }
-        self.admin_protected(target_role)
+        self.admin_protected(target_role)?;
+        self.may_assign(new_role)
     }
 
     /// Any member may remove themselves (leave); removing others needs `MembersManage`, and
@@ -279,6 +417,21 @@ impl Error for PolicyError {}
 pub struct Policy;
 
 impl Policy {
+    /// What a member of `role` may do, including the permissions of their custom role. Only an
+    /// ordinary member holds a custom role.
+    #[must_use]
+    pub fn permissions_with(role: WorkspaceRole, custom_role: PermissionSet) -> Vec<Permission> {
+        let granted = if role == WorkspaceRole::Member {
+            custom_role
+        } else {
+            PermissionSet::EMPTY
+        };
+        Permission::ALL
+            .into_iter()
+            .filter(|permission| Self::can(role, *permission) || granted.contains(*permission))
+            .collect()
+    }
+
     /// The only place that maps a role to what it may do. Guests hold no permission.
     #[must_use]
     pub const fn can(role: WorkspaceRole, permission: Permission) -> bool {
@@ -300,7 +453,8 @@ impl Policy {
             | Permission::ChatManage
             | Permission::MailManage
             | Permission::StorageManage
-            | Permission::WorkspaceExport => {
+            | Permission::WorkspaceExport
+            | Permission::RolesManage => {
                 matches!(role, WorkspaceRole::Owner | WorkspaceRole::Admin)
             }
             Permission::WorkspaceExportPersonal => !matches!(role, WorkspaceRole::Guest),

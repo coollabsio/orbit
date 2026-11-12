@@ -13,13 +13,13 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Tip } from '@/components/common/Tip'
 import { ListPager, usePagedList } from '@/components/common/ListPager'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '@/components/ui/input-group'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useAuthOptions, useCurrentUser } from '@/features/auth/api'
-import { useChangeMemberRole, useCreateInvitation, useInvitations, useMembers, useRemoveMember, useRevokeInvitation, useTransferOwnership } from '@/features/workspaces/api'
+import { useChangeMemberRole, useCreateInvitation, useInvitations, useMembers, useRemoveMember, useRevokeInvitation, useSetMemberCustomRole, useTransferOwnership, useWorkspaceRoles } from '@/features/workspaces/api'
 import { useCan } from '@/features/workspaces/permissions'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import type { User } from '@/features/workspaces/models'
@@ -65,7 +65,10 @@ export function MembersPage() {
   const changeRole = useChangeMemberRole(workspace.id)
   const removeMember = useRemoveMember(workspace.id)
   const transferOwnership = useTransferOwnership(workspace.id)
-  const memberSaving = useSlowPending(changeRole.isPending || removeMember.isPending || transferOwnership.isPending)
+  const canManageRoles = useCan('roles.manage')
+  const customRoles = useWorkspaceRoles(workspace.id, canManageRoles).data?.items ?? []
+  const setCustomRole = useSetMemberCustomRole(workspace.id)
+  const memberSaving = useSlowPending(changeRole.isPending || removeMember.isPending || transferOwnership.isPending || setCustomRole.isPending)
   const users = membersQuery.data ?? EMPTY_USERS
   const pendingInvitations = invitations.data?.items.filter((invitation) => invitation.status === 'pending') ?? []
 
@@ -82,11 +85,14 @@ export function MembersPage() {
   const [copied, setCopied] = useState(false)
   const [copyError, setCopyError] = useState(false)
 
+  // a custom role adds to the member role only; an admin or owner already holds every grantable permission
+  const offersCustomRoles = (user: User) => canManageRoles && user.role === 'Member' && (customRoles.length > 0 || Boolean(user.customRole))
+
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase()
     const list = users.filter((u) => {
       const matchesSearch =
-        !query || [u.name, u.email, u.role].some((v) => v.toLowerCase().includes(query))
+        !query || [u.name, u.email, u.role, u.customRole?.name ?? ''].some((v) => v.toLowerCase().includes(query))
       const matchesRole = roleFilter === 'all' || u.role === roleFilter
       return matchesSearch && matchesRole
     })
@@ -246,12 +252,13 @@ export function MembersPage() {
                     ) : null}
                   </div>
                   <div className="truncate text-xs text-muted-foreground">{user.email}</div>
-                  <div>
+                  <div className="flex min-w-0 flex-wrap gap-1">
                     {user.role === 'Guest' ? <GuestBadge className="h-5 text-xs" /> : <Badge variant="secondary">{user.role}</Badge>}
+                    {user.customRole ? <Badge variant="outline" className="max-w-full truncate" title={user.customRole.name}>{user.customRole.name}</Badge> : null}
                   </div>
                   <div className="flex justify-end">
                     {/* Your own row has no menu; the abilities themselves come from the server. */}
-                    {currentUser.data && user.id !== currentUser.data.id && (user.can.changeRole || user.can.remove) ? (
+                    {currentUser.data && user.id !== currentUser.data.id && (user.can.changeRole || user.can.remove || offersCustomRoles(user)) ? (
                       <DropdownMenu>
                         <DropdownMenuTrigger
                           render={<Button variant="outline" size="sm" className="text-[0.6875rem]" />}
@@ -273,6 +280,24 @@ export function MembersPage() {
                               Make {role.toLowerCase()}
                             </DropdownMenuItem>
                           ))}
+                          {offersCustomRoles(user) ? (
+                            <>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuGroup>
+                                <DropdownMenuLabel>Custom role</DropdownMenuLabel>
+                                {customRoles.filter((role) => role.id !== user.customRole?.id).map((role) => (
+                                  <DropdownMenuItem key={role.id} onClick={() => setCustomRole.mutate({ membershipId: user.membershipId, version: user.version, roleId: role.id })}>
+                                    Give {role.name}
+                                  </DropdownMenuItem>
+                                ))}
+                                {user.customRole ? (
+                                  <DropdownMenuItem onClick={() => setCustomRole.mutate({ membershipId: user.membershipId, version: user.version, roleId: null })}>
+                                    Remove custom role
+                                  </DropdownMenuItem>
+                                ) : null}
+                              </DropdownMenuGroup>
+                            </>
+                          ) : null}
                           {user.can.transferOwnership ? (
                             <DropdownMenuItem onClick={async () => {
                               if (await confirmAction({ title: `Transfer ownership of ${workspace.name} to ${user.name}?`, confirmLabel: 'Transfer ownership', danger: true })) {
@@ -315,6 +340,7 @@ export function MembersPage() {
         {changeRole.isError ? <p role="alert" className="text-destructive">Role change failed. <Button variant="ghost" onClick={() => changeRole.variables && changeRole.mutate(changeRole.variables)}>Retry</Button></p> : null}
         {removeMember.isError ? <p role="alert" className="text-destructive">Member removal failed. <Button variant="ghost" onClick={() => removeMember.variables && removeMember.mutate(removeMember.variables)}>Retry</Button></p> : null}
         {transferOwnership.isError ? <p role="alert" className="text-destructive">Ownership transfer failed. <Button variant="ghost" onClick={() => transferOwnership.variables && transferOwnership.mutate(transferOwnership.variables)}>Retry</Button></p> : null}
+        {setCustomRole.isError ? <p role="alert" className="text-destructive">{setCustomRole.error instanceof ApiProblem ? setCustomRole.error.detail : 'The custom role could not be changed.'}</p> : null}
         {memberSaving ? <p role="status">Saving member change…</p> : null}
       </SettingsCard>
 

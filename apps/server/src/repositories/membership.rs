@@ -2,7 +2,7 @@
 //! permission rule needs. Checks that only ask "is this user a member" together with something
 //! else in one query (a live session, a visible page, an OAuth grant) keep their own SQL.
 
-use orbit_domain::{Actor, WorkspaceRole};
+use orbit_domain::{Actor, Permission, PermissionSet, WorkspaceRole};
 use orbit_platform::Id;
 use sqlx::Any;
 
@@ -56,8 +56,10 @@ async fn any_actor<'e, E>(
 where
     E: sqlx::Executor<'e, Database = Any>,
 {
-    let role: Option<String> = sqlx::query_scalar(
-        "SELECT memberships.role FROM memberships JOIN workspaces ON workspaces.id = memberships.workspace_id \
+    let row: Option<(String, Option<String>)> = sqlx::query_as(
+        "SELECT memberships.role, workspace_roles.permissions \
+         FROM memberships JOIN workspaces ON workspaces.id = memberships.workspace_id \
+         LEFT JOIN workspace_roles ON workspace_roles.id = memberships.custom_role_id \
          WHERE memberships.workspace_id = $1 AND memberships.user_id = $2 \
          AND (CASE WHEN workspaces.deleted_at IS NULL THEN 0 ELSE 1 END) = $3",
     )
@@ -67,8 +69,18 @@ where
     .fetch_optional(executor)
     .await?;
     // The schema only stores known roles; an unknown one grants nothing.
-    Ok(role
-        .as_deref()
-        .and_then(WorkspaceRole::parse)
-        .map(|role| Actor { user_id, role }))
+    Ok(row.and_then(|(role, permissions)| {
+        WorkspaceRole::parse(&role).map(|role| {
+            Actor::new(user_id, role).with_custom_role(parse_permissions(permissions.as_deref()))
+        })
+    }))
+}
+
+/// The permissions that a custom role stores (a JSON array of names). Unknown names and names
+/// that a custom role may not carry add nothing.
+pub(crate) fn parse_permissions(stored: Option<&str>) -> PermissionSet {
+    let names: Vec<String> = stored
+        .and_then(|stored| serde_json::from_str(stored).ok())
+        .unwrap_or_default();
+    PermissionSet::of(names.iter().filter_map(|name| Permission::parse(name)))
 }

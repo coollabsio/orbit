@@ -796,6 +796,7 @@ turns its routes, navigation and shortcuts off.
   Admin → Users shows it as Deleted and cannot reinstate it. Mobile has both flows in Settings → Profile.
 - Workspace Settings: General, Members, Sessions.
 - Workspace creation, members, invitations, fixed roles, ownership transfer, and sessions use persistent APIs.
+- Custom roles (#73): Settings → Roles (owner/admin, `roles.manage`) creates workspace roles, each a list of extra permissions that an ordinary member holds on top of the member role (`workspace_roles`, `memberships.custom_role_id`; `Actor::with_custom_role` in `crates/orbit/src/policy.rs`). Owner-only powers (`workspace.delete`, `workspace.transfer`, `billing.manage`) and `roles.manage` are never grantable. A member who manages members still cannot make admins. Changing a member's base role, or a transfer, drops the custom role; deleting a role makes its members plain members. Routes: `GET/POST /roles`, `PATCH/DELETE /roles/{id}`, `PUT /members/{id}/custom-role`.
 - Sessions lists the current account's active devices. It shows device/browser and last active only, with controls to revoke any non-current session.
 - Chat administration remains separate at `/chat/settings`.
 - Workspace Settings → Advanced → Export (owner/admin, `workspace.export`; also on read-only billing workspaces):

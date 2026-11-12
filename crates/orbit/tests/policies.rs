@@ -1,13 +1,10 @@
 use orbit_domain::{
-    Actor, Membership, MembershipDenied, Permission, Policy, PolicyError, WorkspaceRole,
-    platform::Id,
+    Actor, Membership, MembershipDenied, Permission, PermissionSet, Policy, PolicyError,
+    WorkspaceRole, platform::Id,
 };
 
 fn actor(role: WorkspaceRole) -> Actor {
-    Actor {
-        user_id: Id::new_v7(),
-        role,
-    }
+    Actor::new(Id::new_v7(), role)
 }
 
 #[test]
@@ -296,4 +293,82 @@ fn mail_manage_is_owner_and_admin_only() {
     assert!(Policy::can(WorkspaceRole::Owner, Permission::MailManage));
     assert!(Policy::can(WorkspaceRole::Admin, Permission::MailManage));
     assert!(!Policy::can(WorkspaceRole::Member, Permission::MailManage));
+}
+
+#[test]
+fn permission_names_round_trip() {
+    for permission in Permission::ALL {
+        assert_eq!(Permission::parse(permission.as_str()), Some(permission));
+    }
+    assert_eq!(Permission::parse("nope"), None);
+}
+
+#[test]
+fn a_custom_role_never_carries_the_owner_or_role_powers() {
+    let set = PermissionSet::of(Permission::ALL);
+    assert_eq!(set.to_vec(), Permission::grantable());
+    for permission in [
+        Permission::WorkspaceDelete,
+        Permission::WorkspaceTransfer,
+        Permission::BillingManage,
+        Permission::RolesManage,
+    ] {
+        assert!(!set.contains(permission), "{permission:?}");
+    }
+}
+
+#[test]
+fn a_custom_role_adds_its_permissions_to_a_member_only() {
+    let granted = PermissionSet::of([Permission::AuditView, Permission::ChatManage]);
+    let member = actor(WorkspaceRole::Member).with_custom_role(granted);
+    assert!(member.can(Permission::AuditView));
+    assert!(member.can(Permission::ChatManage));
+    assert!(!member.can(Permission::MailManage));
+    assert!(!member.can(Permission::RolesManage));
+    assert!(member.can_delete_chat_message(Id::new_v7()));
+    assert_eq!(
+        member.permissions(),
+        [
+            Permission::AuditView,
+            Permission::ChatManage,
+            Permission::WorkspaceExportPersonal
+        ]
+    );
+
+    // A guest never gains permissions; an admin already holds them.
+    assert!(
+        !actor(WorkspaceRole::Guest)
+            .with_custom_role(granted)
+            .can(Permission::AuditView)
+    );
+    let admin = actor(WorkspaceRole::Admin);
+    assert_eq!(admin.with_custom_role(granted), admin);
+}
+
+#[test]
+fn a_member_who_manages_members_cannot_make_admins() {
+    let manager = actor(WorkspaceRole::Member)
+        .with_custom_role(PermissionSet::of([Permission::MembersManage]));
+    assert_eq!(manager.invite(WorkspaceRole::Member), Ok(()));
+    assert_eq!(
+        manager.invite(WorkspaceRole::Admin),
+        Err(MembershipDenied::RoleForbidden)
+    );
+    assert_eq!(
+        manager.change_member_role(WorkspaceRole::Member, WorkspaceRole::Admin),
+        Err(MembershipDenied::RoleForbidden)
+    );
+    assert_eq!(
+        manager.change_member_role(WorkspaceRole::Admin, WorkspaceRole::Member),
+        Err(MembershipDenied::RoleForbidden)
+    );
+    assert_eq!(
+        manager.remove_member(Id::new_v7(), WorkspaceRole::Owner),
+        Err(MembershipDenied::OwnerProtected)
+    );
+    // Admins still make admins.
+    assert_eq!(
+        actor(WorkspaceRole::Admin).invite(WorkspaceRole::Admin),
+        Ok(())
+    );
 }
