@@ -46,7 +46,7 @@ async fn record_github_change(
 ) -> Result<(), ApiError> {
     let workspace_id: Id = workspace
         .parse()
-        .map_err(|_| ApiError::internal(request_id))?;
+        .map_err(|error| ApiError::internal(request_id).cause(error))?;
     audit::record(
         tx,
         workspace_id,
@@ -60,7 +60,7 @@ async fn record_github_change(
         TimestampMillis::now(),
     )
     .await
-    .map_err(|_| ApiError::internal(request_id))
+    .map_err(|error| ApiError::internal(request_id).cause(error))
 }
 
 #[derive(Clone)]
@@ -256,7 +256,7 @@ async fn github_workspace_access(
     })?;
     let actor = membership::actor(state.tasks.database().pool(), workspace_id, user_id)
         .await
-        .map_err(|_| ApiError::internal(request_id))?;
+        .map_err(|error| ApiError::internal(request_id).cause(error))?;
     let actor = actor.ok_or_else(|| {
         ApiError::new(
             StatusCode::NOT_FOUND,
@@ -298,7 +298,7 @@ async fn github_project_access(
     let pool = state.tasks.database().pool();
     let actor = membership::actor(pool, workspace_id, user_id)
         .await
-        .map_err(|_| ApiError::internal(request_id))?;
+        .map_err(|error| ApiError::internal(request_id).cause(error))?;
     let Flag(project_exists) = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         "SELECT COUNT(*) FROM projects WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL AND {}",
         user_sees_project_sql("projects.id", "$3")
@@ -308,7 +308,7 @@ async fn github_project_access(
     .bind(user_id.to_string())
     .fetch_one(pool)
     .await
-    .map_err(|_| ApiError::internal(request_id))?;
+    .map_err(|error| ApiError::internal(request_id).cause(error))?;
     let actor = actor.filter(|_| project_exists).ok_or_else(|| {
         ApiError::new(
             StatusCode::NOT_FOUND,
@@ -356,7 +356,7 @@ pub(crate) async fn github_workspace_settings(
             .bind(&workspace)
             .fetch_optional(state.tasks.database().pool())
             .await
-            .map_err(|_| ApiError::internal(id))?;
+            .map_err(|error| ApiError::internal(id).cause(error))?;
     Ok(Json(GithubWorkspaceSettings {
         install_url: app
             .as_ref()
@@ -386,9 +386,9 @@ pub(crate) async fn github_project_settings(
             .bind(&workspace)
             .fetch_optional(state.tasks.database().pool())
             .await
-            .map_err(|_| ApiError::internal(request_id))?;
+            .map_err(|error| ApiError::internal(request_id).cause(error))?;
     let connection = sqlx::query("SELECT repository, label FROM github_project_connections WHERE workspace_id = $1 AND project_id = $2")
-        .bind(&workspace).bind(&project).fetch_optional(state.tasks.database().pool()).await.map_err(|_| ApiError::internal(request_id))?;
+        .bind(&workspace).bind(&project).fetch_optional(state.tasks.database().pool()).await.map_err(|error| ApiError::internal(request_id).cause(error))?;
     Ok(Json(GithubProjectSettings {
         install_url: app
             .as_ref()
@@ -411,7 +411,7 @@ async fn github_repositories(
     request_id: Option<&RequestId>,
 ) -> Result<Vec<GithubRepositoryOption>, ApiError> {
     let rows = sqlx::query("SELECT github_installation_repositories.installation_id, github_installation_repositories.repository FROM github_installation_repositories JOIN github_installations ON github_installations.installation_id = github_installation_repositories.installation_id WHERE github_installations.workspace_id = $1 ORDER BY repository")
-        .bind(workspace).fetch_all(state.tasks.database().pool()).await.map_err(|_| ApiError::internal(request_id))?;
+        .bind(workspace).fetch_all(state.tasks.database().pool()).await.map_err(|error| ApiError::internal(request_id).cause(error))?;
     Ok(rows
         .into_iter()
         .map(|row| GithubRepositoryOption {
@@ -444,7 +444,7 @@ pub(crate) async fn save_github_project_connection(
         ));
     }
     let Flag(installed) = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM github_installation_repositories JOIN github_installations ON github_installations.installation_id = github_installation_repositories.installation_id WHERE github_installations.workspace_id = $1 AND github_installation_repositories.installation_id = $2 AND github_installation_repositories.repository = $3)")
-        .bind(&workspace).bind(body.installation_id).bind(&body.repository).fetch_one(state.tasks.database().pool()).await.map_err(|_| ApiError::internal(id))?;
+        .bind(&workspace).bind(body.installation_id).bind(&body.repository).fetch_one(state.tasks.database().pool()).await.map_err(|error| ApiError::internal(id).cause(error))?;
     if !installed {
         return Err(ApiError::new(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -459,7 +459,7 @@ pub(crate) async fn save_github_project_connection(
         .database()
         .immediate_transaction()
         .await
-        .map_err(|_| ApiError::internal(id))?;
+        .map_err(|error| ApiError::internal(id).cause(error))?;
     let changed = sqlx::query("INSERT INTO github_project_connections (workspace_id, project_id, installation_id, repository, label) VALUES ($1, $2, $3, $4, $5) ON CONFLICT(project_id) DO UPDATE SET installation_id = excluded.installation_id, repository = excluded.repository, label = excluded.label WHERE github_project_connections.installation_id != excluded.installation_id OR github_project_connections.repository != excluded.repository OR github_project_connections.label != excluded.label")
         .bind(&workspace).bind(&project).bind(body.installation_id).bind(&body.repository).bind(label).execute(&mut *tx).await;
     match changed {
@@ -478,7 +478,9 @@ pub(crate) async fn save_github_project_connection(
         }
         Err(_) => return Err(ApiError::internal(id)),
     }
-    tx.commit().await.map_err(|_| ApiError::internal(id))?;
+    tx.commit()
+        .await
+        .map_err(|error| ApiError::internal(id).cause(error))?;
     github_project_settings(
         State(state),
         Path((workspace, project)),
@@ -504,7 +506,7 @@ pub(crate) async fn delete_github_project_connection(
         .database()
         .immediate_transaction()
         .await
-        .map_err(|_| ApiError::internal(id))?;
+        .map_err(|error| ApiError::internal(id).cause(error))?;
     let removed = sqlx::query(
         "DELETE FROM github_project_connections WHERE workspace_id = $1 AND project_id = $2",
     )
@@ -512,11 +514,13 @@ pub(crate) async fn delete_github_project_connection(
     .bind(&project)
     .execute(&mut *tx)
     .await
-    .map_err(|_| ApiError::internal(id))?;
+    .map_err(|error| ApiError::internal(id).cause(error))?;
     if removed.rows_affected() > 0 {
         record_github_change(&mut tx, &workspace, "github.connection.deleted", id).await?;
     }
-    tx.commit().await.map_err(|_| ApiError::internal(id))?;
+    tx.commit()
+        .await
+        .map_err(|error| ApiError::internal(id).cause(error))?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -595,7 +599,7 @@ pub(crate) async fn start_github_manifest(
             .bind(&workspace)
             .fetch_one(state.tasks.database().pool())
             .await
-            .map_err(|_| ApiError::internal(id))?;
+            .map_err(|error| ApiError::internal(id).cause(error))?;
     if exists {
         return Err(ApiError::new(
             StatusCode::CONFLICT,
@@ -611,10 +615,10 @@ pub(crate) async fn start_github_manifest(
         .bind(TimestampMillis::now().as_millis())
         .execute(state.tasks.database().pool())
         .await
-        .map_err(|_| ApiError::internal(id))?;
+        .map_err(|error| ApiError::internal(id).cause(error))?;
     sqlx::query("INSERT INTO github_app_registrations (state_hash, workspace_id, expires_at, public_origin) VALUES ($1, $2, $3, $4) ON CONFLICT(workspace_id) DO UPDATE SET state_hash = excluded.state_hash, expires_at = excluded.expires_at, public_origin = excluded.public_origin")
          .bind(hash.to_vec()).bind(&workspace).bind(TimestampMillis::now().as_millis() + 3_600_000).bind(&origin)
-        .execute(state.tasks.database().pool()).await.map_err(|_| ApiError::internal(id))?;
+        .execute(state.tasks.database().pool()).await.map_err(|error| ApiError::internal(id).cause(error))?;
     Ok(Json(GithubManifestStart {
         action: if organization.is_empty() {
             format!("https://github.com/settings/apps/new?state={token}")
@@ -679,7 +683,7 @@ pub(crate) async fn github_manifest_callback(
     .bind(TimestampMillis::now().as_millis())
     .fetch_optional(state.tasks.database().pool())
     .await
-    .map_err(|_| ApiError::internal(id))?
+    .map_err(|error| ApiError::internal(id).cause(error))?
     .ok_or_else(|| {
         ApiError::new(
             StatusCode::BAD_REQUEST,
@@ -760,10 +764,10 @@ async fn store_github_app(
         .database()
         .immediate_transaction()
         .await
-        .map_err(|_| ApiError::internal(id))?;
+        .map_err(|error| ApiError::internal(id).cause(error))?;
     let consumed = sqlx::query("DELETE FROM github_app_registrations WHERE state_hash = $1 AND workspace_id = $2 AND expires_at > $3")
         .bind(hash.to_vec()).bind(workspace).bind(TimestampMillis::now().as_millis())
-        .execute(&mut *tx).await.map_err(|_| ApiError::internal(id))?;
+        .execute(&mut *tx).await.map_err(|error| ApiError::internal(id).cause(error))?;
     if consumed.rows_affected() != 1 {
         return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
@@ -789,7 +793,9 @@ async fn store_github_app(
         Err(_) => return Err(ApiError::internal(id)),
     }
     record_github_change(&mut tx, workspace, "github.app.registered", id).await?;
-    tx.commit().await.map_err(|_| ApiError::internal(id))?;
+    tx.commit()
+        .await
+        .map_err(|error| ApiError::internal(id).cause(error))?;
     Ok(())
 }
 
@@ -880,7 +886,7 @@ async fn github_webhook_from_database(
     .bind(app_id)
     .fetch_all(state.tasks.database().pool())
     .await
-    .map_err(|_| ApiError::internal(id))?;
+    .map_err(|error| ApiError::internal(id).cause(error))?;
     let mut workspace = None;
     let mut unreadable = false;
     for row in &rows {
@@ -938,7 +944,9 @@ async fn github_webhook_from_database(
     if !matches!(event.as_str(), "issues" | "pull_request") {
         return Ok(StatusCode::ACCEPTED);
     }
-    let workspace_id: Id = workspace.parse().map_err(|_| ApiError::internal(id))?;
+    let workspace_id: Id = workspace
+        .parse()
+        .map_err(|error| ApiError::internal(id).cause(error))?;
     if read_only(state, workspace_id, id).await? {
         // A 2xx keeps GitHub from disabling the hook; the change is dropped.
         tracing::info!(%workspace_id, event, "GitHub event dropped: the workspace is read-only");
@@ -953,7 +961,7 @@ async fn github_webhook_from_database(
         .and_then(Value::as_i64)
         .unwrap_or(0);
     let connections = sqlx::query("SELECT project_id, label FROM github_project_connections WHERE workspace_id = $1 AND repository = $2 AND installation_id = $3")
-        .bind(&workspace).bind(repository).bind(installation_id).fetch_all(state.tasks.database().pool()).await.map_err(|_| ApiError::internal(id))?;
+        .bind(&workspace).bind(repository).bind(installation_id).fetch_all(state.tasks.database().pool()).await.map_err(|error| ApiError::internal(id).cause(error))?;
     if connections.is_empty() {
         return Ok(StatusCode::ACCEPTED);
     }
@@ -1019,14 +1027,16 @@ async fn github_webhook_from_database(
                 .database()
                 .immediate_transaction()
                 .await
-                .map_err(|_| ApiError::internal(id))?;
+                .map_err(|error| ApiError::internal(id).cause(error))?;
             let paused = sqlx::query("UPDATE github_issue_links SET sync_paused = 1 WHERE workspace_id = $1 AND repository = $2 AND issue_number = $3 AND kind = $4 AND sync_paused = 0")
                 .bind(&workspace).bind(repository).bind(number).bind(kind)
-                .execute(&mut *tx).await.map_err(|_| ApiError::internal(id))?;
+                .execute(&mut *tx).await.map_err(|error| ApiError::internal(id).cause(error))?;
             if paused.rows_affected() > 0 {
                 record_github_change(&mut tx, &workspace, "github.work_item.paused", id).await?;
             }
-            tx.commit().await.map_err(|_| ApiError::internal(id))?;
+            tx.commit()
+                .await
+                .map_err(|error| ApiError::internal(id).cause(error))?;
             return Ok(StatusCode::ACCEPTED);
         }
         [connection] => connection,
@@ -1043,15 +1053,17 @@ async fn github_webhook_from_database(
     let project_id: Id = connection
         .get::<String, _>("project_id")
         .parse()
-        .map_err(|_| ApiError::internal(id))?;
+        .map_err(|error| ApiError::internal(id).cause(error))?;
     let actor: String = sqlx::query_scalar(
         "SELECT user_id FROM memberships WHERE workspace_id = $1 AND role = 'owner' LIMIT 1",
     )
     .bind(&workspace)
     .fetch_one(state.tasks.database().pool())
     .await
-    .map_err(|_| ApiError::internal(id))?;
-    let actor_id: Id = actor.parse().map_err(|_| ApiError::internal(id))?;
+    .map_err(|error| ApiError::internal(id).cause(error))?;
+    let actor_id: Id = actor
+        .parse()
+        .map_err(|error| ApiError::internal(id).cause(error))?;
     let title = item
         .get("title")
         .and_then(Value::as_str)
@@ -1158,7 +1170,7 @@ async fn update_github_installation(
         .database()
         .immediate_transaction()
         .await
-        .map_err(|_| ApiError::internal(request_id))?;
+        .map_err(|error| ApiError::internal(request_id).cause(error))?;
     let mut changed = false;
     if event == "installation" && action == "deleted" {
         changed |= sqlx::query(
@@ -1168,7 +1180,7 @@ async fn update_github_installation(
         .bind(installation_id)
         .execute(&mut *tx)
         .await
-        .map_err(|_| ApiError::internal(request_id))?
+        .map_err(|error| ApiError::internal(request_id).cause(error))?
         .rows_affected()
             > 0;
     } else {
@@ -1177,9 +1189,9 @@ async fn update_github_installation(
             .and_then(Value::as_str)
             .unwrap_or("");
         let installed = sqlx::query("INSERT INTO github_installations (installation_id, workspace_id, account_login) VALUES ($1, $2, $3) ON CONFLICT(installation_id) DO UPDATE SET account_login = excluded.account_login WHERE github_installations.workspace_id = excluded.workspace_id AND github_installations.account_login != excluded.account_login")
-            .bind(installation_id).bind(workspace).bind(account).execute(&mut *tx).await.map_err(|_| ApiError::internal(request_id))?;
+            .bind(installation_id).bind(workspace).bind(account).execute(&mut *tx).await.map_err(|error| ApiError::internal(request_id).cause(error))?;
         if installed.rows_affected() == 0 && !sqlx::query_scalar::<_, Flag>("SELECT EXISTS(SELECT 1 FROM github_installations WHERE installation_id = $1 AND workspace_id = $2)")
-            .bind(installation_id).bind(workspace).fetch_one(&mut *tx).await.map_err(|_| ApiError::internal(request_id))?.0 {
+            .bind(installation_id).bind(workspace).fetch_one(&mut *tx).await.map_err(|error| ApiError::internal(request_id).cause(error))?.0 {
             return Err(ApiError::new(
                 StatusCode::FORBIDDEN,
                 "github_installation_forbidden",
@@ -1196,7 +1208,7 @@ async fn update_github_installation(
             .bind(installation_id)
             .execute(&mut *tx)
             .await
-            .map_err(|_| ApiError::internal(request_id))?
+            .map_err(|error| ApiError::internal(request_id).cause(error))?
             .rows_affected()
                 > 0;
         }
@@ -1213,7 +1225,7 @@ async fn update_github_installation(
                     .filter(|name| valid_repository(name))
                 {
                     changed |= sqlx::query("INSERT INTO github_installation_repositories (installation_id, repository) VALUES ($1, $2) ON CONFLICT DO NOTHING")
-                        .bind(installation_id).bind(name).execute(&mut *tx).await.map_err(|_| ApiError::internal(request_id))?.rows_affected() > 0;
+                        .bind(installation_id).bind(name).execute(&mut *tx).await.map_err(|error| ApiError::internal(request_id).cause(error))?.rows_affected() > 0;
                 }
             }
         }
@@ -1224,9 +1236,9 @@ async fn update_github_installation(
             for repository in repositories {
                 if let Some(name) = repository.get("full_name").and_then(Value::as_str) {
                     changed |= sqlx::query("DELETE FROM github_installation_repositories WHERE installation_id = $1 AND repository = $2")
-                        .bind(installation_id).bind(name).execute(&mut *tx).await.map_err(|_| ApiError::internal(request_id))?.rows_affected() > 0;
+                        .bind(installation_id).bind(name).execute(&mut *tx).await.map_err(|error| ApiError::internal(request_id).cause(error))?.rows_affected() > 0;
                     changed |= sqlx::query("DELETE FROM github_project_connections WHERE installation_id = $1 AND repository = $2")
-                        .bind(installation_id).bind(name).execute(&mut *tx).await.map_err(|_| ApiError::internal(request_id))?.rows_affected() > 0;
+                        .bind(installation_id).bind(name).execute(&mut *tx).await.map_err(|error| ApiError::internal(request_id).cause(error))?.rows_affected() > 0;
                 }
             }
         }
@@ -1242,7 +1254,7 @@ async fn update_github_installation(
     }
     tx.commit()
         .await
-        .map_err(|_| ApiError::internal(request_id))?;
+        .map_err(|error| ApiError::internal(request_id).cause(error))?;
     Ok(())
 }
 
@@ -1455,7 +1467,7 @@ async fn read_only(
     billing::write_access(state.tasks.database(), workspace_id)
         .await
         .map(|access| access == WorkspaceAccess::ReadOnly)
-        .map_err(|_| ApiError::internal(request_id))
+        .map_err(|error| ApiError::internal(request_id).cause(error))
 }
 
 fn bearer_token(headers: &HeaderMap) -> Option<&str> {
@@ -1569,9 +1581,16 @@ fn validation(field: &'static str, request_id: Option<&RequestId>) -> ApiError {
 pub(crate) struct ApiError {
     status: StatusCode,
     problem: Box<Problem>,
+    cause: Option<String>,
 }
 
 impl ApiError {
+    /// Records why this 500 happened. The HTTP layer logs it with the request ID; the client does not see it.
+    pub(crate) fn cause(mut self, error: impl std::fmt::Display) -> Self {
+        self.cause = Some(error.to_string());
+        self
+    }
+
     fn new(
         status: StatusCode,
         code: &str,
@@ -1593,6 +1612,7 @@ impl ApiError {
                 errors: None,
                 conflict: None,
             }),
+            cause: None,
         }
     }
 
@@ -1609,12 +1629,18 @@ impl ApiError {
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        (
+        let mut response = (
             self.status,
             [(axum::http::header::CONTENT_TYPE, "application/problem+json")],
             Json(self.problem),
         )
-            .into_response()
+            .into_response();
+        if let Some(cause) = self.cause {
+            response
+                .extensions_mut()
+                .insert(orbit_platform::ErrorCause(cause));
+        }
+        response
     }
 }
 

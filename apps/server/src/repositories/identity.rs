@@ -1,7 +1,8 @@
 use orbit_domain::WorkspaceDefaults;
 use orbit_platform::{
-    AuthenticatedUser, Database, Id, IssuedSession, IssuedToken, Row, SessionRecord,
-    TimestampMillis, UploadError, UploadService, generate_opaque_token, normalize_email,
+    AuthenticatedUser, BlobStoreError, Database, Id, IssuedSession, IssuedToken, Row,
+    SessionRecord, TimestampMillis, UploadError, UploadService, generate_opaque_token,
+    normalize_email,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -1388,7 +1389,8 @@ impl IdentityRepository {
     }
 
     /// The user's profile picture, for the user and for people who share a workspace with them.
-    /// A guest only sees the people it shares a conversation with.
+    /// A guest only sees the people it shares a conversation with. A picture whose file is in no storage tier (for
+    /// example, deleted from the bucket by hand) is removed, so the user shows initials until they upload a new one.
     pub async fn avatar(
         &self,
         uploads: &UploadService,
@@ -1396,7 +1398,7 @@ impl IdentityRepository {
         user_id: Id,
     ) -> Result<Option<Avatar>, IdentityError> {
         let row = sqlx::query(
-            "SELECT a.mime_type, a.bytes, b.storage_key FROM user_avatars a \
+            "SELECT a.mime_type, a.bytes, a.blob_id, b.storage_key FROM user_avatars a \
              LEFT JOIN attachment_blobs b ON b.id = a.blob_id \
              WHERE a.user_id = $1 AND ($1 = $2 OR EXISTS ( \
              SELECT 1 FROM memberships AS theirs JOIN memberships AS mine \
@@ -1413,13 +1415,29 @@ impl IdentityRepository {
         let Some(row) = row else {
             return Ok(None);
         };
-        Ok(Some(Avatar {
-            mime_type: row.get("mime_type"),
-            bytes: match row.get("bytes") {
-                Some(bytes) => bytes,
-                None => uploads.read_blob(row.get("storage_key")).await?,
-            },
-        }))
+        let mime_type = row.get("mime_type");
+        if let Some(bytes) = row.get::<Option<Vec<u8>>, _>("bytes") {
+            return Ok(Some(Avatar { mime_type, bytes }));
+        }
+        if let Some(storage_key) = row.get::<Option<String>, _>("storage_key") {
+            match uploads.read_blob(&storage_key).await {
+                Ok(bytes) => return Ok(Some(Avatar { mime_type, bytes })),
+                Err(UploadError::BlobStore(BlobStoreError::Io { source, .. }))
+                    if source.kind() == std::io::ErrorKind::NotFound => {}
+                // A bucket that is down is not a missing file: keep the picture.
+                Err(error) => return Err(error.into()),
+            }
+        }
+        tracing::warn!(%user_id, "profile picture file is missing; removing the picture");
+        // The same blob only: a picture uploaded meanwhile stays.
+        sqlx::query(
+            "DELETE FROM user_avatars WHERE user_id = $1 AND blob_id IS NOT DISTINCT FROM $2",
+        )
+        .bind(user_id.to_string())
+        .bind(row.get::<Option<String>, _>("blob_id"))
+        .execute(self.database.pool())
+        .await?;
+        Ok(None)
     }
 
     /// Replaces the user's profile picture. Callers check the format and size first. The image is an attachment

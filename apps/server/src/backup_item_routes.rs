@@ -217,7 +217,7 @@ async fn open(
         .identity
         .is_installation_admin(session.user.id)
         .await
-        .map_err(|_| internal(instance, request_id))?;
+        .map_err(|error| internal(instance, request_id).cause(error))?;
     if !admin {
         return Err(ApiError::new(
             StatusCode::FORBIDDEN,

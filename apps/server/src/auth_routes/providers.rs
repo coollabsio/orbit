@@ -196,7 +196,7 @@ pub(super) async fn start_provider_sign_in(
     let provider = Provider::parse(&provider).ok_or_else(|| not_configured(START, rid))?;
     let credentials = credentials(&state, provider)
         .await
-        .map_err(|_| ApiError::internal(START, rid))?
+        .map_err(|error| ApiError::internal(START, rid).cause(error))?
         .ok_or_else(|| not_configured(START, rid))?;
     if !is_pkce_challenge(&body.code_challenge) {
         return Err(unprocessable(
@@ -283,7 +283,7 @@ pub(super) async fn start_provider_sign_in(
             AUTHORIZATION_LIFETIME_MILLIS,
         )
         .await
-        .map_err(|_| ApiError::internal(START, rid))?
+        .map_err(|error| ApiError::internal(START, rid).cause(error))?
         .ok_or_else(|| busy(START, rid))?;
     let url = state.providers.authorization_url(
         provider,
@@ -510,7 +510,7 @@ pub(super) async fn exchange_provider_sign_in(
         .pending
         .take(&body.handoff)
         .await
-        .map_err(|_| ApiError::internal(EXCHANGE, rid))?
+        .map_err(|error| ApiError::internal(EXCHANGE, rid).cause(error))?
     else {
         return Err(invalid_handoff(rid));
     };
@@ -626,7 +626,7 @@ async fn finish_sign_in(
         .repository
         .two_factor_status(user.id)
         .await
-        .map_err(|_| ApiError::internal(instance, rid))?
+        .map_err(|error| ApiError::internal(instance, rid).cause(error))?
         .totp_enabled;
     if totp_enabled {
         return two_factor::challenge(
@@ -701,7 +701,7 @@ async fn password_challenge(
         .repository
         .find_by_email(&user.email)
         .await
-        .map_err(|_| ApiError::internal(EXCHANGE, rid))?
+        .map_err(|error| ApiError::internal(EXCHANGE, rid).cause(error))?
         .is_some_and(|identity| identity.password_hash.is_some());
     if !has_password {
         record_failure(
@@ -731,7 +731,7 @@ async fn password_challenge(
             attempts: 0,
         })
         .await
-        .map_err(|_| ApiError::internal(EXCHANGE, rid))?
+        .map_err(|error| ApiError::internal(EXCHANGE, rid).cause(error))?
         .ok_or_else(|| busy(EXCHANGE, rid))?;
     Ok((
         StatusCode::ACCEPTED,
@@ -783,7 +783,7 @@ pub(super) async fn link_provider_sign_in(
         .pending
         .take(&body.password_token)
         .await
-        .map_err(|_| ApiError::internal(LINK, rid))?
+        .map_err(|error| ApiError::internal(LINK, rid).cause(error))?
     else {
         return Err(expired());
     };
@@ -806,7 +806,7 @@ pub(super) async fn link_provider_sign_in(
                 .pending
                 .restore(&body.password_token, expires_at, restore(attempts))
                 .await
-                .map_err(|_| ApiError::internal(LINK, rid))?;
+                .map_err(|error| ApiError::internal(LINK, rid).cause(error))?;
             return Err(ApiError::throttled(delay, LINK, rid));
         }
         Err(ThrottleDecision::Allowed) => unreachable!("allowed admission returns a reservation"),
@@ -815,7 +815,7 @@ pub(super) async fn link_provider_sign_in(
         .repository
         .find_by_email(&user.email)
         .await
-        .map_err(|_| ApiError::internal(LINK, rid))?
+        .map_err(|error| ApiError::internal(LINK, rid).cause(error))?
         .filter(|identity| identity.id == user.id)
         .and_then(|identity| identity.password_hash);
     let Some(password_hash) = password_hash else {
@@ -827,7 +827,7 @@ pub(super) async fn link_provider_sign_in(
         .passwords
         .verify(body.password, password_hash)
         .await
-        .map_err(|_| ApiError::internal(LINK, rid))?
+        .map_err(|error| ApiError::internal(LINK, rid).cause(error))?
         .valid;
     if !valid {
         state
@@ -847,7 +847,7 @@ pub(super) async fn link_provider_sign_in(
                 .pending
                 .restore(&body.password_token, expires_at, restore(attempts + 1))
                 .await
-                .map_err(|_| ApiError::internal(LINK, rid))?;
+                .map_err(|error| ApiError::internal(LINK, rid).cause(error))?;
         }
         return Err(ApiError::new(
             StatusCode::UNAUTHORIZED,
@@ -928,7 +928,7 @@ pub(super) async fn list_connected_accounts(
         .connected_accounts(session.user.id)
         .await
         .map(Json)
-        .map_err(|_| ApiError::internal(instance, request_id.as_ref()))
+        .map_err(|error| ApiError::internal(instance, request_id.as_ref()).cause(error))
 }
 
 /// Disconnects a provider. Refused with 409 `last_sign_in_method` when it is the account's only way in.
