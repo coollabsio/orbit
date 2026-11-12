@@ -186,7 +186,7 @@ export async function newTeamspace(client: OrbitClient, workspaceId: string, nam
   return (await createTeamspace({ client, path: { workspace_id: workspaceId }, body: { name }, throwOnError: true })).data
 }
 
-export async function saveTeamspace(client: OrbitClient, workspaceId: string, teamspace: Pick<Teamspace, 'id' | 'version'>, body: { name?: string; icon?: string | null }): Promise<Teamspace> {
+export async function saveTeamspace(client: OrbitClient, workspaceId: string, teamspace: Pick<Teamspace, 'id' | 'version'>, body: { name?: string; icon?: string | null; project_id?: string | null }): Promise<Teamspace> {
   return (await updateTeamspace({ client, path: { workspace_id: workspaceId, teamspace_id: teamspace.id }, body: { ...body, expected_version: teamspace.version }, throwOnError: true })).data
 }
 

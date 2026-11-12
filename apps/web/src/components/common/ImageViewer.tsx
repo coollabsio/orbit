@@ -1,5 +1,5 @@
 // Port of the chat reference ImageViewer: full-screen overlay with filename, zoom %, download, ± / reset / close.
-import { useRef, useState, type ComponentProps, type KeyboardEvent, type TouchEvent } from 'react'
+import { useEffect, useRef, useState, type ComponentProps, type KeyboardEvent, type TouchEvent } from 'react'
 import { Copy, Download, Xmark as X } from 'reicon-react'
 import { cn } from 'cn'
 import { toast } from 'sonner'
@@ -47,6 +47,9 @@ export function ImageViewer({ attachment, onClose }: { attachment: Attachment; o
   const [pan, setPan] = useState<Point>({ x: 0, y: 0 })
   const [gesturing, setGesturing] = useState(false)
   const gesture = useRef<Gesture | null>(null)
+  // The wheel handler reads the newest zoom and pan here: several wheel events can come before one render.
+  const view = useRef({ zoom, pan })
+  const [stage, setStage] = useState<HTMLElement | null>(null)
   // Closing plays the dialog's exit first; the caller unmounts the viewer once it has finished.
   const [open, setOpen] = useState(true)
   const close = () => setOpen(false)
@@ -54,9 +57,26 @@ export function ImageViewer({ attachment, onClose }: { attachment: Attachment; o
   // Back at 100% or less there is nothing to pan to, so the image goes back to the center.
   function setZoom(value: number, nextPan: Point = pan) {
     const next = clampZoom(value)
-    setZoomState(next)
-    setPan(next <= 1 ? { x: 0, y: 0 } : nextPan)
+    view.current = { zoom: next, pan: next <= 1 ? { x: 0, y: 0 } : nextPan }
+    setZoomState(view.current.zoom)
+    setPan(view.current.pan)
   }
+
+  // The mouse wheel (and a trackpad pinch) zooms around the pointer. A native listener, because React's
+  // wheel listener is passive and cannot stop the page from scrolling.
+  useEffect(() => {
+    if (!stage) return
+    function onWheel(event: WheelEvent) {
+      event.preventDefault()
+      const { zoom, pan } = view.current
+      const next = clampZoom(zoom * Math.exp(-event.deltaY * 0.002))
+      const rect = stage!.getBoundingClientRect()
+      const at = { x: event.clientX - rect.left - rect.width / 2, y: event.clientY - rect.top - rect.height / 2 }
+      setZoom(next, { x: at.x - ((at.x - pan.x) * next) / zoom, y: at.y - ((at.y - pan.y) * next) / zoom })
+    }
+    stage.addEventListener('wheel', onWheel, { passive: false })
+    return () => stage.removeEventListener('wheel', onWheel)
+  }, [stage])
 
   // Two fingers pinch to zoom (and move the image with them); one finger pans a zoomed image.
   function startGesture(event: TouchEvent) {
@@ -150,6 +170,7 @@ export function ImageViewer({ attachment, onClose }: { attachment: Attachment; o
           </div>
         </div>
         <Button type="button" variant="ghost" className="flex h-auto min-h-0 w-full flex-1 shrink! cursor-zoom-out items-center justify-center overflow-auto rounded-none border-0 p-2 font-normal whitespace-normal select-auto hover:bg-transparent touch-none sm:p-6 dark:hover:bg-transparent active:not-aria-[haspopup]:translate-y-0"
+          ref={setStage}
           title="Close image viewer"
           onClick={close}
           onTouchStart={startGesture}

@@ -200,6 +200,13 @@ favorites through `/pages/favorites` (list), `/pages/{page_id}/favorite` (PUT/DE
   Each workspace starts with a default teamspace "General"; new root pages go there unless created in another space.
   The default is derived: the first teamspace by position (with several teamspaces its header shows a small "Default"
   label with a tooltip), so moving another teamspace to the top makes it the default.
+- Project docs (#64): a teamspace can hold the docs of one project (`teamspaces.project_id`, `PATCH /teamspaces/{id}`
+  `{ project_id }`, `null` = global docs; a project has at most one teamspace: 409 `project_has_teamspace`; a project
+  the member does not see or a trashed one: 422 `project_not_found`). Project settings → "Docs" card picks the teamspace,
+  creates one named after the project, or opens its first page. The docs sidebar shows the project (color dot + name)
+  after the teamspace name, only for projects the member sees. MCP `list_docs` and `GET /docs` take `project_id` to list
+  only the global docs, that project's docs and private docs (a filter, not a permission). A deleted project leaves a
+  global teamspace (`ON DELETE SET NULL`). Workspace export/import does not carry the link.
 - Sidebar: 48px "Documents" header (its "+" creates a page in the default teamspace), a "Teamspaces" label with "+" (create
   dialog), one collapsible section per teamspace (hover "+" adds a page there; "…" menu: Rename inline, Change icon (emoji
   picker anchored to the header; "Remove" returns to the default people glyph), Move up / Move down, Delete teamspace for

@@ -288,6 +288,12 @@ struct ProjectArgs {
 }
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+struct DocsArgs {
+    /// An approved project: leave out the docs of teamspaces linked to other projects.
+    project_id: Option<String>,
+}
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 struct CursorArgs {
     /// Continue from the next_cursor of the previous response.
     cursor: Option<String>,
@@ -432,9 +438,9 @@ fn tools() -> Vec<Tool> {
             "Move a task and its sub-issues to the trash for 30 days using its current version. With permanent: true, delete them forever instead (also a task in the trash); this cannot be undone.",
             true,
         ),
-        definition::<EmptyArgs>(
+        definition::<DocsArgs>(
             "list_docs",
-            "List documents visible to the connected user in the approved workspace.",
+            "List documents visible to the connected user in the approved workspace. With project_id, list only the global docs, the docs of that project's teamspace and private docs.",
         ),
         definition::<PageArgs>("get_doc", "Read a visible document."),
         write_definition::<CreateDocArgs>("create_doc", "Create a document from Markdown.", false),
@@ -663,8 +669,10 @@ impl TaskTools {
                     .map(|()| json!({"deleted": true}))
             }
             "list_docs" => {
-                let _: EmptyArgs = arguments(&request)?;
-                api.list_docs().await.map(|p| json!(p))
+                let a: DocsArgs = arguments(&request)?;
+                api.list_docs(a.project_id.as_deref().map(parse_id).transpose()?)
+                    .await
+                    .map(|p| json!(p))
             }
             "get_doc" => {
                 let a: PageArgs = arguments(&request)?;

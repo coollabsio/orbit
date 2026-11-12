@@ -15,7 +15,7 @@ use crate::repositories::teamspaces::{
     TeamspaceChanges, TeamspaceError, TeamspaceList, TeamspaceRecord, TeamspaceRepository,
 };
 use crate::task_routes::{
-    ApiError, ApiJson, ApiQuery, MutationQuery, authenticate_session, bounded,
+    ApiError, ApiJson, ApiQuery, MutationQuery, authenticate_session, bounded, deserialize_patch,
     deserialize_source_patch, request_id_value, validation,
 };
 
@@ -71,6 +71,11 @@ struct TeamspaceUpdateBody {
     /// Absent: unchanged. `null`: cleared.
     #[serde(default, deserialize_with = "deserialize_source_patch")]
     icon: Option<Option<String>>,
+    /// The project whose docs the teamspace holds. Absent: unchanged. `null`: global docs. A
+    /// project has at most one teamspace.
+    #[serde(default, deserialize_with = "deserialize_patch")]
+    #[schema(value_type = Option<String>)]
+    project_id: Option<Option<Id>>,
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -158,6 +163,7 @@ async fn update_teamspace(
                     .transpose()
             })
             .transpose()?,
+        project_id: body.project_id,
     };
     state
         .teamspaces
@@ -325,6 +331,22 @@ fn teamspace_problem(
             "last_teamspace",
             "Last teamspace",
             "A workspace keeps at least one teamspace.",
+            instance,
+            request_id,
+        ),
+        TeamspaceError::ProjectNotFound => ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "project_not_found",
+            "Project not found",
+            "The project does not exist or is not visible.",
+            instance,
+            request_id,
+        ),
+        TeamspaceError::ProjectTaken => ApiError::new(
+            StatusCode::CONFLICT,
+            "project_has_teamspace",
+            "Project has a teamspace",
+            "Another teamspace already holds this project's docs.",
             instance,
             request_id,
         ),
