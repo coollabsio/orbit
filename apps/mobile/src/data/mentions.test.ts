@@ -36,12 +36,14 @@ test('suggestions match name or handle without regard to case, people for @ and 
   expect(mentionSuggestions({ start: 0, end: 1, query: '', trigger: '#' }, people, channels)).toEqual([{ id: 'c1', label: 'general', detail: '', kind: 'channel' }])
 })
 
-test('picking replaces the query with the name and a space, and the @ button adds an @ at the cursor', () => {
+test('picking replaces the query with the name and a space, and the @ and # buttons add their trigger at the cursor', () => {
   const query = mentionQuery('hi @gr!', 6)!
   expect(applyMention('hi @gr!', query, { id: 'u3', label: 'Grace Hopper', detail: 'grace', kind: 'user' })).toEqual({ text: 'hi @Grace Hopper !', cursor: 17 })
-  expect(insertTrigger('', 0)).toEqual({ text: '@', cursor: 1 })
-  expect(insertTrigger('hi', 2)).toEqual({ text: 'hi @', cursor: 4 })
-  expect(insertTrigger('hi there', 3)).toEqual({ text: 'hi @there', cursor: 4 })
+  expect(insertTrigger('', 0, '@')).toEqual({ text: '@', cursor: 1 })
+  expect(insertTrigger('hi', 2, '@')).toEqual({ text: 'hi @', cursor: 4 })
+  expect(insertTrigger('hi there', 3, '@')).toEqual({ text: 'hi @there', cursor: 4 })
+  expect(insertTrigger('see', 3, '#')).toEqual({ text: 'see #', cursor: 5 })
+  expect(insertTrigger('see ', 4, '#')).toEqual({ text: 'see #', cursor: 5 })
 })
 
 test('a chat body stores mentions as tokens: longest name first, code left alone', () => {
