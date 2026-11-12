@@ -476,7 +476,7 @@ pub(crate) async fn save_github_project_connection(
                 id,
             ));
         }
-        Err(_) => return Err(ApiError::internal(id)),
+        Err(error) => return Err(ApiError::internal(id).cause(error)),
     }
     tx.commit()
         .await
@@ -754,11 +754,12 @@ async fn store_github_app(
     id: Option<&RequestId>,
 ) -> Result<(), ApiError> {
     if app.id <= 0 || app.slug.is_empty() || app.pem.is_empty() || app.webhook_secret.is_empty() {
-        return Err(ApiError::internal(id));
+        return Err(ApiError::internal(id).cause("GitHub returned an incomplete app manifest"));
     }
-    let pem = encrypt_github_secret(key, &app.pem).map_err(|_| ApiError::internal(id))?;
-    let secret =
-        encrypt_github_secret(key, &app.webhook_secret).map_err(|_| ApiError::internal(id))?;
+    let pem = encrypt_github_secret(key, &app.pem)
+        .map_err(|()| ApiError::internal(id).cause("could not encrypt the secret"))?;
+    let secret = encrypt_github_secret(key, &app.webhook_secret)
+        .map_err(|()| ApiError::internal(id).cause("could not encrypt the secret"))?;
     let mut tx = state
         .tasks
         .database()
@@ -790,7 +791,7 @@ async fn store_github_app(
                 id,
             ));
         }
-        Err(_) => return Err(ApiError::internal(id)),
+        Err(error) => return Err(ApiError::internal(id).cause(error)),
     }
     record_github_change(&mut tx, workspace, "github.app.registered", id).await?;
     tx.commit()
@@ -1136,9 +1137,13 @@ async fn github_webhook_from_database(
                 id,
             )
         }
+        TaskError::Unavailable(error) => {
+            tracing::warn!(?error, "GitHub work item sync failed");
+            ApiError::internal(id).cause(error)
+        }
         _ => {
             tracing::warn!(error = ?cause, "GitHub work item sync failed");
-            ApiError::internal(id)
+            ApiError::internal(id).cause(cause)
         }
     })?;
     Ok(StatusCode::OK)
@@ -1511,9 +1516,8 @@ fn token_problem(error: ApiTokenError, request_id: Option<&RequestId>) -> ApiErr
             "The API token is invalid or revoked.",
             request_id,
         ),
-        ApiTokenError::Unavailable(_) | ApiTokenError::InvalidIdentifier => {
-            ApiError::internal(request_id)
-        }
+        ApiTokenError::Unavailable(error) => ApiError::internal(request_id).cause(error),
+        error @ ApiTokenError::InvalidIdentifier => ApiError::internal(request_id).cause(error),
     }
 }
 
@@ -1542,7 +1546,8 @@ fn task_problem(error: TaskError, request_id: Option<&RequestId>) -> ApiError {
             &reached.detail(),
             request_id,
         ),
-        TaskError::Conflict
+        TaskError::Unavailable(error) => ApiError::internal(request_id).cause(error),
+        error @ (TaskError::Conflict
         | TaskError::Busy
         | TaskError::GithubContentReadOnly
         | TaskError::GithubLinkedMove
@@ -1556,8 +1561,7 @@ fn task_problem(error: TaskError, request_id: Option<&RequestId>) -> ApiError {
         | TaskError::CycleOverlap
         | TaskError::NoNextCycle
         | TaskError::ProjectNotTrashed
-        | TaskError::TaskNotTrashed
-        | TaskError::Unavailable(_) => ApiError::internal(request_id),
+        | TaskError::TaskNotTrashed) => ApiError::internal(request_id).cause(error),
     }
 }
 

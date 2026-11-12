@@ -79,13 +79,15 @@ pub enum TokenApiError {
     Page(PageError),
     /// A database refusal other than not found (see `databases`).
     Database(crate::repositories::databases::DatabaseError),
-    Internal,
+    /// Why it failed, for the server log; clients do not see it.
+    Internal(String),
 }
 
 impl From<PageError> for TokenApiError {
     fn from(error: PageError) -> Self {
         match error {
-            PageError::Unavailable(_) | PageError::Corrupt => Self::Internal,
+            PageError::Unavailable(error) => Self::Internal(error.to_string()),
+            error @ PageError::Corrupt => Self::Internal(error.to_string()),
             error => Self::Page(error),
         }
     }
@@ -98,8 +100,8 @@ impl From<TaskError> for TokenApiError {
 }
 
 impl From<sqlx::Error> for TokenApiError {
-    fn from(_: sqlx::Error) -> Self {
-        Self::Internal
+    fn from(error: sqlx::Error) -> Self {
+        Self::Internal(error.to_string())
     }
 }
 
@@ -877,7 +879,8 @@ impl Authorized<'_> {
             .await
             .map_err(|error| match error {
                 WorkspaceError::NotFound => TokenApiError::NotAvailable,
-                _ => TokenApiError::Internal,
+                WorkspaceError::Unavailable(error) => TokenApiError::Internal(error.to_string()),
+                error => TokenApiError::Internal(error.to_string()),
             })?;
         Ok(Page {
             items: members
@@ -1287,7 +1290,7 @@ impl Authorized<'_> {
                 let id = |column: &str| {
                     row.get::<String, _>(column)
                         .parse::<Id>()
-                        .map_err(|_| TokenApiError::Internal)
+                        .map_err(|error| TokenApiError::Internal(error.to_string()))
                 };
                 Ok(Some((id("id")?, id("task_id")?)))
             }
@@ -1560,6 +1563,31 @@ impl Authorized<'_> {
         self.doc_view(pages, page).await
     }
 
+    /// The titles that the actor can see for the links of the doc `page_id`: the page tree and
+    /// the doc's own sub-pages. A database row and its sub-pages are not in the tree, so a link
+    /// from a row to its sub-pages would stay "Untitled" without the second list.
+    async fn link_titles(
+        &self,
+        pages: &PageRepository,
+        page_id: Id,
+    ) -> Result<HashMap<String, String>> {
+        let p = self.principal;
+        let tree = pages
+            .pages(p.workspace_id, p.actor_id)
+            .await
+            .map_err(hidden_page)?;
+        let sub_pages = pages
+            .descendants(p.workspace_id, page_id, p.actor_id)
+            .await
+            .map_err(hidden_page)?;
+        Ok(tree
+            .items
+            .into_iter()
+            .chain(sub_pages.items)
+            .map(|summary| (summary.id.to_string(), summary.title))
+            .collect())
+    }
+
     async fn doc_view(&self, pages: &PageRepository, mut page: PageRecord) -> Result<DocView> {
         let markdown = self.markdown(pages, &page.content).await?;
         let values = self.row_values(&page).await?;
@@ -1577,17 +1605,8 @@ impl Authorized<'_> {
         linked_pages(blocks, &mut linked);
         let mut titles = HashMap::new();
         if !linked.is_empty() {
-            let p = self.principal;
-            let visible = pages
-                .pages(p.workspace_id, p.actor_id)
-                .await
-                .map_err(hidden_page)?;
-            for summary in visible.items {
-                let id = summary.id.to_string();
-                if linked.contains(&id) {
-                    titles.insert(id, summary.title);
-                }
-            }
+            titles = self.link_titles(pages, page.id).await?;
+            titles.retain(|id, _| linked.contains(id));
         }
         Ok(blocks_to_markdown(blocks, &DocLinks(titles)))
     }
@@ -1653,14 +1672,7 @@ impl Authorized<'_> {
             // Merged onto the current document with the links of `doc_view`, so the blocks the
             // Markdown leaves as read stay exactly as they are.
             Some(markdown) => {
-                let titles = pages
-                    .pages(p.workspace_id, p.actor_id)
-                    .await
-                    .map_err(hidden_page)?
-                    .items
-                    .into_iter()
-                    .map(|summary| (summary.id.to_string(), summary.title))
-                    .collect();
+                let titles = self.link_titles(pages, page_id).await?;
                 let members = members(self.api.tasks.database().pool(), p.workspace_id).await?;
                 pages
                     .update_page_markdown_at_revision(
@@ -1843,7 +1855,8 @@ impl Authorized<'_> {
 /// Doc reads tell no refusal apart from a missing doc; a failing database stays an error.
 fn hidden_page(error: PageError) -> TokenApiError {
     match error {
-        PageError::Unavailable(_) | PageError::Corrupt => TokenApiError::Internal,
+        PageError::Unavailable(error) => TokenApiError::Internal(error.to_string()),
+        error @ PageError::Corrupt => TokenApiError::Internal(error.to_string()),
         _ => TokenApiError::NotAvailable,
     }
 }
@@ -1851,7 +1864,8 @@ fn hidden_page(error: PageError) -> TokenApiError {
 /// [`hidden_page`] for chat reads.
 fn hidden_chat(error: ChatError) -> TokenApiError {
     match error {
-        ChatError::Unavailable(_) | ChatError::Upload(_) => TokenApiError::Internal,
+        ChatError::Unavailable(error) => TokenApiError::Internal(error.to_string()),
+        ChatError::Upload(error) => TokenApiError::Internal(error.to_string()),
         _ => TokenApiError::NotAvailable,
     }
 }

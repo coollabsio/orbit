@@ -18,7 +18,8 @@ impl From<DatabaseError> for TokenApiError {
     fn from(error: DatabaseError) -> Self {
         match error {
             DatabaseError::NotFound => Self::NotAvailable,
-            DatabaseError::Unavailable(_) | DatabaseError::Corrupt => Self::Internal,
+            DatabaseError::Unavailable(error) => Self::Internal(error.to_string()),
+            error @ DatabaseError::Corrupt => Self::Internal(error.to_string()),
             DatabaseError::TrialLimit(reached) => Self::Page(PageError::TrialLimit(reached)),
             error => Self::Database(error),
         }
@@ -317,9 +318,10 @@ impl Authorized<'_> {
             .await
         {
             Ok(row) => Ok(Some(row.values)),
-            Err(DatabaseError::Unavailable(_) | DatabaseError::Corrupt) => {
-                Err(TokenApiError::Internal)
+            Err(DatabaseError::Unavailable(error)) => {
+                Err(TokenApiError::Internal(error.to_string()))
             }
+            Err(error @ DatabaseError::Corrupt) => Err(TokenApiError::Internal(error.to_string())),
             // A template of the database, or a database the reader cannot see.
             Err(_) => Ok(None),
         }

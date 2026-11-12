@@ -202,13 +202,14 @@ pub(super) fn upload_problem(
         {
             invalid_multipart(instance, request_id)
         }
-        _ => ApiError::new(
+        error => ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             "internal_error",
             "Internal server error",
             "An unexpected error occurred. Use the request ID when contacting support.",
             instance,
             request_id,
-        ),
+        )
+        .cause(error),
     }
 }

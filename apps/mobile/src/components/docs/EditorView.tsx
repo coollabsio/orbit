@@ -2,14 +2,14 @@ import type { CollabProblem } from '@orbit/editor/collab/session'
 import { isSafeLinkHref } from '@orbit/editor/links'
 import type { DatabaseDetail, PageSummary, TrashedPage } from '@orbit/api/generated/types.gen'
 import { ApiProblem } from '@orbit/api/problem'
-import { useQueries } from '@tanstack/react-query'
+import { useQueries, useQuery } from '@tanstack/react-query'
 import { type Href, router } from 'expo-router'
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { Linking } from 'react-native'
 
 import { type DatabaseBlockRef, databaseCard, databaseCardKey, databaseHref } from '../../data/database-card'
 import * as databaseApi from '../../data/database-api'
-import { collabTicket, fileDataUrl, fileDeleted } from '../../data/docs-api'
+import { collabTicket, descendants, fileDataUrl, fileDeleted } from '../../data/docs-api'
 import { formScreenOf } from '../../data/form-api'
 import { keys } from '../../data/keys'
 import { type FormatState, whileMounted } from '../../data/page-editor'
@@ -43,6 +43,14 @@ export const EditorView = memo(function EditorView({ ref, pageId, epoch, generat
   const pages = usePages()
   const trash = usePageTrash()
   const members = useMembers()
+  // A database row and its sub-pages are not in the tree: the server lists the sub-pages that the page cards point to.
+  const inTree = pages.data?.some((item) => item.id === pageId) ?? true
+  const subPages = useQuery({
+    queryKey: [...keys.pages(workspaceId), 'descendants', pageId],
+    queryFn: () => descendants(client, workspaceId, pageId),
+    enabled: !inTree,
+    retry: false,
+  })
   const [height, setHeight] = useState(120)
   const [databaseBlocks, setDatabaseBlocks] = useState<DatabaseBlockRef[]>([])
   const latest = useRef(callbacks)
@@ -61,9 +69,10 @@ export const EditorView = memo(function EditorView({ ref, pageId, epoch, generat
     const out: Record<string, PageCardInfo> = {}
     for (const item of trash.data ?? []) out[item.id] = { title: item.title, icon: item.icon, trashed: true, database: item.kind === 'database' }
     for (const item of extraPages ?? []) out[item.id] = { title: item.title, icon: item.icon, trashed: false, database: false }
+    for (const item of subPages.data ?? []) out[item.id] = { title: item.title, icon: item.icon, trashed: false, database: item.kind === 'database' }
     for (const item of pages.data ?? []) out[item.id] = { title: item.title, icon: item.icon, trashed: false, database: item.kind === 'database' }
     return out
-  }, [pages.data, trash.data, extraPages])
+  }, [pages.data, trash.data, extraPages, subPages.data])
   const databases = useDatabaseCards(databaseBlocks, pages.data, trash.data)
   const names = useMemo(() => Object.fromEntries((members.data ?? []).map((member) => [member.user_id, member.display_name])), [members.data])
   const editorColors = useMemo(

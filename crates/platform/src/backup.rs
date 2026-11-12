@@ -393,39 +393,47 @@ impl BackupService {
         Ok(snapshot)
     }
 
-    /// Deletes a local snapshot, a pre-migration backup or a snapshot in the S3 bucket.
+    /// Deletes a snapshot or a pre-migration backup from the S3 bucket and from this server. A snapshot can be in
+    /// both places (its upload worked, but removing the local copy failed). The S3 copy goes first, so when S3
+    /// fails the local copy stays and the delete can be tried again.
     pub async fn delete(&self, id: &str) -> Result<(), BackupError> {
         if Uuid::parse_str(id).is_err() {
             return Err(BackupError::NotFound { id: id.to_owned() });
         }
+        let mut found = false;
+        if let Some(bucket) = self.storage.bucket() {
+            let prefix = remote_prefix(BackupKind::Snapshot, id);
+            if let Some(contents) = bucket
+                .get_bytes(&format!("{prefix}{MANIFEST_FILE}"))
+                .await?
+            {
+                let manifest: BackupManifest =
+                    serde_json::from_slice(&contents).map_err(|source| BackupError::Manifest {
+                        path: PathBuf::from(format!("{prefix}{MANIFEST_FILE}")),
+                        source,
+                    })?;
+                let snapshot = BackupSnapshot {
+                    id: id.to_owned(),
+                    path: self.backup_root.join(DOWNLOADS).join(id),
+                    manifest,
+                    in_object_storage: true,
+                };
+                delete_remote_snapshot(&bucket, &snapshot).await?;
+                found = true;
+            }
+        }
         for kind in [BackupKind::Snapshot, BackupKind::PreMigration] {
             let path = self.kind_root(kind).join(id);
             if path.is_dir() {
-                return remove_dir_all(&path);
+                remove_dir_all(&path)?;
+                found = true;
             }
         }
-        let Some(bucket) = self.storage.bucket() else {
-            return Err(BackupError::NotFound { id: id.to_owned() });
-        };
-        let prefix = remote_prefix(BackupKind::Snapshot, id);
-        let Some(contents) = bucket
-            .get_bytes(&format!("{prefix}{MANIFEST_FILE}"))
-            .await?
-        else {
-            return Err(BackupError::NotFound { id: id.to_owned() });
-        };
-        let manifest: BackupManifest =
-            serde_json::from_slice(&contents).map_err(|source| BackupError::Manifest {
-                path: PathBuf::from(format!("{prefix}{MANIFEST_FILE}")),
-                source,
-            })?;
-        let snapshot = BackupSnapshot {
-            id: id.to_owned(),
-            path: self.backup_root.join(DOWNLOADS).join(id),
-            manifest,
-            in_object_storage: true,
-        };
-        delete_remote_snapshot(&bucket, &snapshot).await
+        if found {
+            Ok(())
+        } else {
+            Err(BackupError::NotFound { id: id.to_owned() })
+        }
     }
 
     /// Replaces the SQLite file at `database_path` with an SQLite snapshot.

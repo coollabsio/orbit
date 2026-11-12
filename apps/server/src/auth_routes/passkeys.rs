@@ -273,7 +273,12 @@ pub(super) async fn finish_passkey_registration(
                 instance,
                 request_id.as_ref(),
             ),
-            PasskeySaveError::Unavailable(_) => ApiError::internal(instance, request_id.as_ref()),
+            PasskeySaveError::Unavailable(IdentityError::Unavailable(error)) => {
+                ApiError::internal(instance, request_id.as_ref()).cause(error)
+            }
+            PasskeySaveError::Unavailable(error) => {
+                ApiError::internal(instance, request_id.as_ref()).cause(error)
+            }
         })?;
     Ok((StatusCode::CREATED, Json(record)).into_response())
 }
@@ -432,7 +437,10 @@ pub(super) async fn finish_passkey_login(
         .map_err(|error| match error {
             // Suspended, or the passkey was removed meanwhile.
             IdentityError::InvalidCredential => rejected(),
-            _ => ApiError::internal(instance, request_id.as_ref()),
+            IdentityError::Unavailable(error) => {
+                ApiError::internal(instance, request_id.as_ref()).cause(error)
+            }
+            error => ApiError::internal(instance, request_id.as_ref()).cause(error),
         })?;
     Ok(signed_in_response(
         &state,

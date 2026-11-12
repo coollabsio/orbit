@@ -604,7 +604,9 @@ async fn sign_in(
     {
         Ok(account) => account,
         Err(ProviderSignInError::Refused(refusal)) => return Err(refused(refusal, None).await),
-        Err(ProviderSignInError::Database(_)) => return Err(ApiError::internal(EXCHANGE, rid)),
+        Err(ProviderSignInError::Database(error)) => {
+            return Err(ApiError::internal(EXCHANGE, rid).cause(error));
+        }
     };
     if account.link {
         return password_challenge(state, account.user, profile, rid).await;
@@ -661,7 +663,9 @@ async fn finish_sign_in(
             .await;
             return Err(refusal_problem(refusal, rid));
         }
-        Err(ProviderSignInError::Database(_)) => return Err(ApiError::internal(instance, rid)),
+        Err(ProviderSignInError::Database(error)) => {
+            return Err(ApiError::internal(instance, rid).cause(error));
+        }
     };
     Ok(signed_in_response(state, user, &session, SessionDelivery::for_request(headers)).await)
 }
@@ -909,7 +913,9 @@ fn identity_change_problem(
         IdentityChangeError::LastSignInMethod => {
             return last_sign_in_method(EXCHANGE, rid);
         }
-        IdentityChangeError::Database(_) => return ApiError::internal(EXCHANGE, rid),
+        IdentityChangeError::Database(error) => {
+            return ApiError::internal(EXCHANGE, rid).cause(error);
+        }
     };
     ApiError::new(status, code, title, detail, EXCHANGE, rid)
 }
@@ -966,7 +972,7 @@ pub(super) async fn disconnect_connected_account(
         Ok(()) => Ok(StatusCode::NO_CONTENT),
         Err(IdentityChangeError::NotConnected) => Err(not_found()),
         Err(IdentityChangeError::LastSignInMethod) => Err(last_sign_in_method(instance, rid)),
-        Err(_) => Err(ApiError::internal(instance, rid)),
+        Err(error) => Err(ApiError::internal(instance, rid).cause(error)),
     }
 }
 

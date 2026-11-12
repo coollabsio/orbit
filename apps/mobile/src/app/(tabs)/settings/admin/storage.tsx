@@ -9,6 +9,7 @@ import {
   compressionText,
   type EnvironmentView,
   keepDeletedOptions,
+  movedText,
   movingText,
   s3Body,
   s3Draft,
@@ -125,7 +126,15 @@ function UsageCard({ storage, environment }: { storage: StorageView; environment
   const save = useSaveStorageOptions()
   const ready = Boolean(storage.s3)
   const moving = movingText(storage)
-  const change = (options: Parameters<typeof storageOptions>[1]) => save.mutate(storageOptions(storage, options))
+  // Set when the admin flips "Files in S3" here, so the row says when the move is done, even if it was too quick
+  // to show any progress.
+  const [watchingMove, setWatchingMove] = useState(false)
+  const moved = watchingMove ? movedText(storage) : null
+  const change = (options: Parameters<typeof storageOptions>[1]) => save.mutate(storageOptions(storage, options), {
+    onSuccess: () => {
+      if (options.attachments_in_s3 !== undefined) setWatchingMove(true)
+    },
+  })
   return (
     <SettingsCard title="Usage" description="What Orbit keeps in the bucket, and how often it backs up by itself." flush>
       <SettingsRow first>
@@ -138,6 +147,7 @@ function UsageCard({ storage, environment }: { storage: StorageView; environment
               <OptionHint>{moving}</OptionHint>
             </View>
           ) : null}
+          {moved ? <OptionHint>{moved}</OptionHint> : null}
           {storage.move_error ? <OptionHint error>Moving files stopped: {storage.move_error} Orbit tries again every ten minutes.</OptionHint> : null}
           {environment.attachments_in_s3 ? <SetByEnvironment variable="ORBIT_S3_ATTACHMENTS" /> : null}
         </OptionText>

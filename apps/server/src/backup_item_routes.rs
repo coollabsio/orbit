@@ -355,6 +355,7 @@ fn problem(
             instance,
             request_id,
         ),
-        BackupItemError::Upload(_) | BackupItemError::Database(_) => internal(instance, request_id),
+        BackupItemError::Upload(error) => internal(instance, request_id).cause(error),
+        BackupItemError::Database(error) => internal(instance, request_id).cause(error),
     }
 }
