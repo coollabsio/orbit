@@ -1520,6 +1520,31 @@ impl Authorized<'_> {
         self.doc_view(pages, page).await
     }
 
+    /// The titles that the actor can see for the links of the doc `page_id`: the page tree and
+    /// the doc's own sub-pages. A database row and its sub-pages are not in the tree, so a link
+    /// from a row to its sub-pages would stay "Untitled" without the second list.
+    async fn link_titles(
+        &self,
+        pages: &PageRepository,
+        page_id: Id,
+    ) -> Result<HashMap<String, String>> {
+        let p = self.principal;
+        let tree = pages
+            .pages(p.workspace_id, p.actor_id)
+            .await
+            .map_err(hidden_page)?;
+        let sub_pages = pages
+            .descendants(p.workspace_id, page_id, p.actor_id)
+            .await
+            .map_err(hidden_page)?;
+        Ok(tree
+            .items
+            .into_iter()
+            .chain(sub_pages.items)
+            .map(|summary| (summary.id.to_string(), summary.title))
+            .collect())
+    }
+
     async fn doc_view(&self, pages: &PageRepository, mut page: PageRecord) -> Result<DocView> {
         let markdown = self.markdown(pages, &page.content).await?;
         let values = self.row_values(&page).await?;
@@ -1537,17 +1562,8 @@ impl Authorized<'_> {
         linked_pages(blocks, &mut linked);
         let mut titles = HashMap::new();
         if !linked.is_empty() {
-            let p = self.principal;
-            let visible = pages
-                .pages(p.workspace_id, p.actor_id)
-                .await
-                .map_err(hidden_page)?;
-            for summary in visible.items {
-                let id = summary.id.to_string();
-                if linked.contains(&id) {
-                    titles.insert(id, summary.title);
-                }
-            }
+            titles = self.link_titles(pages, page.id).await?;
+            titles.retain(|id, _| linked.contains(id));
         }
         Ok(blocks_to_markdown(blocks, &DocLinks(titles)))
     }
@@ -1613,14 +1629,7 @@ impl Authorized<'_> {
             // Merged onto the current document with the links of `doc_view`, so the blocks the
             // Markdown leaves as read stay exactly as they are.
             Some(markdown) => {
-                let titles = pages
-                    .pages(p.workspace_id, p.actor_id)
-                    .await
-                    .map_err(hidden_page)?
-                    .items
-                    .into_iter()
-                    .map(|summary| (summary.id.to_string(), summary.title))
-                    .collect();
+                let titles = self.link_titles(pages, page_id).await?;
                 let members = members(self.api.tasks.database().pool(), p.workspace_id).await?;
                 pages
                     .update_page_markdown_at_revision(

@@ -565,8 +565,10 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
     content: editorRef.current?.getContent() ?? page.content,
   })
 
-  const byId = useMemo(() => new Map(pages.map((item) => [item.id, item])), [pages])
-  // Trashed pages leave the tree, so anything not in it renders as "Missing page".
+  // A database row and its sub-pages are not in the tree: their targets come from the server's sub-page list.
+  const subPages = serverSubPages.data
+  const byId = useMemo(() => new Map([...pages, ...(subPages ?? [])].map((item) => [item.id, item])), [pages, subPages])
+  // Trashed pages leave the tree and the sub-page list, so anything not in either renders as "Missing page".
   const resolvePage = useCallback((id: string): PageRef | null => {
     const found = byId.get(id)
     return found ? { title: found.title, icon: found.icon, trashed: false, database: found.kind === 'database' } : null
