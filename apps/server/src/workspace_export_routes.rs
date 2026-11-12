@@ -214,6 +214,10 @@ fn problem(
                 instance,
                 request_id,
             )
+            .cause(match &error {
+                ExportError::Unavailable(source) => source.to_string(),
+                _ => error.to_string(),
+            })
         }
     }
 }

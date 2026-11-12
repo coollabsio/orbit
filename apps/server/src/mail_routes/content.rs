@@ -263,7 +263,8 @@ async fn token_user(
                 "An unexpected error occurred. Use the request ID when contacting support.",
                 instance,
                 request_id.as_ref(),
-            ))
+            )
+            .cause(error))
         }
     }
 }

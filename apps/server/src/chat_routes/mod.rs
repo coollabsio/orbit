@@ -572,12 +572,17 @@ fn problem(
             "A workspace can have at most 100 custom stickers.",
         ),
         ChatError::Upload(error) => return files::upload_problem(error, instance, request_id),
-        ChatError::Unavailable(_) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "internal_error",
-            "Internal server error",
-            "An unexpected error occurred. Use the request ID when contacting support.",
-        ),
+        ChatError::Unavailable(error) => {
+            return ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+                "Internal server error",
+                "An unexpected error occurred. Use the request ID when contacting support.",
+                instance,
+                request_id,
+            )
+            .cause(error);
+        }
     };
     ApiError::new(status, code, title, detail, instance, request_id)
 }

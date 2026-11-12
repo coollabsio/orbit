@@ -1281,7 +1281,7 @@ async fn accept_invitation(
     let mut response = (StatusCode::CREATED, Json(registered.acceptance)).into_response();
     response.headers_mut().insert(
         axum::http::header::SET_COOKIE,
-        HeaderValue::from_str(&cookie).map_err(|_| {
+        HeaderValue::from_str(&cookie).map_err(|error| {
             ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "internal_error",
@@ -1290,6 +1290,7 @@ async fn accept_invitation(
                 instance,
                 request_id.as_ref(),
             )
+            .cause(error)
         })?,
     );
     Ok(response)
@@ -1464,7 +1465,7 @@ async fn list_admin_users(
         .identity
         .list_users_for_admin(query.q.as_deref(), cursor, query.limit)
         .await
-        .map_err(|_| {
+        .map_err(|error| {
             ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "internal_error",
@@ -1473,6 +1474,7 @@ async fn list_admin_users(
                 instance,
                 request_id.as_ref(),
             )
+            .cause(error)
         })?;
     Ok(Json(Page { items, next_cursor }))
 }
@@ -1820,6 +1822,8 @@ struct StorageView {
     backup_schedule: BackupSchedule,
     /// Days a deleted or replaced attachment file stays in S3, so restoring an older backup still finds it.
     s3_keep_deleted_days: u32,
+    /// Orbit has not counted the files to move since the switch changed yet; `files_to_move` is 0 until it has.
+    checking: bool,
     /// Attachment files still waiting to move between this server's disk and the bucket.
     files_to_move: u64,
     /// Why moving files stopped last time. Orbit retries every ten minutes.
@@ -1984,8 +1988,9 @@ async fn settings_view(
     let moving = state
         .object_storage
         .as_ref()
-        .map(|(_, store)| store.status())
-        .unwrap_or_default();
+        .map(|(_, store)| store.status());
+    let checking = matches!(moving, Some(None));
+    let moving = moving.flatten().unwrap_or_default();
     Ok(Json(InstanceSettingsView {
         sign_in_providers,
         environment: EnvironmentView::from(&*EnvironmentSettings::of(state.identity.database())),
@@ -2002,6 +2007,7 @@ async fn settings_view(
             backups_in_s3: storage.backups_in_s3,
             backup_schedule: storage.backup_schedule,
             s3_keep_deleted_days: storage.s3_keep_deleted_days,
+            checking,
             files_to_move: u64::try_from(moving.remaining).unwrap_or(u64::MAX),
             move_error: moving.error,
             image_compression: state.image_compressor.as_ref().map(ImageCompressor::status),
@@ -2217,8 +2223,11 @@ async fn set_registration(
             InstanceSettingsError::EmailNotConfigured => {
                 email_not_configured(instance, request_id.as_ref())
             }
-            InstanceSettingsError::SmtpRequired | InstanceSettingsError::Unavailable(_) => {
-                internal(instance, request_id.as_ref())
+            InstanceSettingsError::Unavailable(error) => {
+                internal(instance, request_id.as_ref()).cause(error)
+            }
+            error @ InstanceSettingsError::SmtpRequired => {
+                internal(instance, request_id.as_ref()).cause(error)
             }
         })?;
     settings_view(&state, instance, request_id.as_ref()).await
@@ -2308,10 +2317,9 @@ async fn save_smtp(
                         request_id.as_ref(),
                     )
                 })?;
-            PasswordChange::Set(
-                crate::secret_box::encrypt_secret(key, &password)
-                    .map_err(|()| internal(instance, request_id.as_ref()))?,
-            )
+            PasswordChange::Set(crate::secret_box::encrypt_secret(key, &password).map_err(
+                |()| internal(instance, request_id.as_ref()).cause("could not encrypt the secret"),
+            )?)
         }
     };
     InstanceSettingsRepository::new(state.identity.database().clone())
@@ -2370,8 +2378,11 @@ async fn remove_smtp(
                 instance,
                 request_id.as_ref(),
             ),
-            InstanceSettingsError::EmailNotConfigured | InstanceSettingsError::Unavailable(_) => {
-                internal(instance, request_id.as_ref())
+            InstanceSettingsError::Unavailable(error) => {
+                internal(instance, request_id.as_ref()).cause(error)
+            }
+            error @ InstanceSettingsError::EmailNotConfigured => {
+                internal(instance, request_id.as_ref()).cause(error)
             }
         })?;
     settings_view(&state, instance, request_id.as_ref()).await
@@ -2554,7 +2565,7 @@ async fn save_sign_in_provider(
     let encrypted = secret
         .map(|secret| crate::secret_box::encrypt_secret(key, &secret))
         .transpose()
-        .map_err(|()| internal(instance, rid))?;
+        .map_err(|()| internal(instance, rid).cause("could not encrypt the secret"))?;
     InstanceSettingsRepository::new(state.identity.database().clone())
         .save_sign_in_provider(
             session.user.id,
@@ -2569,7 +2580,7 @@ async fn save_sign_in_provider(
             SaveSignInProviderError::SecretRequired => {
                 invalid_sign_in_provider("client_secret: enter the client secret.", instance, rid)
             }
-            SaveSignInProviderError::Database(_) => internal(instance, rid),
+            SaveSignInProviderError::Database(error) => internal(instance, rid).cause(error),
         })?;
     settings_view(&state, instance, rid).await
 }
@@ -2773,10 +2784,9 @@ async fn save_s3(
             .and_then(|s3| crate::secret_box::decrypt_secret(key, &s3.secret_access_key).ok())
             .ok_or_else(|| invalid("secret_access_key", "enter the secret key."))?,
     };
-    let s3 = location.with_secret(
-        crate::secret_box::encrypt_secret(key, &secret)
-            .map_err(|()| internal(instance, request_id.as_ref()))?,
-    );
+    let s3 = location.with_secret(crate::secret_box::encrypt_secret(key, &secret).map_err(
+        |()| internal(instance, request_id.as_ref()).cause("could not encrypt the secret"),
+    )?);
     let workspaces = WorkspaceStorageRepository::new(state.identity.database().clone())
         .all()
         .await
@@ -2920,7 +2930,7 @@ fn workspace_storage_problem(
         WorkspaceStorageError::Forbidden => {
             workspace_problem(WorkspaceError::Forbidden, instance, request_id)
         }
-        WorkspaceStorageError::Database(_) => internal(instance, request_id),
+        WorkspaceStorageError::Database(error) => internal(instance, request_id).cause(error),
     }
 }
 
@@ -3017,10 +3027,9 @@ async fn save_workspace_bucket(
             })
             .ok_or_else(|| invalid("secret_access_key", "enter the secret key."))?,
     };
-    let s3 = location.with_secret(
-        crate::secret_box::encrypt_secret(key, &secret)
-            .map_err(|()| internal(instance, request_id.as_ref()))?,
-    );
+    let s3 = location.with_secret(crate::secret_box::encrypt_secret(key, &secret).map_err(
+        |()| internal(instance, request_id.as_ref()).cause("could not encrypt the secret"),
+    )?);
     let location_of = |s3: &S3Settings| (s3.endpoint.clone(), s3.bucket.clone(), s3.prefix.clone());
     let installation = InstanceSettingsRepository::new(database.clone())
         .storage()
@@ -3263,7 +3272,9 @@ async fn save_storage_options(
                 instance,
                 request_id.as_ref(),
             ),
-            StorageSettingsError::Unavailable(_) => internal(instance, request_id.as_ref()),
+            StorageSettingsError::Unavailable(error) => {
+                internal(instance, request_id.as_ref()).cause(error)
+            }
         })?;
     reload_storage(&state, instance, request_id.as_ref()).await?;
     settings_view(&state, instance, request_id.as_ref()).await
@@ -3281,7 +3292,9 @@ async fn start_image_compression(
     let instance = "/api/v1/admin/attachments/compress";
     require_root(&state, &headers, instance, request_id.as_ref()).await?;
     let Some(compressor) = &state.image_compressor else {
-        return Err(internal(instance, request_id.as_ref()));
+        return Err(
+            internal(instance, request_id.as_ref()).cause("image compressor not configured")
+        );
     };
     compressor.start();
     settings_view(&state, instance, request_id.as_ref()).await
@@ -3388,6 +3401,7 @@ async fn create_backup(
         .await
         .map_err(|error| {
             tracing::error!(%error, "backup failed");
+            let cause = error.to_string();
             // A short cause; the full error is in the log above.
             let (code, detail) = match error {
                 orbit_platform::BackupError::ObjectStorage(error) => (
@@ -3411,6 +3425,7 @@ async fn create_backup(
                 instance,
                 request_id.as_ref(),
             )
+            .cause(cause)
         })?;
     Ok((StatusCode::CREATED, Json(BackupCreated { id: snapshot.id })))
 }
@@ -3426,7 +3441,7 @@ async fn list_backups(
     let session = authenticate(&state, &headers, instance, request_id.as_ref()).await?;
     require_installation_admin(&state, session.user.id, instance, request_id.as_ref()).await?;
     let backups = backup_service(&state, instance, request_id.as_ref())?;
-    let fail = |_| {
+    let fail = |error: BackupError| {
         ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             "backup_list_failed",
@@ -3435,6 +3450,7 @@ async fn list_backups(
             instance,
             request_id.as_ref(),
         )
+        .cause(error)
     };
     let mut items = backups.list().await.map_err(fail)?;
     items.extend(backups.list_pre_migration().await.map_err(fail)?);
@@ -3462,7 +3478,7 @@ async fn download_backup(
     let session = authenticate(&state, &headers, &instance, request_id.as_ref()).await?;
     require_installation_admin(&state, session.user.id, &instance, request_id.as_ref()).await?;
     let backups = backup_service(&state, &instance, request_id.as_ref())?;
-    let failed = || {
+    let failed = |error: &dyn std::fmt::Display| {
         ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             "backup_download_failed",
@@ -3471,6 +3487,7 @@ async fn download_backup(
             &instance,
             request_id.as_ref(),
         )
+        .cause(error)
     };
     let snapshot = backups
         .verify(&backup_id)
@@ -3484,13 +3501,13 @@ async fn download_backup(
                 &instance,
                 request_id.as_ref(),
             ),
-            _ => failed(),
+            error => failed(&error),
         })?;
     let name = format!("orbit-backup-{}.zip", snapshot.id);
     let file = tokio::task::spawn_blocking(move || write_backup_archive(&snapshot))
         .await
-        .map_err(|_| failed())?
-        .map_err(|_| failed())?;
+        .map_err(|error| failed(&error))?
+        .map_err(|error| failed(&error))?;
     let length = file.metadata().map(|metadata| metadata.len()).ok();
     let mut response = Response::new(Body::from_stream(tokio_util::io::ReaderStream::new(
         tokio::fs::File::from_std(file),
@@ -3531,14 +3548,15 @@ async fn delete_backup(
                 &instance,
                 request_id.as_ref(),
             ),
-            _ => ApiError::new(
+            error => ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "backup_delete_failed",
                 "Backup delete failed",
                 "Orbit could not delete this backup.",
                 &instance,
                 request_id.as_ref(),
-            ),
+            )
+            .cause(error),
         })?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -3714,7 +3732,7 @@ async fn require_installation_admin(
         .identity
         .is_installation_admin(user_id)
         .await
-        .map_err(|_| {
+        .map_err(|error| {
             ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "internal_error",
@@ -3723,6 +3741,7 @@ async fn require_installation_admin(
                 instance,
                 request_id,
             )
+            .cause(error)
         })?
     {
         Ok(())
@@ -3847,14 +3866,24 @@ fn api_token_problem(
             instance,
             request_id,
         ),
-        ApiTokenError::Unavailable(_) | ApiTokenError::InvalidIdentifier => ApiError::new(
+        ApiTokenError::Unavailable(error) => ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             "internal_error",
             "Internal server error",
             "An unexpected error occurred. Use the request ID when contacting support.",
             instance,
             request_id,
-        ),
+        )
+        .cause(error),
+        error @ ApiTokenError::InvalidIdentifier => ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "internal_error",
+            "Internal server error",
+            "An unexpected error occurred. Use the request ID when contacting support.",
+            instance,
+            request_id,
+        )
+        .cause(error),
     }
 }
 
@@ -3964,14 +3993,24 @@ fn workspace_problem(
             instance,
             request_id,
         ),
-        WorkspaceError::Unavailable(_) | WorkspaceError::Storage(_) => ApiError::new(
+        WorkspaceError::Unavailable(error) => ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             "internal_error",
             "Internal server error",
             "An unexpected error occurred. Use the request ID when contacting support.",
             instance,
             request_id,
-        ),
+        )
+        .cause(error),
+        WorkspaceError::Storage(error) => ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "internal_error",
+            "Internal server error",
+            "An unexpected error occurred. Use the request ID when contacting support.",
+            instance,
+            request_id,
+        )
+        .cause(error),
     }
 }
 
@@ -4032,7 +4071,7 @@ fn password_problem(
     let detail = match error {
         PasswordError::InvalidLength => "Password must contain between 12 and 128 characters.",
         PasswordError::CommonPassword => "Choose a password that is not commonly used.",
-        PasswordError::InvalidHash | PasswordError::HashingFailed => {
+        error @ (PasswordError::InvalidHash | PasswordError::HashingFailed) => {
             return ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "internal_error",
@@ -4040,7 +4079,8 @@ fn password_problem(
                 "An unexpected error occurred. Use the request ID when contacting support.",
                 instance,
                 request_id,
-            );
+            )
+            .cause(error);
         }
     };
     ApiError::new(
@@ -4131,14 +4171,15 @@ fn admin_account_problem(
             instance,
             request_id,
         ),
-        AdminAccountError::Unavailable(_) => ApiError::new(
+        AdminAccountError::Unavailable(error) => ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             "internal_error",
             "Internal server error",
             "An unexpected error occurred. Use the request ID when contacting support.",
             instance,
             request_id,
-        ),
+        )
+        .cause(error),
     }
 }
 

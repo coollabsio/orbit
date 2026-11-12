@@ -172,7 +172,7 @@ impl<'a> Call<'a> {
             call.actor_id,
         )
         .await
-        .map_err(|_| call.internal())?
+        .map_err(|error| call.internal().cause(error))?
         .ok_or_else(|| call.not_found())?;
         if !actor.can(Permission::IntegrationsManage) {
             return Err(ApiError::new(
@@ -224,7 +224,8 @@ impl<'a> Call<'a> {
     }
 
     fn seal(&self, secret: &str) -> Result<Vec<u8>, ApiError> {
-        crate::secret_box::encrypt_secret(&self.app_key()?, secret).map_err(|()| self.internal())
+        crate::secret_box::encrypt_secret(&self.app_key()?, secret)
+            .map_err(|()| self.internal().cause("could not encrypt the secret"))
     }
 
     async fn read(&self) -> Result<Transaction<'_, Any>, ApiError> {
@@ -233,7 +234,7 @@ impl<'a> Call<'a> {
             .database()
             .transaction()
             .await
-            .map_err(|_| self.internal())
+            .map_err(|error| self.internal().cause(error))
     }
 
     async fn write(&self) -> Result<Transaction<'_, Any>, ApiError> {
@@ -242,7 +243,7 @@ impl<'a> Call<'a> {
             .database()
             .immediate_transaction()
             .await
-            .map_err(|_| self.internal())
+            .map_err(|error| self.internal().cause(error))
     }
 
     async fn subscription(
@@ -252,7 +253,7 @@ impl<'a> Call<'a> {
     ) -> Result<Subscription, ApiError> {
         store::get(transaction, self.workspace_id, self.id(webhook)?)
             .await
-            .map_err(|_| self.internal())?
+            .map_err(|error| self.internal().cause(error))?
             .ok_or_else(|| self.not_found())
     }
 
@@ -277,7 +278,7 @@ impl<'a> Call<'a> {
             now,
         )
         .await
-        .map_err(|_| self.internal())
+        .map_err(|error| self.internal().cause(error))
     }
 
     /// Checks a full set of fields, as stored.
@@ -311,7 +312,7 @@ impl<'a> Call<'a> {
             || projects.len() > MAX_PROJECTS
             || !store::projects_exist(transaction, self.workspace_id, &projects)
                 .await
-                .map_err(|_| self.internal())?
+                .map_err(|error| self.internal().cause(error))?
         {
             return Err(self.invalid("project_ids"));
         }
@@ -344,7 +345,7 @@ pub(crate) async fn list_webhooks(
     store::list(&mut transaction, call.workspace_id)
         .await
         .map(Json)
-        .map_err(|_| call.internal())
+        .map_err(|error| call.internal().cause(error))
 }
 
 /// Subscribes a URL to task events of some projects. The answer holds the signing secret, once.
@@ -387,7 +388,7 @@ pub(crate) async fn create_webhook(
         now,
     )
     .await
-    .map_err(|_| call.internal())?;
+    .map_err(|error| call.internal().cause(error))?;
     call.audit(
         &mut transaction,
         "webhook.created",
@@ -398,9 +399,12 @@ pub(crate) async fn create_webhook(
     .await?;
     let subscription = store::get(&mut transaction, call.workspace_id, id)
         .await
-        .map_err(|_| call.internal())?
-        .ok_or_else(|| call.internal())?;
-    transaction.commit().await.map_err(|_| call.internal())?;
+        .map_err(|error| call.internal().cause(error))?
+        .ok_or_else(|| call.internal().cause("webhook missing after insert"))?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| call.internal().cause(error))?;
     Ok((
         StatusCode::CREATED,
         Json(Created {
@@ -467,7 +471,7 @@ pub(crate) async fn update_webhook(
     };
     store::update(&mut transaction, current.id, &input, now)
         .await
-        .map_err(|_| call.internal())?;
+        .map_err(|error| call.internal().cause(error))?;
     call.audit(
         &mut transaction,
         "webhook.updated",
@@ -477,7 +481,10 @@ pub(crate) async fn update_webhook(
     )
     .await?;
     let subscription = call.subscription(&mut transaction, &webhook).await?;
-    transaction.commit().await.map_err(|_| call.internal())?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| call.internal().cause(error))?;
     Ok(Json(subscription))
 }
 
@@ -496,7 +503,7 @@ pub(crate) async fn delete_webhook(
     let current = call.subscription(&mut transaction, &webhook).await?;
     store::delete(&mut transaction, current.id)
         .await
-        .map_err(|_| call.internal())?;
+        .map_err(|error| call.internal().cause(error))?;
     call.audit(
         &mut transaction,
         "webhook.deleted",
@@ -505,7 +512,10 @@ pub(crate) async fn delete_webhook(
         now,
     )
     .await?;
-    transaction.commit().await.map_err(|_| call.internal())?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| call.internal().cause(error))?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -526,7 +536,7 @@ pub(crate) async fn rotate_webhook_secret(
     let current = call.subscription(&mut transaction, &webhook).await?;
     store::set_secret(&mut transaction, current.id, &sealed, now)
         .await
-        .map_err(|_| call.internal())?;
+        .map_err(|error| call.internal().cause(error))?;
     call.audit(
         &mut transaction,
         "webhook.secret_rotated",
@@ -535,7 +545,10 @@ pub(crate) async fn rotate_webhook_secret(
         now,
     )
     .await?;
-    transaction.commit().await.map_err(|_| call.internal())?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| call.internal().cause(error))?;
     Ok(Json(SigningSecret { signing_secret }))
 }
 
@@ -554,7 +567,7 @@ pub(crate) async fn list_webhook_deliveries(
     store::deliveries(&mut transaction, current.id)
         .await
         .map(Json)
-        .map_err(|_| call.internal())
+        .map_err(|error| call.internal().cause(error))
 }
 
 /// Sends a failed or cancelled delivery again, with the same body and `webhook-id`, and a fresh
@@ -574,7 +587,7 @@ pub(crate) async fn retry_webhook_delivery(
     let current = call.subscription(&mut transaction, &webhook).await?;
     let found = store::delivery(&mut transaction, current.id, delivery_id)
         .await
-        .map_err(|_| call.internal())?
+        .map_err(|error| call.internal().cause(error))?
         .ok_or_else(|| call.not_found())?;
     if !matches!(found.state.as_str(), "failed" | "cancelled") {
         return Err(ApiError::new(
@@ -588,14 +601,17 @@ pub(crate) async fn retry_webhook_delivery(
     }
     store::reset_delivery(&mut transaction, delivery_id, now)
         .await
-        .map_err(|_| call.internal())?;
+        .map_err(|error| call.internal().cause(error))?;
     super::enqueue_in(&mut transaction, call.workspace_id, delivery_id, now)
         .await
-        .map_err(|_| call.internal())?;
+        .map_err(|error| call.internal().cause(error))?;
     let updated = store::delivery(&mut transaction, current.id, delivery_id)
         .await
-        .map_err(|_| call.internal())?
-        .ok_or_else(|| call.internal())?;
-    transaction.commit().await.map_err(|_| call.internal())?;
+        .map_err(|error| call.internal().cause(error))?
+        .ok_or_else(|| call.internal().cause("delivery missing after retry"))?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| call.internal().cause(error))?;
     Ok(Json(updated))
 }

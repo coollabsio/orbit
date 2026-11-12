@@ -401,13 +401,23 @@ fn problem(
             request_id,
         ),
         PageCommentError::Invalid { field } => validation(field, instance, request_id),
-        PageCommentError::Corrupt | PageCommentError::Unavailable(_) => ApiError::new(
+        PageCommentError::Unavailable(error) => ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             "internal_error",
             "Internal server error",
             "An unexpected error occurred. Use the request ID when contacting support.",
             instance,
             request_id,
-        ),
+        )
+        .cause(error),
+        error @ PageCommentError::Corrupt => ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "internal_error",
+            "Internal server error",
+            "An unexpected error occurred. Use the request ID when contacting support.",
+            instance,
+            request_id,
+        )
+        .cause(error),
     }
 }
