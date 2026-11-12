@@ -151,6 +151,18 @@ impl Fixture {
         path: &str,
         body: Option<Value>,
     ) -> (StatusCode, Value) {
+        let (status, value, _) = self.call_with(token, method, path, body, &[]).await;
+        (status, value)
+    }
+
+    async fn call_with(
+        &self,
+        token: Option<&str>,
+        method: &str,
+        path: &str,
+        body: Option<Value>,
+        headers: &[(&str, &str)],
+    ) -> (StatusCode, Value, axum::http::HeaderMap) {
         let path = if path == "/me" || path.starts_with("/workspaces/") {
             path.to_owned()
         } else {
@@ -162,6 +174,9 @@ impl Fixture {
         if let Some(token) = token {
             builder = builder.header(header::AUTHORIZATION, format!("Bearer {token}"));
         }
+        for (name, value) in headers {
+            builder = builder.header(*name, *value);
+        }
         let request = match body {
             Some(body) => builder
                 .header(header::CONTENT_TYPE, "application/json")
@@ -171,6 +186,7 @@ impl Fixture {
         .unwrap();
         let response = self.app.clone().oneshot(request).await.unwrap();
         let status = response.status();
+        let response_headers = response.headers().clone();
         let bytes = to_bytes(response.into_body(), 4 * 1024 * 1024)
             .await
             .unwrap();
@@ -180,7 +196,7 @@ impl Fixture {
             serde_json::from_slice(&bytes)
                 .unwrap_or_else(|_| panic!("{}", String::from_utf8_lossy(&bytes)))
         };
-        (status, value)
+        (status, value, response_headers)
     }
 
     async fn first_status(&self, project: Id) -> Id {
@@ -2842,4 +2858,136 @@ async fn permanent_delete_needs_the_scope_the_grant_and_an_owner_or_admin() {
         metadata["actor_service_account_id"].is_string(),
         "{metadata}"
     );
+}
+
+#[tokio::test]
+async fn idempotency_keys_make_task_and_comment_creates_safe_to_retry() {
+    let f = Fixture::new().await;
+    let status = f.first_status(f.project).await;
+    let (token, _) = f.token(&[ApiTokenScope::TasksWrite], false).await;
+    let (other, _) = f.token(&[ApiTokenScope::TasksWrite], false).await;
+    let (reader, _) = f.token(&[ApiTokenScope::TasksRead], false).await;
+    let body = json!({"project_id": f.project, "status_id": status, "title": "Once"});
+    let tasks = |title: &'static str| {
+        let title = title.to_owned();
+        let database = f.database.clone();
+        async move {
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM tasks WHERE title = $1")
+                .bind(title)
+                .fetch_one(database.pool())
+                .await
+                .unwrap()
+        }
+    };
+    let key = [("idempotency-key", "retry-1")];
+
+    let (code, first, headers) = f
+        .call_with(Some(&token), "POST", "/tasks", Some(body.clone()), &key)
+        .await;
+    assert_eq!(code, StatusCode::CREATED, "{first}");
+    assert!(headers.get("idempotent-replayed").is_none());
+    // The same body with other field order and spaces is the same request.
+    let reordered = json!({"title": "Once", "status_id": status, "project_id": f.project});
+    let (code, again, headers) = f
+        .call_with(Some(&token), "POST", "/tasks", Some(reordered), &key)
+        .await;
+    assert_eq!(code, StatusCode::CREATED, "{again}");
+    assert_eq!(again, first);
+    assert_eq!(headers["idempotent-replayed"], "true");
+    assert_eq!(tasks("Once").await, 1);
+
+    // Another body, or another route, with the same key is a mistake of the client.
+    let changed = json!({"project_id": f.project, "status_id": status, "title": "Twice"});
+    let (code, problem, _) = f
+        .call_with(Some(&token), "POST", "/tasks", Some(changed), &key)
+        .await;
+    assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY, "{problem}");
+    assert_eq!(problem["code"], "idempotency_key_reused");
+    assert_eq!(tasks("Twice").await, 0);
+    let comments = format!("/tasks/{}/comments", f.task);
+    let (code, problem, _) = f
+        .call_with(
+            Some(&token),
+            "POST",
+            &comments,
+            Some(json!({"body": "Once"})),
+            &key,
+        )
+        .await;
+    assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY, "{problem}");
+
+    // Keys belong to a token: another token with the same key makes its own task.
+    let (code, second, _) = f
+        .call_with(Some(&other), "POST", "/tasks", Some(body.clone()), &key)
+        .await;
+    assert_eq!(code, StatusCode::CREATED, "{second}");
+    assert_ne!(second["id"], first["id"]);
+    assert_eq!(tasks("Once").await, 2);
+
+    // A failed request keeps nothing: the retry with the same key runs again.
+    let bad = json!({"project_id": f.project, "status_id": status, "title": "  "});
+    let bad_key = [("idempotency-key", "retry-bad")];
+    let (code, _, _) = f
+        .call_with(Some(&token), "POST", "/tasks", Some(bad), &bad_key)
+        .await;
+    assert_eq!(code, StatusCode::BAD_REQUEST);
+    let good = json!({"project_id": f.project, "status_id": status, "title": "Fixed"});
+    let (code, fixed, _) = f
+        .call_with(Some(&token), "POST", "/tasks", Some(good), &bad_key)
+        .await;
+    assert_eq!(code, StatusCode::CREATED, "{fixed}");
+
+    // Comments: one comment for two sends.
+    let comment_key = [("idempotency-key", "comment-1")];
+    let comment = json!({"body": "Shipped"});
+    let (code, first, _) = f
+        .call_with(
+            Some(&token),
+            "POST",
+            &comments,
+            Some(comment.clone()),
+            &comment_key,
+        )
+        .await;
+    assert_eq!(code, StatusCode::CREATED, "{first}");
+    let (code, again, _) = f
+        .call_with(Some(&token), "POST", &comments, Some(comment), &comment_key)
+        .await;
+    assert_eq!(code, StatusCode::CREATED);
+    assert_eq!(again, first);
+    let (_, listed) = f.call(Some(&token), "GET", &comments, None).await;
+    assert_eq!(listed["items"].as_array().unwrap().len(), 1);
+
+    // A claim without a response blocks the retry with 409 until it is stale.
+    let running = [("idempotency-key", "running")];
+    let (code, _, _) = f
+        .call_with(Some(&token), "POST", "/tasks", Some(body.clone()), &running)
+        .await;
+    assert_eq!(code, StatusCode::CREATED);
+    sqlx::query("UPDATE api_idempotency_keys SET status = NULL, response = NULL WHERE idempotency_key = 'running'")
+        .execute(f.database.pool())
+        .await
+        .unwrap();
+    let (code, problem, headers) = f
+        .call_with(Some(&token), "POST", "/tasks", Some(body.clone()), &running)
+        .await;
+    assert_eq!(code, StatusCode::CONFLICT, "{problem}");
+    assert_eq!(problem["code"], "idempotency_request_running");
+    assert_eq!(headers[header::RETRY_AFTER], "1");
+
+    // A key that is not visible ASCII, or a token without the scope, is answered as usual.
+    let (code, _, _) = f
+        .call_with(
+            Some(&token),
+            "POST",
+            "/tasks",
+            Some(body.clone()),
+            &[("idempotency-key", "")],
+        )
+        .await;
+    assert_eq!(code, StatusCode::BAD_REQUEST);
+    let (code, problem, _) = f
+        .call_with(Some(&reader), "POST", "/tasks", Some(body), &key)
+        .await;
+    assert_eq!(code, StatusCode::FORBIDDEN, "{problem}");
 }

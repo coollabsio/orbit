@@ -11545,6 +11545,10 @@ export type PublicCreateTaskData = {
     body: PublicCreateTaskBody;
     headers?: {
         /**
+         * Makes a retry safe. A repeat with the same key and body returns the first response (header `Idempotent-Replayed: true`); the same key with another body or path gets `422`. Kept 24 hours per token.
+         */
+        'Idempotency-Key'?: string | null;
+        /**
          * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
          */
         'X-Orbit-Contract'?: string;
@@ -11957,6 +11961,10 @@ export type PublicListCommentsResponse = PublicListCommentsResponses[keyof Publi
 export type PublicCreateCommentData = {
     body: PublicCommentBody;
     headers?: {
+        /**
+         * Makes a retry safe. A repeat with the same key and body returns the first response (header `Idempotent-Replayed: true`); the same key with another body or path gets `422`. Kept 24 hours per token.
+         */
+        'Idempotency-Key'?: string | null;
         /**
          * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
          */
