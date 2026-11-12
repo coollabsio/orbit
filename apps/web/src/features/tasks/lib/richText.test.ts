@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { commentSaveAction, isEmptyRichText } from './richText'
+import { commentSaveAction, fileUrls, isEmptyRichText, mapFileUrls } from './richText'
 
 const text = (value: string) => ({ type: 'text', text: value, styles: {} })
 
@@ -34,4 +34,17 @@ test('what Save does with an edited comment', () => {
   expect(commentSaveAction({ content: empty, changed: true, hasAttachments: false })).toBe('confirm-delete')
   // removing the text of a comment with files keeps the comment as it was
   expect(commentSaveAction({ content: empty, changed: true, hasAttachments: true })).toBe('close')
+})
+
+test('fileUrls lists the file blocks, nested ones included, and mapFileUrls replaces them', () => {
+  const doc = [
+    { type: 'image', props: { url: 'blob:a', name: 'a.png' }, children: [{ type: 'file', props: { url: 'blob:b' } }] },
+    { type: 'image', props: { url: '' } },
+    { type: 'paragraph', content: [text('x')] },
+  ]
+  expect(fileUrls(doc)).toEqual(['blob:a', 'blob:b'])
+  const mapped = mapFileUrls(doc, (url) => (url === 'blob:b' ? '/api/b' : ''))
+  expect(fileUrls(mapped)).toEqual(['/api/b'])
+  expect(mapped[0]).toMatchObject({ type: 'image', props: { url: '', name: 'a.png' } })
+  expect(fileUrls(doc)).toEqual(['blob:a', 'blob:b'])
 })
