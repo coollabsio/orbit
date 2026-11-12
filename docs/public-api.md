@@ -117,6 +117,18 @@ workspace_action_forbidden`.
 - A task contains no embedded parent, duplicate or ancestor records.
   `parent_task_id` is `null` when the parent is not in an approved project.
 
+- `POST /tasks` and `POST /tasks/{task}/comments` take an optional
+  `Idempotency-Key` header (1 to 255 visible ASCII characters, for example a
+  UUID), so a client can retry after a timeout without a second task or comment.
+  Orbit keeps the first successful response (`200` or `201`) for 24 hours for
+  each token and key. A repeat with the same path and JSON body (the order of
+  fields does not matter) gets that response again, with the header
+  `Idempotent-Replayed: true`. The same key with another path or body gets `422`
+  (`idempotency_key_reused`). If the first request still runs, the repeat gets
+  `409` (`idempotency_request_running`) with `Retry-After: 1`; retry it. Orbit
+  keeps no response of an error, so a retry after an error runs again. Use a
+  new key for each new task or comment.
+
 ## Endpoints
 
 ### Token and workspace
@@ -773,9 +785,11 @@ Errors are RFC 9457 problem documents (`Content-Type: application/problem+json`)
 | 405 | `method_not_allowed` | The path does not take this HTTP method, for example `PUT /tasks`. The `Allow` header lists the methods that it takes (`GET,HEAD,POST`). Orbit sends this before it checks the token. |
 | 409 | `conflict` | The resource changed after you read it (for docs and task descriptions, also through live edits). `conflict.current_version` has the current version. |
 | 409 | `task_conflict`, `github_content_read_only`, `github_linked_move` | The change conflicts with the task's current state. |
+| 409 | `idempotency_request_running` | The first request with this `Idempotency-Key` has not finished. Retry after the `Retry-After` time. |
 | 409 | `export_not_ready` | The export is queued, running or failed, so there is no archive to download yet. |
 | 413 | `doc_too_large` | The doc would have, or already has, more than 4,000 blocks. Nothing changed. |
 | 422 | `validation_failed`, `parent_cycle`, `parent_invalid` | A value is not valid for the workspace or project, for example an unknown assignee, label, milestone or cycle, or an estimate above 1000. `errors` names the field. |
+| 422 | `idempotency_key_reused` | The `Idempotency-Key` was used for another path or body. |
 | 423 | `page_locked` | The doc is locked. Unlock it in Orbit to change its title, icon or content. |
 | 429 | `rate_limit_exceeded` | Too many requests. Wait as the `Retry-After` header tells (RFC 9110). Orbit sends a number of seconds. |
 | 500 | `internal_error` | Orbit could not complete the request, for example because the database is unavailable. Try again later. |

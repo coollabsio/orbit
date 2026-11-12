@@ -4777,6 +4777,18 @@
             }
           },
           {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Makes a retry safe. A repeat with the same key and body returns the first response (header `Idempotent-Replayed: true`); the same key with another body or path gets `422`. Kept 24 hours per token.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
             "name": "X-Orbit-Contract",
             "in": "header",
             "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
@@ -5637,6 +5649,18 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Makes a retry safe. A repeat with the same key and body returns the first response (header `Idempotent-Replayed: true`); the same key with another body or path gets `422`. Kept 24 hours per token.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
