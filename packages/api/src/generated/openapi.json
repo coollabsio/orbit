@@ -874,6 +874,15 @@
             }
           },
           {
+            "name": "project_id",
+            "in": "query",
+            "description": "An approved project: only the global docs, the docs of this project's teamspace and\nprivate docs.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "X-Orbit-Contract",
             "in": "header",
             "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
@@ -85874,6 +85883,7 @@
           "icon",
           "position",
           "version",
+          "project_id",
           "is_default",
           "created_at",
           "updated_at"
@@ -85902,6 +85912,13 @@
           "position": {
             "type": "integer",
             "format": "int64"
+          },
+          "project_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The project whose docs this teamspace holds; `null` for global docs. The project may be\ntrashed or not visible to the caller."
           },
           "updated_at": {
             "type": "string",
@@ -85955,6 +85972,13 @@
               "null"
             ],
             "description": "1 to 100 characters after trimming."
+          },
+          "project_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The project whose docs the teamspace holds. Absent: unchanged. `null`: global docs. A\nproject has at most one teamspace."
           }
         },
         "additionalProperties": false

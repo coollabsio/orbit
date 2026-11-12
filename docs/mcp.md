@@ -359,6 +359,11 @@ and fail on a locked doc. A doc can have at most 4,000 blocks (nested ones inclu
 `markdown` for a doc that already has more, fail with "A doc can have at most 4,000 blocks"
 and change nothing. A database outage on a doc or chat tool is a JSON-RPC internal error
 (-32603), not "Resource is not available".
+`list_docs` takes an optional `project_id` (an approved project). A teamspace can hold the docs
+of one project (Project settings → Docs). With `project_id`, the list leaves out the docs of
+teamspaces of other projects: you get the global docs (teamspaces without a project), that
+project's docs and private docs. This filter is not a permission: without `project_id`, and in
+`get_doc`, every visible doc stays available.
 Databases are docs with `kind: "database"` in `list_docs`, and their rows are docs: `get_doc`
 of a row also returns its `database_id` and `values`. `get_database` takes `database_id` and
 returns the properties (with option names), views, templates and `row_count`.
