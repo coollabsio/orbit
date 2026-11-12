@@ -16074,7 +16074,7 @@
         "tags": [
           "crate::auth_routes::providers"
         ],
-        "summary": "Starts a provider flow. Problems: 404 `provider_not_configured`, 422 `invalid_code_challenge`,\n`invalid_redirect` or `invalid_return_to`, 401 `authentication_required` for `connect` and `confirm`, and for\n`connect` 401 `password_required`, `invalid_credentials` or `reauthentication_required` and 429\n`authentication_throttled`.",
+        "summary": "Starts a provider flow. Problems: 404 `provider_not_configured`, 502 `provider_unavailable`, 422 `invalid_code_challenge`,\n`invalid_redirect` or `invalid_return_to`, 401 `authentication_required` for `connect` and `confirm`, and for\n`connect` 401 `password_required`, `invalid_credentials` or `reauthentication_required` and 429\n`authentication_throttled`.",
         "operationId": "start_provider_sign_in",
         "parameters": [
           {
@@ -16198,6 +16198,16 @@
           },
           "500": {
             "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "provider_unavailable: the OpenID Connect discovery failed",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -66687,6 +66697,13 @@
             "type": "boolean",
             "description": "Mail is on (Admin → Inbound mail). Off: the mail app and its settings are hidden."
           },
+          "oidc_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The label of the OpenID Connect provider on the sign-in buttons (\"Continue with {oidc_name}\"), from\n`ORBIT_OIDC_DISPLAY_NAME`. `null` when it is not set up."
+          },
           "passkeys_enabled": {
             "type": "boolean",
             "description": "People can add passkeys and sign in with them (the public origin is a domain name)."
@@ -71562,7 +71579,7 @@
             "items": {
               "$ref": "#/components/schemas/Provider"
             },
-            "description": "`ORBIT_GOOGLE_*`, `ORBIT_GITHUB_*`."
+            "description": "`ORBIT_GOOGLE_*`, `ORBIT_GITHUB_*`, `ORBIT_OIDC_*`."
           },
           "smtp": {
             "type": "boolean",
@@ -72273,7 +72290,7 @@
             "items": {
               "$ref": "#/components/schemas/SignInProviderView"
             },
-            "description": "The Google and GitHub OAuth clients that are saved. A provider that is not listed is off."
+            "description": "The OAuth clients of the sign-in providers that are on: Google and GitHub saved here or set by the\nenvironment, and OpenID Connect from `ORBIT_OIDC_*`. A provider that is not listed is off."
           },
           "smtp": {
             "oneOf": [
@@ -80643,7 +80660,8 @@
         "type": "string",
         "enum": [
           "google",
-          "github"
+          "github",
+          "oidc"
         ]
       },
       "PtrAddress": {
@@ -84170,6 +84188,13 @@
           },
           "client_id": {
             "type": "string"
+          },
+          "issuer": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The OpenID Connect issuer (`ORBIT_OIDC_ISSUER`); `null` for Google and GitHub."
           },
           "provider": {
             "$ref": "#/components/schemas/Provider"

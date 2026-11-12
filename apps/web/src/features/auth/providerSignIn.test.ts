@@ -20,6 +20,10 @@ test('the flow survives in this tab until it is cleared', () => {
   expect(storedProviderFlow()).toBe(null)
   sessionStorage.setItem('orbit:provider-flow', '{"provider":"gitlab","intent":"sign_in","verifier":"x"}')
   expect(storedProviderFlow()).toBe(null)
+  saveProviderFlow({ provider: 'oidc', intent: 'confirm', verifier: 'o'.repeat(43) })
+  expect(storedProviderFlow()).toEqual({ provider: 'oidc', intent: 'confirm', verifier: 'o'.repeat(43) })
+  sessionStorage.setItem('orbit:provider-flow', '{"provider":"toString","intent":"sign_in","verifier":"x"}')
+  expect(storedProviderFlow()).toBe(null)
 })
 
 test('the callback fragment gives the handoff and the return path', () => {

@@ -34,12 +34,17 @@ const GOOGLE_CLIENT_ID: &str = "ORBIT_GOOGLE_CLIENT_ID";
 const GOOGLE_CLIENT_SECRET: &str = "ORBIT_GOOGLE_CLIENT_SECRET";
 const GITHUB_CLIENT_ID: &str = "ORBIT_GITHUB_CLIENT_ID";
 const GITHUB_CLIENT_SECRET: &str = "ORBIT_GITHUB_CLIENT_SECRET";
+const OIDC_ISSUER: &str = "ORBIT_OIDC_ISSUER";
+const OIDC_CLIENT_ID: &str = "ORBIT_OIDC_CLIENT_ID";
+const OIDC_CLIENT_SECRET: &str = "ORBIT_OIDC_CLIENT_SECRET";
+const OIDC_DISPLAY_NAME: &str = "ORBIT_OIDC_DISPLAY_NAME";
 
-const SECRETS: [&str; 4] = [
+const SECRETS: [&str; 5] = [
     SMTP_PASSWORD,
     S3_SECRET_ACCESS_KEY,
     GOOGLE_CLIENT_SECRET,
     GITHUB_CLIENT_SECRET,
+    OIDC_CLIENT_SECRET,
 ];
 const SMTP_KEYS: [&str; 7] = [
     SMTP_HOST,
@@ -59,7 +64,7 @@ const S3_KEYS: [&str; 7] = [
     S3_SECRET_ACCESS_KEY,
     S3_PATH_STYLE,
 ];
-const OTHER_KEYS: [&str; 9] = [
+const OTHER_KEYS: [&str; 13] = [
     OPEN_REGISTRATION,
     AUTOMATIC_BACKUPS,
     S3_ATTACHMENTS,
@@ -69,6 +74,10 @@ const OTHER_KEYS: [&str; 9] = [
     GOOGLE_CLIENT_SECRET,
     GITHUB_CLIENT_ID,
     GITHUB_CLIENT_SECRET,
+    OIDC_ISSUER,
+    OIDC_CLIENT_ID,
+    OIDC_CLIENT_SECRET,
+    OIDC_DISPLAY_NAME,
 ];
 
 /// The variable is read by [`InstanceConfig::from_environment`].
@@ -169,6 +178,16 @@ pub struct OAuthClientConfig {
     pub client_secret: Secret,
 }
 
+/// The OpenID Connect provider from `ORBIT_OIDC_*`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OidcConfig {
+    /// Without a trailing `/`. Discovery reads `{issuer}/.well-known/openid-configuration`.
+    pub issuer: String,
+    pub client: OAuthClientConfig,
+    /// "Continue with {display_name}"; "SSO" when not set.
+    pub display_name: String,
+}
+
 /// The instance settings that the environment sets. `None` keeps the value saved in Admin.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct InstanceConfig {
@@ -182,6 +201,7 @@ pub struct InstanceConfig {
     pub s3_keep_deleted_days: Option<u32>,
     pub google: Option<OAuthClientConfig>,
     pub github: Option<OAuthClientConfig>,
+    pub oidc: Option<OidcConfig>,
 }
 
 impl InstanceConfig {
@@ -241,11 +261,13 @@ impl InstanceConfig {
                 .transpose()?,
             google: oauth_client(&values, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET)?,
             github: oauth_client(&values, GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET)?,
+            oidc: oidc(&values)?,
         };
         if config.registration_open == Some(true)
             && config.smtp.is_none()
             && config.google.is_none()
             && config.github.is_none()
+            && config.oidc.is_none()
         {
             return Err(invalid(
                 OPEN_REGISTRATION,
@@ -307,6 +329,12 @@ impl InstanceConfig {
                 push(id_key, &client.client_id);
                 push(secret_key, "[REDACTED]");
             }
+        }
+        if let Some(oidc) = &self.oidc {
+            push(OIDC_ISSUER, &oidc.issuer);
+            push(OIDC_CLIENT_ID, &oidc.client.client_id);
+            push(OIDC_CLIENT_SECRET, "[REDACTED]");
+            push(OIDC_DISPLAY_NAME, &oidc.display_name);
         }
         lines
     }
@@ -521,6 +549,48 @@ fn oauth_client(
     }))
 }
 
+/// `ORBIT_OIDC_ISSUER` is an `http(s)` URL without query or fragment (OpenID Connect Discovery 1.0, section 2),
+/// at most 255 characters: the identity key is the issuer and `sub` together.
+fn oidc(values: &Values<'_>) -> Result<Option<OidcConfig>, ConfigError> {
+    let keys = [
+        OIDC_ISSUER,
+        OIDC_CLIENT_ID,
+        OIDC_CLIENT_SECRET,
+        OIDC_DISPLAY_NAME,
+    ];
+    if !values.any(&keys) {
+        return Ok(None);
+    }
+    let issuer = required(values, OIDC_ISSUER, "ORBIT_OIDC_*")?
+        .trim_end_matches('/')
+        .to_owned();
+    let valid = url::Url::parse(&issuer).is_ok_and(|url| {
+        matches!(url.scheme(), "https" | "http")
+            && url.host().is_some()
+            && url.query().is_none()
+            && url.fragment().is_none()
+    });
+    if !valid || issuer.len() > 255 {
+        return Err(invalid(
+            OIDC_ISSUER,
+            "must be an http(s) issuer URL without query or fragment, at most 255 characters",
+        ));
+    }
+    let client = oauth_client(values, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET)?
+        .ok_or_else(|| invalid(OIDC_CLIENT_ID, "is required with ORBIT_OIDC_ISSUER"))?;
+    let display_name = values
+        .text(OIDC_DISPLAY_NAME)
+        .unwrap_or_else(|| "SSO".to_owned());
+    if display_name.chars().count() > 50 {
+        return Err(invalid(OIDC_DISPLAY_NAME, "must be at most 50 characters"));
+    }
+    Ok(Some(OidcConfig {
+        issuer,
+        client,
+        display_name,
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -684,5 +754,62 @@ mod tests {
         );
         assert!(lines.contains("ORBIT_S3_ATTACHMENTS=true"), "{lines}");
         assert!(!lines.contains("very-secret"), "{lines}");
+    }
+
+    #[test]
+    fn oidc_needs_an_issuer_url_and_a_client() {
+        let config = parse(&[
+            (OIDC_ISSUER, " https://idp.example/application/o/orbit/ "),
+            (OIDC_CLIENT_ID, "orbit"),
+            (OIDC_CLIENT_SECRET, "secret"),
+        ])
+        .unwrap()
+        .oidc
+        .unwrap();
+        assert_eq!(
+            (config.issuer.as_str(), config.display_name.as_str()),
+            ("https://idp.example/application/o/orbit", "SSO")
+        );
+        assert_eq!(
+            invalid_key(parse(&[(OIDC_CLIENT_ID, "orbit")])),
+            OIDC_ISSUER
+        );
+        assert_eq!(
+            invalid_key(parse(&[(OIDC_ISSUER, "https://idp.example")])),
+            OIDC_CLIENT_ID
+        );
+        assert_eq!(
+            invalid_key(parse(&[
+                (OIDC_ISSUER, "https://idp.example"),
+                (OIDC_CLIENT_ID, "orbit"),
+            ])),
+            OIDC_CLIENT_SECRET
+        );
+        for issuer in [
+            "idp.example",
+            "ftp://idp.example",
+            "https://idp.example/?realm=x",
+            "https://idp.example/#x",
+        ] {
+            assert_eq!(
+                invalid_key(parse(&[
+                    (OIDC_ISSUER, issuer),
+                    (OIDC_CLIENT_ID, "orbit"),
+                    (OIDC_CLIENT_SECRET, "secret"),
+                ])),
+                OIDC_ISSUER,
+                "{issuer}"
+            );
+        }
+        assert!(
+            parse(&[
+                (OPEN_REGISTRATION, "true"),
+                (OIDC_ISSUER, "http://keycloak.lan/realms/home"),
+                (OIDC_CLIENT_ID, "orbit"),
+                (OIDC_CLIENT_SECRET, "secret"),
+                (OIDC_DISPLAY_NAME, "Keycloak"),
+            ])
+            .is_ok()
+        );
     }
 }

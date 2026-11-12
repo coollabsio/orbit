@@ -1462,7 +1462,7 @@ export const linkProviderSignIn = <ThrowOnError extends boolean = false>(options
 export const providerCallback = <ThrowOnError extends boolean = false>(options: Options<ProviderCallbackData, ThrowOnError>): RequestResult<ProviderCallbackResponses, ProviderCallbackErrors, ThrowOnError> => (options.client ?? client).get<ProviderCallbackResponses, ProviderCallbackErrors, ThrowOnError>({ url: '/api/v1/auth/providers/{provider}/callback', ...options });
 
 /**
- * Starts a provider flow. Problems: 404 `provider_not_configured`, 422 `invalid_code_challenge`,
+ * Starts a provider flow. Problems: 404 `provider_not_configured`, 502 `provider_unavailable`, 422 `invalid_code_challenge`,
  * `invalid_redirect` or `invalid_return_to`, 401 `authentication_required` for `connect` and `confirm`, and for
  * `connect` 401 `password_required`, `invalid_credentials` or `reauthentication_required` and 429
  * `authentication_throttled`.

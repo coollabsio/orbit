@@ -8,8 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { PasswordInput } from '@/components/ui/password-input'
 import { Button } from '@/components/ui/button'
-import { useAuthOptions, useChangePassword, useConnectedAccounts, useCurrentUser, useSetAvatar, useUpdateProfile } from '@/features/auth/api'
-import { PROVIDER_NAMES } from '@/features/auth/providerSignIn'
+import { useAuthOptions, useChangePassword, useConnectedAccounts, useCurrentUser, useProviderName, useSetAvatar, useUpdateProfile } from '@/features/auth/api'
 import { ConfirmWithProvider } from '@/features/auth/components/ConfirmWithProvider'
 import { userColor } from '@/features/workspaces/api'
 import { useIsInstallationAdmin } from '@/features/workspaces/permissions'
@@ -111,7 +110,8 @@ function AvatarField() {
 /** How the account signs in, under the email; Security is where the methods change. */
 function SignInMethods({ hasPassword }: { hasPassword: boolean }) {
   const connected = useConnectedAccounts()
-  const methods = [...(hasPassword ? ['Password'] : []), ...(connected.data ?? []).map((account) => PROVIDER_NAMES[account.provider])]
+  const providerName = useProviderName()
+  const methods = [...(hasPassword ? ['Password'] : []), ...(connected.data ?? []).map((account) => providerName(account.provider))]
   // with no workspace, only an operator can open Security (`WorkspaceProvider`)
   const inWorkspace = useContext(WorkspaceContext) !== null
   const isOperator = useIsInstallationAdmin()

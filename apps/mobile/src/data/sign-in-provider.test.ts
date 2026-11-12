@@ -12,6 +12,7 @@ import {
   linkProviderAccount,
   looksLikeServer,
   nativeRedirect,
+  type Provider,
   type ProviderDevice,
   providerErrorMessage,
   providerRows,
@@ -172,10 +173,12 @@ test('a wrong link password keeps the token; a spent token starts over', async (
 })
 
 test('sign-in methods list the password, then the connected providers', () => {
-  const account = (provider: 'google' | 'github') => ({ provider, email: 'ada', created_at: '2026-01-01T00:00:00Z' })
+  const account = (provider: Provider) => ({ provider, email: 'ada', created_at: '2026-01-01T00:00:00Z' })
   expect(signInMethods(true, [account('github'), account('google')])).toEqual(['Password', 'Google', 'GitHub'])
   expect(signInMethods(false, [account('github')])).toEqual(['GitHub'])
   expect(signInMethods(undefined, [])).toEqual(['Password'])
+  expect(signInMethods(true, [account('oidc'), account('google')], 'Authentik')).toEqual(['Password', 'Google', 'Authentik'])
+  expect(signInMethods(false, [account('oidc')], null)).toEqual(['SSO'])
 })
 
 test('error codes read as sentences; unknown codes keep the server detail', () => {
@@ -209,6 +212,11 @@ test('connected accounts list configured providers, plus a connected one no long
     { provider: 'github', account: github },
   ])
   expect(providerRows([], [])).toEqual([])
+  const oidc = { provider: 'oidc' as const, email: 'ada', created_at: '2026-01-01T00:00:00Z' }
+  expect(providerRows(['oidc', 'github'], [oidc])).toEqual([
+    { provider: 'github', account: null },
+    { provider: 'oidc', account: oidc },
+  ])
 })
 
 test('a server field is worth asking once it has a dot, a port, or is localhost', () => {

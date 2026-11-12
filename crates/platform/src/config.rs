@@ -12,7 +12,9 @@ use thiserror::Error;
 
 mod instance;
 
-pub use instance::{BackupSchedule, InstanceConfig, OAuthClientConfig, SmtpConfig, SmtpSecurity};
+pub use instance::{
+    BackupSchedule, InstanceConfig, OAuthClientConfig, OidcConfig, SmtpConfig, SmtpSecurity,
+};
 
 const MAX_SECRET_FILE_BYTES: u64 = 64 * 1024;
 const HTTP_PORT_ENV: &str = "ORBIT_PORT";

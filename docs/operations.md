@@ -76,6 +76,9 @@ The variables of one group are set together. For example, `ORBIT_SMTP_HOST` need
 | `ORBIT_OPEN_REGISTRATION` | saved value | `true` or `false`. `true` requires `ORBIT_SMTP_*` or a provider variable below. On Orbit Cloud, it requires `ORBIT_SMTP_*`. |
 | `ORBIT_GOOGLE_CLIENT_ID`, `ORBIT_GOOGLE_CLIENT_SECRET`, `ORBIT_GOOGLE_CLIENT_SECRET_FILE` | none | The Google OAuth client. Set the ID and the secret together. See [Sign in with Google and GitHub](#sign-in-with-google-and-github). |
 | `ORBIT_GITHUB_CLIENT_ID`, `ORBIT_GITHUB_CLIENT_SECRET`, `ORBIT_GITHUB_CLIENT_SECRET_FILE` | none | The GitHub OAuth client. Set the ID and the secret together. |
+| `ORBIT_OIDC_ISSUER` | none | The issuer URL of an OpenID Connect provider, for example `https://auth.example.com/application/o/orbit/`. Requires `ORBIT_OIDC_CLIENT_ID` and `ORBIT_OIDC_CLIENT_SECRET`. See [Sign in with OpenID Connect](#sign-in-with-openid-connect). |
+| `ORBIT_OIDC_CLIENT_ID`, `ORBIT_OIDC_CLIENT_SECRET`, `ORBIT_OIDC_CLIENT_SECRET_FILE` | none | The client that the provider issued to Orbit. |
+| `ORBIT_OIDC_DISPLAY_NAME` | `SSO` | The name on the sign-in button ("Continue with SSO"), at most 50 characters. |
 
 Orbit does not test the `ORBIT_S3_*` bucket at startup, as Admin does when it saves one. An unreachable bucket shows up as a move error on **Admin → Storage** and as failed backups. Orbit refuses to start when a workspace's own bucket overlaps the `ORBIT_S3_*` bucket.
 
@@ -233,6 +236,23 @@ Orbit uses these rules:
 - If no account has that email, Orbit creates an account only when **Open registration** is on. Open registration does not need a mail server when a sign-in provider is configured (Orbit Cloud still needs one). A new account has no password. The person can add one in the profile settings within 10 minutes of a sign-in.
 - An account with two-factor authentication must still enter its code after the provider sign-in.
 - People connect and disconnect providers in their security settings. Orbit does not let a person remove the last sign-in method (password, passkey or provider).
+
+## Sign in with OpenID Connect
+
+People can sign in with your own identity provider, for example Authentik, Keycloak, Authelia, Zitadel or Pocket ID. Orbit supports one OpenID Connect provider. Only the `ORBIT_OIDC_*` variables configure it, so **Admin → Sign-in providers** shows it read-only.
+
+1. At the identity provider, create a confidential client (an OAuth2/OpenID Connect application with a client secret) that uses the authorization code flow.
+2. Add this redirect URI: `{ORBIT_PUBLIC_ORIGIN}/api/v1/auth/providers/oidc/callback`.
+3. Allow the scopes `openid`, `email` and `profile`.
+4. Set `ORBIT_OIDC_ISSUER`, `ORBIT_OIDC_CLIENT_ID` and `ORBIT_OIDC_CLIENT_SECRET` (or `ORBIT_OIDC_CLIENT_SECRET_FILE`). Optionally, set `ORBIT_OIDC_DISPLAY_NAME`. Restart Orbit.
+
+`ORBIT_OIDC_ISSUER` must be the `issuer` value of the provider's `{issuer}/.well-known/openid-configuration` document; Orbit refuses a document that names another issuer. Orbit reads this document at each sign-in, so it gets the endpoints of the provider, and a provider that is not available at startup does not stop Orbit. The provider must have a userinfo endpoint. Orbit sends the client secret with HTTP Basic authentication (`client_secret_basic`). It uses `client_secret_post` only when the provider does not support Basic.
+
+The rules of [Sign in with Google and GitHub](#sign-in-with-google-and-github) apply, with these details:
+
+- Orbit identifies an account by the issuer and the `sub` claim together. If you change `ORBIT_OIDC_ISSUER`, the existing connections do not apply. At the next sign-in, people connect again with a verified email.
+- A first sign-in connects to an existing account only when the provider sends `email_verified` as `true`. Some providers send `false` until you configure email verification. Then Orbit refuses the first sign-in because the email is not verified.
+- A security confirmation asks the provider for a new sign-in (`prompt=login`, `max_age=0`). A normal sign-in uses the provider's session, so people who are signed in to the provider continue without a new sign-in.
 
 ### Native app redirects
 

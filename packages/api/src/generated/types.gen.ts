@@ -458,6 +458,11 @@ export type AuthOptions = {
      */
     mail_enabled: boolean;
     /**
+     * The label of the OpenID Connect provider on the sign-in buttons ("Continue with {oidc_name}"), from
+     * `ORBIT_OIDC_DISPLAY_NAME`. `null` when it is not set up.
+     */
+    oidc_name?: string | null;
+    /**
      * People can add passkeys and sign in with them (the public origin is a domain name).
      */
     passkeys_enabled: boolean;
@@ -2533,7 +2538,7 @@ export type EnvironmentView = {
      */
     s3_keep_deleted_days: boolean;
     /**
-     * `ORBIT_GOOGLE_*`, `ORBIT_GITHUB_*`.
+     * `ORBIT_GOOGLE_*`, `ORBIT_GITHUB_*`, `ORBIT_OIDC_*`.
      */
     sign_in_providers: Array<Provider>;
     /**
@@ -2843,7 +2848,8 @@ export type InstanceSettingsView = {
      */
     registration_ready: boolean;
     /**
-     * The Google and GitHub OAuth clients that are saved. A provider that is not listed is off.
+     * The OAuth clients of the sign-in providers that are on: Google and GitHub saved here or set by the
+     * environment, and OpenID Connect from `ORBIT_OIDC_*`. A provider that is not listed is off.
      */
     sign_in_providers: Array<SignInProviderView>;
     smtp?: null | SmtpView;
@@ -6133,7 +6139,7 @@ export type ProjectUpdateBody = {
     private?: boolean | null;
 };
 
-export type Provider = 'google' | 'github';
+export type Provider = 'google' | 'github' | 'oidc';
 
 export type PtrAddress = {
     ip: string;
@@ -7724,6 +7730,10 @@ export type SignInProviderView = {
      */
     callback_url: string;
     client_id: string;
+    /**
+     * The OpenID Connect issuer (`ORBIT_OIDC_ISSUER`); `null` for Google and GitHub.
+     */
+    issuer?: string | null;
     provider: Provider;
     /**
      * A client secret is saved. The secret itself is never returned.
@@ -16760,6 +16770,10 @@ export type StartProviderSignInErrors = {
      * internal_error
      */
     500: AuthProblem;
+    /**
+     * provider_unavailable: the OpenID Connect discovery failed
+     */
+    502: AuthProblem;
     /**
      * authentication_busy
      */

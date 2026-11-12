@@ -6,7 +6,7 @@ import { Image, Linking, Share, View } from 'react-native'
 import { ConfirmDialog, type ConfirmRequest, Dialog, PromptDialog, type PromptRequest } from '../../../components/settings/Dialog'
 import { ACCOUNT_NAV, Badge, Note, RowIcon, RowText, SettingsCard, SettingsRow, SettingsShell } from '../../../components/settings/Shell'
 import { accountKeys, type PasskeyRecord, passkeyAgo, type TotpSetup, twoFactorSummary } from '../../../data/account-api'
-import { type Provider, PROVIDER_LABEL, type ProviderOutcome, providerErrorMessage, providerRows, startProviderSignIn, withReauthentication } from '../../../data/sign-in-provider'
+import { type Provider, type ProviderOutcome, providerErrorMessage, providerLabel, providerRows, startProviderSignIn, withReauthentication } from '../../../data/sign-in-provider'
 import { useAuthOptions, useConfirmIdentity, useConnectedAccounts, useDeletePasskey, useDisconnectAccount, usePasskeys, useTwoFactor, useTwoFactorWrites } from '../../../hooks/account'
 import { useOrbit } from '../../../orbit-context'
 import { errorMessage } from '../../../session-context'
@@ -64,7 +64,7 @@ export default function SecurityScreen() {
   /** A connected account is a new way into the account: one with a password confirms it first. */
   const connect = (provider: Provider) => {
     setAccountsError(null)
-    const label = PROVIDER_LABEL[provider]
+    const label = providerLabel(provider, options.data?.oidc_name)
     if (user.has_password) {
       return setPrompt({
         title: `Connect ${label}`,
@@ -87,8 +87,8 @@ export default function SecurityScreen() {
 
   const askDisconnect = (provider: Provider) =>
     setConfirm({
-      title: `Disconnect ${PROVIDER_LABEL[provider]}?`,
-      description: `You can no longer sign in to Orbit with ${PROVIDER_LABEL[provider]}.`,
+      title: `Disconnect ${providerLabel(provider, options.data?.oidc_name)}?`,
+      description: `You can no longer sign in to Orbit with ${providerLabel(provider, options.data?.oidc_name)}.`,
       confirmLabel: 'Disconnect',
       danger: true,
       onConfirm: () => {
@@ -192,7 +192,7 @@ export default function SecurityScreen() {
           {rows.map(({ provider, account }, index) => (
             <SettingsRow key={provider} first={index === 0}>
               <RowIcon icon={provider} />
-              <RowText title={PROVIDER_LABEL[provider]} subtitle={account ? (account.email ?? 'Connected') : 'Not connected'} />
+              <RowText title={providerLabel(provider, options.data?.oidc_name)} subtitle={account ? (account.email ?? 'Connected') : 'Not connected'} />
               {account ? (
                 <Button label="Disconnect" variant="outline" size="sm" disabled={disconnect.isPending} onPress={() => askDisconnect(provider)} />
               ) : (

@@ -30,7 +30,8 @@ pub use backup::{
 pub use config::{
     ApnsConfig, AppKey, BackupSchedule, BillingConfig, Config, ConfigError, DataConfig,
     EnvironmentMode, HttpConfig, InstanceConfig, JobsConfig, MailConfig, MailMode, MetricsConfig,
-    OAuthClientConfig, Plan, RateLimitConfig, Secret, SmtpConfig, SmtpSecurity, TrialConfig,
+    OAuthClientConfig, OidcConfig, Plan, RateLimitConfig, Secret, SmtpConfig, SmtpSecurity,
+    TrialConfig,
     UploadConfig, redact_database_url,
 };
 pub use db::{

@@ -29,6 +29,16 @@ pub struct EnvironmentSettings {
     pub backup_schedule: Option<BackupSchedule>,
     pub s3_keep_deleted_days: Option<u32>,
     pub sign_in_providers: Vec<SavedSignInProvider>,
+    /// `ORBIT_OIDC_*`; its client is in `sign_in_providers`.
+    pub oidc: Option<OidcSettings>,
+}
+
+/// The OpenID Connect provider's settings besides its client.
+#[derive(Debug)]
+pub struct OidcSettings {
+    pub issuer: url::Url,
+    /// "Continue with {display_name}".
+    pub display_name: String,
 }
 
 impl EnvironmentSettings {
@@ -91,6 +101,22 @@ impl EnvironmentSettings {
                 });
             }
         }
+        let oidc = config
+            .oidc
+            .as_ref()
+            .map(|oidc| -> Result<OidcSettings, String> {
+                sign_in_providers.push(SavedSignInProvider {
+                    provider: Provider::Oidc,
+                    client_id: oidc.client.client_id.clone(),
+                    client_secret: seal(oidc.client.client_secret.expose())?,
+                });
+                Ok(OidcSettings {
+                    issuer: url::Url::parse(&oidc.issuer)
+                        .map_err(|_| "ORBIT_OIDC_ISSUER must be a URL".to_owned())?,
+                    display_name: oidc.display_name.clone(),
+                })
+            })
+            .transpose()?;
         Ok(Self {
             registration_open: config.registration_open,
             smtp,
@@ -100,6 +126,7 @@ impl EnvironmentSettings {
             backup_schedule: config.backup_schedule,
             s3_keep_deleted_days: config.s3_keep_deleted_days,
             sign_in_providers,
+            oidc,
         })
     }
 

@@ -13,11 +13,10 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Field, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
-import { useAuthOptions, useConnectedAccounts, useCurrentUser, useDisconnectAccount, useStartProviderSignIn } from '@/features/auth/api'
+import { useAuthOptions, useConnectedAccounts, useCurrentUser, useDisconnectAccount, useProviderName, useStartProviderSignIn } from '@/features/auth/api'
 import { ConfirmWithProvider } from '@/features/auth/components/ConfirmWithProvider'
 import { CurrentPassword } from '@/features/auth/components/CurrentPassword'
 import { defaultPasskeyName, isPasskeyCancel, passkeysSupported } from '@/features/auth/passkey'
-import { PROVIDER_NAMES } from '@/features/auth/providerSignIn'
 import {
   useAddPasskey,
   useDeletePasskey,
@@ -398,7 +397,7 @@ function AddPasskeyDialog({ add, onAdd, onClose }: { add: ReturnType<typeof useA
 function ConnectProviderDialog({ provider, onClose }: { provider: Provider; onClose: () => void }) {
   const connect = useStartProviderSignIn()
   const [password, setPassword] = useState('')
-  const name = PROVIDER_NAMES[provider]
+  const name = useProviderName()(provider)
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
       <DialogContent>
@@ -427,6 +426,7 @@ function ConnectedAccountsCard() {
   const hasPassword = useHasPassword()
   const connect = useStartProviderSignIn()
   const disconnect = useDisconnectAccount()
+  const providerName = useProviderName()
   const [confirming, setConfirming] = useState<Provider | null>(null)
   const configured = options.data?.providers ?? []
   const connected = accounts.data ?? []
@@ -435,7 +435,7 @@ function ConnectedAccountsCard() {
   if (providers.length === 0) return null
 
   async function confirmDisconnect(account: ConnectedAccount) {
-    const name = PROVIDER_NAMES[account.provider]
+    const name = providerName(account.provider)
     const confirmed = await confirmAction({
       title: `Disconnect ${name}?`,
       description: `You can no longer sign in with this ${name} account.`,
@@ -463,7 +463,7 @@ function ConnectedAccountsCard() {
         {accounts.isError ? <SettingsRow role="alert">Connected accounts could not be loaded. <Button variant="ghost" onClick={() => void accounts.refetch()}>Retry</Button></SettingsRow> : null}
         {providers.map((provider) => {
           const account = connected.find((item) => item.provider === provider)
-          const name = PROVIDER_NAMES[provider]
+          const name = providerName(provider)
           return (
             <SettingsRow key={provider} className="flex-nowrap" data-provider={provider}>
               <RowIcon className="text-foreground"><ProviderMark provider={provider} /></RowIcon>

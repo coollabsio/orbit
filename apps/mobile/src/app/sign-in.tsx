@@ -5,7 +5,7 @@ import { Linking, ScrollView, View } from 'react-native'
 import { Select } from '../components/settings/Shell'
 import { accountKeys, authOptions } from '../data/account-api'
 import { createClient, normalizeServer, type SignIn, signIn as signInWithPassword, signInSecondFactor } from '../data/orbit'
-import { isPasswordTokenSpent, linkProviderAccount, looksLikeServer, type PasswordStep, type Provider, PROVIDER_LABEL, providerErrorMessage, startProviderSignIn } from '../data/sign-in-provider'
+import { isPasswordTokenSpent, linkProviderAccount, looksLikeServer, type PasswordStep, type Provider, providerErrorMessage, providerLabel, startProviderSignIn } from '../data/sign-in-provider'
 import { useSession } from '../session-context'
 import { providerDevice } from '../sign-in-provider'
 import { alpha, useTheme } from '../theme'
@@ -109,7 +109,7 @@ export default function SignInScreen() {
     })
 
   const credentials = step.name === 'credentials'
-  const linking = step.name === 'password' ? PROVIDER_LABEL[step.challenge.provider] : null
+  const linking = step.name === 'password' ? providerLabel(step.challenge.provider, options.data?.oidc_name) : null
   const title = credentials ? 'Orbit' : linking ? `Connect ${linking}` : 'Two-factor code'
   const subtitle = credentials
     ? 'Sign in to your tasks, docs, mail and chat.'
@@ -170,7 +170,7 @@ export default function SignInScreen() {
                     {providers.map((provider) => (
                       <Button
                         key={provider}
-                        label={`Continue with ${PROVIDER_LABEL[provider]}`}
+                        label={`Continue with ${providerLabel(provider, options.data?.oidc_name)}`}
                         icon={provider}
                         variant="outline"
                         size="lg"
