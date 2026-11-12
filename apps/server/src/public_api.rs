@@ -788,6 +788,8 @@ struct CycleOut {
     completed_count: i64,
     estimate_total: i64,
     estimate_completed: i64,
+    /// Live tasks moved out of this cycle to a later one and not back in it; not in `task_count`.
+    carried_over_count: i64,
 }
 
 impl From<CycleView> for CycleOut {
@@ -805,6 +807,7 @@ impl From<CycleView> for CycleOut {
             completed_count: c.completed_count,
             estimate_total: c.estimate_total,
             estimate_completed: c.estimate_completed,
+            carried_over_count: c.carried_over_count,
         }
     }
 }

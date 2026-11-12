@@ -240,7 +240,9 @@ estimate_total, estimate_completed}`. Use the IDs in `milestone_id`.
 
 `GET /workspaces/{workspace_id}/projects/{project_id}/cycles`. Scope: `tasks:read`. Every cycle of
 the project by start date, on one page. Item: `{id, project_id, number, name, starts_at, ends_at,
-relative, version, task_count, completed_count, estimate_total, estimate_completed}`. A cycle
+relative, version, task_count, completed_count, estimate_total, estimate_completed,
+carried_over_count}`. `carried_over_count` counts the live tasks that "Move unfinished tasks to
+next cycle" took out of the cycle and that are not back in it; they are not in `task_count`. A cycle
 covers `starts_at` up to `ends_at`, exclusive. `relative` is `current` (the cycle that runs now),
 `next` (the first that starts after now), `previous` (the last that ended before now) or `null`.
 Use the IDs in `cycle_id`.

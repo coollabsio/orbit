@@ -473,7 +473,7 @@ fn tools() -> Vec<Tool> {
         ),
         definition::<ProjectArgs>(
             "list_cycles",
-            "List the cycles of an approved project by start date: number, name, starts_at and ends_at (exclusive), progress counts, and relative (current, next, previous or null).",
+            "List the cycles of an approved project by start date: number, name, starts_at and ends_at (exclusive), progress counts, carried_over_count (tasks moved on to a later cycle), and relative (current, next, previous or null).",
         ),
         definition::<CursorArgs>(
             "list_members",

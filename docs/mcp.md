@@ -228,7 +228,9 @@ The progress counts of milestones and cycles are `task_count`, `completed_count`
 `estimate_total` and `estimate_completed`. They count live tasks; cancelled and duplicate tasks are
 not counted, and completed means a status in the `completed` category. A cycle's `relative` is
 `current` (it runs now), `next` (the first that starts after now), `previous` (the last that
-ended before now) or `null`.
+ended before now) or `null`. A cycle's `carried_over_count` counts the live tasks that "Move
+unfinished tasks to next cycle" took out of it and that are not back in it. They are not in its
+`task_count`, so a past cycle still shows the work that it did not finish.
 
 Task results include title, description, project/status IDs, priority,
 assignee/label IDs, due dates, `milestone_id`, `cycle_id`, `estimate` (points, or `null`),
