@@ -17,6 +17,8 @@ export function isPageFileUrl(url: unknown): url is string {
 export interface FileScope {
   workspaceId: string
   taskId: string
+  /** The task does not exist yet: its uploads wait in the browser, and their `blob:` URLs are kept in the text. */
+  deferred?: boolean
 }
 
 /** The download path of a task attachment, what inline images and files in task text point at. */
@@ -35,13 +37,13 @@ export function isTaskAttachmentUrl(url: unknown, scope: FileScope): url is stri
 
 /**
  * URL policy for image/file blocks: an uploaded page file (with a `scope`: the task's own attachment), an
- * absolute http(s) URL (embedded by link), or empty (a block still waiting for its upload). Everything else
+ * absolute http(s) URL (embedded by link), a held `blob:` URL (a `deferred` scope), or empty (a block still waiting for its upload). Everything else
  * (javascript:, data:, other paths) is dropped.
  */
 export function isSafeFileUrl(url: unknown, scope?: FileScope): url is string {
   if (typeof url !== 'string') return false
   const ownFile = scope ? isTaskAttachmentUrl(url, scope) : PAGE_FILE_PATH.test(url)
-  if (url === '' || ownFile) return true
+  if (url === '' || ownFile || (scope?.deferred && url.startsWith('blob:'))) return true
   const cleaned = url.replace(URL_NOISE, '')
   return cleaned === url && /^https?:\/\/[^/\\]/i.test(url)
 }

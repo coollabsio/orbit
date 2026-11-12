@@ -22,6 +22,29 @@ export function fileBlock(file: File, url: string) {
   return { type: file.type.startsWith('image/') ? 'image' : 'file', props: { url, name: file.name } }
 }
 
+type Block = Record<string, unknown>
+
+/** The URLs of the image and file blocks of a document, in order, nested blocks included. */
+export function fileUrls(blocks: readonly unknown[]): string[] {
+  return blocks.flatMap((value) => {
+    const block = value as Block
+    const url = (block.props as Block | undefined)?.url
+    const own = (block.type === 'image' || block.type === 'file') && typeof url === 'string' && url !== '' ? [url] : []
+    return [...own, ...(Array.isArray(block.children) ? fileUrls(block.children) : [])]
+  })
+}
+
+/** The document with the URL of each image and file block replaced by `replace(url)`. */
+export function mapFileUrls(blocks: readonly unknown[], replace: (url: string) => string): Block[] {
+  return blocks.map((value) => {
+    const block = value as Block
+    const props = block.props as Block | undefined
+    const next: Block = (block.type === 'image' || block.type === 'file') && typeof props?.url === 'string' ? { ...block, props: { ...props, url: replace(props.url) } } : { ...block }
+    if (Array.isArray(block.children)) next.children = mapFileUrls(block.children, replace)
+    return next
+  })
+}
+
 /**
  * What Save does in a comment's edit: `close` without a change (an old markdown comment is not rewritten), `save` an
  * edit, and `confirm-delete` when the text was removed (a comment needs content). Removing the text of a comment that
