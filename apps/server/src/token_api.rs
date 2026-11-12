@@ -32,9 +32,10 @@ use crate::repositories::task_filter::{
 };
 use crate::repositories::task_recurrences::TaskRecurrence;
 use crate::repositories::tasks::{
-    CommentContent, CommentRecord, CreateTask, ImportedComment, ImportedTask, LabelRecord, Page,
-    ProjectRecord, SortOrder, StatusRecord, TaskChanges, TaskError, TaskFilter, TaskRecord,
-    TaskRepository, TaskSort, TaskUpdate, TokenActor, normalize_project_key, parse_task_identifier,
+    CommentContent, CommentRecord, CreateTask, CycleRecord, ImportedComment, ImportedTask,
+    LabelRecord, MilestoneRecord, Page, ProjectRecord, SortOrder, StatusRecord, TaskChanges,
+    TaskError, TaskFilter, TaskRecord, TaskRepository, TaskSort, TaskUpdate, TokenActor,
+    normalize_project_key, parse_task_identifier,
 };
 use crate::repositories::workspaces::{WorkspaceError, WorkspaceRepository};
 use crate::task_import::escape_markdown;
@@ -138,6 +139,15 @@ pub struct ReadTask {
     /// How the task repeats; null when it does not. Completing it creates the next occurrence.
     #[schema(required = true)]
     pub recurrence: Option<TaskRecurrence>,
+    /// A milestone of the task's project; `null` when none.
+    #[schema(value_type = Option<String>, required = true)]
+    pub milestone_id: Option<Id>,
+    /// A cycle of the task's project; `null` when none.
+    #[schema(value_type = Option<String>, required = true)]
+    pub cycle_id: Option<Id>,
+    /// Points, 0 to 1000; `null` when not estimated.
+    #[schema(required = true)]
+    pub estimate: Option<i64>,
     #[schema(value_type = String, format = DateTime)]
     pub created_at: TimestampMillis,
     #[schema(value_type = String, format = DateTime)]
@@ -216,6 +226,9 @@ impl ReadTask {
             due_start_at: task.due_start_at,
             due_at: task.due_at,
             recurrence: task.recurrence,
+            milestone_id: task.milestone_id,
+            cycle_id: task.cycle_id,
+            estimate: task.estimate,
             created_at: task.created_at,
             updated_at: task.updated_at,
             completed_at: task.completed_at,
@@ -305,6 +318,8 @@ pub struct TaskQuery {
     pub assignee: Option<AssigneeFilter>,
     pub label_id: Option<Id>,
     pub priority: Option<String>,
+    pub milestone: Option<MilestoneFilter>,
+    pub cycle: Option<CycleFilter>,
     /// Only the direct sub-issues of this task, which must be in an approved project.
     pub parent_task_id: Option<Id>,
     /// Newest first when unset.
@@ -319,6 +334,101 @@ pub enum AssigneeFilter {
     Unassigned,
 }
 
+/// A `list_tasks` milestone filter, as `parse_milestone_filter` reads it.
+#[derive(Clone, Copy, Debug)]
+pub enum MilestoneFilter {
+    Milestone(Id),
+    Unset,
+}
+
+/// A `list_tasks` cycle filter, as `parse_cycle_filter` reads it. The relative values name the
+/// cycle of each task's own project, as [`CycleView::relative`] marks it.
+#[derive(Clone, Copy, Debug)]
+pub enum CycleFilter {
+    Cycle(Id),
+    Relative(CycleRelative),
+    Unset,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, ToSchema)]
+#[schema(as = PublicCycleRelative)]
+#[serde(rename_all = "snake_case")]
+pub enum CycleRelative {
+    /// The cycle that runs now.
+    Current,
+    /// The first cycle that starts after now.
+    Next,
+    /// The last cycle that ended before now.
+    Previous,
+}
+
+impl CycleRelative {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Current => "current",
+            Self::Next => "next",
+            Self::Previous => "previous",
+        }
+    }
+}
+
+/// A milestone ID, or `none` for tasks without a milestone.
+pub fn parse_milestone_filter(raw: &str) -> Result<MilestoneFilter> {
+    match raw {
+        "none" => Ok(MilestoneFilter::Unset),
+        id => id
+            .parse()
+            .map(MilestoneFilter::Milestone)
+            .map_err(|_| TokenApiError::Invalid("milestone_id must be a milestone ID or `none`")),
+    }
+}
+
+/// A cycle ID, `current`, `next`, `previous`, or `none` for tasks without a cycle.
+pub fn parse_cycle_filter(raw: &str) -> Result<CycleFilter> {
+    Ok(match raw {
+        "none" => CycleFilter::Unset,
+        "current" => CycleFilter::Relative(CycleRelative::Current),
+        "next" => CycleFilter::Relative(CycleRelative::Next),
+        "previous" => CycleFilter::Relative(CycleRelative::Previous),
+        id => id.parse().map(CycleFilter::Cycle).map_err(|_| {
+            TokenApiError::Invalid("cycle_id must be a cycle ID, current, next, previous or none")
+        })?,
+    })
+}
+
+/// A cycle and where it stands now: `current`, `next`, `previous`, or `null` for any other.
+#[derive(Clone, Debug, Serialize)]
+pub struct CycleView {
+    #[serde(flatten)]
+    pub cycle: CycleRecord,
+    pub relative: Option<CycleRelative>,
+}
+
+/// Marks the current, next and previous cycle of `cycles` (one project's, by start date, so not
+/// overlapping) at `now`, as the `cycle` task filter reads them.
+fn cycle_views(cycles: Vec<CycleRecord>, now: TimestampMillis) -> Vec<CycleView> {
+    let now = now.as_millis();
+    let current = cycles
+        .iter()
+        .position(|c| c.starts_at.as_millis() <= now && now < c.ends_at.as_millis());
+    let next = cycles.iter().position(|c| c.starts_at.as_millis() > now);
+    let previous = cycles.iter().rposition(|c| c.ends_at.as_millis() <= now);
+    cycles
+        .into_iter()
+        .enumerate()
+        .map(|(index, cycle)| CycleView {
+            relative: [
+                (current, CycleRelative::Current),
+                (next, CycleRelative::Next),
+                (previous, CycleRelative::Previous),
+            ]
+            .into_iter()
+            .find_map(|(at, relative)| (at == Some(index)).then_some(relative)),
+            cycle,
+        })
+        .collect()
+}
+
 #[derive(Debug)]
 pub struct NewTask {
     pub project_id: Id,
@@ -331,6 +441,12 @@ pub struct NewTask {
     pub parent_task_id: Option<Id>,
     pub due_start_at: Option<TimestampMillis>,
     pub due_at: Option<TimestampMillis>,
+    /// A milestone of `project_id`.
+    pub milestone_id: Option<Id>,
+    /// A cycle of `project_id`.
+    pub cycle_id: Option<Id>,
+    /// Points, 0 to 1000.
+    pub estimate: Option<i64>,
     /// What the source tool kept; needs `tasks:import`.
     pub import: Option<ImportedTask>,
 }
@@ -451,6 +567,10 @@ pub struct TaskPatch {
     pub parent_task_id: Option<Option<Id>>,
     /// `Some(None)` stops repeating.
     pub recurrence: Option<Option<TaskRecurrence>>,
+    /// `Some(None)` clears the milestone, cycle or estimate.
+    pub milestone_id: Option<Option<Id>>,
+    pub cycle_id: Option<Option<Id>>,
+    pub estimate: Option<Option<i64>>,
     /// `Some(Some(id))` marks the task as a duplicate of `id`; `Some(None)` unmarks it.
     pub duplicate_of_id: Option<Option<Id>>,
 }
@@ -773,6 +893,33 @@ impl Authorized<'_> {
             })
     }
 
+    pub async fn milestones(&self, project_id: Id) -> Result<Vec<MilestoneRecord>> {
+        self.need(ApiTokenScope::TasksRead)?;
+        if !self.approved(project_id) {
+            return Err(TokenApiError::NotAvailable);
+        }
+        let p = self.principal;
+        Ok(self
+            .api
+            .tasks
+            .milestones(p.workspace_id, project_id, p.actor_id)
+            .await?)
+    }
+
+    pub async fn cycles(&self, project_id: Id) -> Result<Vec<CycleView>> {
+        self.need(ApiTokenScope::TasksRead)?;
+        if !self.approved(project_id) {
+            return Err(TokenApiError::NotAvailable);
+        }
+        let p = self.principal;
+        let cycles = self
+            .api
+            .tasks
+            .cycles(p.workspace_id, project_id, p.actor_id)
+            .await?;
+        Ok(cycle_views(cycles, TimestampMillis::now()))
+    }
+
     pub async fn statuses(
         &self,
         project_id: Id,
@@ -882,6 +1029,37 @@ impl Authorized<'_> {
                 json!([priority]),
             ));
         }
+        match query.milestone {
+            Some(MilestoneFilter::Milestone(id)) => children.push(condition(
+                FilterField::Milestone,
+                FilterOperator::Is,
+                json!([id.to_string()]),
+            )),
+            Some(MilestoneFilter::Unset) => children.push(condition(
+                FilterField::Milestone,
+                FilterOperator::IsEmpty,
+                Value::Null,
+            )),
+            None => {}
+        }
+        match query.cycle {
+            Some(CycleFilter::Cycle(id)) => children.push(condition(
+                FilterField::Cycle,
+                FilterOperator::Is,
+                json!([id.to_string()]),
+            )),
+            Some(CycleFilter::Relative(relative)) => children.push(condition(
+                FilterField::Cycle,
+                FilterOperator::Is,
+                json!([relative.as_str()]),
+            )),
+            Some(CycleFilter::Unset) => children.push(condition(
+                FilterField::Cycle,
+                FilterOperator::IsEmpty,
+                Value::Null,
+            )),
+            None => {}
+        }
         let filter = TaskFilter {
             tree: FilterGroup {
                 op: GroupOp::And,
@@ -969,6 +1147,9 @@ impl Authorized<'_> {
             due_start_at: input.due_start_at,
             due_at: input.due_at,
             parent_task_id: input.parent_task_id,
+            milestone_id: input.milestone_id,
+            cycle_id: input.cycle_id,
+            estimate: input.estimate,
         };
         let (tasks, now) = (self.granted(), TimestampMillis::now());
         // An import token creates every task as an import: no notifications, no automation.
@@ -1081,6 +1262,9 @@ impl Authorized<'_> {
                         due_at: patch.due_at,
                         parent_task_id: patch.parent_task_id,
                         recurrence,
+                        milestone_id: patch.milestone_id,
+                        cycle_id: patch.cycle_id,
+                        estimate: patch.estimate,
                         duplicate_of_id: patch.duplicate_of_id,
                         ..Default::default()
                     },

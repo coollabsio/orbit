@@ -169,6 +169,9 @@ async fn create_task(
                 due_start_at: None,
                 due_at: None,
                 parent_task_id: None,
+                milestone_id: None,
+                cycle_id: None,
+                estimate: None,
             },
             "test",
             TimestampMillis::now(),
@@ -665,7 +668,7 @@ async fn tools_list_includes_required_cache_fields_for_current_protocol() {
         let result: Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(result["result"]["ttlMs"], 0, "{result}");
         assert_eq!(result["result"]["cacheScope"], "private", "{result}");
-        assert_eq!(result["result"]["tools"].as_array().unwrap().len(), 8);
+        assert_eq!(result["result"]["tools"].as_array().unwrap().len(), 10);
     }
 }
 

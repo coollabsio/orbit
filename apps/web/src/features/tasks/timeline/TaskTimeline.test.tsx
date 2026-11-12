@@ -44,7 +44,7 @@ const labels = [
   { id: 'bug', name: 'Bug', color: '#eb5757', version: 1, workspace_id: 'ws', project_id: 'p1' },
   { id: 'ui', name: 'UI', color: '#26b5ce', version: 1, workspace_id: 'ws', project_id: 'p1' },
 ]
-const context: GroupContext = { statuses, members: [], labels, projects, currentUserId: 'u1', showEmpty: false }
+const context: GroupContext = { statuses, members: [], labels, projects, milestones: [], cycles: [], currentUserId: 'u1', showEmpty: false }
 
 type Extra = { onOpen?: (id: string) => void; groupBy?: GroupBy; pxPerDay?: number; properties?: TaskProperty[] }
 

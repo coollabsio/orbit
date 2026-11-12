@@ -74,7 +74,7 @@ test('creates the task with the defaults and opens it', async () => {
   await userEvent.type(view.getByLabelText('Task title'), '  Fix login  ')
   await userEvent.click(view.getByRole('button', { name: 'Create task' }))
   await waitFor(() => expect(opened).toEqual(['task-0001']))
-  expect(created).toEqual([{ title: 'Fix login', project_id: 'project-1', status_id: 'todo', priority: 'high', assignee_ids: [], label_ids: [], due_at: null, due_start_at: null, parent_task_id: null }])
+  expect(created).toEqual([{ title: 'Fix login', project_id: 'project-1', status_id: 'todo', priority: 'high', assignee_ids: [], label_ids: [], due_at: null, due_start_at: null, parent_task_id: null, milestone_id: null, cycle_id: null, estimate: null }])
 })
 
 test('"Create more" keeps the dialog and the properties for the next task', async () => {

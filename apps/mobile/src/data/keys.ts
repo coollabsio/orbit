@@ -17,6 +17,8 @@ export const keys = {
   members: (workspaceId: string) => ['members', workspaceId] as const,
   projectMembers: (workspaceId: string, projectId: string) => ['project-members', workspaceId, projectId] as const,
   labels: (workspaceId: string) => ['labels', workspaceId] as const,
+  milestones: (workspaceId: string, projectId: string) => ['milestones', workspaceId, projectId] as const,
+  cycles: (workspaceId: string, projectId: string) => ['cycles', workspaceId, projectId] as const,
   conversations: (workspaceId: string) => ['conversations', workspaceId] as const,
   chatCategories: (workspaceId: string) => ['chat-categories', workspaceId] as const,
   chatStates: (workspaceId: string) => ['chat-states', workspaceId] as const,
@@ -37,7 +39,7 @@ export type QueryKey = readonly string[]
  * notifications are in it, as on the web, where the event refreshes the whole workspace.
  */
 export function workspaceDataKeys(workspaceId: string): QueryKey[] {
-  return (['tasks', 'task', 'comments', 'task-activity', 'projects', 'statuses', 'labels', 'members', 'notifications', 'pages', 'page', 'teamspaces', 'database'] as const).map(
+  return (['tasks', 'task', 'comments', 'task-activity', 'projects', 'statuses', 'labels', 'milestones', 'cycles', 'members', 'notifications', 'pages', 'page', 'teamspaces', 'database'] as const).map(
     (resource) => [resource, workspaceId],
   )
 }

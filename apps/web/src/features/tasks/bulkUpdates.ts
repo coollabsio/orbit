@@ -1,5 +1,5 @@
 import type { BulkItem, LabelRecord } from '@orbit/api/generated/types.gen'
-import type { Task, TaskStatusDef } from '@/features/tasks/api/models'
+import type { Cycle, Milestone, Task, TaskStatusDef } from '@/features/tasks/api/models'
 import { labelKeyOf, labelRepresentatives, projectLabels } from '@/features/tasks/taskMeta'
 import { resolveStatusId } from '@/features/tasks/tasksLib'
 
@@ -66,4 +66,27 @@ export function dueUpdates(tasks: Task[], start: string | null, end: string | nu
   return tasks
     .filter((task) => (task.dueStartAt ?? null) !== start || task.dueAt !== end)
     .map((task) => ({ id: task.id, expected_version: task.version, due_start_at: start, due_at: end }))
+}
+
+/** Milestones and cycles belong to one project: a pick reaches the tasks of that project; `null` clears it on every task. */
+export function milestoneUpdates(tasks: Task[], milestone: Pick<Milestone, 'id' | 'project_id'> | null): BulkItem[] {
+  return tasks
+    .filter((task) => (milestone ? task.projectId === milestone.project_id && task.milestoneId !== milestone.id : Boolean(task.milestoneId)))
+    .map((task) => ({ id: task.id, expected_version: task.version, milestone_id: milestone?.id ?? null }))
+}
+
+export function cycleUpdates(tasks: Task[], cycle: Pick<Cycle, 'id' | 'project_id'> | null): BulkItem[] {
+  return tasks
+    .filter((task) => (cycle ? task.projectId === cycle.project_id && task.cycleId !== cycle.id : Boolean(task.cycleId)))
+    .map((task) => ({ id: task.id, expected_version: task.version, cycle_id: cycle?.id ?? null }))
+}
+
+export function estimateUpdates(tasks: Task[], estimate: number | null): BulkItem[] {
+  return tasks.filter((task) => (task.estimate ?? null) !== estimate).map((task) => ({ id: task.id, expected_version: task.version, estimate }))
+}
+
+/** The one project of all `tasks`, whose milestones and cycles a menu can offer; null when they span projects. */
+export function sharedProjectId(tasks: Task[]): string | null {
+  const ids = new Set(tasks.map((task) => task.projectId))
+  return ids.size === 1 ? [...ids][0]! : null
 }

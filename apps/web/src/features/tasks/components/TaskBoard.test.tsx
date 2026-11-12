@@ -44,7 +44,7 @@ function captureWrites(writes: Write[]) {
 
 function renderBoard(tasks: Task[], options: { statuses?: TaskStatusDef[]; display?: Partial<DisplayOptions>; scope?: string; onOpen?: (taskId: string) => void } = {}) {
   const statuses = options.statuses ?? [todo, doing]
-  const groupContext: GroupContext = { statuses, members: [], labels: [], projects: [launch, docs], currentUserId: 'user-1', showEmpty: false }
+  const groupContext: GroupContext = { statuses, members: [], labels: [], projects: [launch, docs], milestones: [], cycles: [], currentUserId: 'user-1', showEmpty: false }
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>

@@ -1,6 +1,6 @@
 import { useRef, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
-import { ArrowUpRightSquare, Calendar, Clipboard, Copy, Flag, Folder, Hierarchy2, LinkBroken, RecordCircle, Tag, Trash, User as UserIcon, UserAdd } from 'reicon-react'
+import { ArrowUpRightSquare, Calendar, Clipboard, Copy, Diamonds, Flag, Folder, Hierarchy2, LinkBroken, RecordCircle, RefreshCircle, Tag, Trash, Triangle, User as UserIcon, UserAdd } from 'reicon-react'
 import type { BulkItem, LabelRecord } from '@orbit/api/generated/types.gen'
 import { ProjectLock } from '@/features/tasks/components/ProjectLock'
 import { ColorDot } from '@/components/common/ColorDot'
@@ -21,8 +21,11 @@ import {
 } from '@/components/ui/context-menu'
 import type { Task, TaskStatusDef } from '@/features/tasks/api/models'
 import { useProjects } from '@/features/tasks/api/projects'
+import { useCycles } from '@/features/tasks/api/cycles'
+import { useMilestones } from '@/features/tasks/api/milestones'
 import { useBulkTasks } from '@/features/tasks/api/tasks'
-import { assignUpdates, assigneeToggleUpdates, dueUpdates, everyTaskHasLabel, labelChoices, labelToggleUpdates, priorityUpdates, statusUpdates } from '@/features/tasks/bulkUpdates'
+import { assignUpdates, assigneeToggleUpdates, cycleUpdates, dueUpdates, estimateUpdates, everyTaskHasLabel, labelChoices, labelToggleUpdates, milestoneUpdates, priorityUpdates, sharedProjectId, statusUpdates } from '@/features/tasks/bulkUpdates'
+import { cycleName, cyclePickerGroups, ESTIMATE_OPTIONS, estimateLabel } from '@/features/tasks/planningLib'
 import { pickerTitle } from '@/features/tasks/relationsLib'
 import { parentPickerTitle } from '@/features/tasks/subIssuesLib'
 import { PRIORITY_LABEL, PRIORITY_ORDER } from '@/features/tasks/taskMeta'
@@ -97,6 +100,10 @@ export function TaskContextMenu({ tasks, users, labels, statuses, groupContext, 
   // the live tasks, so that a second choice in an open submenu sends the current versions
   const targets = tasks.filter((task) => ids.includes(task.id))
   const labelOptions = labelChoices(targets, labels)
+  // milestones and cycles belong to one project: offered when every target is in it
+  const projectId = sharedProjectId(targets) ?? undefined
+  const milestones = useMilestones(workspace.id, projectId).data ?? []
+  const cycleGroups = cyclePickerGroups(useCycles(workspace.id, projectId).data ?? [])
   const [first] = targets
   const scope = targets.length === 1 ? first.identifier : targets.length
   const mutate = (updates: BulkItem[]) => {
@@ -196,6 +203,56 @@ export function TaskContextMenu({ tasks, users, labels, statuses, groupContext, 
               <ContextMenuSeparator />
               <ContextMenuItem onClick={() => setDialog('dueDate')}>Custom…</ContextMenuItem>
               {targets.some((task) => task.dueAt) ? <ContextMenuItem onClick={() => setDue(null, null)}>Remove due date</ContextMenuItem> : null}
+            </ContextMenuSubContent>
+          </ContextMenuSub>
+          {projectId && milestones.length > 0 ? (
+            <ContextMenuSub>
+              <ContextMenuSubTrigger>
+                <Diamonds aria-hidden />
+                <span className="flex-1">Milestone</span>
+                <ContextMenuShortcut><Shortcut id="task.setMilestone" /></ContextMenuShortcut>
+              </ContextMenuSubTrigger>
+              <ContextMenuSubContent className="min-w-45">
+                <ContextMenuCheckboxItem checked={targets.every((task) => !task.milestoneId)} closeOnClick onCheckedChange={() => mutate(milestoneUpdates(targets, null))}>No milestone</ContextMenuCheckboxItem>
+                {milestones.map((milestone) => (
+                  <ContextMenuCheckboxItem key={milestone.id} checked={targets.every((task) => task.milestoneId === milestone.id)} closeOnClick onCheckedChange={() => mutate(milestoneUpdates(targets, milestone))}>
+                    {milestone.name}
+                  </ContextMenuCheckboxItem>
+                ))}
+              </ContextMenuSubContent>
+            </ContextMenuSub>
+          ) : null}
+          {projectId && (cycleGroups.open.length > 0 || targets.some((task) => task.cycleId)) ? (
+            <ContextMenuSub>
+              <ContextMenuSubTrigger>
+                <RefreshCircle aria-hidden />
+                <span className="flex-1">Cycle</span>
+                <ContextMenuShortcut><Shortcut id="task.setCycle" /></ContextMenuShortcut>
+              </ContextMenuSubTrigger>
+              <ContextMenuSubContent className="min-w-45">
+                <ContextMenuCheckboxItem checked={targets.every((task) => !task.cycleId)} closeOnClick onCheckedChange={() => mutate(cycleUpdates(targets, null))}>No cycle</ContextMenuCheckboxItem>
+                {/* past cycles are rarely the answer: the open ones only */}
+                {cycleGroups.open.map((cycle) => (
+                  <ContextMenuCheckboxItem key={cycle.id} checked={targets.every((task) => task.cycleId === cycle.id)} closeOnClick onCheckedChange={() => mutate(cycleUpdates(targets, cycle))}>
+                    {cycleName(cycle)}
+                  </ContextMenuCheckboxItem>
+                ))}
+              </ContextMenuSubContent>
+            </ContextMenuSub>
+          ) : null}
+          <ContextMenuSub>
+            <ContextMenuSubTrigger>
+              <Triangle aria-hidden />
+              <span className="flex-1">Estimate</span>
+              <ContextMenuShortcut><Shortcut id="task.setEstimate" /></ContextMenuShortcut>
+            </ContextMenuSubTrigger>
+            <ContextMenuSubContent className="min-w-45">
+              <ContextMenuCheckboxItem checked={targets.every((task) => task.estimate == null)} closeOnClick onCheckedChange={() => mutate(estimateUpdates(targets, null))}>No estimate</ContextMenuCheckboxItem>
+              {ESTIMATE_OPTIONS.map((points) => (
+                <ContextMenuCheckboxItem key={points} checked={targets.every((task) => task.estimate === points)} closeOnClick onCheckedChange={() => mutate(estimateUpdates(targets, points))}>
+                  {estimateLabel(points)}
+                </ContextMenuCheckboxItem>
+              ))}
             </ContextMenuSubContent>
           </ContextMenuSub>
           {labelOptions.length > 0 ? (

@@ -39,7 +39,7 @@ pub struct IdRef {
     pub id: String,
 }
 
-/// An object reached only for its name (project, milestone, label group, bot).
+/// An object reached only for its name (project, label group, bot).
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct NameRef {
     #[serde(default)]
@@ -191,12 +191,38 @@ pub struct IssueRef {
     pub identifier: Option<String>,
 }
 
+/// A team's cycle. Issues stored by an older version have only `number` and `name`.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Cycle {
+    #[serde(default)]
+    pub id: Option<String>,
     #[serde(default)]
     pub number: Option<f64>,
     #[serde(default)]
     pub name: Option<String>,
+    #[serde(default)]
+    pub starts_at: Option<String>,
+    #[serde(default)]
+    pub ends_at: Option<String>,
+}
+
+/// A milestone of a Linear project (which can span teams).
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectMilestone {
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Markdown.
+    #[serde(default)]
+    pub description: Option<String>,
+    /// `YYYY-MM-DD`.
+    #[serde(default)]
+    pub target_date: Option<String>,
+    #[serde(default)]
+    pub project: Option<NameRef>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -243,7 +269,7 @@ pub struct LinearIssue {
     #[serde(default)]
     pub cycle: Option<Cycle>,
     #[serde(default)]
-    pub project_milestone: Option<NameRef>,
+    pub project_milestone: Option<ProjectMilestone>,
     #[serde(default)]
     pub labels: Connection<LinearLabel>,
     #[serde(default)]
@@ -256,7 +282,8 @@ pub struct LinearIssue {
 
 /// Nested page sizes of an issue list. With 25 issues a page the query costs about 5,000 of
 /// Linear's 10,000 complexity points per query (<https://linear.app/developers/rate-limiting>);
-/// issues with more nested nodes get follow-up queries.
+/// issues with more nested nodes get follow-up queries. The cycle and milestone selections add
+/// about 1.7 points an issue (0.1 a property, 1 an object), about 42 a page.
 pub const ISSUE_PAGE: u32 = 25;
 pub const NESTED_PAGE: u32 = 20;
 pub const COMMENT_PAGE: u32 = 10;
@@ -270,8 +297,8 @@ pub fn issue_fields() -> String {
     format!(
         "id identifier title description priority url dueDate completedAt canceledAt createdAt \
          archivedAt estimate slaBreachesAt trashed state {{ id }} assignee {{ {USER_FIELDS} }} \
-         parent {{ id identifier }} project {{ name }} cycle {{ number name }} \
-         projectMilestone {{ name }} \
+         parent {{ id identifier }} project {{ name }} cycle {{ id number name startsAt endsAt }} \
+         projectMilestone {{ id name description targetDate project {{ name }} }} \
          labels(first: {NESTED_PAGE}) {{ nodes {{ {LABEL_FIELDS} }} {page} }} \
          relations(first: {NESTED_PAGE}) {{ nodes {{ {RELATION_FIELDS} }} {page} }} \
          attachments(first: {NESTED_PAGE}) {{ nodes {{ {ATTACHMENT_FIELDS} }} {page} }} \

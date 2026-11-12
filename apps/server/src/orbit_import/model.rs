@@ -92,6 +92,11 @@ pub struct Project {
     pub statuses: Vec<Status>,
     #[serde(default)]
     pub labels: Vec<Label>,
+    /// Archives written before milestones and cycles have neither.
+    #[serde(default)]
+    pub milestones: Vec<Milestone>,
+    #[serde(default)]
+    pub cycles: Vec<Cycle>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -114,6 +119,27 @@ pub struct Label {
     pub name: String,
     #[serde(default)]
     pub color: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct Milestone {
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
+    pub description: Option<String>,
+    pub target_at: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct Cycle {
+    pub id: String,
+    #[serde(default)]
+    pub number: i64,
+    pub name: Option<String>,
+    #[serde(default)]
+    pub starts_at: String,
+    #[serde(default)]
+    pub ends_at: String,
 }
 
 /// `tasks/<KEY>-<n>.json`.
@@ -139,6 +165,9 @@ pub struct Task {
     pub due_start_at: Option<String>,
     pub due_at: Option<String>,
     pub completed_at: Option<String>,
+    pub milestone: Option<Named>,
+    pub cycle: Option<Named>,
+    pub estimate: Option<i64>,
     #[serde(default)]
     pub created_at: String,
     #[serde(default)]

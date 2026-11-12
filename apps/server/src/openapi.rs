@@ -142,6 +142,8 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::public_api::setup::update_label,
         crate::public_api::statuses,
         crate::public_api::labels,
+        crate::public_api::milestones,
+        crate::public_api::cycles,
         crate::public_api::members,
         crate::public_api::list_tasks,
         crate::public_api::get_task,
@@ -198,6 +200,16 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::task_routes::create_label,
         crate::task_routes::update_label,
         crate::task_routes::delete_label,
+        crate::task_routes::list_milestones,
+        crate::task_routes::create_milestone,
+        crate::task_routes::update_milestone,
+        crate::task_routes::delete_milestone,
+        crate::task_routes::reorder_milestones,
+        crate::task_routes::list_cycles,
+        crate::task_routes::create_cycle,
+        crate::task_routes::update_cycle,
+        crate::task_routes::delete_cycle,
+        crate::task_routes::move_unfinished_cycle_tasks,
         crate::task_routes::list_tasks,
         crate::task_routes::query_tasks,
         crate::task_routes::get_task,
@@ -1381,6 +1393,13 @@ fn invalid_request_operation(operation_id: &str) -> bool {
             | "create_label"
             | "update_label"
             | "delete_label"
+            | "create_milestone"
+            | "update_milestone"
+            | "delete_milestone"
+            | "reorder_milestones"
+            | "create_cycle"
+            | "update_cycle"
+            | "delete_cycle"
             | "list_tasks"
             | "query_tasks"
             | "create_task"
@@ -1714,6 +1733,16 @@ fn task_operation(operation_id: &str) -> bool {
             | "create_label"
             | "update_label"
             | "delete_label"
+            | "list_milestones"
+            | "create_milestone"
+            | "update_milestone"
+            | "delete_milestone"
+            | "reorder_milestones"
+            | "list_cycles"
+            | "create_cycle"
+            | "update_cycle"
+            | "delete_cycle"
+            | "move_unfinished_cycle_tasks"
             | "list_tasks"
             | "query_tasks"
             | "get_task"
@@ -1761,6 +1790,11 @@ fn task_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec<&'
             | "reorder_statuses"
             | "create_label"
             | "update_label"
+            | "create_milestone"
+            | "update_milestone"
+            | "reorder_milestones"
+            | "create_cycle"
+            | "update_cycle"
             | "create_task"
             | "update_task"
             | "bulk_tasks"
@@ -1780,11 +1814,18 @@ fn task_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec<&'
         add_code(responses, "422", "parent_cycle");
         add_code(responses, "422", "parent_invalid");
     }
+    if matches!(operation_id, "create_cycle" | "update_cycle") {
+        add_code(responses, "409", "cycle_overlap");
+    }
+    if operation_id == "move_unfinished_cycle_tasks" {
+        add_code(responses, "409", "no_next_cycle");
+    }
     if matches!(
         operation_id,
         "create_project"
             | "create_status"
             | "create_label"
+            | "create_milestone"
             | "create_task"
             | "create_comment"
             | "create_task_relation"
@@ -1800,6 +1841,11 @@ fn task_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec<&'
             | "reorder_statuses"
             | "update_label"
             | "delete_label"
+            | "update_milestone"
+            | "delete_milestone"
+            | "reorder_milestones"
+            | "update_cycle"
+            | "delete_cycle"
             | "update_task"
             | "bulk_tasks"
             | "reorder_tasks"

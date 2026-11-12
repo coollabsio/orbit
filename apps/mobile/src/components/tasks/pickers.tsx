@@ -2,6 +2,7 @@
  * The contents of the task sheets: each picker renders its rows into the one `Sheet` of its screen. Shared by the
  * task detail page and the New task dialog.
  */
+import { router } from 'expo-router'
 import { type ReactNode, useState } from 'react'
 import { Platform, Pressable, View } from 'react-native'
 
@@ -11,11 +12,17 @@ import { DEFAULT_RECURRENCE, MAX_RECURRENCE_INTERVAL, normalizeRecurrence, RECUR
 
 import type { LabelRecord, StatusRecord, TaskRecord } from '../../data/orbit'
 import {
+  cycleDates,
+  cycleLabel,
+  cyclesForPicker,
+  cycleTiming,
   DEFAULT_DUE_TIME,
   dayAfter,
   dueOn,
   type DueRange,
   dueWeek,
+  ESTIMATE_CHOICES,
+  estimateLabel,
   identifier,
   LABEL_PALETTE,
   labelChoices,
@@ -23,14 +30,16 @@ import {
   PRIORITY_CHOICES,
   PRIORITY_LABEL,
   type Priority,
+  progressLabel,
   projectLabels,
+  sortMilestones,
   sourceValue,
   taskCandidates,
   timeOf,
   toggleId,
 } from '../../data/tasks'
 import { useCreateLabel, useTaskSearch } from '../../hooks/tasks'
-import { useLabels, useProjects, useStatuses } from '../../queries'
+import { useCycles, useLabels, useMilestones, useProjects, useStatuses } from '../../queries'
 import { useTheme } from '../../theme'
 import { Avatar, Button, Icon, IconButton, type IconName, Input, LabelTip, PriorityIcon, StatusIcon, Text } from '../../ui'
 import { Segmented } from '../settings/Shell'
@@ -53,6 +62,97 @@ export function StatusChoices({ statuses, value, onSelect }: { statuses: readonl
       {statuses.map((status) => (
         <SheetRow key={status.id} label={status.name} leading={<StatusIcon status={status} />} checked={status.id === value} onPress={() => onSelect(status.id)} />
       ))}
+    </SheetList>
+  )
+}
+
+/** Opens the project's settings from an empty milestone or cycle picker. */
+function SettingsLink({ projectId, onOpen }: { projectId: string; onOpen: () => void }) {
+  return (
+    <SheetRow
+      label="Open project settings"
+      icon="settings"
+      onPress={() => {
+        onOpen()
+        router.push(`/tasks/settings/${projectId}`)
+      }}
+    />
+  )
+}
+
+/** The project's milestones in their order, with their progress, and No milestone. One tap picks and closes. */
+export function MilestoneChoices({ projectId, value, onSelect, onOpenSettings }: { projectId: string; value: string | null; onSelect: (milestoneId: string | null) => void; /** Offers project settings when the list is empty (not in the New task dialog, which would lose its draft). */ onOpenSettings?: () => void }) {
+  const { colors } = useTheme()
+  const milestones = useMilestones(projectId)
+  const rows = sortMilestones(milestones.data ?? [])
+  return (
+    <SheetList>
+      {rows.map((milestone) => (
+        <SheetRow
+          key={milestone.id}
+          label={milestone.name}
+          subtitle={progressLabel(milestone)}
+          leading={<Icon name="target" size={18} color={colors.mutedForeground} />}
+          checked={milestone.id === value}
+          onPress={() => onSelect(milestone.id)}
+        />
+      ))}
+      {value ? <SheetRow label="No milestone" icon="close" onPress={() => onSelect(null)} /> : null}
+      {milestones.isPending ? <SheetNote>Loading milestones…</SheetNote> : null}
+      {milestones.isError ? <SheetNote tone="destructive">Could not load the milestones.</SheetNote> : null}
+      {milestones.isSuccess && rows.length === 0 ? (
+        <>
+          <SheetNote>This project has no milestones yet. Add them in the project settings.</SheetNote>
+          {onOpenSettings ? <SettingsLink projectId={projectId} onOpen={onOpenSettings} /> : null}
+        </>
+      ) : null}
+    </SheetList>
+  )
+}
+
+/** The project's cycles, the current one first and marked, then the upcoming and past ones, and No cycle. */
+export function CycleChoices({ projectId, value, onSelect, onOpenSettings }: { projectId: string; value: string | null; onSelect: (cycleId: string | null) => void; onOpenSettings?: () => void }) {
+  const { colors } = useTheme()
+  const cycles = useCycles(projectId)
+  const now = new Date()
+  const rows = cyclesForPicker(cycles.data ?? [], now)
+  return (
+    <SheetList>
+      {rows.map((cycle) => {
+        const timing = cycleTiming(cycle, now)
+        return (
+          <SheetRow
+            key={cycle.id}
+            label={timing === 'current' ? `${cycleLabel(cycle)} · Current` : cycleLabel(cycle)}
+            subtitle={timing === 'past' ? `${cycleDates(cycle)} · Ended` : cycleDates(cycle)}
+            leading={<Icon name="refresh" size={18} color={timing === 'current' ? colors.primary : colors.mutedForeground} />}
+            checked={cycle.id === value}
+            onPress={() => onSelect(cycle.id)}
+          />
+        )
+      })}
+      {value ? <SheetRow label="No cycle" icon="close" onPress={() => onSelect(null)} /> : null}
+      {cycles.isPending ? <SheetNote>Loading cycles…</SheetNote> : null}
+      {cycles.isError ? <SheetNote tone="destructive">Could not load the cycles.</SheetNote> : null}
+      {cycles.isSuccess && rows.length === 0 ? (
+        <>
+          <SheetNote>This project has no cycles yet. Add them in the project settings.</SheetNote>
+          {onOpenSettings ? <SettingsLink projectId={projectId} onOpen={onOpenSettings} /> : null}
+        </>
+      ) : null}
+    </SheetList>
+  )
+}
+
+/** The estimate points, a value set elsewhere (an import's 4) at the top, and No estimate. */
+export function EstimateChoices({ value, onSelect }: { value: number | null; onSelect: (estimate: number | null) => void }) {
+  const choices = value !== null && !ESTIMATE_CHOICES.includes(value) ? [value, ...ESTIMATE_CHOICES] : ESTIMATE_CHOICES
+  return (
+    <SheetList>
+      {choices.map((points) => (
+        <SheetRow key={points} label={estimateLabel(points)} icon="chart" checked={points === value} onPress={() => onSelect(points)} />
+      ))}
+      {value !== null ? <SheetRow label="No estimate" icon="close" onPress={() => onSelect(null)} /> : null}
     </SheetList>
   )
 }

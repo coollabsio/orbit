@@ -4,7 +4,7 @@ import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type
 import { defaultRangeExtractor, useVirtualizer } from '@tanstack/react-virtual'
 import { cn } from 'cn'
 import { differenceInCalendarDays } from 'date-fns'
-import { TaskSquare as SquareCheck } from 'reicon-react'
+import { Diamonds, TaskSquare as SquareCheck } from 'reicon-react'
 import { toast } from 'sonner'
 import { EmptyState } from '@/components/common/EmptyState'
 import { isTaskVersionConflict } from '@/features/tasks/api/conflicts'
@@ -20,13 +20,16 @@ import { TimelineHeader } from './TimelineHeader'
 import { TimelineRowLabel } from './TimelineRowLabel'
 import { useTimelineDrag, type DragState } from './useTimelineDrag'
 import {
-  anchoredScrollLeft, applyDrag, buildTimelineRows, computeRange, dayAt, dayIndex, dayIndexAtX, drawRange, isOverdue, isSameEdit, monthMarks,
-  rowDates, showsDailyTicks, showsWeeklyLines, spanLabel, taskSpan, xOf, zoomFromWheel, type DateEdit,
+  anchoredScrollLeft, applyDrag, buildTimelineRows, computeRange, cycleBands, dayAt, dayIndex, dayIndexAtX, drawRange, isOverdue, isSameEdit,
+  milestoneMarks, monthMarks, planningDates, rowDates, showsDailyTicks, showsWeeklyLines, spanLabel, taskSpan, xOf, zoomFromWheel, type DateEdit,
+  type TimelinePlanning,
 } from './timelineLib'
 
 export const LEFT_PANE = 280
 export const ROW_HEIGHT = 32
 export const HEADER_HEIGHT = 52
+/** With the planning lane (cycles and milestones) between the months and the days. */
+export const PLANNING_HEADER_HEIGHT = 72
 const REVEAL_MARGIN = 48
 
 export interface TimelineHandle {
@@ -46,12 +49,14 @@ export interface TaskTimelineProps {
   pxPerDay: number
   onZoomChange: (px: number) => void
   onOpen: (taskId: string) => void
+  /** A single project's milestones and cycles: target markers, cycle bands, lateness when grouped by milestone. */
+  planning?: TimelinePlanning | null
   /** Injected for tests; defaults to now. */
   today?: Date
 }
 
 /** Roadmap timeline: one row per task, bars span due_start_at → due_at. */
-export function TaskTimeline({ tasks, projects, statuses, users, groupBy, properties, groupContext, pxPerDay, onZoomChange, onOpen, today: todayProp, ref }: TaskTimelineProps & { ref?: Ref<TimelineHandle> }) {
+export function TaskTimeline({ tasks, projects, statuses, users, groupBy, properties, groupContext, pxPerDay, onZoomChange, onOpen, planning = null, today: todayProp, ref }: TaskTimelineProps & { ref?: Ref<TimelineHandle> }) {
   const [today] = useState(() => todayProp ?? new Date())
   const [overrides, setOverrides] = useState<Record<string, boolean>>({})
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -72,7 +77,13 @@ export function TaskTimeline({ tasks, projects, statuses, users, groupBy, proper
   // saved once when the timeline goes away, not on every scroll frame
   const lastScroll = useRef<{ start: string; left: number; top: number; px: number } | null>(null)
 
-  const range = computeRange(rowDates(tasks), today)
+  const range = computeRange([...rowDates(tasks), ...planningDates(planning)], today)
+  const marks = planning ? milestoneMarks(range, planning.milestones) : []
+  const bands = planning ? cycleBands(range, planning.cycles, today) : []
+  const lane = marks.length > 0 || bands.length > 0
+  const headerHeight = lane ? PLANNING_HEADER_HEIGHT : HEADER_HEIGHT
+  // grouped by milestone, a task's bar is hatched past its milestone's target day
+  const milestoneDay = new Map(groupBy === 'milestone' ? marks.map((mark) => [mark.id, mark.day]) : [])
   // an empty group has nothing to draw on a timeline, so show_empty_groups does not apply here
   const groups = groupBy === 'none' ? null : groupTasks(tasks, groupBy, { ...groupContext, showEmpty: false })
   const rows = buildTimelineRows({ tasks, groups, statuses, overrides })
@@ -149,7 +160,7 @@ export function TaskTimeline({ tasks, projects, statuses, users, groupBy, proper
     estimateSize: () => ROW_HEIGHT,
     overscan: 10,
     // the rows start below the sticky date header
-    scrollMargin: HEADER_HEIGHT,
+    scrollMargin: headerHeight,
     rangeExtractor: (range) => {
       const indexes = defaultRangeExtractor(range)
       const outside = kept.filter((index) => index < indexes[0] || index > indexes[indexes.length - 1])
@@ -259,12 +270,14 @@ export function TaskTimeline({ tasks, projects, statuses, users, groupBy, proper
           style={{ width: trackWidth, backgroundImage: background || undefined, backgroundPosition: backgroundPosition || undefined }}
         >
           {monthMarks(range, pxPerDay).map((month) => <div key={month.x} className="absolute inset-y-0 w-px bg-border" style={{ left: month.x }} />)}
+          {/* one line per milestone over the whole grid, never one per row */}
+          {marks.map((mark) => <div key={mark.id} data-milestone-line className="absolute inset-y-0 z-[4] border-l border-dashed border-foreground/25" style={{ left: mark.day * pxPerDay + pxPerDay / 2 }} />)}
           <div data-today-line className="absolute inset-y-0 z-[5] w-px bg-primary/70" style={{ left: todayX }} />
         </div>
 
         <div className="sticky top-0 z-20 flex border-b bg-background">
           <div className="sticky left-0 z-10 w-[280px] shrink-0 border-r bg-background max-[899px]:hidden" />
-          <TimelineHeader range={range} pxPerDay={pxPerDay} today={today} />
+          <TimelineHeader range={range} pxPerDay={pxPerDay} today={today} lane={lane} milestones={marks} cycles={bands} />
         </div>
 
         <div className="relative shrink-0" style={{ height: virtualizer.getTotalSize() }}>
@@ -278,13 +291,14 @@ export function TaskTimeline({ tasks, projects, statuses, users, groupBy, proper
           const saving = row.kind === 'task' && committed?.taskId === row.task.id ? committed.edit : null
           const preview = live ?? saving
           const span = row.kind === 'task' ? (preview ? taskSpan(preview) : row.span) : null
+          const groupTarget = row.kind === 'group' && row.group.field === 'milestone' ? milestoneDay.get(row.group.value ?? '') : undefined
           return (
             <div
               key={row.key}
               // a right-click anywhere on a task row opens the task menu (TaskContextMenu)
               data-task-menu={row.kind === 'task' ? row.task.id : undefined}
               // the group band is opaque so the sticky left cell (TimelineRowLabel) matches it
-              style={{ top: item.start - HEADER_HEIGHT }}
+              style={{ top: item.start - headerHeight }}
               className={cn('group/row absolute inset-x-0 flex h-8 transition-colors duration-150 ease-out', row.kind === 'group' ? 'bg-[color-mix(in_oklch,var(--muted)_45%,var(--background))]' : 'hover:bg-foreground/[0.03]')}
             >
               <TimelineRowLabel
@@ -316,6 +330,14 @@ export function TaskTimeline({ tasks, projects, statuses, users, groupBy, proper
                     style={{ left: xOf(range, row.span.start, pxPerDay), width: (differenceInCalendarDays(row.span.end, row.span.start) + 1) * pxPerDay, background: groupAccent(row.group, groupContext) }}
                   />
                 ) : null}
+                {groupTarget !== undefined ? (
+                  <Diamonds
+                    aria-hidden
+                    data-milestone-target
+                    className="absolute top-1/2 z-[5] size-3.5 -translate-x-1/2 -translate-y-1/2 text-foreground"
+                    style={{ left: groupTarget * pxPerDay + pxPerDay / 2 }}
+                  />
+                ) : null}
                 {undated && ghost?.taskId === row.task.id && !drag ? (
                   <div aria-hidden="true" className="pointer-events-none absolute top-1 h-6 rounded-md border border-dashed border-primary/50 bg-primary/10" style={{ left: ghost.day * pxPerDay, width: pxPerDay }} />
                 ) : null}
@@ -335,6 +357,7 @@ export function TaskTimeline({ tasks, projects, statuses, users, groupBy, proper
                     assignee={assignee}
                     properties={properties}
                     overdueDays={!preview && isOverdue(row.task, status?.category, today) ? dayIndex(range, today) - dayIndex(range, span.end) : 0}
+                    milestoneDay={milestoneDay.get(row.task.milestoneId ?? '') ?? null}
                     dragging={live !== null}
                     onPointerDown={(event, mode) => begin(event, row.task.id, mode)}
                     onClick={() => { if (!consumeClick()) onOpen(row.task.id) }}

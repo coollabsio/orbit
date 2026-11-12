@@ -4135,7 +4135,7 @@ async fn legacy_list_parameters_keep_their_results() {
             "validation_failed",
         ),
         (
-            "sort=estimate",
+            "sort=story_points",
             StatusCode::UNPROCESSABLE_ENTITY,
             "validation_failed",
         ),
@@ -4211,6 +4211,9 @@ fn filter_task(project: Id, status: Id, title: &str) -> CreateTask {
         due_start_at: None,
         due_at: None,
         parent_task_id: None,
+        milestone_id: None,
+        cycle_id: None,
+        estimate: None,
     }
 }
 
@@ -4932,7 +4935,7 @@ async fn task_query_rejects_invalid_filters_with_a_json_path() {
             "filter.children[0].operator",
         ),
         (
-            json!({"op": "and", "children": [{"field": "estimate", "operator": "is", "value": ["1"]}]}),
+            json!({"op": "and", "children": [{"field": "story_points", "operator": "is", "value": ["1"]}]}),
             "filter.children[0].field",
         ),
         (

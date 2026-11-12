@@ -1,5 +1,6 @@
 import type { CreateTaskBody, LabelRecord, ProjectRecord, TaskUpdateBody } from '@orbit/api/generated/types.gen'
-import type { Task, TaskPriority, TaskStatusDef } from '@/features/tasks/api/models'
+import type { Cycle, Milestone, Task, TaskPriority, TaskStatusDef } from '@/features/tasks/api/models'
+import { cycleName, cycleTiming } from '@/features/tasks/planningLib'
 import { labelKeyOf, labelRepresentatives, PRIORITY_LABEL, PRIORITY_ORDER, projectLabels, statusKeyOf } from '@/features/tasks/taskMeta'
 import { statusGroups } from '@/features/tasks/tasksLib'
 import type { User } from '@/features/workspaces/models'
@@ -10,7 +11,17 @@ export type TaskGroup = { key: string; field: GroupBy; value: string | null; lab
  * `statuses` and `projects` should already be scoped to the page (a project page passes only its project's
  * statuses), so empty groups never list another project's workflow.
  */
-export type GroupContext = { statuses: TaskStatusDef[]; members: User[]; labels: LabelRecord[]; projects: ProjectRecord[]; currentUserId: string; showEmpty: boolean }
+export type GroupContext = {
+  statuses: TaskStatusDef[]
+  members: User[]
+  labels: LabelRecord[]
+  projects: ProjectRecord[]
+  /** The milestones and cycles of the page's project, or of the projects of the loaded tasks (names for the chips). */
+  milestones: Milestone[]
+  cycles: Cycle[]
+  currentUserId: string
+  showEmpty: boolean
+}
 export type TaskCreateDefaults = Partial<CreateTaskBody>
 export type DropUpdate = { taskId: string; patch: Partial<TaskUpdateBody> } | { error: string } | null
 
@@ -34,6 +45,10 @@ function bucketsFor(groupBy: GroupBy, ctx: GroupContext): Bucket[] {
       return [...labelRepresentatives(ctx.labels).labels.map((label): Bucket => ({ value: label.id, label: label.name })), { value: null, label: 'No label' }]
     case 'project':
       return [...ctx.projects].sort(byName).map((project): Bucket => ({ value: project.id, label: project.name }))
+    case 'milestone':
+      return [...[...ctx.milestones].sort((a, b) => a.position - b.position).map((milestone): Bucket => ({ value: milestone.id, label: milestone.name })), { value: null, label: 'No milestone' }]
+    case 'cycle':
+      return [...[...ctx.cycles].sort((a, b) => a.starts_at.localeCompare(b.starts_at)).map((cycle): Bucket => ({ value: cycle.id, label: cycleName(cycle) })), { value: null, label: 'No cycle' }]
     case 'none':
       return [{ value: null, label: 'All tasks' }]
   }
@@ -68,9 +83,19 @@ function valuesOf(task: Task, groupBy: GroupBy, { statusKeys, labelGroups, known
       return present(task.labels.flatMap((id) => labelGroups.get(id) ?? []))
     case 'project':
       return [task.projectId]
+    case 'milestone':
+      return present(task.milestoneId ? [task.milestoneId] : [])
+    case 'cycle':
+      return present(task.cycleId ? [task.cycleId] : [])
     case 'none':
       return [null]
   }
+}
+
+/** The sum of the tasks' estimates; null when none of them is estimated. */
+export function estimateTotal(tasks: Task[]): number | null {
+  const estimated = tasks.flatMap((task) => (task.estimate == null ? [] : [task.estimate]))
+  return estimated.length > 0 ? estimated.reduce((sum, points) => sum + points, 0) : null
 }
 
 /**
@@ -141,6 +166,10 @@ export function dropUpdate(task: Task, field: GroupBy, from: string | null, to: 
       const next = swapValue(task.labels, ownWithKeyOf(from)?.id ?? null, target?.id ?? null)
       return next ? update({ label_ids: next }) : null
     }
+    case 'milestone':
+      return to === (task.milestoneId ?? null) ? null : update({ milestone_id: to })
+    case 'cycle':
+      return to === (task.cycleId ?? null) ? null : update({ cycle_id: to })
     // Moving between projects maps the status and renumbers the task on the server (Move to project in the menus);
     // dragging between project groups stays disabled.
     case 'project':
@@ -172,10 +201,20 @@ function dueDefaults(condition: Condition, now: Date): TaskCreateDefaults {
   return {}
 }
 
+/** The cycle a `current`, `next` or `previous` filter value names among one project's cycles, else the cycle with that id. */
+function cycleFor(value: string, cycles: Cycle[], now: Date): Cycle | undefined {
+  const byStart = [...cycles].sort((a, b) => a.starts_at.localeCompare(b.starts_at))
+  if (value === 'current') return byStart.find((cycle) => cycleTiming(cycle, now) === 'current')
+  if (value === 'next') return byStart.find((cycle) => cycleTiming(cycle, now) === 'upcoming')
+  if (value === 'previous') return byStart.findLast((cycle) => cycleTiming(cycle, now) === 'past')
+  return cycles.find((cycle) => cycle.id === value)
+}
+
 /**
  * Defaults for a task created on a filtered page (spec §3 "New-task defaults"): root-AND `is` conditions with
  * exactly one value (label: `includes_any` with one value, or every `includes_all` value), `me` → the current user,
- * the status key → that status in the target project, plus due dates for date presets.
+ * the status key → that status in the target project, a milestone or cycle of the target project (`current`,
+ * `next`, `previous` resolved), plus due dates for date presets.
  * Unknown ids are ignored. `project_id` falls back to `ctx.targetProjectId`.
  */
 export function createDefaultsFromFilter(
@@ -189,6 +228,8 @@ export function createDefaultsFromFilter(
   const defaults: TaskCreateDefaults = {}
   let projectId = ctx.targetProjectId
   let statusKey: string | null = null
+  let milestoneId: string | null = null
+  let cycleValue: string | null = null
   for (const condition of conditions) {
     const is = condition.operator === 'is' ? single(condition) : null
     switch (condition.field) {
@@ -218,6 +259,12 @@ export function createDefaultsFromFilter(
       case 'status':
         if (is) statusKey = is
         break
+      case 'milestone':
+        if (is) milestoneId = is
+        break
+      case 'cycle':
+        if (is) cycleValue = is
+        break
       case 'due_date':
         Object.assign(defaults, dueDefaults(condition, now))
         break
@@ -229,6 +276,9 @@ export function createDefaultsFromFilter(
     defaults.project_id = projectId
     const status = statusKey ? ctx.statuses.find((item) => item.projectId === projectId && statusKeyOf(item) === statusKey) : undefined
     if (status) defaults.status_id = status.id
+    if (ctx.milestones.some((milestone) => milestone.id === milestoneId && milestone.project_id === projectId)) defaults.milestone_id = milestoneId
+    const cycle = cycleValue ? cycleFor(cycleValue, ctx.cycles.filter((item) => item.project_id === projectId), now) : undefined
+    if (cycle) defaults.cycle_id = cycle.id
   }
   return defaults
 }

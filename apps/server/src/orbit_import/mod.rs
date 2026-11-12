@@ -1564,6 +1564,8 @@ impl OrbitImportService {
             "project" => "projects",
             "status" => "task_statuses",
             "label" => "labels",
+            "milestone" => "task_milestones",
+            "cycle" => "task_cycles",
             "task" => "tasks",
             "comment" => "task_comments",
             "attachment" => "attachment_references",

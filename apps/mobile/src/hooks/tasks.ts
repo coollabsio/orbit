@@ -116,6 +116,9 @@ export function useTaskWrite(taskId: string) {
       // closing a task or changing its parent can change its parent, its sub-issues and their lists
       void queryClient.invalidateQueries({ queryKey: keys.tasks(workspaceId) })
       void queryClient.invalidateQueries({ queryKey: keys.taskActivity(workspaceId, taskId) })
+      // the milestone and cycle progress counts the task
+      void queryClient.invalidateQueries({ queryKey: ['milestones', workspaceId] })
+      void queryClient.invalidateQueries({ queryKey: ['cycles', workspaceId] })
     },
   })
 }
@@ -161,6 +164,61 @@ export function useCreateTask() {
     mutationFn: (body: taskApi.CreateTaskBody) => taskApi.createTaskWith(client, workspaceId, body),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: keys.tasks(workspaceId) }),
   })
+}
+
+/**
+ * Create, edit, reorder and delete of a project's milestones. Each refreshes the list; a delete also refreshes the
+ * tasks, which lose the milestone. The caller shows the errors (`milestoneErrorMessage`).
+ */
+export function useMilestoneWrites(projectId: string) {
+  const { client, workspaceId } = useOrbit()
+  const queryClient = useQueryClient()
+  const listKey = keys.milestones(workspaceId, projectId)
+  const refresh = () => void queryClient.invalidateQueries({ queryKey: listKey })
+  return {
+    create: useMutation({ mutationFn: (body: taskApi.TaskMilestoneBody) => taskApi.newMilestone(client, workspaceId, projectId, body), onSettled: refresh }),
+    update: useMutation({
+      mutationFn: ({ milestone, changes }: { milestone: taskApi.TaskMilestone; changes: Omit<taskApi.TaskMilestoneUpdateBody, 'expected_version'> }) =>
+        taskApi.changeMilestone(client, workspaceId, milestone, { ...changes, expected_version: milestone.version }),
+      onSettled: refresh,
+    }),
+    reorder: useMutation({
+      mutationFn: (ordered: readonly taskApi.TaskMilestone[]) => taskApi.reorderProjectMilestones(client, workspaceId, projectId, ordered),
+      onMutate: (ordered) => queryClient.setQueryData(listKey, ordered.map((milestone, position) => ({ ...milestone, position }))),
+      onSuccess: (list) => queryClient.setQueryData(listKey, list),
+      onError: refresh,
+    }),
+    remove: useMutation({
+      mutationFn: (milestone: taskApi.TaskMilestone) => taskApi.removeMilestone(client, workspaceId, milestone),
+      onSettled: () => {
+        refresh()
+        void queryClient.invalidateQueries({ queryKey: keys.tasks(workspaceId) })
+        void queryClient.invalidateQueries({ queryKey: ['task', workspaceId] })
+      },
+    }),
+  }
+}
+
+/** Create, edit and delete of a project's cycles, and "Move unfinished tasks to the next cycle". */
+export function useCycleWrites(projectId: string) {
+  const { client, workspaceId } = useOrbit()
+  const queryClient = useQueryClient()
+  const refresh = () => void queryClient.invalidateQueries({ queryKey: keys.cycles(workspaceId, projectId) })
+  const refreshTasks = () => {
+    refresh()
+    void queryClient.invalidateQueries({ queryKey: keys.tasks(workspaceId) })
+    void queryClient.invalidateQueries({ queryKey: ['task', workspaceId] })
+  }
+  return {
+    create: useMutation({ mutationFn: (body: taskApi.TaskCycleBody) => taskApi.newCycle(client, workspaceId, projectId, body), onSettled: refresh }),
+    update: useMutation({
+      mutationFn: ({ cycle, changes }: { cycle: taskApi.TaskCycle; changes: Omit<taskApi.TaskCycleUpdateBody, 'expected_version'> }) =>
+        taskApi.changeCycle(client, workspaceId, cycle, { ...changes, expected_version: cycle.version }),
+      onSettled: refresh,
+    }),
+    remove: useMutation({ mutationFn: (cycle: taskApi.TaskCycle) => taskApi.removeCycle(client, workspaceId, cycle), onSettled: refreshTasks }),
+    moveUnfinished: useMutation({ mutationFn: (cycle: taskApi.TaskCycle) => taskApi.moveUnfinished(client, workspaceId, cycle), onSettled: refreshTasks }),
+  }
 }
 
 /** "Add existing" of the Sub-issues section: makes another task a sub-issue of `parentId`. */

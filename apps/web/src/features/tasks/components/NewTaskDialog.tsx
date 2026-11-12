@@ -1,7 +1,7 @@
 import { useCommand } from '@/shortcuts/useCommand'
 import { Suspense, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { Calendar, ChevronRight, Hierarchy2, Link2, Paperclip2 as Paperclip, Tag, User as UserIcon, Xmark as X } from 'reicon-react'
+import { Calendar, ChevronRight, Diamonds, Hierarchy2, Link2, Paperclip2 as Paperclip, RefreshCircle, Tag, Triangle, User as UserIcon, Xmark as X } from 'reicon-react'
 import { apiClient } from '@/api/client'
 import { createTaskRelation, updateTask } from '@orbit/api/generated/sdk.gen'
 import { Button } from '@/components/ui/button'
@@ -33,6 +33,10 @@ import { useLabels } from '@/features/tasks/api/labels'
 import { taskIdentifier, type Task, type TaskPriority } from '@/features/tasks/api/models'
 import { useAllStatuses, useProjectAudience, useProjects } from '@/features/tasks/api/projects'
 import { useCreateTask } from '@/features/tasks/api/tasks'
+import { useCycles } from '@/features/tasks/api/cycles'
+import { useMilestones } from '@/features/tasks/api/milestones'
+import { cycleName, estimateLabel } from '@/features/tasks/planningLib'
+import { CyclePicker, EstimatePicker, MilestonePicker } from './PlanningPickers'
 import { dueDateLabel, matchingLabelIds, PRIORITY_LABEL, PRIORITY_ORDER, projectStatuses, statusKeyOf } from '@/features/tasks/taskMeta'
 import { resolveStatusId } from '@/features/tasks/tasksLib'
 import { ADD_RELATION_OPTIONS, type RelationKind } from '@/features/tasks/relationsLib'
@@ -89,6 +93,9 @@ export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescrip
     dueStartAt: defaults.due_start_at ?? null,
     parent: null as Task | null,
     sourceUrl: defaults.source_url ?? null,
+    milestoneId: defaults.milestone_id ?? null,
+    cycleId: defaults.cycle_id ?? null,
+    estimate: defaults.estimate ?? null,
   }))
   // relations are saved once the task exists
   const [relations, setRelations] = useState<PendingRelation[]>([])
@@ -117,6 +124,11 @@ export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescrip
   const chosenLabels = labels.filter((label) => labelIds.includes(label.id)).sort((a, b) => a.name.localeCompare(b.name))
   const assignees = members.filter((member) => draft.assigneeIds.includes(member.id))
   const audience = useProjectAudience(workspace.id, project, members)
+  // a milestone or cycle belongs to one project: another project drops it
+  const milestones = useMilestones(workspace.id, project?.id).data ?? []
+  const cycles = useCycles(workspace.id, project?.id).data ?? []
+  const milestone = milestones.find((item) => item.id === draft.milestoneId)
+  const cycle = cycles.find((item) => item.id === draft.cycleId)
   const busy = createTask.isPending || uploading
   const canCreate = title.trim() !== '' && project !== undefined && status !== undefined && !busy
   const attach = (added: FileList | File[] | null) => {
@@ -143,6 +155,9 @@ export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescrip
         due_at: draft.dueAt,
         due_start_at: draft.dueStartAt,
         parent_task_id: draft.parent?.id ?? null,
+        milestone_id: milestone?.id ?? null,
+        cycle_id: cycle?.id ?? null,
+        estimate: draft.estimate,
         ...(draft.sourceUrl ? { source_url: draft.sourceUrl } : {}),
       })
       if (relations.length > 0) {
@@ -435,6 +450,42 @@ export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescrip
                       Labels
                     </>
                   )}
+                </Button>
+              }
+            />
+            {milestones.length > 0 ? (
+              <MilestonePicker
+                milestones={milestones}
+                value={milestone?.id ?? null}
+                onChange={(milestoneId) => setDraft((current) => ({ ...current, milestoneId }))}
+                trigger={
+                  <Button type="button" variant="outline" size="sm" className="max-w-56 font-normal" aria-label={`Milestone: ${milestone?.name ?? 'none'}`}>
+                    <Diamonds aria-hidden="true" className="text-muted-foreground" />
+                    <span className="truncate">{milestone?.name ?? 'Milestone'}</span>
+                  </Button>
+                }
+              />
+            ) : null}
+            {cycles.length > 0 ? (
+              <CyclePicker
+                cycles={cycles}
+                value={cycle?.id ?? null}
+                onChange={(cycleId) => setDraft((current) => ({ ...current, cycleId }))}
+                trigger={
+                  <Button type="button" variant="outline" size="sm" className="max-w-56 font-normal" aria-label={`Cycle: ${cycle ? cycleName(cycle) : 'none'}`}>
+                    <RefreshCircle aria-hidden="true" className="text-muted-foreground" />
+                    <span className="truncate">{cycle ? cycleName(cycle) : 'Cycle'}</span>
+                  </Button>
+                }
+              />
+            ) : null}
+            <EstimatePicker
+              value={draft.estimate}
+              onChange={(estimate) => setDraft((current) => ({ ...current, estimate }))}
+              trigger={
+                <Button type="button" variant="outline" size="sm" className="font-normal" aria-label={`Estimate: ${draft.estimate === null ? 'none' : estimateLabel(draft.estimate)}`}>
+                  <Triangle aria-hidden="true" className="text-muted-foreground" />
+                  {draft.estimate === null ? 'Estimate' : estimateLabel(draft.estimate)}
                 </Button>
               }
             />

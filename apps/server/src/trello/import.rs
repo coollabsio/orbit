@@ -1491,6 +1491,9 @@ impl TrelloImportService {
                 .and_then(parse_instant_millis)
                 .map(TimestampMillis::from_millis),
             parent_task_id: None,
+            milestone_id: None,
+            cycle_id: None,
+            estimate: None,
         })
     }
 

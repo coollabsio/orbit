@@ -9,6 +9,7 @@ const task = (workspaceId: string, version = 1): TaskRecord => ({
   description: '', description_json: null, collab_epoch: '', position: 1, priority: 'none', assignee_ids: [], creator_id: 'user-1', label_ids: [],
   created_at: '2026-09-04T10:00:00Z', updated_at: '2026-09-04T10:00:00Z', duplicate_of: null, blocked: false, version,
   parent: null, parent_task_id: null, sub_issue_count: 0, sub_issue_closed_count: 0, recurrence: null,
+  milestone_id: null, cycle_id: null, estimate: null,
 })
 
 test('failed optimistic updates restore every captured cache entry in only the affected workspace', () => {

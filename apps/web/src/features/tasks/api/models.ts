@@ -1,11 +1,14 @@
 import type { User } from '@/features/workspaces/models'
 import { formatTaskIdentifier } from '@/lib/taskLinks'
-import type { AttachmentRecord, AuditEvent, CommentRecord, LabelRecord, ProjectRecord, TaskRecord, TaskRecurrence } from '@orbit/api/generated/types.gen'
+import type { AttachmentRecord, AuditEvent, CommentRecord, LabelRecord, ProjectRecord, TaskCycle, TaskMilestone, TaskRecord, TaskRecurrence } from '@orbit/api/generated/types.gen'
 
 export type StatusCategory = 'unstarted' | 'started' | 'completed' | 'cancelled' | 'duplicate'
 export type TaskPriority = 'none' | 'low' | 'medium' | 'high' | 'urgent'
 
 export type Project = ProjectRecord
+export type Milestone = TaskMilestone
+/** `ends_at` is exclusive: the next cycle may start at that instant. */
+export type Cycle = TaskCycle
 
 export interface TaskStatusDef {
   id: string
@@ -65,6 +68,8 @@ export type TaskChange =
   | { field: 'title' | 'project'; from: string; to: string }
   | { field: 'description' | 'source_url' }
   | { field: 'recurrence'; rule: TaskRecurrence | null }
+  | { field: 'milestone' | 'cycle'; from: string | null; to: string | null }
+  | { field: 'estimate'; from: number | null; to: number | null }
 
 export interface TaskActivity {
   id: string
@@ -109,6 +114,10 @@ export interface Task {
   dueAt: string | null
   /** How the task repeats; null when it does not. */
   recurrence?: TaskRecurrence | null
+  milestoneId?: string | null
+  cycleId?: string | null
+  /** Points; null when not estimated. */
+  estimate?: number | null
   createdAt: string
   updatedAt: string
   comments: TaskComment[]
@@ -222,6 +231,8 @@ function updateChanges(metadata: Record<string, unknown>, projectName: (projectI
   const changes = metadata.changes
   if (typeof changes !== 'object' || changes === null) return null
   const text = (value: unknown) => (typeof value === 'string' ? value : '')
+  const id = (value: unknown) => (typeof value === 'string' ? value : null)
+  const points = (value: unknown) => (typeof value === 'number' ? value : null)
   const ids = (value: unknown) => (Array.isArray(value) ? value.filter((id): id is string => typeof id === 'string') : [])
   return Object.entries(changes as Record<string, Record<string, unknown> | true>).flatMap(([field, value]): TaskChange[] => {
     if (field === 'description' || field === 'source_url') return [{ field }]
@@ -231,6 +242,8 @@ function updateChanges(metadata: Record<string, unknown>, projectName: (projectI
     if (field === 'project') return [{ field, from: projectName(text(value.from)), to: projectName(text(value.to)) }]
     if (field === 'assignees' || field === 'labels') return [{ field, added: ids(value.added), removed: ids(value.removed) }]
     if (field === 'due') return [{ field, start: text(value.start) || null, end: text(value.end) || null }]
+    if (field === 'milestone' || field === 'cycle') return [{ field, from: id(value.from), to: id(value.to) }]
+    if (field === 'estimate') return [{ field, from: points(value.from), to: points(value.to) }]
     return []
   })
 }
@@ -325,6 +338,9 @@ export function taskFromRecord(
     dueStartAt: record.due_start_at ?? null,
     dueAt: record.due_at ?? null,
     recurrence: record.recurrence ?? null,
+    milestoneId: record.milestone_id ?? null,
+    cycleId: record.cycle_id ?? null,
+    estimate: record.estimate ?? null,
     createdAt: record.created_at,
     updatedAt: record.updated_at,
     comments: comments.map((comment) => ({

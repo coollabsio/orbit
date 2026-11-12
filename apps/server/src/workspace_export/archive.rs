@@ -43,13 +43,13 @@ manifest.json
 
 workspace.json
     The workspace (id, name, created_at, exported_at, exported_by), its members (id, name,
-    email, role, joined_at), teamspaces, and projects with their statuses (workflow) and
-    labels. In a personal export, members are only the people who appear in the archive.
+    email, role, joined_at), teamspaces, and projects with their statuses (workflow),
+    labels, milestones and cycles. In a personal export, members are only the people who appear in the archive.
 
 tasks/<KEY>-<number>.json
     One file per task, also tasks in the trash (\"deleted\": true) and tasks of deleted
-    projects: title, Markdown description, status, priority, dates, creator, assignees,
-    labels, relations, comments, attachments and activity (the task's audit events). A
+    projects: title, Markdown description, status, priority, dates, milestone, cycle,
+    estimate, creator, assignees, labels, relations, comments, attachments and activity (the task's audit events). A
     comment written with a service account's API token has \"author_service_account\"
     {\"id\", \"name\"} (else null); its \"author\" is the member the write was checked as.
 
@@ -433,7 +433,7 @@ async fn workspace_json(
     .await
 }
 
-/// The teamspaces, and the projects with their statuses and labels.
+/// The teamspaces, and the projects with their statuses, labels, milestones and cycles.
 async fn structure(source: &Source<'_>) -> Result<(Vec<Value>, Vec<Value>), ExportError> {
     let pool = source.database.pool();
     let workspace = source.workspace_id.to_string();
@@ -493,6 +493,47 @@ async fn structure(source: &Source<'_>) -> Result<(Vec<Value>, Vec<Value>), Expo
             }),
         );
     }
+    let mut milestones = HashMap::new();
+    for row in sqlx::query(
+        "SELECT id, project_id, name, description, target_at FROM task_milestones \
+         WHERE workspace_id = $1 ORDER BY position, id",
+    )
+    .bind(&workspace)
+    .fetch_all(pool)
+    .await?
+    {
+        push(
+            &mut milestones,
+            row.get("project_id"),
+            json!({
+                "id": row.get::<String, _>("id"),
+                "name": row.get::<String, _>("name"),
+                "description": row.get::<Option<String>, _>("description"),
+                "target_at": optional_time(row.get("target_at")),
+            }),
+        );
+    }
+    let mut cycles = HashMap::new();
+    for row in sqlx::query(
+        "SELECT id, project_id, number, name, starts_at, ends_at FROM task_cycles \
+         WHERE workspace_id = $1 ORDER BY starts_at, id",
+    )
+    .bind(&workspace)
+    .fetch_all(pool)
+    .await?
+    {
+        push(
+            &mut cycles,
+            row.get("project_id"),
+            json!({
+                "id": row.get::<String, _>("id"),
+                "number": row.get::<i64, _>("number"),
+                "name": row.get::<Option<String>, _>("name"),
+                "starts_at": time(row.get("starts_at")),
+                "ends_at": time(row.get("ends_at")),
+            }),
+        );
+    }
     let projects: Vec<Value> = sqlx::query(
         "SELECT id, name, project_key, color, deleted_at, created_at FROM projects \
          WHERE workspace_id = $1 ORDER BY created_at, id",
@@ -511,6 +552,8 @@ async fn structure(source: &Source<'_>) -> Result<(Vec<Value>, Vec<Value>), Expo
             "created_at": time(row.get("created_at")),
             "statuses": statuses.remove(&id).unwrap_or_default(),
             "labels": labels.remove(&id).unwrap_or_default(),
+            "milestones": milestones.remove(&id).unwrap_or_default(),
+            "cycles": cycles.remove(&id).unwrap_or_default(),
             "id": id,
         })
     })
@@ -659,9 +702,13 @@ async fn tasks(
         "SELECT tasks.id, tasks.number, projects.project_key, tasks.project_id, tasks.status_id, \
          task_statuses.name AS status_name, tasks.title, tasks.description, tasks.priority, \
          tasks.parent_task_id, tasks.creator_id, tasks.source_url, tasks.due_start_at, tasks.due_at, \
-         tasks.completed_at, tasks.deleted_at, tasks.created_at, tasks.updated_at \
+         tasks.completed_at, tasks.deleted_at, tasks.created_at, tasks.updated_at, \
+         tasks.milestone_id, task_milestones.name AS milestone_name, tasks.cycle_id, \
+         task_cycles.number AS cycle_number, tasks.estimate \
          FROM tasks JOIN projects ON projects.id = tasks.project_id \
          LEFT JOIN task_statuses ON task_statuses.id = tasks.status_id \
+         LEFT JOIN task_milestones ON task_milestones.id = tasks.milestone_id \
+         LEFT JOIN task_cycles ON task_cycles.id = tasks.cycle_id \
          WHERE tasks.workspace_id = $1 ORDER BY projects.project_key, tasks.number, tasks.id",
     )
     .await?
@@ -691,6 +738,13 @@ async fn tasks(
             "source_url": row.get::<Option<String>, _>("source_url"),
             "due_start_at": optional_time(row.get("due_start_at")),
             "due_at": optional_time(row.get("due_at")),
+            "milestone": row.get::<Option<String>, _>("milestone_id").map(|id| {
+                json!({"id": id, "name": row.get::<Option<String>, _>("milestone_name")})
+            }),
+            "cycle": row.get::<Option<String>, _>("cycle_id").map(|id| {
+                json!({"id": id, "number": row.get::<Option<i64>, _>("cycle_number")})
+            }),
+            "estimate": row.get::<Option<i64>, _>("estimate"),
             "completed_at": optional_time(row.get("completed_at")),
             "deleted": row.get::<Option<i64>, _>("deleted_at").is_some(),
             "deleted_at": optional_time(row.get("deleted_at")),

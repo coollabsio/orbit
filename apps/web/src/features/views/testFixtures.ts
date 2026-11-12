@@ -50,5 +50,7 @@ export const FILTER_OPTIONS: FilterOptions = {
   members: [member('user-1', 'Ada'), member('user-2', 'Grace')],
   labels: [label('label-bug', 'Bug', '#eb5757'), label('label-ui', 'UI', '#26b5ce'), label('label-docs', 'Docs', '#4cb782')],
   projects: [LAUNCH],
+  milestones: [],
+  cycles: [],
   currentUserId: 'user-1',
 }

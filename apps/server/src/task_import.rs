@@ -514,6 +514,53 @@ pub(crate) async fn find_or_create_label(
     }
 }
 
+/// The project's milestone named `name`, created after its others when missing. An existing
+/// milestone keeps its description and target date.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn find_or_create_milestone(
+    database: &Database,
+    tasks: &TaskRepository,
+    workspace_id: Id,
+    project_id: Id,
+    user_id: Id,
+    name: &str,
+    description: Option<String>,
+    target_at: Option<TimestampMillis>,
+    request_id: &str,
+) -> Result<Id, Failure> {
+    let found = || {
+        sqlx::query_scalar::<_, String>(
+            "SELECT id FROM task_milestones WHERE project_id = $1 AND name = $2",
+        )
+        .bind(project_id.to_string())
+        .bind(name.to_owned())
+        .fetch_optional(database.pool())
+    };
+    if let Some(id) = found().await?.and_then(|id| id.parse().ok()) {
+        return Ok(id);
+    }
+    match tasks
+        .create_milestone(
+            workspace_id,
+            project_id,
+            user_id,
+            name.to_owned(),
+            description,
+            target_at,
+            request_id,
+            TimestampMillis::now(),
+        )
+        .await
+    {
+        Ok(milestone) => Ok(milestone.id),
+        Err(TaskError::Conflict) => found()
+            .await?
+            .and_then(|id| id.parse().ok())
+            .ok_or_else(|| Failure::Item(format!("The milestone {name} could not be created."))),
+        Err(error) => Err(Failure::from(error)),
+    }
+}
+
 /// A trimmed, clamped name, or `fallback` when it is empty.
 pub(crate) fn name_or(name: Option<String>, fallback: &str) -> String {
     name.map(|name| clamp(name.trim(), 200, 800))

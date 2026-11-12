@@ -36,6 +36,7 @@ const STATUS_CATEGORIES: [&str; 5] = [
     "duplicate",
 ];
 const DONE_CATEGORIES: [&str; 3] = ["completed", "cancelled", "duplicate"];
+const RELATIVE_CYCLES: [&str; 3] = ["current", "next", "previous"];
 const PRIORITIES: [&str; 5] = ["none", "low", "medium", "high", "urgent"];
 const DISPLAY_KEYS: [&str; 9] = [
     "layout",
@@ -109,6 +110,12 @@ pub enum FilterField {
     Text,
     Parent,
     SubIssues,
+    /// Milestone ids.
+    Milestone,
+    /// Cycle ids, or `current`, `next` and `previous`: the cycle of the task's project that runs
+    /// now, the first that starts after now, and the last that ended before now.
+    Cycle,
+    Estimate,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, ToSchema)]
@@ -184,6 +191,8 @@ pub enum GroupBy {
     Priority,
     Project,
     Label,
+    Milestone,
+    Cycle,
     None,
 }
 
@@ -196,6 +205,8 @@ pub enum OrderBy {
     Updated,
     Title,
     DueDate,
+    /// Unestimated tasks last in both directions.
+    Estimate,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, ToSchema)]
@@ -218,6 +229,9 @@ pub enum TaskProperty {
     Created,
     Updated,
     SubIssueProgress,
+    Milestone,
+    Cycle,
+    Estimate,
 }
 
 /// Which tasks in a done category (completed, cancelled, duplicate) stay visible.
@@ -495,7 +509,10 @@ fn allowed_operators(field: FilterField) -> &'static [FilterOperator] {
         | FilterField::Priority
         | FilterField::Project
         | FilterField::Parent => &[O::Is, O::IsNot],
-        FilterField::Assignee => &[O::Is, O::IsNot, O::IsEmpty, O::IsNotEmpty],
+        FilterField::Assignee | FilterField::Milestone | FilterField::Cycle => {
+            &[O::Is, O::IsNot, O::IsEmpty, O::IsNotEmpty]
+        }
+        FilterField::Estimate => &[O::IsEmpty, O::IsNotEmpty],
         FilterField::Label => &[
             O::IncludesAny,
             O::IncludesAll,
@@ -574,11 +591,13 @@ fn validate_values(field: FilterField, value: &Value, path: &str) -> Result<(), 
             FilterField::Priority => PRIORITIES.contains(&text),
             FilterField::Assignee | FilterField::Creator => text == "me" || is_id(text),
             FilterField::Label => valid_label_value(text),
-            FilterField::Project => is_id(text),
+            FilterField::Project | FilterField::Milestone => is_id(text),
+            FilterField::Cycle => RELATIVE_CYCLES.contains(&text) || is_id(text),
             FilterField::DueDate
             | FilterField::CreatedAt
             | FilterField::UpdatedAt
-            | FilterField::Text => false,
+            | FilterField::Text
+            | FilterField::Estimate => false,
             FilterField::Parent => text == "none" || is_id(text),
             FilterField::SubIssues => matches!(text, "has" | "none"),
         };
@@ -979,6 +998,35 @@ fn push_condition(query: &mut SqlBuilder, condition: &Condition, ctx: &FilterCon
             push_parent(query, ctx.scope, values(value, ctx, false), negated)
         }
         (F::SubIssues, O::Is) => push_sub_issues(query, ctx.scope, values(value, ctx, false)),
+        (F::Milestone, O::Is | O::IsNot) => {
+            push_column_in(
+                query,
+                "tasks.milestone_id",
+                negated,
+                values(value, ctx, false),
+            );
+        }
+        (F::Milestone, O::IsEmpty) => {
+            query.push("tasks.milestone_id IS NULL");
+        }
+        (F::Milestone, O::IsNotEmpty) => {
+            query.push("tasks.milestone_id IS NOT NULL");
+        }
+        (F::Cycle, O::Is | O::IsNot) => {
+            push_cycle(query, values(value, ctx, false), negated, ctx.now);
+        }
+        (F::Cycle, O::IsEmpty) => {
+            query.push("tasks.cycle_id IS NULL");
+        }
+        (F::Cycle, O::IsNotEmpty) => {
+            query.push("tasks.cycle_id IS NOT NULL");
+        }
+        (F::Estimate, O::IsEmpty) => {
+            query.push("tasks.estimate IS NULL");
+        }
+        (F::Estimate, O::IsNotEmpty) => {
+            query.push("tasks.estimate IS NOT NULL");
+        }
         _ => {
             query.push("0 = 1");
         }
@@ -1084,6 +1132,69 @@ fn push_parent(query: &mut SqlBuilder, scope: ProjectScope, values: Vec<String>,
         query.push(")");
     }
     query.push(")");
+}
+
+/// `cycle is [ids…, current, next, previous]`. Relative values name a cycle of the task's own
+/// project at `now`; cycles cover `[starts_at, ends_at)`. Every alternative is an `IN` or an
+/// `EXISTS` on a non-null `cycle_id`, so the expression is never NULL and `is_not` keeps tasks
+/// without a cycle.
+fn push_cycle(query: &mut SqlBuilder, values: Vec<String>, negated: bool, now: TimestampMillis) {
+    let (relative, ids): (Vec<String>, Vec<String>) = values
+        .into_iter()
+        .partition(|value| RELATIVE_CYCLES.contains(&value.as_str()));
+    if relative.is_empty() && ids.is_empty() {
+        query.push(if negated { "1 = 1" } else { "0 = 1" });
+        return;
+    }
+    let now = now.as_millis();
+    query.push(if negated {
+        "(tasks.cycle_id IS NULL OR NOT ("
+    } else {
+        "(tasks.cycle_id IS NOT NULL AND ("
+    });
+    let mut first = true;
+    let mut or = |query: &mut SqlBuilder| {
+        if !std::mem::take(&mut first) {
+            query.push(" OR ");
+        }
+    };
+    if !ids.is_empty() {
+        or(query);
+        query.push("tasks.cycle_id IN ");
+        push_list(query, ids);
+    }
+    for value in relative {
+        or(query);
+        match value.as_str() {
+            "current" => {
+                query
+                    .push(
+                        "EXISTS (SELECT 1 FROM task_cycles AS cycle WHERE cycle.id = tasks.cycle_id                          AND cycle.starts_at <= ",
+                    )
+                    .push_bind(now)
+                    .push(" AND cycle.ends_at > ")
+                    .push_bind(now)
+                    .push(")");
+            }
+            "next" => {
+                query
+                    .push(
+                        "EXISTS (SELECT 1 FROM task_cycles AS cycle WHERE cycle.id = tasks.cycle_id                          AND cycle.id = (SELECT later.id FROM task_cycles AS later                          WHERE later.project_id = tasks.project_id AND later.starts_at > ",
+                    )
+                    .push_bind(now)
+                    .push(" ORDER BY later.starts_at, later.id LIMIT 1))");
+            }
+            _ => {
+                query
+                    .push(
+                        "EXISTS (SELECT 1 FROM task_cycles AS cycle WHERE cycle.id = tasks.cycle_id                          AND cycle.id = (SELECT earlier.id FROM task_cycles AS earlier                          WHERE earlier.project_id = tasks.project_id AND earlier.ends_at <= ",
+                    )
+                    .push_bind(now)
+                    .push(" ORDER BY earlier.ends_at DESC, earlier.id DESC LIMIT 1))");
+            }
+        }
+    }
+    query.push("))");
 }
 
 /// `sub_issues is [has|none]`: whether the task has live direct children.
@@ -1344,7 +1455,7 @@ mod tests {
         for bad in [
             json!({ "op": "and", "children": [], "field": "priority" }),
             json!({ "field": "priority", "operator": "is", "value": ["high"], "extra": 1 }),
-            json!({ "field": "estimate", "operator": "is", "value": ["1"] }),
+            json!({ "field": "story_points", "operator": "is", "value": ["1"] }),
         ] {
             assert!(
                 serde_json::from_value::<FilterNode>(bad.clone()).is_err(),
@@ -1369,7 +1480,7 @@ mod tests {
             "filter.children[0].value"
         );
         assert_eq!(
-            path_of(tree(vec![condition("estimate", "is", json!(["1"]))])),
+            path_of(tree(vec![condition("story_points", "is", json!(["1"]))])),
             "filter.children[0].field"
         );
         assert_eq!(

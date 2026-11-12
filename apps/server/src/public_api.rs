@@ -26,12 +26,13 @@ use crate::repositories::pages::PageSummary;
 use crate::repositories::pages::{PageError, PageRepository};
 use crate::repositories::task_recurrences::TaskRecurrence;
 use crate::repositories::tasks::{
-    CommentRecord, ImportedComment, ImportedTask, LabelRecord, ProjectRecord, SortOrder,
-    StatusRecord, TaskError, TaskRepository, TaskSort,
+    CommentRecord, ImportedComment, ImportedTask, LabelRecord, MilestoneRecord, ProjectRecord,
+    SortOrder, StatusRecord, TaskError, TaskRepository, TaskSort,
 };
 use crate::token_api::{
-    AssigneeFilter, CommentImport, DOC_TOO_LARGE_DETAIL, DocPatch, DocView, Me, MemberView, Named,
-    NewComment, NewDoc, NewTask, TaskPatch, TaskQuery, TaskView, TokenApi, TokenApiError, Written,
+    AssigneeFilter, CommentImport, CycleRelative, CycleView, DOC_TOO_LARGE_DETAIL, DocPatch,
+    DocView, Me, MemberView, Named, NewComment, NewDoc, NewTask, TaskPatch, TaskQuery, TaskView,
+    TokenApi, TokenApiError, Written, parse_cycle_filter, parse_milestone_filter,
 };
 use crate::workspace_export::{
     ExportError, ExportMode, WorkspaceExport, WorkspaceExportService, WorkspaceExportStatus,
@@ -96,6 +97,8 @@ pub fn router(state: PublicApiState) -> Router {
             "/projects/{project_id}/labels/{label_id}",
             patch(setup::update_label),
         )
+        .route("/projects/{project_id}/milestones", get(milestones))
+        .route("/projects/{project_id}/cycles", get(cycles))
         .route("/members", get(members))
         .route("/tasks", get(list_tasks).post(create_task))
         .route(
@@ -428,6 +431,18 @@ impl Responder {
                 "Invalid parent",
                 "The parent task does not exist or is in the trash.",
             ),
+            TaskError::CycleOverlap => (
+                StatusCode::CONFLICT,
+                "cycle_overlap",
+                "Cycles overlap",
+                "The cycle's dates overlap another cycle of the project.",
+            ),
+            TaskError::NoNextCycle => (
+                StatusCode::CONFLICT,
+                "no_next_cycle",
+                "No next cycle",
+                "The project has no cycle after this one.",
+            ),
             TaskError::ProjectNotTrashed => (
                 StatusCode::CONFLICT,
                 "project_not_trashed",
@@ -626,6 +641,91 @@ impl From<LabelRecord> for LabelOut {
     }
 }
 
+/// The progress counts cover live tasks except cancelled and duplicate ones; `completed_count`
+/// and `estimate_completed` cover those in a `completed` status.
+#[derive(Serialize, ToSchema)]
+#[schema(as = PublicMilestone)]
+struct MilestoneOut {
+    #[schema(value_type = String)]
+    id: Id,
+    #[schema(value_type = String)]
+    project_id: Id,
+    name: String,
+    #[schema(required = true)]
+    description: Option<String>,
+    #[schema(value_type = Option<String>, format = DateTime, required = true)]
+    target_at: Option<TimestampMillis>,
+    position: i64,
+    version: u64,
+    task_count: i64,
+    completed_count: i64,
+    estimate_total: i64,
+    estimate_completed: i64,
+}
+
+impl From<MilestoneRecord> for MilestoneOut {
+    fn from(m: MilestoneRecord) -> Self {
+        Self {
+            id: m.id,
+            project_id: m.project_id,
+            name: m.name,
+            description: m.description,
+            target_at: m.target_at,
+            position: m.position,
+            version: m.version,
+            task_count: m.task_count,
+            completed_count: m.completed_count,
+            estimate_total: m.estimate_total,
+            estimate_completed: m.estimate_completed,
+        }
+    }
+}
+
+#[derive(Serialize, ToSchema)]
+#[schema(as = PublicCycle)]
+struct CycleOut {
+    #[schema(value_type = String)]
+    id: Id,
+    #[schema(value_type = String)]
+    project_id: Id,
+    /// 1 for the project's first cycle.
+    number: i64,
+    #[schema(required = true)]
+    name: Option<String>,
+    #[schema(value_type = String, format = DateTime)]
+    starts_at: TimestampMillis,
+    /// Exclusive: the next cycle may start at this instant.
+    #[schema(value_type = String, format = DateTime)]
+    ends_at: TimestampMillis,
+    /// `current`, `next` or `previous` now; `null` for the other cycles.
+    #[schema(required = true)]
+    relative: Option<CycleRelative>,
+    version: u64,
+    task_count: i64,
+    completed_count: i64,
+    estimate_total: i64,
+    estimate_completed: i64,
+}
+
+impl From<CycleView> for CycleOut {
+    fn from(CycleView { cycle: c, relative }: CycleView) -> Self {
+        Self {
+            id: c.id,
+            project_id: c.project_id,
+            number: c.number,
+            name: c.name,
+            starts_at: c.starts_at,
+            ends_at: c.ends_at,
+            relative,
+            version: c.version,
+            task_count: c.task_count,
+            completed_count: c.completed_count,
+            estimate_total: c.estimate_total,
+            estimate_completed: c.estimate_completed,
+        }
+    }
+}
+
 #[derive(Serialize, ToSchema)]
 #[schema(as = PublicComment)]
 pub(crate) struct CommentOut {
@@ -693,7 +793,8 @@ struct TasksQuery {
     status_id: Option<Id>,
     /// A member's user ID, or `none` for tasks without an assignee.
     assignee_id: Option<String>,
-    /// `created_at` (default), `updated_at`, `priority`, `due_date` or `title`.
+    /// `created_at` (default), `updated_at`, `priority`, `due_date`, `title` or `estimate`
+    /// (tasks without an estimate last).
     sort: Option<String>,
     /// `desc` (default) or `asc`. With `sort=priority`, `desc` lists `urgent` first.
     order: Option<String>,
@@ -701,6 +802,11 @@ struct TasksQuery {
     label_id: Option<Id>,
     /// `none`, `low`, `medium`, `high` or `urgent`.
     priority: Option<String>,
+    /// A milestone ID, or `none` for tasks without a milestone.
+    milestone_id: Option<String>,
+    /// A cycle ID; `current`, `next` or `previous` for that cycle of each task's project; or
+    /// `none` for tasks without a cycle.
+    cycle_id: Option<String>,
     /// Only the direct sub-issues of this task (a UUID or an identifier such as `ENG-12`), which
     /// must be in an approved project.
     parent_task_id: Option<String>,
@@ -746,6 +852,15 @@ struct CreateTaskBody {
     due_start_at: Option<TimestampMillis>,
     #[schema(value_type = Option<String>, format = DateTime)]
     due_at: Option<TimestampMillis>,
+    /// A milestone of the task's project.
+    #[schema(value_type = Option<String>)]
+    milestone_id: Option<Id>,
+    /// A cycle of the task's project.
+    #[schema(value_type = Option<String>)]
+    cycle_id: Option<Id>,
+    /// Points, 0 to 1000.
+    #[schema(minimum = 0, maximum = 1000)]
+    estimate: Option<i64>,
     /// `tasks:import`: the source tool's ID, unique in the workspace. A second create with the
     /// same ID answers `200` with the task that the first one made (unchanged), so a restarted
     /// import does not make duplicates. Up to 200 characters.
@@ -809,6 +924,18 @@ struct UpdateTaskBody {
     #[serde(default, deserialize_with = "present")]
     #[schema(value_type = Option<TaskRecurrence>)]
     recurrence: Option<Option<TaskRecurrence>>,
+    /// A milestone of the task's project; `null` clears it.
+    #[serde(default, deserialize_with = "present")]
+    #[schema(value_type = Option<String>)]
+    milestone_id: Option<Option<Id>>,
+    /// A cycle of the task's project; `null` clears it.
+    #[serde(default, deserialize_with = "present")]
+    #[schema(value_type = Option<String>)]
+    cycle_id: Option<Option<Id>>,
+    /// Points, 0 to 1000; `null` clears the estimate.
+    #[serde(default, deserialize_with = "present")]
+    #[schema(value_type = Option<i64>, minimum = 0, maximum = 1000)]
+    estimate: Option<Option<i64>>,
     /// A task in an approved project (a UUID or an identifier such as `ENG-12`) marks this task
     /// as its duplicate and moves it to the Duplicate status; `null` unmarks it.
     #[serde(default, deserialize_with = "present")]
@@ -1084,6 +1211,62 @@ async fn labels(
 
 #[utoipa::path(
     get,
+    path = "/api/public/v1/workspaces/{workspace_id}/projects/{project_id}/milestones",
+    operation_id = "public_list_milestones",
+    tag = "public-api",
+    summary = "The milestones of a project",
+    params(("workspace_id" = String, Path, description = "The token's workspace, from `GET /me`."), ("project_id" = String, Path)),
+    responses((status = 200, description = "Every milestone, in order; `next_cursor` is `null`", body = List<MilestoneOut>)),
+    security(("bearerAuth" = []))
+)]
+async fn milestones(
+    State(s): State<PublicApiState>,
+    ctx: Ctx,
+    Path((_workspace, project)): Path<(String, String)>,
+) -> Response {
+    let project = path_id!(ctx, project);
+    let result = async {
+        let api = s
+            .api
+            .authorize(&ctx.principal, ApiTokenScope::TasksRead, &ctx.request_id)
+            .await?;
+        let items = api.milestones(project).await?;
+        Ok(list::<_, MilestoneOut>(items, None))
+    }
+    .await;
+    ctx.reply(StatusCode::OK, result)
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/public/v1/workspaces/{workspace_id}/projects/{project_id}/cycles",
+    operation_id = "public_list_cycles",
+    tag = "public-api",
+    summary = "The cycles of a project",
+    params(("workspace_id" = String, Path, description = "The token's workspace, from `GET /me`."), ("project_id" = String, Path)),
+    responses((status = 200, description = "Every cycle, by start date; `next_cursor` is `null`", body = List<CycleOut>)),
+    security(("bearerAuth" = []))
+)]
+async fn cycles(
+    State(s): State<PublicApiState>,
+    ctx: Ctx,
+    Path((_workspace, project)): Path<(String, String)>,
+) -> Response {
+    let project = path_id!(ctx, project);
+    let result = async {
+        let api = s
+            .api
+            .authorize(&ctx.principal, ApiTokenScope::TasksRead, &ctx.request_id)
+            .await?;
+        let items = api.cycles(project).await?;
+        Ok(list::<_, CycleOut>(items, None))
+    }
+    .await;
+    ctx.reply(StatusCode::OK, result)
+}
+
+#[utoipa::path(
+    get,
     path = "/api/public/v1/workspaces/{workspace_id}/members",
     operation_id = "public_list_members",
     tag = "public-api",
@@ -1139,9 +1322,11 @@ async fn list_tasks(
         Some("priority") => TaskSort::Priority,
         Some("due_date") => TaskSort::DueDate,
         Some("title") => TaskSort::Title,
+        Some("estimate") => TaskSort::Estimate,
         Some(_) => {
-            return ctx
-                .invalid("sort must be created_at, updated_at, priority, due_date or title.");
+            return ctx.invalid(
+                "sort must be created_at, updated_at, priority, due_date, title or estimate.",
+            );
         }
     };
     let order = match query.order.as_deref() {
@@ -1168,6 +1353,16 @@ async fn list_tasks(
             assignee,
             label_id: query.label_id,
             priority: query.priority,
+            milestone: query
+                .milestone_id
+                .as_deref()
+                .map(parse_milestone_filter)
+                .transpose()?,
+            cycle: query
+                .cycle_id
+                .as_deref()
+                .map(parse_cycle_filter)
+                .transpose()?,
             parent_task_id: api
                 .optional_task_id(query.parent_task_id.as_deref())
                 .await?,
@@ -1243,6 +1438,9 @@ async fn create_task(
             parent_task_id: api.optional_task_id(body.parent_task_id.as_deref()).await?,
             due_start_at: body.due_start_at,
             due_at: body.due_at,
+            milestone_id: body.milestone_id,
+            cycle_id: body.cycle_id,
+            estimate: body.estimate,
             import: (body.external_id.is_some()
                 || body.number.is_some()
                 || body.created_at.is_some()
@@ -1301,6 +1499,9 @@ async fn update_task(
                 None => None,
             },
             recurrence: body.recurrence,
+            milestone_id: body.milestone_id,
+            cycle_id: body.cycle_id,
+            estimate: body.estimate,
             duplicate_of_id: match body.duplicate_of_id {
                 Some(original) => Some(api.optional_task_id(original.as_deref()).await?),
                 None => None,

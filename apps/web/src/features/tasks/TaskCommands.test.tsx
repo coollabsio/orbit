@@ -52,7 +52,7 @@ function Row({ item }: { item: Task }) {
 
 function Page({ tasks, select = [] }: { tasks: Task[]; select?: string[] }) {
   const { setSelected } = useTaskTarget()
-  const groupContext: GroupContext = { statuses: [todo, doing], members: [ada, bo], labels: [], projects: [launch], currentUserId: 'user-1', showEmpty: false }
+  const groupContext: GroupContext = { statuses: [todo, doing], members: [ada, bo], labels: [], projects: [launch], milestones: [], cycles: [], currentUserId: 'user-1', showEmpty: false }
   return (
     <>
       {tasks.map((item) => <Row key={item.id} item={item} />)}

@@ -4,19 +4,23 @@ import {
   CalendarTick,
   Category,
   Clock,
+  Diamonds,
   Flag,
   Folder,
   Hierarchy2,
   RecordCircle,
+  RefreshCircle,
   Tag,
   TaskSquare,
   Text as TextIcon,
+  Triangle,
   User as UserIcon,
   UserEdit,
   type IconComponent,
 } from 'reicon-react'
 import type { LabelRecord, ProjectRecord } from '@orbit/api/generated/types.gen'
-import type { TaskPriority, TaskStatusDef } from '@/features/tasks/api/models'
+import type { Cycle, Milestone, TaskPriority, TaskStatusDef } from '@/features/tasks/api/models'
+import { cycleName } from '@/features/tasks/planningLib'
 import { CATEGORY_LABEL, CATEGORY_ORDER, labelKeyOf, labelRepresentatives, PRIORITY_LABEL, projectLabels, PRIORITY_ORDER, sortStatuses, statusKeyOf } from '@/features/tasks/taskMeta'
 import type { User } from '@/features/workspaces/models'
 import type { Condition, DateValue, FilterField, FilterOperator, TaskPreset } from './viewState'
@@ -32,6 +36,9 @@ export type FilterOptions = {
   /** A project page lists only this project's labels. */
   projectId?: string | null
   projects: ProjectRecord[]
+  /** The page project's milestones and cycles (elsewhere those of the loaded tasks, so saved values keep their names). */
+  milestones: Milestone[]
+  cycles: Cycle[]
   currentUserId: string
   /** Parent filter values → task (null: deleted or trashed). Filled by `useFilterTaskRefs`. */
   taskRefs?: Readonly<Record<string, TaskFilterRef | null>>
@@ -65,9 +72,21 @@ export const FIELD_META: Record<FilterField, FieldMeta> = {
   created_at: { label: 'Created', plural: 'dates', icon: CalendarTick, kind: 'date', operators: ['before', 'after'], defaultOperator: 'after' },
   updated_at: { label: 'Updated', plural: 'dates', icon: Clock, kind: 'date', operators: ['before', 'after'], defaultOperator: 'after' },
   text: { label: 'Text', plural: 'text', icon: TextIcon, kind: 'text', operators: ['contains'], defaultOperator: 'contains' },
+  milestone: { label: 'Milestone', plural: 'milestones', icon: Diamonds, kind: 'list', operators: ['is', 'is_not', 'is_empty', 'is_not_empty'], defaultOperator: 'is' },
+  cycle: { label: 'Cycle', plural: 'cycles', icon: RefreshCircle, kind: 'list', operators: ['is', 'is_not', 'is_empty', 'is_not_empty'], defaultOperator: 'is' },
+  // no values: a new Estimate filter joins at once as "is empty"
+  estimate: { label: 'Estimate', plural: 'estimates', icon: Triangle, kind: 'list', operators: ['is_empty', 'is_not_empty'], defaultOperator: 'is_empty' },
 }
 
-export const FIELD_ORDER: FilterField[] = ['status', 'status_category', 'assignee', 'creator', 'label', 'priority', 'project', 'parent', 'sub_issues', 'due_date', 'created_at', 'updated_at', 'text']
+export const FIELD_ORDER: FilterField[] = ['status', 'status_category', 'assignee', 'creator', 'label', 'priority', 'project', 'milestone', 'cycle', 'estimate', 'parent', 'sub_issues', 'due_date', 'created_at', 'updated_at', 'text']
+
+/** Fields of one project's milestones and cycles: offered only on that project's page. */
+const PROJECT_FIELDS: readonly FilterField[] = ['milestone', 'cycle']
+
+/** The fields a picker offers; `keep` (the condition's own field) stays listed, so a saved condition still reads. */
+export function availableFields(options: FilterOptions, keep?: FilterField): FilterField[] {
+  return FIELD_ORDER.filter((field) => options.projectId || field === keep || !PROJECT_FIELDS.includes(field))
+}
 
 /** User conditions per tree: the server allows 50 on the effective tree, and a scope adds up to 3 preset conditions + 1 project condition. */
 export const MAX_FILTER_CONDITIONS = 46
@@ -92,6 +111,13 @@ export type Glyph =
   | { kind: 'icon'; icon: IconComponent }
 
 export type ValueOption = { value: string; label: string; glyph: Glyph }
+
+/** Cycle filter values the server resolves per project, at query time. */
+const RELATIVE_CYCLES = [
+  { value: 'current', label: 'Current cycle' },
+  { value: 'next', label: 'Next cycle' },
+  { value: 'previous', label: 'Previous cycle' },
+]
 
 const byName = <T extends { name: string }>(a: T, b: T) => a.name.localeCompare(b.name)
 
@@ -135,6 +161,13 @@ export function valueOptions(field: FilterField, options: FilterOptions): ValueO
       return PRIORITY_ORDER.map((priority): ValueOption => ({ value: priority, label: PRIORITY_LABEL[priority], glyph: { kind: 'priority', priority } }))
     case 'project':
       return [...options.projects].sort(byName).map((project): ValueOption => ({ value: project.id, label: project.name, glyph: { kind: 'dot', color: project.color } }))
+    case 'milestone':
+      return [...options.milestones].sort((a, b) => a.position - b.position).map((milestone): ValueOption => ({ value: milestone.id, label: milestone.name, glyph: { kind: 'icon', icon: Diamonds } }))
+    case 'cycle':
+      return [
+        ...RELATIVE_CYCLES.map((cycle): ValueOption => ({ ...cycle, glyph: { kind: 'icon', icon: RefreshCircle } })),
+        ...[...options.cycles].sort((a, b) => a.starts_at.localeCompare(b.starts_at)).map((cycle): ValueOption => ({ value: cycle.id, label: cycleName(cycle), glyph: { kind: 'icon', icon: RefreshCircle } })),
+      ]
     case 'sub_issues':
       return [
         { value: 'has', label: 'Has sub-issues', glyph: { kind: 'icon', icon: Hierarchy2 } },

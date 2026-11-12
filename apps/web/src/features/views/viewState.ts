@@ -4,16 +4,16 @@
  */
 
 export type GroupOp = 'and' | 'or'
-export type FilterField = 'status' | 'status_category' | 'assignee' | 'creator' | 'label' | 'priority' | 'project' | 'parent' | 'sub_issues' | 'due_date' | 'created_at' | 'updated_at' | 'text'
+export type FilterField = 'status' | 'status_category' | 'assignee' | 'creator' | 'label' | 'priority' | 'project' | 'parent' | 'sub_issues' | 'due_date' | 'created_at' | 'updated_at' | 'text' | 'milestone' | 'cycle' | 'estimate'
 export type FilterOperator = 'is' | 'is_not' | 'is_empty' | 'is_not_empty' | 'includes_any' | 'includes_all' | 'excludes' | 'before' | 'after' | 'between' | 'contains'
 export type DateValue = { absolute: string } | { relative: 'today' | 'start_of_week' | 'end_of_week'; offset_days?: number }
 export type Condition = { field: FilterField; operator: FilterOperator; value?: unknown }
 export type FilterGroup = { op: GroupOp; children: FilterNode[] }
 export type FilterNode = FilterGroup | Condition
 export type Layout = 'list' | 'board' | 'timeline'
-export type GroupBy = 'status' | 'assignee' | 'priority' | 'project' | 'label' | 'none'
-export type OrderBy = 'manual' | 'priority' | 'created' | 'updated' | 'title' | 'due_date'
-export type TaskProperty = 'id' | 'status' | 'assignee' | 'priority' | 'project' | 'due_date' | 'labels' | 'created' | 'updated' | 'sub_issue_progress'
+export type GroupBy = 'status' | 'assignee' | 'priority' | 'project' | 'label' | 'milestone' | 'cycle' | 'none'
+export type OrderBy = 'manual' | 'priority' | 'created' | 'updated' | 'title' | 'due_date' | 'estimate'
+export type TaskProperty = 'id' | 'status' | 'assignee' | 'priority' | 'project' | 'milestone' | 'cycle' | 'estimate' | 'due_date' | 'labels' | 'created' | 'updated' | 'sub_issue_progress'
 export type ShowCompleted = 'all' | 'past_week' | 'past_month' | 'none'
 export type SubIssuesMode = 'nested' | 'flat' | 'hidden'
 export type DisplayOptions = { layout: Layout; group_by: GroupBy; sub_group_by: GroupBy; order_by: OrderBy; order_direction: 'asc' | 'desc'; properties: TaskProperty[]; show_completed: ShowCompleted; show_empty_groups: boolean; sub_issues: SubIssuesMode }
@@ -23,7 +23,7 @@ export type PageKey = 'all' | `project:${string}` | `preset:${TaskPreset}`
 
 export const TASK_PRESETS: readonly TaskPreset[] = ['mine', 'overdue', 'due_soon', 'current_week', 'my_week']
 /** Canonical property order; `normalizeDisplay` sorts `display.properties` into it. */
-export const TASK_PROPERTIES: readonly TaskProperty[] = ['id', 'status', 'assignee', 'priority', 'project', 'due_date', 'labels', 'created', 'updated', 'sub_issue_progress']
+export const TASK_PROPERTIES: readonly TaskProperty[] = ['id', 'status', 'assignee', 'priority', 'project', 'milestone', 'cycle', 'estimate', 'due_date', 'labels', 'created', 'updated', 'sub_issue_progress']
 
 export const DEFAULT_DISPLAY: DisplayOptions = {
   layout: 'list',
@@ -80,6 +80,16 @@ export function normalizeDisplay(display: DisplayOptions): DisplayOptions {
   const sub_group_by: GroupBy = group_by === 'none' || display.sub_group_by === group_by ? 'none' : display.sub_group_by
   const properties = TASK_PROPERTIES.filter((property) => display.properties.includes(property))
   return { ...display, group_by, sub_group_by, properties }
+}
+
+/** Milestones and cycles belong to one project: only a single project's page groups and filters by them. */
+export const PROJECT_GROUPS: readonly GroupBy[] = ['milestone', 'cycle']
+
+/** The display a page shows: off a project page, a saved milestone or cycle grouping reads as no grouping. */
+export function pageDisplay(display: DisplayOptions, projectId: string | null): DisplayOptions {
+  if (projectId) return display
+  const scoped = (group: GroupBy): GroupBy => (PROJECT_GROUPS.includes(group) ? 'none' : group)
+  return normalizeDisplay({ ...display, group_by: scoped(display.group_by), sub_group_by: scoped(display.sub_group_by) })
 }
 
 /** Server or migrated state → a complete, normalized state (missing display keys take defaults). */
