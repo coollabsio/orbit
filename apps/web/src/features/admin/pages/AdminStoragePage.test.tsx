@@ -29,7 +29,7 @@ test('a bucket is saved first, then a switch sends the other options unchanged',
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const view = render(<QueryClientProvider client={client}><AdminStoragePage /></QueryClientProvider>)
 
-  const attachments = await view.findByRole('switch', { name: 'Attachments in S3' })
+  const attachments = await view.findByRole('switch', { name: 'Files in S3' })
   expect(attachments.getAttribute('aria-disabled') === 'true' || attachments.hasAttribute('data-disabled')).toBe(true)
 
   await userEvent.type(view.getByLabelText(/^Endpoint/), 'http://minio:9000')
@@ -43,8 +43,8 @@ test('a bucket is saved first, then a switch sends the other options unchanged',
     body: { endpoint: 'http://minio:9000', region: null, bucket: 'orbit-files', prefix: null, access_key_id: 'orbit', secret_access_key: 'secret', path_style: false },
   })
 
-  await waitFor(() => expect(view.getByRole('switch', { name: 'Attachments in S3' }).hasAttribute('data-disabled')).toBe(false))
-  fireEvent.click(view.getByRole('switch', { name: 'Attachments in S3' }))
+  await waitFor(() => expect(view.getByRole('switch', { name: 'Files in S3' }).hasAttribute('data-disabled')).toBe(false))
+  fireEvent.click(view.getByRole('switch', { name: 'Files in S3' }))
   await waitFor(() => expect(requests).toHaveLength(2))
   expect(requests[1]).toEqual({
     url: '/api/v1/admin/settings/storage',
@@ -63,7 +63,7 @@ test('settings set by the environment are read-only', async () => {
   expect((endpoint as HTMLInputElement).disabled).toBe(true)
   expect((view.getByRole('button', { name: 'Save bucket' }) as HTMLButtonElement).disabled).toBe(true)
   expect((view.getByRole('button', { name: 'Remove' }) as HTMLButtonElement).disabled).toBe(true)
-  const attachments = view.getByRole('switch', { name: 'Attachments in S3' })
+  const attachments = view.getByRole('switch', { name: 'Files in S3' })
   expect(attachments.getAttribute('aria-disabled') === 'true' || attachments.hasAttribute('data-disabled')).toBe(true)
   const backups = view.getByRole('switch', { name: 'Backups in S3' })
   expect(backups.getAttribute('aria-disabled') === 'true' || backups.hasAttribute('data-disabled')).toBe(false)

@@ -381,7 +381,7 @@ Not in the export: pages in the trash, page version history, notifications, save
 
 The root user saves an S3-compatible bucket (AWS S3, Cloudflare R2, MinIO, …) in **Admin → Storage**. Orbit writes, reads and deletes a test object before it saves the bucket. The secret key is encrypted with the app key. Then three settings apply:
 
-- **Attachments in S3**: new files go to the bucket, and existing files move there in the background (the page shows how many are left). Turning it off moves them back to this server. Uploads are still staged on the local disk first. The bucket can be removed only when no attachment file is left in it.
+- **Files in S3**: all uploaded files (task and comment attachments, doc and chat files, custom emoji, stickers, mail attachments, profile pictures). New files go to the bucket, and existing files move there in the background (the page shows how many are left). Turning it off moves them back to this server. Uploads are still staged on the local disk first. The bucket can be removed only when no attachment file is left in it.
 - **Backups in S3**: each new backup is uploaded to `backups/snapshots/{id}/` in the bucket (manifest last) and removed from this server. The Backups page lists local and S3 backups; download and restore fetch an S3 backup into `<backups>/downloads/` and verify its checksums first. Pre-migration backups stay local.
 - **Automatic backups**: off, every hour or every day. Retention keeps the newest backup of each of the last 7 days and 4 weeks, local and in S3.
 

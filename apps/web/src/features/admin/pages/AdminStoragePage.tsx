@@ -111,7 +111,7 @@ function UsageCard({ storage, environment }: { storage: StorageView; environment
       <div className="flex flex-col divide-y">
         <SettingsRow className="flex-nowrap">
           <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-[0.8125rem]">
-            {ready ? <span className="inline-flex items-center gap-1.5 font-medium text-foreground">Attachments in S3 <InfoTip text="On: new files go to the bucket and existing files move there in the background. Off: they move back to this server." /></span> : <span className="font-medium text-foreground">Attachments in S3</span>}
+            {ready ? <span className="inline-flex items-center gap-1.5 font-medium text-foreground">Files in S3 <InfoTip text="All uploaded files: task and comment attachments, doc and chat files, custom emoji, stickers, mail attachments and profile pictures. On: new files go to the bucket and existing files move there in the background. Off: they move back to this server." /></span> : <span className="font-medium text-foreground">Files in S3</span>}
             {ready ? null : <span className="text-xs text-muted-foreground">Save a bucket above first.</span>}
             {moving ? (
               <span role="status" className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -124,10 +124,10 @@ function UsageCard({ storage, environment }: { storage: StorageView; environment
             {environment.attachments_in_s3 ? <SetByEnvironment variable="ORBIT_S3_ATTACHMENTS" /> : null}
           </div>
           <Switch
-            aria-label="Attachments in S3"
+            aria-label="Files in S3"
             checked={storage.attachments_in_s3}
             disabled={environment.attachments_in_s3 || (!ready && !storage.attachments_in_s3) || save.isPending}
-            onCheckedChange={(checked: boolean) => change({ attachments_in_s3: checked }, checked ? 'Attachments go to S3' : 'Attachments move back to this server')}
+            onCheckedChange={(checked: boolean) => change({ attachments_in_s3: checked }, checked ? 'Files go to S3' : 'Files move back to this server')}
           />
         </SettingsRow>
         <SettingsRow className="flex-nowrap">

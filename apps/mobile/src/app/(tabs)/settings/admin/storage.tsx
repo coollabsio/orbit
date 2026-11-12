@@ -129,7 +129,7 @@ function UsageCard({ storage, environment }: { storage: StorageView; environment
   return (
     <SettingsCard title="Usage" description="What Orbit keeps in the bucket, and how often it backs up by itself." flush>
       <SettingsRow first>
-        <OptionText title="Attachments in S3" help={ready ? 'On: new files go to the bucket and existing files move there in the background. Off: they move back to this server.' : undefined}>
+        <OptionText title="Files in S3" help={ready ? 'All uploaded files: task and comment attachments, doc and chat files, custom emoji, stickers, mail attachments and profile pictures. On: new files go to the bucket and existing files move there in the background. Off: they move back to this server.' : undefined}>
           {ready ? null : <OptionHint>Save a bucket above first.</OptionHint>}
           {moving ? (
             <View accessibilityRole="text" className="flex-row items-center gap-1.5">
@@ -142,7 +142,7 @@ function UsageCard({ storage, environment }: { storage: StorageView; environment
           {environment.attachments_in_s3 ? <SetByEnvironment variable="ORBIT_S3_ATTACHMENTS" /> : null}
         </OptionText>
         <Toggle
-          label="Attachments in S3"
+          label="Files in S3"
           value={storage.attachments_in_s3}
           disabled={environment.attachments_in_s3 || (!ready && !storage.attachments_in_s3) || save.isPending}
           onChange={(attachments_in_s3) => change({ attachments_in_s3 })}
