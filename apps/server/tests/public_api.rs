@@ -1653,6 +1653,87 @@ async fn due_dates_can_be_set_kept_and_cleared() {
 }
 
 #[tokio::test]
+async fn tasks_filter_by_due_date() {
+    let f = Fixture::new().await;
+    let (token, _) = f.token(&[ApiTokenScope::TasksWrite], false).await;
+    let status = f.first_status(f.project).await;
+    for (title, due) in [
+        ("Early", "2026-12-05T09:00:00.000Z"),
+        ("Late", "2026-12-05T18:00:00.000Z"),
+        ("Next day", "2026-12-06T09:00:00.000Z"),
+    ] {
+        let (code, task) = f
+            .call(
+                Some(&token),
+                "POST",
+                "/tasks",
+                Some(json!({"project_id": f.project, "status_id": status, "title": title, "due_at": due})),
+            )
+            .await;
+        assert_eq!(code, StatusCode::CREATED, "{task}");
+    }
+    let titles = |page: &Value| {
+        let mut titles = page["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|task| task["title"].as_str().unwrap().to_owned())
+            .collect::<Vec<_>>();
+        titles.sort();
+        titles
+    };
+    for (query, expected) in [
+        ("due_before=2026-12-06", vec!["Early", "Late"]),
+        ("due_after=2026-12-05", vec!["Early", "Late", "Next day"]),
+        ("due_after=2026-12-06", vec!["Next day"]),
+        (
+            "due_after=2026-12-05T09:00:00Z&due_before=2026-12-06T09:00:00Z",
+            vec!["Late"],
+        ),
+        ("due_before=2026-12-05T09:00:00.000Z", vec![]),
+        ("has_due_date=true", vec!["Early", "Late", "Next day"]),
+        ("has_due_date=false", vec!["Approved task"]),
+        ("has_due_date=false&due_before=2027-01-01", vec![]),
+    ] {
+        let (code, page) = f
+            .call(Some(&token), "GET", &format!("/tasks?{query}"), None)
+            .await;
+        assert_eq!(code, StatusCode::OK, "{query}: {page}");
+        assert_eq!(titles(&page), expected, "{query}");
+    }
+    let (_, page) = f
+        .call(
+            Some(&token),
+            "GET",
+            "/tasks?due_after=2026-12-01&sort=due_date&order=asc&limit=1",
+            None,
+        )
+        .await;
+    let cursor = page["next_cursor"].as_str().unwrap().to_owned();
+    assert_eq!(titles(&page), ["Early"]);
+    let (_, next) = f
+        .call(
+            Some(&token),
+            "GET",
+            &format!("/tasks?due_after=2026-12-01&sort=due_date&order=asc&limit=1&cursor={cursor}"),
+            None,
+        )
+        .await;
+    assert_eq!(titles(&next), ["Late"]);
+    for bad in [
+        "due_before=tomorrow",
+        "due_after=2026-13-40",
+        "due_before=",
+        "has_due_date=maybe",
+    ] {
+        let (code, _) = f
+            .call(Some(&token), "GET", &format!("/tasks?{bad}"), None)
+            .await;
+        assert_eq!(code, StatusCode::BAD_REQUEST, "{bad}");
+    }
+}
+
+#[tokio::test]
 async fn sub_issues_take_a_parent_by_identifier_and_can_move_and_detach() {
     let f = Fixture::new().await;
     let (token, _) = f.token(&[ApiTokenScope::TasksWrite], false).await;
@@ -2547,6 +2628,110 @@ async fn doc_markdown_names_visible_sub_pages_and_hides_the_others() {
         "{read}"
     );
     assert!(!read.to_string().contains("Secret plans"), "{read}");
+}
+
+#[tokio::test]
+async fn doc_markdown_names_the_sub_pages_of_a_database_row() {
+    let f = Fixture::new().await;
+    let (token, _) = f
+        .token(&[ApiTokenScope::DocsWrite, ApiTokenScope::DocsRead], false)
+        .await;
+    let create = |kind| CreatePage {
+        kind,
+        parent_id: None,
+        space: SpaceRequest {
+            private: None,
+            teamspace_id: None,
+        },
+        title: "Tasks".into(),
+        icon: None,
+        position: None,
+    };
+    let database = f
+        .pages
+        .create_page(
+            f.workspace,
+            f.user,
+            create(orbit_server::repositories::pages::PageKind::Database),
+            "test",
+            TimestampMillis::now(),
+        )
+        .await
+        .unwrap();
+    let (code, row) = f
+        .call(
+            Some(&token),
+            "POST",
+            &format!("/docs/{}/rows", database.id),
+            Some(json!({"title": "Row"})),
+        )
+        .await;
+    assert_eq!(code, StatusCode::CREATED, "{row}");
+    let row_id: Id = row["id"].as_str().unwrap().parse().unwrap();
+    let mut children = Vec::new();
+    for title in ["Row notes", "Trashed notes"] {
+        let (code, child) = f
+            .call(
+                Some(&token),
+                "POST",
+                "/docs",
+                Some(json!({"parent_id": row_id, "title": title})),
+            )
+            .await;
+        assert_eq!(code, StatusCode::CREATED, "{child}");
+        children.push(child["id"].as_str().unwrap().to_owned());
+    }
+    // Rows and their sub-pages are not in the page tree.
+    let (_, list) = f.call(Some(&token), "GET", "/docs", None).await;
+    assert!(!list.to_string().contains(&children[0]), "{list}");
+    let trashed_id: Id = children[1].parse().unwrap();
+    let trashed = f
+        .pages
+        .get_page(f.workspace, trashed_id, f.user)
+        .await
+        .unwrap();
+    f.pages
+        .delete_page(
+            f.workspace,
+            trashed_id,
+            f.user,
+            trashed.version,
+            "test",
+            TimestampMillis::now(),
+        )
+        .await
+        .unwrap();
+    let block =
+        |page_id: &str| json!({"id": page_id, "type": "page", "props": {"pageId": page_id}});
+    let page = f.pages.get_page(f.workspace, row_id, f.user).await.unwrap();
+    f.pages
+        .update_page(
+            f.workspace,
+            row_id,
+            f.user,
+            page.version,
+            PageChanges {
+                content: Some(vec![block(&children[0]), block(&children[1])]),
+                ..PageChanges::default()
+            },
+            "test",
+            TimestampMillis::now(),
+        )
+        .await
+        .unwrap();
+    let (code, read) = f
+        .call(Some(&token), "GET", &format!("/docs/{row_id}"), None)
+        .await;
+    assert_eq!(code, StatusCode::OK, "{read}");
+    // The live sub-page keeps its title; the trashed one stays unnamed.
+    assert_eq!(
+        read["markdown"],
+        format!(
+            "[Row notes](/docs/{})\n\n[Untitled](/docs/{})\n",
+            children[0], children[1]
+        ),
+        "{read}"
+    );
 }
 
 /// A stored attachment of `task`, as an upload leaves it; returns the blob's storage key.

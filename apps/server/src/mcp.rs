@@ -835,7 +835,9 @@ fn tool_error(error: TokenApiError) -> Result<CallToolResult, ErrorData> {
         TokenApiError::BillingUnavailable => {
             Err(ErrorData::internal_error("Billing is unavailable", None))
         }
-        TokenApiError::Internal => Err(ErrorData::internal_error("Service is unavailable", None)),
+        TokenApiError::Internal(_) => {
+            Err(ErrorData::internal_error("Service is unavailable", None))
+        }
         TokenApiError::ReadOnly => text(READ_ONLY_DETAIL),
         TokenApiError::NotAvailable => text("Resource is not available"),
         TokenApiError::AllProjectsRequired => text(

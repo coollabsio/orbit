@@ -283,6 +283,10 @@ pub enum DateValue {
     Absolute {
         day: i64,
     },
+    /// An exact moment, in epoch milliseconds. The public API sends it for a time (not a day).
+    Instant {
+        millis: i64,
+    },
     Relative {
         anchor: RelativeDay,
         offset_days: i64,
@@ -644,11 +648,24 @@ fn validate_display(display: &DisplayOptions) -> Result<(), FilterError> {
     Ok(())
 }
 
-/// Parses `{ "absolute": "YYYY-MM-DD" }` or `{ "relative": …, "offset_days"?: n }`.
+/// Parses `{ "absolute": "YYYY-MM-DD" }`, `{ "instant": epoch_ms }` or
+/// `{ "relative": …, "offset_days"?: n }`.
 pub fn parse_date_value(value: &Value, path: &str) -> Result<DateValue, FilterError> {
     let Some(object) = value.as_object() else {
         return Err(invalid(path, "must be a date value"));
     };
+    if let Some(instant) = object.get("instant") {
+        if let Some(key) = object.keys().find(|key| key.as_str() != "instant") {
+            return Err(invalid(
+                format!("{path}.{key}"),
+                "cannot be combined with instant",
+            ));
+        }
+        let millis = instant
+            .as_i64()
+            .ok_or_else(|| invalid(format!("{path}.instant"), "must be epoch milliseconds"))?;
+        return Ok(DateValue::Instant { millis });
+    }
     if let Some(absolute) = object.get("absolute") {
         if let Some(key) = object.keys().find(|key| key.as_str() != "absolute") {
             return Err(invalid(
@@ -717,6 +734,7 @@ fn parse_date_range(value: &Value, path: &str) -> Result<(DateValue, DateValue),
 pub fn resolve_day(date: DateValue, now: TimestampMillis) -> i64 {
     match date {
         DateValue::Absolute { day } => day,
+        DateValue::Instant { millis } => millis.div_euclid(DAY_MS),
         DateValue::Relative {
             anchor,
             offset_days,
@@ -1310,6 +1328,7 @@ fn push_status(query: &mut SqlBuilder, value: &Value, negated: bool) {
 }
 
 /// `before D`: `< D`; `after D`: `>= D + 1 day`; `between [a, b]`: `>= a AND < b + 1 day`.
+/// An instant is exact: `before T`: `< T`; `after T`: `> T`; as `between` end: `<= T`.
 fn push_date(
     query: &mut SqlBuilder,
     column: &'static str,
@@ -1317,23 +1336,25 @@ fn push_date(
     now: TimestampMillis,
 ) {
     let start_of = |day: i64| day.saturating_mul(DAY_MS);
+    // The first moment of a day-or-instant operand, and the first moment after it.
+    let first = |date: DateValue| match date {
+        DateValue::Instant { millis } => millis,
+        date => start_of(resolve_day(date, now)),
+    };
+    let after = |date: DateValue| match date {
+        DateValue::Instant { millis } => millis.saturating_add(1),
+        date => start_of(resolve_day(date, now) + 1),
+    };
     let bounds = match condition.operator {
         FilterOperator::Before => parse_date_value(&condition.value, "value")
             .ok()
-            .map(|date| (None, Some(start_of(resolve_day(date, now))))),
+            .map(|date| (None, Some(first(date)))),
         FilterOperator::After => parse_date_value(&condition.value, "value")
             .ok()
-            .map(|date| (Some(start_of(resolve_day(date, now) + 1)), None)),
-        FilterOperator::Between => {
-            parse_date_range(&condition.value, "value")
-                .ok()
-                .map(|(start, end)| {
-                    (
-                        Some(start_of(resolve_day(start, now))),
-                        Some(start_of(resolve_day(end, now) + 1)),
-                    )
-                })
-        }
+            .map(|date| (Some(after(date)), None)),
+        FilterOperator::Between => parse_date_range(&condition.value, "value")
+            .ok()
+            .map(|(start, end)| (Some(first(start)), Some(after(end)))),
         _ => None,
     };
     match bounds {

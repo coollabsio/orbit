@@ -34,7 +34,7 @@ use crate::token_api::{
     AssigneeFilter, CommentImport, CycleRelative, CycleView, DOC_TOO_LARGE_DETAIL, DocMove,
     DocPatch, DocVersionView, DocView, Me, MemberView, MovedDocView, Named, NewComment, NewDoc,
     NewTask, TaskPatch, TaskQuery, TaskView, TokenApi, TokenApiError, Written, parse_cycle_filter,
-    parse_milestone_filter,
+    parse_due_bound, parse_milestone_filter,
 };
 use crate::workspace_export::{
     ExportError, ExportMode, WorkspaceExport, WorkspaceExportService, WorkspaceExportStatus,
@@ -214,7 +214,10 @@ async fn authenticate(
         }
         Err(ApiTokenError::NotFound) => ctx.unauthorized(),
         Err(ApiTokenError::Forbidden) => ctx.error(TokenApiError::MissingScope),
-        Err(_) => ctx.error(TokenApiError::Internal),
+        Err(ApiTokenError::Unavailable(error)) => {
+            ctx.error(TokenApiError::Internal(error.to_string()))
+        }
+        Err(error) => ctx.error(TokenApiError::Internal(error.to_string())),
     }
 }
 
@@ -244,11 +247,13 @@ impl<S: Send + Sync> FromRequestParts<S> for Ctx {
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Response> {
         let out = Responder::new(&parts.extensions, &parts.uri);
         let Some(principal) = parts.extensions.get::<ApiTokenPrincipal>().cloned() else {
-            return Err(out.error(TokenApiError::Internal));
+            return Err(out.error(TokenApiError::Internal(
+                "authenticated request has no token principal".to_owned(),
+            )));
         };
         let params = RawPathParams::from_request_parts(parts, state)
             .await
-            .map_err(|_| out.error(TokenApiError::Internal))?;
+            .map_err(|error| out.error(TokenApiError::Internal(error.to_string())))?;
         if params.iter().any(|(name, value)| {
             name == "workspace_id" && value.parse::<Id>().ok() != Some(principal.workspace_id)
         }) {
@@ -348,6 +353,13 @@ impl Responder {
     }
 
     fn error(&self, error: TokenApiError) -> Response {
+        let cause = match &error {
+            TokenApiError::Internal(cause) => Some(cause.clone()),
+            TokenApiError::Task(TaskError::Unavailable(error)) => Some(error.to_string()),
+            TokenApiError::Page(PageError::Unavailable(error)) => Some(error.to_string()),
+            TokenApiError::Page(error @ PageError::Corrupt) => Some(error.to_string()),
+            _ => None,
+        };
         let problem = match error {
             TokenApiError::MissingScope => self.problem(
                 StatusCode::FORBIDDEN,
@@ -387,12 +399,12 @@ impl Responder {
                 "Workspace action forbidden",
                 "A tasks:import token writes only while its creator is a workspace owner or admin.",
             ),
-            TokenApiError::Internal => Problem::internal(&self.request_id, &self.instance),
+            TokenApiError::Internal(_) => Problem::internal(&self.request_id, &self.instance),
             TokenApiError::Task(error) => self.task_problem(error),
             TokenApiError::Page(error) => self.page_problem(error),
             TokenApiError::Database(error) => self.database_problem(error),
         };
-        problem_response(problem)
+        with_cause(problem_response(problem), cause)
     }
 
     fn task_problem(&self, error: TaskError) -> Problem {
@@ -591,6 +603,16 @@ impl Responder {
         };
         self.problem(status, code, title, detail)
     }
+}
+
+/// Adds why a 500 happened for the HTTP layer's log; the client does not see it.
+fn with_cause(mut response: Response, cause: Option<String>) -> Response {
+    if let Some(cause) = cause {
+        response
+            .extensions_mut()
+            .insert(orbit_platform::ErrorCause(cause));
+    }
+    response
 }
 
 fn problem_response(problem: Problem) -> Response {
@@ -868,6 +890,14 @@ struct TasksQuery {
     /// A cycle ID; `current`, `next` or `previous` for that cycle of each task's project; or
     /// `none` for tasks without a cycle.
     cycle_id: Option<String>,
+    /// Only tasks due before this moment: a date (`2026-11-12`, 00:00 UTC) or a UTC time
+    /// (`2026-11-12T15:00:00Z`). Tasks without a due date never match.
+    due_before: Option<String>,
+    /// Only tasks due after this moment, as `due_before` reads it. Tasks without a due date never
+    /// match.
+    due_after: Option<String>,
+    /// `true` for tasks with a due date, `false` for tasks without one.
+    has_due_date: Option<bool>,
     /// Only the direct sub-issues of this task (a UUID or an identifier such as `ENG-12`), which
     /// must be in an approved project.
     parent_task_id: Option<String>,
@@ -1457,6 +1487,21 @@ async fn list_tasks(
                 .as_deref()
                 .map(parse_cycle_filter)
                 .transpose()?,
+            due_before: query
+                .due_before
+                .as_deref()
+                .map(|raw| {
+                    parse_due_bound(raw, "due_before must be a date or a UTC time, as 2026-11-12 or 2026-11-12T15:00:00Z.")
+                })
+                .transpose()?,
+            due_after: query
+                .due_after
+                .as_deref()
+                .map(|raw| {
+                    parse_due_bound(raw, "due_after must be a date or a UTC time, as 2026-11-12 or 2026-11-12T15:00:00Z.")
+                })
+                .transpose()?,
+            has_due_date: query.has_due_date,
             parent_task_id: api
                 .optional_task_id(query.parent_task_id.as_deref())
                 .await?,
@@ -1995,7 +2040,9 @@ fn export_access<'a>(
     s: &'a PublicApiState,
     principal: &ApiTokenPrincipal,
 ) -> Result<(&'a WorkspaceExportService, ExportMode), TokenApiError> {
-    let exports = s.exports.as_ref().ok_or(TokenApiError::Internal)?;
+    let exports = s.exports.as_ref().ok_or_else(|| {
+        TokenApiError::Internal("workspace export service not configured".to_owned())
+    })?;
     match ApiTokenScope::export_mode(&principal.scopes) {
         Some(mode) if principal.service_account.is_none() => Ok((exports, mode)),
         _ => Err(TokenApiError::MissingScope),
@@ -2004,6 +2051,11 @@ fn export_access<'a>(
 
 impl Responder {
     fn export_error(&self, error: ExportError) -> Response {
+        let cause = match &error {
+            ExportError::Unavailable(source) => Some(source.to_string()),
+            ExportError::Cancelled | ExportError::Storage(_) => Some(error.to_string()),
+            _ => None,
+        };
         let problem = match error {
             ExportError::NotFound => self.not_found(),
             ExportError::Forbidden => self.problem(
@@ -2023,7 +2075,7 @@ impl Responder {
                 Problem::internal(&self.request_id, &self.instance)
             }
         };
-        problem_response(problem)
+        with_cause(problem_response(problem), cause)
     }
 }
 

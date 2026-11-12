@@ -528,7 +528,7 @@ pub(crate) async fn stripe_webhook(
         tracing::warn!(%error, event_id, "queueing the Stripe sync failed");
         // Stripe redelivers after an error; let that delivery queue the job.
         let _ = repository::forget_event(database, event_id).await;
-        return Err(internal(WEBHOOK, id));
+        return Err(internal(WEBHOOK, id).cause(error));
     }
     Ok(StatusCode::OK)
 }

@@ -223,6 +223,10 @@ fn problem(
                 instance,
                 request_id,
             )
+            .cause(match &error {
+                PageExportError::Unavailable(source) => source.to_string(),
+                _ => error.to_string(),
+            })
         }
     }
 }

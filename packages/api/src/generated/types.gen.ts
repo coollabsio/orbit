@@ -7936,6 +7936,10 @@ export type StorageView = {
      */
     backups_in_s3: boolean;
     /**
+     * Orbit has not counted the files to move since the switch changed yet; `files_to_move` is 0 until it has.
+     */
+    checking: boolean;
+    /**
      * Attachment files still waiting to move between this server's disk and the bucket.
      */
     files_to_move: number;
@@ -12345,6 +12349,20 @@ export type PublicListTasksData = {
          * `none` for tasks without a cycle.
          */
         cycle_id?: string;
+        /**
+         * Only tasks due before this moment: a date (`2026-11-12`, 00:00 UTC) or a UTC time
+         * (`2026-11-12T15:00:00Z`). Tasks without a due date never match.
+         */
+        due_before?: string;
+        /**
+         * Only tasks due after this moment, as `due_before` reads it. Tasks without a due date never
+         * match.
+         */
+        due_after?: string;
+        /**
+         * `true` for tasks with a due date, `false` for tasks without one.
+         */
+        has_due_date?: boolean;
         /**
          * Only the direct sub-issues of this task (a UUID or an identifier such as `ENG-12`), which
          * must be in an approved project.

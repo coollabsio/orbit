@@ -484,6 +484,10 @@ pub(crate) fn problem(
                 instance,
                 request_id,
             )
+            .cause(match &error {
+                MailError::Unavailable(source) => source.to_string(),
+                _ => error.to_string(),
+            })
         }
     }
 }
