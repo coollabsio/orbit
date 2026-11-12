@@ -15,7 +15,7 @@ test('a pull request the reader can see shows as a card that opens the viewer', 
   globalThis.fetch = (async () => Response.json(detail)) as unknown as typeof fetch
   const view = renderWithWorkspace(<GithubPullCard workspaceId="workspace-1" pullRef={{ owner: 'acme', repo: 'repo', number: 12 }} />)
   const link = await view.findByRole('link', { name: /Fix the login/ })
-  expect(link.getAttribute('href')).toBe('/tasks/pulls/acme/repo/12')
+  expect(link.getAttribute('href')).toBe('/?pr=acme/repo/12')
   expect(view.getByText('+3')).toBeTruthy()
 })
 
@@ -23,5 +23,7 @@ test('a pull request the reader cannot see shows nothing (not even its title)', 
   globalThis.fetch = (async () => problem(404, 'pull_not_found')) as unknown as typeof fetch
   const view = renderWithWorkspace(<GithubPullCard workspaceId="workspace-1" pullRef={{ owner: 'acme', repo: 'secret', number: 1 }} />)
   await new Promise((resolve) => setTimeout(resolve, 100))
-  expect(view.container.textContent).toBe('')
+  // (toasts of other test files can stay in sonner's global store, so the card itself is checked)
+  expect(view.queryAllByRole('link').length).toBe(0)
+  expect(view.container.querySelector('a')).toBeNull()
 })

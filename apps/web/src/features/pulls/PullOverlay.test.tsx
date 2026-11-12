@@ -3,12 +3,12 @@ import { act, waitFor } from '@testing-library/react'
 import { QueryClient } from '@tanstack/react-query'
 import { pullKeys } from '@/features/pulls/api'
 import userEvent from '@testing-library/user-event'
-import { Route, Routes } from 'react-router'
+import { Route, Routes, useLocation } from 'react-router'
 import { renderWithWorkspace } from '@/test/renderWithWorkspace'
-import { PullPage } from './PullPage'
+import { PullOverlay, PullRedirect } from './PullOverlay'
 
 const originalFetch = globalThis.fetch
-afterEach(() => { globalThis.fetch = originalFetch })
+afterEach(() => { globalThis.fetch = originalFetch; localStorage.clear() })
 
 const actor = { login: 'hubot', avatar_url: '' }
 const detail = {
@@ -16,7 +16,7 @@ const detail = {
   base_ref: 'main', head_ref: 'fix', base_sha: 'b0', head_sha: 'h1', additions: 3, deletions: 1, changed_files: 3,
   html_url: 'https://github.com/acme/repo/pull/12', checks: { state: 'success', runs: [] },
   merge: { methods: ['squash'], mergeable: 'mergeable', blocked_reason: null, default_method: 'squash' },
-  viewer: { can_comment: true, can_review: true, can_merge: true, is_author: false }, tasks: [{ task_id: 't1', title: 'Login fails' }],
+  viewer: { login: 'me', can_comment: true, can_review: true, can_merge: true, is_author: false }, tasks: [{ task_id: 't1', title: 'Login fails' }],
 }
 const files = [
   { path: 'src/login.ts', previous_path: null, status: 'modified', additions: 2, deletions: 1, patch: '@@ -1 +1,2 @@\n const a = 1\n+const b = 2', viewed: false },
@@ -38,31 +38,79 @@ function serve({ pull = () => Response.json(detail), writes = [] as Array<{ meth
     if (path.endsWith('/acme/repo/12')) return pull()
     if (path.endsWith('/files')) return Response.json(files)
     if (path.endsWith('/threads')) return Response.json({ threads: [outdated, onLockfile], pending_review: null })
-    if (path.endsWith('/conversation')) return Response.json([])
+    if (path.endsWith('/conversation')) return Response.json([{ kind: 'review', author: { login: 'mia', avatar_url: '' }, body: 'Looks right.', created_at: 1, review_state: 'approved' }])
     return Response.json({})
   }) as typeof fetch
   return writes
 }
 
-const page = (path = '/tasks/pulls/acme/repo/12') => renderWithWorkspace(<Routes><Route path="/tasks/pulls/:owner/:repo/:number" element={<PullPage />} /></Routes>, { path })
+function Where() {
+  const location = useLocation()
+  return <output aria-label="location">{location.pathname}{location.search}</output>
+}
 
-test('the header shows the pull request and its linked task', async () => {
+// the modal hides the page under it from the accessibility tree, so the location is read from the DOM
+const where = () => document.querySelector('output[aria-label="location"]')?.textContent
+
+const page = (path = '/tasks?pr=acme/repo/12', client?: QueryClient) => renderWithWorkspace(<Routes>
+  <Route path="/tasks/pulls/:owner/:repo/:number" element={<PullRedirect />} />
+  <Route path="*" element={<><Where /><PullOverlay /></>} />
+</Routes>, { path, client })
+
+test('a pull request opens over the page: title, state, and the linked task in the activity', async () => {
+  localStorage.setItem('orbit:pulls:activity', '1')
   serve()
   const view = page()
   expect(await view.findByRole('heading', { name: 'Fix the login' })).toBeTruthy()
   expect(view.getByText('#12')).toBeTruthy()
   expect(view.getByText('Open')).toBeTruthy()
-  expect(view.getByText('main')).toBeTruthy()
   expect(view.getByRole('link', { name: 'Login fails' }).getAttribute('href')).toBe('/tasks/t1')
   expect(view.getByRole('link', { name: 'Open on GitHub' }).getAttribute('href')).toBe('https://github.com/acme/repo/pull/12')
 })
 
-test('the file tree lists every changed file with its viewed tick', async () => {
+test('the old page URL opens the overlay over Tasks, with the comment', async () => {
+  serve()
+  const view = page('/tasks/pulls/acme/repo/12?comment=5')
+  expect(await view.findByRole('heading', { name: 'Fix the login' })).toBeTruthy()
+  expect(where()).toBe('/tasks?pr=acme/repo/12&prComment=5')
+})
+
+test('Esc closes the overlay and leaves the page under it', async () => {
+  serve()
+  const view = page('/tasks?view=board&pr=acme/repo/12')
+  await view.findByRole('heading', { name: 'Fix the login' })
+  await userEvent.keyboard('{Escape}')
+  await waitFor(() => expect(where()).toBe('/tasks?view=board'))
+})
+
+test('Esc in a text field leaves the field first; the overlay stays open', async () => {
+  serve()
+  const view = page()
+  await userEvent.click(await view.findByRole('textbox', { name: 'Filter files' }))
+  await userEvent.keyboard('{Escape}')
+  expect(where()).toBe('/tasks?pr=acme/repo/12')
+  expect(document.activeElement?.getAttribute('aria-label')).not.toBe('Filter files')
+})
+
+test('files to review are in the tree; lockfiles are set aside, folded, and open on click', async () => {
   serve()
   const view = page()
   const tree = await view.findByRole('tree', { name: 'Changed files' })
-  await waitFor(() => expect(tree.querySelectorAll('[role="treeitem"][data-file]').length).toBe(3))
+  await waitFor(() => expect(tree.querySelectorAll('[role="treeitem"][data-file]').length).toBe(2))
   expect((view.getByRole('checkbox', { name: 'Viewed src/util.ts' }) as HTMLInputElement).getAttribute('aria-checked')).toBe('true')
+  expect(view.getByRole('separator', { name: 'Files set aside' })).toBeTruthy()
+  await userEvent.click(view.getByRole('button', { name: /yarn\.lock/ }))
+  expect(await view.findByText('Too large to show here.')).toBeTruthy()
+})
+
+test('the summary counts the files to review and shows the latest decision', async () => {
+  serve()
+  const view = page()
+  const summary = await view.findByRole('region', { name: 'Summary' })
+  await waitFor(() => expect(summary.textContent).toContain('1 of 2 viewed'))
+  expect(summary.textContent).toContain('1 set aside')
+  await waitFor(() => expect(summary.textContent).toContain('Approved by mia'))
+  expect(view.getByRole('progressbar', { name: 'Files viewed' }).getAttribute('aria-valuenow')).toBe('50')
 })
 
 test('ticking a file as viewed tells GitHub', async () => {
@@ -72,17 +120,13 @@ test('ticking a file as viewed tells GitHub', async () => {
   await waitFor(() => expect(writes).toContainEqual({ method: 'PUT', path: '/api/v1/workspaces/workspace-1/github/pulls/acme/repo/12/viewed', body: { path: 'src/login.ts' } }))
 })
 
-test('a file GitHub sends no diff for links to GitHub', async () => {
+test('outdated comments and comments on files the diff cannot show are in the activity', async () => {
+  localStorage.setItem('orbit:pulls:activity', '1')
   serve()
   const view = page()
-  expect(await view.findByText('Too large to show here.')).toBeTruthy()
-})
-
-test('outdated comments are listed in the Overview tab', async () => {
-  serve()
-  const view = page()
-  await userEvent.click(await view.findByRole('tab', { name: 'Overview' }))
   expect(await view.findByText('Old remark')).toBeTruthy()
+  expect(view.getByText('Why this bump?')).toBeTruthy()
+  expect(view.getByRole('region', { name: 'Comments not in the diff' })).toBeTruthy()
   expect(view.getByText('It works now.')).toBeTruthy()
 })
 
@@ -98,14 +142,6 @@ test('a pull request GitHub hides says so', async () => {
   expect(await view.findByText('Pull request not found')).toBeTruthy()
 })
 
-test('comments on a file the diff cannot show are in the Overview tab', async () => {
-  serve()
-  const view = page()
-  await userEvent.click(await view.findByRole('tab', { name: 'Overview' }))
-  expect(await view.findByText('Why this bump?')).toBeTruthy()
-  expect(view.getByRole('region', { name: 'Comments not in the diff' })).toBeTruthy()
-})
-
 test('new commits show a bar; the files load again only on Refresh', async () => {
   let head = 'h1'
   let fileLoads = 0
@@ -117,7 +153,7 @@ test('new commits show a bar; the files load again only on Refresh', async () =>
     return Response.json([])
   }) as typeof fetch
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  const view = renderWithWorkspace(<Routes><Route path="/tasks/pulls/:owner/:repo/:number" element={<PullPage />} /></Routes>, { path: '/tasks/pulls/acme/repo/12', client })
+  const view = page('/tasks?pr=acme/repo/12', client)
   await view.findByRole('tree', { name: 'Changed files' })
   expect(fileLoads).toBe(1)
   head = 'h2'

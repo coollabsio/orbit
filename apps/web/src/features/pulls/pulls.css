@@ -24,3 +24,47 @@ diffs-container {
 .dark diffs-container {
   color-scheme: dark;
 }
+
+/* The pull request overlay: it grows in from the middle of the screen, and the page dims behind it. */
+.pull-overlay {
+  transform-origin: center;
+  transition: opacity 200ms cubic-bezier(0.23, 1, 0.32, 1), transform 200ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+.pull-overlay[data-starting-style],
+.pull-overlay[data-ending-style] {
+  opacity: 0;
+  transform: scale(0.985);
+}
+.pull-overlay[data-ending-style] {
+  transition-duration: 150ms;
+}
+.pull-overlay-backdrop {
+  transition: opacity 200ms ease-out;
+}
+.pull-overlay-backdrop[data-starting-style],
+.pull-overlay-backdrop[data-ending-style] {
+  opacity: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .pull-overlay[data-starting-style],
+  .pull-overlay[data-ending-style] {
+    transform: none;
+  }
+}
+
+/* The review progress under the top bar: the part of the files to review that is viewed. */
+.pull-progress {
+  transition: width 300ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+/* A thread the reader jumped to shows itself once. */
+@keyframes pull-flash {
+  from { box-shadow: 0 0 0 3px color-mix(in oklab, var(--primary) 45%, transparent); }
+  to { box-shadow: 0 0 0 3px transparent; }
+}
+[data-thread-flash] {
+  animation: pull-flash 1200ms ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-thread-flash] { animation: none; }
+}

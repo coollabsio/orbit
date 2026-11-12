@@ -16,7 +16,7 @@ type Actions = { workspaceId: string; pullRef: PullRef }
 /** One review thread: its comments, and whether it is resolved, outdated or pending. With `actions`: reply, resolve,
  *  edit and delete own comments. */
 export function ThreadView({ thread, highlighted = false, actions }: { thread: GithubReviewThread; highlighted?: boolean; actions?: Actions }) {
-  return <div data-thread-id={thread.id} className={cn('my-1 flex flex-col gap-2 rounded-lg border bg-card px-3 py-2.5 font-sans text-[13px] text-foreground shadow-xs', highlighted && 'ring-2 ring-primary/50', thread.is_resolved && 'opacity-80')}>
+  return <div data-thread-id={thread.id} data-thread-flash={highlighted || undefined} className={cn('my-1 flex flex-col gap-2 rounded-lg border bg-card px-3 py-2.5 font-sans text-[13px] text-foreground shadow-xs', thread.is_resolved && 'opacity-80')}>
     {thread.is_resolved || thread.is_outdated ? <div className="flex gap-1.5">
       {thread.is_resolved ? <span className="rounded bg-muted px-1.5 text-[11px] text-muted-foreground">Resolved</span> : null}
       {thread.is_outdated ? <span className="rounded bg-muted px-1.5 text-[11px] text-muted-foreground">Outdated</span> : null}

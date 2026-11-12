@@ -80,8 +80,11 @@ const REGISTRY = [
   { id: 'pull.prevFile', title: 'Go to previous file', group: 'Pull requests', keys: 'K', context: 'pull', repeat: true },
   { id: 'pull.nextThread', title: 'Go to next comment thread', group: 'Pull requests', keys: 'N', context: 'pull' },
   { id: 'pull.prevThread', title: 'Go to previous comment thread', group: 'Pull requests', keys: 'P', context: 'pull' },
-  { id: 'pull.toggleViewed', title: 'Mark file as viewed', group: 'Pull requests', keys: 'V', context: 'pull' },
+  { id: 'pull.toggleViewed', title: 'Mark file as viewed and go to the next one', group: 'Pull requests', keys: 'V', context: 'pull' },
   { id: 'pull.comment', title: 'Comment on the line under the pointer', group: 'Pull requests', keys: 'M', context: 'pull' },
+  { id: 'pull.review', title: 'Open your review', group: 'Pull requests', keys: 'R', context: 'pull' },
+  { id: 'pull.activity', title: 'Show or hide the activity', group: 'Pull requests', keys: 'A', context: 'pull' },
+  { id: 'pull.filter', title: 'Filter the changed files', group: 'Pull requests', keys: 'F', context: 'pull' },
 
   { id: 'docs.createPage', title: 'Create page', group: 'Docs', keys: null, context: 'docs' },
   { id: 'docs.history', title: 'Show page history', group: 'Docs', keys: 'Mod+Shift+H', context: 'docs', inInputs: true },

@@ -12,7 +12,7 @@ const pull = {
   repository: 'acme/repo', number: 12, node_id: 'PR_1', title: 'Fix it', body: 'Body', state: 'open', author: { login: 'hubot', avatar_url: '' },
   base_ref: 'main', head_ref: 'fix', base_sha: 'b0', head_sha: 'h1', additions: 1, deletions: 0, changed_files: 1, html_url: 'https://github.com/acme/repo/pull/12',
   checks: { state: 'success', runs: [] }, merge: { methods: ['merge', 'squash'], mergeable: 'mergeable', blocked_reason: null, default_method: 'squash' },
-  viewer: { can_comment: true, can_review: true, can_merge: true, is_author: false }, tasks: [],
+  viewer: { login: 'me', can_comment: true, can_review: true, can_merge: true, is_author: false }, tasks: [],
 } as GithubPullDetail
 const ref = { owner: 'acme', repo: 'repo', number: 12 }
 const problem = (status: number, code: string) => new Response(JSON.stringify({ type: 'about:blank', title: 'x', status, code, detail: 'New commits were pushed. Refresh before you merge.', instance: '/', request_id: 'r' }), { status, headers: { 'content-type': 'application/problem+json' } })

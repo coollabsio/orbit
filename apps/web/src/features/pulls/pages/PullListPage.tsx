@@ -1,8 +1,7 @@
 import { useState } from 'react'
-import { Link, useParams } from 'react-router'
+import { useParams } from 'react-router'
 import { MessageText } from 'reicon-react'
 import type { GithubPullSummary } from '@orbit/api/generated/types.gen'
-import { pullPath } from '@orbit/api/github'
 import { EmptyState } from '@/components/common/EmptyState'
 import { Pane, PaneHeader, PaneTitle } from '@/components/common/Pane'
 import { Button } from '@/components/ui/button'
@@ -15,6 +14,7 @@ import { TaskSearchBox } from '@/features/tasks/components/TaskSearchBox'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { relativeTime } from '@/lib/format'
 import { useDebouncedValue } from '@/lib/useDebouncedValue'
+import { PullLink } from '@/features/pulls/components/PullLink'
 
 const FILTERS: { value: PullFilter; label: string; empty: string }[] = [
   { value: 'open', label: 'Open', empty: 'No open pull requests' },
@@ -65,13 +65,13 @@ export function PullListPage() {
 function PullRow({ item }: { item: GithubPullSummary }) {
   const [owner, repo] = item.repository.split('/')
   return <li>
-    <Link to={pullPath({ owner, repo, number: item.number })} className="flex min-w-0 items-center gap-3 px-3 py-2.5 transition-colors duration-150 ease-out hover:bg-muted/60">
+    <PullLink pullRef={{ owner, repo, number: item.number }} className="flex min-w-0 items-center gap-3 px-3 py-2.5 transition-colors duration-150 ease-out hover:bg-muted/60">
       <PullStateBadge state={item.state} />
       <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{item.title}</span>
       <span className="shrink-0 text-xs text-muted-foreground tabular-nums">#{item.number}</span>
       {item.comments > 0 ? <span className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground tabular-nums"><MessageText className="size-3.5" />{item.comments}</span> : null}
       <span className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground"><GithubAvatar actor={item.author} size={18} />{relativeTime(new Date(item.updated_at).toISOString())}</span>
-    </Link>
+    </PullLink>
   </li>
 }
 

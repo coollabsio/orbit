@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { pullPath } from '@orbit/api/github'
+import { pullPath, type PullRef } from '@orbit/api/github'
 import { apiClient } from '@/api/client'
 import { queryKeys } from '@/api/queryKeys'
 import {
@@ -92,6 +92,13 @@ const IMPORTS: Record<string, { name: string; page: string }> = {
   trello: { name: 'Trello', page: '/tasks-import/trello' },
   notion: { name: 'Notion', page: '/docs/import' },
   obsidian: { name: 'Obsidian', page: '/docs/import/obsidian' },
+}
+
+/** The pull request a GitHub notice is about; it opens over the Inbox. */
+export function notificationPull(notification: NotificationRecord): PullRef | null {
+  if (!notification.kind.startsWith('github_')) return null
+  const [owner, repo] = (notification.github_repository ?? '').split('/')
+  return owner && repo && notification.github_pull_number ? { owner, repo, number: notification.github_pull_number } : null
 }
 
 /** Where a notification leads: the task, the page with the comment thread open, the page at the mention, the chat message, or the import. */

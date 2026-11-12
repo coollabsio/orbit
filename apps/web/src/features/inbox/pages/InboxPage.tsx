@@ -10,8 +10,9 @@ import { EmptyState } from '@/components/common/EmptyState'
 import { VirtualList } from '@/components/common/VirtualList'
 import { Pane, PaneHeader, PaneTitle } from '@/components/common/Pane'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
+import { useOpenPull } from '@/features/pulls/components/PullLink'
 import { useMembers } from '@/features/workspaces/api'
-import { isMention, notificationCopy, notificationLine, notificationTarget, useMarkAllNotificationsRead, useMarkNotificationRead, useNotifications } from '@/features/inbox/api'
+import { isMention, notificationCopy, notificationLine, notificationPull, notificationTarget, useMarkAllNotificationsRead, useMarkNotificationRead, useNotifications } from '@/features/inbox/api'
 import { usePageTree } from '@/features/docs/api/pages'
 import { useSlowPending } from '@/lib/useDebouncedValue'
 import { ProfileTrigger } from '@/components/common/ProfileTrigger'
@@ -23,6 +24,7 @@ type InboxTab = (typeof TABS)[number]
 export function InboxPage() {
   const { workspace } = useWorkspace()
   const navigate = useNavigate()
+  const openPull = useOpenPull()
   const location = useLocation()
   // the tab is in the URL: back from a notification's task, the same tab shows at the same scroll position
   const [searchParams, setSearchParams] = useSearchParams()
@@ -104,6 +106,8 @@ export function InboxPage() {
                   className="h-auto min-h-14 w-full min-w-0 justify-start gap-2.5 rounded-none border-x-0 border-t-0 border-b-border px-3 py-1.5 text-left font-normal"
                   onClick={() => {
                     if (!notification.read_at) markRead.mutate(notification.id)
+                    const pull = notificationPull(notification)
+                    if (pull) { openPull(pull); return }
                     const target = notificationTarget(notification)
                     if (!target) return
                     if (notification.page_id || notification.chat_conversation_id || notification.import_id) {
