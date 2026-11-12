@@ -220,7 +220,7 @@ export function useTeamspaceWrites() {
   }
   return {
     create: useMutation({ mutationFn: (name: string) => docs.newTeamspace(client, workspaceId, name), onSettled }),
-    save: useMutation({ mutationFn: ({ teamspace, ...body }: { teamspace: Teamspace; name?: string; icon?: string | null }) => docs.saveTeamspace(client, workspaceId, teamspace, body), onSettled }),
+    save: useMutation({ mutationFn: ({ teamspace, ...body }: { teamspace: Teamspace; name?: string; icon?: string | null; project_id?: string | null }) => docs.saveTeamspace(client, workspaceId, teamspace, body), onSettled }),
     remove: useMutation({ mutationFn: (teamspace: Teamspace) => docs.removeTeamspace(client, workspaceId, teamspace), onSettled }),
     move: useMutation({ mutationFn: ({ teamspace, position }: { teamspace: Teamspace; position: number }) => docs.placeTeamspace(client, workspaceId, teamspace, position), onSettled }),
   }

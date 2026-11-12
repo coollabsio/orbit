@@ -492,7 +492,9 @@ writes act as the token's creator: their name shows as the last editor, and
 mentions in the Markdown notify the mentioned members.
 
 `GET /workspaces/{workspace_id}/docs`. Scope: `docs:read`. Item: `{id, parent_id, teamspace_id, private,
-title, icon, position, version, updated_at}`. `next_cursor` is always `null`.
+title, icon, position, version, updated_at}`. `next_cursor` is always `null`. With the query
+`project_id` (an approved project), the list leaves out the docs of teamspaces that hold other
+projects' docs: you get the global docs, the docs of that project's teamspace and private docs.
 
 ```bash
 curl -sS "$ORBIT_WS/docs" -H "Authorization: Bearer $ORBIT_TOKEN"

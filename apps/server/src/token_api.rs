@@ -1539,14 +1539,35 @@ impl Authorized<'_> {
         repository.as_ref().ok_or(TokenApiError::NotAvailable)
     }
 
-    /// Each doc's `version` is its [`revision`], as in [`DocView`].
-    pub async fn list_docs(&self) -> Result<PageList> {
+    /// Each doc's `version` is its [`revision`], as in [`DocView`]. With `project_id` (an
+    /// approved project), only the global docs, the project's teamspace and private docs: the
+    /// docs of teamspaces linked to other projects are left out.
+    pub async fn list_docs(&self, project_id: Option<Id>) -> Result<PageList> {
         let pages = self.content(ApiTokenScope::DocsRead, &self.api.pages)?;
         let p = self.principal;
+        if project_id.is_some_and(|id| !self.approved(id)) {
+            return Err(TaskError::NotFound.into());
+        }
         let mut list = pages
             .pages(p.workspace_id, p.actor_id)
             .await
             .map_err(hidden_page)?;
+        if let Some(project_id) = project_id {
+            let other: HashSet<Id> = sqlx::query_scalar::<_, String>(
+                "SELECT id FROM teamspaces WHERE workspace_id = $1 AND project_id IS NOT NULL \
+                 AND project_id <> $2",
+            )
+            .bind(p.workspace_id.to_string())
+            .bind(project_id.to_string())
+            .fetch_all(self.api.tasks.database().pool())
+            .await
+            .map_err(TaskError::from)?
+            .iter()
+            .filter_map(|id| id.parse().ok())
+            .collect();
+            list.items
+                .retain(|page| !page.teamspace_id.is_some_and(|id| other.contains(&id)));
+        }
         for page in &mut list.items {
             page.version = revision(page.version, page.updated_at);
         }
@@ -1589,7 +1610,7 @@ impl Authorized<'_> {
     }
 
     async fn doc_view(&self, pages: &PageRepository, mut page: PageRecord) -> Result<DocView> {
-        let markdown = self.markdown(pages, &page.content).await?;
+        let markdown = self.markdown(pages, page.id, &page.content).await?;
         let values = self.row_values(&page).await?;
         page.version = revision(page.version, page.updated_at);
         Ok(DocView {
@@ -1599,13 +1620,18 @@ impl Authorized<'_> {
         })
     }
 
-    /// `blocks` as Markdown, with links to the pages that the actor can see.
-    async fn markdown(&self, pages: &PageRepository, blocks: &[Value]) -> Result<String> {
+    /// `blocks` of the doc `page_id` as Markdown, with links to the pages that the actor can see.
+    async fn markdown(
+        &self,
+        pages: &PageRepository,
+        page_id: Id,
+        blocks: &[Value],
+    ) -> Result<String> {
         let mut linked = HashSet::new();
         linked_pages(blocks, &mut linked);
         let mut titles = HashMap::new();
         if !linked.is_empty() {
-            titles = self.link_titles(pages, page.id).await?;
+            titles = self.link_titles(pages, page_id).await?;
             titles.retain(|id, _| linked.contains(id));
         }
         Ok(blocks_to_markdown(blocks, &DocLinks(titles)))
@@ -1785,7 +1811,7 @@ impl Authorized<'_> {
             .page_version(p.workspace_id, page_id, version_id, p.actor_id)
             .await
             .map_err(hidden_page)?;
-        let markdown = self.markdown(pages, &version.content).await?;
+        let markdown = self.markdown(pages, page_id, &version.content).await?;
         Ok(DocVersionView { version, markdown })
     }
 

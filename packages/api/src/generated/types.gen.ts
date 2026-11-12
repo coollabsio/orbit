@@ -8374,6 +8374,11 @@ export type Teamspace = {
     is_default: boolean;
     name: string;
     position: number;
+    /**
+     * The project whose docs this teamspace holds; `null` for global docs. The project may be
+     * trashed or not visible to the caller.
+     */
+    project_id: string | null;
     updated_at: string;
     version: number;
     workspace_id: string;
@@ -8393,6 +8398,11 @@ export type TeamspaceUpdateBody = {
      * 1 to 100 characters after trimming.
      */
     name?: string | null;
+    /**
+     * The project whose docs the teamspace holds. Absent: unchanged. `null`: global docs. A
+     * project has at most one teamspace.
+     */
+    project_id?: string | null;
 };
 
 export type TestPushResult = {
@@ -9618,7 +9628,13 @@ export type PublicListDocsData = {
          */
         workspace_id: string;
     };
-    query?: never;
+    query?: {
+        /**
+         * An approved project: only the global docs, the docs of this project's teamspace and
+         * private docs.
+         */
+        project_id?: string;
+    };
     url: '/api/public/v1/workspaces/{workspace_id}/docs';
 };
 
