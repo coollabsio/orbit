@@ -22,6 +22,7 @@ use crate::export::names::{ascii_file_name, rfc5987};
 use crate::repositories::api_tokens::{
     ApiTokenError, ApiTokenPrincipal, ApiTokenRepository, ApiTokenScope,
 };
+use crate::repositories::page_versions::PageVersionSummary;
 use crate::repositories::pages::PageSummary;
 use crate::repositories::pages::{PageError, PageRepository};
 use crate::repositories::task_recurrences::TaskRecurrence;
@@ -30,9 +31,10 @@ use crate::repositories::tasks::{
     SortOrder, StatusRecord, TaskError, TaskRepository, TaskSort,
 };
 use crate::token_api::{
-    AssigneeFilter, CommentImport, CycleRelative, CycleView, DOC_TOO_LARGE_DETAIL, DocPatch,
-    DocView, Me, MemberView, Named, NewComment, NewDoc, NewTask, TaskPatch, TaskQuery, TaskView,
-    TokenApi, TokenApiError, Written, parse_cycle_filter, parse_milestone_filter,
+    AssigneeFilter, CommentImport, CycleRelative, CycleView, DOC_TOO_LARGE_DETAIL, DocMove,
+    DocPatch, DocVersionView, DocView, Me, MemberView, MovedDocView, Named, NewComment, NewDoc,
+    NewTask, TaskPatch, TaskQuery, TaskView, TokenApi, TokenApiError, Written, parse_cycle_filter,
+    parse_milestone_filter,
 };
 use crate::workspace_export::{
     ExportError, ExportMode, WorkspaceExport, WorkspaceExportService, WorkspaceExportStatus,
@@ -76,6 +78,8 @@ impl PublicApiState {
 }
 
 pub fn router(state: PublicApiState) -> Router {
+    // A retry of a POST with the same `Idempotency-Key` gets the first response (task and comment creates).
+    let idempotent = middleware::from_fn_with_state(state.clone(), idempotency::idempotency);
     // Workspace paths leave room for tokens with more than one workspace; today the path must
     // name the token's only workspace.
     let workspace = Router::new()
@@ -100,12 +104,20 @@ pub fn router(state: PublicApiState) -> Router {
         .route("/projects/{project_id}/milestones", get(milestones))
         .route("/projects/{project_id}/cycles", get(cycles))
         .route("/members", get(members))
-        .route("/tasks", get(list_tasks).post(create_task))
+        .route(
+            "/tasks",
+            get(list_tasks)
+                .post(create_task)
+                .route_layer(idempotent.clone()),
+        )
         .route(
             "/tasks/{task}",
             get(get_task).patch(update_task).delete(delete_task),
         )
-        .route("/tasks/{task}/comments", get(comments).post(create_comment))
+        .route(
+            "/tasks/{task}/comments",
+            get(comments).post(create_comment).route_layer(idempotent),
+        )
         .route(
             "/tasks/{task}/relations",
             get(relations::relations).post(relations::create_relation),
@@ -115,7 +127,13 @@ pub fn router(state: PublicApiState) -> Router {
             delete(relations::delete_relation),
         )
         .route("/docs", get(docs).post(create_doc))
-        .route("/docs/{page_id}", get(doc).patch(update_doc))
+        .route(
+            "/docs/{page_id}",
+            get(doc).patch(update_doc).delete(delete_doc),
+        )
+        .route("/docs/{page_id}/move", post(move_doc))
+        .route("/docs/{page_id}/versions", get(doc_versions))
+        .route("/docs/{page_id}/versions/{version_id}", get(doc_version))
         .route("/docs/{page_id}/database", get(databases::database))
         .route(
             "/docs/{page_id}/database/query",
@@ -517,6 +535,30 @@ impl Responder {
                     &detail,
                 );
             }
+            PageError::InvalidCursor => (
+                StatusCode::BAD_REQUEST,
+                "invalid_cursor",
+                "Invalid cursor",
+                "The cursor does not match this list query.",
+            ),
+            PageError::MoveToPrivateForbidden => (
+                StatusCode::FORBIDDEN,
+                "workspace_action_forbidden",
+                "Workspace action forbidden",
+                "Only workspace owners and administrators may move teamspace docs that others created into a private space.",
+            ),
+            PageError::DatabaseInDatabase => (
+                StatusCode::CONFLICT,
+                "database_in_database",
+                "Database in a database",
+                "A database cannot be a row.",
+            ),
+            PageError::RowLimit => (
+                StatusCode::CONFLICT,
+                "database_row_limit",
+                "Database row limit",
+                "A database holds at most 5,000 rows.",
+            ),
             PageError::Locked => (
                 StatusCode::LOCKED,
                 "page_locked",
@@ -1054,6 +1096,37 @@ struct UpdateDocBody {
     markdown: Option<String>,
 }
 
+/// Where the doc goes. `parent_id` is required: `null` moves the doc to a space root.
+#[derive(Deserialize, ToSchema)]
+#[schema(as = PublicMoveDocBody)]
+#[serde(deny_unknown_fields)]
+struct MoveDocBody {
+    /// The `version` that you read: an opaque number below 2^53. Compare it for equality only.
+    expected_version: u64,
+    /// The new parent doc; `null` moves the doc to a space root. The doc and its sub-docs take
+    /// the parent's space.
+    #[serde(deserialize_with = "Option::deserialize")]
+    #[schema(value_type = Option<String>, required = true)]
+    parent_id: Option<Id>,
+    /// With `parent_id: null`: the target teamspace. Omitted keeps the doc's current space.
+    #[schema(value_type = Option<String>)]
+    teamspace_id: Option<Id>,
+    /// With `parent_id: null`: `true` moves the doc to the token creator's private space,
+    /// `false` out of it (to the default teamspace unless `teamspace_id` is given).
+    private: Option<bool>,
+    /// Index among the new siblings, from 0. Omitted, or past the last sibling, puts the doc
+    /// last. A doc that enters a database always goes last.
+    position: Option<u64>,
+}
+
+#[derive(Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+#[serde(deny_unknown_fields)]
+struct DeleteDocQuery {
+    /// The `version` that you read: an opaque number below 2^53. Compare it for equality only.
+    expected_version: u64,
+}
+
 #[derive(Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 #[serde(deny_unknown_fields)]
@@ -1098,6 +1171,7 @@ macro_rules! path_id {
 }
 
 pub(crate) mod databases;
+mod idempotency;
 pub(crate) mod relations;
 pub(crate) mod setup;
 
@@ -1430,11 +1504,13 @@ async fn get_task(
     operation_id = "public_create_task",
     tag = "public-api",
     summary = "Create a task",
-    params(("workspace_id" = String, Path, description = "The token's workspace, from `GET /me`.")),
+    params(("workspace_id" = String, Path, description = "The token's workspace, from `GET /me`."), ("Idempotency-Key" = Option<String>, Header, description = "Makes a retry safe. A repeat with the same key and body returns the first response (header `Idempotent-Replayed: true`); the same key with another body or path gets `422`. Kept 24 hours per token.")),
     request_body = CreateTaskBody,
     responses(
         (status = 201, description = "The new task", body = TaskView),
         (status = 200, description = "`tasks:import`: the task that an earlier create with the same `external_id` made", body = TaskView),
+        (status = 409, description = "`idempotency_request_running`: the first request with this `Idempotency-Key` has not finished", body = Problem),
+        (status = 422, description = "`idempotency_key_reused`: this `Idempotency-Key` was used for another body or path", body = Problem),
     ),
     security(("bearerAuth" = []))
 )]
@@ -1692,6 +1768,138 @@ async fn update_doc(
 }
 
 #[utoipa::path(
+    delete,
+    path = "/api/public/v1/workspaces/{workspace_id}/docs/{page_id}",
+    operation_id = "public_delete_doc",
+    tag = "public-api",
+    summary = "Move a doc and its sub-docs to the trash",
+    description = "Moves the doc and its live sub-docs to the trash, where people can restore them. Deleting forever is not available through the API.",
+    params(("workspace_id" = String, Path, description = "The token's workspace, from `GET /me`."), ("page_id" = String, Path), DeleteDocQuery),
+    responses((status = 204, description = "The doc is in the trash")),
+    security(("bearerAuth" = []))
+)]
+async fn delete_doc(
+    State(s): State<PublicApiState>,
+    ctx: Ctx,
+    Path((_workspace, page)): Path<(String, String)>,
+    query: Result<Query<DeleteDocQuery>, QueryRejection>,
+) -> Response {
+    let page = path_id!(ctx, page);
+    let query = input!(ctx, ApiTokenScope::DocsWrite, query);
+    let result = async {
+        let api = s
+            .api
+            .authorize(&ctx.principal, ApiTokenScope::DocsWrite, &ctx.request_id)
+            .await?;
+        api.delete_doc(page, query.expected_version).await
+    }
+    .await;
+    match result {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(error) => ctx.error(error),
+    }
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/public/v1/workspaces/{workspace_id}/docs/{page_id}/move",
+    operation_id = "public_move_doc",
+    tag = "public-api",
+    summary = "Move a doc under another doc or to a space root",
+    params(("workspace_id" = String, Path, description = "The token's workspace, from `GET /me`."), ("page_id" = String, Path)),
+    request_body = MoveDocBody,
+    responses((status = 200, description = "The doc after the move", body = MovedDocView)),
+    security(("bearerAuth" = []))
+)]
+async fn move_doc(
+    State(s): State<PublicApiState>,
+    ctx: Ctx,
+    Path((_workspace, page)): Path<(String, String)>,
+    body: Result<Json<MoveDocBody>, JsonRejection>,
+) -> Response {
+    let page = path_id!(ctx, page);
+    let body = input!(ctx, ApiTokenScope::DocsWrite, body);
+    let result = async {
+        let api = s
+            .api
+            .authorize(&ctx.principal, ApiTokenScope::DocsWrite, &ctx.request_id)
+            .await?;
+        let target = DocMove {
+            parent_id: body.parent_id,
+            teamspace_id: body.teamspace_id,
+            private: body.private,
+            position: body.position,
+        };
+        api.move_doc(page, body.expected_version, target).await
+    }
+    .await;
+    ctx.reply(StatusCode::OK, result)
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/public/v1/workspaces/{workspace_id}/docs/{page_id}/versions",
+    operation_id = "public_list_doc_versions",
+    tag = "public-api",
+    summary = "The history of a doc, newest first, without content",
+    params(("workspace_id" = String, Path, description = "The token's workspace, from `GET /me`."), ("page_id" = String, Path), PageQuery),
+    responses((status = 200, description = "A page of versions", body = List<PageVersionSummary>)),
+    security(("bearerAuth" = []))
+)]
+async fn doc_versions(
+    State(s): State<PublicApiState>,
+    ctx: Ctx,
+    Path((_workspace, page)): Path<(String, String)>,
+    query: Result<Query<PageQuery>, QueryRejection>,
+) -> Response {
+    let page = path_id!(ctx, page);
+    let query = input!(ctx, ApiTokenScope::DocsRead, query);
+    let result = async {
+        let api = s
+            .api
+            .authorize(&ctx.principal, ApiTokenScope::DocsRead, &ctx.request_id)
+            .await?;
+        let versions = api
+            .doc_versions(page, query.cursor.as_deref(), query.limit)
+            .await?;
+        Ok(List {
+            items: versions.items,
+            next_cursor: versions.next_cursor,
+        })
+    }
+    .await;
+    ctx.reply(StatusCode::OK, result)
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/public/v1/workspaces/{workspace_id}/docs/{page_id}/versions/{version_id}",
+    operation_id = "public_get_doc_version",
+    tag = "public-api",
+    summary = "One version of a doc, with its content as Markdown",
+    params(("workspace_id" = String, Path, description = "The token's workspace, from `GET /me`."), ("page_id" = String, Path), ("version_id" = String, Path)),
+    responses((status = 200, description = "The version", body = DocVersionView)),
+    security(("bearerAuth" = []))
+)]
+async fn doc_version(
+    State(s): State<PublicApiState>,
+    ctx: Ctx,
+    Path((_workspace, page, version)): Path<(String, String, String)>,
+) -> Response {
+    let page = path_id!(ctx, page);
+    let version = path_id!(ctx, version);
+    let result = async {
+        let api = s
+            .api
+            .authorize(&ctx.principal, ApiTokenScope::DocsRead, &ctx.request_id)
+            .await?;
+        api.doc_version(page, version).await
+    }
+    .await;
+    ctx.reply(StatusCode::OK, result)
+}
+
+#[utoipa::path(
     get,
     path = "/api/public/v1/workspaces/{workspace_id}/tasks/{task}/comments",
     operation_id = "public_list_comments",
@@ -1728,11 +1936,13 @@ async fn comments(
     operation_id = "public_create_comment",
     tag = "public-api",
     summary = "Comment on a task",
-    params(("workspace_id" = String, Path, description = "The token's workspace, from `GET /me`."), ("task" = String, Path, description = "A task UUID or identifier such as `ENG-12` (any letter case).")),
+    params(("workspace_id" = String, Path, description = "The token's workspace, from `GET /me`."), ("task" = String, Path, description = "A task UUID or identifier such as `ENG-12` (any letter case)."), ("Idempotency-Key" = Option<String>, Header, description = "Makes a retry safe. A repeat with the same key and body returns the first response (header `Idempotent-Replayed: true`); the same key with another body or path gets `422`. Kept 24 hours per token.")),
     request_body = CommentBody,
     responses(
         (status = 201, description = "The new comment", body = CommentOut),
         (status = 200, description = "`tasks:import`: the comment that an earlier create with the same `external_id` made", body = CommentOut),
+        (status = 409, description = "`idempotency_request_running`: the first request with this `Idempotency-Key` has not finished", body = Problem),
+        (status = 422, description = "`idempotency_key_reused`: this `Idempotency-Key` was used for another body or path", body = Problem),
     ),
     security(("bearerAuth" = []))
 )]

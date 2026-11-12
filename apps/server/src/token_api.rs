@@ -22,6 +22,7 @@ use crate::repositories::chat::{
     SearchPage, ThreadPage,
 };
 use crate::repositories::membership;
+use crate::repositories::page_versions::{PageVersion, PageVersionList};
 use crate::repositories::pages::{
     CreatePage, MarkdownContent, PageChanges, PageError, PageList, PageRecord, PageRepository,
     SpaceRequest, revision,
@@ -497,6 +498,27 @@ pub struct DocView {
     pub values: Option<std::collections::BTreeMap<String, Value>>,
 }
 
+/// A doc after a move.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+#[schema(as = PublicMovedDoc)]
+pub struct MovedDocView {
+    #[serde(flatten)]
+    pub doc: DocView,
+    /// Property values that the move deleted: the doc left its database, or the new database has
+    /// no property of the same name and type (or no such option) for them.
+    pub dropped_values: u64,
+}
+
+/// A stored version of a doc: its title, icon and content as they were.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+#[schema(as = PublicDocVersion)]
+pub struct DocVersionView {
+    #[serde(flatten)]
+    pub version: PageVersion,
+    /// The content as GitHub-flavored Markdown, as in a doc read.
+    pub markdown: String,
+}
+
 /// Links pages to `/docs/<id>` under the titles of the pages that the actor can see; any other
 /// page stays "Untitled", so a link does not tell what a hidden page is called.
 struct DocLinks(HashMap<String, String>);
@@ -542,6 +564,18 @@ pub struct NewDoc {
     pub title: String,
     pub icon: Option<String>,
     pub markdown: String,
+}
+
+#[derive(Debug, Default)]
+pub struct DocMove {
+    /// The new parent; `None` moves the doc to a space root.
+    pub parent_id: Option<Id>,
+    /// Root moves only: the target teamspace. Unset keeps the doc's space.
+    pub teamspace_id: Option<Id>,
+    /// Root moves only: `true` moves the doc to the token creator's private space.
+    pub private: Option<bool>,
+    /// Index among the new siblings; `None` puts the doc last.
+    pub position: Option<u64>,
 }
 
 #[derive(Debug, Default)]
@@ -1487,8 +1521,20 @@ impl Authorized<'_> {
     }
 
     async fn doc_view(&self, pages: &PageRepository, mut page: PageRecord) -> Result<DocView> {
+        let markdown = self.markdown(pages, &page.content).await?;
+        let values = self.row_values(&page).await?;
+        page.version = revision(page.version, page.updated_at);
+        Ok(DocView {
+            page,
+            markdown,
+            values,
+        })
+    }
+
+    /// `blocks` as Markdown, with links to the pages that the actor can see.
+    async fn markdown(&self, pages: &PageRepository, blocks: &[Value]) -> Result<String> {
         let mut linked = HashSet::new();
-        linked_pages(&page.content, &mut linked);
+        linked_pages(blocks, &mut linked);
         let mut titles = HashMap::new();
         if !linked.is_empty() {
             let p = self.principal;
@@ -1503,14 +1549,7 @@ impl Authorized<'_> {
                 }
             }
         }
-        let markdown = blocks_to_markdown(&page.content, &DocLinks(titles));
-        let values = self.row_values(&page).await?;
-        page.version = revision(page.version, page.updated_at);
-        Ok(DocView {
-            page,
-            markdown,
-            values,
-        })
+        Ok(blocks_to_markdown(blocks, &DocLinks(titles)))
     }
 
     pub async fn create_doc(&self, input: NewDoc) -> Result<DocView> {
@@ -1615,6 +1654,87 @@ impl Authorized<'_> {
             }
         };
         self.doc_view(pages, page).await
+    }
+
+    /// Moves the doc and its sub-docs to the trash. `expected_version` is the doc's `version` as
+    /// read (its [`revision`]).
+    pub async fn delete_doc(&self, page_id: Id, expected_version: u64) -> Result<()> {
+        let pages = self.content(ApiTokenScope::DocsWrite, &self.api.pages)?;
+        let p = self.principal;
+        pages
+            .delete_page_at_revision(
+                p.workspace_id,
+                page_id,
+                p.actor_id,
+                expected_version,
+                self.request_id,
+                TimestampMillis::now(),
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// `expected_version` is the doc's `version` as read (its [`revision`]).
+    pub async fn move_doc(
+        &self,
+        page_id: Id,
+        expected_version: u64,
+        target: DocMove,
+    ) -> Result<MovedDocView> {
+        let pages = self.content(ApiTokenScope::DocsWrite, &self.api.pages)?;
+        let p = self.principal;
+        let moved = pages
+            .move_page_at_revision(
+                p.workspace_id,
+                page_id,
+                p.actor_id,
+                expected_version,
+                target.parent_id,
+                SpaceRequest {
+                    teamspace_id: target.teamspace_id,
+                    private: target.private,
+                },
+                target.position.map_or(i64::MAX, |position| {
+                    i64::try_from(position).unwrap_or(i64::MAX)
+                }),
+                self.request_id,
+                TimestampMillis::now(),
+            )
+            .await?;
+        Ok(MovedDocView {
+            doc: self.doc_view(pages, moved.page).await?,
+            dropped_values: moved.dropped_values,
+        })
+    }
+
+    /// The history of a doc, newest first, without content.
+    pub async fn doc_versions(
+        &self,
+        page_id: Id,
+        cursor: Option<&str>,
+        limit: Option<usize>,
+    ) -> Result<PageVersionList> {
+        let pages = self.content(ApiTokenScope::DocsRead, &self.api.pages)?;
+        let limit = page_limit(cursor, limit)?;
+        let p = self.principal;
+        pages
+            .page_versions(p.workspace_id, page_id, p.actor_id, cursor, limit)
+            .await
+            .map_err(|error| match error {
+                PageError::InvalidCursor => TokenApiError::Page(error),
+                error => hidden_page(error),
+            })
+    }
+
+    pub async fn doc_version(&self, page_id: Id, version_id: Id) -> Result<DocVersionView> {
+        let pages = self.content(ApiTokenScope::DocsRead, &self.api.pages)?;
+        let p = self.principal;
+        let version = pages
+            .page_version(p.workspace_id, page_id, version_id, p.actor_id)
+            .await
+            .map_err(hidden_page)?;
+        let markdown = self.markdown(pages, &version.content).await?;
+        Ok(DocVersionView { version, markdown })
     }
 
     /// Doc blocks from Markdown; `@Name` mentions of workspace members become mentions.
