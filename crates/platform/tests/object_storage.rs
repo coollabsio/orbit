@@ -561,3 +561,53 @@ async fn backups_go_to_s3_and_restore_from_it() {
         Err(orbit_platform::BackupError::NotFound { .. })
     ));
 }
+
+#[tokio::test]
+async fn deleting_a_backup_that_is_local_and_in_s3_deletes_both_copies() {
+    if orbit_platform::testing_postgres() {
+        return; // file snapshots are SQLite-only
+    }
+    let root = tempfile::tempdir().unwrap();
+    let database = Database::open(&DatabaseConfig::new(root.path().join("orbit.sqlite")))
+        .await
+        .unwrap();
+    MigrationRunner::embedded(env!("CARGO_PKG_VERSION"))
+        .run(&database)
+        .await
+        .unwrap();
+    let attachments = root.path().join("attachments");
+    std::fs::create_dir_all(&attachments).unwrap();
+    let bucket = bucket().await;
+    let storage = ObjectStorage::default();
+    storage.configure(ObjectStorageState {
+        bucket: Some(bucket.clone()),
+        attachments: false,
+        backups: true,
+        ..Default::default()
+    });
+    let backups_root = root.path().join("backups");
+    let service = BackupService::new(&backups_root, &attachments).with_object_storage(storage);
+    let snapshot = service.create(&database).await.unwrap();
+    // A failed local remove after the upload leaves the same snapshot on this server too.
+    service.verify(&snapshot.id).await.unwrap();
+    let local = backups_root.join("snapshots").join(&snapshot.id);
+    copy_dir(&backups_root.join("downloads").join(&snapshot.id), &local);
+
+    service.delete(&snapshot.id).await.unwrap();
+    assert!(!local.exists());
+    assert!(bucket.list("backups/").await.unwrap().is_empty());
+    assert!(service.list().await.unwrap().is_empty());
+}
+
+fn copy_dir(from: &std::path::Path, to: &std::path::Path) {
+    std::fs::create_dir_all(to).unwrap();
+    for entry in std::fs::read_dir(from).unwrap() {
+        let entry = entry.unwrap();
+        let target = to.join(entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            copy_dir(&entry.path(), &target);
+        } else {
+            std::fs::copy(entry.path(), target).unwrap();
+        }
+    }
+}
