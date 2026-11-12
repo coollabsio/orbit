@@ -1,5 +1,5 @@
 import { useCommand } from '@/shortcuts/useCommand'
-import { Suspense, useRef, useState } from 'react'
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { Calendar, ChevronRight, Diamonds, Hierarchy2, Link2, Paperclip2 as Paperclip, RefreshCircle, Tag, Triangle, User as UserIcon, Xmark as X } from 'reicon-react'
 import { apiClient } from '@/api/client'
@@ -24,7 +24,7 @@ import { DatePicker } from '@/components/common/DatePicker'
 import { SearchPicker } from '@/components/common/SearchPicker'
 import { UserAvatarStack } from '@/components/common/UserAvatar'
 import { uploadInlineFile } from '@/features/tasks/api/inlineFiles'
-import { fileBlock, isEmptyRichText } from '@/features/tasks/lib/richText'
+import { fileBlock, fileUrls, isEmptyRichText, mapFileUrls } from '@/features/tasks/lib/richText'
 // Type-only import: erased at build time, so the BlockNote chunk stays lazy.
 import type { PageEditorHandle } from '@/features/docs/editor/PageEditor'
 import { useTeamMembers } from '@/features/workspaces/api'
@@ -111,6 +111,19 @@ export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescrip
   const fileInputRef = useRef<HTMLInputElement>(null)
   const titleRef = useRef<HTMLInputElement>(null)
   const descriptionRef = useRef<PageEditorHandle>(null)
+  // images and files picked in the description (/image, /file) stay in the browser, by `blob:` URL, until the task exists
+  const held = useRef(new Map<string, File>())
+  const holdFile = useCallback(async (file: File) => {
+    const url = URL.createObjectURL(file)
+    held.current.set(url, file)
+    return url
+  }, [])
+  const releaseHeld = useCallback(() => {
+    for (const url of held.current.keys()) URL.revokeObjectURL(url)
+    held.current.clear()
+  }, [])
+  useEffect(() => releaseHeld, [releaseHeld])
+  const fileScope = useMemo(() => ({ workspaceId: workspace.id, taskId: '', deferred: true }), [workspace.id])
 
   // projects and statuses can still load when the dialog opens outside Tasks, so the fallbacks are derived
   const project = projects.find((candidate) => candidate.id === draft.projectId) ?? projects[0]
@@ -144,9 +157,11 @@ export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescrip
     if (!canCreate) return
     try {
       const content = (descriptionRef.current?.getContent() ?? []) as Array<Record<string, unknown>>
+      // the held files are not on the server yet: the new task starts without their blocks' URLs
+      const description = mapFileUrls(content, (url) => (held.current.has(url) ? '' : url))
       const task = await createTask.mutateAsync({
         title: title.trim(),
-        ...(isEmptyRichText(content) ? {} : { description_json: content }),
+        ...(isEmptyRichText(description) ? {} : { description_json: description }),
         project_id: project.id,
         status_id: status.id,
         priority: draft.priority,
@@ -164,13 +179,16 @@ export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescrip
         const results = await Promise.allSettled(relations.map((relation) => createTaskRelation({ client: apiClient, path: { workspace_id: workspace.id, task_id: task.id }, body: { type: relation.kind, task_id: relation.task.id }, throwOnError: true })))
         if (results.some((result) => result.status === 'rejected')) toast.error('The task was created, but some relations were not added.')
       }
-      if (files.length > 0) {
-        // the files go into the description, after the text
+      const heldUrls = [...new Set(fileUrls(content).filter((url) => held.current.has(url)))]
+      if (files.length > 0 || heldUrls.length > 0) {
+        // the held files go in at their blocks; the chip files go after the text
         setUploading(true)
         try {
+          const uploaded = new Map<string, string>()
+          for (const url of heldUrls) uploaded.set(url, await uploadInlineFile(workspace.id, task.id, held.current.get(url)!))
           const blocks: Array<Record<string, unknown>> = []
           for (const file of files) blocks.push(fileBlock(file, await uploadInlineFile(workspace.id, task.id, file)))
-          const text = isEmptyRichText(content) ? [] : content
+          const text = isEmptyRichText(content) ? [] : mapFileUrls(content, (url) => uploaded.get(url) ?? url)
           await updateTask({ client: apiClient, path: { workspace_id: workspace.id, task_id: task.id }, body: { expected_version: task.version, description_json: [...text, ...blocks] }, throwOnError: true })
         } catch {
           // the task exists; its page can take the files again
@@ -179,6 +197,7 @@ export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescrip
           setUploading(false)
         }
       }
+      releaseHeld()
       if (!more) return openTask(task)
       // the properties stay for the next task of the batch
       setCreated(task)
@@ -307,8 +326,9 @@ export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescrip
                     ref={descriptionRef}
                     pageId={`new-task:${descriptionKey}`}
                     profile="task"
-                    // no task yet: images of other tasks in the workspace stay (by link); nothing uploads here
-                    fileScope={{ workspaceId: workspace.id, taskId: '' }}
+                    // no task yet: images of other tasks in the workspace stay (by link); uploads wait for the task
+                    fileScope={fileScope}
+                    uploadFile={holdFile}
                     placeholder="description"
                     initialMarkdown={descriptionKey === 0 ? initialDescription : undefined}
                     editable={!busy}
