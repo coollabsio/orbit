@@ -160,7 +160,8 @@ export function useWorkspaceBucket(workspaceId: string, enabled: boolean) {
     enabled,
     refetchInterval: (query) => {
       const bucket = query.state.data
-      return bucket && (bucket.checking || bucket.files_to_move > 0 || bucket.removing) ? 5000 : false
+      if (bucket?.checking) return 1000
+      return bucket && (bucket.files_to_move > 0 || bucket.removing) ? 5000 : false
     },
   })
 }

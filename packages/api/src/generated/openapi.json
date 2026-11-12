@@ -82025,6 +82025,7 @@
           "backups_in_s3",
           "backup_schedule",
           "s3_keep_deleted_days",
+          "checking",
           "files_to_move"
         ],
         "properties": {
@@ -82038,6 +82039,10 @@
           "backups_in_s3": {
             "type": "boolean",
             "description": "New backups are uploaded to the bucket instead of kept on this server."
+          },
+          "checking": {
+            "type": "boolean",
+            "description": "Orbit has not counted the files to move since the switch changed yet; `files_to_move` is 0 until it has."
           },
           "files_to_move": {
             "type": "integer",

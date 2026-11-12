@@ -172,11 +172,12 @@ async fn the_mover_moves_blobs_to_s3_and_back_while_reads_keep_working() {
         ..Default::default()
     });
     assert_eq!(fixture.read(&key).await, b"first on disk");
+    assert_eq!(fixture.store.status(), None, "not counted for the new switch yet");
     assert_eq!(fixture.store.move_blobs().await.unwrap(), 1);
     assert!(fixture.local.blobs().await.unwrap().is_empty());
     assert!(fixture.in_bucket(&key).await);
     assert_eq!(fixture.read(&key).await, b"first on disk");
-    assert_eq!(fixture.store.status().remaining, 0);
+    assert_eq!(fixture.store.status().unwrap().remaining, 0);
 
     fixture.storage.configure(ObjectStorageState {
         bucket: Some(fixture.bucket.clone()),

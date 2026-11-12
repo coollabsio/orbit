@@ -144,6 +144,8 @@ pub struct BlobMoveStatus {
 #[derive(Clone, Debug, Default)]
 struct MoveStatuses {
     installation: BlobMoveStatus,
+    /// The attachments switch that the last installation pass counted the blobs for.
+    installation_counted_for: Option<bool>,
     workspaces: HashMap<String, WorkspaceMove>,
 }
 
@@ -177,10 +179,13 @@ impl TieredBlobStore {
         }
     }
 
-    /// The move between this server's disk and the installation's bucket.
+    /// The move between this server's disk and the installation's bucket. `None` until a pass counted the blobs
+    /// for the current attachments switch, so right after a change the files to move are not known yet.
     #[must_use]
-    pub fn status(&self) -> BlobMoveStatus {
-        self.statuses().installation
+    pub fn status(&self) -> Option<BlobMoveStatus> {
+        let attachments = self.storage.current().attachments;
+        let statuses = self.statuses();
+        (statuses.installation_counted_for == Some(attachments)).then_some(statuses.installation)
     }
 
     /// The move into (or, after it was removed, out of) the workspace's own bucket. `None` until a pass checked
@@ -258,7 +263,13 @@ impl TieredBlobStore {
             .workspaces
             .retain(|workspace_id, _| state.workspace_buckets.contains_key(workspace_id));
         let result = self.move_pass(&state).await;
-        self.lock_status().installation.error = result.as_ref().err().map(ToString::to_string);
+        let mut statuses = self.lock_status();
+        statuses.installation.error = result.as_ref().err().map(ToString::to_string);
+        // A pass that failed before it counted still reports its error for this switch state.
+        if result.is_err() {
+            statuses.installation_counted_for = Some(state.attachments);
+        }
+        drop(statuses);
         result.map(|installation| installation + moved)
     }
 
@@ -358,14 +369,14 @@ impl TieredBlobStore {
     /// The installation's own move: blobs of workspaces with an active bucket are left to their pass.
     async fn move_pass(&self, state: &ObjectStorageState) -> Result<usize, BlobStoreError> {
         let Some(bucket) = &state.bucket else {
-            self.set_remaining(0);
+            self.set_counted(state.attachments, 0);
             return Ok(0);
         };
         let installation = |key: &str| !state.in_active_workspace_bucket(key);
         if state.attachments {
             let mut objects = self.local.blobs().await?;
             objects.retain(|object| installation(&object.storage_key));
-            self.set_remaining(objects.len());
+            self.set_counted(state.attachments, objects.len());
             for (index, object) in objects.iter().enumerate() {
                 let _mutation = self.mutations.begin().await;
                 self.upload_local(bucket, &object.storage_key, &object.path)
@@ -376,7 +387,7 @@ impl TieredBlobStore {
         } else {
             let mut objects = bucket.list("blobs/").await?;
             objects.retain(|object| installation(&object.key));
-            self.set_remaining(objects.len());
+            self.set_counted(state.attachments, objects.len());
             for (index, object) in objects.iter().enumerate() {
                 let _mutation = self.mutations.begin().await;
                 self.download(bucket, &object.key).await?;
@@ -415,6 +426,12 @@ impl TieredBlobStore {
             let _ = tokio::fs::remove_file(&partial).await;
         }
         result
+    }
+
+    fn set_counted(&self, attachments: bool, remaining: usize) {
+        let mut statuses = self.lock_status();
+        statuses.installation_counted_for = Some(attachments);
+        statuses.installation.remaining = remaining;
     }
 
     fn set_remaining(&self, remaining: usize) {

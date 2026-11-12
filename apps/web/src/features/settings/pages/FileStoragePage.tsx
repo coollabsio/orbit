@@ -36,13 +36,21 @@ export function FileStoragePage() {
 /** The workspace's own S3 bucket for its files, instead of the installation's storage. */
 function BucketSettings({ workspaceId }: { workspaceId: string }) {
   const bucket = useWorkspaceBucket(workspaceId, true)
+  // The move that the admin started here, kept outside the form because a save remounts it. The form says when the
+  // move is done, even if it was too quick to show any progress.
+  const [started, setStarted] = useState<'save' | 'remove' | null>(null)
   if (bucket.isPending) return <SettingsCard title={TITLE}><p><LoadingText>Loading settings…</LoadingText></p></SettingsCard>
   if (bucket.isError) return <SettingsCard title={TITLE}><p role="alert">Settings could not be loaded. <Button variant="ghost" onClick={() => void bucket.refetch()}>Retry</Button></p></SettingsCard>
   // Remount on save so the form shows what the server stored.
-  return <BucketForm key={JSON.stringify(bucket.data.s3)} workspaceId={workspaceId} bucket={bucket.data} />
+  return <BucketForm key={JSON.stringify(bucket.data.s3)} workspaceId={workspaceId} bucket={bucket.data} started={started} onStart={setStarted} />
 }
 
-function BucketForm({ workspaceId, bucket }: { workspaceId: string; bucket: WorkspaceBucketView }) {
+function BucketForm({ workspaceId, bucket, started, onStart }: {
+  workspaceId: string
+  bucket: WorkspaceBucketView
+  started: 'save' | 'remove' | null
+  onStart: (move: 'save' | 'remove') => void
+}) {
   const save = useSaveWorkspaceBucket(workspaceId)
   const remove = useRemoveWorkspaceBucket(workspaceId)
 
@@ -55,7 +63,10 @@ function BucketForm({ workspaceId, bucket }: { workspaceId: string; bucket: Work
     })
     if (!confirmed) return
     remove.mutate(undefined, {
-      onSuccess: () => toast("Files move back to Orbit's storage"),
+      onSuccess: () => {
+        toast("Files move back to Orbit's storage")
+        onStart('remove')
+      },
       onError: (error) => toast.error(problemText(error, 'The bucket could not be removed.')),
     })
   }
@@ -66,6 +77,9 @@ function BucketForm({ workspaceId, bucket }: { workspaceId: string; bucket: Work
     : bucket.files_to_move > 0
       ? (bucket.removing ? `${count} left to move back to Orbit's storage.` : `${count} left to move to your bucket.`)
       : null
+  const moved = started && !moving && !bucket.removing && !bucket.move_error
+    ? (started === 'remove' ? "Done. All files are back in Orbit's storage." : 'Done. All files are in your bucket.')
+    : null
   return (
     <S3BucketForm
       s3={bucket.s3 ?? null}
@@ -75,7 +89,10 @@ function BucketForm({ workspaceId, bucket }: { workspaceId: string; bucket: Work
       saving={save.isPending}
       removing={remove.isPending}
       onSave={(body) => save.mutate(body, {
-        onSuccess: () => toast('Bucket saved'),
+        onSuccess: () => {
+          toast('Bucket saved')
+          onStart('save')
+        },
         onError: (error) => toast.error(problemText(error, 'The bucket could not be saved.')),
       })}
       onRemove={bucket.s3 && !bucket.removing ? () => void removeBucket() : undefined}
@@ -89,6 +106,7 @@ function BucketForm({ workspaceId, bucket }: { workspaceId: string; bucket: Work
             {moving}
           </span>
         ) : null}
+        {moved ? <span role="status">{moved}</span> : null}
         {bucket.move_error ? <span role="alert" className="text-destructive">Moving files stopped: {bucket.move_error} Orbit tries again every ten minutes.</span> : null}
       </div>
     </S3BucketForm>

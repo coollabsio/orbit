@@ -7677,6 +7677,10 @@ export type StorageView = {
      */
     backups_in_s3: boolean;
     /**
+     * Orbit has not counted the files to move since the switch changed yet; `files_to_move` is 0 until it has.
+     */
+    checking: boolean;
+    /**
      * Attachment files still waiting to move between this server's disk and the bucket.
      */
     files_to_move: number;
