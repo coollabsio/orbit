@@ -67,16 +67,17 @@ service-account token shows the service account as the actor.
 
 API tokens and MCP OAuth connections use the same five resource scopes. In
 **Settings → API tokens**, set the access for each resource to **No access**,
-**Read** or **Write**. API tokens also have two export scopes, which MCP does
-not use.
+**Read** or **Write**. API tokens also have an import scope and two export
+scopes, which MCP does not use.
 
 | Scope | Access in **Settings → API tokens** | Public API endpoints |
 | --- | --- | --- |
 | `tasks:read` | Tasks: **Read** | `GET` projects, statuses, labels, members, tasks and comments |
-| `tasks:write` | Tasks: **Write** | Create, update and delete tasks, add comments, `POST /integrations/discord/events` |
-| `docs:read` | Docs: **Read** | `GET /docs`, `GET /docs/{page_id}`, `GET /docs/{page_id}/database`, `POST /docs/{page_id}/database/query` |
-| `docs:write` | Docs: **Write** | `POST /docs`, `PATCH /docs/{page_id}`, `POST /docs/{page_id}/rows`, `PATCH /docs/{page_id}/rows/{row_id}`, `POST /docs/{page_id}/rows/trash` |
-| `chat:read` | Chat: **Read** | None. Chat is available through MCP only. |
+| `tasks:write` | Tasks: **Write** | Create, update and delete tasks, add comments, link tasks, create and change projects, statuses and labels, `POST /integrations/discord/events` |
+| `tasks:import` | Tasks: **Write** with **Import mode** | With `tasks:write`: the import fields of new tasks and comments. See [Import from another tool](#import-from-another-tool). |
+| `docs:read` | Docs: **Read** | `GET /docs`, `GET /docs/{page_id}`, `GET /docs/{page_id}/versions`, `GET /docs/{page_id}/versions/{version_id}`, `GET /docs/{page_id}/database`, `POST /docs/{page_id}/database/query`, `GET /docs/{page_id}/database/views` and `…/views/{view_id}` |
+| `docs:write` | Docs: **Write** | `POST /docs`, `PATCH /docs/{page_id}`, `POST /docs/{page_id}/move`, `DELETE /docs/{page_id}`, `POST /docs/{page_id}/rows`, `PATCH /docs/{page_id}/rows/{row_id}`, `POST /docs/{page_id}/rows/trash`, `POST /databases`, the schema, view and linked view endpoints under `/docs/{page_id}/database` |
+| `chat:read` | Chat: **Read** | None. Chat is available through MCP only. A bot that reads and writes one channel uses a [chat webhook with events](chat-webhooks.md#events). |
 | `workspace:export` | **Workspace export** | `POST /exports` with `mode: "full"`, `GET /exports/{export_id}`, `GET /exports/{export_id}/download` |
 | `workspace:export:personal` | **Personal export** | The same, with `mode: "personal"` |
 
@@ -88,6 +89,11 @@ service-account token with an export scope, or an export scope together with
 another scope (`422 invalid_api_token`). `workspace:export` needs a workspace
 owner or administrator, when you create the token and on each request.
 `workspace:export:personal` is open to each member except guests.
+
+`tasks:import` needs `tasks:write` (`422 invalid_api_token` otherwise). Its
+creator must be a workspace owner or administrator on each write: when the
+creator loses that role, each write of the token gets `403
+workspace_action_forbidden`.
 
 ## Conventions
 
@@ -110,6 +116,18 @@ owner or administrator, when you create the token and on each request.
 - `limit` is 1 to 100. The default is 50.
 - A task contains no embedded parent, duplicate or ancestor records.
   `parent_task_id` is `null` when the parent is not in an approved project.
+
+- `POST /tasks` and `POST /tasks/{task}/comments` take an optional
+  `Idempotency-Key` header (1 to 255 visible ASCII characters, for example a
+  UUID), so a client can retry after a timeout without a second task or comment.
+  Orbit keeps the first successful response (`200` or `201`) for 24 hours for
+  each token and key. A repeat with the same path and JSON body (the order of
+  fields does not matter) gets that response again, with the header
+  `Idempotent-Replayed: true`. The same key with another path or body gets `422`
+  (`idempotency_key_reused`). If the first request still runs, the repeat gets
+  `409` (`idempotency_request_running`) with `Retry-After: 1`; retry it. Orbit
+  keeps no response of an error, so a retry after an error runs again. Use a
+  new key for each new task or comment.
 
 ## Endpoints
 
@@ -147,7 +165,7 @@ In the examples below, set the workspace first:
 export ORBIT_WS="$ORBIT_URL/api/public/v1/workspaces/$WORKSPACE_ID"
 ```
 
-### Projects, statuses, labels and members
+### Projects, statuses, labels, milestones, cycles and members
 
 `GET /workspaces/{workspace_id}/projects`. Scope: `tasks:read`. The approved live projects. Item:
 `{id, name, key, color, version, created_at, updated_at}`.
@@ -168,6 +186,10 @@ curl -sS -X POST "$ORBIT_WS/projects" -H "Authorization: Bearer $ORBIT_TOKEN" \
   -H 'Content-Type: application/json' --data '{"name":"Video series","key":"VID"}'
 ```
 
+`PATCH /workspaces/{workspace_id}/projects/{project_id}`. Scope: `tasks:write`. Body:
+`{expected_version, name?, color?}`. A missing field keeps its value. Answers 200 with the
+project, or 409 when the project changed after you read it. The key does not change.
+
 `GET /workspaces/{workspace_id}/projects/{project_id}/statuses?cursor&limit`. Scope: `tasks:read`. Item:
 `{id, project_id, name, description, color, category, position, version}`.
 `category` is `unstarted`, `started`, `completed`, `cancelled` or `duplicate`.
@@ -177,12 +199,57 @@ curl -sS "$ORBIT_WS/projects/$PROJECT_ID/statuses" \
   -H "Authorization: Bearer $ORBIT_TOKEN"
 ```
 
+`POST /workspaces/{workspace_id}/projects/{project_id}/statuses`. Scope: `tasks:write`. Body:
+`{name, category, color?, description?, position?}`. `category` is `unstarted`, `started`,
+`completed` or `cancelled`: tasks in a `completed` or `cancelled` status are done. Orbit makes
+the `duplicate` status itself. Without `color`, the status gets the color of its category.
+Without `position`, it goes after the last status. Answers 201 with the status.
+
+`PATCH /workspaces/{workspace_id}/projects/{project_id}/statuses/{status_id}`. Scope:
+`tasks:write`. Body: `{expected_version, name?, category?, color?, description?, position?}`. A
+missing field keeps its value. The Duplicate status cannot change its category, and no other
+status can become `duplicate` (400). Answers 200 with the status, or 409 after a change.
+
+```bash
+curl -sS -X POST "$ORBIT_WS/projects/$PROJECT_ID/statuses" \
+  -H "Authorization: Bearer $ORBIT_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"name":"In review","category":"started"}'
+```
+
 `GET /workspaces/{workspace_id}/projects/{project_id}/labels?cursor&limit`.
 Scope: `tasks:read`. Item: `{id, project_id, name, color, version}`. Use the
 IDs in `label_ids`.
 
 ```bash
 curl -sS "$ORBIT_WS/projects/$PROJECT_ID/labels" \
+  -H "Authorization: Bearer $ORBIT_TOKEN"
+```
+
+`POST /workspaces/{workspace_id}/projects/{project_id}/labels`. Scope: `tasks:write`. Body:
+`{name, color?}`: 1 to 100 characters, and `#rrggbb` (gray when unset). Answers 201 with the
+label, or 400 when the project already has a label with this name.
+
+`PATCH /workspaces/{workspace_id}/projects/{project_id}/labels/{label_id}`. Scope:
+`tasks:write`. Body: `{expected_version, name?, color?}`. A missing field keeps its value.
+Answers 200 with the label, or 409 after a change.
+
+`GET /workspaces/{workspace_id}/projects/{project_id}/milestones`. Scope: `tasks:read`. Every
+milestone of the project in its order, on one page (`next_cursor` is `null`). Item:
+`{id, project_id, name, description, target_at, position, version, task_count, completed_count,
+estimate_total, estimate_completed}`. Use the IDs in `milestone_id`.
+
+`GET /workspaces/{workspace_id}/projects/{project_id}/cycles`. Scope: `tasks:read`. Every cycle of
+the project by start date, on one page. Item: `{id, project_id, number, name, starts_at, ends_at,
+relative, version, task_count, completed_count, estimate_total, estimate_completed}`. A cycle
+covers `starts_at` up to `ends_at`, exclusive. `relative` is `current` (the cycle that runs now),
+`next` (the first that starts after now), `previous` (the last that ended before now) or `null`.
+Use the IDs in `cycle_id`.
+
+The counts cover the live tasks, without cancelled and duplicate tasks. `completed_count` and
+`estimate_completed` cover the tasks in a `completed` status.
+
+```bash
+curl -sS "$ORBIT_WS/projects/$PROJECT_ID/cycles" \
   -H "Authorization: Bearer $ORBIT_TOKEN"
 ```
 
@@ -204,7 +271,10 @@ A task:
   "title": "Fix login", "description": "Markdown text", "priority": "high",
   "assignee_ids": ["…"], "label_ids": ["…"],
   "due_start_at": null, "due_at": null,
-  "created_at": "…", "updated_at": "…", "version": 4503599627370495,
+  "milestone_id": null, "cycle_id": null, "estimate": 3,
+  "created_at": "…", "updated_at": "…", "completed_at": null,
+  "creator_id": "…", "creator_service_account": null, "external_id": null,
+  "version": 4503599627370495,
   "parent_task_id": null,
   "identifier": "ENG-12",
   "url": "https://orbit.example.com/tasks/…?workspace=…"
@@ -213,22 +283,40 @@ A task:
 
 `identifier` is the project key and the task number. Use it in `{task}` paths.
 `url` is the task's page in the Orbit web app.
+`completed_at` is when the task entered a `completed` or `cancelled` status, and `null` while it
+is open. `creator_id` is the member who created the task. For a task that a service account
+created, `creator_id` is `null` and `creator_service_account` is `{id, name}`. `external_id` is the
+source tool's ID of an imported task (see [Import from another tool](#import-from-another-tool)),
+and `null` otherwise.
 
-`priority` is `none`, `low`, `medium`, `high` or `urgent`.
+`priority` is `none`, `low`, `medium`, `high` or `urgent`. `estimate` is a number of points from
+0 to 1000, or `null`.
 
 `GET /workspaces/{workspace_id}/tasks`. Scope: `tasks:read`. Tasks in the approved projects, newest first,
 including completed tasks and sub-issues. Optional parameters: `project_id`,
 `status_id`, `assignee_id` (a user ID, or `none` for tasks without an
-assignee), `label_id`, `priority`, `parent_task_id` (only the direct sub-issues
+assignee), `label_id`, `priority`, `milestone_id` (a milestone ID, or `none`), `cycle_id` (a
+cycle ID; `current`, `next` or `previous` for that cycle of each task's project; or `none`),
+`due_before` and `due_after` (a date such as
+`2026-11-12`, which means 00:00 UTC, or a UTC time such as `2026-11-12T15:00:00Z`; both bounds are
+exclusive, and tasks without a due date never match), `has_due_date` (`true` or `false`),
+`parent_task_id` (only the direct sub-issues
 of this task, as a UUID or an identifier such as `ENG-12`; the task must be in an approved project), `q` (text in the title or description, or an
-identifier), `sort` (`created_at`, `updated_at`, `priority`, `due_date` or
-`title`; default `created_at`), `order` (`desc` or `asc`; default `desc`; with
+identifier), `sort` (`created_at`, `updated_at`, `priority`, `due_date`,
+`title` or `estimate`; default `created_at`; tasks without an estimate come last), `order` (`desc` or `asc`; default `desc`; with
 `sort=priority`, `desc` gives `urgent` first and `none` last),
 `cursor` and `limit`. Keep the same parameters when you send `cursor`.
 
 ```bash
 curl -sS -G "$ORBIT_WS/tasks" -H "Authorization: Bearer $ORBIT_TOKEN" \
   --data-urlencode "project_id=$PROJECT_ID" --data-urlencode 'q=login' -d limit=20
+```
+
+Overdue tasks, oldest first:
+
+```bash
+curl -sS -G "$ORBIT_WS/tasks" -H "Authorization: Bearer $ORBIT_TOKEN" \
+  --data-urlencode "due_before=$(date -u +%Y-%m-%dT%H:%M:%SZ)" -d sort=due_date -d order=asc
 ```
 
 `GET /workspaces/{workspace_id}/tasks/{task}`. Scope: `tasks:read`.
@@ -241,10 +329,10 @@ curl -sS "$ORBIT_WS/tasks/ENG-12" -H "Authorization: Bearer $ORBIT_TOKEN"
 `project_id` and `status_id` (required), `title` (required, 1 to 500
 characters), and the optional `description` (Markdown, up to 50,000 bytes),
 `priority` (default `none`), `assignee_ids`, `label_ids`, `parent_task_id`,
-`due_start_at` and `due_at` (RFC 3339 times; `due_start_at` needs `due_at` and
+`milestone_id`, `cycle_id`, `estimate`, `due_start_at` and `due_at` (RFC 3339 times; `due_start_at` needs `due_at` and
 must not be after it).
-The assignees must be members of the workspace. The labels and the status must
-be in the task's project. The parent and all the tasks related to it must be in
+The assignees must be members of the workspace. The labels, the status, the
+milestone and the cycle must be in the task's project. The parent and all the tasks related to it must be in
 approved projects. `parent_task_id` takes a task UUID or an identifier such as `ENG-12`.
 
 ```bash
@@ -256,8 +344,11 @@ curl -sS "$ORBIT_WS/tasks" -H "Authorization: Bearer $ORBIT_TOKEN" \
 `PATCH /workspaces/{workspace_id}/tasks/{task}`. Scope: `tasks:write`. Response: `200` with the task. Body:
 `expected_version` (required, the `version` that you read), and the optional
 `title`, `description`, `status_id`, `priority`, `assignee_ids`, `label_ids`,
-`due_start_at`, `due_at` and `parent_task_id`. A list replaces the old list. A missing field keeps
-its value, `null` clears a due date, and `parent_task_id: null` detaches the task from its
+`due_start_at`, `due_at`, `milestone_id`, `cycle_id`, `estimate`, `parent_task_id` and
+`duplicate_of_id`. A list replaces the old list. `duplicate_of_id` (a task UUID or identifier in
+an approved project) marks the task as a duplicate of that task and moves it to the Duplicate
+status; `null` unmarks it. A missing field keeps its value, `null` clears a due date, the
+milestone, the cycle or the estimate, and `parent_task_id: null` detaches the task from its
 parent (a new parent is a task UUID or an identifier such as `ENG-12`). A new parent and all the tasks related to it must be in approved projects. If the task changed after you read it, the
 response is `409`. This includes edits that people make to the description in
 the editor. Read the task again, then try again. All the tasks in the
@@ -300,11 +391,35 @@ curl -sS -X DELETE "$ORBIT_WS/tasks/ENG-12?expected_version=4503599627370495&per
   -H "Authorization: Bearer $ORBIT_TOKEN"
 ```
 
+### Relations
+
+`GET /workspaces/{workspace_id}/tasks/{task}/relations`. Scope: `tasks:read`. Every relation of
+the task, as seen from it: `{id, type, direction, task, created_at}`. `type` is `blocks`,
+`related` or `duplicate`. `direction` is `outgoing` when this task is the blocker or the
+duplicate. `task` is the other task: `{id, project_id, number, title, status_id, version}`.
+Relations to tasks outside the approved projects are left out. `next_cursor` is `null`.
+
+`POST /workspaces/{workspace_id}/tasks/{task}/relations`. Scope: `tasks:write`. Body:
+`{type, task_id}`. `type` is `blocks` (this task blocks `task_id`), `blocked_by` or `related`.
+`task_id` is a task UUID or identifier in an approved project (422 otherwise). A relation that
+already links the two tasks is replaced, and the same relation again is returned unchanged. A
+duplicate relation is not replaced (409). Answers 201 with the relation.
+
+`DELETE /workspaces/{workspace_id}/tasks/{task}/relations/{relation_id}`. Scope: `tasks:write`.
+Answers 204. Removing a duplicate relation also moves the duplicate out of the Duplicate status.
+Make duplicates with `duplicate_of_id` on `PATCH /tasks/{task}`.
+
+```bash
+curl -sS -X POST "$ORBIT_WS/tasks/ENG-12/relations" \
+  -H "Authorization: Bearer $ORBIT_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"type":"blocks","task_id":"ENG-14"}'
+```
+
 ### Comments
 
 `GET /workspaces/{workspace_id}/tasks/{task}/comments?cursor&limit`. Scope:
 `tasks:read`. Oldest first. Item:
-`{id, task_id, author_id, author_service_account, body, parent_id, version,
+`{id, task_id, author_id, author_service_account, body, parent_id, external_id, version,
 created_at, updated_at}`. `author_service_account` is `{id, name}` for a comment
 that a service account wrote, and `null` otherwise. Show it as the author when
 it is set.
@@ -315,13 +430,58 @@ curl -sS "$ORBIT_WS/tasks/ENG-12/comments" -H "Authorization: Bearer $ORBIT_TOKE
 ```
 
 `POST /workspaces/{workspace_id}/tasks/{task}/comments`. Scope: `tasks:write`.
-Body: `{"body": "Markdown"}` (1 to 100,000 bytes in UTF-8, not only spaces). Response: `201` with
-the comment. The author is the token's creator, or for a service-account token
+Body: `{"body": "Markdown", "parent_id"?: "…"}` (1 to 100,000 bytes in UTF-8, not only
+spaces). `parent_id` is a comment of the same task: the new comment is its reply. Response:
+`201` with the comment. The author is the token's creator, or for a service-account token
 the service account.
 
 ```bash
 curl -sS "$ORBIT_WS/tasks/ENG-12/comments" -H "Authorization: Bearer $ORBIT_TOKEN" \
   -H 'Content-Type: application/json' -d '{"body":"Deployed in build 512."}'
+```
+
+### Import from another tool
+
+A token with `tasks:write` and `tasks:import` (**Import mode** in **Settings → API tokens**)
+copies tasks from another tool, such as Plane, Jira or a tool of your own, as the built-in
+importers do:
+
+- Its writes notify nobody (assignees, mentions) and run no sub-issue automation, also its
+  updates. The source tool already decided the state of each task.
+- New tasks and comments take the import fields below. A token without `tasks:import` that
+  sends one of them gets `403 insufficient_scope`.
+
+| Field | On | Effect |
+| --- | --- | --- |
+| `external_id` | tasks, comments | The source tool's ID, 1 to 200 characters, unique in the workspace. A second create with the same ID answers `200` with the item that the first create made, and changes nothing. A restarted import thus makes no duplicates. An ID whose task is in the trash, or a comment ID on another task, answers `409`. |
+| `number` | tasks | The task number, so `ABC-166` stays `ABC-166`. It must be free in the project, also among tasks in the trash (`409`). Later tasks get numbers after the highest one. |
+| `created_at`, `updated_at` | tasks, comments | The original times (RFC 3339). `updated_at` needs `created_at` and must not be before it; it is `created_at` when unset. |
+| `completed_at` | tasks | When the task was done. Kept when the status is `completed` or `cancelled`. |
+| `creator_id` | tasks | The member shown as the creator. |
+| `author_id` | comments | The member shown as the author. |
+| `author_name` | comments | An author who is not a member, shown in bold on the first line of the comment. Not with `author_id`. |
+
+`creator_id` and `author_id` must be active members who are not guests (`422`). The audit
+log still names the token.
+
+A typical import:
+
+1. Create the projects (`POST /projects`, with a token for all projects), then their statuses
+   and labels.
+2. Create the tasks, parents before their sub-issues, with `external_id`, `number` and the
+   original times.
+3. Add the comments, oldest first, with `external_id`, the author and the original times.
+4. Link the tasks with `POST /tasks/{task}/relations`, and mark duplicates with
+   `duplicate_of_id`.
+
+If the script stops, run it again: each create with an `external_id` that Orbit already has
+returns the existing item.
+
+```bash
+curl -sS "$ORBIT_WS/tasks" -H "Authorization: Bearer $ORBIT_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d "{\"project_id\":\"$PROJECT_ID\",\"status_id\":\"$STATUS_ID\",\"title\":\"Fix login\",
+       \"external_id\":\"plane:6f1c…\",\"number\":166,\"created_at\":\"2024-03-01T09:30:00.000Z\"}"
 ```
 
 ### Docs
@@ -391,6 +551,46 @@ icon writes; edit its content in Orbit, or split it into several docs.
 curl -sS -X PATCH "$ORBIT_WS/docs/$PAGE_ID" -H "Authorization: Bearer $ORBIT_TOKEN" \
   -H 'Content-Type: application/json' -d '{"expected_version":4503599627370495,"markdown":"Updated."}'
 ```
+
+`POST /workspaces/{workspace_id}/docs/{page_id}/move`. Scope: `docs:write`. Body:
+`expected_version` (required), `parent_id` (required: a doc ID, or `null` for a
+space root) and optional `position`, `teamspace_id` and `private`. The doc and
+its sub-docs go under the new parent and take the parent's space. With
+`parent_id: null`, `teamspace_id` moves the doc to that teamspace and
+`private: true` moves it to the token creator's private space; with neither,
+the doc keeps its space. `position` is the index among the new siblings, from 0;
+without it, or past the last sibling, the doc goes last. A doc that moves into a
+database always goes last. Response: `200` with the doc record, as `GET` shows
+it after the move, and `dropped_values`: how many property values the move
+deleted because the new database cannot hold them. `expected_version` works as
+in `PATCH`: a stale value gets `409`. A move under the doc itself or under one
+of its sub-docs gets `422`; moving a database under a database gets `409`
+(`database_in_database`); moving teamspace docs that others created into a
+private space needs a workspace owner or admin (`403`,
+`workspace_action_forbidden`).
+
+```bash
+curl -sS "$ORBIT_WS/docs/$PAGE_ID/move" -H "Authorization: Bearer $ORBIT_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d "{\"expected_version\":4503599627370495,\"parent_id\":\"$PARENT_ID\",\"position\":0}"
+```
+
+`DELETE /workspaces/{workspace_id}/docs/{page_id}?expected_version=…`. Scope:
+`docs:write`. Moves the doc and its live sub-docs to the trash, where people can
+restore them in Orbit. Deleting forever, and restoring, are not part of the API.
+Response: `204`. A stale `expected_version` gets `409`. Afterwards `GET` on the
+doc answers `404`.
+
+`GET /workspaces/{workspace_id}/docs/{page_id}/versions`. Scope: `docs:read`.
+The history of a doc, newest first, without content: `id`, `kind` (`auto`,
+`restore` or `import`), `title`, `icon`, `created_at` and `created_by`. Query:
+`cursor` and `limit` (1 to 100, default 50), as in other lists. Orbit keeps a
+version when someone edits the title or content, at most one per 10 minutes.
+
+`GET /workspaces/{workspace_id}/docs/{page_id}/versions/{version_id}`. Scope:
+`docs:read`. One version with its `content` and its `markdown`, the format that
+doc writes take. Restoring a version is not part of the API: send the version's
+`markdown` in a `PATCH`.
 
 ### Databases
 
@@ -539,6 +739,75 @@ curl -sS -X PATCH "$ORBIT_WS/docs/$DATABASE_ID/database/properties/Status" \
   -d '{"add_options":["Blocked",{"name":"Shipped","color":"green"}]}'
 ```
 
+#### Create a database
+
+`POST /workspaces/{workspace_id}/databases`. Scope: `docs:write`. Body:
+
+- `title` (up to 500 characters), `icon`, and where it goes, as for `POST /docs`: `parent_id`, or
+  `teamspace_id`, or `private: true`. A database cannot go directly under another database
+  (`409` `database_in_database`).
+- `properties` (optional): the properties after the title property "Name", each
+  `{name, type, config}` as in `POST …/database/properties`. Types: `text`, `number`, `select`,
+  `multi_select`, `status`, `date`, `person`, `checkbox`, `url`, `email`, `phone`, `files`,
+  `created_time`, `created_by`, `last_edited_time`, `last_edited_by`. Add relations, rollups,
+  formulas, buttons and unique IDs afterwards. Omitted: a "Tags" multi-select.
+- `views` (optional, 1 to 50): each as in [Views](#views). Their filters, sorts, columns and group
+  name the properties above and their options. Omitted: one "Table" view.
+
+Response: `201` with the database, as `GET …/database` shows it. The whole database is written
+in one step: if a property or view is invalid, nothing is created (`422`).
+
+#### Views
+
+A database has views (table, board, list, calendar, gallery, timeline, form) with a filter, sorts
+and visible columns. These endpoints read and change them with property and option **names**, as
+`query_database` does. They need `docs:write` (read: `docs:read`) and an editable, unlocked
+database (`423` `page_locked`). Add `?link_id=` to work on the views of a [linked view
+block](#linked-views) instead of the database's own views.
+
+- `GET /workspaces/{workspace_id}/docs/{page_id}/database/views` lists the views, and `GET
+  …/views/{view_id}` returns one.
+- `POST …/views` adds a view. Body: `name` (1 to 200 characters), `type` (default `table`),
+  `filter` (an AND/OR group as in `query_database`, `property_id` is a property name or ID and
+  `value` takes option names), `sorts` (up to 10 `{property_id, direction}`), `columns` (the
+  visible properties in order; the others are hidden; the title always shows) and `group_by` (a
+  board's select, status, multi-select or person property). Omitted fields give every row, no
+  sorts and every property. Response: `201`. A database holds at most 50 views and a linked view
+  block at most 20 (`409` `database_view_limit`, `database_link_view_limit`).
+- `PATCH …/views/{view_id}` changes `name`, `position`, `filter`, `sorts`, `columns` or
+  `group_by`. A field you send replaces what the view has; other fields stay. Send
+  `{"op": "and", "children": []}` to clear the filter and `[]` to clear the sorts. The view's
+  type cannot change: add a view of the new type. Last write wins: there is no `expected_version`.
+- `DELETE …/views/{view_id}` returns `204`. The last view of a database or of a linked view block
+  stays (`409` `database_last_view`).
+
+A view returned by the API has `id`, `name`, `type`, `position`, `filter`, `sorts`, `columns` and,
+for a board, `group_by`. A property that shares its name with another is shown by ID.
+
+```bash
+curl -sS -X POST "$ORBIT_WS/docs/$DATABASE_ID/database/views" \
+  -H "Authorization: Bearer $ORBIT_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"name":"Dessert","filter":{"property_id":"Type","operator":"is","value":"Dessert"}}'
+```
+
+#### Linked views
+
+A linked view block shows an existing database inside a doc, with views of its own. The rows are
+not copied, and its filters and columns do not change the database's own views.
+
+`POST /workspaces/{workspace_id}/docs/{page_id}/database/links`, where `{page_id}` is the
+database. Scope: `docs:write`. Body: `host_page_id` (the doc that shows the database; you must be
+able to edit it) and optional `from_view_id` (an own view whose type and config the block's first
+view copies; default: the first view). Orbit adds the block at the end of the host doc, so the
+request fails with `409 conflict` if someone changed the doc at the same time (send it again), and
+with `423 page_locked` for a locked doc. Response: `201` with `link_id`, `database_id`,
+`host_page_id` and the block's `views`. Use `link_id` as `?link_id=` in the view endpoints above.
+`GET /docs/{host_page_id}` shows the block as a `database` block in `content` with the same
+`linkId`.
+
+`DELETE …/database/links/{link_id}` removes the block from its doc and deletes its views. The
+database and its rows stay. Response: `204`.
+
 ### Exports
 
 An export is a ZIP archive that another Orbit instance can import. The export
@@ -635,9 +904,11 @@ Errors are RFC 9457 problem documents (`Content-Type: application/problem+json`)
 | 405 | `method_not_allowed` | The path does not take this HTTP method, for example `PUT /tasks`. The `Allow` header lists the methods that it takes (`GET,HEAD,POST`). Orbit sends this before it checks the token. |
 | 409 | `conflict` | The resource changed after you read it (for docs and task descriptions, also through live edits). `conflict.current_version` has the current version. |
 | 409 | `task_conflict`, `github_content_read_only`, `github_linked_move` | The change conflicts with the task's current state. |
+| 409 | `idempotency_request_running` | The first request with this `Idempotency-Key` has not finished. Retry after the `Retry-After` time. |
 | 409 | `export_not_ready` | The export is queued, running or failed, so there is no archive to download yet. |
 | 413 | `doc_too_large` | The doc would have, or already has, more than 4,000 blocks. Nothing changed. |
-| 422 | `validation_failed`, `parent_cycle`, `parent_invalid` | A value is not valid for the workspace or project, for example an unknown assignee or label. `errors` names the field. |
+| 422 | `validation_failed`, `parent_cycle`, `parent_invalid` | A value is not valid for the workspace or project, for example an unknown assignee, label, milestone or cycle, or an estimate above 1000. `errors` names the field. |
+| 422 | `idempotency_key_reused` | The `Idempotency-Key` was used for another path or body. |
 | 423 | `page_locked` | The doc is locked. Unlock it in Orbit to change its title, icon or content. |
 | 429 | `rate_limit_exceeded` | Too many requests. Wait as the `Retry-After` header tells (RFC 9110). Orbit sends a number of seconds. |
 | 500 | `internal_error` | Orbit could not complete the request, for example because the database is unavailable. Try again later. |

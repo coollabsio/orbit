@@ -4,11 +4,14 @@ import type { BulkItem, LabelRecord } from '@orbit/api/generated/types.gen'
 import { ProjectLock } from '@/features/tasks/components/ProjectLock'
 import { ColorDot } from '@/components/common/ColorDot'
 import { UserAvatar } from '@/components/common/UserAvatar'
-import { Command, CommandDialog, CommandEmpty, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
-import type { Task, TaskStatusDef } from '@/features/tasks/api/models'
+import { Command, CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
+import type { Cycle, Task, TaskStatusDef } from '@/features/tasks/api/models'
 import { useProjects } from '@/features/tasks/api/projects'
+import { useCycles } from '@/features/tasks/api/cycles'
+import { useMilestones } from '@/features/tasks/api/milestones'
 import { useBulkTasks } from '@/features/tasks/api/tasks'
-import { assignUpdates, assigneeToggleUpdates, dueUpdates, everyTaskHasLabel, labelChoices, labelToggleUpdates, priorityUpdates, statusUpdates } from '@/features/tasks/bulkUpdates'
+import { assignUpdates, assigneeToggleUpdates, cycleUpdates, dueUpdates, estimateUpdates, everyTaskHasLabel, labelChoices, labelToggleUpdates, milestoneUpdates, priorityUpdates, sharedProjectId, statusUpdates } from '@/features/tasks/bulkUpdates'
+import { cycleDates, cycleName, cyclePickerGroups, cycleTiming, ESTIMATE_OPTIONS, estimateLabel, parseEstimate } from '@/features/tasks/planningLib'
 import { DueDateDialog } from '@/features/tasks/components/DueDateDialog'
 import { PriorityIcon } from '@/features/tasks/components/PriorityIcon'
 import { LabelPill } from '@/features/tasks/components/TaskLabels'
@@ -23,9 +26,19 @@ import { taskPath } from '@/lib/taskLinks'
 import { focusTaskRow, focusedTaskId, useTaskTarget } from '@/shortcuts/taskTarget'
 import { useCommand } from '@/shortcuts/useCommand'
 
-type TaskField = 'status' | 'priority' | 'assignee' | 'labels' | 'dueDate' | 'project'
+type TaskField = 'status' | 'priority' | 'assignee' | 'labels' | 'dueDate' | 'project' | 'milestone' | 'cycle' | 'estimate'
 
-const FIELD_TITLE: Record<TaskField, string> = { status: 'Change status', priority: 'Change priority', assignee: 'Change assignee', labels: 'Change labels', dueDate: 'Set due date', project: 'Move to project' }
+const FIELD_TITLE: Record<TaskField, string> = {
+  status: 'Change status',
+  priority: 'Change priority',
+  assignee: 'Change assignee',
+  labels: 'Change labels',
+  dueDate: 'Set due date',
+  project: 'Move to project',
+  milestone: 'Change milestone',
+  cycle: 'Change cycle',
+  estimate: 'Set estimate',
+}
 
 interface TaskCommandsProps {
   /** The tasks in view, or the open task. */
@@ -49,6 +62,8 @@ export function TaskCommands({ tasks, users, labels, statuses, groupContext, cur
   const projects = useProjects(workspace.id).data ?? []
   // `focused`: the row that had the keyboard focus, to give it back when the list closes
   const [menu, setMenu] = useState<{ field: TaskField; ids: string[]; focused: string | null } | null>(null)
+  // the estimate list offers what is typed as a value of its own
+  const [search, setSearch] = useState('')
 
   const targets = () => {
     const ids = getTargetIds()
@@ -58,7 +73,12 @@ export function TaskCommands({ tasks, users, labels, statuses, groupContext, cur
   const mutate = (updates: BulkItem[]) => {
     if (updates.length > 0) bulkTasks.mutate(updates)
   }
-  const open = (field: TaskField) => () => setMenu({ field, ids: targets().map((task) => task.id), focused: focusedTaskId() })
+  const open = (field: TaskField) => () => {
+    setSearch('')
+    setMenu({ field, ids: targets().map((task) => task.id), focused: focusedTaskId() })
+  }
+  // milestones and cycles belong to one project
+  const oneProject = () => available() && sharedProjectId(targets()) !== null
   // one task only: these have no form for several tasks
   const single = () => targets().length === 1
   const copy = (text: string, done: string) => void navigator.clipboard.writeText(text).then(() => toast(done), () => toast.error('Could not copy to the clipboard.'))
@@ -68,6 +88,9 @@ export function TaskCommands({ tasks, users, labels, statuses, groupContext, cur
   useCommand('task.setAssignee', open('assignee'), { available })
   useCommand('task.setLabels', open('labels'), { available })
   useCommand('task.setDueDate', open('dueDate'), { available })
+  useCommand('task.setMilestone', open('milestone'), { available: oneProject })
+  useCommand('task.setCycle', open('cycle'), { available: oneProject })
+  useCommand('task.setEstimate', open('estimate'), { available })
   useCommand('task.moveToProject', open('project'), { available: () => available() && projects.length > 1 })
   useCommand('task.assignMe', () => mutate(assignUpdates(targets(), currentUserId)), { available })
   useCommand('task.copyId', () => copy(targets()[0].identifier, 'Copied task ID'), { available: single })
@@ -79,6 +102,9 @@ export function TaskCommands({ tasks, users, labels, statuses, groupContext, cur
 
   // the live tasks, so that a second choice in the same list sends the current versions
   const menuTasks = menu ? tasks.filter((task) => menu.ids.includes(task.id)) : []
+  const menuProjectId = menu?.field === 'milestone' || menu?.field === 'cycle' ? sharedProjectId(menuTasks) : null
+  const milestones = useMilestones(workspace.id, menu?.field === 'milestone' ? menuProjectId ?? undefined : undefined).data ?? []
+  const cycles = useCycles(workspace.id, menu?.field === 'cycle' ? menuProjectId ?? undefined : undefined).data ?? []
   if (!menu || menuTasks.length === 0) return null
   const close = () => {
     setMenu(null)
@@ -110,6 +136,14 @@ export function TaskCommands({ tasks, users, labels, statuses, groupContext, cur
     mutate(updates)
     close()
   }
+  const cycleGroups = cyclePickerGroups(cycles)
+  const cycleItem = (cycle: Cycle) => (
+    <CommandItem key={cycle.id} value={`${cycleName(cycle)} ${cycle.number}`} data-checked={menuTasks.every((task) => task.cycleId === cycle.id)} onSelect={() => choose(cycleUpdates(menuTasks, cycle))}>
+      <span className="flex-1 truncate">{cycleName(cycle)}{cycleTiming(cycle) === 'current' ? ' · Current' : ''}</span>
+      <span className="text-xs text-muted-foreground tabular-nums">{cycleDates(cycle)}</span>
+    </CommandItem>
+  )
+  const typedEstimate = parseEstimate(search)
 
   return (
     <CommandDialog open onOpenChange={(next) => { if (!next) close() }} title={FIELD_TITLE[menu.field]} description={scope} className="flex max-h-[60vh] flex-col sm:max-w-md">
@@ -117,9 +151,9 @@ export function TaskCommands({ tasks, users, labels, statuses, groupContext, cur
         <div className="px-3 pt-2.5 pb-1">
           <span className="rounded-sm bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">{scope}</span>
         </div>
-        <CommandInput autoFocus placeholder={`${FIELD_TITLE[menu.field]}…`} />
+        <CommandInput autoFocus placeholder={menu.field === 'estimate' ? 'Points…' : `${FIELD_TITLE[menu.field]}…`} value={search} onValueChange={setSearch} />
         <CommandList className="mx-1.5 mt-1 mb-1.5 max-h-none min-h-0 flex-1 rounded-lg bg-background p-1 ring-1 ring-border">
-          <CommandEmpty className="p-6 text-[13px] text-muted-foreground">No match</CommandEmpty>
+          <CommandEmpty className="p-6 text-[0.8125rem] text-muted-foreground">No match</CommandEmpty>
           {menu.field === 'status' ? statusOptions.map((group) => (
             <CommandItem key={group.key} value={group.label} data-checked={statusKeys.has(group.key)} onSelect={() => choose(statusUpdates(menuTasks, statuses, group.value))}>
               <GroupIcon group={group} context={groupContext} />
@@ -144,6 +178,36 @@ export function TaskCommands({ tasks, users, labels, statuses, groupContext, cur
               <LabelPill label={label} />
             </CommandItem>
           )) : null}
+          {menu.field === 'milestone' ? (
+            <>
+              <CommandItem value="No milestone" data-checked={menuTasks.every((task) => !task.milestoneId)} onSelect={() => choose(milestoneUpdates(menuTasks, null))}>No milestone</CommandItem>
+              {milestones.map((milestone) => (
+                <CommandItem key={milestone.id} value={milestone.name} data-checked={menuTasks.every((task) => task.milestoneId === milestone.id)} onSelect={() => choose(milestoneUpdates(menuTasks, milestone))}>
+                  {milestone.name}
+                </CommandItem>
+              ))}
+            </>
+          ) : null}
+          {menu.field === 'cycle' ? (
+            <>
+              <CommandItem value="No cycle" data-checked={menuTasks.every((task) => !task.cycleId)} onSelect={() => choose(cycleUpdates(menuTasks, null))}>No cycle</CommandItem>
+              {cycleGroups.open.map(cycleItem)}
+              {cycleGroups.past.length > 0 ? <CommandGroup heading="Past cycles">{cycleGroups.past.map(cycleItem)}</CommandGroup> : null}
+            </>
+          ) : null}
+          {menu.field === 'estimate' ? (
+            <>
+              {typedEstimate !== null && !(ESTIMATE_OPTIONS as readonly number[]).includes(typedEstimate) ? (
+                <CommandItem value={search} onSelect={() => choose(estimateUpdates(menuTasks, typedEstimate))}>{estimateLabel(typedEstimate)}</CommandItem>
+              ) : null}
+              <CommandItem value="No estimate" data-checked={menuTasks.every((task) => task.estimate == null)} onSelect={() => choose(estimateUpdates(menuTasks, null))}>No estimate</CommandItem>
+              {ESTIMATE_OPTIONS.map((points) => (
+                <CommandItem key={points} value={`${points} ${estimateLabel(points)}`} data-checked={menuTasks.every((task) => task.estimate === points)} onSelect={() => choose(estimateUpdates(menuTasks, points))}>
+                  {estimateLabel(points)}
+                </CommandItem>
+              ))}
+            </>
+          ) : null}
           {menu.field === 'project' ? projects.map((project) => (
             <CommandItem key={project.id} value={`${project.name} ${project.key}`} data-checked={menuTasks.every((task) => task.projectId === project.id)} onSelect={() => {
               moveToProject(menuTasks, project)

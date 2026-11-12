@@ -27,9 +27,9 @@ use crate::repositories::task_filter::{
 use crate::repositories::task_recurrences::TaskRecurrence;
 use crate::repositories::task_relations::{NewTaskRelationType, TaskRelationRecord};
 use crate::repositories::tasks::{
-    CommentContent, CreateTask, NotificationRecord, Page, ProjectAutomationPatch, SortOrder,
-    TaskChanges, TaskError, TaskFilter, TaskRecord, TaskRepository, TaskSort, TaskUpdate,
-    normalize_project_key,
+    CommentContent, CreateTask, CycleChanges, CycleMoveOutcome, CycleRecord, MilestoneChanges,
+    MilestoneRecord, NotificationRecord, Page, ProjectAutomationPatch, SortOrder, TaskChanges,
+    TaskError, TaskFilter, TaskRecord, TaskRepository, TaskSort, TaskUpdate, normalize_project_key,
 };
 use crate::repositories::views::ViewRepository;
 use crate::socket_ticket::SocketTickets;
@@ -128,6 +128,30 @@ pub fn task_router(state: TaskState) -> Router {
         .route(
             "/api/v1/workspaces/{workspace_id}/projects/{project_id}/statuses/{status_id}",
             patch(update_status).delete(delete_status),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/projects/{project_id}/milestones",
+            get(list_milestones).post(create_milestone),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/projects/{project_id}/milestones/reorder",
+            post(reorder_milestones),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/projects/{project_id}/milestones/{milestone_id}",
+            patch(update_milestone).delete(delete_milestone),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/projects/{project_id}/cycles",
+            get(list_cycles).post(create_cycle),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/projects/{project_id}/cycles/{cycle_id}",
+            patch(update_cycle).delete(delete_cycle),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/projects/{project_id}/cycles/{cycle_id}/move-unfinished",
+            post(move_unfinished_cycle_tasks),
         )
         .route("/api/v1/workspaces/{workspace_id}/labels", get(list_labels))
         .route(
@@ -886,6 +910,399 @@ async fn reorder_statuses(
 }
 
 #[derive(Deserialize, ToSchema)]
+#[schema(as = TaskMilestoneBody)]
+#[serde(deny_unknown_fields)]
+struct MilestoneBody {
+    name: String,
+    description: Option<String>,
+    #[schema(value_type = Option<String>, format = DateTime)]
+    target_at: Option<TimestampMillis>,
+}
+
+/// Absent fields stay; `null` clears `description` and `target_at`.
+#[derive(Deserialize, ToSchema)]
+#[schema(as = TaskMilestoneUpdateBody)]
+#[serde(deny_unknown_fields)]
+struct MilestoneUpdateBody {
+    expected_version: u64,
+    name: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_patch")]
+    #[schema(value_type = Option<String>)]
+    description: Option<Option<String>>,
+    #[serde(default, deserialize_with = "deserialize_patch")]
+    #[schema(value_type = Option<String>, format = DateTime)]
+    target_at: Option<Option<TimestampMillis>>,
+    position: Option<i64>,
+}
+
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/projects/{project_id}/milestones", params(("workspace_id" = String, Path), ("project_id" = String, Path)), responses((status = 200, body = Page<MilestoneRecord>)))]
+async fn list_milestones(
+    State(state): State<TaskState>,
+    Path((workspace, project)): Path<(String, String)>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<Json<Page<MilestoneRecord>>, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace}/projects/{project}/milestones");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    let project_id = parse_id(&project, &instance, request_id.as_ref())?;
+    state
+        .tasks
+        .milestones(workspace_id, project_id, actor_id)
+        .await
+        .map(|items| {
+            Json(Page {
+                items,
+                next_cursor: None,
+            })
+        })
+        .map_err(|error| task_problem(error, instance, request_id.as_ref()))
+}
+
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/projects/{project_id}/milestones", params(("workspace_id" = String, Path), ("project_id" = String, Path)), request_body = MilestoneBody, responses((status = 201, body = MilestoneRecord)))]
+async fn create_milestone(
+    State(state): State<TaskState>,
+    Path((workspace, project)): Path<(String, String)>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<MilestoneBody>,
+) -> Result<Response, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace}/projects/{project}/milestones");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    let project_id = parse_id(&project, &instance, request_id.as_ref())?;
+    let name = text(body.name, 200, 200, "name", &instance, request_id.as_ref())?;
+    let description = plan_description(body.description, &instance, request_id.as_ref())?;
+    state
+        .tasks
+        .create_milestone(
+            workspace_id,
+            project_id,
+            actor_id,
+            name,
+            description,
+            body.target_at,
+            request_id_value(request_id.as_ref()),
+            TimestampMillis::now(),
+        )
+        .await
+        .map(|record| (StatusCode::CREATED, Json(record)).into_response())
+        .map_err(|error| task_problem(error, instance, request_id.as_ref()))
+}
+
+#[utoipa::path(patch, path = "/api/v1/workspaces/{workspace_id}/projects/{project_id}/milestones/{milestone_id}", params(("workspace_id" = String, Path), ("project_id" = String, Path), ("milestone_id" = String, Path)), request_body = MilestoneUpdateBody, responses((status = 200, body = MilestoneRecord)))]
+async fn update_milestone(
+    State(state): State<TaskState>,
+    Path((workspace, project, milestone)): Path<(String, String, String)>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<MilestoneUpdateBody>,
+) -> Result<Json<MilestoneRecord>, ApiError> {
+    let instance =
+        format!("/api/v1/workspaces/{workspace}/projects/{project}/milestones/{milestone}");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    let project_id = parse_id(&project, &instance, request_id.as_ref())?;
+    let milestone_id = parse_id(&milestone, &instance, request_id.as_ref())?;
+    let changes = MilestoneChanges {
+        name: body
+            .name
+            .map(|name| text(name, 200, 200, "name", &instance, request_id.as_ref()))
+            .transpose()?,
+        description: body
+            .description
+            .map(|value| plan_description(value, &instance, request_id.as_ref()))
+            .transpose()?,
+        target_at: body.target_at,
+        position: body.position,
+    };
+    state
+        .tasks
+        .update_milestone(
+            workspace_id,
+            project_id,
+            milestone_id,
+            actor_id,
+            changes,
+            body.expected_version,
+            request_id_value(request_id.as_ref()),
+            TimestampMillis::now(),
+        )
+        .await
+        .map(Json)
+        .map_err(|error| task_problem(error, instance, request_id.as_ref()))
+}
+
+/// The milestone's tasks stay, without a milestone.
+#[utoipa::path(delete, path = "/api/v1/workspaces/{workspace_id}/projects/{project_id}/milestones/{milestone_id}", params(MutationQuery, ("workspace_id" = String, Path), ("project_id" = String, Path), ("milestone_id" = String, Path)), responses((status = 204)))]
+async fn delete_milestone(
+    State(state): State<TaskState>,
+    Path((workspace, project, milestone)): Path<(String, String, String)>,
+    ApiQuery(query): ApiQuery<MutationQuery>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<StatusCode, ApiError> {
+    let instance =
+        format!("/api/v1/workspaces/{workspace}/projects/{project}/milestones/{milestone}");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    let project_id = parse_id(&project, &instance, request_id.as_ref())?;
+    let milestone_id = parse_id(&milestone, &instance, request_id.as_ref())?;
+    state
+        .tasks
+        .delete_milestone(
+            workspace_id,
+            project_id,
+            milestone_id,
+            actor_id,
+            query.expected_version,
+            request_id_value(request_id.as_ref()),
+            TimestampMillis::now(),
+        )
+        .await
+        .map(|()| StatusCode::NO_CONTENT)
+        .map_err(|error| task_problem(error, instance, request_id.as_ref()))
+}
+
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/projects/{project_id}/milestones/reorder", params(("workspace_id" = String, Path), ("project_id" = String, Path)), request_body = ReorderBody, responses((status = 200, body = Page<MilestoneRecord>)))]
+async fn reorder_milestones(
+    State(state): State<TaskState>,
+    Path((workspace, project)): Path<(String, String)>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<ReorderBody>,
+) -> Result<Json<Page<MilestoneRecord>>, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace}/projects/{project}/milestones/reorder");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    let project_id = parse_id(&project, &instance, request_id.as_ref())?;
+    let items = parse_reorder(body.items, &instance, request_id.as_ref())?;
+    state
+        .tasks
+        .reorder_milestones(
+            workspace_id,
+            project_id,
+            actor_id,
+            &items,
+            request_id_value(request_id.as_ref()),
+            TimestampMillis::now(),
+        )
+        .await
+        .map(|items| {
+            Json(Page {
+                items,
+                next_cursor: None,
+            })
+        })
+        .map_err(|error| task_problem(error, instance, request_id.as_ref()))
+}
+
+#[derive(Deserialize, ToSchema)]
+#[schema(as = TaskCycleBody)]
+#[serde(deny_unknown_fields)]
+struct CycleBody {
+    name: Option<String>,
+    #[schema(value_type = String, format = DateTime)]
+    starts_at: TimestampMillis,
+    /// Exclusive; must be after `starts_at`.
+    #[schema(value_type = String, format = DateTime)]
+    ends_at: TimestampMillis,
+}
+
+/// Absent fields stay; `null` clears `name`.
+#[derive(Deserialize, ToSchema)]
+#[schema(as = TaskCycleUpdateBody)]
+#[serde(deny_unknown_fields)]
+struct CycleUpdateBody {
+    expected_version: u64,
+    #[serde(default, deserialize_with = "deserialize_patch")]
+    #[schema(value_type = Option<String>)]
+    name: Option<Option<String>>,
+    #[schema(value_type = Option<String>, format = DateTime)]
+    starts_at: Option<TimestampMillis>,
+    #[schema(value_type = Option<String>, format = DateTime)]
+    ends_at: Option<TimestampMillis>,
+}
+
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/projects/{project_id}/cycles", params(("workspace_id" = String, Path), ("project_id" = String, Path)), responses((status = 200, body = Page<CycleRecord>)))]
+async fn list_cycles(
+    State(state): State<TaskState>,
+    Path((workspace, project)): Path<(String, String)>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<Json<Page<CycleRecord>>, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace}/projects/{project}/cycles");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    let project_id = parse_id(&project, &instance, request_id.as_ref())?;
+    state
+        .tasks
+        .cycles(workspace_id, project_id, actor_id)
+        .await
+        .map(|items| {
+            Json(Page {
+                items,
+                next_cursor: None,
+            })
+        })
+        .map_err(|error| task_problem(error, instance, request_id.as_ref()))
+}
+
+/// 409 `cycle_overlap` when the dates overlap another cycle of the project.
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/projects/{project_id}/cycles", params(("workspace_id" = String, Path), ("project_id" = String, Path)), request_body = CycleBody, responses((status = 201, body = CycleRecord)))]
+async fn create_cycle(
+    State(state): State<TaskState>,
+    Path((workspace, project)): Path<(String, String)>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<CycleBody>,
+) -> Result<Response, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace}/projects/{project}/cycles");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    let project_id = parse_id(&project, &instance, request_id.as_ref())?;
+    let name = cycle_name(body.name, &instance, request_id.as_ref())?;
+    state
+        .tasks
+        .create_cycle(
+            workspace_id,
+            project_id,
+            actor_id,
+            name,
+            body.starts_at,
+            body.ends_at,
+            request_id_value(request_id.as_ref()),
+            TimestampMillis::now(),
+        )
+        .await
+        .map(|record| (StatusCode::CREATED, Json(record)).into_response())
+        .map_err(|error| task_problem(error, instance, request_id.as_ref()))
+}
+
+/// 409 `cycle_overlap` when the new dates overlap another cycle of the project.
+#[utoipa::path(patch, path = "/api/v1/workspaces/{workspace_id}/projects/{project_id}/cycles/{cycle_id}", params(("workspace_id" = String, Path), ("project_id" = String, Path), ("cycle_id" = String, Path)), request_body = CycleUpdateBody, responses((status = 200, body = CycleRecord)))]
+async fn update_cycle(
+    State(state): State<TaskState>,
+    Path((workspace, project, cycle)): Path<(String, String, String)>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<CycleUpdateBody>,
+) -> Result<Json<CycleRecord>, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace}/projects/{project}/cycles/{cycle}");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    let project_id = parse_id(&project, &instance, request_id.as_ref())?;
+    let cycle_id = parse_id(&cycle, &instance, request_id.as_ref())?;
+    let changes = CycleChanges {
+        name: body
+            .name
+            .map(|name| cycle_name(name, &instance, request_id.as_ref()))
+            .transpose()?,
+        starts_at: body.starts_at,
+        ends_at: body.ends_at,
+    };
+    state
+        .tasks
+        .update_cycle(
+            workspace_id,
+            project_id,
+            cycle_id,
+            actor_id,
+            changes,
+            body.expected_version,
+            request_id_value(request_id.as_ref()),
+            TimestampMillis::now(),
+        )
+        .await
+        .map(Json)
+        .map_err(|error| task_problem(error, instance, request_id.as_ref()))
+}
+
+/// The cycle's tasks stay, without a cycle.
+#[utoipa::path(delete, path = "/api/v1/workspaces/{workspace_id}/projects/{project_id}/cycles/{cycle_id}", params(MutationQuery, ("workspace_id" = String, Path), ("project_id" = String, Path), ("cycle_id" = String, Path)), responses((status = 204)))]
+async fn delete_cycle(
+    State(state): State<TaskState>,
+    Path((workspace, project, cycle)): Path<(String, String, String)>,
+    ApiQuery(query): ApiQuery<MutationQuery>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<StatusCode, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace}/projects/{project}/cycles/{cycle}");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    let project_id = parse_id(&project, &instance, request_id.as_ref())?;
+    let cycle_id = parse_id(&cycle, &instance, request_id.as_ref())?;
+    state
+        .tasks
+        .delete_cycle(
+            workspace_id,
+            project_id,
+            cycle_id,
+            actor_id,
+            query.expected_version,
+            request_id_value(request_id.as_ref()),
+            TimestampMillis::now(),
+        )
+        .await
+        .map(|()| StatusCode::NO_CONTENT)
+        .map_err(|error| task_problem(error, instance, request_id.as_ref()))
+}
+
+/// Moves the cycle's tasks that are not completed, cancelled or duplicates to the next cycle by
+/// date. 409 `no_next_cycle` when the project has no cycle after this one.
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/projects/{project_id}/cycles/{cycle_id}/move-unfinished", params(("workspace_id" = String, Path), ("project_id" = String, Path), ("cycle_id" = String, Path)), responses((status = 200, body = CycleMoveOutcome)))]
+async fn move_unfinished_cycle_tasks(
+    State(state): State<TaskState>,
+    Path((workspace, project, cycle)): Path<(String, String, String)>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<Json<CycleMoveOutcome>, ApiError> {
+    let instance =
+        format!("/api/v1/workspaces/{workspace}/projects/{project}/cycles/{cycle}/move-unfinished");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    let project_id = parse_id(&project, &instance, request_id.as_ref())?;
+    let cycle_id = parse_id(&cycle, &instance, request_id.as_ref())?;
+    state
+        .tasks
+        .move_unfinished_tasks(
+            workspace_id,
+            project_id,
+            cycle_id,
+            actor_id,
+            request_id_value(request_id.as_ref()),
+            TimestampMillis::now(),
+        )
+        .await
+        .map(Json)
+        .map_err(|error| task_problem(error, instance, request_id.as_ref()))
+}
+
+/// An optional description: blank is none.
+fn plan_description(
+    value: Option<String>,
+    instance: &str,
+    request_id: Option<&Extension<RequestId>>,
+) -> Result<Option<String>, ApiError> {
+    value
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| bounded(value, 20_000, 20_000, "description", instance, request_id))
+        .transpose()
+}
+
+/// An optional cycle name, trimmed: blank is none.
+fn cycle_name(
+    value: Option<String>,
+    instance: &str,
+    request_id: Option<&Extension<RequestId>>,
+) -> Result<Option<String>, ApiError> {
+    value
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| text(value, 200, 200, "name", instance, request_id))
+        .transpose()
+}
+
+#[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 struct LabelBody {
     name: String,
@@ -1116,6 +1533,12 @@ struct CreateTaskBody {
     due_at: Option<TimestampMillis>,
     /// Create the task as a sub-issue of this task.
     parent_task_id: Option<String>,
+    /// A milestone of `project_id`.
+    milestone_id: Option<String>,
+    /// A cycle of `project_id`.
+    cycle_id: Option<String>,
+    /// Points, 0 to 1000.
+    estimate: Option<i64>,
 }
 
 #[derive(Clone, Deserialize, ToSchema)]
@@ -1153,6 +1576,18 @@ struct TaskUpdateBody {
     #[serde(default, deserialize_with = "deserialize_patch")]
     #[schema(value_type = Option<TaskRecurrence>)]
     recurrence: Option<Option<TaskRecurrence>>,
+    /// Absent: unchanged (on a project move, the target project's milestone of the same name,
+    /// else none). A milestone id of the task's project: set. `null`: clear.
+    #[serde(default, deserialize_with = "deserialize_source_patch")]
+    milestone_id: Option<Option<String>>,
+    /// Absent: unchanged (a project move clears it). A cycle id of the task's project: set.
+    /// `null`: clear.
+    #[serde(default, deserialize_with = "deserialize_source_patch")]
+    cycle_id: Option<Option<String>>,
+    /// Absent: unchanged. Points, 0 to 1000. `null`: clear.
+    #[serde(default, deserialize_with = "deserialize_patch")]
+    #[schema(value_type = Option<i64>)]
+    estimate: Option<Option<i64>>,
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -1188,6 +1623,18 @@ struct BulkItem {
     /// Absent: unchanged. A task id: make this task its sub-issue. `null`: detach.
     #[serde(default, deserialize_with = "deserialize_source_patch")]
     parent_task_id: Option<Option<String>>,
+    /// Absent: unchanged (on a project move, the target project's milestone of the same name,
+    /// else none). A milestone id of the task's project: set. `null`: clear.
+    #[serde(default, deserialize_with = "deserialize_source_patch")]
+    milestone_id: Option<Option<String>>,
+    /// Absent: unchanged (a project move clears it). A cycle id of the task's project: set.
+    /// `null`: clear.
+    #[serde(default, deserialize_with = "deserialize_source_patch")]
+    cycle_id: Option<Option<String>>,
+    /// Absent: unchanged. Points, 0 to 1000. `null`: clear.
+    #[serde(default, deserialize_with = "deserialize_patch")]
+    #[schema(value_type = Option<i64>)]
+    estimate: Option<Option<i64>>,
 }
 
 #[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/tasks", params(TaskQuery, ("workspace_id" = String, Path)), responses((status = 200, body = Page<crate::repositories::tasks::TaskRecord>)))]
@@ -1229,6 +1676,7 @@ async fn list_tasks(
         "created_at" => TaskSort::CreatedAt,
         "updated_at" => TaskSort::UpdatedAt,
         "due_date" => TaskSort::DueDate,
+        "estimate" => TaskSort::Estimate,
         _ => return Err(validation("sort", &instance, request_id.as_ref())),
     };
     let order = match query.order.as_str() {
@@ -1374,6 +1822,7 @@ fn task_order(order_by: OrderBy, direction: OrderDirection) -> (TaskSort, SortOr
         OrderBy::Updated => TaskSort::UpdatedAt,
         OrderBy::Title => TaskSort::Title,
         OrderBy::DueDate => TaskSort::DueDate,
+        OrderBy::Estimate => TaskSort::Estimate,
     };
     let order = match (order_by, direction) {
         (OrderBy::Manual, _) | (_, OrderDirection::Asc) => SortOrder::Asc,
@@ -1645,6 +2094,9 @@ async fn create_task(
         due_start_at: body.due_start_at,
         due_at: body.due_at,
         parent_task_id: optional_id(body.parent_task_id, &instance, request_id.as_ref())?,
+        milestone_id: optional_id(body.milestone_id, &instance, request_id.as_ref())?,
+        cycle_id: optional_id(body.cycle_id, &instance, request_id.as_ref())?,
+        estimate: body.estimate,
     };
     state
         .tasks
@@ -1734,6 +2186,9 @@ async fn bulk_tasks(
                     duplicate_of_id: item.duplicate_of_id,
                     parent_task_id: item.parent_task_id,
                     recurrence: None,
+                    milestone_id: item.milestone_id,
+                    cycle_id: item.cycle_id,
+                    estimate: item.estimate,
                 },
                 &instance,
                 request_id.as_ref(),
@@ -2319,6 +2774,15 @@ fn task_update(
                         .map_err(|_| validation("recurrence", instance, request_id))
                 })
                 .transpose()?,
+            milestone_id: body
+                .milestone_id
+                .map(|value| optional_id(value, instance, request_id))
+                .transpose()?,
+            cycle_id: body
+                .cycle_id
+                .map(|value| optional_id(value, instance, request_id))
+                .transpose()?,
+            estimate: body.estimate,
         },
     })
 }
@@ -2700,6 +3164,22 @@ pub(crate) fn task_problem(
             instance,
             request_id,
         ),
+        TaskError::CycleOverlap => ApiError::new(
+            StatusCode::CONFLICT,
+            "cycle_overlap",
+            "Cycles overlap",
+            "The cycle's dates overlap another cycle of the project.",
+            instance,
+            request_id,
+        ),
+        TaskError::NoNextCycle => ApiError::new(
+            StatusCode::CONFLICT,
+            "no_next_cycle",
+            "No next cycle",
+            "The project has no cycle after this one. Create the next cycle first.",
+            instance,
+            request_id,
+        ),
         TaskError::ProjectNotTrashed => ApiError::new(
             StatusCode::CONFLICT,
             "project_not_trashed",
@@ -2725,14 +3205,15 @@ pub(crate) fn task_problem(
             request_id,
         ),
         TaskError::TrialLimit(reached) => ApiError::trial_limit(reached, instance, request_id),
-        TaskError::Unavailable(_) => ApiError::new(
+        TaskError::Unavailable(error) => ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             "internal_error",
             "Internal server error",
             "An unexpected error occurred. Use the request ID when contacting support.",
             instance,
             request_id,
-        ),
+        )
+        .cause(error),
     }
 }
 
@@ -2791,9 +3272,16 @@ pub(crate) struct ConflictBody {
 pub(crate) struct ApiError {
     status: StatusCode,
     body: Box<ProblemBody>,
+    cause: Option<String>,
 }
 
 impl ApiError {
+    /// Records why this 500 happened. The HTTP layer logs it with the request ID; the client does not see it.
+    pub(crate) fn cause(mut self, error: impl std::fmt::Display) -> Self {
+        self.cause = Some(error.to_string());
+        self
+    }
+
     /// The same problem with a detail made at run time, such as the position of an invalid value.
     pub(crate) fn with_detail(mut self, detail: String) -> Self {
         self.body.detail = detail.into();
@@ -2824,6 +3312,7 @@ impl ApiError {
                 path: None,
                 formula: None,
             }),
+            cause: None,
         }
     }
 
@@ -2994,6 +3483,11 @@ impl IntoResponse for ApiError {
             CONTENT_TYPE,
             HeaderValue::from_static("application/problem+json"),
         );
+        if let Some(cause) = self.cause {
+            response
+                .extensions_mut()
+                .insert(orbit_platform::ErrorCause(cause));
+        }
         response
     }
 }

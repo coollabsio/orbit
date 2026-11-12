@@ -81,9 +81,9 @@ export function AcceptInvitationPage() {
       }}>{signIn ? 'Create an account instead' : 'Sign in instead'}</Button> : undefined}
     >
       <AuthInput label="Email" type="email" value={email} required={false} />
-      {mismatch ? <p className="text-[13px]">You are signed in as {user.data!.email}. Switch accounts to accept this invitation as {email}.</p> : (
+      {mismatch ? <p className="text-[0.8125rem]">You are signed in as {user.data!.email}. Switch accounts to accept this invitation as {email}.</p> : (
         <>
-          <p className="text-[13px]">{user.data ? 'Accept to join this workspace with your account.' : signIn ? 'Sign in with your existing account to join this workspace.' : 'Choose your name and password to create your account.'} To use another email, ask the inviter for a new invitation.</p>
+          <p className="text-[0.8125rem]">{user.data ? 'Accept to join this workspace with your account.' : signIn ? 'Sign in with your existing account to join this workspace.' : 'Choose your name and password to create your account.'} To use another email, ask the inviter for a new invitation.</p>
           {!user.data && !signIn ? <AuthInput label="Your name" value={displayName} onChange={setDisplayName} /> : null}
           {!user.data && twoFactorToken ? <AuthInput label="Authentication code" value={code} onChange={setCode} /> : null}
           {!user.data && !twoFactorToken ? <AuthInput label="Password" type="password" value={password} onChange={setPassword} /> : null}

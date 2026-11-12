@@ -391,7 +391,7 @@ export function DocTree({
     if (roots.length === 0) {
       return (
         <div
-          className="flex h-8 min-w-0 items-center rounded-md pr-2 text-[13px] text-muted-foreground/60 data-[drop=inside]:bg-primary/10 data-[drop=inside]:ring-1 data-[drop=inside]:ring-primary/25 data-[drop=inside]:ring-inset"
+          className="flex h-8 min-w-0 items-center rounded-md pr-2 text-[0.8125rem] text-muted-foreground/60 data-[drop=inside]:bg-primary/10 data-[drop=inside]:ring-1 data-[drop=inside]:ring-primary/25 data-[drop=inside]:ring-inset"
           style={{ paddingLeft: 6 + depth * 16 + 26 }}
           data-empty-space={space}
           {...spaceDropProps(space)}
@@ -659,7 +659,7 @@ export function DocTree({
                       else headerRefs.current.delete(teamspace.id)
                     }}
                     className={cn(
-                      'h-8 px-1.5 text-[13px] font-medium text-sidebar-foreground data-[dragging]:opacity-60',
+                      'h-8 px-1.5 text-[0.8125rem] font-medium text-sidebar-foreground data-[dragging]:opacity-60',
                       // Before/after line while another teamspace is dragged over this one.
                       "data-[reorder=before]:before:absolute data-[reorder=before]:before:inset-x-1.5 data-[reorder=before]:before:-top-px data-[reorder=before]:before:h-0.5 data-[reorder=before]:before:rounded-[1px] data-[reorder=before]:before:bg-primary data-[reorder=before]:before:content-['']",
                       "data-[reorder=after]:after:absolute data-[reorder=after]:after:inset-x-1.5 data-[reorder=after]:after:-bottom-px data-[reorder=after]:after:h-0.5 data-[reorder=after]:after:rounded-[1px] data-[reorder=after]:after:bg-primary data-[reorder=after]:after:content-['']",
@@ -688,7 +688,7 @@ export function DocTree({
                         <span className="min-w-0 truncate">{teamspace.name}</span>
                         {teamspace.is_default && teamspaces.length > 1 ? (
                           <span
-                            className="shrink-0 rounded-sm bg-muted px-1 text-[10px] leading-4 font-medium text-muted-foreground"
+                            className="shrink-0 rounded-sm bg-muted px-1 text-[0.625rem] leading-4 font-medium text-muted-foreground"
                             title="New pages go to this teamspace by default. Move another teamspace to the top to change it."
                           >
                             Default
@@ -735,7 +735,7 @@ export function DocTree({
         <NavLink
           to="/docs/trash"
           className={cn(
-            'flex h-8 w-full min-w-0 items-center gap-2 rounded-md px-2 text-[13px] font-medium text-muted-foreground transition-colors hover:bg-sidebar-accent/50 hover:text-foreground',
+            'flex h-8 w-full min-w-0 items-center gap-2 rounded-md px-2 text-[0.8125rem] font-medium text-muted-foreground transition-colors hover:bg-sidebar-accent/50 hover:text-foreground',
             trashActive && 'bg-sidebar-accent text-sidebar-accent-foreground',
           )}
         >
@@ -958,7 +958,7 @@ function RenameInput({ value, onCommit, onCancel }: { value: string; onCommit: (
       defaultValue={value}
       maxLength={100}
       aria-label="Teamspace name"
-      className="h-6 min-w-0 flex-1 rounded-sm px-1.5 py-0 text-[13px] md:text-[13px]"
+      className="h-6 min-w-0 flex-1 rounded-sm px-1.5 py-0 text-[0.8125rem] md:text-[0.8125rem]"
       onFocus={(e) => e.currentTarget.select()}
       onClick={(e) => e.stopPropagation()}
       onKeyDown={(e) => {

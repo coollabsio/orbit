@@ -1,7 +1,7 @@
 import { useCommand } from '@/shortcuts/useCommand'
-import { Suspense, useRef, useState } from 'react'
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { Calendar, ChevronRight, Hierarchy2, Link2, Paperclip2 as Paperclip, Tag, User as UserIcon, Xmark as X } from 'reicon-react'
+import { Calendar, ChevronRight, Diamonds, Hierarchy2, Link2, Paperclip2 as Paperclip, RefreshCircle, Tag, Triangle, User as UserIcon, Xmark as X } from 'reicon-react'
 import { apiClient } from '@/api/client'
 import { createTaskRelation, updateTask } from '@orbit/api/generated/sdk.gen'
 import { Button } from '@/components/ui/button'
@@ -9,7 +9,6 @@ import { Tip } from '@/components/common/Tip'
 import { Dialog, DialogContent, DialogFooter, DialogTitle } from '@/components/ui/dialog'
 import {
   DropdownMenu,
-  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
@@ -22,9 +21,10 @@ import { clipboardFiles } from '@/lib/attachmentLib'
 import type { CreateTaskBody, TaskRecord } from '@orbit/api/generated/types.gen'
 import { ColorDot } from '@/components/common/ColorDot'
 import { DatePicker } from '@/components/common/DatePicker'
-import { UserAvatar, UserAvatarStack } from '@/components/common/UserAvatar'
+import { SearchPicker } from '@/components/common/SearchPicker'
+import { UserAvatarStack } from '@/components/common/UserAvatar'
 import { uploadInlineFile } from '@/features/tasks/api/inlineFiles'
-import { fileBlock, isEmptyRichText } from '@/features/tasks/lib/richText'
+import { fileBlock, fileUrls, isEmptyRichText, mapFileUrls } from '@/features/tasks/lib/richText'
 // Type-only import: erased at build time, so the BlockNote chunk stays lazy.
 import type { PageEditorHandle } from '@/features/docs/editor/PageEditor'
 import { useTeamMembers } from '@/features/workspaces/api'
@@ -33,10 +33,15 @@ import { useLabels } from '@/features/tasks/api/labels'
 import { taskIdentifier, type Task, type TaskPriority } from '@/features/tasks/api/models'
 import { useAllStatuses, useProjectAudience, useProjects } from '@/features/tasks/api/projects'
 import { useCreateTask } from '@/features/tasks/api/tasks'
+import { useCycles } from '@/features/tasks/api/cycles'
+import { useMilestones } from '@/features/tasks/api/milestones'
+import { cycleName, estimateLabel } from '@/features/tasks/planningLib'
+import { CyclePicker, EstimatePicker, MilestonePicker } from './PlanningPickers'
 import { dueDateLabel, matchingLabelIds, PRIORITY_LABEL, PRIORITY_ORDER, projectStatuses, statusKeyOf } from '@/features/tasks/taskMeta'
 import { resolveStatusId } from '@/features/tasks/tasksLib'
 import { ADD_RELATION_OPTIONS, type RelationKind } from '@/features/tasks/relationsLib'
 import { EditorFallback, PageEditor } from './lazyEditor'
+import { personOption, projectOption } from './pickerOptions'
 import { PriorityIcon } from './PriorityIcon'
 import { LabelPicker } from './TaskLabels'
 import { TaskPickerDialog } from './TaskPickerDialog'
@@ -88,6 +93,9 @@ export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescrip
     dueStartAt: defaults.due_start_at ?? null,
     parent: null as Task | null,
     sourceUrl: defaults.source_url ?? null,
+    milestoneId: defaults.milestone_id ?? null,
+    cycleId: defaults.cycle_id ?? null,
+    estimate: defaults.estimate ?? null,
   }))
   // relations are saved once the task exists
   const [relations, setRelations] = useState<PendingRelation[]>([])
@@ -103,6 +111,19 @@ export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescrip
   const fileInputRef = useRef<HTMLInputElement>(null)
   const titleRef = useRef<HTMLInputElement>(null)
   const descriptionRef = useRef<PageEditorHandle>(null)
+  // images and files picked in the description (/image, /file) stay in the browser, by `blob:` URL, until the task exists
+  const held = useRef(new Map<string, File>())
+  const holdFile = useCallback(async (file: File) => {
+    const url = URL.createObjectURL(file)
+    held.current.set(url, file)
+    return url
+  }, [])
+  const releaseHeld = useCallback(() => {
+    for (const url of held.current.keys()) URL.revokeObjectURL(url)
+    held.current.clear()
+  }, [])
+  useEffect(() => releaseHeld, [releaseHeld])
+  const fileScope = useMemo(() => ({ workspaceId: workspace.id, taskId: '', deferred: true }), [workspace.id])
 
   // projects and statuses can still load when the dialog opens outside Tasks, so the fallbacks are derived
   const project = projects.find((candidate) => candidate.id === draft.projectId) ?? projects[0]
@@ -116,6 +137,11 @@ export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescrip
   const chosenLabels = labels.filter((label) => labelIds.includes(label.id)).sort((a, b) => a.name.localeCompare(b.name))
   const assignees = members.filter((member) => draft.assigneeIds.includes(member.id))
   const audience = useProjectAudience(workspace.id, project, members)
+  // a milestone or cycle belongs to one project: another project drops it
+  const milestones = useMilestones(workspace.id, project?.id).data ?? []
+  const cycles = useCycles(workspace.id, project?.id).data ?? []
+  const milestone = milestones.find((item) => item.id === draft.milestoneId)
+  const cycle = cycles.find((item) => item.id === draft.cycleId)
   const busy = createTask.isPending || uploading
   const canCreate = title.trim() !== '' && project !== undefined && status !== undefined && !busy
   const attach = (added: FileList | File[] | null) => {
@@ -131,9 +157,11 @@ export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescrip
     if (!canCreate) return
     try {
       const content = (descriptionRef.current?.getContent() ?? []) as Array<Record<string, unknown>>
+      // the held files are not on the server yet: the new task starts without their blocks' URLs
+      const description = mapFileUrls(content, (url) => (held.current.has(url) ? '' : url))
       const task = await createTask.mutateAsync({
         title: title.trim(),
-        ...(isEmptyRichText(content) ? {} : { description_json: content }),
+        ...(isEmptyRichText(description) ? {} : { description_json: description }),
         project_id: project.id,
         status_id: status.id,
         priority: draft.priority,
@@ -142,19 +170,25 @@ export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescrip
         due_at: draft.dueAt,
         due_start_at: draft.dueStartAt,
         parent_task_id: draft.parent?.id ?? null,
+        milestone_id: milestone?.id ?? null,
+        cycle_id: cycle?.id ?? null,
+        estimate: draft.estimate,
         ...(draft.sourceUrl ? { source_url: draft.sourceUrl } : {}),
       })
       if (relations.length > 0) {
         const results = await Promise.allSettled(relations.map((relation) => createTaskRelation({ client: apiClient, path: { workspace_id: workspace.id, task_id: task.id }, body: { type: relation.kind, task_id: relation.task.id }, throwOnError: true })))
         if (results.some((result) => result.status === 'rejected')) toast.error('The task was created, but some relations were not added.')
       }
-      if (files.length > 0) {
-        // the files go into the description, after the text
+      const heldUrls = [...new Set(fileUrls(content).filter((url) => held.current.has(url)))]
+      if (files.length > 0 || heldUrls.length > 0) {
+        // the held files go in at their blocks; the chip files go after the text
         setUploading(true)
         try {
+          const uploaded = new Map<string, string>()
+          for (const url of heldUrls) uploaded.set(url, await uploadInlineFile(workspace.id, task.id, held.current.get(url)!))
           const blocks: Array<Record<string, unknown>> = []
           for (const file of files) blocks.push(fileBlock(file, await uploadInlineFile(workspace.id, task.id, file)))
-          const text = isEmptyRichText(content) ? [] : content
+          const text = isEmptyRichText(content) ? [] : mapFileUrls(content, (url) => uploaded.get(url) ?? url)
           await updateTask({ client: apiClient, path: { workspace_id: workspace.id, task_id: task.id }, body: { expected_version: task.version, description_json: [...text, ...blocks] }, throwOnError: true })
         } catch {
           // the task exists; its page can take the files again
@@ -163,6 +197,7 @@ export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescrip
           setUploading(false)
         }
       }
+      releaseHeld()
       if (!more) return openTask(task)
       // the properties stay for the next task of the batch
       setCreated(task)
@@ -213,30 +248,21 @@ export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescrip
           }}
         >
           <div className="flex items-center gap-1.5 pr-8">
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={
-                  <Button type="button" variant="outline" size="xs" className="max-w-48 font-normal" aria-label={`Project: ${project?.name ?? 'none'}`}>
-                    <ColorDot color={project?.color} />
-                    <span className="truncate">{project?.name ?? 'No project'}</span>
-                  </Button>
-                }
-              />
-              <DropdownMenuContent className="w-auto min-w-45">
-                {projects.map((option) => (
-                  <DropdownMenuItem
-                    key={option.id}
-                    className="data-selected:bg-accent data-selected:font-medium"
-                    data-selected={option.id === project?.id || undefined}
-                    // the status follows by name into the other project's workflow
-                    onClick={() => setDraft((current) => ({ ...current, projectId: option.id, statusId: resolveStatusId(statuses, option.id, status ? statusKeyOf(status) : null) }))}
-                  >
-                    <ColorDot color={option.color} />
-                    <span className="truncate">{option.name}</span>
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <SearchPicker
+              label="Project"
+              placeholder="Change project…"
+              emptyText="No projects match"
+              options={projects.map(projectOption)}
+              selected={project ? [project.id] : []}
+              // the status follows by name into the other project's workflow
+              onSelect={(id) => setDraft((current) => ({ ...current, projectId: id, statusId: resolveStatusId(statuses, id, status ? statusKeyOf(status) : null) }))}
+              trigger={
+                <Button type="button" variant="outline" size="xs" className="max-w-48 font-normal" aria-label={`Project: ${project?.name ?? 'none'}`}>
+                  <ColorDot color={project?.color} />
+                  <span className="truncate">{project?.name ?? 'No project'}</span>
+                </Button>
+              }
+            />
             <ChevronRight aria-hidden className="size-3 text-muted-foreground/70" />
             <DialogTitle className="text-xs font-normal text-muted-foreground">New task</DialogTitle>
           </div>
@@ -300,8 +326,9 @@ export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescrip
                     ref={descriptionRef}
                     pageId={`new-task:${descriptionKey}`}
                     profile="task"
-                    // no task yet: images of other tasks in the workspace stay (by link); nothing uploads here
-                    fileScope={{ workspaceId: workspace.id, taskId: '' }}
+                    // no task yet: images of other tasks in the workspace stay (by link); uploads wait for the task
+                    fileScope={fileScope}
+                    uploadFile={holdFile}
                     placeholder="description"
                     initialMarkdown={descriptionKey === 0 ? initialDescription : undefined}
                     editable={!busy}
@@ -398,40 +425,30 @@ export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescrip
                 ))}
               </DropdownMenuContent>
             </DropdownMenu>
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={
-                  <Button type="button" variant="outline" size="sm" className="max-w-56 font-normal" aria-label="Assignees">
-                    {assignees.length > 0 ? (
-                      <>
-                        <UserAvatarStack users={assignees} size={16} />
-                        <span className="truncate">{assignees.map((member) => member.name).join(', ')}</span>
-                      </>
-                    ) : (
-                      <>
-                        <UserIcon aria-hidden="true" className="text-muted-foreground" />
-                        Assignee
-                      </>
-                    )}
-                  </Button>
-                }
-              />
-              <DropdownMenuContent className="w-auto min-w-45">
-                {audience.map((member) => {
-                  const active = draft.assigneeIds.includes(member.id)
-                  return (
-                    <DropdownMenuCheckboxItem
-                      key={member.id}
-                      checked={active}
-                      onCheckedChange={() => setDraft((current) => ({ ...current, assigneeIds: active ? current.assigneeIds.filter((id) => id !== member.id) : [...current.assigneeIds, member.id] }))}
-                    >
-                      <UserAvatar user={member} size={16} />
-                      {member.name}
-                    </DropdownMenuCheckboxItem>
-                  )
-                })}
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <SearchPicker
+              multiple
+              label="Assignees"
+              placeholder="Assign to…"
+              emptyText="No people match"
+              options={audience.map(personOption)}
+              selected={draft.assigneeIds}
+              onSelect={(id) => setDraft((current) => ({ ...current, assigneeIds: current.assigneeIds.includes(id) ? current.assigneeIds.filter((item) => item !== id) : [...current.assigneeIds, id] }))}
+              trigger={
+                <Button type="button" variant="outline" size="sm" className="max-w-56 font-normal" aria-label="Assignees">
+                  {assignees.length > 0 ? (
+                    <>
+                      <UserAvatarStack users={assignees} size={16} />
+                      <span className="truncate">{assignees.map((member) => member.name).join(', ')}</span>
+                    </>
+                  ) : (
+                    <>
+                      <UserIcon aria-hidden="true" className="text-muted-foreground" />
+                      Assignee
+                    </>
+                  )}
+                </Button>
+              }
+            />
             <LabelPicker
               workspaceId={workspace.id}
               projectId={project?.id ?? ''}
@@ -453,6 +470,42 @@ export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescrip
                       Labels
                     </>
                   )}
+                </Button>
+              }
+            />
+            {milestones.length > 0 ? (
+              <MilestonePicker
+                milestones={milestones}
+                value={milestone?.id ?? null}
+                onChange={(milestoneId) => setDraft((current) => ({ ...current, milestoneId }))}
+                trigger={
+                  <Button type="button" variant="outline" size="sm" className="max-w-56 font-normal" aria-label={`Milestone: ${milestone?.name ?? 'none'}`}>
+                    <Diamonds aria-hidden="true" className="text-muted-foreground" />
+                    <span className="truncate">{milestone?.name ?? 'Milestone'}</span>
+                  </Button>
+                }
+              />
+            ) : null}
+            {cycles.length > 0 ? (
+              <CyclePicker
+                cycles={cycles}
+                value={cycle?.id ?? null}
+                onChange={(cycleId) => setDraft((current) => ({ ...current, cycleId }))}
+                trigger={
+                  <Button type="button" variant="outline" size="sm" className="max-w-56 font-normal" aria-label={`Cycle: ${cycle ? cycleName(cycle) : 'none'}`}>
+                    <RefreshCircle aria-hidden="true" className="text-muted-foreground" />
+                    <span className="truncate">{cycle ? cycleName(cycle) : 'Cycle'}</span>
+                  </Button>
+                }
+              />
+            ) : null}
+            <EstimatePicker
+              value={draft.estimate}
+              onChange={(estimate) => setDraft((current) => ({ ...current, estimate }))}
+              trigger={
+                <Button type="button" variant="outline" size="sm" className="font-normal" aria-label={`Estimate: ${draft.estimate === null ? 'none' : estimateLabel(draft.estimate)}`}>
+                  <Triangle aria-hidden="true" className="text-muted-foreground" />
+                  {draft.estimate === null ? 'Estimate' : estimateLabel(draft.estimate)}
                 </Button>
               }
             />

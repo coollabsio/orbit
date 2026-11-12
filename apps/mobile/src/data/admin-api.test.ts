@@ -15,6 +15,7 @@ import {
   limitsBody,
   limitsDraft,
   limitText,
+  movedText,
   movingText,
   parseLimit,
   restoredRoute,
@@ -74,12 +75,13 @@ test('badges, the audit actor and job wording', () => {
   expect([jobLabel('notion.scan'), jobLabel('mail.sync'), limitText(null), limitText(4)]).toEqual(['Notion scans', 'mail.sync', 'no limit', '4'])
 })
 
-const storage = (fields: Partial<StorageView>): StorageView => ({ attachments_in_s3: false, backups_in_s3: false, backup_schedule: 'off', files_to_move: 0, ...fields })
+const storage = (fields: Partial<StorageView>): StorageView => ({ attachments_in_s3: false, backups_in_s3: false, backup_schedule: 'off', s3_keep_deleted_days: 40, checking: false, files_to_move: 0, ...fields })
 
 test('the settings poll while images compress or files move', () => {
   expect(settingsPollInterval(undefined)).toBe(false)
   expect(settingsPollInterval(storage({}))).toBe(false)
   expect(settingsPollInterval(storage({ files_to_move: 3 }))).toBe(5000)
+  expect(settingsPollInterval(storage({ checking: true }))).toBe(1000)
   expect(settingsPollInterval(storage({ files_to_move: 3, image_compression: { running: true, compressed: 0, skipped: 0, bytes_before: 0, bytes_after: 0 } }))).toBe(2000)
 })
 
@@ -114,13 +116,19 @@ test('the bucket form keeps the saved secret key when the field is empty', () =>
 })
 
 test('storage options change one field and keep the others', () => {
-  expect(storageOptions(storage({ backups_in_s3: true, backup_schedule: 'daily' }), { attachments_in_s3: true })).toEqual({ attachments_in_s3: true, backups_in_s3: true, backup_schedule: 'daily' })
+  expect(storageOptions(storage({ backups_in_s3: true, backup_schedule: 'daily' }), { attachments_in_s3: true })).toEqual({ attachments_in_s3: true, backups_in_s3: true, backup_schedule: 'daily', s3_keep_deleted_days: 40 })
 })
 
 test('moving and compression wording', () => {
-  expect(movingText({ files_to_move: 0, attachments_in_s3: true })).toBeNull()
-  expect(movingText({ files_to_move: 1, attachments_in_s3: true })).toBe('1 file left to move to the bucket.')
-  expect(movingText({ files_to_move: 4, attachments_in_s3: false })).toBe('4 files left to move to this server.')
+  expect(movingText({ checking: false, files_to_move: 0, attachments_in_s3: true })).toBeNull()
+  expect(movingText({ checking: true, files_to_move: 0, attachments_in_s3: true })).toBe('Checking which files to move…')
+  expect(movingText({ checking: false, files_to_move: 1, attachments_in_s3: true })).toBe('1 file left to move to the bucket.')
+  expect(movingText({ checking: false, files_to_move: 4, attachments_in_s3: false })).toBe('4 files left to move to this server.')
+  expect(movedText({ checking: true, files_to_move: 0, attachments_in_s3: true, move_error: null })).toBeNull()
+  expect(movedText({ checking: false, files_to_move: 2, attachments_in_s3: true, move_error: null })).toBeNull()
+  expect(movedText({ checking: false, files_to_move: 0, attachments_in_s3: true, move_error: 'denied' })).toBeNull()
+  expect(movedText({ checking: false, files_to_move: 0, attachments_in_s3: true, move_error: null })).toBe('Done. All files are in the bucket.')
+  expect(movedText({ checking: false, files_to_move: 0, attachments_in_s3: false, move_error: null })).toBe('Done. All files are on this server.')
   expect(compressionText({ running: false, compressed: 0, skipped: 0, bytes_before: 0, bytes_after: 0 })).toBeNull()
   expect(compressionText({ running: true, compressed: 0, skipped: 1, bytes_before: 0, bytes_after: 0 })).toBe('Compressing… 1 file checked. No image was compressed.')
   expect(compressionText({ running: false, compressed: 2, skipped: 1, bytes_before: 3_000_000, bytes_after: 1_000_000 })).toBe('Done. 2 images compressed: 3 MB → 1 MB.')

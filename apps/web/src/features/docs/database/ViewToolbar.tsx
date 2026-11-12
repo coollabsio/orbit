@@ -98,7 +98,7 @@ export function ViewToolbar({ properties, config, onConfig, onAddFilter, onAdvan
           <Button type="button" variant="ghost" size="sm" data-active={rules > 0 || undefined} className="text-muted-foreground data-active:text-primary" aria-label={rules > 0 ? `Filter (${rules})` : 'Filter'}>
             <Filter />
             <span className="@max-lg/controls:hidden">Filter</span>
-            {rules > 0 ? <Badge className="h-4 min-w-4 px-1 text-[10px] tabular-nums">{rules}</Badge> : null}
+            {rules > 0 ? <Badge className="h-4 min-w-4 px-1 text-[0.625rem] tabular-nums">{rules}</Badge> : null}
           </Button>
         }
       />
@@ -110,7 +110,7 @@ export function ViewToolbar({ properties, config, onConfig, onAddFilter, onAdvan
           <Button type="button" variant="ghost" size="sm" data-active={sorts > 0 || undefined} className="text-muted-foreground data-active:text-primary" aria-label={sorts > 0 ? `Sort (${sorts})` : 'Sort'}>
             <Sort />
             <span className="@max-lg/controls:hidden">Sort</span>
-            {sorts > 0 ? <Badge className="h-4 min-w-4 px-1 text-[10px] tabular-nums">{sorts}</Badge> : null}
+            {sorts > 0 ? <Badge className="h-4 min-w-4 px-1 text-[0.625rem] tabular-nums">{sorts}</Badge> : null}
           </Button>
         }
       />

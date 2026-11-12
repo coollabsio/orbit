@@ -163,7 +163,8 @@ async fn download_page_file(
         .download(workspace_id, page_id, file_id, session.user.id)
         .await
         .map_err(|error| problem(error, &instance, request_id))?;
-    download_response(download).ok_or_else(|| internal(&instance, request_id))
+    download_response(download)
+        .ok_or_else(|| internal(&instance, request_id).cause("invalid stored file headers"))
 }
 
 fn parse_id(
@@ -249,7 +250,7 @@ fn upload_problem(
             invalid_multipart(instance, request_id)
         }
         UploadError::Unauthorized => not_found(instance, request_id),
-        _ => internal(instance, request_id),
+        error => internal(instance, request_id).cause(error),
     }
 }
 
@@ -261,6 +262,6 @@ fn problem(
     match error {
         PageFileError::NotFound => not_found(instance, request_id),
         PageFileError::Upload(error) => upload_problem(error, instance, request_id),
-        PageFileError::Database(_) => internal(instance, request_id),
+        PageFileError::Database(error) => internal(instance, request_id).cause(error),
     }
 }

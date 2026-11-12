@@ -26,7 +26,7 @@ import {
   type ViewState,
 } from '../../../data/tasks-filter'
 import { useOrbit } from '../../../orbit-context'
-import { useLabels, usePeople, useProjects, useStatuses } from '../../../queries'
+import { useCycles, useLabels, useMilestones, usePeople, useProjects, useStatuses } from '../../../queries'
 import { useTheme } from '../../../theme'
 import { EmptyState, ErrorView, HeaderTitle, Icon, IconButton, LoadingView, PaneHeader, PullRefresh, PickerSheet, SafeAreaView, StatusIcon, Text } from '../../../ui'
 
@@ -47,6 +47,8 @@ export default function TasksScreen() {
   // in the URL, so the drawer's project links can pick it
   const projectId = projectParam || null
   const setProjectId = (id: string | null) => router.setParams({ project: id ?? undefined })
+  const milestones = useMilestones(projectId)
+  const cycles = useCycles(projectId)
   // the filter and display are stored per page on the server, as the web stores them, so both apps show the same filter
   const pageKey = pageKeyFor(preset, projectId)
   const preferenceKey = ['view-preference', workspaceId, pageKey] as const
@@ -78,6 +80,8 @@ export default function TasksScreen() {
     labels: labels.data ?? [],
     projectId,
     projects: projectId ? (projects.data ?? []).filter((item) => item.id === projectId) : (projects.data ?? []),
+    milestones: projectId ? (milestones.data ?? []) : [],
+    cycles: projectId ? (cycles.data ?? []) : [],
     currentUserId: user.id,
   }
 
@@ -137,6 +141,7 @@ export default function TasksScreen() {
           ) : null}
         </Pressable>
         <IconButton icon="display" label="Display" size={32} onPress={() => setSheet('display')} />
+        {project ? <IconButton icon="settings" label={`${project.name} settings`} size={32} onPress={() => router.push(`/tasks/settings/${project.id}`)} /> : null}
         <IconButton icon="plus" label="New task" size={32} variant="primary" onPress={() => newTask()} />
         <View
           className="h-8.5 mt-1 basis-full flex-row items-center border border-input rounded-lg bg-input/30"

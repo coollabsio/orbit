@@ -205,10 +205,12 @@ scripts, CI jobs and the Orbit CLI. That API serves tasks and docs, not chat. Se
 | Tool | Arguments | Result |
 | --- | --- | --- |
 | `list_projects` | None | Approved live projects only. |
-| `list_tasks` | Optional `project_id`, `query`, `parent_task_id`, `cursor`, `limit` | Tasks and `next_cursor`. |
+| `list_tasks` | Optional `project_id`, `query`, `parent_task_id`, `milestone_id`, `cycle_id`, `cursor`, `limit` | Tasks and `next_cursor`. |
 | `get_task` | Required `task_id` | One task in an approved project. |
 | `create_project` | Required `name`, `key`; optional `color` | The new project, with the default statuses. Needs task write and an all-projects connection. |
 | `list_task_statuses`, `list_labels` | Required `project_id`; optional `cursor`, `limit` | Statuses or labels (names, colors) of an approved project. |
+| `list_milestones` | Required `project_id` | Every milestone of an approved project, in order: `name`, `description`, `target_at` and the progress counts. |
+| `list_cycles` | Required `project_id` | Every cycle of an approved project, by start date: `number`, `name`, `starts_at`, `ends_at` (exclusive), the progress counts, and `relative`. |
 | `list_members` | Optional `cursor`, `limit` | Workspace members: `user_id` and `display_name`. |
 | `list_comments` | Required `task_id`; optional `cursor`, `limit` | Comments on the task, oldest first, and `next_cursor`. |
 | `get_me` | None | The connection: its user (`null` for a service account), workspace, scopes and approved project IDs. Needs no permission. |
@@ -218,9 +220,19 @@ such as `ENG-12`) lists only the direct sub-issues of that task. The default lim
 range is 1–100. Results include completed tasks and sub-issues, but not deleted
 tasks or tasks in deleted projects. Copy `next_cursor` into the next request and
 keep the same project and search query.
+`milestone_id` takes a milestone ID, or `none` for tasks without a milestone. `cycle_id` takes a
+cycle ID; `current`, `next` or `previous` for that cycle of each task's project; or `none` for
+tasks without a cycle.
+
+The progress counts of milestones and cycles are `task_count`, `completed_count`,
+`estimate_total` and `estimate_completed`. They count live tasks; cancelled and duplicate tasks are
+not counted, and completed means a status in the `completed` category. A cycle's `relative` is
+`current` (it runs now), `next` (the first that starts after now), `previous` (the last that
+ended before now) or `null`.
 
 Task results include title, description, project/status IDs, priority,
-assignee/label IDs, due dates, timestamps, version (an opaque number that changes
+assignee/label IDs, due dates, `milestone_id`, `cycle_id`, `estimate` (points, or `null`),
+timestamps, version (an opaque number that changes
 with every change, including live edits; pass it back unchanged), `parent_task_id`
 (`null` for a top-level task or a parent in an unapproved project), the identifier
 (`ENG-12`) and the task's URL in the web app. Embedded task relations
@@ -299,19 +311,24 @@ Service-account tokens support tasks only; docs and chat require a personal iden
 
 | Permission | Tools |
 | --- | --- |
-| Task read | `list_projects`, `list_tasks`, `get_task`, `list_task_statuses`, `list_labels`, `list_members`, `list_comments` |
+| Task read | `list_projects`, `list_tasks`, `get_task`, `list_task_statuses`, `list_labels`, `list_milestones`, `list_cycles`, `list_members`, `list_comments` |
 | Task write | `create_task`, `update_task`, `delete_task`, `create_comment`, `create_project` |
 | None | `get_me` |
-| Docs read | `list_docs`, `get_doc`, `get_database`, `query_database` |
-| Docs write | `create_doc`, `update_doc`, `create_database_row`, `update_database_row`, `trash_database_rows`, `create_database_property`, `update_database_property`, `delete_database_property` |
+| Docs read | `list_docs`, `get_doc`, `get_database`, `query_database`, `list_database_views` |
+| Docs write | `create_doc`, `update_doc`, `create_database_row`, `update_database_row`, `trash_database_rows`, `create_database_property`, `update_database_property`, `delete_database_property`, `create_database`, `create_database_view`, `update_database_view`, `delete_database_view`, `create_database_link`, `delete_database_link` |
 | Chat read | `list_conversations`, `list_messages`, `get_thread`, `search_messages` |
 
 Task create takes `project_id`, `status_id`, `title`, optional markdown `description`,
-`priority`, `parent_task_id` (creates a sub-issue) and `assignee_ids`. Task update takes `task_id`,
-`expected_version`, and optional title, description, status, priority, `assignee_ids` or
-`parent_task_id`: a task ID or identifier moves the task under that task, and `null` detaches it.
+`priority`, `parent_task_id` (creates a sub-issue), `assignee_ids`, `label_ids`, `milestone_id`,
+`cycle_id` and `estimate` (0 to 1000 points). The milestone and the cycle must be in the task's
+project. Task update takes `task_id`, `expected_version`, and optional title, description, status,
+priority, `assignee_ids`, `label_ids`, `milestone_id`, `cycle_id`, `estimate` or `parent_task_id`:
+a task ID or identifier moves the task under that task, and `null` detaches it. `null` also clears
+the milestone, the cycle or the estimate.
 `assignee_ids` replaces the whole list with member user IDs from `list_members` or `get_me`, and
 `[]` unassigns everyone; to claim a task, send the current list plus your own `get_me` user ID.
+`label_ids` replaces the whole list with label IDs of the task's project from `list_labels`, and
+`[]` removes all labels. A label of another project, or the same label twice, is refused.
 `create_project` works only for a connection approved for all projects (choose all projects at
 consent, or when you create the token): a connection for chosen projects could not use the new
 project. `key` is the identifier prefix (1 to 20 letters, digits or underscores, unique in the
@@ -377,6 +394,15 @@ sent by name only keeps the ID, color and group of the option with that name, so
 `add_options` appends options and skips names the property already has; it cannot be sent with
 `config`. `delete_database_property` takes `database_id` and `property` and deletes the property
 with its values; the title property cannot be deleted or change its type.
+`create_database` takes optional `title`, `icon`, `parent_id`, `teamspace_id` or `private`, `properties`
+(`{name, type, config}` after the title property "Name") and `views`, and writes the database in one
+step. A view is `{name, type, filter, sorts, columns, group_by}` with property and option names, as
+in `query_database`. `list_database_views`, `create_database_view`, `update_database_view` and
+`delete_database_view` work on a database's views, or on a linked view block's views with `link_id`.
+`update_database_view` replaces only the fields you send. `create_database_link` takes
+`database_id` and `host_page_id` and shows the database in that doc as a linked view block at the
+end of the doc, with views of its own; it returns `link_id`. `delete_database_link` removes the
+block and its views. See [Public API](public-api.md#views) for the rules and limits.
 Chat message and thread tools accept `before` and `limit` (1–100) for pagination.
 `search_messages` takes `query` (up to 500 characters; every word must match, the last one as a
 prefix) and optional `conversation_id`, `author_id`, `has_file` and `cursor` filters. It returns

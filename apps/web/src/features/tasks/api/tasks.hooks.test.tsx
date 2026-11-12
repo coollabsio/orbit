@@ -23,7 +23,8 @@ const task = (id: string, position: number): TaskRecord => ({
   id, workspace_id: 'workspace-1', project_id: 'project-1', number: 1, status_id: 'todo', title: id,
   description: '', description_json: null, collab_epoch: '', position, priority: 'none', assignee_ids: [], creator_id: 'user-1', label_ids: [],
   created_at: '2026-09-05T10:00:00Z', updated_at: '2026-09-05T10:00:00Z', duplicate_of: null, blocked: false, version: 1,
-  parent: null, parent_task_id: null, sub_issue_count: 0, sub_issue_closed_count: 0,
+  parent: null, parent_task_id: null, sub_issue_count: 0, sub_issue_closed_count: 0, recurrence: null,
+  milestone_id: null, cycle_id: null, estimate: null,
 })
 
 const failure = () => Response.json({

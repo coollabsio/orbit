@@ -217,7 +217,7 @@ async fn open(
         .identity
         .is_installation_admin(session.user.id)
         .await
-        .map_err(|_| internal(instance, request_id))?;
+        .map_err(|error| internal(instance, request_id).cause(error))?;
     if !admin {
         return Err(ApiError::new(
             StatusCode::FORBIDDEN,
@@ -255,7 +255,7 @@ async fn open(
                 unreadable(instance, request_id)
             }
         })?;
-    let reader = SnapshotReader::open(&snapshot).map_err(|error| {
+    let reader = backups.snapshot_reader(&snapshot).await.map_err(|error| {
         tracing::warn!(%error, backup_id, "backup snapshot cannot be read");
         unreadable(instance, request_id)
     })?;
@@ -355,6 +355,7 @@ fn problem(
             instance,
             request_id,
         ),
-        BackupItemError::Upload(_) | BackupItemError::Database(_) => internal(instance, request_id),
+        BackupItemError::Upload(error) => internal(instance, request_id).cause(error),
+        BackupItemError::Database(error) => internal(instance, request_id).cause(error),
     }
 }

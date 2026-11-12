@@ -10,9 +10,12 @@ import * as taskApi from '../data/task-api'
 import {
   attachmentPath,
   bodyWithFiles,
+  cycleLabel,
+  cycleTiming,
   defaultStatusOf,
   type DueRange,
   dueDateLabel,
+  estimateLabel,
   identifier,
   isImageType,
   matchingLabelIds,
@@ -24,12 +27,12 @@ import {
   type RelationKind,
 } from '../data/tasks'
 import { useOrbit } from '../orbit-context'
-import { useLabels, usePeople, useProjects, useSeesProject, useStatuses } from '../queries'
+import { useCycles, useLabels, useMilestones, usePeople, useProjects, useSeesProject, useStatuses } from '../queries'
 import { errorMessage } from '../session-context'
 import { alpha, cssColors, useTheme } from '../theme'
 import { Avatar, Button, Icon, IconButton, type IconName, KeyboardSpace, PriorityIcon, StatusIcon, Text } from '../ui'
 import { type FileSource, pickFiles } from './tasks/files'
-import { Dot, DueDateChoices, LabelChoices, MenuChoices, PeopleChoices, PriorityChoices, StatusChoices, TaskChoices } from './tasks/pickers'
+import { CycleChoices, Dot, DueDateChoices, EstimateChoices, LabelChoices, MenuChoices, MilestoneChoices, PeopleChoices, PriorityChoices, StatusChoices, TaskChoices } from './tasks/pickers'
 import { Sheet, SheetList, SheetRow, useSheet } from './tasks/Sheet'
 
 /** Relations a new task can have: a duplicate needs a canonical task, which it cannot be marked as before it exists. */
@@ -38,7 +41,7 @@ const PENDING_RELATIONS = RELATION_OPTIONS.filter((option): option is { kind: Pe
 const RELATION_LABEL: Record<PendingKind, string> = { blocks: 'Blocks', blocked_by: 'Blocked by', related: 'Related to' }
 
 type DialogSheet =
-  | { kind: 'project' | 'status' | 'priority' | 'assignees' | 'labels' | 'due' | 'parent-menu' | 'relation-menu' | 'attach' }
+  | { kind: 'project' | 'status' | 'priority' | 'assignees' | 'labels' | 'due' | 'milestone' | 'cycle' | 'estimate' | 'parent-menu' | 'relation-menu' | 'attach' }
   | { kind: 'pick-task'; purpose: 'parent' | PendingKind }
 
 function sheetTitle(sheet: DialogSheet | null): string {
@@ -56,6 +59,12 @@ function sheetTitle(sheet: DialogSheet | null): string {
       return 'Labels'
     case 'due':
       return 'Due date'
+    case 'milestone':
+      return 'Milestone'
+    case 'cycle':
+      return 'Cycle'
+    case 'estimate':
+      return 'Estimate'
     case 'parent-menu':
       return 'Parent'
     case 'relation-menu':
@@ -95,6 +104,9 @@ export function NewTaskDialog({ defaults, onClose }: { defaults: NewTaskDefaults
   const [assigneeIds, setAssigneeIds] = useState<string[]>([])
   const [chosenLabelIds, setChosenLabelIds] = useState<string[]>([])
   const [due, setDue] = useState<DueRange | null>(null)
+  const [milestoneId, setMilestoneId] = useState<string | null>(null)
+  const [cycleId, setCycleId] = useState<string | null>(null)
+  const [estimate, setEstimate] = useState<number | null>(null)
   const [parent, setParent] = useState<api.TaskRecord | null>(null)
   const [relations, setRelations] = useState<readonly { kind: PendingKind; task: api.TaskRecord }[]>([])
   const [files, setFiles] = useState<readonly PickedFile[]>([])
@@ -109,6 +121,10 @@ export function NewTaskDialog({ defaults, onClose }: { defaults: NewTaskDefaults
   const labelIds = project && labels.data ? matchingLabelIds(labels.data, chosenLabelIds, project.id) : chosenLabelIds
   const chosenLabels = (labels.data ?? []).filter((label) => labelIds.includes(label.id)).sort((a, b) => a.name.localeCompare(b.name))
   const assignees = people.filter((person) => assigneeIds.includes(person.id))
+  const milestones = useMilestones(project?.id ?? null)
+  const cycles = useCycles(project?.id ?? null)
+  const milestone = milestones.data?.find((item) => item.id === milestoneId)
+  const cycle = cycles.data?.find((item) => item.id === cycleId)
 
   const create = useMutation({
     mutationFn: async () => {
@@ -116,7 +132,7 @@ export function NewTaskDialog({ defaults, onClose }: { defaults: NewTaskDefaults
       const task = await taskApi.createTaskWith(
         client,
         workspaceId,
-        taskApi.newTaskBody({ title, description: files.length > 0 ? '' : description, projectId: project.id, statusId: status.id, priority, assigneeIds, labelIds, dueAt: due?.end ?? null, dueStartAt: due?.start ?? null, parentId: parent?.id ?? null }),
+        taskApi.newTaskBody({ title, description: files.length > 0 ? '' : description, projectId: project.id, statusId: status.id, priority, assigneeIds, labelIds, dueAt: due?.end ?? null, dueStartAt: due?.start ?? null, parentId: parent?.id ?? null, milestoneId: milestone?.id ?? null, cycleId: cycle?.id ?? null, estimate }),
       )
       const problems: string[] = []
       if (relations.length > 0) {
@@ -273,6 +289,18 @@ export function NewTaskDialog({ defaults, onClose }: { defaults: NewTaskDefaults
                 <Icon name="calendar" size={14} color={colors.foreground} />
                 <ChipText>{due ? dueDateLabel(due.end, due.start) : 'Due date'}</ChipText>
               </Chip>
+              <Chip label={milestone ? `Milestone: ${milestone.name}` : 'Milestone'} onPress={project ? () => sheets.open({ kind: 'milestone' }) : undefined}>
+                <Icon name="target" size={14} color={colors.mutedForeground} />
+                <ChipText>{milestone?.name ?? 'Milestone'}</ChipText>
+              </Chip>
+              <Chip label={cycle ? `Cycle: ${cycleLabel(cycle)}` : 'Cycle'} onPress={project ? () => sheets.open({ kind: 'cycle' }) : undefined}>
+                <Icon name="refresh" size={14} color={cycle && cycleTiming(cycle, new Date()) === 'current' ? colors.primary : colors.mutedForeground} />
+                <ChipText>{cycle ? cycleLabel(cycle) : 'Cycle'}</ChipText>
+              </Chip>
+              <Chip label={estimate === null ? 'Estimate' : `Estimate: ${estimateLabel(estimate)}`} onPress={() => sheets.open({ kind: 'estimate' })}>
+                <Icon name="chart" size={14} color={colors.mutedForeground} />
+                <ChipText>{estimate === null ? 'Estimate' : estimateLabel(estimate)}</ChipText>
+              </Chip>
               <Chip
                 label={parent ? `Parent: ${identifier(parent, projects.data ?? [])} ${parent.title}` : 'Parent'}
                 onPress={() => sheets.open(parent ? { kind: 'parent-menu' } : { kind: 'pick-task', purpose: 'parent' })}
@@ -320,8 +348,10 @@ export function NewTaskDialog({ defaults, onClose }: { defaults: NewTaskDefaults
                 onPress={() => {
                   sheets.close()
                   setProjectId(item.id)
-                  // a status belongs to one project: the new project starts at its default
+                  // a status, a milestone and a cycle belong to one project: the new project starts without them
                   setStatusId(null)
+                  setMilestoneId(null)
+                  setCycleId(null)
                 }}
               />
             ))}
@@ -354,6 +384,35 @@ export function NewTaskDialog({ defaults, onClose }: { defaults: NewTaskDefaults
             onChange={(next) => {
               sheets.close()
               setDue(next)
+            }}
+          />
+        ) : null}
+        {sheet?.kind === 'milestone' && project ? (
+          <MilestoneChoices
+            projectId={project.id}
+            value={milestone?.id ?? null}
+            onSelect={(id) => {
+              sheets.close()
+              setMilestoneId(id)
+            }}
+          />
+        ) : null}
+        {sheet?.kind === 'cycle' && project ? (
+          <CycleChoices
+            projectId={project.id}
+            value={cycle?.id ?? null}
+            onSelect={(id) => {
+              sheets.close()
+              setCycleId(id)
+            }}
+          />
+        ) : null}
+        {sheet?.kind === 'estimate' ? (
+          <EstimateChoices
+            value={estimate}
+            onSelect={(next) => {
+              sheets.close()
+              setEstimate(next)
             }}
           />
         ) : null}

@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Field, FieldContent, FieldLabel, FieldTitle } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { relativeTime, shortDate } from '@/lib/format'
 import { useCan } from '@/features/workspaces/permissions'
@@ -137,7 +138,13 @@ export function ApiTokensPage() {
           </Field>
         </FieldLabel>
         <div className="min-[900px]:col-span-2">
-          <AccessPicker id="api-token-access" resources={tokenResources(serviceAccount, taskScope ? <ProjectPicker id="api-token-projects" projects={projects} selected={projectIds} onChange={setProjectIds} all={allProjects} onAllChange={setAllProjects} empty={projectsQuery.isPending ? 'Loading projects…' : projects.length ? undefined : 'This workspace has no active projects.'} /> : null)} scopes={scopes} onChange={setScopes} />
+          <AccessPicker id="api-token-access" resources={tokenResources(serviceAccount, taskScope ? <>
+            <ProjectPicker id="api-token-projects" projects={projects} selected={projectIds} onChange={setProjectIds} all={allProjects} onAllChange={setAllProjects} empty={projectsQuery.isPending ? 'Loading projects…' : projects.length ? undefined : 'This workspace has no active projects.'} />
+            {scopes.includes('tasks:write') ? <Label className="mt-3 flex items-start gap-2">
+              <Checkbox className="mt-0.5" checked={scopes.includes('tasks:import')} onCheckedChange={(checked) => setScopes(checked ? [...scopes, 'tasks:import'] : scopes.filter((scope) => scope !== 'tasks:import'))} />
+              <span className="grid gap-0.5">Import mode<span className="text-xs font-normal text-muted-foreground">Keeps original dates, numbers and authors. Sends no notifications.</span></span>
+            </Label> : null}
+          </> : null)} scopes={scopes} onChange={(next) => setScopes(next.includes('tasks:write') ? next : next.filter((scope) => scope !== 'tasks:import'))} />
         </div>
         </> : null}
         <Button className="justify-self-start" type="submit" disabled={createToken.isPending || !ready}>Create token</Button>
@@ -154,7 +161,7 @@ export function ApiTokensPage() {
         {tokens.data?.map((token) => <SettingsRow className="flex-nowrap" key={token.id}>
           <RowIcon><Key /></RowIcon>
           <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
-            <div className="flex min-w-0 flex-1 flex-col gap-0.5"><span className="flex items-center gap-2 text-[13px] font-medium text-foreground">{token.name}{isExpired(token.expires_at) ? <Badge variant="destructive">Expired</Badge> : null}</span><span className="text-xs text-muted-foreground/70">{token.service_account_name ? `Service account: ${token.service_account_name}` : 'Personal token'} · <code>{token.token_prefix}…</code> · {token.all_projects ? 'All projects · ' : token.project_ids.length ? `${token.project_ids.map((id) => projectNames.get(id) ?? 'Unavailable project').join(', ')} · ` : null}{token.expires_at ? `${isExpired(token.expires_at) ? 'expired' : 'expires'} ${shortDate(token.expires_at)}` : 'never expires'} · created {relativeTime(token.created_at)}</span></div>
+            <div className="flex min-w-0 flex-1 flex-col gap-0.5"><span className="flex items-center gap-2 text-[0.8125rem] font-medium text-foreground">{token.name}{isExpired(token.expires_at) ? <Badge variant="destructive">Expired</Badge> : null}</span><span className="text-xs text-muted-foreground/70">{token.service_account_name ? `Service account: ${token.service_account_name}` : 'Personal token'} · <code>{token.token_prefix}…</code> · {token.all_projects ? 'All projects · ' : token.project_ids.length ? `${token.project_ids.map((id) => projectNames.get(id) ?? 'Unavailable project').join(', ')} · ` : null}{token.expires_at ? `${isExpired(token.expires_at) ? 'expired' : 'expires'} ${shortDate(token.expires_at)}` : 'never expires'} · created {relativeTime(token.created_at)}</span></div>
             {/* Phones have no room beside the text, so the badges go under it, as in the mobile app. */}
             <span className="flex flex-wrap gap-1">{token.scopes.map((scope) => <Badge variant="secondary" key={scope}>{scope}</Badge>)}</span>
           </div>

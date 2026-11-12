@@ -41,7 +41,7 @@ function captureWrites(): Write[] {
 
 function Page({ tasks, select }: { tasks: Task[]; select: string[] }) {
   const { setSelected, selectedIds } = useTaskTarget()
-  const groupContext: GroupContext = { statuses: [todo], members: [], labels: [], projects: [launch], currentUserId: 'user-1', showEmpty: false }
+  const groupContext: GroupContext = { statuses: [todo], members: [], labels: [], projects: [launch], milestones: [], cycles: [], currentUserId: 'user-1', showEmpty: false }
   return (
     <>
       <button type="button" onClick={() => setSelected(select)}>select</button>

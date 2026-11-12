@@ -16,6 +16,7 @@ const LABEL_MIN_WIDTH = 120
 const HANDLE_MIN_WIDTH = 24
 const DIAMOND = 12
 const GAP = 6
+const HATCH = 'repeating-linear-gradient(135deg, color-mix(in oklch, var(--destructive) 30%, transparent) 0 3px, transparent 3px 7px)'
 
 /** Edge hit zone with a grip that shows on hover, so resizing is discoverable. `outside` puts it next to a short bar, so both edges and the bar itself stay grabbable. */
 function ResizeHandle({ side, outside, onPointerDown }: { side: 'start' | 'end'; outside: boolean; onPointerDown: (event: PointerEvent) => void }) {
@@ -41,6 +42,8 @@ export interface TimelineBarProps {
   /** `display.properties`: status and assignee follow it. */
   properties: TaskProperty[]
   overdueDays: number
+  /** Day index of the task's milestone target when the timeline groups by milestone: days past it are hatched. */
+  milestoneDay: number | null
   dragging: boolean
   onPointerDown: (event: PointerEvent, mode: DragMode) => void
   onClick: () => void
@@ -48,12 +51,13 @@ export interface TimelineBarProps {
 }
 
 /** A task on the timeline: a bar for a date range, a diamond for a due date only, plus an overdue tail. */
-export function TimelineBar({ task, span, range, pxPerDay, color, status, assignee, properties, overdueDays, dragging, onPointerDown, onClick, onKeyDown }: TimelineBarProps) {
+export function TimelineBar({ task, span, range, pxPerDay, color, status, assignee, properties, overdueDays, milestoneDay, dragging, onPointerDown, onClick, onKeyDown }: TimelineBarProps) {
   const closed = isClosedCategory(status?.category)
   const left = xOf(range, span.start, pxPerDay)
   const width = (dayIndex(range, span.end) - dayIndex(range, span.start) + 1) * pxPerDay
   const tailStart = xOf(range, span.end, pxPerDay) + pxPerDay
   const tailEnd = tailStart + overdueDays * pxPerDay
+  const lateDays = milestoneDay === null || closed ? 0 : Math.max(0, dayIndex(range, span.end) - milestoneDay)
   const label = (
     <>
       {properties.includes('status') ? <TaskStatusIcon status={status} size={13} /> : null}
@@ -67,7 +71,7 @@ export function TimelineBar({ task, span, range, pxPerDay, color, status, assign
     'data-dragging': dragging || undefined,
     role: 'button',
     tabIndex: 0,
-    'aria-label': `${task.identifier} ${task.title || 'Untitled'}, ${spanLabel(span)}`,
+    'aria-label': `${task.identifier} ${task.title || 'Untitled'}, ${spanLabel(span)}${lateDays > 0 ? `, ${lateDays} ${lateDays === 1 ? 'day' : 'days'} after its milestone` : ''}`,
     onClick,
     onKeyDown,
   }
@@ -79,7 +83,7 @@ export function TimelineBar({ task, span, range, pxPerDay, color, status, assign
       style={{
         left: tailStart,
         width: overdueDays * pxPerDay,
-        background: 'repeating-linear-gradient(135deg, color-mix(in oklch, var(--destructive) 30%, transparent) 0 3px, transparent 3px 7px)',
+        background: HATCH,
       }}
     />
   ) : null
@@ -88,9 +92,14 @@ export function TimelineBar({ task, span, range, pxPerDay, color, status, assign
     const boxLeft = left + pxPerDay / 2 - DIAMOND / 2
     // an overdue diamond's label sits after its tail, where it stays readable
     const labelShift = overdueDays > 0 ? Math.max(0, tailEnd + GAP - (boxLeft + DIAMOND + GAP)) : 0
+    const lateStart = (milestoneDay ?? 0) * pxPerDay + pxPerDay
     return (
       <>
         {tail}
+        {lateDays > 0 ? (
+          // from the day after the milestone target up to the diamond
+          <div data-late aria-hidden="true" className="pointer-events-none absolute top-2 bottom-2 rounded-l-sm" style={{ left: lateStart, width: boxLeft + DIAMOND / 2 - lateStart, background: HATCH }} />
+        ) : null}
         <div
           {...common}
           className={cn(
@@ -137,6 +146,10 @@ export function TimelineBar({ task, span, range, pxPerDay, color, status, assign
         style={{ ...tint, left, width: barWidth }}
         onPointerDown={(event) => onPointerDown(event, 'move')}
       >
+        {lateDays > 0 ? (
+          // the part of the bar past the milestone target; first, so the label paints over it
+          <span data-late aria-hidden="true" className="pointer-events-none absolute inset-y-0 right-0 rounded-r-[5px]" style={{ width: Math.min(lateDays * pxPerDay, barWidth), background: HATCH }} />
+        ) : null}
         <ResizeHandle side="start" outside={short} onPointerDown={(event) => onPointerDown(event, 'start')} />
         {narrow ? null : (
           <>

@@ -93,6 +93,8 @@ export interface ReplyPreview {
   /** The reply has a sticker. Missing on a row cached before stickers existed. */
   sticker?: boolean
   createdAt: number
+  /** The integration that posted the reply; `authorId` is then only the member who set it up. */
+  botName?: string | null
 }
 
 /** `pin`, `join` and `leave` are one-line system rows; `authorId` is the member who did it. */
@@ -148,6 +150,8 @@ export interface ChannelWebhook {
   lastUsedAt: number | null
   /** Where clicks on its buttons go; `null` when they are off. */
   requestUrl: string | null
+  /** Members' messages are sent to `requestUrl` too, and the webhook's secret can read the channel. */
+  events: boolean
 }
 
 /** One click that Orbit sent to a webhook's request URL. */

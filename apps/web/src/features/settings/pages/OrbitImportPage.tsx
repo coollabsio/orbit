@@ -210,7 +210,7 @@ function RecentImports({ imports }: { imports: OrbitImport[] | undefined }) {
           <Link
             key={item.id}
             to={`${ROOT}/${item.id}`}
-            className="flex min-h-10 min-w-0 items-center gap-3 px-4 py-1.5 text-[13px] transition-colors duration-150 ease-out hover:bg-sidebar-accent/50"
+            className="flex min-h-10 min-w-0 items-center gap-3 px-4 py-1.5 text-[0.8125rem] transition-colors duration-150 ease-out hover:bg-sidebar-accent/50"
           >
             <span className="min-w-0 flex-1 truncate text-foreground">{orbitImportName(item)}</span>
             {item.mode ? <span className="shrink-0 text-xs text-muted-foreground">{item.mode === 'full' ? 'Workspace' : 'Private data'}</span> : null}
@@ -294,7 +294,7 @@ function ChoiceGroup({ title, choices, selected, onChange }: { title: string; ch
       {choices.map((choice) => (
         <div
           key={choice.id}
-          className="flex h-8 items-center gap-2 rounded-md px-2 pl-8 text-[13px] text-foreground transition-colors duration-150 ease-out hover:bg-sidebar-accent/50"
+          className="flex h-8 items-center gap-2 rounded-md px-2 pl-8 text-[0.8125rem] text-foreground transition-colors duration-150 ease-out hover:bg-sidebar-accent/50"
         >
           <Checkbox aria-label={`Select ${choice.name}`} checked={selected.has(choice.id)} onCheckedChange={(checked) => toggle([choice.id], checked)} />
           {/* Clicking the name toggles the row, like the checkbox (the checkbox is the keyboard control). */}
@@ -357,7 +357,7 @@ function Chooser({ workspaceId, item, tree }: { workspaceId: string; item: Orbit
           </>
         ) : null}
         {tree.private_page_count > 0 ? (
-          <div className="flex h-8 items-center gap-2 rounded-md px-2 text-[13px] text-foreground transition-colors duration-150 ease-out hover:bg-sidebar-accent/50">
+          <div className="flex h-8 items-center gap-2 rounded-md px-2 text-[0.8125rem] text-foreground transition-colors duration-150 ease-out hover:bg-sidebar-accent/50">
             <Checkbox aria-label="Import my private pages" checked={privatePages} onCheckedChange={setPrivatePages} />
             <button type="button" tabIndex={-1} className="min-w-0 flex-1 truncate text-left text-xs font-semibold" onClick={() => setPrivatePages(!privatePages)}>
               My private pages
@@ -511,7 +511,7 @@ function ResultStep({ item }: { item: OrbitImport }) {
             />
             <ul className="flex flex-col border-t border-border">
               {report.unmatched_users.map((user) => (
-                <li key={user.email ?? user.name} className="flex items-center gap-3 border-b border-border px-1 py-2 text-[13px]">
+                <li key={user.email ?? user.name} className="flex items-center gap-3 border-b border-border px-1 py-2 text-[0.8125rem]">
                   <span className="min-w-0 flex-1 truncate text-foreground">{user.name}</span>
                   <span className="min-w-0 truncate text-muted-foreground">{user.email}</span>
                 </li>
@@ -525,7 +525,7 @@ function ResultStep({ item }: { item: OrbitImport }) {
             <ul className="flex flex-col border-t border-border">
               {report.failures.map((failure, index) => (
                 <li key={`${failure.kind}-${index}`} className="flex flex-col gap-0.5 border-b border-border px-1 py-2">
-                  <span className="text-[13px] text-foreground">
+                  <span className="text-[0.8125rem] text-foreground">
                     {failure.title.trim() ? failure.title : 'Untitled'}
                     <span className="text-muted-foreground"> ({failure.kind})</span>
                   </span>

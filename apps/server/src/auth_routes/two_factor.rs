@@ -239,7 +239,7 @@ pub(super) async fn challenge(
             attempts: 0,
         })
         .await
-        .map_err(|_| ApiError::internal(instance, request_id))?
+        .map_err(|error| ApiError::internal(instance, request_id).cause(error))?
         .ok_or_else(|| busy(instance, request_id))?;
     Ok((
         StatusCode::ACCEPTED,
@@ -300,7 +300,7 @@ pub(super) async fn login_second_factor(
         .pending
         .take(&body.two_factor_token)
         .await
-        .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?
+        .map_err(|error| ApiError::internal(instance, request_id.as_ref()).cause(error))?
     else {
         return Err(expired());
     };
@@ -328,7 +328,7 @@ pub(super) async fn login_second_factor(
                     },
                 )
                 .await
-                .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?;
+                .map_err(|error| ApiError::internal(instance, request_id.as_ref()).cause(error))?;
             return Err(ApiError::throttled(delay, instance, request_id.as_ref()));
         }
         Err(ThrottleDecision::Allowed) => unreachable!("allowed admission returns a reservation"),
@@ -341,7 +341,7 @@ pub(super) async fn login_second_factor(
         request_id_value(request_id.as_ref()),
     )
     .await
-    .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?;
+    .map_err(|error| ApiError::internal(instance, request_id.as_ref()).cause(error))?;
     if !accepted {
         state
             .throttler
@@ -360,7 +360,7 @@ pub(super) async fn login_second_factor(
                 TimestampMillis::now(),
             )
             .await
-            .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?;
+            .map_err(|error| ApiError::internal(instance, request_id.as_ref()).cause(error))?;
         if attempts + 1 < MAX_CODE_ATTEMPTS {
             state
                 .pending
@@ -374,7 +374,7 @@ pub(super) async fn login_second_factor(
                     },
                 )
                 .await
-                .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?;
+                .map_err(|error| ApiError::internal(instance, request_id.as_ref()).cause(error))?;
         }
         return Err(ApiError::new(
             StatusCode::UNAUTHORIZED,
@@ -405,7 +405,10 @@ pub(super) async fn login_second_factor(
             .map_err(|error| match error {
                 // The password changed or the account was suspended after the first step.
                 IdentityError::InvalidCredential => expired(),
-                _ => ApiError::internal(instance, request_id.as_ref()),
+                IdentityError::Unavailable(error) => {
+                    ApiError::internal(instance, request_id.as_ref()).cause(error)
+                }
+                error => ApiError::internal(instance, request_id.as_ref()).cause(error),
             })?,
         FirstFactor::Provider { profile, link } => state
             .repository
@@ -413,8 +416,8 @@ pub(super) async fn login_second_factor(
             .await
             .map_err(|error| match error {
                 ProviderSignInError::Refused(_) => expired(),
-                ProviderSignInError::Database(_) => {
-                    ApiError::internal(instance, request_id.as_ref())
+                ProviderSignInError::Database(error) => {
+                    ApiError::internal(instance, request_id.as_ref()).cause(error)
                 }
             })?,
     };
@@ -511,7 +514,7 @@ pub(super) async fn get_two_factor(
         .two_factor_status(session.user.id)
         .await
         .map(Json)
-        .map_err(|_| ApiError::internal(instance, request_id.as_ref()))
+        .map_err(|error| ApiError::internal(instance, request_id.as_ref()).cause(error))
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -553,31 +556,33 @@ pub(super) async fn setup_totp(
         request_id.as_ref(),
     )
     .await?;
-    let app_key = state
-        .app_key
-        .ok_or_else(|| ApiError::internal(instance, request_id.as_ref()))?;
+    let app_key = state.app_key.ok_or_else(|| {
+        ApiError::internal(instance, request_id.as_ref()).cause("app key missing")
+    })?;
     let mut bytes = [0_u8; 20];
     OsRng.fill_bytes(&mut bytes);
     let secret = Secret::from(bytes.to_vec());
     let encoded = secret.to_base32();
-    let totp = totp_for(secret, &session.user.email)
-        .ok_or_else(|| ApiError::internal(instance, request_id.as_ref()))?;
-    let encrypted = encrypt_secret(&app_key, &encoded)
-        .map_err(|()| ApiError::internal(instance, request_id.as_ref()))?;
+    let totp = totp_for(secret, &session.user.email).ok_or_else(|| {
+        ApiError::internal(instance, request_id.as_ref()).cause("could not build the TOTP")
+    })?;
+    let encrypted = encrypt_secret(&app_key, &encoded).map_err(|()| {
+        ApiError::internal(instance, request_id.as_ref()).cause("could not encrypt the secret")
+    })?;
     let started = state
         .repository
         .begin_totp_setup(session.user.id, &encrypted, TimestampMillis::now())
         .await
-        .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?;
+        .map_err(|error| ApiError::internal(instance, request_id.as_ref()).cause(error))?;
     if !started {
         return Err(already_enabled(instance, request_id.as_ref()));
     }
     let otpauth_url = totp
         .to_url()
-        .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?;
+        .map_err(|error| ApiError::internal(instance, request_id.as_ref()).cause(error))?;
     let qr_code = totp
         .to_qr_base64()
-        .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?;
+        .map_err(|error| ApiError::internal(instance, request_id.as_ref()).cause(error))?;
     Ok(Json(TotpSetup {
         secret: encoded,
         otpauth_url,
@@ -612,7 +617,7 @@ pub(super) async fn enable_totp(
         .repository
         .totp(session.user.id)
         .await
-        .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?;
+        .map_err(|error| ApiError::internal(instance, request_id.as_ref()).cause(error))?;
     match stored {
         Some(stored) if stored.enabled => {
             return Err(already_enabled(instance, request_id.as_ref()));
@@ -632,7 +637,7 @@ pub(super) async fn enable_totp(
     let code = body.code.trim().replace(' ', "");
     let step = totp_step(&state, &session.user, &code)
         .await
-        .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?
+        .map_err(|error| ApiError::internal(instance, request_id.as_ref()).cause(error))?
         .ok_or_else(|| {
             ApiError::new(
                 StatusCode::UNPROCESSABLE_ENTITY,
@@ -648,13 +653,14 @@ pub(super) async fn enable_totp(
         .enable_totp(
             session.user.id,
             step,
-            &recovery_code_key(&state)
-                .ok_or_else(|| ApiError::internal(instance, request_id.as_ref()))?,
+            &recovery_code_key(&state).ok_or_else(|| {
+                ApiError::internal(instance, request_id.as_ref()).cause("app key missing")
+            })?,
             request_id_value(request_id.as_ref()),
             TimestampMillis::now(),
         )
         .await
-        .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?
+        .map_err(|error| ApiError::internal(instance, request_id.as_ref()).cause(error))?
         .ok_or_else(|| already_enabled(instance, request_id.as_ref()))?;
     Ok(Json(RecoveryCodes {
         recovery_codes: codes,
@@ -689,7 +695,7 @@ pub(super) async fn disable_two_factor(
             TimestampMillis::now(),
         )
         .await
-        .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?;
+        .map_err(|error| ApiError::internal(instance, request_id.as_ref()).cause(error))?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -717,13 +723,14 @@ pub(super) async fn regenerate_recovery_codes(
         .repository
         .regenerate_recovery_codes(
             session.user.id,
-            &recovery_code_key(&state)
-                .ok_or_else(|| ApiError::internal(instance, request_id.as_ref()))?,
+            &recovery_code_key(&state).ok_or_else(|| {
+                ApiError::internal(instance, request_id.as_ref()).cause("app key missing")
+            })?,
             request_id_value(request_id.as_ref()),
             TimestampMillis::now(),
         )
         .await
-        .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?
+        .map_err(|error| ApiError::internal(instance, request_id.as_ref()).cause(error))?
         .ok_or_else(|| {
             ApiError::new(
                 StatusCode::CONFLICT,
@@ -768,8 +775,10 @@ pub(super) async fn confirm_identity(
         .repository
         .find_by_email(&session.user.email)
         .await
-        .map_err(|_| ApiError::internal(instance, request_id))?
-        .ok_or_else(|| ApiError::internal(instance, request_id))?;
+        .map_err(|error| ApiError::internal(instance, request_id).cause(error))?
+        .ok_or_else(|| {
+            ApiError::internal(instance, request_id).cause("signed-in user's identity missing")
+        })?;
     let Some(password_hash) = identity.password_hash else {
         let since =
             TimestampMillis::from_millis(TimestampMillis::now().as_millis() - FRESH_SIGN_IN_MILLIS);
@@ -777,7 +786,7 @@ pub(super) async fn confirm_identity(
             .repository
             .session_fresh_since(session.id, since)
             .await
-            .map_err(|_| ApiError::internal(instance, request_id))?;
+            .map_err(|error| ApiError::internal(instance, request_id).cause(error))?;
         if fresh {
             return Ok(());
         }
@@ -809,13 +818,14 @@ pub(super) async fn confirm_identity(
         .await
         .map_err(|decision| match decision {
             ThrottleDecision::RetryAfter(delay) => ApiError::throttled(delay, instance, request_id),
-            ThrottleDecision::Allowed => ApiError::internal(instance, request_id),
+            ThrottleDecision::Allowed => ApiError::internal(instance, request_id)
+                .cause("throttler refused an allowed reservation"),
         })?;
     let valid = state
         .passwords
         .verify(password, password_hash)
         .await
-        .map_err(|_| ApiError::internal(instance, request_id))?
+        .map_err(|error| ApiError::internal(instance, request_id).cause(error))?
         .valid;
     if valid {
         state.throttler.finish_success(reservation).await;

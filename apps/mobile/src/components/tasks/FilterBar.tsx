@@ -6,8 +6,9 @@ import {
   chosenValues,
   countConditions,
   defaultValue,
+  ESTIMATE_PRESENCE,
   FIELD_META,
-  FIELD_ORDER,
+  fieldsFor,
   isCompleteCondition,
   isFlatFilter,
   listValue,
@@ -140,7 +141,7 @@ export function FilterBar({
   if (editor?.kind === 'fields') {
     sheet = {
       title: 'Filter by',
-      options: FIELD_ORDER.map((field) => ({ key: field, label: FIELD_META[field].label, leading: <Icon name={FIELD_META[field].icon} size={14} color={colors.mutedForeground} /> })),
+      options: fieldsFor(options.projectId).map((field) => ({ key: field, label: FIELD_META[field].label, leading: <Icon name={FIELD_META[field].icon} size={14} color={colors.mutedForeground} /> })),
       onSelect: (key) => pickField(key as FilterField),
     }
   } else if (editor?.kind === 'operator') {
@@ -157,7 +158,13 @@ export function FilterBar({
   } else if (editor?.kind === 'values') {
     const { draft } = editor
     const meta = FIELD_META[draft.field]
-    if (meta.kind === 'date') {
+    if (draft.field === 'estimate') {
+      sheet = {
+        title: meta.label,
+        options: ESTIMATE_PRESENCE.map((choice) => ({ key: choice.operator, label: choice.label, selected: editor.index !== null && choice.operator === draft.operator })),
+        onSelect: (key) => edit({ field: draft.field, operator: key as FilterOperator }, true),
+      }
+    } else if (meta.kind === 'date') {
       const presets = draft.operator === 'between' ? RANGE_DATE_PRESETS : SINGLE_DATE_PRESETS
       sheet = {
         title: meta.label,

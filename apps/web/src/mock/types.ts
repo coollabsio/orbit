@@ -1,5 +1,3 @@
-import type { Attachment } from '@/lib/attachmentLib'
-
 export interface User {
   id: string
   name: string
@@ -10,35 +8,6 @@ export interface User {
   online: boolean
   title: string
   roleIds: string[]
-}
-
-export interface MailFolder {
-  id: string
-  name: string
-  icon: 'inbox' | 'send' | 'note' | 'trash' | 'archive' | 'star' | 'folder'
-  /** user-created folder (listed under "Custom folders") */
-  custom?: boolean
-}
-
-export interface MailMessage {
-  id: string
-  from: { name: string; email: string }
-  to: string[]
-  body: string
-  createdAt: string
-  attachments?: Attachment[]
-}
-
-export interface MailThread {
-  id: string
-  folderId: string
-  subject: string
-  snippet: string
-  messages: MailMessage[]
-  unread: boolean
-  starred: boolean
-  hasAttachment: boolean
-  updatedAt: string
 }
 
 /** A row of the Home dashboard's "Active channels" card. */
@@ -64,8 +33,6 @@ export interface Notification {
 export interface AppState {
   currentUserId: string
   users: User[]
-  mailFolders: MailFolder[]
-  mailThreads: MailThread[]
   channels: Channel[]
   notifications: Notification[]
 }

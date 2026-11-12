@@ -816,7 +816,9 @@ async fn download_attachment(
         .download(&session, workspace_id, task_id, comment_id, attachment_id)
         .await
         .map_err(|error| AttachmentApiError::repository(error, &instance, request_id))?;
-    download_response(download).ok_or_else(|| AttachmentApiError::internal(&instance, request_id))
+    download_response(download).ok_or_else(|| {
+        AttachmentApiError::internal(&instance, request_id).cause("invalid stored file headers")
+    })
 }
 
 /// Streams a blob with the download safety headers (type, disposition, nosniff); `None` when
@@ -907,9 +909,16 @@ pub(crate) struct AttachmentProblem {
 struct AttachmentApiError {
     status: StatusCode,
     body: Box<AttachmentProblem>,
+    cause: Option<String>,
 }
 
 impl AttachmentApiError {
+    /// Records why this 500 happened. The HTTP layer logs it with the request ID; the client does not see it.
+    fn cause(mut self, error: impl std::fmt::Display) -> Self {
+        self.cause = Some(error.to_string());
+        self
+    }
+
     fn new(
         status: StatusCode,
         code: &'static str,
@@ -929,6 +938,7 @@ impl AttachmentApiError {
                 instance: instance.to_owned(),
                 request_id: request_id_value(request_id).to_owned(),
             }),
+            cause: None,
         }
     }
 
@@ -1050,7 +1060,7 @@ impl AttachmentApiError {
                 Self::invalid_multipart(instance, request_id)
             }
             UploadError::Unauthorized => Self::not_found(instance, request_id),
-            _ => Self::internal(instance, request_id),
+            error => Self::internal(instance, request_id).cause(error),
         }
     }
 
@@ -1071,8 +1081,11 @@ impl AttachmentApiError {
             ),
             AttachmentRepositoryError::InvalidCursor => Self::invalid_cursor(instance, request_id),
             AttachmentRepositoryError::Upload(error) => Self::upload(error, instance, request_id),
-            AttachmentRepositoryError::Database(_) | AttachmentRepositoryError::InvalidRecord => {
-                Self::internal(instance, request_id)
+            AttachmentRepositoryError::Database(error) => {
+                Self::internal(instance, request_id).cause(error)
+            }
+            error @ AttachmentRepositoryError::InvalidRecord => {
+                Self::internal(instance, request_id).cause(error)
             }
         }
     }
@@ -1085,6 +1098,11 @@ impl IntoResponse for AttachmentApiError {
             CONTENT_TYPE,
             HeaderValue::from_static("application/problem+json"),
         );
+        if let Some(cause) = self.cause {
+            response
+                .extensions_mut()
+                .insert(orbit_platform::ErrorCause(cause));
+        }
         response
     }
 }

@@ -12,10 +12,10 @@ export function ConfirmWithProvider({ returnTo }: { returnTo: string }) {
   const accounts = useConnectedAccounts()
   const start = useStartProviderSignIn()
   const provider = accounts.data?.[0]?.provider
-  if (!provider) return <p role="alert" className="text-[13px] text-destructive">Sign out and sign in again, then try again.</p>
+  if (!provider) return <p role="alert" className="text-[0.8125rem] text-destructive">Sign out and sign in again, then try again.</p>
   const name = PROVIDER_NAMES[provider]
   return (
-    <div role="alert" className="grid gap-3 text-[13px]">
+    <div role="alert" className="grid gap-3 text-[0.8125rem]">
       <p>For your security, confirm it is you with {name} first. Then try again.</p>
       {start.isError ? <p className="text-destructive">{start.error instanceof ApiProblem ? start.error.detail : 'The confirmation could not start.'}</p> : null}
       <Button type="button" variant="outline" className="justify-self-start" disabled={start.isPending || start.isSuccess} onClick={() => start.mutate({ provider, intent: 'confirm', returnTo })}>

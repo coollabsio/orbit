@@ -160,7 +160,8 @@ export function useWorkspaceBucket(workspaceId: string, enabled: boolean) {
     enabled,
     refetchInterval: (query) => {
       const bucket = query.state.data
-      return bucket && (bucket.checking || bucket.files_to_move > 0 || bucket.removing) ? 5000 : false
+      if (bucket?.checking) return 1000
+      return bucket && (bucket.files_to_move > 0 || bucket.removing) ? 5000 : false
     },
   })
 }
@@ -193,6 +194,8 @@ export function useCreateWorkspace() {
     onSuccess: (workspace) => {
       queryClient.setQueryData(queryKeys.workspaces, (items: unknown) =>
         Array.isArray(items) ? [...items, workspace] : [workspace])
+      // The first workspace starts the account's trial.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.accountTrial })
     },
   })
 }

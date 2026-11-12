@@ -23,12 +23,14 @@ pub use auth::{
     generate_opaque_token, normalize_email,
 };
 pub use backup::{
-    AttachmentMutationCoordinator, AttachmentMutationGuard, BackupError, BackupFile, BackupKind,
-    BackupManifest, BackupService, BackupSnapshot, SnapshotReader, SnapshotRow,
+    AttachmentMutationCoordinator, AttachmentMutationGuard, BackupEncryption, BackupError,
+    BackupFile, BackupKind, BackupManifest, BackupService, BackupSnapshot, SnapshotReader,
+    SnapshotRow,
 };
 pub use config::{
-    ApnsConfig, AppKey, BillingConfig, Config, ConfigError, DataConfig, EnvironmentMode,
-    HttpConfig, JobsConfig, MetricsConfig, Plan, RateLimitConfig, Secret, TrialConfig,
+    ApnsConfig, AppKey, BackupSchedule, BillingConfig, Config, ConfigError, DataConfig,
+    EnvironmentMode, HttpConfig, InstanceConfig, JobsConfig, MailConfig, MailMode, MetricsConfig,
+    OAuthClientConfig, Plan, RateLimitConfig, Secret, SmtpConfig, SmtpSecurity, TrialConfig,
     UploadConfig, redact_database_url,
 };
 pub use db::{
@@ -44,13 +46,13 @@ pub use files::{
     BlobObject, BlobReader, BlobStore, BlobStoreError, ContentDisposition, DownloadMetadata,
     FinalizedAttachment, FinalizedBlob, INLINE_IMAGE_TYPES, LocalBlobStore, NewAttachmentReference,
     ObjectStorage, ObjectStorageState, ReconcileResult, S3_DELETE_DELAY_MILLIS, S3Bucket, S3Config,
-    S3Error, S3Object, StagedUpload, StoredObject, TieredBlobStore, UploadError,
+    S3Error, S3Object, SHRINK_MIN_BYTES, StagedUpload, StoredObject, TieredBlobStore, UploadError,
     UploadFinalization, UploadLimitError, UploadLimits, UploadService, WORKSPACE_STORAGE_USED,
-    WorkspaceBucket,
+    WorkspaceBucket, shrink_image,
 };
 pub use health::{HealthCheck, HealthCheckResult, HealthRegistry, ReadinessReport};
 pub use http::{
-    ClientIp, HttpLimits, HttpPlatformLayer, LargeUpload, OriginPolicy, RequestId,
+    ClientIp, ErrorCause, HttpLimits, HttpPlatformLayer, LargeUpload, OriginPolicy, RequestId,
     RequestTransport, bearer_token,
 };
 pub use id::{Id, ParseIdError};

@@ -8,8 +8,10 @@ use serde_json::{Map, Value, json};
 
 use super::{arguments, definition, parse_id, write_definition};
 use crate::repositories::api_tokens::ApiTokenScope;
-use crate::repositories::databases::{AgentPropertyChanges, AgentQuery};
-use crate::token_api::{Authorized, DatabaseRowPatch, NewDatabaseRow, TokenApiError};
+use crate::repositories::databases::{
+    AgentPropertyChanges, AgentPropertySpec, AgentQuery, AgentViewChanges, AgentViewSpec, ViewType,
+};
+use crate::token_api::{Authorized, DatabaseRowPatch, NewDatabase, NewDatabaseRow, TokenApiError};
 
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -138,15 +140,125 @@ struct DeletePropertyArgs {
     property: String,
 }
 
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct CreateDatabaseArgs {
+    /// Up to 500 characters.
+    #[serde(default)]
+    title: String,
+    /// The database goes under this doc, in its space.
+    parent_id: Option<String>,
+    /// Root databases only: the teamspace. With neither this nor `private`, the default teamspace.
+    teamspace_id: Option<String>,
+    /// Root databases only: `true` puts the database in your private space.
+    private: Option<bool>,
+    /// Up to 64 characters.
+    icon: Option<String>,
+    /// The properties after the title property "Name", such as `{"name": "Type", "type":
+    /// "select", "config": {"options": ["Main", "Dessert"]}}`. Omitted: a "Tags" multi-select.
+    properties: Option<Vec<AgentPropertySpec>>,
+    /// 1 to 50 views such as `{"name": "Dessert", "type": "table", "filter": {"op": "and",
+    /// "children": [{"property_id": "Type", "operator": "is", "value": "Dessert"}]}}`. Omitted:
+    /// one "Table" view.
+    views: Option<Vec<AgentViewSpec>>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct ListViewsArgs {
+    database_id: String,
+    /// The `link_id` of a linked view block; omitted: the database's own views.
+    link_id: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct CreateViewArgs {
+    database_id: String,
+    /// Adds the view to this linked view block instead of the database's own views.
+    link_id: Option<String>,
+    /// 1 to 200 characters.
+    name: String,
+    /// `table` (default), `board`, `list`, `calendar`, `gallery`, `timeline` or `form`.
+    #[serde(rename = "type", default)]
+    view_type: ViewType,
+    /// An AND/OR group as in `query_database`: `{"op": "and", "children": [{"property_id":
+    /// "Type", "operator": "is", "value": "Dessert"}]}`. Omitted: every row.
+    filter: Option<Value>,
+    /// Up to 10 sorts: `[{"property_id": "Name", "direction": "asc"}]`.
+    sorts: Option<Value>,
+    /// The visible properties in order, by name or id; the others are hidden. The title always
+    /// shows. Omitted: every property.
+    columns: Option<Vec<String>>,
+    /// Board only: the select, status, multi-select or person property of the columns.
+    group_by: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct UpdateViewArgs {
+    database_id: String,
+    view_id: String,
+    /// The view belongs to this linked view block.
+    link_id: Option<String>,
+    /// 1 to 200 characters.
+    name: Option<String>,
+    /// As in `create_database_view`; replaces the view's filter. `{"op": "and", "children": []}`
+    /// clears it.
+    filter: Option<Value>,
+    /// Replaces the sorts; an empty list clears them.
+    sorts: Option<Value>,
+    /// Replaces the visible properties.
+    columns: Option<Vec<String>>,
+    /// Board only.
+    group_by: Option<String>,
+    /// The new index among the views.
+    position: Option<i64>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct DeleteViewArgs {
+    database_id: String,
+    view_id: String,
+    /// The view belongs to this linked view block.
+    link_id: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct CreateLinkArgs {
+    /// The database to show.
+    database_id: String,
+    /// The doc that shows it. The block goes at the end of the doc.
+    host_page_id: String,
+    /// An own view whose type and config the block's first view copies. Default: the first view.
+    from_view_id: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct DeleteLinkArgs {
+    database_id: String,
+    /// The `link_id` of the block.
+    link_id: String,
+}
+
 pub(super) fn scope(name: &str) -> Option<ApiTokenScope> {
     match name {
-        "get_database" | "query_database" => Some(ApiTokenScope::DocsRead),
+        "get_database" | "query_database" | "list_database_views" => Some(ApiTokenScope::DocsRead),
         "create_database_row"
         | "update_database_row"
         | "trash_database_rows"
         | "create_database_property"
         | "update_database_property"
-        | "delete_database_property" => Some(ApiTokenScope::DocsWrite),
+        | "delete_database_property"
+        | "create_database"
+        | "create_database_view"
+        | "update_database_view"
+        | "delete_database_view"
+        | "create_database_link"
+        | "delete_database_link" => Some(ApiTokenScope::DocsWrite),
         _ => None,
     }
 }
@@ -189,6 +301,40 @@ pub(super) fn tools() -> Vec<Tool> {
         write_definition::<DeletePropertyArgs>(
             "delete_database_property",
             "Delete a database property, by name or id, with its values in every row. This cannot be undone.",
+            true,
+        ),
+        write_definition::<CreateDatabaseArgs>(
+            "create_database",
+            "Create a database with its properties and views in one call. Returns the database as get_database does.",
+            false,
+        ),
+        definition::<ListViewsArgs>(
+            "list_database_views",
+            "List the views of a database, or of one of its linked view blocks, with each view's type, filter, sorts and visible columns by name.",
+        ),
+        write_definition::<CreateViewArgs>(
+            "create_database_view",
+            "Add a view (table, board, list, calendar, gallery, timeline or form) with a filter, sorts and visible columns to a database or to a linked view block.",
+            false,
+        ),
+        write_definition::<UpdateViewArgs>(
+            "update_database_view",
+            "Rename, move or reconfigure a view. filter, sorts, columns and group_by replace what the view has; fields left out stay. Last write wins.",
+            true,
+        ),
+        write_definition::<DeleteViewArgs>(
+            "delete_database_view",
+            "Delete a view of a database or of a linked view block. The last view stays.",
+            true,
+        ),
+        write_definition::<CreateLinkArgs>(
+            "create_database_link",
+            "Show an existing database in a doc as a linked view block at the end of the doc, with views of its own (the rows are not copied). Returns link_id; use it as link_id in the view tools. Fails with a conflict when the doc changed meanwhile.",
+            false,
+        ),
+        write_definition::<DeleteLinkArgs>(
+            "delete_database_link",
+            "Remove a linked view block from its doc, with its views. The database and its rows stay.",
             true,
         ),
     ]
@@ -314,6 +460,113 @@ pub(super) async fn call(
                     .delete_database_property(parse_id(&a.database_id)?, &a.property)
                     .await
                     .map(|id| json!({ "deleted": id.to_string() })))
+            };
+            run.await
+        }
+        "create_database" => {
+            let run = async {
+                let a: CreateDatabaseArgs = arguments(request)?;
+                let input = NewDatabase {
+                    parent_id: a.parent_id.as_deref().map(parse_id).transpose()?,
+                    teamspace_id: a.teamspace_id.as_deref().map(parse_id).transpose()?,
+                    private: a.private,
+                    title: a.title,
+                    icon: a.icon,
+                    properties: a.properties,
+                    views: a.views,
+                };
+                Ok(api.create_database(input).await.map(|d| json!(d)))
+            };
+            run.await
+        }
+        "list_database_views" => {
+            let run = async {
+                let a: ListViewsArgs = arguments(request)?;
+                let link = a.link_id.as_deref().map(parse_id).transpose()?;
+                Ok(api
+                    .database_views(parse_id(&a.database_id)?, link)
+                    .await
+                    .map(|views| json!({ "items": views })))
+            };
+            run.await
+        }
+        "create_database_view" => {
+            let run = async {
+                let a: CreateViewArgs = arguments(request)?;
+                let link = a.link_id.as_deref().map(parse_id).transpose()?;
+                Ok(api
+                    .create_database_view(
+                        parse_id(&a.database_id)?,
+                        link,
+                        AgentViewSpec {
+                            name: a.name,
+                            view_type: a.view_type,
+                            filter: a.filter,
+                            sorts: a.sorts,
+                            columns: a.columns,
+                            group_by: a.group_by,
+                        },
+                    )
+                    .await
+                    .map(|view| json!(view)))
+            };
+            run.await
+        }
+        "update_database_view" => {
+            let run = async {
+                let a: UpdateViewArgs = arguments(request)?;
+                let link = a.link_id.as_deref().map(parse_id).transpose()?;
+                Ok(api
+                    .update_database_view(
+                        parse_id(&a.database_id)?,
+                        parse_id(&a.view_id)?,
+                        link,
+                        AgentViewChanges {
+                            name: a.name,
+                            filter: a.filter,
+                            sorts: a.sorts,
+                            columns: a.columns,
+                            group_by: a.group_by,
+                            position: a.position,
+                        },
+                    )
+                    .await
+                    .map(|view| json!(view)))
+            };
+            run.await
+        }
+        "delete_database_view" => {
+            let run = async {
+                let a: DeleteViewArgs = arguments(request)?;
+                let link = a.link_id.as_deref().map(parse_id).transpose()?;
+                Ok(api
+                    .delete_database_view(parse_id(&a.database_id)?, parse_id(&a.view_id)?, link)
+                    .await
+                    .map(|()| json!({ "deleted": a.view_id })))
+            };
+            run.await
+        }
+        "create_database_link" => {
+            let run = async {
+                let a: CreateLinkArgs = arguments(request)?;
+                Ok(api
+                    .create_database_link(
+                        parse_id(&a.database_id)?,
+                        parse_id(&a.host_page_id)?,
+                        a.from_view_id.as_deref().map(parse_id).transpose()?,
+                    )
+                    .await
+                    .map(|linked| json!(linked)))
+            };
+            run.await
+        }
+        "delete_database_link" => {
+            let run = async {
+                let a: DeleteLinkArgs = arguments(request)?;
+                Ok(api
+                    .delete_database_link(parse_id(&a.database_id)?, parse_id(&a.link_id)?)
+                    .await
+                    .map(|()| json!({ "deleted": a.link_id })))
             };
             run.await
         }

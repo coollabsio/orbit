@@ -6,12 +6,13 @@ import { Button } from '@/components/ui/button'
 import { Tip } from '@/components/common/Tip'
 import { Input } from '@/components/ui/input'
 import { applyRebind, findConflict, findConflicts, isReserved, parseKeys, resolveBindings } from '@/shortcuts/bindings'
-import { COMMANDS, type Command, type Group } from '@/shortcuts/commands'
+import { COMMANDS, isMailCommand, type Command, type Group } from '@/shortcuts/commands'
+import { useMailEnabled } from '@/features/mail/enabled'
 import { KeyRecorder } from '@/shortcuts/KeyRecorder'
 import { ShortcutKeys } from '@/shortcuts/Shortcut'
 import { useShortcutBindings } from '@/shortcuts/useShortcutBindings'
 
-const GROUPS: Group[] = ['General', 'Navigation', 'List', 'Task', 'Pull requests', 'Docs', 'Chat']
+const GROUPS: Group[] = ['General', 'Navigation', 'List', 'Task', 'Pull requests', 'Docs', 'Chat', 'Mail']
 const ALL: readonly Command[] = COMMANDS
 
 /** What the page says under a row after a recording that could not be saved as it is. */
@@ -26,7 +27,8 @@ export function ShortcutsPage() {
   const [notice, setNotice] = useState<Notice | null>(null)
 
   const needle = query.trim().toLowerCase()
-  const shown = ALL.filter((command) => !needle || command.title.toLowerCase().includes(needle) || (bindings[command.id] ?? '').toLowerCase().includes(needle))
+  const mail = useMailEnabled()
+  const shown = ALL.filter((command) => (mail || !isMailCommand(command.id))).filter((command) => !needle || command.title.toLowerCase().includes(needle) || (bindings[command.id] ?? '').toLowerCase().includes(needle))
   const changed = Object.keys(overrides).length > 0
 
   const record = (command: Command, keys: string) => {
@@ -66,7 +68,7 @@ export function ShortcutsPage() {
       }
       flush
     >
-      {shown.length === 0 ? <p className="px-4 py-10 text-center text-[13px] text-muted-foreground">No shortcut matches "{query.trim()}".</p> : null}
+      {shown.length === 0 ? <p className="px-4 py-10 text-center text-[0.8125rem] text-muted-foreground">No shortcut matches "{query.trim()}".</p> : null}
       {GROUPS.map((group) => {
         const commands = shown.filter((command) => command.group === group)
         if (commands.length === 0) return null
@@ -80,7 +82,7 @@ export function ShortcutsPage() {
                 // a default that another command's override took over
                 const clash = keys && !rowNotice ? findConflict(bindings, command.id, keys) : null
                 return (
-                  <li key={command.id} aria-label={command.title} className="px-4 py-1.5 text-[13px]">
+                  <li key={command.id} aria-label={command.title} className="px-4 py-1.5 text-[0.8125rem]">
                     {/* a fixed height, so a row does not move when its recorder or keys change */}
                     <div className="flex h-8 items-center gap-2">
                       <span className="min-w-0 flex-1 truncate">{command.title}</span>

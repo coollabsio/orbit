@@ -16,7 +16,7 @@ import { identifier, taskCandidates } from '../data/tasks'
 import { useTaskSearch } from '../hooks/tasks'
 import { useProjects, useStatuses } from '../queries'
 import { useTheme } from '../theme'
-import { Avatar, Icon, StatusIcon, Text } from '../ui'
+import { Avatar, Icon, Spinner, StatusIcon, Text } from '../ui'
 
 /** Task hits shown for one query. */
 const TASK_LIMIT = 8
@@ -58,7 +58,7 @@ export function useMentionField({
   // the last hits stay while the next search loads, but never once the "#" is gone
   const taskSuggestions = taskText !== null
     ? rankTaskSuggestions(
-        taskCandidates(search.data ?? [], projects, { query: taskText.replace(/^#/, ''), excludeIds: [], limit: TASK_LIMIT }).map((task) => ({
+        taskCandidates(search.data ?? [], projects, { query: taskText.replace(/^#/, ''), excludeIds: [], limit: 100 }).map((task) => ({
           id: `task_${task.id}`,
           label: task.title || 'Untitled',
           detail: identifier(task, projects),
@@ -67,8 +67,11 @@ export function useMentionField({
           project: projects.find((project) => project.id === task.project_id)?.name,
         })),
         taskText,
-      )
+        // rank all the hits first: an older task with the word in its title comes before newer description hits
+      ).slice(0, TASK_LIMIT)
     : []
+  // a task search is still on its way: the list says so, also before anything matches
+  const searchingTasks = taskText !== null && (search.isPending || search.isPlaceholderData)
   const suggestions = shown ? mixSuggestions(mentionSuggestions(shown, people, channels), taskSuggestions, shown.query) : []
 
   const place = (next: { text: string; cursor: number }) => {
@@ -87,6 +90,7 @@ export function useMentionField({
       onSelectionChange: (event: TextInputSelectionChangeEvent) => setCursor(event.nativeEvent.selection.end),
     },
     suggestions,
+    searchingTasks,
     pick: (suggestion: MentionSuggestion) => {
       if (!shown) return
       const next = applyMention(text, shown, suggestion)
@@ -105,16 +109,34 @@ export function useMentionField({
  * The web's mention popup as a list above the field: people (avatar, name, handle), tasks (status, ID, title, project)
  * and channels, each under its heading.
  */
-export function MentionSuggestions({ suggestions, onPick }: { suggestions: readonly MentionSuggestion[]; onPick: (suggestion: MentionSuggestion) => void }) {
+export function MentionSuggestions({
+  suggestions,
+  onPick,
+  loading = false,
+}: {
+  suggestions: readonly MentionSuggestion[]
+  onPick: (suggestion: MentionSuggestion) => void
+  /** A task search is still running: the rows (the last hits) dim under a spinner, so the list keeps its size. */
+  loading?: boolean
+}) {
   const { colors } = useTheme()
-  if (suggestions.length === 0) return null
+  if (suggestions.length === 0 && !loading) return null
   return (
     <View className="max-h-56 border-b border-border py-1.5">
-      <ScrollView keyboardShouldPersistTaps="always" nestedScrollEnabled>
+      <ScrollView keyboardShouldPersistTaps="always" nestedScrollEnabled style={{ opacity: loading && suggestions.length > 0 ? 0.6 : 1 }}>
         {suggestions.map((suggestion, index) => (
           <View key={suggestion.id}>
             {index === 0 || SECTION[suggestions[index - 1]!.kind] !== SECTION[suggestion.kind] ? (
-              <Text className={`px-3 pb-1 text-[11px] font-noto-bold tracking-wider uppercase text-muted-foreground${index > 0 ? ' pt-1.5' : ''}`}>{SECTION[suggestion.kind]}</Text>
+              <View className={`flex-row items-center gap-1.5 px-3 pb-1${index > 0 ? ' pt-1.5' : ''}`}>
+                <Text className="text-[11px] font-noto-bold tracking-wider uppercase text-muted-foreground">{SECTION[suggestion.kind]}</Text>
+                {/* the spinner sits by the "Tasks" heading (by the first heading while no task is listed) */}
+                {loading && (suggestion.kind === 'task' || (index === 0 && !suggestions.some((item) => item.kind === 'task'))) ? (
+                  // scaled to the heading's size, so the heading does not grow while it spins
+                  <View className="h-3.5 justify-center" style={{ transform: [{ scale: 0.6 }] }}>
+                    <Spinner />
+                  </View>
+                ) : null}
+              </View>
             ) : null}
             <Pressable
               accessibilityRole="button"
@@ -164,6 +186,12 @@ export function MentionSuggestions({ suggestions, onPick }: { suggestions: reado
             </Pressable>
           </View>
         ))}
+        {loading && suggestions.length === 0 ? (
+          <View className="flex-row items-center gap-2 px-3 py-1.5">
+            <Spinner />
+            <Text className="text-[12px] text-muted-foreground">Searching tasks…</Text>
+          </View>
+        ) : null}
       </ScrollView>
     </View>
   )

@@ -335,7 +335,8 @@ export async function removeBucket(client: OrbitClient, workspaceId: string): Pr
 
 /** Polls while files move either way, as the admin Storage page does. */
 export function bucketPollInterval(view: WorkspaceBucketView | undefined): number | false {
-  return view && (view.checking || view.files_to_move > 0 || view.removing) ? 5000 : false
+  if (view?.checking) return 1000
+  return view && (view.files_to_move > 0 || view.removing) ? 5000 : false
 }
 
 /** The File storage page's progress line, or `null` when no file waits to move. */
@@ -343,6 +344,13 @@ export function bucketMovingText(view: Pick<WorkspaceBucketView, 'checking' | 'f
   if (view.checking) return 'Checking which files to move…'
   if (view.files_to_move <= 0) return null
   return `${view.files_to_move} ${view.files_to_move === 1 ? 'file' : 'files'} left to move ${view.removing ? "back to Orbit's storage" : 'to your bucket'}.`
+}
+
+/** The line shown once a move the admin started (by a save or a removal) is done, or `null` while it runs or
+    after it failed. */
+export function bucketMovedText(view: Pick<WorkspaceBucketView, 'checking' | 'files_to_move' | 'removing' | 'move_error'>, started: 'save' | 'remove' | null): string | null {
+  if (!started || bucketMovingText(view) || view.removing || view.move_error) return null
+  return started === 'remove' ? "Done. All files are back in Orbit's storage." : 'Done. All files are in your bucket.'
 }
 
 /** The web's `formatBytes`: `512 B`, `12 KB`, `1.5 MB`, `2 GB`. */

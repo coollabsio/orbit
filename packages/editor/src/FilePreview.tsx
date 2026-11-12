@@ -148,7 +148,7 @@ function TextPreview({ name, url }: FileFields) {
   if (failed) return <FileLink name={name} url={url} />
   if (text === null) return <p className="text-sm text-muted-foreground">Loading…</p>
   return (
-    <pre className="max-h-80 overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-[13px] whitespace-pre-wrap" style={{ maxHeight: 320, overflow: 'auto', whiteSpace: 'pre-wrap', margin: 0 }}>
+    <pre className="max-h-80 overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-[0.8125rem] whitespace-pre-wrap" style={{ maxHeight: 320, overflow: 'auto', whiteSpace: 'pre-wrap', margin: 0 }}>
       {text}
     </pre>
   )

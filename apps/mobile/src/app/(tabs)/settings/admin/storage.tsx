@@ -2,11 +2,14 @@ import { useState } from 'react'
 import { View } from 'react-native'
 
 import { ConfirmDialog, type ConfirmRequest } from '../../../../components/settings/Dialog'
-import { AdminShell, FieldLabel, Note, OptionHint, OptionText, Segmented, SettingsCard, SettingsRow, Toggle } from '../../../../components/settings/Shell'
+import { AdminShell, FieldLabel, Note, OptionHint, OptionText, Segmented, Select, SetByEnvironment, SettingsCard, SettingsRow, Toggle } from '../../../../components/settings/Shell'
 import {
   BACKUP_SCHEDULE_OPTIONS,
   type CompressionStatus,
   compressionText,
+  type EnvironmentView,
+  keepDeletedOptions,
+  movedText,
   movingText,
   s3Body,
   s3Draft,
@@ -22,6 +25,7 @@ import { Button, Input, LabelTip, Spinner, Text } from '../../../../ui'
 export default function AdminStorageScreen() {
   const settings = useInstanceSettings()
   const storage = settings.data?.storage
+  const environment = settings.data?.environment
   return (
     <AdminShell onRefresh={() => settings.refetch()}>
       {settings.isPending ? <SettingsCard title="Storage"><Note loading>Loading settings…</Note></SettingsCard> : null}
@@ -33,10 +37,10 @@ export default function AdminStorageScreen() {
           </View>
         </SettingsCard>
       ) : null}
-      {storage ? (
+      {storage && environment ? (
         <>
-          <BucketCard s3={storage.s3 ?? null} />
-          <UsageCard storage={storage} />
+          <BucketCard s3={storage.s3 ?? null} locked={environment.s3} />
+          <UsageCard storage={storage} environment={environment} />
           {storage.image_compression ? <ImagesCard status={storage.image_compression} /> : null}
         </>
       ) : null}
@@ -44,7 +48,7 @@ export default function AdminStorageScreen() {
   )
 }
 
-function BucketCard({ s3 }: { s3: S3View | null }) {
+function BucketCard({ s3, locked }: { s3: S3View | null; locked: boolean }) {
   const save = useSaveS3()
   const remove = useRemoveS3()
   const [draft, setDraft] = useState(() => s3Draft(s3))
@@ -67,11 +71,11 @@ function BucketCard({ s3 }: { s3: S3View | null }) {
       description="An S3-compatible bucket (AWS S3, Cloudflare R2, MinIO, …) for attachments and backups. Orbit writes, reads and deletes a test file before it saves."
     >
       <View className="gap-4">
-        <Input label="Endpoint" required placeholder="https://s3.eu-central-1.amazonaws.com" keyboardType="url" {...plain} value={draft.endpoint} onChangeText={set('endpoint')} />
-        <Input label="Region" placeholder="us-east-1" {...plain} value={draft.region} onChangeText={set('region')} />
-        <Input label="Bucket" required placeholder="orbit-files" {...plain} value={draft.bucket} onChangeText={set('bucket')} />
-        <Input label="Prefix" placeholder="orbit" {...plain} value={draft.prefix} onChangeText={set('prefix')} />
-        <Input label="Access key ID" required autoComplete="off" {...plain} value={draft.access_key_id} onChangeText={set('access_key_id')} />
+        <Input label="Endpoint" required placeholder="https://s3.eu-central-1.amazonaws.com" keyboardType="url" {...plain} editable={!locked} value={draft.endpoint} onChangeText={set('endpoint')} />
+        <Input label="Region" placeholder="us-east-1" {...plain} editable={!locked} value={draft.region} onChangeText={set('region')} />
+        <Input label="Bucket" required placeholder="orbit-files" {...plain} editable={!locked} value={draft.bucket} onChangeText={set('bucket')} />
+        <Input label="Prefix" placeholder="orbit" {...plain} editable={!locked} value={draft.prefix} onChangeText={set('prefix')} />
+        <Input label="Access key ID" required autoComplete="off" {...plain} editable={!locked} value={draft.access_key_id} onChangeText={set('access_key_id')} />
         <Input
           label="Secret access key"
           required={!s3}
@@ -79,14 +83,16 @@ function BucketCard({ s3 }: { s3: S3View | null }) {
           autoComplete="new-password"
           {...plain}
           placeholder={s3 ? 'Saved. Leave empty to keep it.' : undefined}
+          editable={!locked}
           value={draft.secret_access_key}
           onChangeText={set('secret_access_key')}
         />
         {/* the web's switch with its label after it */}
         <View className="flex-row items-center gap-2">
-          <Toggle label="Path-style URLs" value={draft.path_style} onChange={(path_style) => edit({ path_style })} />
+          <Toggle label="Path-style URLs" value={draft.path_style} disabled={locked} onChange={(path_style) => edit({ path_style })} />
           <View className="flex-1"><LabelTip label="Path-style URLs" text="For MinIO and some other S3-compatible services." className="text-[13px] leading-[18px] text-foreground" /></View>
         </View>
+        {locked ? <SetByEnvironment variable="ORBIT_S3_*" /> : null}
         {save.isError ? <Note error>{errorMessage(save.error)}</Note> : null}
         {remove.isError ? <Note error>{errorMessage(remove.error)}</Note> : null}
         {save.isSuccess ? <Note>Bucket saved.</Note> : null}
@@ -96,7 +102,7 @@ function BucketCard({ s3 }: { s3: S3View | null }) {
             <Button
               label="Remove"
               variant="destructive"
-              disabled={remove.isPending}
+              disabled={locked || remove.isPending}
               onPress={() =>
                 setConfirm({
                   title: 'Remove the bucket?',
@@ -108,7 +114,7 @@ function BucketCard({ s3 }: { s3: S3View | null }) {
               }
             />
           ) : null}
-          <Button label={save.isPending ? 'Testing bucket…' : 'Save bucket'} disabled={save.isPending} onPress={() => (ready ? save.mutate(s3Body(draft), stored) : setTried(true))} />
+          <Button label={save.isPending ? 'Testing bucket…' : 'Save bucket'} disabled={locked || save.isPending} onPress={() => (ready ? save.mutate(s3Body(draft), stored) : setTried(true))} />
         </View>
       </View>
       <ConfirmDialog request={confirm} onClose={() => setConfirm(null)} />
@@ -116,15 +122,23 @@ function BucketCard({ s3 }: { s3: S3View | null }) {
   )
 }
 
-function UsageCard({ storage }: { storage: StorageView }) {
+function UsageCard({ storage, environment }: { storage: StorageView; environment: EnvironmentView }) {
   const save = useSaveStorageOptions()
   const ready = Boolean(storage.s3)
   const moving = movingText(storage)
-  const change = (options: Parameters<typeof storageOptions>[1]) => save.mutate(storageOptions(storage, options))
+  // Set when the admin flips "Files in S3" here, so the row says when the move is done, even if it was too quick
+  // to show any progress.
+  const [watchingMove, setWatchingMove] = useState(false)
+  const moved = watchingMove ? movedText(storage) : null
+  const change = (options: Parameters<typeof storageOptions>[1]) => save.mutate(storageOptions(storage, options), {
+    onSuccess: () => {
+      if (options.attachments_in_s3 !== undefined) setWatchingMove(true)
+    },
+  })
   return (
     <SettingsCard title="Usage" description="What Orbit keeps in the bucket, and how often it backs up by itself." flush>
       <SettingsRow first>
-        <OptionText title="Attachments in S3" help={ready ? 'On: new files go to the bucket and existing files move there in the background. Off: they move back to this server.' : undefined}>
+        <OptionText title="Files in S3" help={ready ? 'All uploaded files: task and comment attachments, doc and chat files, custom emoji, stickers, mail attachments and profile pictures. On: new files go to the bucket and existing files move there in the background. Off: they move back to this server.' : undefined}>
           {ready ? null : <OptionHint>Save a bucket above first.</OptionHint>}
           {moving ? (
             <View accessibilityRole="text" className="flex-row items-center gap-1.5">
@@ -133,25 +147,44 @@ function UsageCard({ storage }: { storage: StorageView }) {
               <OptionHint>{moving}</OptionHint>
             </View>
           ) : null}
+          {moved ? <OptionHint>{moved}</OptionHint> : null}
           {storage.move_error ? <OptionHint error>Moving files stopped: {storage.move_error} Orbit tries again every ten minutes.</OptionHint> : null}
+          {environment.attachments_in_s3 ? <SetByEnvironment variable="ORBIT_S3_ATTACHMENTS" /> : null}
         </OptionText>
         <Toggle
-          label="Attachments in S3"
+          label="Files in S3"
           value={storage.attachments_in_s3}
-          disabled={(!ready && !storage.attachments_in_s3) || save.isPending}
+          disabled={environment.attachments_in_s3 || (!ready && !storage.attachments_in_s3) || save.isPending}
           onChange={(attachments_in_s3) => change({ attachments_in_s3 })}
         />
       </SettingsRow>
       <SettingsRow>
         <OptionText title="Backups in S3" help={ready ? 'On: each new backup is uploaded to the bucket and removed from this server, so a lost server loses no backups.' : undefined}>
           {ready ? null : <OptionHint>Save a bucket above first.</OptionHint>}
+          {environment.backups_in_s3 ? <SetByEnvironment variable="ORBIT_S3_BACKUPS" /> : null}
         </OptionText>
-        <Toggle label="Backups in S3" value={storage.backups_in_s3} disabled={(!ready && !storage.backups_in_s3) || save.isPending} onChange={(backups_in_s3) => change({ backups_in_s3 })} />
+        <Toggle label="Backups in S3" value={storage.backups_in_s3} disabled={environment.backups_in_s3 || (!ready && !storage.backups_in_s3) || save.isPending} onChange={(backups_in_s3) => change({ backups_in_s3 })} />
       </SettingsRow>
       <View className="gap-2 border-t border-border px-4 py-3">
-        <OptionText title="Automatic backups" help="Orbit keeps the newest backup of each of the last 7 days and 4 weeks." />
-        <Segmented label="Automatic backups" value={storage.backup_schedule} options={BACKUP_SCHEDULE_OPTIONS} onChange={(backup_schedule) => (save.isPending ? undefined : change({ backup_schedule }))} />
+        <OptionText title="Automatic backups" help="Orbit keeps the newest backup of each of the last 7 days and 4 weeks.">
+          {environment.backup_schedule ? <SetByEnvironment variable="ORBIT_AUTOMATIC_BACKUPS" /> : null}
+        </OptionText>
+        <Segmented label="Automatic backups" value={storage.backup_schedule} options={BACKUP_SCHEDULE_OPTIONS} disabled={environment.backup_schedule} onChange={(backup_schedule) => (save.isPending ? undefined : change({ backup_schedule }))} />
       </View>
+      {ready ? (
+        <View className="gap-2 border-t border-border px-4 py-3">
+          <OptionText title="Keep deleted files in S3" help="A deleted or replaced attachment file (for example an image original after Compress images) stays in the bucket this long, then Orbit deletes it. Backups do not contain S3 files: restoring a backup older than this can miss files. The default, 40 days, covers all kept backups.">
+            {environment.s3_keep_deleted_days ? <SetByEnvironment variable="ORBIT_S3_KEEP_DELETED_DAYS" /> : null}
+          </OptionText>
+          <Select
+            label="Keep deleted files in S3"
+            value={String(storage.s3_keep_deleted_days)}
+            options={keepDeletedOptions(storage.s3_keep_deleted_days)}
+            disabled={environment.s3_keep_deleted_days || save.isPending}
+            onChange={(days) => change({ s3_keep_deleted_days: Number(days) })}
+          />
+        </View>
+      ) : null}
       {save.isError ? <View className="border-t border-border px-4 py-3"><Note error>{errorMessage(save.error)}</Note></View> : null}
     </SettingsCard>
   )

@@ -4,34 +4,74 @@
  * screens and `scripts/api-check-tasks.ts` share them.
  */
 import {
+  createCycle,
   createLabel,
+  createMilestone,
   createTask,
   createTaskRelation,
+  deleteCycle,
   deleteLabel,
+  deleteMilestone,
   deleteTaskAttachment,
   deleteTaskRelation,
   emptyTaskTrash,
+  getProjectOrder,
   getTrashedProject,
   getTrashedTask,
   listCommentAttachments,
+  listCycles,
+  listMilestones,
   listProjectTrash,
   listTaskAttachments,
   listTaskRelations,
   listTasks,
   listTaskTrash,
   listTrashedProjectTasks,
+  moveUnfinishedCycleTasks,
   purgeProject,
   purgeTask,
+  putProjectOrder,
+  reorderMilestones,
   restoreProject,
   restoreTask,
+  updateCycle,
+  updateMilestone,
   uploadTaskAttachments,
 } from '@orbit/api/generated/sdk.gen'
-import type { AttachmentRecord, CreateTaskBody, NewTaskRelationType, TaskRelationRecord, TrashedProject, TrashedTask } from '@orbit/api/generated/types.gen'
+import type {
+  AttachmentRecord,
+  CreateTaskBody,
+  NewTaskRelationType,
+  TaskCycle,
+  TaskCycleBody,
+  TaskCycleMoveOutcome,
+  TaskCycleUpdateBody,
+  TaskMilestone,
+  TaskMilestoneBody,
+  TaskMilestoneUpdateBody,
+  TaskRelationRecord,
+  TrashedProject,
+  TrashedTask,
+} from '@orbit/api/generated/types.gen'
 
 import type { LabelRecord, OrbitClient, ProjectRecord, TaskRecord } from './orbit'
 import type { PickedFile } from './tasks'
 
-export type { AttachmentRecord, CreateTaskBody, NewTaskRelationType, TaskRelationRecord, TrashedProject, TrashedTask }
+export type {
+  AttachmentRecord,
+  CreateTaskBody,
+  NewTaskRelationType,
+  TaskCycle,
+  TaskCycleBody,
+  TaskCycleMoveOutcome,
+  TaskCycleUpdateBody,
+  TaskMilestone,
+  TaskMilestoneBody,
+  TaskMilestoneUpdateBody,
+  TaskRelationRecord,
+  TrashedProject,
+  TrashedTask,
+}
 
 const task = (client: OrbitClient, workspaceId: string, taskId: string) => ({ client, path: { workspace_id: workspaceId, task_id: taskId }, throwOnError: true as const })
 
@@ -63,6 +103,9 @@ export function newTaskBody(draft: {
   dueAt: string | null
   dueStartAt: string | null
   parentId: string | null
+  milestoneId: string | null
+  cycleId: string | null
+  estimate: number | null
 }): CreateTaskBody {
   const description = draft.description.trim()
   return {
@@ -76,6 +119,9 @@ export function newTaskBody(draft: {
     due_at: draft.dueAt,
     due_start_at: draft.dueStartAt,
     parent_task_id: draft.parentId,
+    milestone_id: draft.milestoneId,
+    cycle_id: draft.cycleId,
+    estimate: draft.estimate,
   }
 }
 
@@ -112,6 +158,55 @@ export async function newLabel(client: OrbitClient, workspaceId: string, project
 
 export async function removeLabel(client: OrbitClient, workspaceId: string, label: Pick<LabelRecord, 'id' | 'project_id' | 'version'>): Promise<void> {
   await deleteLabel({ client, path: { workspace_id: workspaceId, project_id: label.project_id, label_id: label.id }, query: { expected_version: label.version }, throwOnError: true })
+}
+
+// ---- milestones and cycles of a project
+
+const inProject = (client: OrbitClient, workspaceId: string, projectId: string) => ({ client, path: { workspace_id: workspaceId, project_id: projectId }, throwOnError: true as const })
+
+/** Every milestone of the project, with its task counts. The server returns them in one page. */
+export async function milestones(client: OrbitClient, workspaceId: string, projectId: string): Promise<TaskMilestone[]> {
+  return (await listMilestones(inProject(client, workspaceId, projectId))).data.items
+}
+
+export async function newMilestone(client: OrbitClient, workspaceId: string, projectId: string, body: TaskMilestoneBody): Promise<TaskMilestone> {
+  return (await createMilestone({ ...inProject(client, workspaceId, projectId), body })).data
+}
+
+export async function changeMilestone(client: OrbitClient, workspaceId: string, milestone: Pick<TaskMilestone, 'id' | 'project_id'>, body: TaskMilestoneUpdateBody): Promise<TaskMilestone> {
+  return (await updateMilestone({ client, path: { workspace_id: workspaceId, project_id: milestone.project_id, milestone_id: milestone.id }, body, throwOnError: true })).data
+}
+
+export async function removeMilestone(client: OrbitClient, workspaceId: string, milestone: Pick<TaskMilestone, 'id' | 'project_id' | 'version'>): Promise<void> {
+  await deleteMilestone({ client, path: { workspace_id: workspaceId, project_id: milestone.project_id, milestone_id: milestone.id }, query: { expected_version: milestone.version }, throwOnError: true })
+}
+
+/** Gives the milestones the positions of their order in `ordered`; returns them in the new order. */
+export async function reorderProjectMilestones(client: OrbitClient, workspaceId: string, projectId: string, ordered: readonly Pick<TaskMilestone, 'id' | 'version'>[]): Promise<TaskMilestone[]> {
+  const items = ordered.map((milestone, position) => ({ id: milestone.id, expected_version: milestone.version, position }))
+  return (await reorderMilestones({ ...inProject(client, workspaceId, projectId), body: { items } })).data.items
+}
+
+/** Every cycle of the project, with its task counts. */
+export async function cycles(client: OrbitClient, workspaceId: string, projectId: string): Promise<TaskCycle[]> {
+  return (await listCycles(inProject(client, workspaceId, projectId))).data.items
+}
+
+export async function newCycle(client: OrbitClient, workspaceId: string, projectId: string, body: TaskCycleBody): Promise<TaskCycle> {
+  return (await createCycle({ ...inProject(client, workspaceId, projectId), body })).data
+}
+
+export async function changeCycle(client: OrbitClient, workspaceId: string, cycle: Pick<TaskCycle, 'id' | 'project_id'>, body: TaskCycleUpdateBody): Promise<TaskCycle> {
+  return (await updateCycle({ client, path: { workspace_id: workspaceId, project_id: cycle.project_id, cycle_id: cycle.id }, body, throwOnError: true })).data
+}
+
+export async function removeCycle(client: OrbitClient, workspaceId: string, cycle: Pick<TaskCycle, 'id' | 'project_id' | 'version'>): Promise<void> {
+  await deleteCycle({ client, path: { workspace_id: workspaceId, project_id: cycle.project_id, cycle_id: cycle.id }, query: { expected_version: cycle.version }, throwOnError: true })
+}
+
+/** Moves the cycle's tasks that are not done or cancelled to the next cycle by date; 409 `no_next_cycle` when there is none. */
+export async function moveUnfinished(client: OrbitClient, workspaceId: string, cycle: Pick<TaskCycle, 'id' | 'project_id'>): Promise<TaskCycleMoveOutcome> {
+  return (await moveUnfinishedCycleTasks({ client, path: { workspace_id: workspaceId, project_id: cycle.project_id, cycle_id: cycle.id }, throwOnError: true })).data
 }
 
 /** Files attached to the task itself (before rich text). Inline files of the description and comments are not in it. */
@@ -197,4 +292,13 @@ export function trashedProjectTasks(client: OrbitClient, workspaceId: string, pr
 /** Deletes a trashed task forever with the sub-issues trashed with it. */
 export async function purgeTrashedTask(client: OrbitClient, workspaceId: string, taskId: string): Promise<void> {
   await purgeTask(task(client, workspaceId, taskId))
+}
+
+/** The member's own project order (the web's `useProjectOrder`); projects not listed follow by name. */
+export async function projectOrder(client: OrbitClient, workspaceId: string): Promise<string[]> {
+  return (await getProjectOrder({ client, path: { workspace_id: workspaceId }, throwOnError: true })).data.project_ids
+}
+
+export async function saveProjectOrder(client: OrbitClient, workspaceId: string, projectIds: string[]): Promise<void> {
+  await putProjectOrder({ client, path: { workspace_id: workspaceId }, body: { project_ids: projectIds }, throwOnError: true })
 }

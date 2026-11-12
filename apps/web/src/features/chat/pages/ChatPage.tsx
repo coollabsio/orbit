@@ -245,7 +245,7 @@ export function ChatPage() {
   } else if (loadFailed(conversations)) {
     main = (
       <Pane>
-        <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-[13px] text-muted-foreground" role="alert">
+        <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-[0.8125rem] text-muted-foreground" role="alert">
           Could not load chat.
           <Button type="button" variant="outline" size="sm" onClick={() => void conversations.refetch()}>
             Try again

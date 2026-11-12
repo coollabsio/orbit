@@ -49,8 +49,10 @@ pub use search::{SearchHitRecord, SearchInput, SearchPage};
 pub use slack::{attachment_blocks, cut, emoji_name, mrkdwn_to_markdown};
 pub use state::{ConversationCursor, ReadSnapshot, StateUpdate, ThreadCursor};
 pub use stickers::{CustomStickerImage, CustomStickerRecord, STICKER_MAX_BYTES, StickerRecord};
+pub(crate) use webhooks::clean_request_url;
 pub use webhooks::{
-    BotSender, DeliveryRecord, HookTarget, WebhookInput, WebhookRecord, WebhookWithSecret,
+    BotSender, DeliveryRecord, EventTarget, HookTarget, WebhookInput, WebhookRecord,
+    WebhookWithSecret,
 };
 
 /// Characters in one message body.
@@ -249,6 +251,10 @@ pub struct ReplyPreviewRecord {
     pub sticker: bool,
     #[schema(value_type = String, format = DateTime)]
     pub created_at: TimestampMillis,
+    /// The integration's name when an integration posted the reply: `author_id` is then only the
+    /// member who set it up.
+    #[schema(required = true)]
+    pub bot_name: Option<String>,
 }
 
 /// The message that a message quotes, shown above it.
@@ -1065,6 +1071,7 @@ const MESSAGE_SELECT: &str = "SELECT m.id, m.conversation_id, m.thread_root_id, 
      m.body, m.mention_channel, m.mention_here, m.also_in_channel, m.nonce, m.pinned_at, \
      m.edited_at, m.deleted_at, m.created_at, m.reply_count, m.reply_user_ids, m.last_reply_id, \
      l.author_id AS last_author_id, l.body AS last_body, l.created_at AS last_created_at, \
+     l.bot_name AS last_bot_name, \
      l.sticker_id IS NOT NULL AS last_sticker, q.sticker_id IS NOT NULL AS quoted_sticker, \
      m.reply_to_id, q.author_id AS quoted_author_id, substr(q.body, 1, 200) AS quoted_body, \
      m.forward_of_id, m.forward_conversation_id, m.forward_author_id, m.forward_created_at, \
@@ -1089,6 +1096,7 @@ fn message_from_row(row: &AnyRow) -> Result<MessageRecord, ChatError> {
             body: row.get("last_body"),
             sticker: row.get("last_sticker"),
             created_at: TimestampMillis::from_millis(row.get("last_created_at")),
+            bot_name: row.get("last_bot_name"),
         }),
         None => None,
     };
@@ -1281,18 +1289,15 @@ struct ThreadMember {
 }
 
 impl ThreadMember {
-    /// A thread that is not followed has nothing unread.
+    /// Replies after the cursor are unread whether the member follows the thread or not (the
+    /// Unreads view shows both). Mentions count only while the member follows.
     fn state(&self, root: &MessageRecord) -> ThreadStateRecord {
         ThreadStateRecord {
             root_id: root.id,
             conversation_id: root.conversation_id,
             following: self.following,
             last_read_reply_id: self.last_read_reply_id,
-            unread_replies: if self.following {
-                (root.reply_count - self.read_reply_count).max(0)
-            } else {
-                0
-            },
+            unread_replies: (root.reply_count - self.read_reply_count).max(0),
             mention_count: if self.following {
                 self.mention_count
             } else {
@@ -1324,6 +1329,72 @@ async fn load_thread_member(
         })
     })
     .transpose()
+}
+
+/// The lowest message id of the millisecond `millis`: a UUIDv7 starts with its time.
+fn first_id_at(millis: i64) -> String {
+    let millis = u64::try_from(millis).unwrap_or(0);
+    format!(
+        "{:08x}-{:04x}-0000-0000-000000000000",
+        millis >> 16,
+        millis & 0xffff
+    )
+}
+
+/// For a member with no state in a thread, the replies after this id are unread: the later of
+/// the member's join and its `threads_read_to`.
+fn thread_baseline(joined_at: i64, threads_read_to: Option<String>) -> String {
+    let joined = first_id_at(joined_at);
+    match threads_read_to {
+        Some(id) if id > joined => id,
+        _ => joined,
+    }
+}
+
+/// The member's state in a thread. Without a row it comes from the member's thread baseline:
+/// `None` when nothing is unread there or the user is not a member of the conversation.
+async fn thread_state(
+    conn: &mut AnyConnection,
+    root: &MessageRecord,
+    user_id: Id,
+) -> Result<Option<ThreadStateRecord>, ChatError> {
+    if let Some(member) = load_thread_member(conn, root.id, user_id).await? {
+        return Ok(Some(member.state(root)));
+    }
+    let Some(member) = sqlx::query(
+        "SELECT joined_at, threads_read_to FROM chat_members \
+         WHERE conversation_id = $1 AND user_id = $2",
+    )
+    .bind(root.conversation_id.to_string())
+    .bind(user_id.to_string())
+    .fetch_optional(&mut *conn)
+    .await?
+    else {
+        return Ok(None);
+    };
+    let baseline = thread_baseline(member.get("joined_at"), member.get("threads_read_to"));
+    let row = sqlx::query(
+        "SELECT (SELECT MAX(id) FROM chat_messages WHERE thread_root_id = $1 AND id <= $2) AS cursor, \
+         (SELECT COUNT(*) FROM chat_messages WHERE thread_root_id = $1 AND id > $2 \
+          AND author_id <> $3) AS unread",
+    )
+    .bind(root.id.to_string())
+    .bind(baseline)
+    .bind(user_id.to_string())
+    .fetch_one(&mut *conn)
+    .await?;
+    let unread: i64 = row.get("unread");
+    if unread == 0 {
+        return Ok(None);
+    }
+    Ok(Some(ThreadStateRecord {
+        root_id: root.id,
+        conversation_id: root.conversation_id,
+        following: false,
+        last_read_reply_id: parse_optional_id(row.get("cursor"))?,
+        unread_replies: unread,
+        mention_count: 0,
+    }))
 }
 
 /// The users a body mentions with `<@id>`, in order, each once. Tokens that are not ids are text.

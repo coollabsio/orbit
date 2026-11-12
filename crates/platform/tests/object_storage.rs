@@ -172,11 +172,12 @@ async fn the_mover_moves_blobs_to_s3_and_back_while_reads_keep_working() {
         ..Default::default()
     });
     assert_eq!(fixture.read(&key).await, b"first on disk");
+    assert_eq!(fixture.store.status(), None, "not counted for the new switch yet");
     assert_eq!(fixture.store.move_blobs().await.unwrap(), 1);
     assert!(fixture.local.blobs().await.unwrap().is_empty());
     assert!(fixture.in_bucket(&key).await);
     assert_eq!(fixture.read(&key).await, b"first on disk");
-    assert_eq!(fixture.store.status().remaining, 0);
+    assert_eq!(fixture.store.status().unwrap().remaining, 0);
 
     fixture.storage.configure(ObjectStorageState {
         bucket: Some(fixture.bucket.clone()),
@@ -209,6 +210,7 @@ fn with_workspace_bucket(
             },
         )]
         .into(),
+        ..ObjectStorageState::default()
     }
 }
 
@@ -520,10 +522,14 @@ async fn backups_go_to_s3_and_restore_from_it() {
         ..Default::default()
     });
     let backups_root = root.path().join("backups");
-    let service = BackupService::new(&backups_root, &attachments).with_object_storage(storage);
+    let service = BackupService::new(&backups_root, &attachments)
+        .with_object_storage(storage)
+        .with_app_key(Some([5; 32]));
 
     let snapshot = service.create(&database).await.unwrap();
     assert!(snapshot.in_object_storage);
+    // The encrypted files go to the bucket as they are and come back through the download cache.
+    assert!(snapshot.manifest.encryption.is_some());
     assert!(!backups_root.join("snapshots").join(&snapshot.id).exists());
     let listed = service.list().await.unwrap();
     assert_eq!(listed.len(), 1);
@@ -555,4 +561,54 @@ async fn backups_go_to_s3_and_restore_from_it() {
         service.delete(&snapshot.id).await,
         Err(orbit_platform::BackupError::NotFound { .. })
     ));
+}
+
+#[tokio::test]
+async fn deleting_a_backup_that_is_local_and_in_s3_deletes_both_copies() {
+    if orbit_platform::testing_postgres() {
+        return; // file snapshots are SQLite-only
+    }
+    let root = tempfile::tempdir().unwrap();
+    let database = Database::open(&DatabaseConfig::new(root.path().join("orbit.sqlite")))
+        .await
+        .unwrap();
+    MigrationRunner::embedded(env!("CARGO_PKG_VERSION"))
+        .run(&database)
+        .await
+        .unwrap();
+    let attachments = root.path().join("attachments");
+    std::fs::create_dir_all(&attachments).unwrap();
+    let bucket = bucket().await;
+    let storage = ObjectStorage::default();
+    storage.configure(ObjectStorageState {
+        bucket: Some(bucket.clone()),
+        attachments: false,
+        backups: true,
+        ..Default::default()
+    });
+    let backups_root = root.path().join("backups");
+    let service = BackupService::new(&backups_root, &attachments).with_object_storage(storage);
+    let snapshot = service.create(&database).await.unwrap();
+    // A failed local remove after the upload leaves the same snapshot on this server too.
+    service.verify(&snapshot.id).await.unwrap();
+    let local = backups_root.join("snapshots").join(&snapshot.id);
+    copy_dir(&backups_root.join("downloads").join(&snapshot.id), &local);
+
+    service.delete(&snapshot.id).await.unwrap();
+    assert!(!local.exists());
+    assert!(bucket.list("backups/").await.unwrap().is_empty());
+    assert!(service.list().await.unwrap().is_empty());
+}
+
+fn copy_dir(from: &std::path::Path, to: &std::path::Path) {
+    std::fs::create_dir_all(to).unwrap();
+    for entry in std::fs::read_dir(from).unwrap() {
+        let entry = entry.unwrap();
+        let target = to.join(entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            copy_dir(&entry.path(), &target);
+        } else {
+            std::fs::copy(entry.path(), target).unwrap();
+        }
+    }
 }

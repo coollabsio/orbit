@@ -29,8 +29,8 @@ use crate::task_routes::{
 };
 
 pub(crate) mod buttons;
-pub(crate) mod formula;
 pub(crate) mod forms;
+pub(crate) mod formula;
 pub(crate) mod import;
 pub(crate) mod templates;
 
@@ -1007,12 +1007,28 @@ fn database_problem(
             "Title property",
             "The title property cannot be deleted or change its type.",
         ),
-        DatabaseError::Corrupt | DatabaseError::Unavailable(_) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "internal_error",
-            "Internal server error",
-            "An unexpected error occurred. Use the request ID when contacting support.",
-        ),
+        DatabaseError::Unavailable(error) => {
+            return ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+                "Internal server error",
+                "An unexpected error occurred. Use the request ID when contacting support.",
+                instance,
+                request_id,
+            )
+            .cause(error);
+        }
+        error @ DatabaseError::Corrupt => {
+            return ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+                "Internal server error",
+                "An unexpected error occurred. Use the request ID when contacting support.",
+                instance,
+                request_id,
+            )
+            .cause(error);
+        }
     };
     ApiError::new(status, code, title, detail, instance, request_id)
 }

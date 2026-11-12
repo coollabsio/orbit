@@ -3,22 +3,28 @@
 use std::collections::BTreeMap;
 
 use orbit_platform::{Id, TimestampMillis};
+use serde::Serialize;
 use serde_json::{Map, Value};
+use utoipa::ToSchema;
 
 use super::{Authorized, DocPatch, Result, TokenApiError, hidden_page, validate_doc_input};
 use crate::collab::markdown_merge::{MAX_BLOCKS, block_count};
 use crate::repositories::api_tokens::ApiTokenScope;
 use crate::repositories::databases::{
-    AgentDatabase, AgentPropertyChanges, AgentQuery, AgentRow, AgentRowPage, DatabaseError,
-    DatabaseProperty, DatabaseRepository, NewRow, PropertyUpdate, RowPlacement,
+    AgentDatabase, AgentPropertyChanges, AgentPropertySpec, AgentQuery, AgentRow, AgentRowPage,
+    AgentViewChanges, AgentViewDetail, AgentViewSpec, DatabaseError, DatabaseProperty,
+    DatabaseRepository, NewRow, PropertyUpdate, RowPlacement, link_block, without_link_blocks,
 };
-use crate::repositories::pages::{PageChanges, PageError, PageRecord, revision};
+use crate::repositories::pages::{
+    CreatePage, PageChanges, PageError, PageKind, PageRecord, SpaceRequest, revision,
+};
 
 impl From<DatabaseError> for TokenApiError {
     fn from(error: DatabaseError) -> Self {
         match error {
             DatabaseError::NotFound => Self::NotAvailable,
-            DatabaseError::Unavailable(_) | DatabaseError::Corrupt => Self::Internal,
+            DatabaseError::Unavailable(error) => Self::Internal(error.to_string()),
+            error @ DatabaseError::Corrupt => Self::Internal(error.to_string()),
             DatabaseError::TrialLimit(reached) => Self::Page(PageError::TrialLimit(reached)),
             error => Self::Database(error),
         }
@@ -41,14 +47,86 @@ pub struct DatabaseRowPatch {
     pub values: Map<String, Value>,
 }
 
+#[derive(Debug, Default)]
+pub struct NewDatabase {
+    /// With a parent the database joins the parent's space.
+    pub parent_id: Option<Id>,
+    /// Root databases only: the teamspace; with neither this nor `private`, the default one.
+    pub teamspace_id: Option<Id>,
+    /// Root databases only: `true` puts it in the token creator's private space.
+    pub private: Option<bool>,
+    pub title: String,
+    pub icon: Option<String>,
+    /// After the title property "Name". Omitted: a "Tags" multi-select.
+    pub properties: Option<Vec<AgentPropertySpec>>,
+    /// Omitted: one "Table" view.
+    pub views: Option<Vec<AgentViewSpec>>,
+}
+
+/// A linked view block that a doc now shows.
+#[derive(Serialize, ToSchema)]
+#[schema(as = PublicLinkedDatabase)]
+pub struct LinkedDatabase {
+    /// The block's `linkId`; send it as `link_id` to read and change the block's views.
+    #[schema(value_type = String)]
+    pub link_id: Id,
+    #[schema(value_type = String)]
+    pub database_id: Id,
+    /// The doc that shows the block.
+    #[schema(value_type = String)]
+    pub host_page_id: Id,
+    pub views: Vec<AgentViewDetail>,
+}
+
 impl Authorized<'_> {
     fn databases(&self, scope: ApiTokenScope) -> Result<DatabaseRepository> {
         self.content(scope, &self.api.pages)?;
         Ok(DatabaseRepository::new(self.api.tasks.database().clone()))
     }
 
+    /// Creates a database page with its properties and views in one write.
+    pub async fn create_database(&self, input: NewDatabase) -> Result<AgentDatabase> {
+        let databases = self.databases(ApiTokenScope::DocsWrite)?;
+        let pages = self.content(ApiTokenScope::DocsWrite, &self.api.pages)?;
+        validate_doc_input(Some(&input.title), input.icon.as_deref(), None)?;
+        let p = self.principal;
+        let schema = databases
+            .agent_schema(p.workspace_id, p.actor_id, input.properties, input.views)
+            .await?;
+        let page = pages
+            .create_database_with_id(
+                Id::new_v7(),
+                p.workspace_id,
+                p.actor_id,
+                CreatePage {
+                    kind: PageKind::Database,
+                    parent_id: input.parent_id,
+                    space: SpaceRequest {
+                        teamspace_id: input.teamspace_id,
+                        private: input.private,
+                    },
+                    title: input.title,
+                    icon: input.icon,
+                    position: None,
+                },
+                &schema,
+                self.request_id,
+                TimestampMillis::now(),
+            )
+            .await?;
+        self.read_database(&databases, page.id).await
+    }
+
     pub async fn get_database(&self, database_id: Id) -> Result<AgentDatabase> {
         let databases = self.databases(ApiTokenScope::DocsRead)?;
+        self.read_database(&databases, database_id).await
+    }
+
+    async fn read_database(
+        &self,
+        databases: &DatabaseRepository,
+        database_id: Id,
+    ) -> Result<AgentDatabase> {
         let p = self.principal;
         Ok(databases
             .agent_database(
@@ -317,9 +395,10 @@ impl Authorized<'_> {
             .await
         {
             Ok(row) => Ok(Some(row.values)),
-            Err(DatabaseError::Unavailable(_) | DatabaseError::Corrupt) => {
-                Err(TokenApiError::Internal)
+            Err(DatabaseError::Unavailable(error)) => {
+                Err(TokenApiError::Internal(error.to_string()))
             }
+            Err(error @ DatabaseError::Corrupt) => Err(TokenApiError::Internal(error.to_string())),
             // A template of the database, or a database the reader cannot see.
             Err(_) => Ok(None),
         }
@@ -332,5 +411,209 @@ impl Authorized<'_> {
             .get_page(p.workspace_id, row_id, p.actor_id)
             .await
             .map_err(hidden_page)
+    }
+
+    /// The views of a database, or of its linked view block `link`.
+    pub async fn database_views(
+        &self,
+        database_id: Id,
+        link: Option<Id>,
+    ) -> Result<Vec<AgentViewDetail>> {
+        let databases = self.databases(ApiTokenScope::DocsRead)?;
+        let p = self.principal;
+        Ok(databases
+            .agent_views(p.workspace_id, database_id, p.actor_id, link)
+            .await?)
+    }
+
+    pub async fn create_database_view(
+        &self,
+        database_id: Id,
+        link: Option<Id>,
+        spec: AgentViewSpec,
+    ) -> Result<AgentViewDetail> {
+        let databases = self.databases(ApiTokenScope::DocsWrite)?;
+        let p = self.principal;
+        Ok(databases
+            .agent_create_view(
+                p.workspace_id,
+                database_id,
+                p.actor_id,
+                spec,
+                link,
+                self.request_id,
+                TimestampMillis::now(),
+            )
+            .await?)
+    }
+
+    pub async fn update_database_view(
+        &self,
+        database_id: Id,
+        view_id: Id,
+        link: Option<Id>,
+        changes: AgentViewChanges,
+    ) -> Result<AgentViewDetail> {
+        let databases = self.databases(ApiTokenScope::DocsWrite)?;
+        let p = self.principal;
+        Ok(databases
+            .agent_update_view(
+                p.workspace_id,
+                database_id,
+                p.actor_id,
+                view_id,
+                link,
+                changes,
+                self.request_id,
+                TimestampMillis::now(),
+            )
+            .await?)
+    }
+
+    /// Deletes a view; the last view of a database or of a linked view block stays.
+    pub async fn delete_database_view(
+        &self,
+        database_id: Id,
+        view_id: Id,
+        link: Option<Id>,
+    ) -> Result<()> {
+        let databases = self.databases(ApiTokenScope::DocsWrite)?;
+        let p = self.principal;
+        Ok(databases
+            .delete_view(
+                p.workspace_id,
+                database_id,
+                view_id,
+                link,
+                p.actor_id,
+                self.request_id,
+                TimestampMillis::now(),
+            )
+            .await?)
+    }
+
+    /// Shows the database in the doc `host_page_id`: a linked view block at the end of the doc,
+    /// with one view that copies `from_view_id` (default: the database's first view). The doc is
+    /// read and written at the same revision, so an edit in between fails with a conflict.
+    pub async fn create_database_link(
+        &self,
+        database_id: Id,
+        host_page_id: Id,
+        from_view_id: Option<Id>,
+    ) -> Result<LinkedDatabase> {
+        let databases = self.databases(ApiTokenScope::DocsWrite)?;
+        let pages = self.content(ApiTokenScope::DocsWrite, &self.api.pages)?;
+        let p = self.principal;
+        let host = pages
+            .get_page(p.workspace_id, host_page_id, p.actor_id)
+            .await
+            .map_err(hidden_page)?;
+        if host.kind != PageKind::Page {
+            return Err(DatabaseError::Invalid {
+                field: "host_page_id".to_owned(),
+            }
+            .into());
+        }
+        let mut content = host.content.clone();
+        if block_count(&content) >= MAX_BLOCKS {
+            return Err(PageError::TooLarge.into());
+        }
+        let now = TimestampMillis::now();
+        let linked = databases
+            .create_link(
+                p.workspace_id,
+                database_id,
+                p.actor_id,
+                host.id,
+                from_view_id,
+                self.request_id,
+                now,
+            )
+            .await?;
+        content.push(link_block(database_id, linked.link.id));
+        let written = pages
+            .update_page_at_revision(
+                p.workspace_id,
+                host.id,
+                p.actor_id,
+                revision(host.version, host.updated_at),
+                PageChanges {
+                    content: Some(content),
+                    ..PageChanges::default()
+                },
+                self.request_id,
+                now,
+            )
+            .await;
+        if let Err(error) = written {
+            // The block was not written: take the link back, so no link is left without a block.
+            let _ = databases
+                .delete_link(
+                    p.workspace_id,
+                    database_id,
+                    linked.link.id,
+                    p.actor_id,
+                    self.request_id,
+                    now,
+                )
+                .await;
+            return Err(error.into());
+        }
+        let views = databases
+            .agent_views(
+                p.workspace_id,
+                database_id,
+                p.actor_id,
+                Some(linked.link.id),
+            )
+            .await?;
+        Ok(LinkedDatabase {
+            link_id: linked.link.id,
+            database_id,
+            host_page_id: host.id,
+            views,
+        })
+    }
+
+    /// Deletes a linked view block's views and removes its blocks from the host doc.
+    pub async fn delete_database_link(&self, database_id: Id, link_id: Id) -> Result<()> {
+        let databases = self.databases(ApiTokenScope::DocsWrite)?;
+        let pages = self.content(ApiTokenScope::DocsWrite, &self.api.pages)?;
+        let p = self.principal;
+        let host_id = databases
+            .link_host(p.workspace_id, database_id, link_id, p.actor_id)
+            .await?;
+        let now = TimestampMillis::now();
+        let host = pages
+            .get_page(p.workspace_id, host_id, p.actor_id)
+            .await
+            .map_err(hidden_page)?;
+        let content = without_link_blocks(&host.content, link_id);
+        if content != host.content {
+            pages
+                .update_page_at_revision(
+                    p.workspace_id,
+                    host.id,
+                    p.actor_id,
+                    revision(host.version, host.updated_at),
+                    PageChanges {
+                        content: Some(content),
+                        ..PageChanges::default()
+                    },
+                    self.request_id,
+                    now,
+                )
+                .await?;
+        }
+        Ok(databases
+            .delete_link(
+                p.workspace_id,
+                database_id,
+                link_id,
+                p.actor_id,
+                self.request_id,
+                now,
+            )
+            .await?)
     }
 }

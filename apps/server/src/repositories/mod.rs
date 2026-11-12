@@ -1,12 +1,15 @@
 pub mod account;
+pub mod api_idempotency;
 pub mod api_tokens;
 pub mod attachments;
 pub mod backup_items;
 pub mod billing;
 pub mod chat;
 pub mod databases;
+pub mod environment_settings;
 pub mod identity;
 pub mod instance_settings;
+pub mod mail;
 pub(crate) mod membership;
 pub mod page_comments;
 pub mod page_export;

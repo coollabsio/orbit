@@ -141,6 +141,13 @@ pub enum AttachmentsCommand {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Forgets the bucket that may still hold attachment files, so Orbit starts with another bucket. Use it only
+    /// when the files in that bucket are no longer needed, for example when the bucket was deleted: Orbit does not
+    /// read them again.
+    ForgetBucket {
+        #[arg(long)]
+        yes: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -429,9 +436,11 @@ async fn migrate(config: Config, command: &MigrateCommand) -> Result<String, Cli
 }
 
 async fn backup(config: Config, command: &BackupCommand) -> Result<String, CliError> {
+    // New backups are encrypted with the app key (`effective_config` requires it); restoring one needs the same key.
     let service = |storage| {
         BackupService::new(&config.data.backups, &config.data.attachments)
             .with_object_storage(storage)
+            .with_app_key(config.app_key.map(|key| *key.bytes()))
     };
     match command {
         BackupCommand::Create => {
@@ -540,11 +549,18 @@ async fn safety_backup(
 }
 
 async fn attachments(config: Config, command: &AttachmentsCommand) -> Result<String, CliError> {
+    if let AttachmentsCommand::ForgetBucket { yes: false } = command {
+        return Err(CliError::Operation(
+            "forget-bucket requires --yes: attachment files still in the bucket are not used again"
+                .to_owned(),
+        ));
+    }
     let database = Database::open(&DatabaseConfig::for_data(&config.data))
         .await
         .map_err(|error| match error {
             DatabaseError::AlreadyOwned { .. } => CliError::Operation(
-                "Orbit is running: use Admin → Storage → Compress images instead, or stop it first"
+                "Orbit is running: stop it first (to compress images while it runs, use Admin → Storage → \
+                 Compress images)"
                     .to_owned(),
             ),
             error => operation(error),
@@ -558,6 +574,21 @@ async fn attachments(config: Config, command: &AttachmentsCommand) -> Result<Str
         UploadLimits::default(),
     );
     match command {
+        AttachmentsCommand::ForgetBucket { .. } => {
+            let forgotten =
+                orbit_server::repositories::instance_settings::InstanceSettingsRepository::new(
+                    database.clone(),
+                )
+                .forget_files_bucket("cli", orbit_platform::TimestampMillis::now())
+                .await
+                .map_err(operation)?;
+            Ok(match forgotten {
+                Some(location) => format!(
+                    "forgot the {location}: Orbit starts with another bucket, and does not read the files in this one again"
+                ),
+                None => "no bucket of attachment files is recorded".to_owned(),
+            })
+        }
         AttachmentsCommand::Compress { dry_run } => Ok(
             orbit_server::image_compression::compress_images(&database, &uploads, *dry_run, |_| {})
                 .await
@@ -1115,6 +1146,9 @@ async fn install_seed_data(
                     due_start_at: None,
                     due_at: None,
                     parent_task_id: None,
+                    milestone_id: None,
+                    cycle_id: None,
+                    estimate: None,
                 },
                 "development-seed",
                 now,
@@ -1171,8 +1205,8 @@ fn apply_path_overrides(cli: &Cli, config: &mut Config) {
     }
 }
 
-/// The bucket for backups: the one in `ORBIT_BACKUP_S3_*` when it is set (for a lost database), else the one saved
-/// in Admin → Storage. When the database cannot give its saved bucket, only local backups are used.
+/// The bucket for backups: the one in `ORBIT_BACKUP_S3_*` when it is set (for a lost database), else the one in
+/// `ORBIT_S3_*` or saved in Admin → Storage. When the database cannot give its saved bucket, only local backups are used.
 async fn backup_storage(
     config: &Config,
     database: Option<&Database>,
@@ -1185,6 +1219,14 @@ async fn backup_storage(
         return Ok(storage);
     }
     let app_key = config.app_key.as_ref().map(|key| *key.bytes());
+    if let Some(key) = &app_key {
+        orbit_server::repositories::environment_settings::EnvironmentSettings::from_config(
+            &config.instance,
+            key,
+        )
+        .map_err(CliError::Operation)?
+        .install(database);
+    }
     match orbit_server::object_storage::saved_storage(database, app_key.as_ref()).await {
         Ok(saved) => Ok(saved),
         Err(error) => {
@@ -1396,6 +1438,7 @@ pub fn redacted_config(config: &Config) -> String {
         Some(listen) => lines.push(format!("ORBIT_METRICS_LISTEN={listen}")),
         None => lines.push("# ORBIT_METRICS_LISTEN is not set: metrics are disabled".to_owned()),
     }
+    lines.extend(redacted_mail_config(&config.mail));
     if config.app_key.is_some() {
         lines.push("ORBIT_APP_KEY=[REDACTED]".to_owned());
     }
@@ -1429,7 +1472,59 @@ pub fn redacted_config(config: &Config) -> String {
         ]),
         None => lines.push("# ORBIT_APNS_KEY is not set: no native iOS pushes".to_owned()),
     }
+    let instance = config.instance.redacted_lines();
+    if instance.is_empty() {
+        lines.push("# No instance settings are set by variables: Admin saves them".to_owned());
+    }
+    lines.extend(instance);
     lines.join("\n")
+}
+
+fn redacted_mail_config(mail: &orbit_platform::MailConfig) -> Vec<String> {
+    fn cidrs<T: ToString>(cidrs: &[T]) -> String {
+        cidrs
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(",")
+    }
+    let mut lines = vec![
+        format!("ORBIT_MAIL_ENABLED={}", mail.enabled),
+        format!("ORBIT_MAIL_SMTP_BIND={}", mail.smtp_bind),
+        format!("ORBIT_MAIL_SMTP_PORT={}", mail.smtp_port),
+        format!("ORBIT_MAIL_MODE={}", mail.mode.as_str()),
+        format!("ORBIT_MAIL_RELAY_CIDRS={}", cidrs(&mail.relay_cidrs)),
+        format!("ORBIT_MAIL_PROXY_CIDRS={}", cidrs(&mail.proxy_cidrs)),
+        format!("ORBIT_MAIL_MAX_MESSAGE_BYTES={}", mail.max_message_bytes),
+    ];
+    let optional = [
+        ("ORBIT_MAIL_HOSTNAME", mail.hostname.clone()),
+        (
+            "ORBIT_MAIL_RELAY_AUTHSERV_ID",
+            mail.relay_authserv_id.clone(),
+        ),
+        (
+            "ORBIT_MAIL_TLS_CERT",
+            mail.tls_cert
+                .as_ref()
+                .map(|path| path.display().to_string()),
+        ),
+        (
+            "ORBIT_MAIL_TLS_KEY",
+            mail.tls_key.as_ref().map(|path| path.display().to_string()),
+        ),
+        (
+            "ORBIT_MAIL_DNS_RESOLVER",
+            mail.dns_resolver.map(|address| address.to_string()),
+        ),
+        ("ORBIT_MAIL_CONTENT_ORIGIN", mail.content_origin.clone()),
+    ];
+    lines.extend(
+        optional
+            .into_iter()
+            .filter_map(|(key, value)| value.map(|value| format!("{key}={value}"))),
+    );
+    lines
 }
 
 pub fn failure_message(error: &str) -> String {
@@ -2008,10 +2103,60 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(backups.len(), 1);
+        assert!(backups[0].manifest.encryption.is_some());
         BackupService::new(&config.data.backups, &config.data.attachments)
             .verify(&backups[0].id)
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn backup_commands_encrypt_with_the_app_key() {
+        if orbit_platform::testing_postgres() {
+            return; // SQLite file restore; Postgres: backup_restore_replaces_a_postgres_database.
+        }
+        let root = tempfile::TempDir::new().unwrap();
+        let path = |name: &str| root.path().join(name).to_str().unwrap().to_owned();
+        let (database, attachments, backups) =
+            (path("orbit.sqlite"), path("attachments"), path("backups"));
+        let with_key = |key: &str| {
+            environment(&[
+                ("ORBIT_ENV", "development"),
+                ("ORBIT_DATABASE_PATH", &database),
+                ("ORBIT_ATTACHMENTS_PATH", &attachments),
+                ("ORBIT_BACKUPS_PATH", &backups),
+                ("ORBIT_APP_KEY", key),
+            ])
+        };
+        let cli = |args: &[&str]| Cli::try_parse_from([&["orbit"], args].concat()).unwrap();
+        run(cli(&["migrate", "run"]), with_key(APP_KEY))
+            .await
+            .unwrap();
+
+        let id = run(cli(&["backup", "create"]), with_key(APP_KEY))
+            .await
+            .unwrap();
+        let manifest = fs::read_to_string(
+            root.path()
+                .join("backups/snapshots")
+                .join(&id)
+                .join("manifest.json"),
+        )
+        .unwrap();
+        assert!(manifest.contains("key_sealed"));
+
+        let other_key = "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=";
+        let error = run(cli(&["backup", "restore", &id]), with_key(other_key))
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("different app key"), "{error}");
+        let restored = run(cli(&["backup", "restore", &id]), with_key(APP_KEY))
+            .await
+            .unwrap();
+        assert!(
+            restored.starts_with(&format!("backup {id} restored")),
+            "{restored}"
+        );
     }
 
     #[tokio::test]
@@ -2479,6 +2624,7 @@ mod tests {
             .await
             .unwrap();
         let backup = BackupService::new(&config.data.backups, &config.data.attachments)
+            .with_app_key(config.app_key.map(|key| *key.bytes()))
             .create(&database)
             .await
             .unwrap();

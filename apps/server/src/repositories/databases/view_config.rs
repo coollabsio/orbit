@@ -16,7 +16,18 @@ use super::{
 };
 use super::{board, calendar, forms, gallery, timeline};
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    Eq,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    ToSchema,
+    schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 #[schema(as = DatabaseViewType)]
 pub enum ViewType {

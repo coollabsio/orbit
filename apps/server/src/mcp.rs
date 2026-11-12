@@ -31,7 +31,8 @@ use crate::repositories::pages::PageError;
 use crate::repositories::task_recurrences::TaskRecurrence;
 use crate::repositories::tasks::{TaskError, TaskRepository};
 use crate::token_api::{
-    DOC_TOO_LARGE_DETAIL, DocPatch, NewDoc, NewTask, TaskPatch, TaskQuery, TokenApi, TokenApiError,
+    DOC_TOO_LARGE_DETAIL, DocPatch, NewComment, NewDoc, NewTask, TaskPatch, TaskQuery, TokenApi,
+    TokenApiError, parse_cycle_filter, parse_milestone_filter,
 };
 
 mod databases;
@@ -163,6 +164,11 @@ struct ListTasksArgs {
     query: Option<String>,
     /// Only the direct sub-issues of this task: its id, or its identifier such as ENG-12.
     parent_task_id: Option<String>,
+    /// Only tasks in this milestone (an id from list_milestones), or `none` for tasks without one.
+    milestone_id: Option<String>,
+    /// Only tasks in this cycle: an id from list_cycles, `current`, `next` or `previous` (the
+    /// cycle of each task's project), or `none` for tasks without one.
+    cycle_id: Option<String>,
     /// Continue from the next_cursor of the previous response.
     cursor: Option<String>,
     /// Maximum number of tasks, from 1 to 100. Default: 50.
@@ -205,6 +211,15 @@ struct CreateArgs {
     /// Workspace member user IDs, from list_members or get_me.
     #[serde(default)]
     assignee_ids: Vec<String>,
+    /// Label IDs of the task's project, from list_labels.
+    #[serde(default)]
+    label_ids: Vec<String>,
+    /// A milestone of the project, from list_milestones.
+    milestone_id: Option<String>,
+    /// A cycle of the project, from list_cycles.
+    cycle_id: Option<String>,
+    /// Points, 0 to 1000.
+    estimate: Option<i64>,
 }
 fn default_priority() -> String {
     "none".into()
@@ -225,10 +240,22 @@ struct UpdateArgs {
     /// Replaces the assignees with these member user IDs (from list_members or get_me); `[]`
     /// unassigns everyone.
     assignee_ids: Option<Vec<String>>,
+    /// Replaces the labels with these label IDs of the task's project (from list_labels); `[]`
+    /// removes all labels.
+    label_ids: Option<Vec<String>>,
     /// Makes the task repeat: completing it creates the next occurrence. Every occurrence of
     /// the series shares this rule. `null` stops repeating.
     #[serde(default, deserialize_with = "present")]
     recurrence: Option<Option<TaskRecurrence>>,
+    /// A milestone of the task's project (from list_milestones); `null` clears it.
+    #[serde(default, deserialize_with = "present")]
+    milestone_id: Option<Option<String>>,
+    /// A cycle of the task's project (from list_cycles); `null` clears it.
+    #[serde(default, deserialize_with = "present")]
+    cycle_id: Option<Option<String>>,
+    /// Points, 0 to 1000; `null` clears the estimate.
+    #[serde(default, deserialize_with = "present")]
+    estimate: Option<Option<i64>>,
 }
 /// A field that is present, `null` included: `null` clears the value, a missing field keeps it.
 fn present<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
@@ -253,6 +280,11 @@ struct ProjectPageArgs {
     project_id: String,
     cursor: Option<String>,
     limit: Option<usize>,
+}
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct ProjectArgs {
+    project_id: String,
 }
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -387,12 +419,12 @@ fn tools() -> Vec<Tool> {
     let mut tools = vec![
         write_definition::<CreateArgs>(
             "create_task",
-            "Create a task in an approved project. With parent_task_id, the task is a sub-issue of that task. assignee_ids takes member user IDs.",
+            "Create a task in an approved project. With parent_task_id, the task is a sub-issue of that task. assignee_ids takes member user IDs; label_ids takes label IDs of the project, from list_labels; milestone_id and cycle_id take IDs from list_milestones and list_cycles.",
             false,
         ),
         write_definition::<UpdateArgs>(
             "update_task",
-            "Update a task using its current version. parent_task_id moves the task under another task; null detaches it. Related task projects must also be approved. assignee_ids replaces the assignees: add your get_me user id to claim a task, send [] to unassign everyone. recurrence makes the task repeat, e.g. {\"frequency\": \"weekly\", \"interval\": 1, \"weekdays\": [\"mon\", \"wed\"], \"base\": \"due\"}; base \"completion\" counts from the day it is completed (no weekdays); null stops repeating.",
+            "Update a task using its current version. parent_task_id moves the task under another task; null detaches it. Related task projects must also be approved. assignee_ids replaces the assignees: add your get_me user id to claim a task, send [] to unassign everyone. label_ids replaces the labels with label IDs of the task's project (from list_labels); [] removes all labels. recurrence makes the task repeat, e.g. {\"frequency\": \"weekly\", \"interval\": 1, \"weekdays\": [\"mon\", \"wed\"], \"base\": \"due\"}; base \"completion\" counts from the day it is completed (no weekdays); null stops repeating. milestone_id, cycle_id and estimate set the plan; null clears each.",
             true,
         ),
         write_definition::<DeleteArgs>(
@@ -429,6 +461,14 @@ fn tools() -> Vec<Tool> {
             "list_labels",
             "List the labels of an approved project: the names and colors of task label_ids.",
         ),
+        definition::<ProjectArgs>(
+            "list_milestones",
+            "List the milestones of an approved project in their order: name, description, target date, and progress (task_count, completed_count, estimate_total, estimate_completed).",
+        ),
+        definition::<ProjectArgs>(
+            "list_cycles",
+            "List the cycles of an approved project by start date: number, name, starts_at and ends_at (exclusive), progress counts, and relative (current, next, previous or null).",
+        ),
         definition::<CursorArgs>(
             "list_members",
             "List workspace members (user_id and display_name), to read and set task assignee_ids.",
@@ -457,7 +497,7 @@ fn tools() -> Vec<Tool> {
         ),
         definition::<ListTasksArgs>(
             "list_tasks",
-            "Search and list live tasks in approved projects. Includes completed tasks and sub-issues; parent_task_id lists the sub-issues of one task.",
+            "Search and list live tasks in approved projects. Includes completed tasks and sub-issues; parent_task_id lists the sub-issues of one task. milestone_id and cycle_id filter by plan; cycle_id also takes current, next or previous.",
         ),
         definition::<TaskArgs>("get_task", "Read one live task from an approved project."),
     ];
@@ -556,6 +596,9 @@ impl TaskTools {
                 let a: CreateArgs = arguments(&request)?;
                 let (project_id, status_id) = (parse_id(&a.project_id)?, parse_id(&a.status_id)?);
                 let assignee_ids = parse_ids(&a.assignee_ids)?;
+                let label_ids = parse_ids(&a.label_ids)?;
+                let milestone_id = a.milestone_id.as_deref().map(parse_id).transpose()?;
+                let cycle_id = a.cycle_id.as_deref().map(parse_id).transpose()?;
                 async {
                     let parent_task_id = api.optional_task_id(a.parent_task_id.as_deref()).await?;
                     api.create_task(NewTask {
@@ -565,20 +608,30 @@ impl TaskTools {
                         description: a.description,
                         priority: a.priority,
                         assignee_ids,
-                        label_ids: vec![],
+                        label_ids,
                         parent_task_id,
                         due_start_at: None,
                         due_at: None,
+                        milestone_id,
+                        cycle_id,
+                        estimate: a.estimate,
+                        import: None,
                     })
                     .await
                 }
                 .await
-                .map(|task| json!(task))
+                .map(|task| json!(task.value))
             }
             "update_task" => {
                 let a: UpdateArgs = arguments(&request)?;
                 let status_id = a.status_id.as_deref().map(parse_id).transpose()?;
                 let assignee_ids = a.assignee_ids.as_deref().map(parse_ids).transpose()?;
+                let label_ids = a.label_ids.as_deref().map(parse_ids).transpose()?;
+                let plan_id = |id: Option<Option<String>>| {
+                    id.map(|id| id.as_deref().map(parse_id).transpose())
+                        .transpose()
+                };
+                let (milestone_id, cycle_id) = (plan_id(a.milestone_id)?, plan_id(a.cycle_id)?);
                 async {
                     let parent_task_id = match a.parent_task_id {
                         Some(parent) => Some(api.optional_task_id(parent.as_deref()).await?),
@@ -591,7 +644,11 @@ impl TaskTools {
                         priority: a.priority,
                         parent_task_id,
                         assignee_ids,
+                        label_ids,
                         recurrence: a.recurrence,
+                        milestone_id,
+                        cycle_id,
+                        estimate: a.estimate,
                         ..Default::default()
                     };
                     api.update_task(&a.task_id, a.expected_version, patch).await
@@ -679,6 +736,18 @@ impl TaskTools {
                     .await
                     .map(|page| json!({"items": page.items, "next_cursor": page.next_cursor}))
             }
+            "list_milestones" => {
+                let a: ProjectArgs = arguments(&request)?;
+                api.milestones(parse_id(&a.project_id)?)
+                    .await
+                    .map(|items| json!({"items": items}))
+            }
+            "list_cycles" => {
+                let a: ProjectArgs = arguments(&request)?;
+                api.cycles(parse_id(&a.project_id)?)
+                    .await
+                    .map(|items| json!({"items": items}))
+            }
             "list_members" => {
                 let a: CursorArgs = arguments(&request)?;
                 api.members(a.cursor.as_deref(), a.limit)
@@ -697,9 +766,14 @@ impl TaskTools {
             }
             "create_comment" => {
                 let a: CreateCommentArgs = arguments(&request)?;
-                api.create_comment(&a.task_id, a.body)
+                let comment = NewComment {
+                    body: a.body,
+                    parent_id: None,
+                    import: None,
+                };
+                api.create_comment(&a.task_id, comment)
                     .await
-                    .map(|comment| json!(CommentOut::from(comment)))
+                    .map(|comment| json!(CommentOut::from(comment.value)))
             }
             "create_project" => {
                 let a: CreateProjectArgs = arguments(&request)?;
@@ -720,6 +794,12 @@ impl TaskTools {
                     api.list_tasks(TaskQuery {
                         project_id,
                         query: a.query,
+                        milestone: a
+                            .milestone_id
+                            .as_deref()
+                            .map(parse_milestone_filter)
+                            .transpose()?,
+                        cycle: a.cycle_id.as_deref().map(parse_cycle_filter).transpose()?,
                         parent_task_id: api.optional_task_id(a.parent_task_id.as_deref()).await?,
                         cursor: a.cursor,
                         limit: a.limit,
@@ -755,7 +835,9 @@ fn tool_error(error: TokenApiError) -> Result<CallToolResult, ErrorData> {
         TokenApiError::BillingUnavailable => {
             Err(ErrorData::internal_error("Billing is unavailable", None))
         }
-        TokenApiError::Internal => Err(ErrorData::internal_error("Service is unavailable", None)),
+        TokenApiError::Internal(_) => {
+            Err(ErrorData::internal_error("Service is unavailable", None))
+        }
         TokenApiError::ReadOnly => text(READ_ONLY_DETAIL),
         TokenApiError::NotAvailable => text("Resource is not available"),
         TokenApiError::AllProjectsRequired => text(
@@ -764,12 +846,25 @@ fn tool_error(error: TokenApiError) -> Result<CallToolResult, ErrorData> {
         TokenApiError::PurgeForbidden => {
             text("Only workspace owners and administrators may delete tasks forever")
         }
+        TokenApiError::ImportForbidden => {
+            text("Import writes need a token of a workspace owner or administrator")
+        }
         TokenApiError::Task(error) => text(match error {
             TaskError::NotFound | TaskError::Forbidden => "Task resource is not available",
             TaskError::InvalidCursor => "Invalid pagination cursor",
             TaskError::Invalid {
                 field: "assignee_ids",
             } => "assignee_ids must be distinct user IDs of workspace members who are not guests",
+            TaskError::Invalid { field: "label_ids" } => {
+                "label_ids must be distinct label IDs of the task's project, from list_labels"
+            }
+            TaskError::Invalid {
+                field: "milestone_id",
+            } => "milestone_id must be a milestone of the task's project (see list_milestones)",
+            TaskError::Invalid { field: "cycle_id" } => {
+                "cycle_id must be a cycle of the task's project (see list_cycles)"
+            }
+            TaskError::Invalid { field: "estimate" } => "estimate must be 0 to 1000 points",
             TaskError::InvalidFilter { .. } | TaskError::Invalid { .. } => "Invalid task query",
             TaskError::VersionConflict { .. } => {
                 "Task version changed; read the task again before retrying"
@@ -808,6 +903,12 @@ fn database_detail(error: DatabaseError) -> String {
         DatabaseError::Locked => "Database is locked".to_owned(),
         DatabaseError::PropertyNotFound => "Database property is not available".to_owned(),
         DatabaseError::PropertyLimit => "A database holds at most 100 properties".to_owned(),
+        DatabaseError::LinkNotFound => "Linked view block is not available".to_owned(),
+        DatabaseError::ViewLimit => "A database holds at most 50 views".to_owned(),
+        DatabaseError::LinkViewLimit => "A linked view block holds at most 20 views".to_owned(),
+        DatabaseError::LastView => {
+            "A database or a linked view block keeps at least one view".to_owned()
+        }
         DatabaseError::TitleProperty => {
             "The title property cannot be deleted or change its type".to_owned()
         }

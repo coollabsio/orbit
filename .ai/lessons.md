@@ -3,17 +3,20 @@
 ## Migration history
 - Do not squash or edit a migration after a local database has applied it. Orbit checks both version and checksum at startup. If an uncommitted migration must be consolidated, compare the old and new schemas and back up the database before reconciling its migration records; do not reset user data to make the dev server start.
 - SQLite table rebuilds (to change a CHECK): the runner holds a transaction with `foreign_keys=ON`, so `PRAGMA foreign_keys=OFF` is a no-op and `ALTER TABLE … RENAME` fails on triggers that name the table. Copy rows aside, `DROP`, re-`CREATE` under the same name, re-insert under `PRAGMA defer_foreign_keys=ON`, then recreate the table's own indexes and triggers (see `0021`).
-- When `main` takes a migration number that a branch also uses, renumber the branch's files (SQLite and Postgres) above `main`'s, then update each local DB that applied the old numbers: back it up, shift its `schema_migrations` versions and set each checksum to the new file's SHA-256, then run `orbit migrate run` to apply `main`'s migration (done for 0078_guests on 2026-11-09).
+- Migration versions after 0099 are UTC timestamps (`just new-migration <name>`), so branches do not renumber on merge. The runner applies any migration that is not in `schema_migrations`, so a branch's earlier timestamp that merges later still runs. Two parallel migrations that change the same table can still clash in meaning: check the merged `main`.
 - `scripts/dev-server-watch.sh` reruns `migrate run --seed` against `data/orbit.sqlite` on every source change, so a new migration is applied to the dev DB (and its checksum frozen) the moment it compiles. Get the SQL right in tests (`embedded_through`) before any `cargo build` of the server while the watcher runs (0023 was applied this way on 2026-09-25).
-- A new migration also needs: its entry in `crates/platform/src/db/migrate.rs` (else every query on the new table returns 500), `SUPPORTED_SCHEMA_VERSION` in `crates/platform/src/backup.rs` (restore refuses newer snapshots), and the version number in `crates/platform/tests/{database,backup}.rs` and `apps/server/tests/app_smoke.rs`. A new route also needs the path and operation counts in `apps/server/tests/openapi_contract.rs` and `just api`.
+- `crates/platform/build.rs` makes the migration catalog from the files, and the backup and tests take the newest version from `MigrationRunner::latest_version()`. A new migration needs no other edit. A new route needs the path and operation counts in `apps/server/tests/openapi_contract.rs` and `just api`.
 - utoipa silently keeps one schema when two `ToSchema` types share a name: the databases `FilterOperator` replaced the task filter's in `openapi.json` (2026-11-09). After `just api`, diff `components.schemas` against `HEAD` and give new types a unique `#[schema(as = …)]` name.
 - A rebuilt table becomes the *newest* FK child, and SQLite runs parent-delete cascades newest-child first. A `RESTRICT` reference to the rebuilt table (e.g. `tasks.status_id`) can then block a cascade that used to work. Hard deletes must delete the restricting children explicitly first.
 
+- `cargo fmt -p orbit-server` also reformats files that `main` left unformatted. Check `git status` after it and revert the files that the task did not touch, so the diff stays reviewable.
+
 ## Two database backends (SQLite + Postgres)
 - All SQL goes through sqlx `Any`: write `$1, $2, …` (SQLite binds them by number too), import `orbit_platform::Row` (not `sqlx::Row`) so 0/1 flags decode as `bool`, decode boolean scalars as `Flag`, bind `i64` (never `bool`/`u32`), and build dynamic SQL with `SqlBuilder`. SQLite silently ignores extra bound values, so clashing `$N` numbers in `format!`-glued fragments only fail on Postgres.
-- A new SQLite migration also needs its change in the Postgres schema (`apps/server/migrations/postgres/`) and that file's entry in `runner.postgres` in `crates/platform/src/db/migrate.rs`.
 - Run the whole suite on Postgres with `ORBIT_TEST_POSTGRES_URL=postgres://orbit:orbit@127.0.0.1:15432/orbit`; each test database maps from its SQLite path.
 - No Postgres listens on 15432 after a reboot unless the persistent dev one runs: `orbit-dev-pg` (volume `orbit-dev-pg-data`, `--restart unless-stopped`, databases `orbit` for tests and `orbit_dev` for `just dev`). A `--rm` container loses all data on reboot (the dev data was lost this way on 2026-10-24). For the full test suite use `-c max_connections=300`, at least 1 GB of memory and `--shm-size=1g` (the 64 MB default `/dev/shm` gives error 53100 in `collab_api`), or tests fail mid-suite. With a 64 MB `/dev/shm`, run the server suite with `-- --test-threads=4`, and rerun the failed binaries before you suspect the code.
+
+- A partial index (`… WHERE reply_count > 0`) is used only when the query repeats its condition: without it the unread-threads query scanned the whole conversation (134 ms → 2 ms at 500,000 messages, 2026-11-10). Check new list queries with `EXPLAIN QUERY PLAN` and the ignored `every_call_stays_fast_with_half_a_million_messages` test.
 
 ## Several servers on one Postgres database
 - Any process-local state (maps, locks, counters, caches, "running" flags, background loops) is per server. If it must hold for every server, keep it in the database (a serialized `immediate_transaction`, `Database::try_singleton`) or send it through `crate::cluster`. Test such changes with two `App`s on one database (`apps/server/tests/shared_postgres`), and prove the test fails without the fix.
@@ -32,6 +35,9 @@
   (Python's SQLite 3.46.1 also says ok). It made the weekly integrity job (which runs at App start in tests) stop the
   server once `page_search` rows were updated. `IntegrityService::full` now confirms such findings with FTS5's own check
   (2026-09-25). Check new virtual tables against `integrity_check` with the bundled SQLite, not the system one.
+- A contentless FTS5 table (`content = ''`) refuses `DELETE` unless it is created with `contentless_delete = 1`
+  (SQLite 3.43+); then `DELETE … WHERE rowid = …` works and reads the same as on the Postgres twin table
+  (`mail_search`, 2026-10-23).
 
 ## Project visibility
 - Projects can be private (#37). Every new query that reads projects, tasks or anything inside them (comments, labels, files, notifications, counts or titles of related tasks) must filter with `repositories/project_access.rs` (`ProjectScope::of(actor)`, or `user_sees_*_sql` for other users), never with `workspace_id` alone. Server-side work (integrations, automation) uses `ProjectScope::All` on purpose.
@@ -77,6 +83,7 @@
 - Typecheck the web app with `bunx tsc -b` (what `build` runs). `tsc --noEmit -p .` checks nothing: the root `tsconfig.json` only has references, so it passes on broken code.
 - In `apps/web`, run `bun test src` (the `test` script), not bare `bun test`: bare `bun test` also loads the Playwright e2e files and reports false failures.
 - `cargo test --workspace` stops at the first failing test binary; use `--no-fail-fast` to see the whole suite.
+- JavaScript packages install once at the repository root (Bun workspace, hoisted linker). An old `apps/web/node_modules` from before that layout shadows the root copies; two copies of `prosemirror-view` make the editor tests fail with `this.members[i].localsInner`. Delete it and run `bun install --frozen-lockfile` at the root.
 - Playwright rewrites the tracked `apps/web/test-results/.last-run.json` on every run — restore it with `git checkout --` and never commit it.
 - If the Agent Browser fails with a `SingletonLock: File exists` profile error, another session holds the profile. Do not delete the lock; drive the dev server with `playwright-core` from `apps/web/node_modules` instead (script in `/tmp`).
 - If Playwright's pinned headless shell is not installed, set `PLAYWRIGHT_CHROMIUM_EXECUTABLE` to an installed one under `~/.cache/ms-playwright/` (`playwright.config.ts` reads it) instead of downloading browsers.

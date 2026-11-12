@@ -122,10 +122,25 @@ async fn record_scoped(
     .bind(resource_type)
     .bind(resource_id.map(|id| id.to_string()))
     .bind(bounded_text(request_id, 128))
-    .bind(bounded_metadata(metadata))
+    .bind(bounded_metadata(&metadata))
     .bind(now.as_millis())
     .execute(&mut **transaction)
     .await?;
+    // Every task change is recorded here, so this is where its webhook deliveries are written.
+    if let (Some(workspace_id), AuditOutcome::Success, "task", Some(task_id)) =
+        (workspace_id, outcome, resource_type, resource_id)
+    {
+        crate::webhooks::capture(
+            transaction,
+            workspace_id,
+            task_id,
+            action,
+            actor_id,
+            &metadata,
+            now,
+        )
+        .await?;
+    }
     Ok(())
 }
 
@@ -252,8 +267,8 @@ fn decode_event(row: sqlx::any::AnyRow) -> Result<AuditEvent, sqlx::Error> {
     })
 }
 
-fn bounded_metadata(metadata: Value) -> String {
-    let serialized = serde_json::to_string(&metadata).unwrap_or_else(|_| "{}".to_owned());
+fn bounded_metadata(metadata: &Value) -> String {
+    let serialized = serde_json::to_string(metadata).unwrap_or_else(|_| "{}".to_owned());
     if serialized.len() <= MAX_METADATA_BYTES {
         serialized
     } else {

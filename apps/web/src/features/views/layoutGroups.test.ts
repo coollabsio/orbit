@@ -18,7 +18,7 @@ const projects = [
   { id: 'p1', name: 'Launch', key: 'ORB', color: '#e0457b', version: 1 },
   { id: 'p2', name: 'Docs', key: 'DOC', color: '#26b5ce', version: 1 },
 ] as Project[]
-const ctx: GroupContext = { statuses, members: [], labels: [], projects, currentUserId: 'u1', showEmpty: false }
+const ctx: GroupContext = { statuses, members: [], labels: [], projects, milestones: [], cycles: [], currentUserId: 'u1', showEmpty: false }
 const display = (patch: Partial<DisplayOptions> = {}): DisplayOptions => ({ ...DEFAULT_DISPLAY, ...patch })
 
 function task(id: string, overrides: Partial<Task> = {}): Task {

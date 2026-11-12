@@ -269,6 +269,7 @@ export function Composer({ ref, conversation, threadRootId = null, replyTo = nul
             onSelect={mention.insert}
             onHover={mention.setActiveIndex}
             hint={mention.emptyTaskQuery ? 'Type a task title or ID, like ENG-12' : undefined}
+            loading={mention.searchingTasks}
           />
         ) : emoji.open ? (
           <EmojiSuggestions id={emojiListId} query={emoji.query} suggestions={emoji.suggestions} activeIndex={emoji.activeIndex} onSelect={emoji.insert} onHover={emoji.setActiveIndex} />
@@ -314,7 +315,7 @@ export function Composer({ ref, conversation, threadRootId = null, replyTo = nul
             aria-controls={emoji.open ? emojiListId : undefined}
             aria-activedescendant={emoji.open ? `${emojiListId}-${emoji.activeIndex}` : undefined}
             placeholder={inThread ? 'Reply…' : `Message ${title}`}
-            className="min-h-10 shrink resize-none rounded-none border-0 bg-transparent px-3 pt-2.5 pb-1 text-[15px] leading-[1.5] focus-visible:ring-0 md:text-[15px] dark:bg-transparent"
+            className="min-h-10 shrink resize-none rounded-none border-0 bg-transparent px-3 pt-2.5 pb-1 text-[0.9375rem] leading-[1.5] focus-visible:ring-0 md:text-[0.9375rem] dark:bg-transparent"
             onChange={onChange}
             onKeyDown={onKeyDown}
             onPaste={onPaste}

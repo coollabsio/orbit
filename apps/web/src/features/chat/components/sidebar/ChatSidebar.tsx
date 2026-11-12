@@ -19,7 +19,7 @@ import { CategoryDialog } from '@/features/chat/components/dialogs/CategoryDialo
 import { EditChannelDialog } from '@/features/chat/components/dialogs/EditChannelDialog'
 import { NewChannelDialog } from '@/features/chat/components/dialogs/NewChannelDialog'
 import { NewMessageDialog } from '@/features/chat/components/dialogs/NewMessageDialog'
-import { customSidebarVariables, useCustomTheme } from '@/lib/customTheme'
+import { customSidebarVariables, setAppLook, setCustomTheme, useCustomTheme, useCustomThemeChoice } from '@/lib/customTheme'
 import { buildSidebarSections, conversationBadge, dropBefore, unjoinedChannelCount, type SidebarSection } from '@/features/chat/lib/sidebar'
 import { useChatLocation } from '@/features/chat/useChatNavigation'
 import { useMembers } from '@/features/workspaces/api'
@@ -202,6 +202,9 @@ export function ChatSidebar() {
   const [collapsed, toggleCollapsed] = useCollapsedSections(workspaceId)
   const [showAllDms, setShowAllDms] = useState(false)
   const theme = useCustomTheme()
+  // under Per app, the editor here changes only the chat colours
+  const choice = useCustomThemeChoice()
+  const perApp = Boolean(choice && 'apps' in choice)
   const inAppSidebar = useInAppSidebar()
   // the last dialog stays set while it closes, so it can play its exit
   const [dialog, setDialog] = useState<SidebarDialog | null>(null)
@@ -364,7 +367,7 @@ export function ChatSidebar() {
 
       <nav aria-label="Conversations" className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-2 pt-3">
         {conversations.isError ? (
-          <div className="flex flex-col items-start gap-2 px-2 text-[13px] text-muted-foreground" role="alert">
+          <div className="flex flex-col items-start gap-2 px-2 text-[0.8125rem] text-muted-foreground" role="alert">
             Could not load your conversations.
             <Button type="button" variant="outline" size="sm" onClick={() => void conversations.refetch()}>
               Try again
@@ -442,7 +445,20 @@ export function ChatSidebar() {
       <NewMessageDialog open={isOpen('message')} onOpenChange={setDialogOpen} />
       <NewChannelDialog open={isOpen('channel')} onOpenChange={setDialogOpen} defaultCategoryId={dialog?.kind === 'channel' ? dialog.categoryId : null} />
       <BrowseChannelsDialog open={isOpen('browse')} onOpenChange={setDialogOpen} />
-      {dialog?.kind === 'theme' ? <CustomThemeDialog open={dialogOpen} onOpenChange={setDialogOpen} /> : null}
+      {dialog?.kind === 'theme' ? (
+        <CustomThemeDialog
+          open={dialogOpen}
+          onOpenChange={setDialogOpen}
+          title={perApp ? 'Chat colours' : 'Custom theme'}
+          description={
+            perApp
+              ? 'Colours of chat pages. Orbit uses your Light, System or Dark theme. Only you see them.'
+              : 'Colours of the whole app, in place of Light, System or Dark. Only you see them, and text stays readable on every colour.'
+          }
+          value={theme}
+          onSave={(next) => (perApp ? setAppLook('chat', next) : setCustomTheme(next))}
+        />
+      ) : null}
       {dialog?.kind === 'category' ? (
         <CategoryDialog key={dialog.category?.id ?? 'new'} open={dialogOpen} onOpenChange={setDialogOpen} category={dialog.category} />
       ) : null}

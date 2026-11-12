@@ -9,6 +9,8 @@ export const queryKeys = {
   },
   setup: ['setup-status'] as const,
   currentUser: ['current-user'] as const,
+  /** Orbit Cloud: the caller's trial, which every workspace they create shares. */
+  accountTrial: ['account-trial'] as const,
   sessions: ['sessions'] as const,
   /** Whether the authenticator app is on and how many recovery codes are left. */
   twoFactor: ['two-factor'] as const,
@@ -25,6 +27,10 @@ export const queryKeys = {
   adminUserSummary: ['admin', 'user-summary'] as const,
   adminSettings: ['admin', 'settings'] as const,
   adminJobLimits: ['admin', 'job-limits'] as const,
+  /** The Admin mail page (switch and health card). Workspace mail keys are `mailKeys` in `features/mail/api/keys`. */
+  adminMail: ['admin', 'mail'] as const,
+  adminMailProviders: ['admin', 'mail', 'providers'] as const,
+  adminMailTest: (testId: string) => ['admin', 'mail', 'test', testId] as const,
   /** Public: what the sign-in pages offer (open registration, email). */
   authOptions: ['auth-options'] as const,
   adminAudit: ['admin', 'audit'] as const,
@@ -35,6 +41,9 @@ export const queryKeys = {
   memberProfile: (workspaceId: string, userId: string) => [...workspace(workspaceId), 'profiles', userId] as const,
   invitations: (workspaceId: string) => [...workspace(workspaceId), 'invitations'] as const,
   apiTokens: (workspaceId: string) => [...workspace(workspaceId), 'api-tokens'] as const,
+  /** Outgoing webhook subscriptions; each one's deliveries sit under it. */
+  webhooks: (workspaceId: string) => [...workspace(workspaceId), 'webhooks'] as const,
+  webhookDeliveries: (workspaceId: string, webhookId: string) => [...workspace(workspaceId), 'webhooks', webhookId, 'deliveries'] as const,
   /** People from Asana, Linear and Trello imports, mapped to members in Settings → Import. */
   importPeople: (workspaceId: string) => [...workspace(workspaceId), 'import-people'] as const,
   /** Full workspace exports (ZIP archives) that have not expired. */
@@ -46,10 +55,17 @@ export const queryKeys = {
   /** The workspace's own S3 bucket for its files. */
   workspaceBucket: (workspaceId: string) => [...workspace(workspaceId), 'storage', 'bucket'] as const,
   projects: (workspaceId: string) => [...workspace(workspaceId), 'projects'] as const,
+  /** The member's own sidebar order of the projects. */
+  projectOrder: (workspaceId: string) => [...workspace(workspaceId), 'project-order'] as const,
   statuses: (workspaceId: string, projectId: string) =>
     [...workspace(workspaceId), 'projects', projectId, 'statuses'] as const,
   projectMembers: (workspaceId: string, projectId: string) =>
     [...workspace(workspaceId), 'projects', projectId, 'members'] as const,
+  /** Their task counts change with every task write: refetch them with `tasks.all`. */
+  milestones: (workspaceId: string, projectId: string) =>
+    [...workspace(workspaceId), 'projects', projectId, 'milestones'] as const,
+  cycles: (workspaceId: string, projectId: string) =>
+    [...workspace(workspaceId), 'projects', projectId, 'cycles'] as const,
   comments: (workspaceId: string, taskId: string) =>
     [...workspace(workspaceId), 'tasks', 'detail', taskId, 'comments'] as const,
   taskActivity: (workspaceId: string, taskId: string) =>

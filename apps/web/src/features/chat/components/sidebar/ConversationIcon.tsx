@@ -46,7 +46,7 @@ export function ConversationIcon({
     <span
       data-slot="conversation-icon"
       aria-hidden="true"
-      className="flex shrink-0 items-center justify-center rounded-[5px] bg-muted text-[10px] leading-none font-semibold text-muted-foreground tabular-nums"
+      className="flex shrink-0 items-center justify-center rounded-[5px] bg-muted text-[0.625rem] leading-none font-semibold text-muted-foreground tabular-nums"
       style={{ width: size, height: size }}
     >
       {peerIds.length}

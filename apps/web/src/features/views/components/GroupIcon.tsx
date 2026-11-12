@@ -1,4 +1,4 @@
-import { ChevronRight } from 'reicon-react'
+import { ChevronRight, Diamonds, RefreshCircle } from 'reicon-react'
 import { cn } from 'cn'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import { ColorDot } from '@/components/common/ColorDot'
@@ -21,7 +21,7 @@ export function DisclosureChevron({ open, className }: { open: boolean; classNam
   )
 }
 
-/** The glyph in front of a group name: status icon, priority bars, avatar, or a project/label colour dot. */
+/** The glyph in front of a group name: status icon, priority bars, avatar, a project/label colour dot, or the milestone/cycle icon. */
 export function GroupIcon({ group, context }: { group: Pick<TaskGroup, 'field' | 'value'>; context: GroupContext }) {
   switch (group.field) {
     case 'status':
@@ -42,6 +42,10 @@ export function GroupIcon({ group, context }: { group: Pick<TaskGroup, 'field' |
         ? <ColorDot color={color} className="size-2" />
         : <span aria-hidden className="size-2 shrink-0 rounded-full border border-dashed border-muted-foreground/60" />
     }
+    case 'milestone':
+      return <Diamonds aria-hidden className={cn('size-3.5 shrink-0', group.value === null && 'opacity-50')} />
+    case 'cycle':
+      return <RefreshCircle aria-hidden className={cn('size-3.5 shrink-0', group.value === null && 'opacity-50')} />
     default:
       return null
   }

@@ -12,6 +12,7 @@ import { useProjects, useUpdateProject } from '@/features/tasks/api/projects'
 import type { Project } from '@/features/tasks/api/models'
 import { PROJECT_COLORS } from '@/features/tasks/taskMeta'
 import { useCreateWorkspace, useWorkspaces } from '@/features/workspaces/api'
+import { newWorkspaceTrialNote, useAccountTrial } from '@/features/workspaces/billing'
 import { useIsInstallationAdmin } from '@/features/workspaces/permissions'
 import { LoadingText } from '@/components/ui/spinner'
 
@@ -44,7 +45,7 @@ function StepHeader({ step, title, children }: { step: number; title: string; ch
       <AuthBrand />
       <p className="mt-4 text-xs font-medium text-muted-foreground">Step {step} of 2</p>
       <h1 className="mt-1 mb-2">{title}</h1>
-      <div className="grid gap-2 text-[13px] leading-[1.6] text-muted-foreground">{children}</div>
+      <div className="grid gap-2 text-[0.8125rem] leading-[1.6] text-muted-foreground">{children}</div>
     </>
   )
 }
@@ -53,6 +54,7 @@ function WorkspaceStep({ onCreated }: { onCreated: (workspaceId: string) => void
   const createWorkspace = useCreateWorkspace()
   const isOperator = useIsInstallationAdmin()
   const [name, setName] = useState('')
+  const trialNote = newWorkspaceTrialNote(useAccountTrial().data)
   return (
     <AuthCard>
       <form className="grid gap-[18px]" onSubmit={(event) => {
@@ -68,7 +70,8 @@ function WorkspaceStep({ onCreated }: { onCreated: (workspaceId: string) => void
           <FieldLabel htmlFor="onboarding-workspace">Workspace name</FieldLabel>
           <Input id="onboarding-workspace" required autoFocus placeholder="Acme Inc." value={name} onChange={(event) => setName(event.target.value)} />
         </Field>
-        {createWorkspace.isError ? <p role="alert" className="text-[13px] text-destructive">{problemText(createWorkspace.error, 'The workspace could not be created.')}</p> : null}
+        {trialNote ? <p className="-mt-2 text-[0.8125rem] text-muted-foreground">{trialNote}</p> : null}
+        {createWorkspace.isError ? <p role="alert" className="text-[0.8125rem] text-destructive">{problemText(createWorkspace.error, 'The workspace could not be created.')}</p> : null}
         <Button type="submit" disabled={createWorkspace.isPending || !name.trim()}>{createWorkspace.isPending ? 'Please wait…' : 'Create workspace'}</Button>
         {/* Admin and the account settings work without a workspace: there, a person can also delete their account. */}
         {isOperator
@@ -90,7 +93,7 @@ function ProjectStep({ workspaceId }: { workspaceId: string }) {
       </AuthCard>
     )
   }
-  if (!project) return <AuthCard><p className="text-[13px] text-muted-foreground"><LoadingText>Loading…</LoadingText></p></AuthCard>
+  if (!project) return <AuthCard><p className="text-[0.8125rem] text-muted-foreground"><LoadingText>Loading…</LoadingText></p></AuthCard>
   return <ProjectForm workspaceId={workspaceId} project={project} />
 }
 
@@ -146,7 +149,7 @@ function ProjectForm({ workspaceId, project }: { workspaceId: string; project: P
             ))}
           </div>
         </div>
-        {updateProject.isError ? <p role="alert" className="text-[13px] text-destructive">{problemText(updateProject.error, 'The project could not be saved.')}</p> : null}
+        {updateProject.isError ? <p role="alert" className="text-[0.8125rem] text-destructive">{problemText(updateProject.error, 'The project could not be saved.')}</p> : null}
         <Button type="submit" disabled={updateProject.isPending || !name || !key}>{updateProject.isPending ? 'Please wait…' : 'Create project'}</Button>
         <Button type="button" variant="ghost" onClick={finish}>Skip, keep “{project.name}”</Button>
       </form>

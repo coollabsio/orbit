@@ -10,13 +10,15 @@ import { Switch } from '@/components/ui/switch'
 import { FieldGrid, RequiredMark } from '@/features/settings/components/SettingsParts'
 
 /** The form of an S3-compatible bucket, for the installation (Admin → Storage) and for one workspace. */
-export function S3BucketForm({ s3, title, description, endpointPlaceholder, saving, removing, onSave, onRemove, children }: {
+export function S3BucketForm({ s3, title, description, endpointPlaceholder, saving, removing, disabled = false, onSave, onRemove, children }: {
   s3: S3View | null
   title: string
   description: string
   endpointPlaceholder: string
   saving: boolean
   removing: boolean
+  /** Shows the saved bucket read-only: no field, switch or button can change it. */
+  disabled?: boolean
   onSave: (body: S3Body) => void
   /** Absent: no Remove button. */
   onRemove?: () => void
@@ -54,41 +56,41 @@ export function S3BucketForm({ s3, title, description, endpointPlaceholder, savi
         <FieldGrid>
           <Field>
             <FieldLabel htmlFor="s3-endpoint">Endpoint <RequiredMark /></FieldLabel>
-            <Input id="s3-endpoint" required type="url" placeholder={endpointPlaceholder} value={draft.endpoint} onChange={set('endpoint')} />
+            <Input id="s3-endpoint" required type="url" placeholder={endpointPlaceholder} disabled={disabled} value={draft.endpoint} onChange={set('endpoint')} />
           </Field>
           <Field>
             <FieldLabel htmlFor="s3-region">Region</FieldLabel>
-            <Input id="s3-region" placeholder="us-east-1" value={draft.region} onChange={set('region')} />
+            <Input id="s3-region" placeholder="us-east-1" disabled={disabled} value={draft.region} onChange={set('region')} />
           </Field>
           <Field>
             <FieldLabel htmlFor="s3-bucket">Bucket <RequiredMark /></FieldLabel>
-            <Input id="s3-bucket" required placeholder="orbit-files" value={draft.bucket} onChange={set('bucket')} />
+            <Input id="s3-bucket" required placeholder="orbit-files" disabled={disabled} value={draft.bucket} onChange={set('bucket')} />
           </Field>
           <Field>
             <FieldLabel htmlFor="s3-prefix">Prefix</FieldLabel>
-            <Input id="s3-prefix" placeholder="orbit" value={draft.prefix} onChange={set('prefix')} />
+            <Input id="s3-prefix" placeholder="orbit" disabled={disabled} value={draft.prefix} onChange={set('prefix')} />
           </Field>
           <Field>
             <FieldLabel htmlFor="s3-access-key">Access key ID <RequiredMark /></FieldLabel>
-            <Input id="s3-access-key" required autoComplete="off" value={draft.access_key_id} onChange={set('access_key_id')} />
+            <Input id="s3-access-key" required autoComplete="off" disabled={disabled} value={draft.access_key_id} onChange={set('access_key_id')} />
           </Field>
           <Field>
             <FieldLabel htmlFor="s3-secret-key">Secret access key {s3 ? null : <RequiredMark />}</FieldLabel>
-            <PasswordInput id="s3-secret-key" autoComplete="new-password" required={!s3} placeholder={s3 ? 'Saved. Leave empty to keep it.' : ''} value={draft.secret_access_key} onChange={set('secret_access_key')} />
+            <PasswordInput id="s3-secret-key" autoComplete="new-password" required={!s3} placeholder={s3 ? 'Saved. Leave empty to keep it.' : ''} disabled={disabled} value={draft.secret_access_key} onChange={set('secret_access_key')} />
           </Field>
         </FieldGrid>
         {children}
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-1.5">
-            <label className="flex items-center gap-2 text-[13px]">
-              <Switch checked={draft.path_style} onCheckedChange={(checked: boolean) => setDraft((current) => ({ ...current, path_style: checked }))} />
+            <label className="flex items-center gap-2 text-[0.8125rem]">
+              <Switch checked={draft.path_style} disabled={disabled} onCheckedChange={(checked: boolean) => setDraft((current) => ({ ...current, path_style: checked }))} />
               Path-style URLs
             </label>
             <InfoTip text="For MinIO and some other S3-compatible services." />
           </div>
           <div className="flex items-center gap-2">
-            {onRemove ? <Button type="button" variant="ghost" className="text-destructive" disabled={removing} onClick={onRemove}>Remove</Button> : null}
-            <Button type="submit" disabled={saving}>{saving ? 'Testing bucket…' : 'Save bucket'}</Button>
+            {onRemove ? <Button type="button" variant="ghost" className="text-destructive" disabled={disabled || removing} onClick={onRemove}>Remove</Button> : null}
+            <Button type="submit" disabled={disabled || saving}>{saving ? 'Testing bucket…' : 'Save bucket'}</Button>
           </div>
         </div>
       </SettingsCard>

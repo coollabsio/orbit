@@ -3,20 +3,20 @@ import { Link } from 'react-router'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import type { Bindings } from './bindings'
-import { COMMANDS, type Command, type Group } from './commands'
+import { COMMANDS, isMailCommand, type Command, type Group } from './commands'
 import { ShortcutKeys } from './Shortcut'
 import { useAvailableCommands, useBindings } from './useCommand'
 
-const GROUPS: Group[] = ['General', 'Navigation', 'List', 'Task', 'Pull requests', 'Docs', 'Chat']
+const GROUPS: Group[] = ['General', 'Navigation', 'List', 'Task', 'Pull requests', 'Docs', 'Chat', 'Mail']
 
 interface Row { title: string; group: Group; keys: string[]; ids: string[] }
 
 /** One row per action: commands that do the same thing (J and the down arrow) share a row. */
-function shortcutRows(bindings: Bindings): Row[] {
+function shortcutRows(bindings: Bindings, mail: boolean): Row[] {
   const rows = new Map<string, Row>()
   for (const command of COMMANDS as readonly Command[]) {
     const keys = bindings[command.id]
-    if (!keys) continue
+    if (!keys || (!mail && isMailCommand(command.id))) continue
     const key = `${command.group}:${command.context}:${command.title}`
     const row = rows.get(key) ?? { title: command.title, group: command.group, keys: [], ids: [] }
     rows.set(key, { ...row, keys: [...row.keys, keys], ids: [...row.ids, command.id] })
@@ -30,7 +30,7 @@ function Rows({ label, rows }: { label: string; rows: Row[] }) {
       <h3 className="mb-1 text-xs font-medium text-muted-foreground">{label}</h3>
       <ul>
         {rows.map((row) => (
-          <li key={row.ids.join()} className="flex min-h-8 items-center justify-between gap-4 text-[13px]">
+          <li key={row.ids.join()} className="flex min-h-8 items-center justify-between gap-4 text-[0.8125rem]">
             <span className="truncate">{row.title}</span>
             <span className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground/70">
               {row.keys.map((keys, index) => (
@@ -48,7 +48,7 @@ function Rows({ label, rows }: { label: string; rows: Row[] }) {
 }
 
 /** Every shortcut with its current keys. A rare visit, so it opens with the dialog's normal motion. */
-export function ShortcutHelpDialog({ onClose }: { onClose: () => void }) {
+export function ShortcutHelpDialog({ onClose, mailEnabled: mail = false }: { onClose: () => void; /** Mail is on for the server: its shortcuts are listed. */ mailEnabled?: boolean }) {
   const bindings = useBindings()
   const [query, setQuery] = useState('')
   // what the page in view can do, read once: the dialog itself must not change the list
@@ -56,7 +56,7 @@ export function ShortcutHelpDialog({ onClose }: { onClose: () => void }) {
   const [onPage] = useState(() => new Set(available().filter((command) => command.context !== 'global').map((command) => command.id)))
 
   const needle = query.trim().toLowerCase()
-  const rows = shortcutRows(bindings).filter((row) => !needle || row.title.toLowerCase().includes(needle) || row.keys.some((keys) => keys.toLowerCase().includes(needle)))
+  const rows = shortcutRows(bindings, mail).filter((row) => !needle || row.title.toLowerCase().includes(needle) || row.keys.some((keys) => keys.toLowerCase().includes(needle)))
   const pageRows = rows.filter((row) => row.ids.some((id) => onPage.has(id)))
 
   return (
@@ -68,7 +68,7 @@ export function ShortcutHelpDialog({ onClose }: { onClose: () => void }) {
           <Input type="search" aria-label="Search shortcuts" placeholder="Search shortcuts…" autoFocus value={query} onChange={(event) => setQuery(event.target.value)} className="ml-auto h-7 w-56 max-sm:w-40" />
         </DialogHeader>
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pt-4">
-          {rows.length === 0 ? <p className="py-10 text-center text-[13px] text-muted-foreground">No shortcut matches "{query.trim()}".</p> : null}
+          {rows.length === 0 ? <p className="py-10 text-center text-[0.8125rem] text-muted-foreground">No shortcut matches "{query.trim()}".</p> : null}
           <div className="gap-x-10 sm:columns-2">
             {pageRows.length > 0 ? <Rows label="On this page" rows={pageRows} /> : null}
             {GROUPS.map((group) => {
@@ -77,7 +77,7 @@ export function ShortcutHelpDialog({ onClose }: { onClose: () => void }) {
             })}
           </div>
         </div>
-        <div className="border-t px-4 py-2.5 text-[13px]">
+        <div className="border-t px-4 py-2.5 text-[0.8125rem]">
           <Link to="/profile/shortcuts" className="text-muted-foreground underline-offset-4 hover:text-foreground hover:underline" onClick={onClose}>Customize shortcuts</Link>
         </div>
       </DialogContent>

@@ -8,6 +8,9 @@ import { useCommand } from '@/shortcuts/useCommand'
 import { useContext, useEffect, useLayoutEffect, useState, useSyncExternalStore } from 'react'
 import { useWorkspaceEvents } from '@/features/realtime/useWorkspaceEvents'
 import { ChatProvider } from '@/features/chat/api/ChatProvider'
+import { emitMailEvent, resyncMail } from '@/features/mail/api/events'
+import { useMailInboxUnread } from '@/features/mail/api/queries'
+import { useMailEnabled } from '@/features/mail/enabled'
 import { useChatBadges } from '@/features/chat/api/queries'
 import { useHasUnreadNotifications } from '@/features/inbox/api'
 import { startPushWorker } from '@/features/realtime/push'
@@ -60,7 +63,8 @@ function WorkspaceShell() {
   const { overrides } = useShortcutBindings()
   return (
     <ShortcutProvider overrides={overrides}>
-      <ChatProvider enabled={chatEnabled}>
+      {/* mail shares the live socket: app/ wires its handlers, so chat does not import mail */}
+      <ChatProvider enabled={chatEnabled} onMailEvent={emitMailEvent} onResync={resyncMail}>
         <Shell />
       </ChatProvider>
     </ShortcutProvider>
@@ -72,10 +76,12 @@ function Shell() {
   const guest = useIsGuest()
   const live = useWorkspaceEvents(workspace.id)
   const { total: chatBadge, unread: chatUnread } = useChatBadges()
-  // The tab icon gets a dot while chat or the Inbox has something unread. A guest has only chat.
+  const mailEnabled = useMailEnabled()
+  const mailBadge = useMailInboxUnread()
+  // The tab icon gets a dot while chat, mail or the Inbox has something unread. A guest has only chat.
   const inboxUnread = useHasUnreadNotifications(workspace.id, !guest).data === true
   const isRoot = useIsInstallationAdmin()
-  useUnreadFavicon(chatBadge + (inboxUnread ? 1 : 0))
+  useUnreadFavicon(chatBadge + mailBadge + (inboxUnread ? 1 : 0))
   // Signed in: the worker that shows notifications may run. This asks for no permission.
   useEffect(() => startPushWorker(), [])
   // The rich text editor (tasks, comments, docs, the new task dialog) is ready before its first use. A guest
@@ -181,7 +187,7 @@ function Shell() {
             {/* a guest has no Activity page */}
             {guest ? null : <ActivityBell unread={inboxUnread} />}
           </div>
-          <SidebarNav collapsed={sidebarCollapsed} chatBadge={chatBadge} chatUnread={chatUnread} isRoot={isRoot} pageListRef={hostsList ? setPageListSlot : undefined} />
+          <SidebarNav collapsed={sidebarCollapsed} chatBadge={chatBadge} chatUnread={chatUnread} mailBadge={mailBadge} mailEnabled={mailEnabled} isRoot={isRoot} pageListRef={hostsList ? setPageListSlot : undefined} />
           <div
             className={cn(
               'flex shrink-0 items-center justify-between gap-1 py-2',
@@ -213,7 +219,7 @@ function Shell() {
             <Outlet />
           </ErrorBoundary>
         </div>
-        <MobileDock chatBadge={chatBadge} chatUnread={chatUnread} />
+        <MobileDock chatBadge={chatBadge} chatUnread={chatUnread} mailBadge={mailBadge} mailEnabled={mailEnabled} />
         {!guest && <DonationReminder />}
       </div>
 
@@ -225,14 +231,14 @@ function Shell() {
           style={sidebarTheme.style}
         >
           <MenuSurfaceContext value={menuSurface}>
-            <SidebarNav backShowsMenu onNavigate={() => setDrawerOpen(false)} chatBadge={chatBadge} chatUnread={chatUnread} isRoot={isRoot} />
+            <SidebarNav backShowsMenu onNavigate={() => setDrawerOpen(false)} chatBadge={chatBadge} chatUnread={chatUnread} mailBadge={mailBadge} mailEnabled={mailEnabled} isRoot={isRoot} />
           </MenuSurfaceContext>
         </SideSheetContent>
       </SideSheet>
 
       {/* a guest has nothing the palette searches (tasks, docs) */}
       {paletteOpen && !guest ? <CommandPalette onClose={() => setPaletteOpen(false)} /> : null}
-      {helpOpen ? <ShortcutHelpDialog onClose={() => setHelpOpen(false)} /> : null}
+      {helpOpen ? <ShortcutHelpDialog onClose={() => setHelpOpen(false)} mailEnabled={mailEnabled} /> : null}
       <NavigationCommands />
       {/* a pull request opens over any page (`?pr=owner/repo/n`) */}
       {!guest ? <PullOverlay /> : null}

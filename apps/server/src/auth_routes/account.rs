@@ -85,8 +85,8 @@ pub(super) async fn delete_account(
                 error.body.workspaces = Some(workspaces);
                 error
             }
-            DeleteAccountError::NotFound | DeleteAccountError::Unavailable(_) => {
-                ApiError::internal(ME, rid)
+            error @ (DeleteAccountError::NotFound | DeleteAccountError::Unavailable(_)) => {
+                ApiError::internal(ME, rid).cause(error)
             }
         })?;
     let mut response = StatusCode::NO_CONTENT.into_response();
@@ -165,7 +165,7 @@ pub(super) async fn request_email_change(
         .repository
         .email_taken_by_other(session.user.id, email)
         .await
-        .map_err(|_| ApiError::internal(CHANGE_EMAIL, rid))?;
+        .map_err(|error| ApiError::internal(CHANGE_EMAIL, rid).cause(error))?;
     // The email limit, link and email run in the background, so a free address does not answer
     // later than one another account uses.
     if !taken {
@@ -262,7 +262,9 @@ pub(super) async fn confirm_email_change(
                 CONFIRM_EMAIL,
                 rid,
             ),
-            EmailChangeError::Unavailable(_) => ApiError::internal(CONFIRM_EMAIL, rid),
+            EmailChangeError::Unavailable(error) => {
+                ApiError::internal(CONFIRM_EMAIL, rid).cause(error)
+            }
         })?;
     if let Some(mailer) = state.mailer().await {
         mailer.send_later(mail::templates::email_changed(

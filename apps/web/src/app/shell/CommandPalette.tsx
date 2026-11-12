@@ -3,7 +3,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useLocation, useNavigate } from 'react-router'
 import { cn } from 'cn'
 import { useAppSidebarTheme } from '@/lib/customTheme'
-import { DocumentText as FileText, Hashtag, Home2 as Home, Message as MessageSquare, Notification as Bell, People as Users, Setting2 as Settings, ShieldTick as ShieldCheck, TaskSquare as SquareCheck, Trash as Trash2, User as Person } from 'reicon-react'
+import { DocumentText as FileText, Hashtag, Home2 as Home, Message as MessageSquare, Notification as Bell, People as Users, Setting2 as Settings, ShieldTick as ShieldCheck, Sms as Mail, TaskSquare as SquareCheck, Trash as Trash2, User as Person } from 'reicon-react'
 import type { IconComponent as LucideIcon } from 'reicon-react'
 import { RobotIcon } from '@/components/common/icons/RobotIcon'
 import { Emoji } from '@/components/common/Emoji'
@@ -37,10 +37,11 @@ import { useDebouncedValue } from '@/lib/useDebouncedValue'
 import type { CommandId, Group } from '@/shortcuts/commands'
 import { ShortcutKeys } from '@/shortcuts/Shortcut'
 import { useAvailableCommands, useBindings, useRunCommand } from '@/shortcuts/useCommand'
+import { useMailEnabled } from '@/features/mail/enabled'
 import { chatEnabled, docsHidden } from './productNavigation'
 import { namesDestination, paletteArea, sectionOrder, type PaletteArea, type PaletteSection } from './paletteOrder'
 
-const COMMAND_ICON: Record<Group, LucideIcon> = { General: Settings, Navigation: Home, List: SquareCheck, Task: SquareCheck, 'Pull requests': FileText, Docs: FileText, Chat: MessageSquare }
+const COMMAND_ICON: Record<Group, LucideIcon> = { General: Settings, Navigation: Home, List: SquareCheck, Task: SquareCheck, 'Pull requests': FileText, Docs: FileText, Chat: MessageSquare, Mail }
 
 type EntryKind = 'navigation' | 'command' | 'task' | 'page' | 'chat'
 
@@ -95,7 +96,7 @@ function queryRanges(text: string, query: string): TextRange[] {
 /** The leading glyph: a task's status, a page's emoji, a channel's #, or the entry's icon. */
 function EntryGlyph({ entry }: { entry: CommandEntry }) {
   if (entry.task) return <span className="grid size-4 shrink-0 place-items-center"><TaskStatusIcon status={entry.task.status} size={14} /></span>
-  if (entry.emoji) return <Emoji value={entry.emoji} className="grid size-4 shrink-0 place-items-center text-[14px] leading-none" />
+  if (entry.emoji) return <Emoji value={entry.emoji} className="grid size-4 shrink-0 place-items-center text-[0.875rem] leading-none" />
   return <entry.icon className="size-4 shrink-0 text-muted-foreground/70" />
 }
 
@@ -107,7 +108,7 @@ function PaletteItem({ entry, query, onSelect }: { entry: CommandEntry; query: s
   const bindings = useBindings()
   const keys = entry.command ? bindings[entry.command] : null
   return (
-    <CommandItem value={entry.id} data-kind={entry.kind} className={cn('gap-2.5 px-2.5 text-[13px]', entry.snippet ? 'min-h-10 py-1.5' : 'h-10')} onSelect={onSelect}>
+    <CommandItem value={entry.id} data-kind={entry.kind} className={cn('gap-2.5 px-2.5 text-[0.8125rem]', entry.snippet ? 'min-h-10 py-1.5' : 'h-10')} onSelect={onSelect}>
       <EntryGlyph entry={entry} />
       {entry.task ? (
         <span className="min-w-[4.5rem] shrink-0 text-xs text-muted-foreground tabular-nums" data-task-id>
@@ -128,7 +129,7 @@ function PaletteItem({ entry, query, onSelect }: { entry: CommandEntry; query: s
           {entry.titleHighlights ? <Highlighted text={entry.title} ranges={entry.titleHighlights} /> : entry.title}
         </span>
       )}
-      <CommandShortcut className="max-w-[35%] truncate text-[11px] tracking-normal whitespace-nowrap text-muted-foreground/70">
+      <CommandShortcut className="max-w-[35%] truncate text-[0.6875rem] tracking-normal whitespace-nowrap text-muted-foreground/70">
         {entry.command && keys ? <ShortcutKeys keys={keys} /> : entry.meta}
       </CommandShortcut>
     </CommandItem>
@@ -188,12 +189,14 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
   const teamspaces = useTeamspaces(workspace.id, search.length > 0 || recentCount > 0)
   const searching = query.trim().length > 0
 
+  const mailEnabled = useMailEnabled()
   const navigation = useMemo<CommandEntry[]>(() => {
     const go = (entry: Omit<CommandEntry, 'kind' | 'meta'>): CommandEntry => ({ ...entry, kind: 'navigation', meta: 'Navigation' })
     const entries: CommandEntry[] = [
       go({ id: 'nav_home', icon: Home, title: 'Go to Home', to: '/', keywords: 'home' }),
       go({ id: 'nav_tasks', icon: SquareCheck, title: 'Go to Tasks', to: '/tasks', command: 'nav.tasks', keywords: 'tasks all', area: 'tasks' }),
       go({ id: 'nav_docs', icon: FileText, title: 'Go to Docs', to: '/docs', command: 'nav.docs', keywords: 'docs pages wiki documents', area: 'docs' }),
+      ...(mailEnabled ? [go({ id: 'nav_mail', icon: Mail, title: 'Go to Mail', to: '/mail', command: 'nav.mail', keywords: 'mail email inbox messages' })] : []),
       ...(chatEnabled ? [go({ id: 'nav_chat', icon: MessageSquare, title: 'Go to Chat', to: '/chat', command: 'nav.chat', keywords: 'chat messages channels', area: 'chat' })] : []),
       go({ id: 'nav_inbox', icon: Bell, title: 'Go to Activity', to: '/activity', command: 'nav.inbox', keywords: 'activity notifications mentions inbox' }),
       go({ id: 'nav_profile', icon: Users, title: 'Go to Profile', to: '/profile', command: 'nav.profile', keywords: 'profile account password name' }),
@@ -212,7 +215,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
       go({ id: 'nav_shortcuts', icon: Settings, title: 'Go to Keyboard shortcuts', to: '/profile/shortcuts', keywords: 'keyboard shortcuts keys hotkeys customize' }),
     ]
     return docsHidden ? entries.filter((entry) => !entry.to?.startsWith('/docs')) : entries
-  }, [])
+  }, [mailEnabled])
 
   const sections = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -337,10 +340,10 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
             value={query}
             onValueChange={setQuery}
           />
-          <Kbd className="absolute top-1/2 right-3 -translate-y-1/2 px-1.5 text-[11px] text-muted-foreground/70">esc</Kbd>
+          <Kbd className="absolute top-1/2 right-3 -translate-y-1/2 px-1.5 text-[0.6875rem] text-muted-foreground/70">esc</Kbd>
         </div>
         <CommandList className="mx-1.5 mt-1 mb-1.5 max-h-none min-h-0 flex-1 rounded-lg bg-background p-1 ring-1 ring-border dark:bg-[color-mix(in_oklab,var(--sidebar-popover),white_3%)] dark:ring-sidebar-tint/12 dark:**:data-[slot=command-item]:data-selected:bg-sidebar-tint/10">
-          <CommandEmpty className="p-6 text-[13px] text-muted-foreground">No results for “{query}”</CommandEmpty>
+          <CommandEmpty className="p-6 text-[0.8125rem] text-muted-foreground">No results for “{query}”</CommandEmpty>
           {group('Commands', contextual)}
           {/* in Docs, the pages opened last come before navigation */}
           {here === 'docs' ? recentGroup : null}

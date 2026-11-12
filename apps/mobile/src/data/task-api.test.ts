@@ -15,6 +15,9 @@ test('newTaskBody trims the text, leaves an empty description out, and sends eve
       dueAt: '2026-10-25T07:00:00.000Z',
       dueStartAt: null,
       parentId: 't0',
+      milestoneId: 'm1',
+      cycleId: null,
+      estimate: 3,
     }),
   ).toEqual({
     title: 'Ship it',
@@ -26,6 +29,9 @@ test('newTaskBody trims the text, leaves an empty description out, and sends eve
     due_at: '2026-10-25T07:00:00.000Z',
     due_start_at: null,
     parent_task_id: 't0',
+    milestone_id: 'm1',
+    cycle_id: null,
+    estimate: 3,
   })
-  expect(newTaskBody({ title: 'x', description: ' Notes ', projectId: 'p', statusId: 's', priority: 'none', assigneeIds: [], labelIds: [], dueAt: null, dueStartAt: null, parentId: null }).description).toBe('Notes')
+  expect(newTaskBody({ title: 'x', description: ' Notes ', projectId: 'p', statusId: 's', priority: 'none', assigneeIds: [], labelIds: [], dueAt: null, dueStartAt: null, parentId: null, milestoneId: null, cycleId: null, estimate: null }).description).toBe('Notes')
 })

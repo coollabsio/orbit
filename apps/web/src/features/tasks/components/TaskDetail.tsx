@@ -4,21 +4,20 @@ import { cn } from 'cn'
 import { useQueryClient } from '@tanstack/react-query'
 import { confirmAction } from '@/components/common/confirmAction'
 import { recurrenceLabel } from '@orbit/api/recurrence'
-import { Add as Plus, ArrowLeft, Calendar, Hierarchy2, Link2, Repeat, Tag, TaskSquare as SquareCheck, User as UserIcon, Xmark as X } from 'reicon-react'
+import { Add as Plus, ArrowLeft, Calendar, Diamonds, Hierarchy2, Link2, RefreshCircle, Repeat, Tag, TaskSquare as SquareCheck, Triangle, User as UserIcon, Xmark as X } from 'reicon-react'
 import { Badge } from '@/components/ui/badge'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Tip } from '@/components/common/Tip'
 import { Input } from '@/components/ui/input'
-import { UserAvatar, UserAvatarStack } from '@/components/common/UserAvatar'
+import { UserAvatarStack } from '@/components/common/UserAvatar'
 import { DatePicker } from '@/components/common/DatePicker'
+import { SearchPicker } from '@/components/common/SearchPicker'
+import { personOption, projectOption } from './pickerOptions'
 import { useTaskPickerUpdate } from '@/features/tasks/useTaskPickerUpdate'
 import {
   DropdownMenu,
-  DropdownMenuCheckboxItem,
   DropdownMenuContent,
-  DropdownMenuGroup,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -30,6 +29,10 @@ import { dueDateLabel, PRIORITY_LABEL, PRIORITY_ORDER, projectLabels, projectSta
 import { refIdentifier, type Project, type Task, type TaskViewState } from '@/features/tasks/api/models'
 import { cachedDescendantIds, type PageTaskRecord } from '@/features/tasks/api/optimistic'
 import { useProjectAudience, useProjects } from '@/features/tasks/api/projects'
+import { useCycles } from '@/features/tasks/api/cycles'
+import { useMilestones } from '@/features/tasks/api/milestones'
+import { cycleName, estimateLabel } from '@/features/tasks/planningLib'
+import { CyclePicker, EstimatePicker, MilestonePicker } from './PlanningPickers'
 import {
   useAddTaskRelation, useCreateTaskComment, useDeleteTask, useDeleteTaskAttachment, useRemoveTaskRelation,
   subIssuesQuery, useSubIssues, useTaskGithubLinks, useTaskRelations, useUpdateTask,
@@ -95,6 +98,10 @@ export function TaskDetail({ task, project, state, onClose, onOpenTask, onOpenPr
   const [repeatOpen, setRepeatOpen] = useState(false)
   const [sourceOpen, setSourceOpen] = useState(false)
   const projects = useProjects(workspace.id).data ?? []
+  const milestones = useMilestones(workspace.id, task?.projectId).data ?? []
+  const cycles = useCycles(workspace.id, task?.projectId).data ?? []
+  const milestone = task?.milestoneId ? milestones.find((item) => item.id === task.milestoneId) : undefined
+  const cycle = task?.cycleId ? cycles.find((item) => item.id === task.cycleId) : undefined
   const relations = useTaskRelations(workspace.id, task?.id).data ?? []
   const addRelation = useAddTaskRelation(workspace.id, task?.id ?? '')
   const removeRelation = useRemoveTaskRelation(workspace.id, task?.id ?? '')
@@ -308,45 +315,64 @@ export function TaskDetail({ task, project, state, onClose, onOpenTask, onOpenPr
                   ))}
                 </DropdownMenuContent>
               </DropdownMenu>
-              {/* Multi-assignee options toggle individually; the checked indicator marks the active ones. */}
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  render={
-                    <PropertyButton>
-                      {assignees.length > 0 ? (
-                        <>
-                          <UserAvatarStack users={assignees} size={16} />
-                          <span className="truncate">{assignees.map((u) => u.name).join(', ')}</span>
-                        </>
-                      ) : (
-                        <>
-                          <UserIcon aria-hidden="true" className="text-muted-foreground" />
-                          Assign
-                        </>
-                      )}
-                    </PropertyButton>
-                  }
-                />
-                <DropdownMenuContent className="w-auto min-w-45">
-                  <DropdownMenuGroup>
-                    <DropdownMenuLabel>Assignees</DropdownMenuLabel>
-                    {audience.map((u) => {
-                      const active = task.assigneeIds.includes(u.id)
-                      return (
-                        <DropdownMenuCheckboxItem
-                          key={u.id}
-                          checked={active}
-                          closeOnClick
-                          onCheckedChange={() => updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, assignee_ids: active ? task.assigneeIds.filter((id) => id !== u.id) : [...task.assigneeIds, u.id] } })}
-                        >
-                          <UserAvatar user={u} size={16} />
-                          {u.name}
-                        </DropdownMenuCheckboxItem>
-                      )
-                    })}
-                  </DropdownMenuGroup>
-                </DropdownMenuContent>
-              </DropdownMenu>
+              {/* several assignees; the picker closes after each toggle, like the other properties */}
+              <SearchPicker
+                multiple
+                closeOnSelect
+                label="Assignees"
+                placeholder="Assign to…"
+                emptyText="No people match"
+                options={audience.map(personOption)}
+                selected={task.assigneeIds}
+                onSelect={(id) => updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, assignee_ids: task.assigneeIds.includes(id) ? task.assigneeIds.filter((item) => item !== id) : [...task.assigneeIds, id] } })}
+                trigger={
+                  <PropertyButton>
+                    {assignees.length > 0 ? (
+                      <>
+                        <UserAvatarStack users={assignees} size={16} />
+                        <span className="truncate">{assignees.map((u) => u.name).join(', ')}</span>
+                      </>
+                    ) : (
+                      <>
+                        <UserIcon aria-hidden="true" className="text-muted-foreground" />
+                        Assign
+                      </>
+                    )}
+                  </PropertyButton>
+                }
+              />
+              <MilestonePicker
+                milestones={milestones}
+                value={task.milestoneId ?? null}
+                onChange={(milestoneId) => updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, milestone_id: milestoneId } })}
+                trigger={
+                  <PropertyButton className={cn('max-w-full', !milestone && 'text-muted-foreground')} aria-label={`Milestone: ${milestone?.name ?? 'none'}`}>
+                    <Diamonds className="size-3.5" aria-hidden="true" />
+                    <span className="truncate">{milestone?.name ?? 'Set milestone'}</span>
+                  </PropertyButton>
+                }
+              />
+              <CyclePicker
+                cycles={cycles}
+                value={task.cycleId ?? null}
+                onChange={(cycleId) => updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, cycle_id: cycleId } })}
+                trigger={
+                  <PropertyButton className={cn('max-w-full', !cycle && 'text-muted-foreground')} aria-label={`Cycle: ${cycle ? cycleName(cycle) : 'none'}`}>
+                    <RefreshCircle className="size-3.5" aria-hidden="true" />
+                    <span className="truncate">{cycle ? cycleName(cycle) : 'Set cycle'}</span>
+                  </PropertyButton>
+                }
+              />
+              <EstimatePicker
+                value={task.estimate ?? null}
+                onChange={(estimate) => updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, estimate } })}
+                trigger={
+                  <PropertyButton className={cn(task.estimate == null && 'text-muted-foreground')} aria-label={`Estimate: ${task.estimate == null ? 'none' : estimateLabel(task.estimate)}`}>
+                    <Triangle className="size-3.5" aria-hidden="true" />
+                    {task.estimate == null ? 'Set estimate' : estimateLabel(task.estimate)}
+                  </PropertyButton>
+                }
+              />
               {task.parent ? (
                 <DropdownMenu>
                   <DropdownMenuTrigger render={
@@ -401,34 +427,24 @@ export function TaskDetail({ task, project, state, onClose, onOpenTask, onOpenPr
                   <p className="mt-1 text-xs text-muted-foreground">Synced with GitHub, so it stays in this project.</p>
                 </>
               ) : (
-                <DropdownMenu>
-                  <DropdownMenuTrigger
-                    render={
-                      // the pill is the trigger, like "Add label": a ghost button around a badge reads as two controls
-                      <Button variant="outline" size="xs" className="h-5 max-w-full rounded-full font-medium" aria-label={`Project: ${project?.name ?? 'none'}`}>
-                        {project ? <ColorDot color={project.color} /> : null}
-                        <span className="truncate">{project?.name ?? 'Set project'}</span>
-                      </Button>
-                    }
-                  />
-                  <DropdownMenuContent className="w-auto min-w-52">
-                    <DropdownMenuGroup>
-                      <DropdownMenuLabel>Move to project</DropdownMenuLabel>
-                      {projects.map((item) => (
-                        <DropdownMenuItem
-                          key={item.id}
-                          className="data-selected:bg-accent data-selected:font-medium"
-                          data-selected={item.id === task.projectId || undefined}
-                          onClick={() => moveToProject([task], item)}
-                        >
-                          <ColorDot color={item.color} className="size-2" />
-                          <span className="flex-1 truncate">{item.name}</span>
-                          <span className="text-xs text-muted-foreground tabular-nums">{item.key}</span>
-                        </DropdownMenuItem>
-                      ))}
-                    </DropdownMenuGroup>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                <SearchPicker
+                  label="Move to project"
+                  placeholder="Move to project…"
+                  emptyText="No projects match"
+                  options={projects.map(projectOption)}
+                  selected={[task.projectId]}
+                  onSelect={(id) => {
+                    const target = projects.find((item) => item.id === id)
+                    if (target && id !== task.projectId) moveToProject([task], target)
+                  }}
+                  trigger={
+                    // the pill is the trigger, like "Add label": a ghost button around a badge reads as two controls
+                    <Button variant="outline" size="xs" className="h-5 max-w-full rounded-full font-medium" aria-label={`Project: ${project?.name ?? 'none'}`}>
+                      {project ? <ColorDot color={project.color} /> : null}
+                      <span className="truncate">{project?.name ?? 'Set project'}</span>
+                    </Button>
+                  }
+                />
               )}
             </PropertyGroup>
 
@@ -438,7 +454,7 @@ export function TaskDetail({ task, project, state, onClose, onOpenTask, onOpenPr
                   href={task.sourceUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className={cn(buttonVariants({ variant: 'ghost' }), '-ml-2 max-w-full text-[13px] max-[899px]:h-7 max-[899px]:px-1.5 max-[899px]:text-xs')}
+                  className={cn(buttonVariants({ variant: 'ghost' }), '-ml-2 max-w-full text-[0.8125rem] max-[899px]:h-7 max-[899px]:px-1.5 max-[899px]:text-xs')}
                 >
                   <Link2 className="size-3.5" aria-hidden="true" />
                   <span className="truncate">{task.sourceUrl.replace(/^https?:\/\//, '').split('/')[0]}</span>
@@ -569,7 +585,7 @@ function PropertyButton({ className, ...props }: ComponentProps<typeof Button>) 
   return (
     <Button
       variant="ghost"
-      className={cn('-ml-2 text-[13px] max-[899px]:h-7 max-[899px]:max-w-full max-[899px]:px-1.5 max-[899px]:text-xs', className)}
+      className={cn('-ml-2 text-[0.8125rem] max-[899px]:h-7 max-[899px]:max-w-full max-[899px]:px-1.5 max-[899px]:text-xs', className)}
       {...props}
     />
   )

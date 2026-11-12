@@ -151,6 +151,18 @@ impl Fixture {
         path: &str,
         body: Option<Value>,
     ) -> (StatusCode, Value) {
+        let (status, value, _) = self.call_with(token, method, path, body, &[]).await;
+        (status, value)
+    }
+
+    async fn call_with(
+        &self,
+        token: Option<&str>,
+        method: &str,
+        path: &str,
+        body: Option<Value>,
+        headers: &[(&str, &str)],
+    ) -> (StatusCode, Value, axum::http::HeaderMap) {
         let path = if path == "/me" || path.starts_with("/workspaces/") {
             path.to_owned()
         } else {
@@ -162,6 +174,9 @@ impl Fixture {
         if let Some(token) = token {
             builder = builder.header(header::AUTHORIZATION, format!("Bearer {token}"));
         }
+        for (name, value) in headers {
+            builder = builder.header(*name, *value);
+        }
         let request = match body {
             Some(body) => builder
                 .header(header::CONTENT_TYPE, "application/json")
@@ -171,6 +186,7 @@ impl Fixture {
         .unwrap();
         let response = self.app.clone().oneshot(request).await.unwrap();
         let status = response.status();
+        let response_headers = response.headers().clone();
         let bytes = to_bytes(response.into_body(), 4 * 1024 * 1024)
             .await
             .unwrap();
@@ -180,7 +196,7 @@ impl Fixture {
             serde_json::from_slice(&bytes)
                 .unwrap_or_else(|_| panic!("{}", String::from_utf8_lossy(&bytes)))
         };
-        (status, value)
+        (status, value, response_headers)
     }
 
     async fn first_status(&self, project: Id) -> Id {
@@ -230,6 +246,9 @@ async fn create_task(
                 due_start_at: None,
                 due_at: None,
                 parent_task_id,
+                milestone_id: None,
+                cycle_id: None,
+                estimate: None,
             },
             "test",
             TimestampMillis::now(),
@@ -362,17 +381,25 @@ async fn read_endpoints_return_public_fields_of_approved_projects_only() {
         keys,
         [
             "assignee_ids",
+            "completed_at",
             "created_at",
+            "creator_id",
+            "creator_service_account",
+            "cycle_id",
             "description",
             "due_at",
             "due_start_at",
+            "estimate",
+            "external_id",
             "id",
             "identifier",
             "label_ids",
+            "milestone_id",
             "number",
             "parent_task_id",
             "priority",
             "project_id",
+            "recurrence",
             "status_id",
             "title",
             "updated_at",
@@ -810,6 +837,137 @@ async fn docs_need_their_scope_and_a_personal_token_and_unserved_paths_are_not_f
 }
 
 #[tokio::test]
+async fn docs_write_moves_and_trashes_docs_and_docs_read_shows_versions() {
+    let f = Fixture::new().await;
+    let (writer, _) = f.token(&[ApiTokenScope::DocsWrite], false).await;
+    let make = |body: Value| {
+        let writer = writer.clone();
+        let f = &f;
+        async move {
+            let (code, doc) = f.call(Some(&writer), "POST", "/docs", Some(body)).await;
+            assert_eq!(code, StatusCode::CREATED, "{doc}");
+            doc
+        }
+    };
+    let parent = make(json!({"title": "Parent"})).await;
+    let doc = make(json!({"title": "Note", "markdown": "text"})).await;
+    let id = doc["id"].as_str().unwrap().to_owned();
+    let path = format!("/docs/{id}/move");
+
+    // `parent_id` is required: a move never lands at the root by accident.
+    let (code, problem) = f
+        .call(
+            Some(&writer),
+            "POST",
+            &path,
+            Some(json!({"expected_version": doc["version"]})),
+        )
+        .await;
+    assert_eq!(code, StatusCode::BAD_REQUEST, "{problem}");
+    let (code, _) = f
+        .call(
+            Some(&writer),
+            "POST",
+            &path,
+            Some(json!({"expected_version": 1, "parent_id": parent["id"]})),
+        )
+        .await;
+    assert_eq!(code, StatusCode::CONFLICT);
+    let (code, moved) = f
+        .call(
+            Some(&writer),
+            "POST",
+            &path,
+            Some(json!({"expected_version": doc["version"], "parent_id": parent["id"], "position": 0})),
+        )
+        .await;
+    assert_eq!(code, StatusCode::OK, "{moved}");
+    assert_eq!(moved["parent_id"], parent["id"]);
+    assert_eq!(moved["dropped_values"], 0);
+    assert_eq!(moved["markdown"], "text\n");
+    // The version in the answer is the one that a read shows.
+    let (_, read) = f
+        .call(Some(&writer), "GET", &format!("/docs/{id}"), None)
+        .await;
+    assert_eq!(read["version"], moved["version"], "{read}");
+    // A doc cannot go under its own sub-doc.
+    let (code, _) = f
+        .call(
+            Some(&writer),
+            "POST",
+            &format!("/docs/{}/move", parent["id"].as_str().unwrap()),
+            Some(json!({"expected_version": parent["version"], "parent_id": id})),
+        )
+        .await;
+    assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY);
+
+    // Versions come with `docs:read`, newest first, with Markdown for one version.
+    sqlx::query(
+        "INSERT INTO page_versions (id, workspace_id, page_id, title, icon, content_json, kind, created_at) \
+         SELECT $1, workspace_id, id, 'Old', NULL, \
+         '[{\"id\":\"b\",\"type\":\"paragraph\",\"props\":{},\"content\":[{\"type\":\"text\",\"text\":\"old\",\"styles\":{}}],\"children\":[]}]', \
+         'auto', 1700000000000 FROM pages WHERE id = $2",
+    )
+    .bind(Id::new_v7().to_string())
+    .bind(&id)
+    .execute(f.database.pool())
+    .await
+    .unwrap();
+    let (reader, _) = f.token(&[ApiTokenScope::DocsRead], false).await;
+    let (code, list) = f
+        .call(Some(&reader), "GET", &format!("/docs/{id}/versions"), None)
+        .await;
+    assert_eq!(code, StatusCode::OK, "{list}");
+    assert_eq!(list["items"][0]["title"], "Old");
+    assert_eq!(list["next_cursor"], Value::Null);
+    let version_id = list["items"][0]["id"].as_str().unwrap();
+    let (code, version) = f
+        .call(
+            Some(&reader),
+            "GET",
+            &format!("/docs/{id}/versions/{version_id}"),
+            None,
+        )
+        .await;
+    assert_eq!(code, StatusCode::OK, "{version}");
+    assert_eq!(version["markdown"], "old\n");
+    // A reader cannot move or trash.
+    let (code, _) = f
+        .call(
+            Some(&reader),
+            "DELETE",
+            &format!("/docs/{id}?expected_version={}", read["version"]),
+            None,
+        )
+        .await;
+    assert_eq!(code, StatusCode::FORBIDDEN);
+
+    // Trashing needs the current version, and the doc is gone afterwards.
+    let (code, _) = f
+        .call(
+            Some(&writer),
+            "DELETE",
+            &format!("/docs/{id}?expected_version=1"),
+            None,
+        )
+        .await;
+    assert_eq!(code, StatusCode::CONFLICT);
+    let (code, _) = f
+        .call(
+            Some(&writer),
+            "DELETE",
+            &format!("/docs/{id}?expected_version={}", read["version"]),
+            None,
+        )
+        .await;
+    assert_eq!(code, StatusCode::NO_CONTENT);
+    let (code, _) = f
+        .call(Some(&writer), "GET", &format!("/docs/{id}"), None)
+        .await;
+    assert_eq!(code, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
 async fn docs_write_creates_and_updates_docs_from_markdown() {
     let f = Fixture::new().await;
     let (reader, _) = f.token(&[ApiTokenScope::DocsRead], false).await;
@@ -1160,6 +1318,8 @@ async fn service_account_writes_name_the_service_account_and_the_token() {
         )
         .await;
     assert_eq!(code, StatusCode::CREATED, "{created}");
+    assert_eq!(created["creator_id"], Value::Null);
+    assert_eq!(created["creator_service_account"], me["service_account"]);
     let id = created["id"].as_str().unwrap().to_owned();
     let creator: Option<String> =
         sqlx::query_scalar("SELECT creator_service_account_id FROM tasks WHERE id = $1")
@@ -1490,6 +1650,87 @@ async fn due_dates_can_be_set_kept_and_cleared() {
         .call(Some(&token), "POST", "/tasks", Some(json!({"project_id": f.project, "status_id": status, "title": "Bad", "due_at": "tomorrow"})))
         .await;
     assert_eq!(code, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn tasks_filter_by_due_date() {
+    let f = Fixture::new().await;
+    let (token, _) = f.token(&[ApiTokenScope::TasksWrite], false).await;
+    let status = f.first_status(f.project).await;
+    for (title, due) in [
+        ("Early", "2026-12-05T09:00:00.000Z"),
+        ("Late", "2026-12-05T18:00:00.000Z"),
+        ("Next day", "2026-12-06T09:00:00.000Z"),
+    ] {
+        let (code, task) = f
+            .call(
+                Some(&token),
+                "POST",
+                "/tasks",
+                Some(json!({"project_id": f.project, "status_id": status, "title": title, "due_at": due})),
+            )
+            .await;
+        assert_eq!(code, StatusCode::CREATED, "{task}");
+    }
+    let titles = |page: &Value| {
+        let mut titles = page["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|task| task["title"].as_str().unwrap().to_owned())
+            .collect::<Vec<_>>();
+        titles.sort();
+        titles
+    };
+    for (query, expected) in [
+        ("due_before=2026-12-06", vec!["Early", "Late"]),
+        ("due_after=2026-12-05", vec!["Early", "Late", "Next day"]),
+        ("due_after=2026-12-06", vec!["Next day"]),
+        (
+            "due_after=2026-12-05T09:00:00Z&due_before=2026-12-06T09:00:00Z",
+            vec!["Late"],
+        ),
+        ("due_before=2026-12-05T09:00:00.000Z", vec![]),
+        ("has_due_date=true", vec!["Early", "Late", "Next day"]),
+        ("has_due_date=false", vec!["Approved task"]),
+        ("has_due_date=false&due_before=2027-01-01", vec![]),
+    ] {
+        let (code, page) = f
+            .call(Some(&token), "GET", &format!("/tasks?{query}"), None)
+            .await;
+        assert_eq!(code, StatusCode::OK, "{query}: {page}");
+        assert_eq!(titles(&page), expected, "{query}");
+    }
+    let (_, page) = f
+        .call(
+            Some(&token),
+            "GET",
+            "/tasks?due_after=2026-12-01&sort=due_date&order=asc&limit=1",
+            None,
+        )
+        .await;
+    let cursor = page["next_cursor"].as_str().unwrap().to_owned();
+    assert_eq!(titles(&page), ["Early"]);
+    let (_, next) = f
+        .call(
+            Some(&token),
+            "GET",
+            &format!("/tasks?due_after=2026-12-01&sort=due_date&order=asc&limit=1&cursor={cursor}"),
+            None,
+        )
+        .await;
+    assert_eq!(titles(&next), ["Late"]);
+    for bad in [
+        "due_before=tomorrow",
+        "due_after=2026-13-40",
+        "due_before=",
+        "has_due_date=maybe",
+    ] {
+        let (code, _) = f
+            .call(Some(&token), "GET", &format!("/tasks?{bad}"), None)
+            .await;
+        assert_eq!(code, StatusCode::BAD_REQUEST, "{bad}");
+    }
 }
 
 #[tokio::test]
@@ -2389,6 +2630,110 @@ async fn doc_markdown_names_visible_sub_pages_and_hides_the_others() {
     assert!(!read.to_string().contains("Secret plans"), "{read}");
 }
 
+#[tokio::test]
+async fn doc_markdown_names_the_sub_pages_of_a_database_row() {
+    let f = Fixture::new().await;
+    let (token, _) = f
+        .token(&[ApiTokenScope::DocsWrite, ApiTokenScope::DocsRead], false)
+        .await;
+    let create = |kind| CreatePage {
+        kind,
+        parent_id: None,
+        space: SpaceRequest {
+            private: None,
+            teamspace_id: None,
+        },
+        title: "Tasks".into(),
+        icon: None,
+        position: None,
+    };
+    let database = f
+        .pages
+        .create_page(
+            f.workspace,
+            f.user,
+            create(orbit_server::repositories::pages::PageKind::Database),
+            "test",
+            TimestampMillis::now(),
+        )
+        .await
+        .unwrap();
+    let (code, row) = f
+        .call(
+            Some(&token),
+            "POST",
+            &format!("/docs/{}/rows", database.id),
+            Some(json!({"title": "Row"})),
+        )
+        .await;
+    assert_eq!(code, StatusCode::CREATED, "{row}");
+    let row_id: Id = row["id"].as_str().unwrap().parse().unwrap();
+    let mut children = Vec::new();
+    for title in ["Row notes", "Trashed notes"] {
+        let (code, child) = f
+            .call(
+                Some(&token),
+                "POST",
+                "/docs",
+                Some(json!({"parent_id": row_id, "title": title})),
+            )
+            .await;
+        assert_eq!(code, StatusCode::CREATED, "{child}");
+        children.push(child["id"].as_str().unwrap().to_owned());
+    }
+    // Rows and their sub-pages are not in the page tree.
+    let (_, list) = f.call(Some(&token), "GET", "/docs", None).await;
+    assert!(!list.to_string().contains(&children[0]), "{list}");
+    let trashed_id: Id = children[1].parse().unwrap();
+    let trashed = f
+        .pages
+        .get_page(f.workspace, trashed_id, f.user)
+        .await
+        .unwrap();
+    f.pages
+        .delete_page(
+            f.workspace,
+            trashed_id,
+            f.user,
+            trashed.version,
+            "test",
+            TimestampMillis::now(),
+        )
+        .await
+        .unwrap();
+    let block =
+        |page_id: &str| json!({"id": page_id, "type": "page", "props": {"pageId": page_id}});
+    let page = f.pages.get_page(f.workspace, row_id, f.user).await.unwrap();
+    f.pages
+        .update_page(
+            f.workspace,
+            row_id,
+            f.user,
+            page.version,
+            PageChanges {
+                content: Some(vec![block(&children[0]), block(&children[1])]),
+                ..PageChanges::default()
+            },
+            "test",
+            TimestampMillis::now(),
+        )
+        .await
+        .unwrap();
+    let (code, read) = f
+        .call(Some(&token), "GET", &format!("/docs/{row_id}"), None)
+        .await;
+    assert_eq!(code, StatusCode::OK, "{read}");
+    // The live sub-page keeps its title; the trashed one stays unnamed.
+    assert_eq!(
+        read["markdown"],
+        format!(
+            "[Row notes](/docs/{})\n\n[Untitled](/docs/{})\n",
+            children[0], children[1]
+        ),
+        "{read}"
+    );
+}
+
 /// A stored attachment of `task`, as an upload leaves it; returns the blob's storage key.
 async fn attach(f: &Fixture, task: Id) -> String {
     let blob = Id::new_v7();
@@ -2698,4 +3043,136 @@ async fn permanent_delete_needs_the_scope_the_grant_and_an_owner_or_admin() {
         metadata["actor_service_account_id"].is_string(),
         "{metadata}"
     );
+}
+
+#[tokio::test]
+async fn idempotency_keys_make_task_and_comment_creates_safe_to_retry() {
+    let f = Fixture::new().await;
+    let status = f.first_status(f.project).await;
+    let (token, _) = f.token(&[ApiTokenScope::TasksWrite], false).await;
+    let (other, _) = f.token(&[ApiTokenScope::TasksWrite], false).await;
+    let (reader, _) = f.token(&[ApiTokenScope::TasksRead], false).await;
+    let body = json!({"project_id": f.project, "status_id": status, "title": "Once"});
+    let tasks = |title: &'static str| {
+        let title = title.to_owned();
+        let database = f.database.clone();
+        async move {
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM tasks WHERE title = $1")
+                .bind(title)
+                .fetch_one(database.pool())
+                .await
+                .unwrap()
+        }
+    };
+    let key = [("idempotency-key", "retry-1")];
+
+    let (code, first, headers) = f
+        .call_with(Some(&token), "POST", "/tasks", Some(body.clone()), &key)
+        .await;
+    assert_eq!(code, StatusCode::CREATED, "{first}");
+    assert!(headers.get("idempotent-replayed").is_none());
+    // The same body with other field order and spaces is the same request.
+    let reordered = json!({"title": "Once", "status_id": status, "project_id": f.project});
+    let (code, again, headers) = f
+        .call_with(Some(&token), "POST", "/tasks", Some(reordered), &key)
+        .await;
+    assert_eq!(code, StatusCode::CREATED, "{again}");
+    assert_eq!(again, first);
+    assert_eq!(headers["idempotent-replayed"], "true");
+    assert_eq!(tasks("Once").await, 1);
+
+    // Another body, or another route, with the same key is a mistake of the client.
+    let changed = json!({"project_id": f.project, "status_id": status, "title": "Twice"});
+    let (code, problem, _) = f
+        .call_with(Some(&token), "POST", "/tasks", Some(changed), &key)
+        .await;
+    assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY, "{problem}");
+    assert_eq!(problem["code"], "idempotency_key_reused");
+    assert_eq!(tasks("Twice").await, 0);
+    let comments = format!("/tasks/{}/comments", f.task);
+    let (code, problem, _) = f
+        .call_with(
+            Some(&token),
+            "POST",
+            &comments,
+            Some(json!({"body": "Once"})),
+            &key,
+        )
+        .await;
+    assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY, "{problem}");
+
+    // Keys belong to a token: another token with the same key makes its own task.
+    let (code, second, _) = f
+        .call_with(Some(&other), "POST", "/tasks", Some(body.clone()), &key)
+        .await;
+    assert_eq!(code, StatusCode::CREATED, "{second}");
+    assert_ne!(second["id"], first["id"]);
+    assert_eq!(tasks("Once").await, 2);
+
+    // A failed request keeps nothing: the retry with the same key runs again.
+    let bad = json!({"project_id": f.project, "status_id": status, "title": "  "});
+    let bad_key = [("idempotency-key", "retry-bad")];
+    let (code, _, _) = f
+        .call_with(Some(&token), "POST", "/tasks", Some(bad), &bad_key)
+        .await;
+    assert_eq!(code, StatusCode::BAD_REQUEST);
+    let good = json!({"project_id": f.project, "status_id": status, "title": "Fixed"});
+    let (code, fixed, _) = f
+        .call_with(Some(&token), "POST", "/tasks", Some(good), &bad_key)
+        .await;
+    assert_eq!(code, StatusCode::CREATED, "{fixed}");
+
+    // Comments: one comment for two sends.
+    let comment_key = [("idempotency-key", "comment-1")];
+    let comment = json!({"body": "Shipped"});
+    let (code, first, _) = f
+        .call_with(
+            Some(&token),
+            "POST",
+            &comments,
+            Some(comment.clone()),
+            &comment_key,
+        )
+        .await;
+    assert_eq!(code, StatusCode::CREATED, "{first}");
+    let (code, again, _) = f
+        .call_with(Some(&token), "POST", &comments, Some(comment), &comment_key)
+        .await;
+    assert_eq!(code, StatusCode::CREATED);
+    assert_eq!(again, first);
+    let (_, listed) = f.call(Some(&token), "GET", &comments, None).await;
+    assert_eq!(listed["items"].as_array().unwrap().len(), 1);
+
+    // A claim without a response blocks the retry with 409 until it is stale.
+    let running = [("idempotency-key", "running")];
+    let (code, _, _) = f
+        .call_with(Some(&token), "POST", "/tasks", Some(body.clone()), &running)
+        .await;
+    assert_eq!(code, StatusCode::CREATED);
+    sqlx::query("UPDATE api_idempotency_keys SET status = NULL, response = NULL WHERE idempotency_key = 'running'")
+        .execute(f.database.pool())
+        .await
+        .unwrap();
+    let (code, problem, headers) = f
+        .call_with(Some(&token), "POST", "/tasks", Some(body.clone()), &running)
+        .await;
+    assert_eq!(code, StatusCode::CONFLICT, "{problem}");
+    assert_eq!(problem["code"], "idempotency_request_running");
+    assert_eq!(headers[header::RETRY_AFTER], "1");
+
+    // A key that is not visible ASCII, or a token without the scope, is answered as usual.
+    let (code, _, _) = f
+        .call_with(
+            Some(&token),
+            "POST",
+            "/tasks",
+            Some(body.clone()),
+            &[("idempotency-key", "")],
+        )
+        .await;
+    assert_eq!(code, StatusCode::BAD_REQUEST);
+    let (code, problem, _) = f
+        .call_with(Some(&reader), "POST", "/tasks", Some(body), &key)
+        .await;
+    assert_eq!(code, StatusCode::FORBIDDEN, "{problem}");
 }

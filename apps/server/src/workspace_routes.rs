@@ -31,13 +31,14 @@ use crate::object_storage::Owner;
 use crate::repositories::api_tokens::{
     ApiTokenError, ApiTokenRecord, ApiTokenRepository, ApiTokenScope, IssuedApiToken, TokenProjects,
 };
+use crate::repositories::environment_settings::EnvironmentSettings;
 use crate::repositories::identity::{
     AdminAccountError, AdminUser, AuthenticatedSession, IdentityRepository,
 };
 use crate::repositories::instance_settings::{
     BackupSchedule, InstanceLimits, InstanceSettingsError, InstanceSettingsRepository,
     PasswordChange, S3Settings, SmtpSecurity, SmtpSettings, StorageSettingsError,
-    adjustable_job_kinds,
+    adjustable_job_kinds, can_confirm_sign_up,
 };
 use crate::repositories::sign_in_providers::SaveSignInProviderError;
 use crate::repositories::workspace_storage::{WorkspaceStorageError, WorkspaceStorageRepository};
@@ -1008,7 +1009,7 @@ async fn create_invitation(
             ];
             let decision = email_quota::take(state.identity.database(), &quotas, now)
                 .await
-                .map_err(|_| internal(&instance, request_id.as_ref()))?;
+                .map_err(|error| internal(&instance, request_id.as_ref()).cause(error))?;
             if let ThrottleDecision::RetryAfter(delay) = decision {
                 return Err(invitation_email_limited(
                     delay,
@@ -1280,7 +1281,7 @@ async fn accept_invitation(
     let mut response = (StatusCode::CREATED, Json(registered.acceptance)).into_response();
     response.headers_mut().insert(
         axum::http::header::SET_COOKIE,
-        HeaderValue::from_str(&cookie).map_err(|_| {
+        HeaderValue::from_str(&cookie).map_err(|error| {
             ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "internal_error",
@@ -1289,6 +1290,7 @@ async fn accept_invitation(
                 instance,
                 request_id.as_ref(),
             )
+            .cause(error)
         })?,
     );
     Ok(response)
@@ -1463,7 +1465,7 @@ async fn list_admin_users(
         .identity
         .list_users_for_admin(query.q.as_deref(), cursor, query.limit)
         .await
-        .map_err(|_| {
+        .map_err(|error| {
             ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "internal_error",
@@ -1472,6 +1474,7 @@ async fn list_admin_users(
                 instance,
                 request_id.as_ref(),
             )
+            .cause(error)
         })?;
     Ok(Json(Page { items, next_cursor }))
 }
@@ -1507,15 +1510,19 @@ async fn get_admin_user_summary(
             request_id.as_ref(),
         )
     };
-    let users = state.identity.count_users().await.map_err(|_| internal())?;
+    let users = state
+        .identity
+        .count_users()
+        .await
+        .map_err(|error| internal().cause(error))?;
     let active = state
         .identity
         .active_user_counts()
         .await
-        .map_err(|_| internal())?;
+        .map_err(|error| internal().cause(error))?;
     let trials = crate::repositories::billing::trial_counts(state.identity.database())
         .await
-        .map_err(|_| internal())?;
+        .map_err(|error| internal().cause(error))?;
     Ok(Json(AdminUserSummary {
         users,
         active,
@@ -1813,6 +1820,10 @@ struct StorageView {
     /// New backups are uploaded to the bucket instead of kept on this server.
     backups_in_s3: bool,
     backup_schedule: BackupSchedule,
+    /// Days a deleted or replaced attachment file stays in S3, so restoring an older backup still finds it.
+    s3_keep_deleted_days: u32,
+    /// Orbit has not counted the files to move since the switch changed yet; `files_to_move` is 0 until it has.
+    checking: bool,
     /// Attachment files still waiting to move between this server's disk and the bucket.
     files_to_move: u64,
     /// Why moving files stopped last time. Orbit retries every ten minutes.
@@ -1824,12 +1835,84 @@ struct StorageView {
 #[derive(Serialize, ToSchema)]
 struct InstanceSettingsView {
     registration_open: bool,
+    /// Registration can open: a mail server or (not on Orbit Cloud) a sign-in provider confirms new emails.
+    registration_ready: bool,
     /// `null` until a mail server is saved.
     smtp: Option<SmtpView>,
     storage: StorageView,
     limits: LimitsView,
+    mail: InstanceMailView,
     /// The Google and GitHub OAuth clients that are saved. A provider that is not listed is off.
     sign_in_providers: Vec<SignInProviderView>,
+    /// The settings that `ORBIT_*` environment variables set. They replace the saved values, and changing them
+    /// here gives 409 `set_by_environment`.
+    environment: EnvironmentView,
+}
+
+/// `true` for each setting that an environment variable sets.
+#[derive(Serialize, ToSchema)]
+struct EnvironmentView {
+    /// `ORBIT_OPEN_REGISTRATION`.
+    registration_open: bool,
+    /// `ORBIT_SMTP_*`.
+    smtp: bool,
+    /// `ORBIT_S3_*`: the bucket.
+    s3: bool,
+    /// `ORBIT_S3_ATTACHMENTS`.
+    attachments_in_s3: bool,
+    /// `ORBIT_S3_BACKUPS`.
+    backups_in_s3: bool,
+    /// `ORBIT_AUTOMATIC_BACKUPS`.
+    backup_schedule: bool,
+    /// `ORBIT_S3_KEEP_DELETED_DAYS`.
+    s3_keep_deleted_days: bool,
+    /// `ORBIT_GOOGLE_*`, `ORBIT_GITHUB_*`.
+    sign_in_providers: Vec<Provider>,
+}
+
+impl From<&EnvironmentSettings> for EnvironmentView {
+    fn from(environment: &EnvironmentSettings) -> Self {
+        Self {
+            registration_open: environment.registration_open.is_some(),
+            smtp: environment.smtp.is_some(),
+            s3: environment.s3.is_some(),
+            attachments_in_s3: environment.attachments_in_s3.is_some(),
+            backups_in_s3: environment.backups_in_s3.is_some(),
+            backup_schedule: environment.backup_schedule.is_some(),
+            s3_keep_deleted_days: environment.s3_keep_deleted_days.is_some(),
+            sign_in_providers: environment
+                .sign_in_providers
+                .iter()
+                .map(|saved| saved.provider)
+                .collect(),
+        }
+    }
+}
+
+/// 409 `set_by_environment`: `variables` set the setting, so only the server's environment can change it.
+fn set_by_environment(
+    variables: &str,
+    instance: &str,
+    request_id: Option<&Extension<RequestId>>,
+) -> ApiError {
+    ApiError::new(
+        StatusCode::CONFLICT,
+        "set_by_environment",
+        "Set by the environment",
+        format!(
+            "{variables} sets this on the server. Change the environment variable and restart Orbit."
+        ),
+        instance,
+        request_id,
+    )
+}
+
+/// Mail on this installation; the health card is `GET /api/v1/admin/mail`.
+#[derive(Serialize, ToSchema)]
+struct InstanceMailView {
+    /// Mail is on for this installation (`PUT /api/v1/admin/mail`). Off: the mail app is hidden and
+    /// the workspace mail API refuses with `mail_disabled`.
+    mail_enabled: bool,
 }
 
 #[derive(Serialize, ToSchema)]
@@ -1871,19 +1954,29 @@ async fn settings_view(
     let settings = repository
         .get()
         .await
-        .map_err(|_| internal(instance, request_id))?;
+        .map_err(|error| internal(instance, request_id).cause(error))?;
     let storage = repository
         .storage()
         .await
-        .map_err(|_| internal(instance, request_id))?;
+        .map_err(|error| internal(instance, request_id).cause(error))?;
     let limits = repository
         .limits()
         .await
-        .map_err(|_| internal(instance, request_id))?;
+        .map_err(|error| internal(instance, request_id).cause(error))?;
+    let mail_enabled = repository
+        .mail_enabled()
+        .await
+        .map_err(|error| internal(instance, request_id).cause(error))?;
     let sign_in_providers = repository
         .sign_in_providers()
         .await
-        .map_err(|_| internal(instance, request_id))?
+        .map_err(|error| internal(instance, request_id).cause(error))?;
+    let registration_ready = can_confirm_sign_up(
+        state.identity.database(),
+        settings.smtp.is_some(),
+        !sign_in_providers.is_empty(),
+    );
+    let sign_in_providers = sign_in_providers
         .into_iter()
         .map(|saved| SignInProviderView {
             provider: saved.provider,
@@ -1895,10 +1988,12 @@ async fn settings_view(
     let moving = state
         .object_storage
         .as_ref()
-        .map(|(_, store)| store.status())
-        .unwrap_or_default();
+        .map(|(_, store)| store.status());
+    let checking = matches!(moving, Some(None));
+    let moving = moving.flatten().unwrap_or_default();
     Ok(Json(InstanceSettingsView {
         sign_in_providers,
+        environment: EnvironmentView::from(&*EnvironmentSettings::of(state.identity.database())),
         storage: StorageView {
             s3: storage.s3.map(|s3| S3View {
                 endpoint: s3.endpoint,
@@ -1911,12 +2006,16 @@ async fn settings_view(
             attachments_in_s3: storage.attachments_in_s3,
             backups_in_s3: storage.backups_in_s3,
             backup_schedule: storage.backup_schedule,
+            s3_keep_deleted_days: storage.s3_keep_deleted_days,
+            checking,
             files_to_move: u64::try_from(moving.remaining).unwrap_or(u64::MAX),
             move_error: moving.error,
             image_compression: state.image_compressor.as_ref().map(ImageCompressor::status),
         },
         limits: limits.into(),
+        mail: InstanceMailView { mail_enabled },
         registration_open: settings.registration_open,
+        registration_ready,
         smtp: settings.smtp.map(|smtp| SmtpView {
             host: smtp.host,
             port: smtp.port,
@@ -1997,7 +2096,7 @@ async fn job_limits_view(
     let kinds = InstanceSettingsRepository::new(state.identity.database().clone())
         .job_limits()
         .await
-        .map_err(|_| internal(instance, request_id))?;
+        .map_err(|error| internal(instance, request_id).cause(error))?;
     Ok(Json(JobLimitsView {
         kinds: kinds
             .into_iter()
@@ -2082,7 +2181,7 @@ async fn save_job_limits(
             TimestampMillis::now(),
         )
         .await
-        .map_err(|_| internal(instance, request_id.as_ref()))?;
+        .map_err(|error| internal(instance, request_id.as_ref()).cause(error))?;
     job_limits_view(&state, instance, request_id.as_ref()).await
 }
 
@@ -2102,6 +2201,16 @@ async fn set_registration(
 ) -> Result<Json<InstanceSettingsView>, ApiError> {
     let instance = "/api/v1/admin/settings/registration";
     let session = require_root(&state, &headers, instance, request_id.as_ref()).await?;
+    if EnvironmentSettings::of(state.identity.database())
+        .registration_open
+        .is_some()
+    {
+        return Err(set_by_environment(
+            "ORBIT_OPEN_REGISTRATION",
+            instance,
+            request_id.as_ref(),
+        ));
+    }
     InstanceSettingsRepository::new(state.identity.database().clone())
         .set_registration_open(
             session.user.id,
@@ -2114,8 +2223,11 @@ async fn set_registration(
             InstanceSettingsError::EmailNotConfigured => {
                 email_not_configured(instance, request_id.as_ref())
             }
-            InstanceSettingsError::SmtpRequired | InstanceSettingsError::Unavailable(_) => {
-                internal(instance, request_id.as_ref())
+            InstanceSettingsError::Unavailable(error) => {
+                internal(instance, request_id.as_ref()).cause(error)
+            }
+            error @ InstanceSettingsError::SmtpRequired => {
+                internal(instance, request_id.as_ref()).cause(error)
             }
         })?;
     settings_view(&state, instance, request_id.as_ref()).await
@@ -2143,6 +2255,16 @@ async fn save_smtp(
 ) -> Result<Json<InstanceSettingsView>, ApiError> {
     let instance = "/api/v1/admin/settings/smtp";
     let session = require_root(&state, &headers, instance, request_id.as_ref()).await?;
+    if EnvironmentSettings::of(state.identity.database())
+        .smtp
+        .is_some()
+    {
+        return Err(set_by_environment(
+            "ORBIT_SMTP_*",
+            instance,
+            request_id.as_ref(),
+        ));
+    }
     let invalid = |field: &str, detail: &str| {
         ApiError::new(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -2195,10 +2317,9 @@ async fn save_smtp(
                         request_id.as_ref(),
                     )
                 })?;
-            PasswordChange::Set(
-                crate::secret_box::encrypt_secret(key, &password)
-                    .map_err(|()| internal(instance, request_id.as_ref()))?,
-            )
+            PasswordChange::Set(crate::secret_box::encrypt_secret(key, &password).map_err(
+                |()| internal(instance, request_id.as_ref()).cause("could not encrypt the secret"),
+            )?)
         }
     };
     InstanceSettingsRepository::new(state.identity.database().clone())
@@ -2218,7 +2339,7 @@ async fn save_smtp(
             TimestampMillis::now(),
         )
         .await
-        .map_err(|_| internal(instance, request_id.as_ref()))?;
+        .map_err(|error| internal(instance, request_id.as_ref()).cause(error))?;
     settings_view(&state, instance, request_id.as_ref()).await
 }
 
@@ -2231,6 +2352,16 @@ async fn remove_smtp(
 ) -> Result<Json<InstanceSettingsView>, ApiError> {
     let instance = "/api/v1/admin/settings/smtp";
     let session = require_root(&state, &headers, instance, request_id.as_ref()).await?;
+    if EnvironmentSettings::of(state.identity.database())
+        .smtp
+        .is_some()
+    {
+        return Err(set_by_environment(
+            "ORBIT_SMTP_*",
+            instance,
+            request_id.as_ref(),
+        ));
+    }
     InstanceSettingsRepository::new(state.identity.database().clone())
         .clear_smtp(
             session.user.id,
@@ -2247,8 +2378,11 @@ async fn remove_smtp(
                 instance,
                 request_id.as_ref(),
             ),
-            InstanceSettingsError::EmailNotConfigured | InstanceSettingsError::Unavailable(_) => {
-                internal(instance, request_id.as_ref())
+            InstanceSettingsError::Unavailable(error) => {
+                internal(instance, request_id.as_ref()).cause(error)
+            }
+            error @ InstanceSettingsError::EmailNotConfigured => {
+                internal(instance, request_id.as_ref()).cause(error)
             }
         })?;
     settings_view(&state, instance, request_id.as_ref()).await
@@ -2328,14 +2462,14 @@ async fn reload_storage(
     let database = state.identity.database();
     let settings = crate::object_storage::load_saved(database)
         .await
-        .map_err(|_| internal(instance, request_id))?;
+        .map_err(|error| internal(instance, request_id).cause(error))?;
     crate::object_storage::apply_and_keep(
         database,
         storage,
         &settings,
         state.mailer.as_ref().and_then(Mailer::app_key),
     )
-    .map_err(|_| internal(instance, request_id))?;
+    .map_err(|error| internal(instance, request_id).cause(error))?;
     // The other servers of the database use them too.
     crate::cluster::Cluster::of(database).send(crate::cluster::Message::StorageChanged);
     Ok(())
@@ -2394,6 +2528,16 @@ async fn save_sign_in_provider(
     let session = require_root(&state, &headers, instance, rid).await?;
     let provider =
         Provider::parse(&provider).ok_or_else(|| sign_in_provider_not_found(instance, rid))?;
+    if EnvironmentSettings::of(state.identity.database())
+        .sign_in_provider(provider)
+        .is_some()
+    {
+        let variables = match provider {
+            Provider::Google => "ORBIT_GOOGLE_CLIENT_ID",
+            Provider::Github => "ORBIT_GITHUB_CLIENT_ID",
+        };
+        return Err(set_by_environment(variables, instance, rid));
+    }
     let client_id = body.client_id.trim();
     if client_id.is_empty() || client_id.len() > 256 {
         return Err(invalid_sign_in_provider(
@@ -2421,7 +2565,7 @@ async fn save_sign_in_provider(
     let encrypted = secret
         .map(|secret| crate::secret_box::encrypt_secret(key, &secret))
         .transpose()
-        .map_err(|()| internal(instance, rid))?;
+        .map_err(|()| internal(instance, rid).cause("could not encrypt the secret"))?;
     InstanceSettingsRepository::new(state.identity.database().clone())
         .save_sign_in_provider(
             session.user.id,
@@ -2436,7 +2580,7 @@ async fn save_sign_in_provider(
             SaveSignInProviderError::SecretRequired => {
                 invalid_sign_in_provider("client_secret: enter the client secret.", instance, rid)
             }
-            SaveSignInProviderError::Database(_) => internal(instance, rid),
+            SaveSignInProviderError::Database(error) => internal(instance, rid).cause(error),
         })?;
     settings_view(&state, instance, rid).await
 }
@@ -2454,6 +2598,16 @@ async fn remove_sign_in_provider(
     let session = require_root(&state, &headers, instance, rid).await?;
     let provider =
         Provider::parse(&provider).ok_or_else(|| sign_in_provider_not_found(instance, rid))?;
+    if EnvironmentSettings::of(state.identity.database())
+        .sign_in_provider(provider)
+        .is_some()
+    {
+        let variables = match provider {
+            Provider::Google => "ORBIT_GOOGLE_CLIENT_ID",
+            Provider::Github => "ORBIT_GITHUB_CLIENT_ID",
+        };
+        return Err(set_by_environment(variables, instance, rid));
+    }
     InstanceSettingsRepository::new(state.identity.database().clone())
         .remove_sign_in_provider(
             session.user.id,
@@ -2462,7 +2616,7 @@ async fn remove_sign_in_provider(
             TimestampMillis::now(),
         )
         .await
-        .map_err(|_| internal(instance, rid))?;
+        .map_err(|error| internal(instance, rid).cause(error))?;
     settings_view(&state, instance, rid).await
 }
 
@@ -2599,6 +2753,16 @@ async fn save_s3(
 ) -> Result<Json<InstanceSettingsView>, ApiError> {
     let instance = "/api/v1/admin/settings/s3";
     let session = require_root(&state, &headers, instance, request_id.as_ref()).await?;
+    if EnvironmentSettings::of(state.identity.database())
+        .s3
+        .is_some()
+    {
+        return Err(set_by_environment(
+            "ORBIT_S3_*",
+            instance,
+            request_id.as_ref(),
+        ));
+    }
     let invalid =
         |field: &str, detail: &str| invalid_storage(field, detail, instance, request_id.as_ref());
     let location = validated_s3(&body, instance, request_id.as_ref())?;
@@ -2611,7 +2775,7 @@ async fn save_s3(
     let saved = repository
         .storage()
         .await
-        .map_err(|_| internal(instance, request_id.as_ref()))?;
+        .map_err(|error| internal(instance, request_id.as_ref()).cause(error))?;
     let secret = match body.secret_access_key.filter(|secret| !secret.is_empty()) {
         Some(secret) => secret,
         None => saved
@@ -2620,14 +2784,13 @@ async fn save_s3(
             .and_then(|s3| crate::secret_box::decrypt_secret(key, &s3.secret_access_key).ok())
             .ok_or_else(|| invalid("secret_access_key", "enter the secret key."))?,
     };
-    let s3 = location.with_secret(
-        crate::secret_box::encrypt_secret(key, &secret)
-            .map_err(|()| internal(instance, request_id.as_ref()))?,
-    );
+    let s3 = location.with_secret(crate::secret_box::encrypt_secret(key, &secret).map_err(
+        |()| internal(instance, request_id.as_ref()).cause("could not encrypt the secret"),
+    )?);
     let workspaces = WorkspaceStorageRepository::new(state.identity.database().clone())
         .all()
         .await
-        .map_err(|_| internal(instance, request_id.as_ref()))?;
+        .map_err(|error| internal(instance, request_id.as_ref()).cause(error))?;
     if let Some(workspace) = workspaces
         .iter()
         .find(|workspace| crate::object_storage::overlap(&workspace.s3, &s3))
@@ -2647,7 +2810,7 @@ async fn save_s3(
         if moved {
             let in_use = saved.attachments_in_s3
                 || crate::object_storage::saved_bucket(old, Some(key), Owner::Installation)
-                    .map_err(|_| internal(instance, request_id.as_ref()))?
+                    .map_err(|error| internal(instance, request_id.as_ref()).cause(error))?
                     .any("blobs/")
                     .await
                     .map_err(|error| storage_unreachable(error, instance, request_id.as_ref()))?;
@@ -2674,7 +2837,7 @@ async fn save_s3(
             TimestampMillis::now(),
         )
         .await
-        .map_err(|_| internal(instance, request_id.as_ref()))?;
+        .map_err(|error| internal(instance, request_id.as_ref()).cause(error))?;
     reload_storage(&state, instance, request_id.as_ref()).await?;
     settings_view(&state, instance, request_id.as_ref()).await
 }
@@ -2689,11 +2852,21 @@ async fn remove_s3(
 ) -> Result<Json<InstanceSettingsView>, ApiError> {
     let instance = "/api/v1/admin/settings/s3";
     let session = require_root(&state, &headers, instance, request_id.as_ref()).await?;
+    if EnvironmentSettings::of(state.identity.database())
+        .s3
+        .is_some()
+    {
+        return Err(set_by_environment(
+            "ORBIT_S3_*",
+            instance,
+            request_id.as_ref(),
+        ));
+    }
     let repository = InstanceSettingsRepository::new(state.identity.database().clone());
     let saved = repository
         .storage()
         .await
-        .map_err(|_| internal(instance, request_id.as_ref()))?;
+        .map_err(|error| internal(instance, request_id.as_ref()).cause(error))?;
     if let Some(s3) = &saved.s3 {
         if saved.attachments_in_s3 {
             return Err(storage_in_use(
@@ -2704,7 +2877,7 @@ async fn remove_s3(
         }
         let app_key = state.mailer.as_ref().and_then(Mailer::app_key);
         let files_left = crate::object_storage::saved_bucket(s3, app_key, Owner::Installation)
-            .map_err(|_| internal(instance, request_id.as_ref()))?
+            .map_err(|error| internal(instance, request_id.as_ref()).cause(error))?
             .any("blobs/")
             .await
             .map_err(|error| storage_unreachable(error, instance, request_id.as_ref()))?;
@@ -2723,7 +2896,7 @@ async fn remove_s3(
             TimestampMillis::now(),
         )
         .await
-        .map_err(|_| internal(instance, request_id.as_ref()))?;
+        .map_err(|error| internal(instance, request_id.as_ref()).cause(error))?;
     reload_storage(&state, instance, request_id.as_ref()).await?;
     settings_view(&state, instance, request_id.as_ref()).await
 }
@@ -2757,7 +2930,7 @@ fn workspace_storage_problem(
         WorkspaceStorageError::Forbidden => {
             workspace_problem(WorkspaceError::Forbidden, instance, request_id)
         }
-        WorkspaceStorageError::Database(_) => internal(instance, request_id),
+        WorkspaceStorageError::Database(error) => internal(instance, request_id).cause(error),
     }
 }
 
@@ -2854,15 +3027,14 @@ async fn save_workspace_bucket(
             })
             .ok_or_else(|| invalid("secret_access_key", "enter the secret key."))?,
     };
-    let s3 = location.with_secret(
-        crate::secret_box::encrypt_secret(key, &secret)
-            .map_err(|()| internal(instance, request_id.as_ref()))?,
-    );
+    let s3 = location.with_secret(crate::secret_box::encrypt_secret(key, &secret).map_err(
+        |()| internal(instance, request_id.as_ref()).cause("could not encrypt the secret"),
+    )?);
     let location_of = |s3: &S3Settings| (s3.endpoint.clone(), s3.bucket.clone(), s3.prefix.clone());
     let installation = InstanceSettingsRepository::new(database.clone())
         .storage()
         .await
-        .map_err(|_| internal(instance, request_id.as_ref()))?;
+        .map_err(|error| internal(instance, request_id.as_ref()).cause(error))?;
     if installation
         .s3
         .as_ref()
@@ -2876,7 +3048,7 @@ async fn save_workspace_bucket(
     }
     if let Some(old) = saved.filter(|old| location_of(&old.s3) != location_of(&s3)) {
         let files_left = crate::object_storage::saved_bucket(&old.s3, Some(key), Owner::Workspace)
-            .map_err(|_| internal(instance, request_id.as_ref()))?
+            .map_err(|error| internal(instance, request_id.as_ref()).cause(error))?
             .any(&format!("blobs/{workspace_id}/"))
             .await
             .map_err(|error| storage_unreachable(error, instance, request_id.as_ref()))?;
@@ -2956,6 +3128,9 @@ struct StorageOptionsBody {
     /// New backups are uploaded to the bucket.
     backups_in_s3: bool,
     backup_schedule: BackupSchedule,
+    /// Days (1–365) a deleted or replaced attachment file stays in S3 before Orbit deletes it. Omitted: unchanged.
+    #[serde(default)]
+    s3_keep_deleted_days: Option<u32>,
 }
 
 /// Saves the limits of a shared installation; `null` or 0 is unlimited. A lower limit refuses new workspaces and
@@ -2996,7 +3171,7 @@ async fn save_limits(
             TimestampMillis::now(),
         )
         .await
-        .map_err(|_| internal(instance, request_id.as_ref()))?;
+        .map_err(|error| internal(instance, request_id.as_ref()).cause(error))?;
     settings_view(&state, instance, request_id.as_ref()).await
 }
 
@@ -3013,11 +3188,59 @@ async fn save_storage_options(
     let instance = "/api/v1/admin/settings/storage";
     let session = require_root(&state, &headers, instance, request_id.as_ref()).await?;
     let database = state.identity.database();
+    let environment = EnvironmentSettings::of(database);
+    let changed = |set: Option<bool>, wanted: bool| set.is_some_and(|set| set != wanted);
+    if changed(environment.attachments_in_s3, body.attachments_in_s3) {
+        return Err(set_by_environment(
+            "ORBIT_S3_ATTACHMENTS",
+            instance,
+            request_id.as_ref(),
+        ));
+    }
+    if changed(environment.backups_in_s3, body.backups_in_s3) {
+        return Err(set_by_environment(
+            "ORBIT_S3_BACKUPS",
+            instance,
+            request_id.as_ref(),
+        ));
+    }
+    if environment
+        .backup_schedule
+        .is_some_and(|schedule| schedule != body.backup_schedule)
+    {
+        return Err(set_by_environment(
+            "ORBIT_AUTOMATIC_BACKUPS",
+            instance,
+            request_id.as_ref(),
+        ));
+    }
+    if let (Some(set), Some(wanted)) = (environment.s3_keep_deleted_days, body.s3_keep_deleted_days)
+        && set != wanted
+    {
+        return Err(set_by_environment(
+            "ORBIT_S3_KEEP_DELETED_DAYS",
+            instance,
+            request_id.as_ref(),
+        ));
+    }
+    if body
+        .s3_keep_deleted_days
+        .is_some_and(|days| !(1..=365).contains(&days))
+    {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_keep_deleted_days",
+            "Invalid number of days",
+            "Keep deleted files for 1 to 365 days.",
+            instance,
+            request_id.as_ref(),
+        ));
+    }
     if !body.attachments_in_s3 && crate::cluster::Cluster::of(database).others() > 0 {
         let current = InstanceSettingsRepository::new(database.clone())
             .storage()
             .await
-            .map_err(|_| internal(instance, request_id.as_ref()))?;
+            .map_err(|error| internal(instance, request_id.as_ref()).cause(error))?;
         if current.attachments_in_s3 {
             return Err(ApiError::new(
                 StatusCode::CONFLICT,
@@ -3035,6 +3258,7 @@ async fn save_storage_options(
             body.attachments_in_s3,
             body.backups_in_s3,
             body.backup_schedule,
+            body.s3_keep_deleted_days,
             request_id_value(request_id.as_ref()),
             TimestampMillis::now(),
         )
@@ -3048,7 +3272,9 @@ async fn save_storage_options(
                 instance,
                 request_id.as_ref(),
             ),
-            StorageSettingsError::Unavailable(_) => internal(instance, request_id.as_ref()),
+            StorageSettingsError::Unavailable(error) => {
+                internal(instance, request_id.as_ref()).cause(error)
+            }
         })?;
     reload_storage(&state, instance, request_id.as_ref()).await?;
     settings_view(&state, instance, request_id.as_ref()).await
@@ -3066,7 +3292,9 @@ async fn start_image_compression(
     let instance = "/api/v1/admin/attachments/compress";
     require_root(&state, &headers, instance, request_id.as_ref()).await?;
     let Some(compressor) = &state.image_compressor else {
-        return Err(internal(instance, request_id.as_ref()));
+        return Err(
+            internal(instance, request_id.as_ref()).cause("image compressor not configured")
+        );
     };
     compressor.start();
     settings_view(&state, instance, request_id.as_ref()).await
@@ -3173,6 +3401,7 @@ async fn create_backup(
         .await
         .map_err(|error| {
             tracing::error!(%error, "backup failed");
+            let cause = error.to_string();
             // A short cause; the full error is in the log above.
             let (code, detail) = match error {
                 orbit_platform::BackupError::ObjectStorage(error) => (
@@ -3196,6 +3425,7 @@ async fn create_backup(
                 instance,
                 request_id.as_ref(),
             )
+            .cause(cause)
         })?;
     Ok((StatusCode::CREATED, Json(BackupCreated { id: snapshot.id })))
 }
@@ -3211,7 +3441,7 @@ async fn list_backups(
     let session = authenticate(&state, &headers, instance, request_id.as_ref()).await?;
     require_installation_admin(&state, session.user.id, instance, request_id.as_ref()).await?;
     let backups = backup_service(&state, instance, request_id.as_ref())?;
-    let fail = |_| {
+    let fail = |error: BackupError| {
         ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             "backup_list_failed",
@@ -3220,6 +3450,7 @@ async fn list_backups(
             instance,
             request_id.as_ref(),
         )
+        .cause(error)
     };
     let mut items = backups.list().await.map_err(fail)?;
     items.extend(backups.list_pre_migration().await.map_err(fail)?);
@@ -3247,7 +3478,7 @@ async fn download_backup(
     let session = authenticate(&state, &headers, &instance, request_id.as_ref()).await?;
     require_installation_admin(&state, session.user.id, &instance, request_id.as_ref()).await?;
     let backups = backup_service(&state, &instance, request_id.as_ref())?;
-    let failed = || {
+    let failed = |error: &dyn std::fmt::Display| {
         ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             "backup_download_failed",
@@ -3256,6 +3487,7 @@ async fn download_backup(
             &instance,
             request_id.as_ref(),
         )
+        .cause(error)
     };
     let snapshot = backups
         .verify(&backup_id)
@@ -3269,13 +3501,13 @@ async fn download_backup(
                 &instance,
                 request_id.as_ref(),
             ),
-            _ => failed(),
+            error => failed(&error),
         })?;
     let name = format!("orbit-backup-{}.zip", snapshot.id);
     let file = tokio::task::spawn_blocking(move || write_backup_archive(&snapshot))
         .await
-        .map_err(|_| failed())?
-        .map_err(|_| failed())?;
+        .map_err(|error| failed(&error))?
+        .map_err(|error| failed(&error))?;
     let length = file.metadata().map(|metadata| metadata.len()).ok();
     let mut response = Response::new(Body::from_stream(tokio_util::io::ReaderStream::new(
         tokio::fs::File::from_std(file),
@@ -3316,14 +3548,15 @@ async fn delete_backup(
                 &instance,
                 request_id.as_ref(),
             ),
-            _ => ApiError::new(
+            error => ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "backup_delete_failed",
                 "Backup delete failed",
                 "Orbit could not delete this backup.",
                 &instance,
                 request_id.as_ref(),
-            ),
+            )
+            .cause(error),
         })?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -3499,7 +3732,7 @@ async fn require_installation_admin(
         .identity
         .is_installation_admin(user_id)
         .await
-        .map_err(|_| {
+        .map_err(|error| {
             ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "internal_error",
@@ -3508,6 +3741,7 @@ async fn require_installation_admin(
                 instance,
                 request_id,
             )
+            .cause(error)
         })?
     {
         Ok(())
@@ -3632,14 +3866,24 @@ fn api_token_problem(
             instance,
             request_id,
         ),
-        ApiTokenError::Unavailable(_) | ApiTokenError::InvalidIdentifier => ApiError::new(
+        ApiTokenError::Unavailable(error) => ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             "internal_error",
             "Internal server error",
             "An unexpected error occurred. Use the request ID when contacting support.",
             instance,
             request_id,
-        ),
+        )
+        .cause(error),
+        error @ ApiTokenError::InvalidIdentifier => ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "internal_error",
+            "Internal server error",
+            "An unexpected error occurred. Use the request ID when contacting support.",
+            instance,
+            request_id,
+        )
+        .cause(error),
     }
 }
 
@@ -3749,14 +3993,24 @@ fn workspace_problem(
             instance,
             request_id,
         ),
-        WorkspaceError::Unavailable(_) | WorkspaceError::Storage(_) => ApiError::new(
+        WorkspaceError::Unavailable(error) => ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             "internal_error",
             "Internal server error",
             "An unexpected error occurred. Use the request ID when contacting support.",
             instance,
             request_id,
-        ),
+        )
+        .cause(error),
+        WorkspaceError::Storage(error) => ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "internal_error",
+            "Internal server error",
+            "An unexpected error occurred. Use the request ID when contacting support.",
+            instance,
+            request_id,
+        )
+        .cause(error),
     }
 }
 
@@ -3817,7 +4071,7 @@ fn password_problem(
     let detail = match error {
         PasswordError::InvalidLength => "Password must contain between 12 and 128 characters.",
         PasswordError::CommonPassword => "Choose a password that is not commonly used.",
-        PasswordError::InvalidHash | PasswordError::HashingFailed => {
+        error @ (PasswordError::InvalidHash | PasswordError::HashingFailed) => {
             return ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "internal_error",
@@ -3825,7 +4079,8 @@ fn password_problem(
                 "An unexpected error occurred. Use the request ID when contacting support.",
                 instance,
                 request_id,
-            );
+            )
+            .cause(error);
         }
     };
     ApiError::new(
@@ -3916,14 +4171,15 @@ fn admin_account_problem(
             instance,
             request_id,
         ),
-        AdminAccountError::Unavailable(_) => ApiError::new(
+        AdminAccountError::Unavailable(error) => ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             "internal_error",
             "Internal server error",
             "An unexpected error occurred. Use the request ID when contacting support.",
             instance,
             request_id,
-        ),
+        )
+        .cause(error),
     }
 }
 
@@ -3962,9 +4218,16 @@ struct ApiError {
     status: StatusCode,
     body: Box<ProblemBody>,
     retry_after: Option<std::time::Duration>,
+    cause: Option<String>,
 }
 
 impl ApiError {
+    /// Records why this 500 happened. The HTTP layer logs it with the request ID; the client does not see it.
+    pub(crate) fn cause(mut self, error: impl std::fmt::Display) -> Self {
+        self.cause = Some(error.to_string());
+        self
+    }
+
     fn new(
         status: StatusCode,
         code: &'static str,
@@ -3988,6 +4251,7 @@ impl ApiError {
                 conflict: None,
             }),
             retry_after: None,
+            cause: None,
         }
     }
 
@@ -4015,6 +4279,7 @@ impl ApiError {
                 }),
             }),
             retry_after: None,
+            cause: None,
         }
     }
 }
@@ -4031,6 +4296,11 @@ impl IntoResponse for ApiError {
                 RETRY_AFTER,
                 HeaderValue::from_str(&retry_after.as_secs().max(1).to_string()).unwrap(),
             );
+        }
+        if let Some(cause) = self.cause {
+            response
+                .extensions_mut()
+                .insert(orbit_platform::ErrorCause(cause));
         }
         response
     }

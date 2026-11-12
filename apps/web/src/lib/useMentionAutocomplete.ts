@@ -60,11 +60,13 @@ export function useMentionAutocomplete<Person extends MentionPerson>(
   const taskQuery = mentionState?.trigger === '#' && taskWorkspaceId ? taskSearchText(mentionState.query) : null
   const debouncedTaskQuery = useDebouncedValue(taskQuery, 150)
   const taskResults = useTaskReferences(taskWorkspaceId ?? '', debouncedTaskQuery ?? '', Boolean(taskWorkspaceId) && debouncedTaskQuery !== null)
-  // only the hits of the query as typed: Enter must never pick a task found for an earlier query
   const fresh = taskQuery !== null && debouncedTaskQuery === taskQuery && !taskResults.isPlaceholderData
-  const tasks: MentionSuggestion[] = fresh
+  // the last hits stay (dimmed) while the next search loads, so the popup keeps its size; only the "#" gone clears them
+  const tasks: MentionSuggestion[] = taskQuery !== null
     ? (taskResults.data ?? []).map((task) => ({ id: `task_${task.id}`, label: task.title, username: task.identifier, task, kind: 'task' as const }))
     : []
+  // a task search is still on its way: the popup stays open (and says so) even before anything matches
+  const searchingTasks = taskQuery !== null && (!fresh || taskResults.isPending)
 
   const all: MentionSuggestion[] =
     mentionState?.trigger === '#'
@@ -84,7 +86,7 @@ export function useMentionAutocomplete<Person extends MentionPerson>(
       : all
   )
   const suggestions = mixSuggestions(matching, tasks, query)
-  const open = mentionState !== null && suggestions.length > 0
+  const open = mentionState !== null && (suggestions.length > 0 || searchingTasks)
   // task hits arrive later and can shorten the list under the highlight
   const active = Math.max(0, Math.min(activeIndex, suggestions.length - 1))
 
@@ -109,8 +111,9 @@ export function useMentionAutocomplete<Person extends MentionPerson>(
       setMentionState(null)
       return
     }
+    // `onSelect` also runs on ↑/↓: the highlight goes back to the top only when the query changes
+    if (mentionState?.start !== atIndex || mentionState.query !== nextQuery || mentionState.trigger !== trigger) setActiveIndex(0)
     setMentionState({ start: atIndex, end: cursor, query: nextQuery, trigger })
-    setActiveIndex(0)
   }
 
   function insert(suggestion: MentionSuggestion) {
@@ -138,6 +141,17 @@ export function useMentionAutocomplete<Person extends MentionPerson>(
   function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>): boolean {
     // During IME composition the keys belong to the IME.
     if (!open || e.nativeEvent.isComposing) return false
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      setMentionState(null)
+      return true
+    }
+    // only "Searching tasks…" so far: Enter/Tab wait for the hits instead of sending the half-typed "#query"
+    if (suggestions.length === 0) {
+      if (e.key !== 'Enter' && e.key !== 'Tab') return false
+      e.preventDefault()
+      return true
+    }
     if (e.key === 'ArrowDown') {
       e.preventDefault()
       setActiveIndex((active + 1) % suggestions.length)
@@ -150,12 +164,8 @@ export function useMentionAutocomplete<Person extends MentionPerson>(
     }
     if (e.key === 'Enter' || e.key === 'Tab') {
       e.preventDefault()
-      insert(suggestions[active])
-      return true
-    }
-    if (e.key === 'Escape') {
-      e.preventDefault()
-      setMentionState(null)
+      // a task listed for an earlier query may not match this one: Enter waits for the fresh hits
+      if (!(searchingTasks && suggestions[active]!.kind === 'task')) insert(suggestions[active]!)
       return true
     }
     return false
@@ -170,6 +180,7 @@ export function useMentionAutocomplete<Person extends MentionPerson>(
     insert,
     close,
     handleKeyDown,
+    searchingTasks,
     /** "#" with nothing typed yet and tasks on offer: the popup can say how to find a task. */
     emptyTaskQuery: Boolean(taskWorkspaceId) && mentionState?.trigger === '#' && query === '',
   }

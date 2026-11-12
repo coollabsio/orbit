@@ -10,7 +10,7 @@ use axum::http::request::Parts;
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, patch, post};
+use axum::routing::{delete, get, patch, post};
 use axum::{Json, Router};
 use orbit_platform::{Id, Problem, RequestId, TimestampMillis};
 use serde::{Deserialize, Serialize};
@@ -22,16 +22,19 @@ use crate::export::names::{ascii_file_name, rfc5987};
 use crate::repositories::api_tokens::{
     ApiTokenError, ApiTokenPrincipal, ApiTokenRepository, ApiTokenScope,
 };
+use crate::repositories::page_versions::PageVersionSummary;
 use crate::repositories::pages::PageSummary;
 use crate::repositories::pages::{PageError, PageRepository};
 use crate::repositories::task_recurrences::TaskRecurrence;
 use crate::repositories::tasks::{
-    CommentRecord, LabelRecord, ProjectRecord, SortOrder, StatusRecord, TaskError, TaskRepository,
-    TaskSort,
+    CommentRecord, ImportedComment, ImportedTask, LabelRecord, MilestoneRecord, ProjectRecord,
+    SortOrder, StatusRecord, TaskError, TaskRepository, TaskSort,
 };
 use crate::token_api::{
-    AssigneeFilter, DOC_TOO_LARGE_DETAIL, DocPatch, DocView, Me, MemberView, Named, NewDoc,
-    NewTask, TaskPatch, TaskQuery, TaskView, TokenApi, TokenApiError,
+    AssigneeFilter, CommentImport, CycleRelative, CycleView, DOC_TOO_LARGE_DETAIL, DocMove,
+    DocPatch, DocVersionView, DocView, Me, MemberView, MovedDocView, Named, NewComment, NewDoc,
+    NewTask, TaskPatch, TaskQuery, TaskView, TokenApi, TokenApiError, Written, parse_cycle_filter,
+    parse_due_bound, parse_milestone_filter,
 };
 use crate::workspace_export::{
     ExportError, ExportMode, WorkspaceExport, WorkspaceExportService, WorkspaceExportStatus,
@@ -75,21 +78,62 @@ impl PublicApiState {
 }
 
 pub fn router(state: PublicApiState) -> Router {
+    // A retry of a POST with the same `Idempotency-Key` gets the first response (task and comment creates).
+    let idempotent = middleware::from_fn_with_state(state.clone(), idempotency::idempotency);
     // Workspace paths leave room for tokens with more than one workspace; today the path must
     // name the token's only workspace.
     let workspace = Router::new()
         .route("/projects", get(projects).post(create_project))
-        .route("/projects/{project_id}/statuses", get(statuses))
-        .route("/projects/{project_id}/labels", get(labels))
+        .route("/projects/{project_id}", patch(setup::update_project))
+        .route(
+            "/projects/{project_id}/statuses",
+            get(statuses).post(setup::create_status),
+        )
+        .route(
+            "/projects/{project_id}/statuses/{status_id}",
+            patch(setup::update_status),
+        )
+        .route(
+            "/projects/{project_id}/labels",
+            get(labels).post(setup::create_label),
+        )
+        .route(
+            "/projects/{project_id}/labels/{label_id}",
+            patch(setup::update_label),
+        )
+        .route("/projects/{project_id}/milestones", get(milestones))
+        .route("/projects/{project_id}/cycles", get(cycles))
         .route("/members", get(members))
-        .route("/tasks", get(list_tasks).post(create_task))
+        .route(
+            "/tasks",
+            get(list_tasks)
+                .post(create_task)
+                .route_layer(idempotent.clone()),
+        )
         .route(
             "/tasks/{task}",
             get(get_task).patch(update_task).delete(delete_task),
         )
-        .route("/tasks/{task}/comments", get(comments).post(create_comment))
+        .route(
+            "/tasks/{task}/comments",
+            get(comments).post(create_comment).route_layer(idempotent),
+        )
+        .route(
+            "/tasks/{task}/relations",
+            get(relations::relations).post(relations::create_relation),
+        )
+        .route(
+            "/tasks/{task}/relations/{relation_id}",
+            delete(relations::delete_relation),
+        )
         .route("/docs", get(docs).post(create_doc))
-        .route("/docs/{page_id}", get(doc).patch(update_doc))
+        .route(
+            "/docs/{page_id}",
+            get(doc).patch(update_doc).delete(delete_doc),
+        )
+        .route("/docs/{page_id}/move", post(move_doc))
+        .route("/docs/{page_id}/versions", get(doc_versions))
+        .route("/docs/{page_id}/versions/{version_id}", get(doc_version))
         .route("/docs/{page_id}/database", get(databases::database))
         .route(
             "/docs/{page_id}/database/query",
@@ -108,6 +152,25 @@ pub fn router(state: PublicApiState) -> Router {
         .route(
             "/docs/{page_id}/rows/{row_id}",
             patch(databases::update_row),
+        )
+        .route("/databases", post(database_views::create_database))
+        .route(
+            "/docs/{page_id}/database/views",
+            get(database_views::views).post(database_views::create_view),
+        )
+        .route(
+            "/docs/{page_id}/database/views/{view_id}",
+            get(database_views::view)
+                .patch(database_views::update_view)
+                .delete(database_views::delete_view),
+        )
+        .route(
+            "/docs/{page_id}/database/links",
+            post(database_views::create_link),
+        )
+        .route(
+            "/docs/{page_id}/database/links/{link_id}",
+            delete(database_views::delete_link),
         );
     // Exports belong to the token's only workspace, which the token already names.
     let routes = Router::new()
@@ -151,7 +214,10 @@ async fn authenticate(
         }
         Err(ApiTokenError::NotFound) => ctx.unauthorized(),
         Err(ApiTokenError::Forbidden) => ctx.error(TokenApiError::MissingScope),
-        Err(_) => ctx.error(TokenApiError::Internal),
+        Err(ApiTokenError::Unavailable(error)) => {
+            ctx.error(TokenApiError::Internal(error.to_string()))
+        }
+        Err(error) => ctx.error(TokenApiError::Internal(error.to_string())),
     }
 }
 
@@ -181,11 +247,13 @@ impl<S: Send + Sync> FromRequestParts<S> for Ctx {
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Response> {
         let out = Responder::new(&parts.extensions, &parts.uri);
         let Some(principal) = parts.extensions.get::<ApiTokenPrincipal>().cloned() else {
-            return Err(out.error(TokenApiError::Internal));
+            return Err(out.error(TokenApiError::Internal(
+                "authenticated request has no token principal".to_owned(),
+            )));
         };
         let params = RawPathParams::from_request_parts(parts, state)
             .await
-            .map_err(|_| out.error(TokenApiError::Internal))?;
+            .map_err(|error| out.error(TokenApiError::Internal(error.to_string())))?;
         if params.iter().any(|(name, value)| {
             name == "workspace_id" && value.parse::<Id>().ok() != Some(principal.workspace_id)
         }) {
@@ -216,6 +284,24 @@ impl Responder {
     ) -> Response {
         match result {
             Ok(value) => (status, Json(value)).into_response(),
+            Err(error) => self.error(error),
+        }
+    }
+
+    /// 201 for a new item, 200 for the item that an earlier write with its `external_id` made.
+    fn written<T, U: Serialize + From<T>>(
+        &self,
+        result: Result<Written<T>, TokenApiError>,
+    ) -> Response {
+        match result {
+            Ok(Written { value, created }) => {
+                let status = if created {
+                    StatusCode::CREATED
+                } else {
+                    StatusCode::OK
+                };
+                (status, Json(U::from(value))).into_response()
+            }
             Err(error) => self.error(error),
         }
     }
@@ -267,6 +353,13 @@ impl Responder {
     }
 
     fn error(&self, error: TokenApiError) -> Response {
+        let cause = match &error {
+            TokenApiError::Internal(cause) => Some(cause.clone()),
+            TokenApiError::Task(TaskError::Unavailable(error)) => Some(error.to_string()),
+            TokenApiError::Page(PageError::Unavailable(error)) => Some(error.to_string()),
+            TokenApiError::Page(error @ PageError::Corrupt) => Some(error.to_string()),
+            _ => None,
+        };
         let problem = match error {
             TokenApiError::MissingScope => self.problem(
                 StatusCode::FORBIDDEN,
@@ -300,12 +393,18 @@ impl Responder {
                 "Workspace action forbidden",
                 "Only workspace owners and administrators may delete tasks forever.",
             ),
-            TokenApiError::Internal => Problem::internal(&self.request_id, &self.instance),
+            TokenApiError::ImportForbidden => self.problem(
+                StatusCode::FORBIDDEN,
+                "workspace_action_forbidden",
+                "Workspace action forbidden",
+                "A tasks:import token writes only while its creator is a workspace owner or admin.",
+            ),
+            TokenApiError::Internal(_) => Problem::internal(&self.request_id, &self.instance),
             TokenApiError::Task(error) => self.task_problem(error),
             TokenApiError::Page(error) => self.page_problem(error),
             TokenApiError::Database(error) => self.database_problem(error),
         };
-        problem_response(problem)
+        with_cause(problem_response(problem), cause)
     }
 
     fn task_problem(&self, error: TaskError) -> Problem {
@@ -381,6 +480,18 @@ impl Responder {
                 "Invalid parent",
                 "The parent task does not exist or is in the trash.",
             ),
+            TaskError::CycleOverlap => (
+                StatusCode::CONFLICT,
+                "cycle_overlap",
+                "Cycles overlap",
+                "The cycle's dates overlap another cycle of the project.",
+            ),
+            TaskError::NoNextCycle => (
+                StatusCode::CONFLICT,
+                "no_next_cycle",
+                "No next cycle",
+                "The project has no cycle after this one.",
+            ),
             TaskError::ProjectNotTrashed => (
                 StatusCode::CONFLICT,
                 "project_not_trashed",
@@ -443,6 +554,30 @@ impl Responder {
                     &detail,
                 );
             }
+            PageError::InvalidCursor => (
+                StatusCode::BAD_REQUEST,
+                "invalid_cursor",
+                "Invalid cursor",
+                "The cursor does not match this list query.",
+            ),
+            PageError::MoveToPrivateForbidden => (
+                StatusCode::FORBIDDEN,
+                "workspace_action_forbidden",
+                "Workspace action forbidden",
+                "Only workspace owners and administrators may move teamspace docs that others created into a private space.",
+            ),
+            PageError::DatabaseInDatabase => (
+                StatusCode::CONFLICT,
+                "database_in_database",
+                "Database in a database",
+                "A database cannot be a row.",
+            ),
+            PageError::RowLimit => (
+                StatusCode::CONFLICT,
+                "database_row_limit",
+                "Database row limit",
+                "A database holds at most 5,000 rows.",
+            ),
             PageError::Locked => (
                 StatusCode::LOCKED,
                 "page_locked",
@@ -468,6 +603,16 @@ impl Responder {
         };
         self.problem(status, code, title, detail)
     }
+}
+
+/// Adds why a 500 happened for the HTTP layer's log; the client does not see it.
+fn with_cause(mut response: Response, cause: Option<String>) -> Response {
+    if let Some(cause) = cause {
+        response
+            .extensions_mut()
+            .insert(orbit_platform::ErrorCause(cause));
+    }
+    response
 }
 
 fn problem_response(problem: Problem) -> Response {
@@ -579,6 +724,91 @@ impl From<LabelRecord> for LabelOut {
     }
 }
 
+/// The progress counts cover live tasks except cancelled and duplicate ones; `completed_count`
+/// and `estimate_completed` cover those in a `completed` status.
+#[derive(Serialize, ToSchema)]
+#[schema(as = PublicMilestone)]
+struct MilestoneOut {
+    #[schema(value_type = String)]
+    id: Id,
+    #[schema(value_type = String)]
+    project_id: Id,
+    name: String,
+    #[schema(required = true)]
+    description: Option<String>,
+    #[schema(value_type = Option<String>, format = DateTime, required = true)]
+    target_at: Option<TimestampMillis>,
+    position: i64,
+    version: u64,
+    task_count: i64,
+    completed_count: i64,
+    estimate_total: i64,
+    estimate_completed: i64,
+}
+
+impl From<MilestoneRecord> for MilestoneOut {
+    fn from(m: MilestoneRecord) -> Self {
+        Self {
+            id: m.id,
+            project_id: m.project_id,
+            name: m.name,
+            description: m.description,
+            target_at: m.target_at,
+            position: m.position,
+            version: m.version,
+            task_count: m.task_count,
+            completed_count: m.completed_count,
+            estimate_total: m.estimate_total,
+            estimate_completed: m.estimate_completed,
+        }
+    }
+}
+
+#[derive(Serialize, ToSchema)]
+#[schema(as = PublicCycle)]
+struct CycleOut {
+    #[schema(value_type = String)]
+    id: Id,
+    #[schema(value_type = String)]
+    project_id: Id,
+    /// 1 for the project's first cycle.
+    number: i64,
+    #[schema(required = true)]
+    name: Option<String>,
+    #[schema(value_type = String, format = DateTime)]
+    starts_at: TimestampMillis,
+    /// Exclusive: the next cycle may start at this instant.
+    #[schema(value_type = String, format = DateTime)]
+    ends_at: TimestampMillis,
+    /// `current`, `next` or `previous` now; `null` for the other cycles.
+    #[schema(required = true)]
+    relative: Option<CycleRelative>,
+    version: u64,
+    task_count: i64,
+    completed_count: i64,
+    estimate_total: i64,
+    estimate_completed: i64,
+}
+
+impl From<CycleView> for CycleOut {
+    fn from(CycleView { cycle: c, relative }: CycleView) -> Self {
+        Self {
+            id: c.id,
+            project_id: c.project_id,
+            number: c.number,
+            name: c.name,
+            starts_at: c.starts_at,
+            ends_at: c.ends_at,
+            relative,
+            version: c.version,
+            task_count: c.task_count,
+            completed_count: c.completed_count,
+            estimate_total: c.estimate_total,
+            estimate_completed: c.estimate_completed,
+        }
+    }
+}
+
 #[derive(Serialize, ToSchema)]
 #[schema(as = PublicComment)]
 pub(crate) struct CommentOut {
@@ -595,6 +825,9 @@ pub(crate) struct CommentOut {
     body: String,
     #[schema(value_type = Option<String>, required = true)]
     parent_id: Option<Id>,
+    /// The source tool's ID of an imported comment (`tasks:import`); `null` otherwise.
+    #[schema(required = true)]
+    external_id: Option<String>,
     version: u64,
     #[schema(value_type = String, format = DateTime)]
     created_at: TimestampMillis,
@@ -614,6 +847,7 @@ impl From<CommentRecord> for CommentOut {
             }),
             body: c.body,
             parent_id: c.parent_id,
+            external_id: c.external_id,
             version: c.version,
             created_at: c.created_at,
             updated_at: c.updated_at,
@@ -642,7 +876,8 @@ struct TasksQuery {
     status_id: Option<Id>,
     /// A member's user ID, or `none` for tasks without an assignee.
     assignee_id: Option<String>,
-    /// `created_at` (default), `updated_at`, `priority`, `due_date` or `title`.
+    /// `created_at` (default), `updated_at`, `priority`, `due_date`, `title` or `estimate`
+    /// (tasks without an estimate last).
     sort: Option<String>,
     /// `desc` (default) or `asc`. With `sort=priority`, `desc` lists `urgent` first.
     order: Option<String>,
@@ -650,6 +885,19 @@ struct TasksQuery {
     label_id: Option<Id>,
     /// `none`, `low`, `medium`, `high` or `urgent`.
     priority: Option<String>,
+    /// A milestone ID, or `none` for tasks without a milestone.
+    milestone_id: Option<String>,
+    /// A cycle ID; `current`, `next` or `previous` for that cycle of each task's project; or
+    /// `none` for tasks without a cycle.
+    cycle_id: Option<String>,
+    /// Only tasks due before this moment: a date (`2026-11-12`, 00:00 UTC) or a UTC time
+    /// (`2026-11-12T15:00:00Z`). Tasks without a due date never match.
+    due_before: Option<String>,
+    /// Only tasks due after this moment, as `due_before` reads it. Tasks without a due date never
+    /// match.
+    due_after: Option<String>,
+    /// `true` for tasks with a due date, `false` for tasks without one.
+    has_due_date: Option<bool>,
     /// Only the direct sub-issues of this task (a UUID or an identifier such as `ENG-12`), which
     /// must be in an approved project.
     parent_task_id: Option<String>,
@@ -695,6 +943,34 @@ struct CreateTaskBody {
     due_start_at: Option<TimestampMillis>,
     #[schema(value_type = Option<String>, format = DateTime)]
     due_at: Option<TimestampMillis>,
+    /// A milestone of the task's project.
+    #[schema(value_type = Option<String>)]
+    milestone_id: Option<Id>,
+    /// A cycle of the task's project.
+    #[schema(value_type = Option<String>)]
+    cycle_id: Option<Id>,
+    /// Points, 0 to 1000.
+    #[schema(minimum = 0, maximum = 1000)]
+    estimate: Option<i64>,
+    /// `tasks:import`: the source tool's ID, unique in the workspace. A second create with the
+    /// same ID answers `200` with the task that the first one made (unchanged), so a restarted
+    /// import does not make duplicates. Up to 200 characters.
+    external_id: Option<String>,
+    /// `tasks:import`: the task number, free in the project (`409` otherwise), so `ENG-166`
+    /// stays `ENG-166`. Later tasks are numbered after the highest number.
+    number: Option<i64>,
+    /// `tasks:import`: the original creation time.
+    #[schema(value_type = Option<String>, format = DateTime)]
+    created_at: Option<TimestampMillis>,
+    /// `tasks:import`: the original update time; needs `created_at` and is not before it.
+    #[schema(value_type = Option<String>, format = DateTime)]
+    updated_at: Option<TimestampMillis>,
+    /// `tasks:import`: when the task was done; kept when its status is completed or cancelled.
+    #[schema(value_type = Option<String>, format = DateTime)]
+    completed_at: Option<TimestampMillis>,
+    /// `tasks:import`: the member shown as the creator (not a guest).
+    #[schema(value_type = Option<String>)]
+    creator_id: Option<Id>,
 }
 
 fn default_priority() -> String {
@@ -739,6 +1015,22 @@ struct UpdateTaskBody {
     #[serde(default, deserialize_with = "present")]
     #[schema(value_type = Option<TaskRecurrence>)]
     recurrence: Option<Option<TaskRecurrence>>,
+    /// A milestone of the task's project; `null` clears it.
+    #[serde(default, deserialize_with = "present")]
+    #[schema(value_type = Option<String>)]
+    milestone_id: Option<Option<Id>>,
+    /// A cycle of the task's project; `null` clears it.
+    #[serde(default, deserialize_with = "present")]
+    #[schema(value_type = Option<String>)]
+    cycle_id: Option<Option<Id>>,
+    /// Points, 0 to 1000; `null` clears the estimate.
+    #[serde(default, deserialize_with = "present")]
+    #[schema(value_type = Option<i64>, minimum = 0, maximum = 1000)]
+    estimate: Option<Option<i64>>,
+    /// A task in an approved project (a UUID or an identifier such as `ENG-12`) marks this task
+    /// as its duplicate and moves it to the Duplicate status; `null` unmarks it.
+    #[serde(default, deserialize_with = "present")]
+    duplicate_of_id: Option<Option<String>>,
 }
 
 /// A field that is present, `null` included: `null` clears the value, a missing field keeps it.
@@ -767,6 +1059,24 @@ struct CreateProjectBody {
 struct CommentBody {
     /// Markdown, 1 to 100,000 bytes in UTF-8, not only spaces.
     body: String,
+    /// A comment of the same task: the new comment is its reply.
+    #[schema(value_type = Option<String>)]
+    parent_id: Option<Id>,
+    /// `tasks:import`: the source tool's ID, unique in the workspace. A second create with the
+    /// same ID answers `200` with the comment that the first one made. Up to 200 characters.
+    external_id: Option<String>,
+    /// `tasks:import`: the member shown as the author (not a guest).
+    #[schema(value_type = Option<String>)]
+    author_id: Option<Id>,
+    /// `tasks:import`: an author who is not a member; shown in bold on the first line, as the
+    /// built-in importers do. Not with `author_id`. Up to 200 characters.
+    author_name: Option<String>,
+    /// `tasks:import`: the original creation time.
+    #[schema(value_type = Option<String>, format = DateTime)]
+    created_at: Option<TimestampMillis>,
+    /// `tasks:import`: the original update time; needs `created_at` and is not before it.
+    #[schema(value_type = Option<String>, format = DateTime)]
+    updated_at: Option<TimestampMillis>,
 }
 
 /// Without `parent_id`, `teamspace_id` or `private`, the doc goes to the root of the default
@@ -813,6 +1123,37 @@ struct UpdateDocBody {
     markdown: Option<String>,
 }
 
+/// Where the doc goes. `parent_id` is required: `null` moves the doc to a space root.
+#[derive(Deserialize, ToSchema)]
+#[schema(as = PublicMoveDocBody)]
+#[serde(deny_unknown_fields)]
+struct MoveDocBody {
+    /// The `version` that you read: an opaque number below 2^53. Compare it for equality only.
+    expected_version: u64,
+    /// The new parent doc; `null` moves the doc to a space root. The doc and its sub-docs take
+    /// the parent's space.
+    #[serde(deserialize_with = "Option::deserialize")]
+    #[schema(value_type = Option<String>, required = true)]
+    parent_id: Option<Id>,
+    /// With `parent_id: null`: the target teamspace. Omitted keeps the doc's current space.
+    #[schema(value_type = Option<String>)]
+    teamspace_id: Option<Id>,
+    /// With `parent_id: null`: `true` moves the doc to the token creator's private space,
+    /// `false` out of it (to the default teamspace unless `teamspace_id` is given).
+    private: Option<bool>,
+    /// Index among the new siblings, from 0. Omitted, or past the last sibling, puts the doc
+    /// last. A doc that enters a database always goes last.
+    position: Option<u64>,
+}
+
+#[derive(Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+#[serde(deny_unknown_fields)]
+struct DeleteDocQuery {
+    /// The `version` that you read: an opaque number below 2^53. Compare it for equality only.
+    expected_version: u64,
+}
+
 #[derive(Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 #[serde(deny_unknown_fields)]
@@ -856,7 +1197,11 @@ macro_rules! path_id {
     };
 }
 
+pub(crate) mod database_views;
 pub(crate) mod databases;
+mod idempotency;
+pub(crate) mod relations;
+pub(crate) mod setup;
 
 #[utoipa::path(
     get,
@@ -990,6 +1335,62 @@ async fn labels(
 
 #[utoipa::path(
     get,
+    path = "/api/public/v1/workspaces/{workspace_id}/projects/{project_id}/milestones",
+    operation_id = "public_list_milestones",
+    tag = "public-api",
+    summary = "The milestones of a project",
+    params(("workspace_id" = String, Path, description = "The token's workspace, from `GET /me`."), ("project_id" = String, Path)),
+    responses((status = 200, description = "Every milestone, in order; `next_cursor` is `null`", body = List<MilestoneOut>)),
+    security(("bearerAuth" = []))
+)]
+async fn milestones(
+    State(s): State<PublicApiState>,
+    ctx: Ctx,
+    Path((_workspace, project)): Path<(String, String)>,
+) -> Response {
+    let project = path_id!(ctx, project);
+    let result = async {
+        let api = s
+            .api
+            .authorize(&ctx.principal, ApiTokenScope::TasksRead, &ctx.request_id)
+            .await?;
+        let items = api.milestones(project).await?;
+        Ok(list::<_, MilestoneOut>(items, None))
+    }
+    .await;
+    ctx.reply(StatusCode::OK, result)
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/public/v1/workspaces/{workspace_id}/projects/{project_id}/cycles",
+    operation_id = "public_list_cycles",
+    tag = "public-api",
+    summary = "The cycles of a project",
+    params(("workspace_id" = String, Path, description = "The token's workspace, from `GET /me`."), ("project_id" = String, Path)),
+    responses((status = 200, description = "Every cycle, by start date; `next_cursor` is `null`", body = List<CycleOut>)),
+    security(("bearerAuth" = []))
+)]
+async fn cycles(
+    State(s): State<PublicApiState>,
+    ctx: Ctx,
+    Path((_workspace, project)): Path<(String, String)>,
+) -> Response {
+    let project = path_id!(ctx, project);
+    let result = async {
+        let api = s
+            .api
+            .authorize(&ctx.principal, ApiTokenScope::TasksRead, &ctx.request_id)
+            .await?;
+        let items = api.cycles(project).await?;
+        Ok(list::<_, CycleOut>(items, None))
+    }
+    .await;
+    ctx.reply(StatusCode::OK, result)
+}
+
+#[utoipa::path(
+    get,
     path = "/api/public/v1/workspaces/{workspace_id}/members",
     operation_id = "public_list_members",
     tag = "public-api",
@@ -1045,9 +1446,11 @@ async fn list_tasks(
         Some("priority") => TaskSort::Priority,
         Some("due_date") => TaskSort::DueDate,
         Some("title") => TaskSort::Title,
+        Some("estimate") => TaskSort::Estimate,
         Some(_) => {
-            return ctx
-                .invalid("sort must be created_at, updated_at, priority, due_date or title.");
+            return ctx.invalid(
+                "sort must be created_at, updated_at, priority, due_date, title or estimate.",
+            );
         }
     };
     let order = match query.order.as_deref() {
@@ -1074,6 +1477,31 @@ async fn list_tasks(
             assignee,
             label_id: query.label_id,
             priority: query.priority,
+            milestone: query
+                .milestone_id
+                .as_deref()
+                .map(parse_milestone_filter)
+                .transpose()?,
+            cycle: query
+                .cycle_id
+                .as_deref()
+                .map(parse_cycle_filter)
+                .transpose()?,
+            due_before: query
+                .due_before
+                .as_deref()
+                .map(|raw| {
+                    parse_due_bound(raw, "due_before must be a date or a UTC time, as 2026-11-12 or 2026-11-12T15:00:00Z.")
+                })
+                .transpose()?,
+            due_after: query
+                .due_after
+                .as_deref()
+                .map(|raw| {
+                    parse_due_bound(raw, "due_after must be a date or a UTC time, as 2026-11-12 or 2026-11-12T15:00:00Z.")
+                })
+                .transpose()?,
+            has_due_date: query.has_due_date,
             parent_task_id: api
                 .optional_task_id(query.parent_task_id.as_deref())
                 .await?,
@@ -1119,9 +1547,14 @@ async fn get_task(
     operation_id = "public_create_task",
     tag = "public-api",
     summary = "Create a task",
-    params(("workspace_id" = String, Path, description = "The token's workspace, from `GET /me`.")),
+    params(("workspace_id" = String, Path, description = "The token's workspace, from `GET /me`."), ("Idempotency-Key" = Option<String>, Header, description = "Makes a retry safe. A repeat with the same key and body returns the first response (header `Idempotent-Replayed: true`); the same key with another body or path gets `422`. Kept 24 hours per token.")),
     request_body = CreateTaskBody,
-    responses((status = 201, description = "The new task", body = TaskView)),
+    responses(
+        (status = 201, description = "The new task", body = TaskView),
+        (status = 200, description = "`tasks:import`: the task that an earlier create with the same `external_id` made", body = TaskView),
+        (status = 409, description = "`idempotency_request_running`: the first request with this `Idempotency-Key` has not finished", body = Problem),
+        (status = 422, description = "`idempotency_key_reused`: this `Idempotency-Key` was used for another body or path", body = Problem),
+    ),
     security(("bearerAuth" = []))
 )]
 async fn create_task(
@@ -1146,11 +1579,28 @@ async fn create_task(
             parent_task_id: api.optional_task_id(body.parent_task_id.as_deref()).await?,
             due_start_at: body.due_start_at,
             due_at: body.due_at,
+            milestone_id: body.milestone_id,
+            cycle_id: body.cycle_id,
+            estimate: body.estimate,
+            import: (body.external_id.is_some()
+                || body.number.is_some()
+                || body.created_at.is_some()
+                || body.updated_at.is_some()
+                || body.completed_at.is_some()
+                || body.creator_id.is_some())
+            .then_some(ImportedTask {
+                completed_at: body.completed_at,
+                created_at: body.created_at,
+                updated_at: body.updated_at,
+                number: body.number,
+                creator_id: body.creator_id,
+                external_id: body.external_id,
+            }),
         })
         .await
     }
     .await;
-    ctx.reply(StatusCode::CREATED, result)
+    ctx.written::<_, TaskView>(result)
 }
 
 #[utoipa::path(
@@ -1190,6 +1640,13 @@ async fn update_task(
                 None => None,
             },
             recurrence: body.recurrence,
+            milestone_id: body.milestone_id,
+            cycle_id: body.cycle_id,
+            estimate: body.estimate,
+            duplicate_of_id: match body.duplicate_of_id {
+                Some(original) => Some(api.optional_task_id(original.as_deref()).await?),
+                None => None,
+            },
         };
         api.update_task(&task, body.expected_version, patch).await
     }
@@ -1354,6 +1811,138 @@ async fn update_doc(
 }
 
 #[utoipa::path(
+    delete,
+    path = "/api/public/v1/workspaces/{workspace_id}/docs/{page_id}",
+    operation_id = "public_delete_doc",
+    tag = "public-api",
+    summary = "Move a doc and its sub-docs to the trash",
+    description = "Moves the doc and its live sub-docs to the trash, where people can restore them. Deleting forever is not available through the API.",
+    params(("workspace_id" = String, Path, description = "The token's workspace, from `GET /me`."), ("page_id" = String, Path), DeleteDocQuery),
+    responses((status = 204, description = "The doc is in the trash")),
+    security(("bearerAuth" = []))
+)]
+async fn delete_doc(
+    State(s): State<PublicApiState>,
+    ctx: Ctx,
+    Path((_workspace, page)): Path<(String, String)>,
+    query: Result<Query<DeleteDocQuery>, QueryRejection>,
+) -> Response {
+    let page = path_id!(ctx, page);
+    let query = input!(ctx, ApiTokenScope::DocsWrite, query);
+    let result = async {
+        let api = s
+            .api
+            .authorize(&ctx.principal, ApiTokenScope::DocsWrite, &ctx.request_id)
+            .await?;
+        api.delete_doc(page, query.expected_version).await
+    }
+    .await;
+    match result {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(error) => ctx.error(error),
+    }
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/public/v1/workspaces/{workspace_id}/docs/{page_id}/move",
+    operation_id = "public_move_doc",
+    tag = "public-api",
+    summary = "Move a doc under another doc or to a space root",
+    params(("workspace_id" = String, Path, description = "The token's workspace, from `GET /me`."), ("page_id" = String, Path)),
+    request_body = MoveDocBody,
+    responses((status = 200, description = "The doc after the move", body = MovedDocView)),
+    security(("bearerAuth" = []))
+)]
+async fn move_doc(
+    State(s): State<PublicApiState>,
+    ctx: Ctx,
+    Path((_workspace, page)): Path<(String, String)>,
+    body: Result<Json<MoveDocBody>, JsonRejection>,
+) -> Response {
+    let page = path_id!(ctx, page);
+    let body = input!(ctx, ApiTokenScope::DocsWrite, body);
+    let result = async {
+        let api = s
+            .api
+            .authorize(&ctx.principal, ApiTokenScope::DocsWrite, &ctx.request_id)
+            .await?;
+        let target = DocMove {
+            parent_id: body.parent_id,
+            teamspace_id: body.teamspace_id,
+            private: body.private,
+            position: body.position,
+        };
+        api.move_doc(page, body.expected_version, target).await
+    }
+    .await;
+    ctx.reply(StatusCode::OK, result)
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/public/v1/workspaces/{workspace_id}/docs/{page_id}/versions",
+    operation_id = "public_list_doc_versions",
+    tag = "public-api",
+    summary = "The history of a doc, newest first, without content",
+    params(("workspace_id" = String, Path, description = "The token's workspace, from `GET /me`."), ("page_id" = String, Path), PageQuery),
+    responses((status = 200, description = "A page of versions", body = List<PageVersionSummary>)),
+    security(("bearerAuth" = []))
+)]
+async fn doc_versions(
+    State(s): State<PublicApiState>,
+    ctx: Ctx,
+    Path((_workspace, page)): Path<(String, String)>,
+    query: Result<Query<PageQuery>, QueryRejection>,
+) -> Response {
+    let page = path_id!(ctx, page);
+    let query = input!(ctx, ApiTokenScope::DocsRead, query);
+    let result = async {
+        let api = s
+            .api
+            .authorize(&ctx.principal, ApiTokenScope::DocsRead, &ctx.request_id)
+            .await?;
+        let versions = api
+            .doc_versions(page, query.cursor.as_deref(), query.limit)
+            .await?;
+        Ok(List {
+            items: versions.items,
+            next_cursor: versions.next_cursor,
+        })
+    }
+    .await;
+    ctx.reply(StatusCode::OK, result)
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/public/v1/workspaces/{workspace_id}/docs/{page_id}/versions/{version_id}",
+    operation_id = "public_get_doc_version",
+    tag = "public-api",
+    summary = "One version of a doc, with its content as Markdown",
+    params(("workspace_id" = String, Path, description = "The token's workspace, from `GET /me`."), ("page_id" = String, Path), ("version_id" = String, Path)),
+    responses((status = 200, description = "The version", body = DocVersionView)),
+    security(("bearerAuth" = []))
+)]
+async fn doc_version(
+    State(s): State<PublicApiState>,
+    ctx: Ctx,
+    Path((_workspace, page, version)): Path<(String, String, String)>,
+) -> Response {
+    let page = path_id!(ctx, page);
+    let version = path_id!(ctx, version);
+    let result = async {
+        let api = s
+            .api
+            .authorize(&ctx.principal, ApiTokenScope::DocsRead, &ctx.request_id)
+            .await?;
+        api.doc_version(page, version).await
+    }
+    .await;
+    ctx.reply(StatusCode::OK, result)
+}
+
+#[utoipa::path(
     get,
     path = "/api/public/v1/workspaces/{workspace_id}/tasks/{task}/comments",
     operation_id = "public_list_comments",
@@ -1390,9 +1979,14 @@ async fn comments(
     operation_id = "public_create_comment",
     tag = "public-api",
     summary = "Comment on a task",
-    params(("workspace_id" = String, Path, description = "The token's workspace, from `GET /me`."), ("task" = String, Path, description = "A task UUID or identifier such as `ENG-12` (any letter case).")),
+    params(("workspace_id" = String, Path, description = "The token's workspace, from `GET /me`."), ("task" = String, Path, description = "A task UUID or identifier such as `ENG-12` (any letter case)."), ("Idempotency-Key" = Option<String>, Header, description = "Makes a retry safe. A repeat with the same key and body returns the first response (header `Idempotent-Replayed: true`); the same key with another body or path gets `422`. Kept 24 hours per token.")),
     request_body = CommentBody,
-    responses((status = 201, description = "The new comment", body = CommentOut)),
+    responses(
+        (status = 201, description = "The new comment", body = CommentOut),
+        (status = 200, description = "`tasks:import`: the comment that an earlier create with the same `external_id` made", body = CommentOut),
+        (status = 409, description = "`idempotency_request_running`: the first request with this `Idempotency-Key` has not finished", body = Problem),
+        (status = 422, description = "`idempotency_key_reused`: this `Idempotency-Key` was used for another body or path", body = Problem),
+    ),
     security(("bearerAuth" = []))
 )]
 async fn create_comment(
@@ -1407,12 +2001,30 @@ async fn create_comment(
             .api
             .authorize(&ctx.principal, ApiTokenScope::TasksWrite, &ctx.request_id)
             .await?;
-        api.create_comment(&task, body.body)
-            .await
-            .map(CommentOut::from)
+        let source = ImportedComment {
+            author_id: body.author_id,
+            created_at: body.created_at,
+            updated_at: body.updated_at,
+            external_id: body.external_id,
+        };
+        let import = (source.author_id.is_some()
+            || source.created_at.is_some()
+            || source.updated_at.is_some()
+            || source.external_id.is_some()
+            || body.author_name.is_some())
+        .then_some(CommentImport {
+            source,
+            author_name: body.author_name,
+        });
+        let comment = NewComment {
+            body: body.body,
+            parent_id: body.parent_id,
+            import,
+        };
+        api.create_comment(&task, comment).await
     }
     .await;
-    ctx.reply(StatusCode::CREATED, result)
+    ctx.written::<_, CommentOut>(result)
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -1428,7 +2040,9 @@ fn export_access<'a>(
     s: &'a PublicApiState,
     principal: &ApiTokenPrincipal,
 ) -> Result<(&'a WorkspaceExportService, ExportMode), TokenApiError> {
-    let exports = s.exports.as_ref().ok_or(TokenApiError::Internal)?;
+    let exports = s.exports.as_ref().ok_or_else(|| {
+        TokenApiError::Internal("workspace export service not configured".to_owned())
+    })?;
     match ApiTokenScope::export_mode(&principal.scopes) {
         Some(mode) if principal.service_account.is_none() => Ok((exports, mode)),
         _ => Err(TokenApiError::MissingScope),
@@ -1437,6 +2051,11 @@ fn export_access<'a>(
 
 impl Responder {
     fn export_error(&self, error: ExportError) -> Response {
+        let cause = match &error {
+            ExportError::Unavailable(source) => Some(source.to_string()),
+            ExportError::Cancelled | ExportError::Storage(_) => Some(error.to_string()),
+            _ => None,
+        };
         let problem = match error {
             ExportError::NotFound => self.not_found(),
             ExportError::Forbidden => self.problem(
@@ -1456,7 +2075,7 @@ impl Responder {
                 Problem::internal(&self.request_id, &self.instance)
             }
         };
-        problem_response(problem)
+        with_cause(problem_response(problem), cause)
     }
 }
 

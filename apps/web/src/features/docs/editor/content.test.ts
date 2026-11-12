@@ -208,3 +208,13 @@ describe('trimBlocks', () => {
     expect(trimBlocks([paragraph(), paragraph(text('\n'))])).toEqual([])
   })
 })
+
+describe('blob URLs of a deferred scope', () => {
+  const scope = { workspaceId: '0199a0b0-0000-7000-8000-000000000001', taskId: '' }
+  const blocks = [{ type: 'image', props: { url: 'blob:http://localhost/x' } }]
+  test('a task that does not exist yet keeps its held files; any other scope drops them', () => {
+    expect(toStoredContent(blocks, { ...scope, deferred: true })[0]).toEqual(blocks[0])
+    expect(toStoredContent(blocks, scope)[0]).toEqual({ type: 'image', props: { url: '' } })
+    expect(toStoredContent(blocks)[0]).toEqual({ type: 'image', props: { url: '' } })
+  })
+})

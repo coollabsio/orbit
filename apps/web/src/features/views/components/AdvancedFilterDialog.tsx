@@ -6,7 +6,7 @@ import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, Di
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
-import { FIELD_META, FIELD_ORDER, defaultValue, listValue, operatorLabel, operatorNeedsValue, valueSummary, withOperator, type FilterOptions } from '../filterFields'
+import { FIELD_META, availableFields, defaultValue, listValue, operatorLabel, operatorNeedsValue, valueSummary, withOperator, type FilterOptions } from '../filterFields'
 import {
   MAX_FILTER_CONDITIONS,
   MAX_FILTER_DEPTH,
@@ -250,7 +250,7 @@ function ConditionRow({ condition, path, root, options, issue, issueNode, onChan
   const error = issue && samePath(issueNode, path) ? issue.message : null
   const count = meta.kind === 'list' || meta.kind === 'task' ? listValue(condition).length : 1
   const replace = (next: Condition) => onChange(updateNode(root, path, () => next))
-  const fieldItems = FIELD_ORDER.map((field) => ({ value: field, label: FIELD_META[field].label }))
+  const fieldItems = availableFields(options, condition.field).map((field) => ({ value: field, label: FIELD_META[field].label }))
   const operatorItems = meta.operators.map((operator) => ({ value: operator, label: operatorLabel(operator, count) }))
   return (
     <div role="group" aria-label={label} className="flex flex-col gap-1">

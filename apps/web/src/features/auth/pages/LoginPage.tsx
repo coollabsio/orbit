@@ -62,7 +62,7 @@ export function LoginPage() {
     </>} footer={options.data?.registration_open || options.data?.provider_registration_open ? <>New to Orbit? <Link to="/register" className="font-medium text-foreground">Create an account</Link></> : undefined}>
       <AuthInput label="Email" type="email" value={email} onChange={setEmail} />
       <AuthInput label="Password" type="password" value={password} onChange={setPassword} />
-      <Link to="/recovery" className="justify-self-end text-[13px] text-muted-foreground hover:text-foreground">Forgot password?</Link>
+      <Link to="/recovery" className="justify-self-end text-[0.8125rem] text-muted-foreground hover:text-foreground">Forgot password?</Link>
     </AuthForm>
   )
 }

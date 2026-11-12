@@ -48,10 +48,7 @@ impl Default for ExportLimits {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ExportEntry {
     /// A text file: a page's Markdown or a database's CSV.
-    Markdown {
-        path: String,
-        text: String,
-    },
+    Markdown { path: String, text: String },
     Asset {
         path: String,
         page_id: Id,

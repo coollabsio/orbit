@@ -1,6 +1,7 @@
 import { recurrenceChangeText } from '@orbit/api/recurrence'
-import type { StatusCategory, Task, TaskActivity, TaskChange, TaskComment, TaskPriority, TaskStatusDef, TaskViewState } from '@/features/tasks/api/models'
+import type { Cycle, Milestone, StatusCategory, Task, TaskActivity, TaskChange, TaskComment, TaskPriority, TaskStatusDef, TaskViewState } from '@/features/tasks/api/models'
 import { relativeTime, shortDate } from '@/lib/format'
+import { cycleName, estimateLabel } from './planningLib'
 import { defaultStatusOf, PRIORITY_LABEL, sortStatuses, statusKeyOf } from './taskMeta'
 
 /** Local quick search (never saved): title, description or identifier contains the text. */
@@ -84,7 +85,12 @@ export function buildFeed(task: Task): FeedEntry[] {
 }
 
 /** Activity sentence for one changed field, e.g. "Changed status from Backlog to Done". Deleted statuses, members and labels get a neutral word. */
-export function activityChangeText(change: TaskChange, state: Pick<TaskViewState, 'users' | 'statuses' | 'labels'>): string {
+export function activityChangeText(
+  change: TaskChange,
+  state: Pick<TaskViewState, 'users' | 'statuses' | 'labels'>,
+  /** The task's project's; a milestone or cycle of another project (before a move) gets a neutral word. */
+  planning: { milestones: Milestone[]; cycles: Cycle[] } = { milestones: [], cycles: [] },
+): string {
   const names = (ids: string[], all: Array<{ id: string; name: string }>, unknown: string) =>
     ids.map((id) => all.find((item) => item.id === id)?.name ?? unknown).join(', ')
   // "assigned Ada and unassigned Bo"
@@ -120,5 +126,16 @@ export function activityChangeText(change: TaskChange, state: Pick<TaskViewState
       return 'updated the source link'
     case 'recurrence':
       return recurrenceChangeText(change.rule)
+    case 'milestone': {
+      if (!change.to) return 'removed the milestone'
+      return `set milestone to ${planning.milestones.find((milestone) => milestone.id === change.to)?.name ?? 'another milestone'}`
+    }
+    case 'cycle': {
+      if (!change.to) return 'removed the cycle'
+      const cycle = planning.cycles.find((item) => item.id === change.to)
+      return `moved to ${cycle ? cycleName(cycle) : 'another cycle'}`
+    }
+    case 'estimate':
+      return change.to === null ? 'removed the estimate' : `set estimate to ${estimateLabel(change.to)}`
   }
 }

@@ -178,7 +178,7 @@ function GalleryCard({ row, title, properties, face, fitImage, width, dragging, 
       <div className="flex min-w-0 flex-col gap-1.5 px-2.5 py-2">
         {title ? <CellView property={title} row={row} width={width - 20} wrap /> : null}
         {filled.map((property) => (
-          <div key={property.id} className={cn('flex min-w-0 text-[13px]', property.type === 'checkbox' && '[&>span]:justify-start')}>
+          <div key={property.id} className={cn('flex min-w-0 text-[0.8125rem]', property.type === 'checkbox' && '[&>span]:justify-start')}>
             <CellView property={property} row={row} width={width - 20} wrap={false} />
           </div>
         ))}

@@ -100,6 +100,7 @@ export function toWebhook(record: WebhookRecord): ChannelWebhook {
     rotatedAt: record.rotated_at === null ? null : millis(record.rotated_at),
     lastUsedAt: record.last_used_at === null ? null : millis(record.last_used_at),
     requestUrl: record.request_url,
+    events: record.events,
   }
 }
 
@@ -156,6 +157,7 @@ export function toMessage(record: MessageRecord): Message {
       body: record.last_reply.body,
       sticker: record.last_reply.sticker,
       createdAt: millis(record.last_reply.created_at),
+      botName: record.last_reply.bot_name,
     },
     bot: record.bot && { webhookId: record.bot.webhook_id, name: record.bot.name, iconUrl: record.bot.icon_url, iconEmoji: record.bot.icon_emoji, interactive: record.bot.interactive },
     blocks: record.blocks,

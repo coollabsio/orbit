@@ -3,6 +3,8 @@
 //! when the webhook is made or its secret rotated. The channel's creator and the workspace's
 //! owners and admins manage them; a webhook keeps working when the member who made it leaves.
 
+use std::collections::HashMap;
+
 use orbit_platform::{Id, Row, TimestampMillis, generate_opaque_token};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -10,14 +12,14 @@ use sqlx::any::AnyRow;
 use subtle::ConstantTimeEq;
 use utoipa::ToSchema;
 
-use super::{ChatError, ChatRepository, load_access, parse_id};
+use super::{ChatError, ChatRepository, id_list, in_ids, load_access, parse_id};
 
 /// Live webhooks in one channel.
 const MAX_WEBHOOKS_PER_CHANNEL: i64 = 10;
 const NAME_MAX_CHARS: usize = 80;
 const ICON_URL_MAX_CHARS: usize = 2048;
 
-const WEBHOOK_COLUMNS: &str = "id, conversation_id, name, icon_url, created_by, created_at, rotated_at, last_used_at, request_url";
+const WEBHOOK_COLUMNS: &str = "id, conversation_id, name, icon_url, created_by, created_at, rotated_at, last_used_at, request_url, events";
 /// Deliveries kept for each webhook.
 const MAX_DELIVERIES: i64 = 20;
 
@@ -43,6 +45,9 @@ pub struct WebhookRecord {
     /// Where clicks on its buttons go; null when its buttons are not interactive.
     #[schema(required = true)]
     pub request_url: Option<String>,
+    /// Members' messages in the channel are sent to the request URL, and the webhook's secret
+    /// can read the channel. Always false without a request URL.
+    pub events: bool,
 }
 
 /// One click that Orbit sent to a webhook's request URL.
@@ -92,6 +97,18 @@ pub struct HookTarget {
     pub workspace_id: Id,
     pub conversation_id: Id,
     pub sender: BotSender,
+    /// Events are on: the secret may also read the channel.
+    pub events: bool,
+}
+
+/// A webhook that gets the events of a channel, with its decrypted signing secret.
+#[derive(Clone, Debug)]
+pub struct EventTarget {
+    pub webhook_id: Id,
+    /// The webhook's name: a message that contains `@name` is an `app_mention`.
+    pub name: String,
+    pub request_url: String,
+    pub signing_secret: String,
 }
 
 /// A trimmed name of 1 to 80 characters. `field` names the input in the error.
@@ -149,13 +166,14 @@ fn webhook_from_row(row: &AnyRow) -> Result<WebhookRecord, ChatError> {
         rotated_at: time("rotated_at"),
         last_used_at: time("last_used_at"),
         request_url: row.get("request_url"),
+        events: row.get::<i64, _>("events") != 0,
     })
 }
 
 /// A request URL Orbit may send clicks to: https on a public host. `development` also takes http
 /// and local hosts, so a receiver on the developer's machine can be tested. The address of a name
 /// is checked again for each click (`PublicResolver`).
-fn clean_request_url(url: &str, development: bool) -> Result<String, ChatError> {
+pub(crate) fn clean_request_url(url: &str, development: bool) -> Result<String, ChatError> {
     let invalid = ChatError::Invalid {
         field: "request_url",
     };
@@ -337,8 +355,9 @@ impl ChatRepository {
         Ok(WebhookWithSecret { webhook, secret })
     }
 
-    /// Sets where clicks on the webhook's buttons go (`None` turns clicks off). The first URL makes
-    /// the signing secret, which stays when the URL changes.
+    /// Sets where clicks on the webhook's buttons go (`None` turns clicks and events off), and
+    /// whether members' messages are sent there too. The first URL makes the signing secret, which
+    /// stays when the URL changes.
     #[allow(clippy::too_many_arguments)]
     pub async fn set_request_url(
         &self,
@@ -347,6 +366,7 @@ impl ChatRepository {
         conversation_id: Id,
         webhook_id: Id,
         url: Option<&str>,
+        events: bool,
         key: &[u8; 32],
         development: bool,
     ) -> Result<WebhookRecord, ChatError> {
@@ -367,10 +387,13 @@ impl ChatRepository {
             Some(stored) => stored,
             None => encrypt(key, &generate_opaque_token())?,
         };
-        sqlx::query("UPDATE chat_webhooks SET request_url = $1, signing_secret = $2 WHERE id = $3")
-            .bind(url.as_deref())
-            .bind(secret)
-            .bind(webhook_id.to_string())
+        sqlx::query(
+            "UPDATE chat_webhooks SET request_url = $1, signing_secret = $2, events = $3 WHERE id = $4",
+        )
+        .bind(url.as_deref())
+        .bind(secret)
+        .bind(i64::from(url.is_some() && events))
+        .bind(webhook_id.to_string())
             .execute(&mut *tx)
             .await?;
         let webhook = load_webhook(&mut tx, conversation_id, webhook_id).await?;
@@ -518,7 +541,7 @@ impl ChatRepository {
     ) -> Result<Option<HookTarget>, ChatError> {
         let row = sqlx::query(
             "SELECT h.workspace_id, h.conversation_id, h.name, h.icon_url, h.created_by, \
-             h.secret_hash FROM chat_webhooks h JOIN workspaces w ON w.id = h.workspace_id \
+             h.secret_hash, h.events FROM chat_webhooks h JOIN workspaces w ON w.id = h.workspace_id \
              WHERE h.id = $1 AND h.revoked_at IS NULL AND w.deleted_at IS NULL",
         )
         .bind(webhook_id.to_string())
@@ -543,6 +566,55 @@ impl ChatRepository {
                 name: row.get("name"),
                 icon_url: row.get("icon_url"),
             },
+            events: row.get::<i64, _>("events") != 0,
         }))
+    }
+
+    /// The display names of these users, for integrations that show who wrote a message.
+    pub async fn display_names(&self, user_ids: Vec<Id>) -> Result<HashMap<Id, String>, ChatError> {
+        if user_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let mut conn = self.database.pool().acquire().await?;
+        let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
+            "SELECT id, display_name FROM users WHERE id {}",
+            in_ids(&*conn, 1)
+        )))
+        .bind(id_list(user_ids))
+        .fetch_all(&mut *conn)
+        .await?;
+        rows.iter()
+            .map(|row| Ok((parse_id(row.get("id"))?, row.get("display_name"))))
+            .collect()
+    }
+
+    /// The live webhooks of a channel that get its events. A webhook whose signing secret this
+    /// server's app key cannot read is left out.
+    pub async fn event_targets(
+        &self,
+        conversation_id: Id,
+        key: &[u8; 32],
+    ) -> Result<Vec<EventTarget>, ChatError> {
+        let rows = sqlx::query(
+            "SELECT id, name, request_url, signing_secret FROM chat_webhooks \
+             WHERE conversation_id = $1 AND revoked_at IS NULL AND events = 1 \
+             AND request_url IS NOT NULL AND signing_secret IS NOT NULL",
+        )
+        .bind(conversation_id.to_string())
+        .fetch_all(self.database.pool())
+        .await?;
+        let mut targets = Vec::with_capacity(rows.len());
+        for row in &rows {
+            let Ok(signing_secret) = decrypt(key, &row.get::<Vec<u8>, _>("signing_secret")) else {
+                continue;
+            };
+            targets.push(EventTarget {
+                webhook_id: parse_id(row.get("id"))?,
+                name: row.get("name"),
+                request_url: row.get("request_url"),
+                signing_secret,
+            });
+        }
+        Ok(targets)
     }
 }

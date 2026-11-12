@@ -168,9 +168,9 @@ function ReplySummary({ message, handlers }: { message: MessageRecord; handlers:
       <View className="border-l-2 border-border pl-2.5 gap-1">
         {reply ? (
           <View className="flex-row items-center gap-1.5 min-w-0">
-            <Avatar id={reply.author_id} name={handlers.nameOf(reply.author_id)} size={16} />
+            <Avatar id={reply.bot_name ? `bot:${reply.bot_name}` : reply.author_id} name={reply.bot_name ?? handlers.nameOf(reply.author_id)} size={16} />
             <Text numberOfLines={1} className="font-noto-medium text-[12px] leading-[16px] shrink-0 text-foreground/90">
-              {handlers.nameOf(reply.author_id)}
+              {reply.bot_name ?? handlers.nameOf(reply.author_id)}
             </Text>
             <Text numberOfLines={1} className="text-[13px] leading-[17px] shrink text-muted-foreground">
               {reply.sticker ? 'Sticker' : handlers.text(reply.body)}

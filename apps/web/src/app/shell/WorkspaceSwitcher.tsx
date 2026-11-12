@@ -9,6 +9,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Separator } from '@/components/ui/separator'
 import { Tip } from '@/components/common/Tip'
 import { useCreateWorkspace } from '@/features/workspaces/api'
+import { newWorkspaceTrialNote, useAccountTrial } from '@/features/workspaces/billing'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 
 /** The panel is a Popover rather than a DropdownMenu: picking a workspace swaps the
@@ -22,10 +23,10 @@ export function WorkspaceSwitcher({ collapsed = false, topbar = false }: { colla
     <Popover open={open} onOpenChange={setOpen} modal={false}>
       {topbar ? (
         <PopoverTrigger
-          render={<Button variant="ghost" className="-ml-1 h-8 min-w-0 justify-start gap-1.5 rounded-lg px-2" aria-label={`Workspace: ${workspace.name}`} />}
+          render={<Button variant="ghost" className="-ml-1 h-8 min-w-0 shrink justify-start gap-1.5 rounded-lg px-2" aria-label={`Workspace: ${workspace.name}`} />}
         >
-          <span className="flex size-5 shrink-0 items-center justify-center rounded-md bg-muted text-[11px] font-semibold text-muted-foreground">{workspace.name.charAt(0).toUpperCase()}</span>
-          <span className="truncate text-[13px] font-semibold text-foreground">{workspace.name}</span>
+          <span className="flex size-5 shrink-0 items-center justify-center rounded-md bg-muted text-[0.6875rem] font-semibold text-muted-foreground">{workspace.name.charAt(0).toUpperCase()}</span>
+          <span className="truncate text-[0.8125rem] font-semibold text-foreground">{workspace.name}</span>
           <ChevronExpandY className="size-4 shrink-0 text-muted-foreground/70" />
         </PopoverTrigger>
       ) : (
@@ -35,7 +36,7 @@ export function WorkspaceSwitcher({ collapsed = false, topbar = false }: { colla
             <Button variant="ghost" className="h-auto min-w-0 shrink items-baseline justify-start gap-[7px] rounded-none border-0 p-0 hover:bg-transparent aria-expanded:bg-transparent dark:hover:bg-transparent" aria-label={`Workspace: ${workspace.name}`} />
           }
         >
-          <span className="truncate text-[17px] font-bold tracking-[-0.02em] text-foreground">{collapsed ? workspace.name.charAt(0) : workspace.name}</span>
+          <span className="truncate text-[1.0625rem] font-bold tracking-[-0.02em] text-foreground">{collapsed ? workspace.name.charAt(0) : workspace.name}</span>
           {!collapsed ? <ChevronDown className="size-[13px] shrink-0 text-muted-foreground/70" /> : null}
         </PopoverTrigger>
       </Tip>
@@ -52,6 +53,7 @@ function WorkspaceMenu({ onSelect, createWorkspace }: { onSelect: () => void; cr
   const { workspace, workspaces, selectWorkspace } = useWorkspace()
   const [creating, setCreating] = useState(false)
   const [name, setName] = useState('')
+  const trialNote = newWorkspaceTrialNote(useAccountTrial().data)
   const active = useRef(true)
   useEffect(() => {
     active.current = true
@@ -73,8 +75,9 @@ function WorkspaceMenu({ onSelect, createWorkspace }: { onSelect: () => void; cr
 
   if (creating) return (
     <form className="flex w-60 max-w-full flex-col gap-2 p-2" onSubmit={(event) => { event.preventDefault(); void create() }}>
-      <Label className="mb-1.5 h-4 gap-1 text-[13px] leading-4 font-medium text-muted-foreground" htmlFor={inputId}>New workspace</Label>
+      <Label className="mb-1.5 h-4 gap-1 text-[0.8125rem] leading-4 font-medium text-muted-foreground" htmlFor={inputId}>New workspace</Label>
       <Input id={inputId} autoFocus required value={name} disabled={createWorkspace.isPending} onChange={(event) => setName(event.target.value)} />
+      {trialNote ? <p className="text-xs text-muted-foreground">{trialNote}</p> : null}
       {createWorkspace.isError ? <p role="alert" className="text-xs text-destructive">{createWorkspace.error instanceof ApiProblem ? createWorkspace.error.detail : 'Workspace creation failed. Try again.'}</p> : null}
       <Button type="submit" disabled={!name.trim() || createWorkspace.isPending}>{createWorkspace.isPending ? 'Creating…' : 'Create workspace'}</Button>
       <Button type="button" variant="ghost" disabled={createWorkspace.isPending} onClick={() => { setCreating(false); setName(''); createWorkspace.reset() }}>Cancel</Button>

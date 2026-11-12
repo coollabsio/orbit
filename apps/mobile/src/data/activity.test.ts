@@ -14,6 +14,8 @@ const context: ActivityContext = {
     { id: 'p1', name: 'Foundation' },
     { id: 'p2', name: 'Mobile' },
   ],
+  milestones: [],
+  cycles: [],
   identifierOf: (taskId) => (taskId === 't2' ? 'GEN-2' : 'a task'),
   locale: 'en-US',
 }

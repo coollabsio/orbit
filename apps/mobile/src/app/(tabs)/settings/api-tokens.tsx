@@ -97,6 +97,15 @@ function CreateToken({ canManage }: { canManage: boolean }) {
     />
   ) : null
 
+  const importMode = scopes.includes('tasks:write') ? (
+    <CheckRow
+      label="Import mode"
+      hint="Keeps original dates, numbers and authors. Sends no notifications."
+      checked={scopes.includes('tasks:import')}
+      onPress={() => setScopes(scopes.includes('tasks:import') ? scopes.filter((scope) => scope !== 'tasks:import') : [...scopes, 'tasks:import'])}
+    />
+  ) : null
+
   return (
     <SettingsCard title="Create API token" description={canManage ? 'Create a personal token, or select a non-login service account for an integration. The secret is shown only once.' : `${kindDescription} Paste it with this workspace's URL in the other instance. The secret is shown only once.`}>
       <View className="gap-4">
@@ -128,7 +137,7 @@ function CreateToken({ canManage }: { canManage: boolean }) {
                 <LabelTip label="Use a service account" text="For bots, such as a Discord bot. Changes show as made by this account, not by you. Tokens with the same name share one account." />
               </View>
             </Pressable>
-            <AccessPicker resources={tokenResources(serviceAccount)} scopes={scopes} onChange={setScopes} details={{ Tasks: projectPicker }} />
+            <AccessPicker resources={tokenResources(serviceAccount)} scopes={scopes} onChange={(next) => setScopes(next.includes('tasks:write') ? next : next.filter((scope) => scope !== 'tasks:import'))} details={{ Tasks: projectPicker || importMode ? <View className="gap-3">{projectPicker}{importMode}</View> : null }} />
           </>
         ) : null}
         <View className="items-start">
@@ -256,11 +265,14 @@ function ProjectPicker({ projects, selected, onChange, all, onAllChange, empty }
   )
 }
 
-function CheckRow({ label, checked, indeterminate = false, muted = false, onPress }: { label: string; checked: boolean; indeterminate?: boolean; muted?: boolean; onPress: () => void }) {
+function CheckRow({ label, hint, checked, indeterminate = false, muted = false, onPress }: { label: string; hint?: string; checked: boolean; indeterminate?: boolean; muted?: boolean; onPress: () => void }) {
   return (
-    <Pressable accessibilityRole="checkbox" accessibilityLabel={label} accessibilityState={{ checked: indeterminate ? 'mixed' : checked }} onPress={onPress} hitSlop={4} className="flex-row items-center gap-2">
+    <Pressable accessibilityRole="checkbox" accessibilityLabel={label} accessibilityState={{ checked: indeterminate ? 'mixed' : checked }} onPress={onPress} hitSlop={4} className={`flex-row gap-2 ${hint ? 'items-start' : 'items-center'}`}>
       <Checkbox checked={checked} indeterminate={indeterminate} />
-      <Text className={`text-[14px] leading-[18px] ${muted ? 'text-muted-foreground' : 'font-noto-medium text-foreground'}`}>{label}</Text>
+      <View className="flex-1 gap-0.5">
+        <Text className={`text-[14px] leading-[18px] ${muted ? 'text-muted-foreground' : 'font-noto-medium text-foreground'}`}>{label}</Text>
+        {hint ? <Text className="text-[12px] leading-[16px] text-muted-foreground">{hint}</Text> : null}
+      </View>
     </Pressable>
   )
 }

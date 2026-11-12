@@ -25,7 +25,7 @@ export function ReferencePreviewCard({ rect, placement = 'above', children }: { 
       data-placement={placement}
       style={{ left, width: CARD_WIDTH, ...position }}
       className={cn(
-        'pointer-events-none fixed z-50 rounded-lg border bg-popover p-3 text-[13px] text-popover-foreground shadow-lg',
+        'pointer-events-none fixed z-50 rounded-lg border bg-popover p-3 text-[0.8125rem] text-popover-foreground shadow-lg',
         'animate-in fade-in-0 duration-150 ease-out motion-reduce:animate-none',
         placement === 'above' ? 'slide-in-from-bottom-1' : 'slide-in-from-top-1',
       )}

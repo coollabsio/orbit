@@ -166,7 +166,7 @@ export function AdminUsersPage() {
         actions={<Input type="search" aria-label="Search users" placeholder="Search by name or email…" value={query} onChange={(event) => setQuery(event.target.value)} className="h-8 w-60 max-sm:w-40" />}
         flush
       >
-        <div className="flex flex-col divide-y text-[13px]">
+        <div className="flex flex-col divide-y text-[0.8125rem]">
           {!search ? <SettingsRow role="status" className="text-muted-foreground">Search by name or email to find a user.</SettingsRow> : null}
           {search && users.isPending ? <SettingsRow role="status">Searching…</SettingsRow> : null}
           {users.isError ? <SettingsRow role="alert">Users could not be loaded. <Button variant="ghost" onClick={() => void users.refetch()}>Retry</Button></SettingsRow> : null}
@@ -174,7 +174,7 @@ export function AdminUsersPage() {
           {search ? users.data?.users.map((user) => (
             <SettingsRow key={user.id} className="flex-nowrap" data-admin-user={user.id}>
               <Avatar size="sm" className="size-8">
-                <AvatarFallback className="rounded-lg text-[11px] font-semibold">{(user.display_name || user.email).charAt(0).toUpperCase()}</AvatarFallback>
+                <AvatarFallback className="rounded-lg text-[0.6875rem] font-semibold">{(user.display_name || user.email).charAt(0).toUpperCase()}</AvatarFallback>
               </Avatar>
               <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                 <span className="flex min-w-0 items-center gap-2 font-medium text-foreground">
@@ -196,7 +196,7 @@ export function AdminUsersPage() {
               <div className="flex w-24 justify-end">
                 {user.deleted || (user.id !== viewerId && !manageable(user)) ? null : (
                   <DropdownMenu>
-                    <DropdownMenuTrigger render={<Button variant="outline" size="sm" className="text-[11px]" aria-label={`Manage ${user.display_name}`} />}>
+                    <DropdownMenuTrigger render={<Button variant="outline" size="sm" className="text-[0.6875rem]" aria-label={`Manage ${user.display_name}`} />}>
                       Manage
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="w-auto min-w-52">
@@ -315,7 +315,7 @@ function ChangeEmailDialog({ user, cloud, onClose }: { user: AdminUser; cloud: b
             {fieldError ? <FieldError>{detail}</FieldError> : <FieldDescription>Now {user.email}.</FieldDescription>}
           </Field>
         </FieldGroup>
-        {change.error && !fieldError ? <p role="alert" className="text-[13px] text-destructive">{detail}</p> : null}
+        {change.error && !fieldError ? <p role="alert" className="text-[0.8125rem] text-destructive">{detail}</p> : null}
         <DialogFooter>
           <DialogClose render={<Button type="button" variant="ghost" disabled={change.isPending} />}>Cancel</DialogClose>
           <Button type="submit" disabled={change.isPending || !email.trim()}>{change.isPending ? 'Saving…' : 'Change email'}</Button>

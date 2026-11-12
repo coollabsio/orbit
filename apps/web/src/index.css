@@ -4,6 +4,12 @@
 @import "@fontsource-variable/noto-sans";
 /* KaTeX draws a Math code block. The rules stay in this file so production CSP (style-src 'self') keeps them. */
 @import "katex/dist/katex.min.css";
+/* Account settings → Appearance → Font. Browsers download a face only when text uses it. */
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
+@import "@fontsource-variable/ibm-plex-sans";
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/literata";
 
 /* BlockNote's shadcn menus use Tailwind classes from its compiled bundle; scan it so they get generated. */
 @source "../node_modules/@blocknote/shadcn";
@@ -26,7 +32,7 @@
 
 @theme inline {
     --font-heading: var(--font-sans);
-    --font-sans: 'Noto Sans Variable', sans-serif;
+    --font-sans: var(--font-ui);
     --color-sidebar-ring: var(--sidebar-ring);
     --color-sidebar-border: var(--sidebar-border);
     --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -164,6 +170,46 @@
     --sidebar-popover: color-mix(in oklab, var(--primary) 10%, oklch(0.2002 0 0));
 }
 
+/* Account settings → Appearance → Font (lib/theme.tsx puts [data-font] on <html>; the font tiles set it too) */
+:root {
+    --font-ui: 'Noto Sans Variable', sans-serif;
+}
+[data-font='noto-sans'] {
+    --font-ui: 'Noto Sans Variable', sans-serif;
+}
+[data-font='geist'] {
+    --font-ui: 'Geist Variable', sans-serif;
+}
+[data-font='inter'] {
+    --font-ui: 'Inter Variable', sans-serif;
+}
+[data-font='ibm-plex-sans'] {
+    --font-ui: 'IBM Plex Sans Variable', sans-serif;
+}
+[data-font='system'] {
+    --font-ui: ui-sans-serif, system-ui, sans-serif;
+}
+[data-font='literata'] {
+    --font-ui: 'Literata Variable', serif;
+}
+[data-font='mono'] {
+    --font-ui: 'Geist Mono Variable', ui-monospace, monospace;
+}
+
+/* Account settings → Appearance → Text size: every rem size (Tailwind's text, spacing and radii) follows the root size */
+:root[data-text-size='small'] {
+    font-size: 87.5%;
+}
+:root[data-text-size='compact'] {
+    font-size: 93.75%;
+}
+:root[data-text-size='large'] {
+    font-size: 112.5%;
+}
+:root[data-text-size='extra-large'] {
+    font-size: 125%;
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50 [scrollbar-width:thin] [scrollbar-color:color-mix(in_oklch,var(--foreground)_18%,transparent)_transparent];
@@ -200,7 +246,7 @@
     }
   }
   body {
-    @apply overflow-hidden bg-background text-[14px] leading-[1.45] text-foreground antialiased [text-rendering:optimizeLegibility];
+    @apply overflow-hidden bg-background text-[0.875rem] leading-[1.45] text-foreground antialiased [text-rendering:optimizeLegibility];
   }
 
   h1,
@@ -210,13 +256,13 @@
     @apply font-semibold text-foreground;
   }
   h1 {
-    @apply text-[24px] leading-7 tracking-[-0.025em];
+    @apply text-[1.5rem] leading-7 tracking-[-0.025em];
   }
   h2 {
-    @apply text-[18px];
+    @apply text-[1.125rem];
   }
   h3 {
-    @apply text-[15px];
+    @apply text-[0.9375rem];
   }
 
   /* bare <button>s (shadcn Button sets its own): keep the old reset */
@@ -312,7 +358,7 @@
 }
 
 /*
- * Page print / "Save as PDF" (Docs page menu → Export → PDF; `printPage` in features/docs/pageExport.ts).
+ * Page print / "Save as PDF" (Docs page menu → Export → PDF, mail message menu → Print; `printPage` in lib/print.ts).
  * While <html> has [data-print-doc] only the open page's content ([data-print-root] in DocEditor) prints: the app
  * sidebar, docs tree, page header, menus and toasts are hidden; the content is full width, light-themed whatever the
  * app theme, with images fitted to the page. A static stylesheet on purpose: the production CSP blocks injected

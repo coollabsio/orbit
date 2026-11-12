@@ -23,7 +23,10 @@ export function SequenceHint() {
   }, [pending])
 
   if (!shown || shown !== pending) return null
+  // a global command whose keys a page command shadows does not run here
+  const shadowed = new Set(active.flatMap((command) => (command.shadows ? [command.shadows] : [])))
   const next = active.flatMap((command) => {
+    if (shadowed.has(command.id)) return []
     const steps = parseKeys(bindings[command.id] ?? '')
     return steps?.length === 2 && steps[0] === shown ? [{ command, key: steps[1] }] : []
   })
@@ -32,7 +35,7 @@ export function SequenceHint() {
     <div
       role="status"
       data-slot="sequence-hint"
-      className="fixed right-4 bottom-4 z-50 grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-1.5 rounded-lg border bg-popover px-3 py-2.5 text-[13px] text-popover-foreground shadow-lg transition-opacity duration-125 ease-out starting:opacity-0"
+      className="fixed right-4 bottom-4 z-50 grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-1.5 rounded-lg border bg-popover px-3 py-2.5 text-[0.8125rem] text-popover-foreground shadow-lg transition-opacity duration-125 ease-out starting:opacity-0"
     >
       {next.map(({ command, key }) => (
         <div key={command.id} className="col-span-full grid grid-cols-subgrid items-center">

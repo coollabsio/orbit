@@ -10,8 +10,8 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Tip } from '@/components/common/Tip'
 import {
   FIELD_META,
-  FIELD_ORDER,
   MAX_FILTER_CONDITIONS,
+  availableFields,
   defaultValue,
   isCompleteCondition,
   listValue,
@@ -59,7 +59,11 @@ function AddFilterPopover({ filter, options, onChange, onOpenAdvanced, open, onO
   const close = () => onOpenChange(false)
   const pickField = (field: FilterField) => {
     const operator = FIELD_META[field].defaultOperator
-    setDraft({ field, operator, value: defaultValue(field, operator) })
+    // a field without values (Estimate) is complete at once
+    if (!operatorNeedsValue(operator)) {
+      onChange(appendCondition(filter, { field, operator }))
+      close()
+    } else setDraft({ field, operator, value: defaultValue(field, operator) })
   }
   const change = (next: Condition) => {
     setDraft(next)
@@ -85,7 +89,7 @@ function AddFilterPopover({ filter, options, onChange, onOpenAdvanced, open, onO
             <CommandList>
               <CommandEmpty className="py-4 text-xs text-muted-foreground">No matching fields</CommandEmpty>
               <CommandGroup>
-                {FIELD_ORDER.map((field) => {
+                {availableFields(options).map((field) => {
                   const Icon = FIELD_META[field].icon
                   return (
                     <CommandItem key={field} value={field} keywords={[FIELD_META[field].label]} onSelect={() => pickField(field)}>
@@ -157,7 +161,7 @@ export function FilterButton({ filter, options, onChange, onOpenAdvanced }: Filt
           <Filter className="size-4" />
           <span className="max-[899px]:hidden">Filter</span>
           {count > 0 ? (
-            <Badge className="h-4 min-w-4 px-1 text-[10px] tabular-nums">{count}</Badge>
+            <Badge className="h-4 min-w-4 px-1 text-[0.625rem] tabular-nums">{count}</Badge>
           ) : null}
         </Button>
       }

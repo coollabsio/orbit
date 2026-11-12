@@ -47,7 +47,7 @@ use thiserror::Error;
 use utoipa::ToSchema;
 
 use super::client::{LinearClient, LinearClientConfig, LinearError};
-use super::model::{LinearComment, LinearIssue};
+use super::model::{Cycle, LinearComment, LinearIssue, ProjectMilestone};
 pub use super::scan::{LinearImportTeam, LinearImportTree};
 use super::scan::{MAX_TEAMS, build_tree};
 use crate::import_people::{self, Match, Source};
@@ -57,17 +57,17 @@ use crate::repositories::attachments::AttachmentRepository;
 use crate::repositories::membership;
 use crate::repositories::task_relations::NewTaskRelationType;
 use crate::repositories::tasks::{
-    CommentContent, CreateTask, TaskChanges, TaskError, TaskRepository, TaskUpdate,
+    CommentContent, CreateTask, ImportedTask, TaskChanges, TaskError, TaskRepository, TaskUpdate,
 };
 use crate::secret_box::{decrypt_secret, encrypt_secret};
 pub use crate::task_import::JobRun;
 use crate::task_import::{
     Attached, Failure, ImportTables, LABEL_COLORS, NewProject, PROJECT_COLORS, attach_once,
     attachment_url, category_color, display_instant, ensure_project, ensure_writable,
-    escape_markdown, find_or_create_label, job_kind, markdown_links, member_emails, mentions_any,
-    parse_date_millis, parse_instant_millis, parse_stored_id, project_key_base, project_statuses,
-    retryable, reuse_earlier_projects, reuse_earlier_tasks, rewrite_links, stopped,
-    with_source_details,
+    escape_markdown, find_or_create_label, find_or_create_milestone, job_kind, markdown_links,
+    member_emails, mentions_any, parse_date_millis, parse_instant_millis, parse_stored_id,
+    project_key_base, project_statuses, retryable, reuse_earlier_projects, reuse_earlier_tasks,
+    rewrite_links, stopped, with_source_details,
 };
 
 /// Job kind names.
@@ -450,6 +450,10 @@ struct TeamContext {
     open_status: Id,
     /// Lowercase name → label id.
     labels: HashMap<String, Id>,
+    /// Orbit name (`<Linear project> / <milestone>`) → milestone id.
+    milestones: HashMap<String, Id>,
+    /// Linear cycle number → cycle id; `None` when the cycle overlaps one the project had.
+    cycles: HashMap<i64, Option<Id>>,
 }
 
 /// Shared state of one import run.
@@ -1592,6 +1596,8 @@ impl LinearImportService {
             states,
             open_status,
             labels,
+            milestones: HashMap::new(),
+            cycles: HashMap::new(),
         })
     }
 
@@ -1645,7 +1651,7 @@ impl LinearImportService {
                     run.workspace_id,
                     run.user_id,
                     input.clone(),
-                    completed_at,
+                    ImportedTask::completed(completed_at),
                     &run.request_id,
                     TimestampMillis::now(),
                 )
@@ -1661,7 +1667,7 @@ impl LinearImportService {
                         run.workspace_id,
                         run.user_id,
                         input,
-                        completed_at,
+                        ImportedTask::completed(completed_at),
                         &run.request_id,
                         TimestampMillis::now(),
                     )
@@ -1714,6 +1720,17 @@ impl LinearImportService {
                 labels.push(label);
             }
         }
+        let milestone_id = match issue.project_milestone.as_ref() {
+            Some(milestone) => {
+                self.ensure_milestone(run, team_id, issue, milestone)
+                    .await?
+            }
+            None => None,
+        };
+        let cycle_id = match issue.cycle.as_ref() {
+            Some(cycle) => self.ensure_cycle(run, team_id, cycle).await?,
+            None => None,
+        };
         let team = run
             .teams
             .get(team_id)
@@ -1749,6 +1766,7 @@ impl LinearImportService {
                 issue.description.as_deref().unwrap_or_default(),
                 unmatched.as_deref(),
                 detached,
+                cycle_id.is_some(),
                 &links,
             ),
             description_json: None,
@@ -1767,7 +1785,112 @@ impl LinearImportService {
                 .and_then(parse_date_millis)
                 .map(TimestampMillis::from_millis),
             parent_task_id: parent,
+            milestone_id,
+            cycle_id,
+            estimate: issue.estimate.and_then(estimate),
         })
+    }
+
+    /// The project's milestone `<Linear project> / <milestone>`, created on first use with the
+    /// milestone's description and target date. `None` for a milestone without a name.
+    async fn ensure_milestone(
+        &self,
+        run: &mut Run<'_>,
+        team_id: &str,
+        issue: &LinearIssue,
+        milestone: &ProjectMilestone,
+    ) -> Result<Option<Id>, Failure> {
+        let Some(name) = milestone_name(issue, milestone) else {
+            return Ok(None);
+        };
+        let team = run
+            .teams
+            .get(team_id)
+            .ok_or_else(|| Failure::Item("Its team could not be imported.".to_owned()))?;
+        if let Some(id) = team.milestones.get(&name) {
+            return Ok(Some(*id));
+        }
+        let id = find_or_create_milestone(
+            self.database(),
+            &self.inner.tasks,
+            run.workspace_id,
+            team.project_id,
+            run.user_id,
+            &name,
+            milestone
+                .description
+                .as_deref()
+                .map(|text| clamp(text.trim(), 20_000, 20_000))
+                .filter(|text| !text.is_empty()),
+            milestone
+                .target_date
+                .as_deref()
+                .and_then(parse_date_millis)
+                .map(TimestampMillis::from_millis),
+            &run.request_id,
+        )
+        .await?;
+        if let Some(team) = run.teams.get_mut(team_id) {
+            team.milestones.insert(name, id);
+        }
+        Ok(Some(id))
+    }
+
+    /// The project's cycle with the Linear cycle's number, created on first use with its name
+    /// and dates. `None` when the cycle lacks a number or dates (an issue stored by an older
+    /// version), overlaps a cycle the project already had, or its number is taken by a cycle with
+    /// other dates: the description names it then.
+    async fn ensure_cycle(
+        &self,
+        run: &mut Run<'_>,
+        team_id: &str,
+        cycle: &Cycle,
+    ) -> Result<Option<Id>, Failure> {
+        let Some(number) = cycle
+            .number
+            .filter(|number| number.is_finite() && *number >= 1.0)
+            .map(|number| number.round() as i64)
+        else {
+            return Ok(None);
+        };
+        let team = run
+            .teams
+            .get(team_id)
+            .ok_or_else(|| Failure::Item("Its team could not be imported.".to_owned()))?;
+        if let Some(id) = team.cycles.get(&number) {
+            return Ok(*id);
+        }
+        let dates = cycle
+            .starts_at
+            .as_deref()
+            .and_then(parse_instant_millis)
+            .zip(cycle.ends_at.as_deref().and_then(parse_instant_millis));
+        let Some((starts_at, ends_at)) = dates else {
+            return Ok(None);
+        };
+        let id = self
+            .inner
+            .tasks
+            .find_or_create_cycle(
+                run.workspace_id,
+                team.project_id,
+                run.user_id,
+                number,
+                cycle
+                    .name
+                    .as_deref()
+                    .map(|name| clamp(name.trim(), 200, 200))
+                    .filter(|name| !name.is_empty()),
+                TimestampMillis::from_millis(starts_at),
+                TimestampMillis::from_millis(ends_at),
+                &run.request_id,
+                TimestampMillis::now(),
+            )
+            .await?;
+        if let Some(team) = run.teams.get_mut(team_id) {
+            team.cycles.insert(number, id);
+        }
+        Ok(id)
     }
 
     /// The project's label with this name, created on first use.
@@ -1845,17 +1968,19 @@ impl LinearImportService {
             let detached = issue.parent.is_some() && item.parent_id.is_none();
             let unmatched = source_assignee(run, &issue)
                 .and_then(|(found, name)| (found == Match::Unmatched).then_some(name));
+            let (version, cycle_id): (i64, Option<String>) =
+                sqlx::query_as("SELECT version, cycle_id FROM tasks WHERE id = $1")
+                    .bind(task_id.to_string())
+                    .fetch_one(self.database().pool())
+                    .await?;
             let markdown = description(
                 &issue,
                 &rewrite_links(body, &files),
                 unmatched.as_deref(),
                 detached,
+                cycle_id.is_some(),
                 &links(run.client, &issue),
             );
-            let version: i64 = sqlx::query_scalar("SELECT version FROM tasks WHERE id = $1")
-                .bind(task_id.to_string())
-                .fetch_one(self.database().pool())
-                .await?;
             self.inner
                 .tasks
                 .update_task(
@@ -2534,12 +2659,44 @@ fn links(client: &LinearClient, issue: &LinearIssue) -> Vec<(String, String)> {
         .collect()
 }
 
-/// The description: the issue's markdown, then what Orbit has no field for, then the links.
+/// Orbit's estimate for a Linear one: whole points in `0..=1000` (Linear's scales are whole
+/// numbers, so rounding is only a guard).
+fn estimate(value: f64) -> Option<i64> {
+    value
+        .is_finite()
+        .then(|| value.round().clamp(0.0, 1_000.0) as i64)
+}
+
+/// `<Linear project> / <milestone>` (two Linear projects can both have a "Beta"), clamped to
+/// a milestone name; the milestone's own name when no project name is known.
+fn milestone_name(issue: &LinearIssue, milestone: &ProjectMilestone) -> Option<String> {
+    let name = milestone
+        .name
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())?;
+    let project = milestone
+        .project
+        .as_ref()
+        .or(issue.project.as_ref())
+        .and_then(|project| project.name.as_deref())
+        .map(str::trim)
+        .filter(|project| !project.is_empty());
+    let full = match project {
+        Some(project) => format!("{project} / {name}"),
+        None => name.to_owned(),
+    };
+    Some(clamp(&full, 200, 200))
+}
+
+/// The description: the issue's markdown, then what Orbit has no field for (a cycle that could
+/// not be set included), then the links.
 fn description(
     issue: &LinearIssue,
     body: &str,
     unmatched_assignee: Option<&str>,
     detached: bool,
+    cycle_set: bool,
     links: &[(String, String)],
 ) -> String {
     let mut fields: Vec<(&str, String)> = Vec::new();
@@ -2565,14 +2722,7 @@ fn description(
     {
         fields.push(("Project", project));
     }
-    if let Some(milestone) = issue
-        .project_milestone
-        .as_ref()
-        .and_then(|milestone| milestone.name.clone())
-    {
-        fields.push(("Milestone", milestone));
-    }
-    if let Some(cycle) = &issue.cycle {
+    if !cycle_set && let Some(cycle) = &issue.cycle {
         let number = cycle
             .number
             .map(|number| format!("{}", number.round() as i64));
@@ -2589,9 +2739,6 @@ fn description(
             fields.push(("Cycle", value));
         }
     }
-    if let Some(estimate) = issue.estimate {
-        fields.push(("Estimate", format!("{estimate}")));
-    }
     if let Some(sla) = issue.sla_breaches_at.as_deref() {
         fields.push(("SLA breaches", display_instant(sla)));
     }
@@ -2604,7 +2751,7 @@ fn description(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::linear::model::{Cycle, IssueRef, LinearLabel, NameRef};
+    use crate::linear::model::{IssueRef, LinearLabel, NameRef};
 
     #[test]
     fn maps_states_priorities_and_labels() {
@@ -2642,22 +2789,61 @@ mod tests {
             project: Some(NameRef {
                 name: Some("Launch".into()),
             }),
+            project_milestone: Some(ProjectMilestone {
+                name: Some("Beta".into()),
+                ..ProjectMilestone::default()
+            }),
             cycle: Some(Cycle {
                 number: Some(3.0),
                 name: Some("Sprint *3*".into()),
+                ..Cycle::default()
             }),
             estimate: Some(2.0),
             ..LinearIssue::default()
         };
+        let links = [("PR #1".into(), "https://github.com/a/b/pull/1".into())];
         assert_eq!(
-            description(
-                &issue,
-                "Body",
-                Some("Ghost"),
-                true,
-                &[("PR #1".into(), "https://github.com/a/b/pull/1".into())]
-            ),
-            "Body\n\n**Linear**\n\n- Issue: ENG-7\n- Assignee: Ghost\n- Parent: ENG-1\n- Project: Launch\n- Cycle: 3 (Sprint \\*3\\*)\n- Estimate: 2\n\n**Links**\n\n- [PR \\#1](<https://github.com/a/b/pull/1>)"
+            description(&issue, "Body", Some("Ghost"), true, false, &links),
+            "Body\n\n**Linear**\n\n- Issue: ENG-7\n- Assignee: Ghost\n- Parent: ENG-1\n- Project: Launch\n- Cycle: 3 (Sprint \\*3\\*)\n\n**Links**\n\n- [PR \\#1](<https://github.com/a/b/pull/1>)"
         );
+        assert_eq!(
+            description(&issue, "Body", None, false, true, &[]),
+            "Body\n\n**Linear**\n\n- Issue: ENG-7\n- Project: Launch"
+        );
+    }
+
+    #[test]
+    fn maps_milestones_and_estimates_to_orbit_fields() {
+        let mut issue = LinearIssue {
+            project: Some(NameRef {
+                name: Some("Issue project".into()),
+            }),
+            ..LinearIssue::default()
+        };
+        let mut milestone = ProjectMilestone {
+            name: Some(" Beta ".into()),
+            project: Some(NameRef {
+                name: Some("Launch".into()),
+            }),
+            ..ProjectMilestone::default()
+        };
+        assert_eq!(
+            milestone_name(&issue, &milestone).as_deref(),
+            Some("Launch / Beta")
+        );
+        milestone.project = None;
+        assert_eq!(
+            milestone_name(&issue, &milestone).as_deref(),
+            Some("Issue project / Beta")
+        );
+        issue.project = None;
+        assert_eq!(milestone_name(&issue, &milestone).as_deref(), Some("Beta"));
+        milestone.name = Some("  ".into());
+        assert_eq!(milestone_name(&issue, &milestone), None);
+        assert_eq!(
+            [0.0, 2.0, 2.5, -1.0, 5_000.0].map(estimate),
+            [Some(0), Some(2), Some(3), Some(0), Some(1_000)]
+        );
+        assert_eq!(estimate(f64::NAN), None);
     }
 }

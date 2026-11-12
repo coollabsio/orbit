@@ -378,12 +378,16 @@ impl WorkspaceRepository {
         let id = defaults.workspace.id;
         let mut transaction = self.database.immediate_transaction().await?;
         ensure_may_own_another(&mut transaction, actor_id).await?;
-        // The root user's first workspace is exempt from billing (`crate::billing::access`).
+        // The trial is the creator's: a workspace copies the account's trial start, so a new workspace never starts a
+        // new trial. The root user's first workspace is exempt from billing (`crate::billing::access`).
+        let trial_started_at = super::billing::account_trial_start(&mut transaction, actor_id)
+            .await?
+            .unwrap_or(now.as_millis());
         sqlx::query(
             "INSERT INTO workspaces (id, name, version, owner_membership_id, created_at, updated_at, \
-             billing_exempt) VALUES ($1, $2, 0, $3, $4, $5, CASE WHEN EXISTS (SELECT 1 FROM \
+             billing_exempt, trial_started_at) VALUES ($1, $2, 0, $3, $4, $5, CASE WHEN EXISTS (SELECT 1 FROM \
              installation_state WHERE id = 1 AND root_user_id = $6) AND NOT EXISTS (SELECT 1 FROM \
-             workspaces WHERE billing_exempt = 1) THEN 1 ELSE 0 END)",
+             workspaces WHERE billing_exempt = 1) THEN 1 ELSE 0 END, $7)",
         )
         .bind(id.to_string())
         .bind(&defaults.workspace.name)
@@ -391,6 +395,17 @@ impl WorkspaceRepository {
         .bind(now.as_millis())
         .bind(now.as_millis())
         .bind(actor_id.to_string())
+        .bind(trial_started_at)
+        .execute(&mut *transaction)
+        .await?;
+        // The first workspace that is not billing-exempt starts the account's trial.
+        sqlx::query(
+            "UPDATE users SET trial_started_at = $1 WHERE id = $2 AND trial_started_at IS NULL \
+             AND NOT EXISTS (SELECT 1 FROM workspaces WHERE id = $3 AND billing_exempt = 1)",
+        )
+        .bind(trial_started_at)
+        .bind(actor_id.to_string())
+        .bind(id.to_string())
         .execute(&mut *transaction)
         .await?;
         sqlx::query(
@@ -1642,6 +1657,17 @@ impl WorkspaceRepository {
             transaction.commit().await?;
             return Err(denied.into());
         }
+        // The member's personal mailbox stays for the admins, suspended: the delete below sets
+        // its owner to NULL and removes its only member.
+        crate::repositories::mail::suspend_owned_mailboxes(
+            &mut transaction,
+            workspace_id,
+            membership_id,
+            actor_id,
+            request_id,
+            now,
+        )
+        .await?;
         sqlx::query("DELETE FROM memberships WHERE id = $1 AND workspace_id = $2 AND version = $3")
             .bind(membership_id.to_string())
             .bind(workspace_id.to_string())
@@ -2094,7 +2120,10 @@ impl WorkspaceRepository {
             .await?;
         // Sessions not used for 30 days, revoked or not. Their push subscriptions cascade.
         sqlx::query("DELETE FROM sessions WHERE last_activity_at <= $1")
-            .bind(now.as_millis().saturating_sub(SESSION_IDLE_RETENTION_MILLIS))
+            .bind(
+                now.as_millis()
+                    .saturating_sub(SESSION_IDLE_RETENTION_MILLIS),
+            )
             .execute(&mut *transaction)
             .await?;
         let expired = sqlx::query_scalar::<_, String>(
@@ -2188,9 +2217,9 @@ impl WorkspaceRepository {
                     .execute(&mut *transaction)
                     .await?
                     .rows_affected();
-            // Page files and chat files hold their blobs with ON DELETE RESTRICT, so they go
-            // before the blobs.
-            for table in ["page_files", "chat_message_files"] {
+            // Page files, chat files and mail receipts hold their blobs with ON DELETE RESTRICT,
+            // so they go before the blobs. A receipt takes its parsed messages along.
+            for table in ["page_files", "chat_message_files", "mail_receipts"] {
                 attachment_references_purged += sqlx::query(sqlx::AssertSqlSafe(format!(
                     "DELETE FROM {table} WHERE workspace_id = $1"
                 )))

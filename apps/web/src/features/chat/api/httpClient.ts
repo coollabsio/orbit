@@ -33,6 +33,7 @@ import {
   listChatStates,
   listChatThreads,
   listFollowedChatThreads,
+  listUnreadChatThreads,
   markChatMessageUnread,
   moveChatItem,
   placeChatChannel,
@@ -84,6 +85,8 @@ export interface HttpChatClientOptions {
   onInboxChanged?: () => void
   /** Something the user asked to be notified about happened, and the server chose this tab over a push. */
   onNotify?: (notice: Notice) => void
+  /** An event of the `mail` topic (a thread of a mailbox the user reads changed); the mail feature applies it. */
+  onMailEvent?: (event: unknown) => void
   /** Opens the live socket; tests put their own in. */
   openSocket?: (options: LiveSocketOptions) => LiveSocket
   /** How long a send that could not reach the server waits for the connection to come back. Default 60000. */
@@ -193,6 +196,8 @@ export function createHttpChatClient(options: HttpChatClientOptions): ChatClient
           options.onInboxChanged?.()
         } else if (topic === 'notify') {
           options.onNotify?.(event as Notice)
+        } else if (topic === 'mail') {
+          options.onMailEvent?.(event)
         } else if (topic === 'chat') {
           const wire = event as WireEvent | WireTyping
           if (wire.type === 'typing') {
@@ -255,6 +260,9 @@ export function createHttpChatClient(options: HttpChatClientOptions): ChatClient
     },
     async listFollowedThreads() {
       return (await call(listFollowedChatThreads(at({})))).map(toFollowedThread)
+    },
+    async listUnreadThreads() {
+      return (await call(listUnreadChatThreads(at({})))).map(toFollowedThread)
     },
     async listPins(conversationId) {
       return (await call(listChatPins(at({ conversation_id: conversationId })))).map(toMessage)
@@ -340,8 +348,8 @@ export function createHttpChatClient(options: HttpChatClientOptions): ChatClient
         throw toChatError(error)
       }
     },
-    async setWebhookInteractivity(conversationId, webhookId, requestUrl) {
-      const body = { request_url: requestUrl }
+    async setWebhookInteractivity(conversationId, webhookId, requestUrl, events) {
+      const body = { request_url: requestUrl, events }
       return toWebhook(await call(setChatWebhookInteractivity({ ...at({ conversation_id: conversationId, webhook_id: webhookId }), body })))
     },
     async webhookSigningSecret(conversationId, webhookId, rotate) {

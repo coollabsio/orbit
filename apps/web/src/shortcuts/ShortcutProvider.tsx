@@ -79,7 +79,8 @@ function Engine({ store, bindings, onPending }: { store: CommandStore; bindings:
         && !((command.context === 'pull' || command.id === 'help.open') && onlyPullOverlay()))
 
     const run = (event: KeyboardEvent, commands: Command[]) => {
-      const command = commands.find((item) => !blocked(event, item))
+      // a page command that shadows a global one with the same keys goes first
+      const command = commands.find((item) => item.shadows !== undefined && !blocked(event, item)) ?? commands.find((item) => !blocked(event, item))
       if (!command) return
       // a held key runs most commands once, but the key stays ours: the browser must not act on the repeats
       if (event.repeat && !command.repeat) event.preventDefault()

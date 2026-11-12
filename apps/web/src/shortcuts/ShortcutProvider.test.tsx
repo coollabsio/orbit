@@ -67,6 +67,17 @@ test('a sequence runs its command and not the single-key command of its last ste
   expect(calls).toEqual(['inbox', 'assignee'])
 })
 
+test('a page command that shadows a global one takes its keys while it is mounted', async () => {
+  const user = userEvent.setup()
+  const global = <Probe id="nav.settings" run={record('settings')} />
+  const view = mount(global)
+  await user.keyboard('gs')
+  expect(calls).toEqual(['settings'])
+  view.rerender(<ShortcutProvider>{global}<Probe id="mail.starred" run={record('starred')} /></ShortcutProvider>)
+  await user.keyboard('gs')
+  expect(calls).toEqual(['settings', 'starred'])
+})
+
 test('a sequence does not run when the second key comes too late', async () => {
   const user = userEvent.setup()
   mount(<Probe id="nav.inbox" run={record('inbox')} />)

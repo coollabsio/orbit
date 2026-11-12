@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Tip } from '@/components/common/Tip'
 import { Checkbox } from '@/components/ui/checkbox'
 import { BlockedIndicator } from './BlockedIndicator'
-import { refIdentifier, type Project, type Task, type TaskStatusDef } from '@/features/tasks/api/models'
+import { refIdentifier, type Cycle, type Milestone, type Project, type Task, type TaskStatusDef } from '@/features/tasks/api/models'
 import type { User } from '@/features/workspaces/models'
 import type { LabelRecord } from '@orbit/api/generated/types.gen'
 import type { TaskProperty } from '@/features/views/viewState'
@@ -12,7 +12,7 @@ import { PriorityPicker } from './PriorityPicker'
 import { StatusPicker } from './StatusPicker'
 import { AssigneePicker } from './AssigneePicker'
 import { LinkifiedText } from './LinkifiedText'
-import { DateStamp, ProjectChip } from './TaskPropertyChips'
+import { CycleChip, DateStamp, EstimateChip, MilestoneChip, ProjectChip } from './TaskPropertyChips'
 import { DueDatePicker } from './DueDatePicker'
 import { SubIssueProgress, completedStatusColor } from './SubIssueProgress'
 import { TreeGutter } from './TreeGutter'
@@ -35,6 +35,8 @@ interface TaskRowProps {
   users: User[]
   assignees: User[]
   project: Project | undefined
+  milestone: Milestone | undefined
+  cycle: Cycle | undefined
   /** Only these properties render (`display.properties`). */
   properties: TaskProperty[]
   selected: boolean
@@ -57,8 +59,8 @@ interface TaskRowProps {
   nest?: NestRowProps
 }
 
-/** List row: [checkbox] priority · id · [tree gutter] status · [parent ›] title … labels · progress · project · due · assignee · created · updated. */
-export function TaskRow({ task, statuses, labels, users, assignees, project, properties, selected, dragging, draggable, dropEdge, onOpen, onToggleSelect, onDragStart, onDragEnd, onRequestDuplicate, tree, showParent, nest }: TaskRowProps) {
+/** List row: [checkbox] priority · id · [tree gutter] status · [parent ›] title … labels · progress · project · milestone · cycle · estimate · due · assignee · created · updated. */
+export function TaskRow({ task, statuses, labels, users, assignees, project, milestone, cycle, properties, selected, dragging, draggable, dropEdge, onOpen, onToggleSelect, onDragStart, onDragEnd, onRequestDuplicate, tree, showParent, nest }: TaskRowProps) {
   const status = statuses.find((s) => s.id === task.statusId)
   const has = (property: TaskProperty) => properties.includes(property)
   return (
@@ -122,12 +124,12 @@ export function TaskRow({ task, statuses, labels, users, assignees, project, pro
       {has('status') ? <StatusPicker task={task} statuses={statuses} onRequestDuplicate={() => onRequestDuplicate(task)} /> : null}
       {!has('id') && task.blocked ? <BlockedIndicator /> : null}
       {showParent && task.parent ? (
-        <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[13px]">
+        <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[0.8125rem]">
           <Tip label={`Open ${refIdentifier(task.parent)}`}>
             <Button
               type="button"
               variant="link"
-              className="h-auto max-w-[40%] shrink justify-start p-0 text-[13px] font-normal text-muted-foreground hover:text-foreground"
+              className="h-auto max-w-[40%] shrink justify-start p-0 text-[0.8125rem] font-normal text-muted-foreground hover:text-foreground"
               onClick={(event) => {
                 event.stopPropagation()
                 onOpen(task.parent!.id)
@@ -140,7 +142,7 @@ export function TaskRow({ task, statuses, labels, users, assignees, project, pro
           <span className="min-w-0 flex-1 truncate font-medium"><LinkifiedText text={task.title || 'Untitled'} /></span>
         </span>
       ) : (
-        <span className="min-w-0 flex-1 truncate text-[13px] font-medium"><LinkifiedText text={task.title || 'Untitled'} /></span>
+        <span className="min-w-0 flex-1 truncate text-[0.8125rem] font-medium"><LinkifiedText text={task.title || 'Untitled'} /></span>
       )}
       {has('labels') && task.labels.length > 0 ? (
         <span className="flex shrink-0 gap-1 max-[1099px]:hidden">
@@ -158,6 +160,9 @@ export function TaskRow({ task, statuses, labels, users, assignees, project, pro
         </span>
       ) : null}
       {has('project') ? <span className="flex w-[4.5rem] shrink-0 max-[1099px]:hidden"><ProjectChip project={project} className="max-w-full text-xs" /></span> : null}
+      {has('milestone') ? <span className="flex w-[5.5rem] shrink-0 max-[1099px]:hidden"><MilestoneChip milestone={milestone} className="max-w-full text-xs" /></span> : null}
+      {has('cycle') ? <span className="flex w-[4.5rem] shrink-0 max-[1099px]:hidden"><CycleChip cycle={cycle} className="max-w-full text-xs" /></span> : null}
+      {has('estimate') ? <span className="flex w-12 shrink-0 max-[640px]:hidden"><EstimateChip task={task} className="text-xs" /></span> : null}
       {has('due_date') ? <DueDatePicker task={task} status={status} className="w-[4.25rem] shrink-0 text-xs max-[640px]:hidden" /> : null}
       {/* at most two circles (28px) so the slot stays narrow */}
       {has('assignee') ? <AssigneePicker task={task} users={users} max={assignees.length > 2 ? 1 : 2} className="w-7 justify-end" /> : null}

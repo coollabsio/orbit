@@ -1,7 +1,8 @@
 use orbit_domain::WorkspaceDefaults;
 use orbit_platform::{
-    AuthenticatedUser, Database, Id, IssuedSession, IssuedToken, Row, SessionRecord,
-    TimestampMillis, UploadError, UploadService, generate_opaque_token, normalize_email,
+    AuthenticatedUser, BlobStoreError, Database, Id, IssuedSession, IssuedToken, Row,
+    SessionRecord, TimestampMillis, UploadError, UploadService, generate_opaque_token,
+    normalize_email,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -812,12 +813,9 @@ impl IdentityRepository {
         now: TimestampMillis,
     ) -> Result<RootAccount, RegistrationError> {
         let mut transaction = self.database.immediate_transaction().await?;
-        let open = sqlx::query_scalar::<_, i64>(
-            "SELECT registration_open FROM instance_settings WHERE id = 1",
-        )
-        .fetch_one(&mut *transaction)
-        .await?;
-        if open == 0 {
+        let open = super::environment_settings::registration_open(&self.database, &mut transaction)
+            .await?;
+        if !open {
             return Err(RegistrationError::Closed);
         }
         let email = sqlx::query_scalar::<_, String>(
@@ -1391,7 +1389,8 @@ impl IdentityRepository {
     }
 
     /// The user's profile picture, for the user and for people who share a workspace with them.
-    /// A guest only sees the people it shares a conversation with.
+    /// A guest only sees the people it shares a conversation with. A picture whose file is in no storage tier (for
+    /// example, deleted from the bucket by hand) is removed, so the user shows initials until they upload a new one.
     pub async fn avatar(
         &self,
         uploads: &UploadService,
@@ -1399,7 +1398,7 @@ impl IdentityRepository {
         user_id: Id,
     ) -> Result<Option<Avatar>, IdentityError> {
         let row = sqlx::query(
-            "SELECT a.mime_type, a.bytes, b.storage_key FROM user_avatars a \
+            "SELECT a.mime_type, a.bytes, a.blob_id, b.storage_key FROM user_avatars a \
              LEFT JOIN attachment_blobs b ON b.id = a.blob_id \
              WHERE a.user_id = $1 AND ($1 = $2 OR EXISTS ( \
              SELECT 1 FROM memberships AS theirs JOIN memberships AS mine \
@@ -1416,13 +1415,29 @@ impl IdentityRepository {
         let Some(row) = row else {
             return Ok(None);
         };
-        Ok(Some(Avatar {
-            mime_type: row.get("mime_type"),
-            bytes: match row.get("bytes") {
-                Some(bytes) => bytes,
-                None => uploads.read_blob(row.get("storage_key")).await?,
-            },
-        }))
+        let mime_type = row.get("mime_type");
+        if let Some(bytes) = row.get::<Option<Vec<u8>>, _>("bytes") {
+            return Ok(Some(Avatar { mime_type, bytes }));
+        }
+        if let Some(storage_key) = row.get::<Option<String>, _>("storage_key") {
+            match uploads.read_blob(&storage_key).await {
+                Ok(bytes) => return Ok(Some(Avatar { mime_type, bytes })),
+                Err(UploadError::BlobStore(BlobStoreError::Io { source, .. }))
+                    if source.kind() == std::io::ErrorKind::NotFound => {}
+                // A bucket that is down is not a missing file: keep the picture.
+                Err(error) => return Err(error.into()),
+            }
+        }
+        tracing::warn!(%user_id, "profile picture file is missing; removing the picture");
+        // The same blob only: a picture uploaded meanwhile stays.
+        sqlx::query(
+            "DELETE FROM user_avatars WHERE user_id = $1 AND blob_id IS NOT DISTINCT FROM $2",
+        )
+        .bind(user_id.to_string())
+        .bind(row.get::<Option<String>, _>("blob_id"))
+        .execute(self.database.pool())
+        .await?;
+        Ok(None)
     }
 
     /// Replaces the user's profile picture. Callers check the format and size first. The image is an attachment
@@ -1902,6 +1917,28 @@ impl IdentityRepository {
         })
     }
 
+    /// The user of session `session_id` while it is live (not revoked, not expired, the user not
+    /// suspended). For URLs bound to a session that arrive without its cookie (mail content).
+    pub async fn session_user(
+        &self,
+        session_id: Id,
+        now: TimestampMillis,
+    ) -> Result<Option<Id>, IdentityError> {
+        let user: Option<String> = sqlx::query_scalar(
+            "SELECT sessions.user_id FROM sessions JOIN users ON users.id = sessions.user_id \
+             WHERE sessions.id = $1 AND sessions.revoked_at IS NULL \
+             AND sessions.idle_expires_at > $2 AND sessions.absolute_expires_at > $3 \
+             AND users.suspended_at IS NULL",
+        )
+        .bind(session_id.to_string())
+        .bind(now.as_millis())
+        .bind(now.as_millis())
+        .fetch_optional(self.database.pool())
+        .await?;
+        user.map(|user| user.parse().map_err(|_| IdentityError::InvalidIdentifier))
+            .transpose()
+    }
+
     pub async fn list_sessions(
         &self,
         user_id: Id,
@@ -2091,8 +2128,8 @@ async fn insert_first_workspace(
     // older installation already marked one.
     sqlx::query(
         "INSERT INTO workspaces (id, name, version, owner_membership_id, created_at, updated_at, \
-         billing_exempt) VALUES ($1, $2, $3, $4, $5, $6, CASE WHEN EXISTS (SELECT 1 FROM workspaces \
-         WHERE billing_exempt = 1) THEN 0 ELSE 1 END)",
+         billing_exempt, trial_started_at) VALUES ($1, $2, $3, $4, $5, $6, CASE WHEN EXISTS (SELECT 1 FROM workspaces \
+         WHERE billing_exempt = 1) THEN 0 ELSE 1 END, $5)",
     )
     .bind(defaults.workspace.id.to_string())
     .bind(&defaults.workspace.name)

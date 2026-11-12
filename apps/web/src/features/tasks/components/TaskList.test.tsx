@@ -66,7 +66,7 @@ type ListOptions = {
 function renderList(tasks: Task[], options: ListOptions = {}) {
   const statuses = options.statuses ?? [status]
   const groupContext: GroupContext = {
-    statuses, members: options.users ?? [], labels: [], projects: [launch, docs], currentUserId: 'user-1', showEmpty: false,
+    statuses, members: options.users ?? [], labels: [], projects: [launch, docs], milestones: [], cycles: [], currentUserId: 'user-1', showEmpty: false,
   }
   return render(
     <TaskList

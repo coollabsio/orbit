@@ -28,7 +28,7 @@ export function ListPager({ total, page, lastPage, perPage, setPage, setPerPage 
   const firstRow = total === 0 ? 0 : (page - 1) * perPage + 1
   const lastRow = Math.min(page * perPage, total)
   return (
-    <footer className="flex min-h-11 items-center justify-between border-t px-4 text-[11px] text-muted-foreground/70">
+    <footer className="flex min-h-11 items-center justify-between border-t px-4 text-[0.6875rem] text-muted-foreground/70">
       <div className="inline-flex h-7 items-center gap-3 whitespace-nowrap tabular-nums">
         <span>
           {firstRow}-{lastRow} of {total}

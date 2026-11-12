@@ -1205,13 +1205,23 @@ pub(crate) fn page_problem(
             instance,
             request_id,
         ),
-        PageError::Corrupt | PageError::Unavailable(_) => ApiError::new(
+        PageError::Unavailable(error) => ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             "internal_error",
             "Internal server error",
             "An unexpected error occurred. Use the request ID when contacting support.",
             instance,
             request_id,
-        ),
+        )
+        .cause(error),
+        error @ PageError::Corrupt => ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "internal_error",
+            "Internal server error",
+            "An unexpected error occurred. Use the request ID when contacting support.",
+            instance,
+            request_id,
+        )
+        .cause(error),
     }
 }

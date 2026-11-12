@@ -22,15 +22,15 @@ use crate::audit::{self, AuditOutcome};
 
 mod agent;
 mod agent_schema;
+mod agent_views;
 mod board;
 mod buttons;
 mod calendar;
+mod computed;
 mod contact;
 mod copy;
-mod files;
-mod unique_id;
-mod computed;
 mod export;
+mod files;
 mod forms;
 mod formula;
 mod gallery;
@@ -39,40 +39,40 @@ mod links;
 mod model;
 mod moves;
 mod properties;
+mod query;
 mod relation_import;
 mod relations;
 mod rollups;
 mod rows;
-mod query;
 mod schema;
 mod search;
 mod templates;
 mod timeline;
+mod unique_id;
 mod values;
 mod view_config;
 mod views;
+pub use agent::{AgentDatabase, AgentQuery, AgentRow, AgentRowPage, invalid_detail};
+pub use agent_schema::AgentPropertyChanges;
+pub use agent_views::{AgentPropertySpec, AgentViewChanges, AgentViewDetail, AgentViewSpec};
 pub use buttons::{ButtonAction, ButtonConfig, ButtonPress, CreatedRow, MAX_ACTIONS};
 pub use calendar::CalendarMode;
 pub use computed::{ComputeScope, RelatedPage, is_computed};
 pub(super) use copy::{
     DatabaseData, copy_database_data, retain_fitting_values, write_database_data,
 };
-pub use files::{FileRef, MAX_FILES, first_image_url};
+pub use export::{ExportDatabase, ExportRow, cell_text, is_number};
 pub(super) use files::FileCopies;
-pub use unique_id::UniqueIdConfig;
-pub(super) use unique_id::renumber_copy;
-pub use agent::{AgentDatabase, AgentQuery, AgentRow, AgentRowPage, invalid_detail};
-pub use agent_schema::AgentPropertyChanges;
+pub use files::{FileRef, MAX_FILES, first_image_url};
 pub use forms::{FormAccess, FormConfig, FormQuestion, FormSubmission, MAX_SUBMISSIONS_PER_HOUR};
 pub use formula::{
     FormulaConfig, FormulaPreview, FormulaProblem, FormulaSample, checked as check_formula,
 };
-pub use export::{ExportDatabase, ExportRow, cell_text, is_number};
 pub use gallery::{CardPreview, CardSize, RowPreview};
 pub use import::{
     CsvImport, ImportColumn, ImportColumnResult, ImportResult, ImportTarget, MAX_IMPORT_COLUMNS,
 };
-pub use links::{DatabaseLink, LinkedViews, MAX_LINK_VIEWS};
+pub use links::{DatabaseLink, LinkedViews, MAX_LINK_VIEWS, link_block, without_link_blocks};
 pub(super) use links::{LinkCopy, block_links, copy_links, linked_databases};
 pub use model::{
     DateConfig, DateFormat, NumberConfig, NumberFormat, OptionColor, PropertyKind, PropertyType,
@@ -92,7 +92,10 @@ pub(super) use schema::insert_schema;
 pub use schema::{DatabaseSchema, SchemaProperty, SchemaView};
 pub use search::row_search_lines;
 pub use templates::{DatabaseTemplate, NewTemplate, TemplateChanges};
+pub(super) use templates::{NOT_TEMPLATE, TemplateCopy, is_template};
 pub use timeline::TimelineZoom;
+pub use unique_id::UniqueIdConfig;
+pub(super) use unique_id::renumber_copy;
 pub use values::{CellValue, Conversion, DatePoint, DateValue, accepts_value, convert};
 use values::{display_text, parse_value, scalar_from_text, valid_url};
 pub use view_config::{
@@ -100,7 +103,6 @@ pub use view_config::{
     ViewConfig, ViewSort, ViewType,
 };
 use views::{insert_view, raw_views, views_in_tx, write_view_config};
-pub(super) use templates::{NOT_TEMPLATE, TemplateCopy, is_template};
 
 pub const MAX_ROWS: i64 = 5_000;
 pub const MAX_PROPERTIES: usize = 100;

@@ -50,7 +50,7 @@ export function DatabaseFormPage({ workspaceId, databaseId, viewId }: { workspac
         <Link className={buttonVariants({ variant: 'ghost', size: 'icon-sm', className: 'text-muted-foreground/70' })} to={back} aria-label="Back">
           <ArrowLeft className="size-4" />
         </Link>
-        <nav aria-label="Breadcrumb" className="flex min-w-0 flex-1 items-center gap-1.5 text-[13px]">
+        <nav aria-label="Breadcrumb" className="flex min-w-0 flex-1 items-center gap-1.5 text-[0.8125rem]">
           {database ? (
             <Link className="min-w-0 truncate text-muted-foreground hover:text-foreground" to={`/docs/${databaseId}`}>
               {databaseTitle}

@@ -11,10 +11,12 @@ import { Separator } from '@/components/ui/separator'
 import { Tip } from '@/components/common/Tip'
 import { ColorDot } from '@/components/common/ColorDot'
 import { useQuery } from '@tanstack/react-query'
-import { useProjects } from '@/features/tasks/api/projects'
+import { useProjectOrder, useProjects, useSetProjectOrder } from '@/features/tasks/api/projects'
+import { moveProject, orderProjects } from '@orbit/api/projectOrder'
+import type { ProjectRecord } from '@orbit/api/generated/types.gen'
+import { ProjectLock } from '@/features/tasks/components/ProjectLock'
 import { useGithubWorkspaceSettings } from '@/features/tasks/api/github'
 import { ProviderMark } from '@/components/common/icons/ProviderMark'
-import { ProjectLock } from '@/features/tasks/components/ProjectLock'
 import { NewProjectModal } from '@/features/tasks/components/NewProjectModal'
 import { savedViewsQueryOptions } from '@/features/views/api/views'
 import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
@@ -29,13 +31,14 @@ const WORKSPACE_LINKS = [
   { to: '/tasks', label: 'Tasks', icon: SquareCheck, enabled: true },
   { to: '/docs', label: 'Docs', icon: FileText, enabled: true },
   { to: '/chat', label: 'Chat', icon: MessageSquare, enabled: false },
-  { to: '/mail', label: 'Mail', icon: Mail, enabled: false },
+  // slice 1 receives and reads mail; sending comes later
+  { to: '/mail', label: 'Mail', icon: Mail, enabled: true, tag: 'Beta' },
 ].filter((link) => !(docsHidden && link.to === '/docs'))
 
 // Coolify tile navigation: the row never fills; the icon sits in a 3D tile and the current row shows a pink tile.
 // The Flat style (Account settings → Appearance) drops the tile: plain rows, and a filled row for the current page.
 const sidebarNavItemClass =
-  'group/nav-item relative flex h-9 w-full min-w-0 shrink-0 items-center justify-start gap-2.5 overflow-hidden pr-2.5 pl-1 text-left text-[13px] font-medium whitespace-nowrap text-sidebar-nav transition-colors duration-120 outline-none hover:text-sidebar-nav-active focus-visible:text-sidebar-nav-active data-[active=true]:text-sidebar-nav-active group-data-[collapsed=true]/sidebar-nav:justify-center group-data-[collapsed=true]/sidebar-nav:px-0 '
+  'group/nav-item relative flex h-9 w-full min-w-0 shrink-0 items-center justify-start gap-2.5 overflow-hidden pr-2.5 pl-1 text-left text-[0.8125rem] font-medium whitespace-nowrap text-sidebar-nav transition-colors duration-120 outline-none hover:text-sidebar-nav-active focus-visible:text-sidebar-nav-active data-[active=true]:text-sidebar-nav-active group-data-[collapsed=true]/sidebar-nav:justify-center group-data-[collapsed=true]/sidebar-nav:px-0 '
     + 'flat:h-8 flat:rounded-md flat:pl-2.5 flat:hover:not-disabled:bg-black/4 flat:data-[active=true]:bg-black/5 dark:flat:hover:not-disabled:bg-white/5 dark:flat:data-[active=true]:bg-white/6'
 
 const sidebarNavTileVariants = cva(
@@ -84,6 +87,7 @@ function SidebarNavItem({
   active,
   badge = 0,
   unread = false,
+  tag,
   tone,
   className,
   trailing,
@@ -98,6 +102,8 @@ function SidebarNavItem({
   badge?: number
   /** Something waits for the user, but there is no count: a dot shows. */
   unread?: boolean
+  /** A short note after the label, e.g. "Beta". Hidden while collapsed. */
+  tag?: string
   /** A mark right after the label, hidden with the label when the sidebar is collapsed. */
   trailing?: ReactNode
 }) {
@@ -118,12 +124,17 @@ function SidebarNavItem({
       >
         <SidebarNavTile icon={Icon} tone={tone} />
         <SidebarNavLabel>{label}</SidebarNavLabel>
+        {tag ? (
+          <span data-slot="sidebar-nav-tag" aria-hidden="true" className="shrink-0 text-[0.625rem] text-muted-foreground/70 group-data-[collapsed=true]/sidebar-nav:hidden">
+            {tag}
+          </span>
+        ) : null}
         {trailing ? <span aria-hidden="true" className="flex shrink-0 group-data-[collapsed=true]/sidebar-nav:hidden">{trailing}</span> : null}
         {badge > 0 ? (
           <span
             data-slot="sidebar-nav-badge"
             aria-hidden="true"
-            className="inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-primary px-1 text-[10px] leading-none font-semibold text-primary-foreground tabular-nums group-data-[collapsed=true]/sidebar-nav:absolute group-data-[collapsed=true]/sidebar-nav:top-0.5 group-data-[collapsed=true]/sidebar-nav:right-0.5"
+            className="inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-primary px-1 text-[0.625rem] leading-none font-semibold text-primary-foreground tabular-nums group-data-[collapsed=true]/sidebar-nav:absolute group-data-[collapsed=true]/sidebar-nav:top-0.5 group-data-[collapsed=true]/sidebar-nav:right-0.5"
           >
             {badge > 99 ? '99+' : badge}
           </span>
@@ -152,7 +163,7 @@ function SidebarNavComingSoon({ icon: Icon, label }: { icon: SidebarNavIcon; lab
       >
         <SidebarNavTile icon={Icon} />
         <SidebarNavLabel>{label}</SidebarNavLabel>
-        <span className="ml-auto text-[10px] text-muted-foreground/70 group-data-[collapsed=true]/sidebar-nav:hidden">Coming soon</span>
+        <span className="ml-auto text-[0.625rem] text-muted-foreground/70 group-data-[collapsed=true]/sidebar-nav:hidden">Coming soon</span>
       </Button>
     </Tip>
   )
@@ -162,7 +173,7 @@ function SidebarSection({ label, collapsed }: { label: string; collapsed: boolea
   if (collapsed) return <Separator className="mx-2.5 my-2 bg-black/8 data-horizontal:w-auto dark:bg-sidebar-tint/10" aria-hidden="true" />
   return (
     // Coolify's section header: Title Case in light, small mono capitals in dark.
-    <div className="mt-3 px-2.5 py-1 text-[11px] leading-4 font-medium text-sidebar-nav-muted select-none dark:font-mono dark:text-[10.5px] dark:tracking-[0.08em] dark:uppercase">
+    <div className="mt-3 px-2.5 py-1 text-[0.6875rem] leading-4 font-medium text-sidebar-nav-muted select-none dark:font-mono dark:text-[0.65625rem] dark:tracking-[0.08em] dark:uppercase">
       {label}
     </div>
   )
@@ -218,9 +229,7 @@ function TasksAreaNav({ onNavigate, onBack }: { onNavigate?: () => void; onBack?
   const navigate = useNavigate()
   const [creating, setCreating] = useState(false)
   const workspaceId = useContext(WorkspaceContext)?.workspace.id ?? ''
-  const projects = useProjects(workspaceId, workspaceId !== '').data ?? []
-  // projects with a GitHub repository get a link to their pull requests
-  const withPulls = new Set(useGithubWorkspaceSettings(workspaceId, workspaceId !== '' && projects.length > 0).data?.connected_projects ?? [])
+  const projects = orderProjects(useProjects(workspaceId, workspaceId !== '').data ?? [], useProjectOrder(workspaceId, workspaceId !== '').data ?? [])
   const favorites = (useQuery({ ...savedViewsQueryOptions(workspaceId), enabled: workspaceId !== '' }).data ?? [])
     .filter((saved) => saved.is_favorite)
     .sort((a, b) => (a.favorite_position ?? 0) - (b.favorite_position ?? 0))
@@ -247,35 +256,7 @@ function TasksAreaNav({ onNavigate, onBack }: { onNavigate?: () => void; onBack?
         <>
           <SidebarSection label="Projects" collapsed={collapsed} />
           <SidebarNavItem to={tasksPath({ project: null })} active={onTasks && !project} icon={Folder} label="All projects" onClick={onNavigate} />
-          {projects.map((item) => (
-            <div key={item.id} className="group/project relative">
-              <SidebarNavItem to={tasksPath({ project: item.id })} active={onTasks && project === item.id} icon={dotIcon(item.color)} label={item.name} aria-label={item.private ? `${item.name}, private` : item.name} trailing={item.private ? <ProjectLock project={item} className="text-sidebar-nav" /> : undefined} className={withPulls.has(item.id) ? 'pr-14' : 'pr-8'} onClick={onNavigate} />
-              {collapsed || !withPulls.has(item.id) ? null : (
-                <Tip label="Pull requests" side="right">
-                  <Link
-                    to={`/tasks/projects/${item.id}/pulls`}
-                    aria-label={`${item.name} pull requests`}
-                    className="absolute top-1/2 right-7 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-sidebar-nav opacity-0 transition-opacity outline-none group-hover/project:opacity-100 hover:bg-black/5 hover:text-sidebar-nav-active focus-visible:opacity-100 pointer-coarse:opacity-100 dark:hover:bg-white/8"
-                    onClick={onNavigate}
-                  >
-                    <ProviderMark provider="github" className="size-3.5" />
-                  </Link>
-                </Tip>
-              )}
-              {collapsed ? null : (
-                <Tip label="Project settings" side="right">
-                  <Link
-                    to={`/tasks/projects/${item.id}/settings`}
-                    aria-label={`${item.name} settings`}
-                    className="absolute top-1/2 right-1 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-sidebar-nav opacity-0 transition-opacity outline-none group-hover/project:opacity-100 hover:bg-black/5 hover:text-sidebar-nav-active focus-visible:opacity-100 pointer-coarse:opacity-100 dark:hover:bg-white/8"
-                    onClick={onNavigate}
-                  >
-                    <Settings className="size-3.5" />
-                  </Link>
-                </Tip>
-              )}
-            </div>
-          ))}
+          <ProjectLinks workspaceId={workspaceId} projects={projects} selected={onTasks ? project : null} pathOf={(id) => tasksPath({ project: id })} onNavigate={onNavigate} />
         </>
       ) : <SidebarSection label="Projects" collapsed={collapsed} />}
       <Tip label={collapsed ? 'New project' : undefined} side="right">
@@ -310,6 +291,115 @@ function TasksAreaNav({ onNavigate, onBack }: { onNavigate?: () => void; onBack?
 }
 
 /**
+ * The project links in the member's own order. A row drags to a new place, or moves with Alt+Arrow when its link has
+ * focus; the order saves for this member only.
+ */
+function ProjectLinks({ workspaceId, projects, selected, pathOf, onNavigate }: {
+  workspaceId: string
+  projects: ProjectRecord[]
+  selected: string | null
+  pathOf: (projectId: string) => string
+  onNavigate?: () => void
+}) {
+  const collapsed = useContext(SidebarNavCollapsed)
+  const setOrder = useSetProjectOrder(workspaceId)
+  // projects with a GitHub repository get a link to their pull requests
+  const withPulls = new Set(useGithubWorkspaceSettings(workspaceId, workspaceId !== '' && projects.length > 0).data?.connected_projects ?? [])
+  const [dragId, setDragId] = useState<string | null>(null)
+  const [overId, setOverId] = useState<string | null>(null)
+  const ids = projects.map((item) => item.id)
+  const move = (id: string, to: number) => {
+    const next = moveProject(ids, id, to)
+    if (next) setOrder.mutate(next)
+  }
+  const endDrag = () => {
+    setDragId(null)
+    setOverId(null)
+  }
+
+  return projects.map((item, index) => {
+    const target = overId === item.id && dragId !== null && dragId !== item.id
+    return (
+      <div
+        key={item.id}
+        // the dragged row fades and stays mounted (a drag cancels if its source leaves the DOM); a 2px pink line marks the drop
+        className="group/project relative data-[dragging=true]:opacity-50 data-[drop-target=true]:before:absolute data-[drop-target=true]:before:inset-x-2 data-[drop-target=true]:before:z-10 data-[drop-target=true]:before:h-0.5 data-[drop-target=true]:before:rounded-full data-[drop-target=true]:before:bg-primary data-[drop-edge=before]:before:-top-px data-[drop-edge=after]:before:-bottom-px"
+        draggable
+        data-dragging={dragId === item.id || undefined}
+        data-drop-target={target || undefined}
+        // dropping takes the target's slot, so a downward move lands below it and an upward one above
+        data-drop-edge={target && dragId !== null ? (ids.indexOf(dragId) < index ? 'after' : 'before') : undefined}
+        onDragStart={(event) => {
+          setDragId(item.id)
+          event.dataTransfer.effectAllowed = 'move'
+          event.dataTransfer.setData('text/plain', item.id)
+        }}
+        onDragOver={(event) => {
+          if (!dragId) return
+          event.preventDefault()
+          event.dataTransfer.dropEffect = 'move'
+          setOverId(item.id)
+        }}
+        onDrop={(event) => {
+          event.preventDefault()
+          if (dragId) move(dragId, index)
+          endDrag()
+        }}
+        onDragEnd={endDrag}
+      >
+        <SidebarNavItem
+          to={pathOf(item.id)}
+          active={selected === item.id}
+          icon={dotIcon(item.color)}
+          label={item.name}
+          aria-label={item.private ? `${item.name}, private` : item.name}
+          trailing={item.private ? <ProjectLock project={item} className="text-sidebar-nav" /> : undefined}
+          className={withPulls.has(item.id) ? 'pr-14' : 'pr-8'}
+          // the row is the drag source, not the link (a dragged link carries its URL and a text drag image)
+          draggable={false}
+          aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
+          onClick={onNavigate}
+          onKeyDown={(event) => {
+            if (!event.altKey || (event.key !== 'ArrowUp' && event.key !== 'ArrowDown')) return
+            event.preventDefault()
+            move(item.id, event.key === 'ArrowUp' ? index - 1 : index + 1)
+            // React moves the focused node while reordering; keep focus on it for the next press
+            const link = event.currentTarget
+            requestAnimationFrame(() => link.focus())
+          }}
+        />
+        {collapsed || !withPulls.has(item.id) ? null : (
+          <Tip label="Pull requests" side="right">
+            <Link
+              to={`/tasks/projects/${item.id}/pulls`}
+              aria-label={`${item.name} pull requests`}
+              draggable={false}
+              className="absolute top-1/2 right-7 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-sidebar-nav opacity-0 transition-opacity outline-none group-hover/project:opacity-100 hover:bg-black/5 hover:text-sidebar-nav-active focus-visible:opacity-100 pointer-coarse:opacity-100 dark:hover:bg-white/8"
+              onClick={onNavigate}
+            >
+              <ProviderMark provider="github" className="size-3.5" />
+            </Link>
+          </Tip>
+        )}
+        {collapsed ? null : (
+          <Tip label="Project settings" side="right">
+            <Link
+              to={`/tasks/projects/${item.id}/settings`}
+              aria-label={`${item.name} settings`}
+              draggable={false}
+              className="absolute top-1/2 right-1 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-sidebar-nav opacity-0 transition-opacity outline-none group-hover/project:opacity-100 hover:bg-black/5 hover:text-sidebar-nav-active focus-visible:opacity-100 pointer-coarse:opacity-100 dark:hover:bg-white/8"
+              onClick={onNavigate}
+            >
+              <Settings className="size-3.5" />
+            </Link>
+          </Tip>
+        )}
+      </div>
+    )
+  })
+}
+
+/**
  * Coolify's Back row: a small chevron as wide as an icon tile, then the area's name, centred. No tile, a fill on hover.
  * It opens the last page outside the current area.
  */
@@ -328,7 +418,7 @@ function BackToApp({ label, onNavigate, onBack }: { label: string; onNavigate?: 
     'data-slot': 'sidebar-nav-back',
     title: 'Back to the main menu',
     'aria-label': 'Back to the main menu',
-    className: 'mb-1 flex h-9 w-full min-w-0 shrink-0 items-center gap-2.5 rounded-md pr-2.5 pl-1 text-[13px] outline-none transition-colors duration-120 hover:bg-neutral-100 focus-visible:outline-1 focus-visible:outline-primary dark:hover:bg-white/6 group-data-[collapsed=true]/sidebar-nav:justify-center group-data-[collapsed=true]/sidebar-nav:px-0 flat:h-8 flat:pl-2.5',
+    className: 'mb-1 flex h-9 w-full min-w-0 shrink-0 items-center gap-2.5 rounded-md pr-2.5 pl-1 text-[0.8125rem] outline-none transition-colors duration-120 hover:bg-neutral-100 focus-visible:outline-1 focus-visible:outline-primary dark:hover:bg-white/6 group-data-[collapsed=true]/sidebar-nav:justify-center group-data-[collapsed=true]/sidebar-nav:px-0 flat:h-8 flat:pl-2.5',
     children: (
       <>
         {/* as wide as an icon tile (16px icon, padding and border), so the chevron lines up with the icons below */}
@@ -377,6 +467,8 @@ export function SidebarNav({
   onNavigate,
   collapsed = false,
   chatBadge,
+  mailBadge,
+  mailEnabled = false,
   chatUnread,
   chatEnabled: chat = chatEnabled,
   isRoot = false,
@@ -387,6 +479,10 @@ export function SidebarNav({
   collapsed?: boolean
   /** Unread count on the Chat item. */
   chatBadge?: number
+  /** Unread Inbox threads on the Mail item. */
+  mailBadge?: number
+  /** Mail is on for the server; off, Mail shows as Coming soon. */
+  mailEnabled?: boolean
   /** Chat has an unread message, with or without a count. */
   chatUnread?: boolean
   /** Chat is a link instead of "Coming soon". Defaults to the build's setting. */
@@ -453,14 +549,14 @@ export function SidebarNav({
             // the expanded sidebar shows Search as an input, not a tile
             <button
               type="button"
-              className="flex h-8 w-full min-w-0 items-center gap-2.5 rounded-md bg-neutral-100 pr-1.5 pl-2.5 text-[13px] font-medium text-muted-foreground transition-colors outline-none hover:bg-neutral-200 focus-visible:outline-1 focus-visible:outline-primary dark:bg-sidebar-tint/6 dark:inset-ring dark:inset-ring-sidebar-tint/10 dark:hover:bg-sidebar-tint/10"
+              className="flex h-8 w-full min-w-0 items-center gap-2.5 rounded-md bg-neutral-100 pr-1.5 pl-2.5 text-[0.8125rem] font-medium text-muted-foreground transition-colors outline-none hover:bg-neutral-200 focus-visible:outline-1 focus-visible:outline-primary dark:bg-sidebar-tint/6 dark:inset-ring dark:inset-ring-sidebar-tint/10 dark:hover:bg-sidebar-tint/10"
               aria-label="Search"
               onClick={openSearch}
             >
               <Search className="size-4 shrink-0 opacity-90" />
               <span className="min-w-0 flex-1 truncate text-left">Search</span>
               {paletteKeys ? (
-                <Kbd className="h-auto rounded-md border border-neutral-300 bg-neutral-200 px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground dark:border-sidebar-tint/18 dark:bg-white/6">{shortcutText(paletteKeys)}</Kbd>
+                <Kbd className="h-auto rounded-md border border-neutral-300 bg-neutral-200 px-1.5 py-0.5 text-[0.6875rem] font-medium text-muted-foreground dark:border-sidebar-tint/18 dark:bg-white/6">{shortcutText(paletteKeys)}</Kbd>
               ) : null}
             </button>
           )}
@@ -495,7 +591,7 @@ export function SidebarNav({
                 </>
               ) : (
                 <>
-                  {WORKSPACE_LINKS.map((link) => link.enabled || (link.to === '/chat' && chat) ? (
+                  {WORKSPACE_LINKS.map((link) => (link.to === '/mail' ? mailEnabled : link.enabled || (link.to === '/chat' && chat)) ? (
                     <SidebarNavItem
                       key={link.to}
                       to={link.to === '/tasks' ? tasksPath : link.to}
@@ -503,7 +599,8 @@ export function SidebarNav({
                       end={link.to === '/'}
                       icon={link.icon}
                       label={link.label}
-                      badge={link.to === '/chat' ? chatBadge : undefined}
+                      tag={link.tag}
+                      badge={link.to === '/chat' ? chatBadge : link.to === '/mail' ? mailBadge : undefined}
                       unread={link.to === '/chat' ? chatUnread : undefined}
                       onClick={onNavigate}
                     />

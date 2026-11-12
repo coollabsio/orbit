@@ -21,6 +21,8 @@ test('a workspace event refreshes the workspace data; a resync also the workspac
     ['projects', 'w'],
     ['statuses', 'w'],
     ['labels', 'w'],
+    ['milestones', 'w'],
+    ['cycles', 'w'],
     ['members', 'w'],
     ['notifications', 'w'],
     ['pages', 'w'],

@@ -26,6 +26,7 @@ Orbit reads its configuration only from environment variables that start with `O
 | `ORBIT_UPLOAD_MAX_REQUEST_BYTES` | `104857600` (100 MiB) | |
 | `ORBIT_METRICS_LISTEN` | none (metrics off) | A private listener, for example `127.0.0.1:9090`. `/metrics` has no authentication: never send it through the public site. Orbit logs a warning at startup when the address is not loopback; then only the monitoring network may reach it. |
 | `ORBIT_RATE_LIMIT_*` | see notes | Request limits and email caps. See [Request limits and email caps](#request-limits-and-email-caps). |
+| `ORBIT_MAIL_*` | mail off | The SMTP listener that receives mail. See [Mail](#mail). |
 | `ORBIT_APP_KEY` | none | **Required.** The key for saved secrets: base64 of 32 random bytes. |
 | `ORBIT_APP_KEY_FILE` | none | The path of a file that contains the app key, instead of `ORBIT_APP_KEY`. Do not set both. |
 | `ORBIT_CLOUD` | `false` | `true` turns on Stripe billing for Orbit Cloud and requires the three Stripe variables below. See [Billing (Orbit Cloud)](#billing-orbit-cloud). |
@@ -34,7 +35,7 @@ Orbit reads its configuration only from environment variables that start with `O
 | `ORBIT_STRIPE_WEBHOOK_SECRET` | none | The signing secret (`whsec_…`) of the Stripe webhook endpoint. Only with `ORBIT_CLOUD=true`. |
 | `ORBIT_STRIPE_WEBHOOK_SECRET_FILE` | none | The path of a file that contains the webhook signing secret, instead of `ORBIT_STRIPE_WEBHOOK_SECRET`. Do not set both. |
 | `ORBIT_STRIPE_PRICES` | none | The plans, in display order: `plan:price_id` pairs separated by commas, for example `team:price_1Abc,business:price_2Def`. Plan keys are 1 to 32 lowercase letters, digits or hyphens, and keys and prices must be unique. Only with `ORBIT_CLOUD=true`. |
-| `ORBIT_TRIAL_DAYS` | `7` | How many days a new workspace without a subscription stays writable. A whole number from 0 to 365. `0` means no trial: a new workspace is read-only until it subscribes. Only with `ORBIT_CLOUD=true`. |
+| `ORBIT_TRIAL_DAYS` | `7` | How many days a workspace without a subscription stays writable. The trial belongs to the owner account: it starts with the account's first workspace, and later workspaces of that account share its end. When an account is deleted or changes its email, Orbit keeps a SHA-256 of the old mailbox with the trial start (table `used_trials`), so a new account with that mailbox continues the trial. A whole number from 0 to 365. `0` means no trial: a new workspace is read-only until it subscribes. Only with `ORBIT_CLOUD=true`. |
 | `ORBIT_TRIAL_TASKS` | `50` | The most tasks (not counting the trash) a workspace holds during its trial. A whole number, 0 or more. Only with `ORBIT_CLOUD=true`. |
 | `ORBIT_TRIAL_PAGES` | `20` | The most pages (not counting the trash) a workspace holds during its trial. A whole number, 0 or more. Only with `ORBIT_CLOUD=true`. |
 | `ORBIT_TRIAL_MEMBERS` | `3` | The most members, pending invitations included, a workspace holds during its trial. A whole number, 1 or more (the owner counts). Only with `ORBIT_CLOUD=true`. |
@@ -46,7 +47,56 @@ Orbit reads its configuration only from environment variables that start with `O
 
 Create the app key once with `openssl rand -base64 32` and keep a copy outside the server. Orbit does not start without it. See [Email, registration and the app key](#email-registration-and-the-app-key).
 
-The root user configures outgoing email in **Admin → Settings** and S3 storage in **Admin → Storage**, not with variables.
+## Instance settings from environment variables
+
+The root user saves outgoing email, S3 storage, sign-in providers, open registration and automatic backups in Admin. A declarative deployment (Kubernetes, GitOps, Docker Compose) can set them with the variables below instead. When a variable is set, it replaces the saved value, and Admin shows the setting read-only with the name of the variable. Admin answers a change of it with `409 set_by_environment`. Orbit does not write these values to the database: when you remove a variable, Orbit uses the saved value again after a restart. A setting without a variable keeps the value saved in Admin.
+
+The variables of one group are set together. For example, `ORBIT_SMTP_HOST` needs `ORBIT_SMTP_FROM`. Orbit refuses to start when a group is not complete, and `orbit config check` shows the error. Each secret also has a `_FILE` variable that names a file with the secret, as `ORBIT_APP_KEY_FILE` does. Do not set both. `orbit config show` prints the set variables, with each secret as `[REDACTED]`.
+
+| Variable | Default | Notes |
+|---|---|---|
+| `ORBIT_SMTP_HOST` | none | The mail server. Sets all of **Admin → Email**. Requires `ORBIT_SMTP_FROM`. |
+| `ORBIT_SMTP_SECURITY` | `starttls` | `tls`, `starttls` or `none`. Use `none` only for a relay on the same host or private network. |
+| `ORBIT_SMTP_PORT` | `465` for `tls`, `587` for `starttls`, `25` for `none` | |
+| `ORBIT_SMTP_USERNAME` | none | |
+| `ORBIT_SMTP_PASSWORD`, `ORBIT_SMTP_PASSWORD_FILE` | none | |
+| `ORBIT_SMTP_FROM` | none | The sender address, for example `orbit@example.com`. |
+| `ORBIT_SMTP_FROM_NAME` | none | The sender name, at most 120 characters. |
+| `ORBIT_S3_ENDPOINT` | none | The bucket of **Admin → Storage**, for example `https://s3.eu-central-1.amazonaws.com`. Requires `ORBIT_S3_BUCKET`, `ORBIT_S3_ACCESS_KEY_ID` and `ORBIT_S3_SECRET_ACCESS_KEY`. |
+| `ORBIT_S3_BUCKET` | none | 3 to 63 characters. |
+| `ORBIT_S3_REGION` | `us-east-1` | |
+| `ORBIT_S3_PREFIX` | none (bucket root) | The key prefix, for example `orbit`. |
+| `ORBIT_S3_ACCESS_KEY_ID` | none | |
+| `ORBIT_S3_SECRET_ACCESS_KEY`, `ORBIT_S3_SECRET_ACCESS_KEY_FILE` | none | |
+| `ORBIT_S3_PATH_STYLE` | `false` | `true` for `endpoint/bucket/key` URLs (MinIO and most self-hosted servers). |
+| `ORBIT_S3_ATTACHMENTS` | saved value | `true` or `false`: attachments in S3. `true` requires the `ORBIT_S3_*` bucket. |
+| `ORBIT_S3_BACKUPS` | saved value | `true` or `false`: backups in S3. `true` requires the `ORBIT_S3_*` bucket. |
+| `ORBIT_AUTOMATIC_BACKUPS` | saved value | `off`, `hourly` or `daily`. |
+| `ORBIT_S3_KEEP_DELETED_DAYS` | saved value (40) | 1 to 365: the days a deleted or replaced attachment file stays in S3 before Orbit deletes it. Backups do not contain S3 files, so a restore from a backup older than this can miss files. |
+| `ORBIT_OPEN_REGISTRATION` | saved value | `true` or `false`. `true` requires `ORBIT_SMTP_*` or a provider variable below. On Orbit Cloud, it requires `ORBIT_SMTP_*`. |
+| `ORBIT_GOOGLE_CLIENT_ID`, `ORBIT_GOOGLE_CLIENT_SECRET`, `ORBIT_GOOGLE_CLIENT_SECRET_FILE` | none | The Google OAuth client. Set the ID and the secret together. See [Sign in with Google and GitHub](#sign-in-with-google-and-github). |
+| `ORBIT_GITHUB_CLIENT_ID`, `ORBIT_GITHUB_CLIENT_SECRET`, `ORBIT_GITHUB_CLIENT_SECRET_FILE` | none | The GitHub OAuth client. Set the ID and the secret together. |
+
+Orbit does not test the `ORBIT_S3_*` bucket at startup, as Admin does when it saves one. An unreachable bucket shows up as a move error on **Admin → Storage** and as failed backups. Orbit refuses to start when a workspace's own bucket overlaps the `ORBIT_S3_*` bucket.
+
+### Changing the bucket that holds the attachment files
+
+Orbit records the location (endpoint, bucket and prefix, not the keys) of the bucket that holds the attachment files: when attachments go to S3, from Admin or from `ORBIT_S3_*`. The mover clears the record when attachments are off and no file is left in that bucket. Upgrading to migration `20261111122359_files_bucket` records the bucket saved in Admin, if there is one. An empty one is cleared within 10 minutes.
+
+At startup, Orbit compares the record with the bucket it is about to use (`ORBIT_S3_*`, else Admin → Storage). When they are different, Orbit starts only if it can prove that the recorded bucket has no attachment files:
+
+- When the recorded bucket is the one saved in Admin, Orbit lists `blobs/` in it with the saved keys. An empty bucket is forgotten, and Orbit starts.
+- Otherwise (the recorded bucket came from earlier `ORBIT_S3_*` values, whose keys Orbit never saves), or when the bucket cannot be reached, Orbit refuses to start. The error names the recorded bucket.
+
+To change or remove the `ORBIT_S3_*` bucket while it holds the attachment files, do these steps:
+
+1. Set `ORBIT_S3_ATTACHMENTS=false` and restart Orbit.
+2. Wait until **Admin → Storage** shows no files left to move.
+3. Change or remove the `ORBIT_S3_*` variables, and restart Orbit.
+
+When the files in the recorded bucket are no longer needed (for example, the bucket was deleted), stop Orbit and run `orbit attachments forget-bucket --yes`. Orbit then forgets the bucket and does not read its files again. The audit log records `instance.files_bucket_forgotten`.
+
+All servers that share one Postgres database must have the same variables. Each server reads only its own environment.
 
 ## Upgrade to migration 0066 (API token scopes)
 
@@ -131,6 +181,8 @@ Without a mail server, Profile tells the person to ask an administrator. An admi
 A person can also delete their account in **Account → Profile**, after typing their email and their password (or a fresh sign-in). Orbit refuses while they own a workspace outside the trash (`409 owns_workspaces`, delete those first) and for the root user (`409 root_account`). The account row stays so tasks, comments and messages keep their author, but it is anonymized: the name becomes "Deleted user", the email becomes `deleted-<id>@deleted.invalid` (so the address can register again), and the password, second factors, passkeys, connected accounts, sessions, OAuth grants, personal API tokens, push subscriptions and registered phones, avatar, profile fields and memberships are removed. **Admin → Users** shows it as **Deleted**; it can never be reinstated (`409 account_deleted`). The audit log has `account.deleted`.
 
 Saved secrets (the SMTP password, GitHub App keys, Notion and Asana import tokens, Linear import API keys, Trello import API keys and tokens) are encrypted with the app key. `ORBIT_APP_KEY` (base64 of 32 random bytes, from `openssl rand -base64 32`) is required. Orbit does not create a key. Keep a copy outside the server and its backups: a database restored without the same key cannot read its saved secrets, and the root user must enter them again. Users with two-factor authentication must set it up again.
+
+**Backups are encrypted with the app key.** Each new backup (manual, automatic and pre-migration, local and in S3) has its own random key, sealed with the app key in the backup's `manifest.json`; the database and every attachment file are encrypted. Without the app key a backup cannot be restored: `orbit backup restore` stops with "backup … is encrypted" when `ORBIT_APP_KEY` is not set, and with "encrypted with a different app key" when it is another key, before it changes anything. `orbit backup verify` checks the stored files and needs no key. So keep a copy of the app key outside the server and outside its backups, for example in a password manager. Backups made by older versions are not encrypted and still restore.
 
 Older versions created an `app.key` file beside the SQLite database. If that file still exists, Orbit starts only when `ORBIT_APP_KEY` holds the same key. Set `ORBIT_APP_KEY` to the contents of the file, start Orbit, and then you can delete the file.
 
@@ -329,13 +381,13 @@ Not in the export: pages in the trash, page version history, notifications, save
 
 The root user saves an S3-compatible bucket (AWS S3, Cloudflare R2, MinIO, …) in **Admin → Storage**. Orbit writes, reads and deletes a test object before it saves the bucket. The secret key is encrypted with the app key. Then three settings apply:
 
-- **Attachments in S3**: new files go to the bucket, and existing files move there in the background (the page shows how many are left). Turning it off moves them back to this server. Uploads are still staged on the local disk first. The bucket can be removed only when no attachment file is left in it.
+- **Files in S3**: all uploaded files (task and comment attachments, doc and chat files, custom emoji, stickers, mail attachments, profile pictures). New files go to the bucket, and existing files move there in the background (the page shows how many are left). Turning it off moves them back to this server. Uploads are still staged on the local disk first. The bucket can be removed only when no attachment file is left in it.
 - **Backups in S3**: each new backup is uploaded to `backups/snapshots/{id}/` in the bucket (manifest last) and removed from this server. The Backups page lists local and S3 backups; download and restore fetch an S3 backup into `<backups>/downloads/` and verify its checksums first. Pre-migration backups stay local.
 - **Automatic backups**: off, every hour or every day. Retention keeps the newest backup of each of the last 7 days and 4 weeks, local and in S3.
 
 With attachments in S3, a backup holds the database (and the files still on this server), not the bucket's files. So Orbit does not delete an unused file from the bucket at once: it keeps it 40 days, longer than any kept backup, so a restored older database still finds its files.
 
-The `orbit backup` commands use the bucket saved in Admin → Storage and decrypt its secret with `ORBIT_APP_KEY`. With Postgres, or with SQLite on a server that still has its database, stop the servers and restore:
+The `orbit backup` commands use the `ORBIT_S3_*` bucket, or else the bucket saved in Admin → Storage, and decrypt its secret with `ORBIT_APP_KEY`. With Postgres, or with SQLite on a server that still has its database, stop the servers and restore:
 
 ```sh
 orbit backup list            # the last column says local or s3
@@ -377,6 +429,114 @@ Workspace owners and admins can connect their own bucket in **Settings → File 
 - As with the installation's bucket, Orbit keeps an unused file in the workspace's bucket for 40 days. If the bucket fails (for example, revoked keys), other workspaces are not affected: reads try the other tiers, and cleanup skips that bucket until it works again.
 - Files in a workspace's bucket still count toward the workspace's storage quota.
 - When a workspace is deleted for good, its files in its own bucket stay there.
+## Mail
+
+Orbit is its own mail server for incoming mail. Mail for the verified domains of the workspaces arrives in one of two ways: at Orbit's own SMTP listener, or through a mail provider that sends each message to Orbit over HTTPS (no port 25 on this server; see [Receive through a provider](#receive-through-a-provider)). Members read it in **Mail**. Outgoing mail is not in this release.
+
+### Settings
+
+| Variable | Default | Notes |
+|---|---|---|
+| `ORBIT_MAIL_ENABLED` | `false` | Starts the listener. |
+| `ORBIT_MAIL_HOSTNAME` | none | Required when mail is on. The name in the SMTP greeting, the MX target and the name the certificate must cover, for example `mx.example.com`. |
+| `ORBIT_MAIL_SMTP_BIND` / `ORBIT_MAIL_SMTP_PORT` | `0.0.0.0` / `2525` | The listener address. |
+| `ORBIT_MAIL_MODE` | `relay` | `relay` or `direct`. See [Modes](#modes). |
+| `ORBIT_MAIL_RELAY_CIDRS` | none | Relay mode: required. The relay's addresses. Orbit refuses `/0` and any range that contains the Docker gateway `172.17.0.1`. |
+| `ORBIT_MAIL_RELAY_AUTHSERV_ID` | none | Relay mode: required. The `authserv-id` of the relay's `Authentication-Results` header. |
+| `ORBIT_MAIL_PROXY_CIDRS` | none | Sources (a TCP load balancer) that can send a PROXY protocol v2 header. Orbit then uses the client address from the header. |
+| `ORBIT_MAIL_TLS_CERT` / `ORBIT_MAIL_TLS_KEY` | none | PEM files. Direct mode: required. Relay mode: optional; with them, Orbit offers STARTTLS. |
+| `ORBIT_MAIL_MAX_MESSAGE_BYTES` | `52428800` (50 MB) | The raw size limit, at least 1 MiB. 50 MB holds about 37 MB of attachments. |
+| `ORBIT_MAIL_DNS_RESOLVER` | system | A resolver address (`ip:port`) for the SPF, DKIM, DMARC and domain checks. |
+| `ORBIT_MAIL_CONTENT_ORIGIN` | public origin | An optional separate origin for mail HTML and its images. When set, only this host serves them; the public origin answers 404. Point it at the same server and keep the original `Host` header in the proxy. |
+
+Mail is off by default. The root user turns it on with the **Mail** switch in **Admin → Inbound mail**. Until then, no one sees the Mail app, its menu items, its shortcuts or **Settings → Mail**, and the workspace mail API answers `403 mail_disabled`. When the switch is on, workspace admins add domains and mailboxes in **Settings → Mail**. If you turn it off again, mail for the domains that were added before still arrives, and it shows again when you turn Mail on.
+
+### Modes
+
+- **Relay (default):** a mail service you trust (a spam filter or a mail gateway) receives the mail and sends it to Orbit. Only `ORBIT_MAIL_RELAY_CIDRS` can connect; other clients get `554 5.7.1`. Orbit does not check SPF, DKIM and DMARC itself: it uses only the relay's `Authentication-Results` header with `ORBIT_MAIL_RELAY_AUTHSERV_ID` and removes the others. A message without that header gets no results, and Orbit logs a warning. Use relay mode when the server cannot receive on port 25.
+- **Direct:** the MX record points to Orbit, and Orbit checks SPF, DKIM and DMARC itself. The certificate must cover `ORBIT_MAIL_HOSTNAME`.
+
+In both modes Orbit removes incoming `Authentication-Results` headers with its own ID and adds its own. A DMARC failure does not refuse a message: Orbit puts it in Spam.
+
+Many cloud providers block port 25 (inbound, outbound or both), or open it only on request. Ask your provider, use relay mode, or receive through a provider.
+
+### Receive through a provider
+
+The domain's MX points to a mail provider, and the provider sends each message to `https://<public origin>/api/v1/mail/inbound/<kind>/<id>`. This server needs no listener, no port 25, no certificate and no PTR record for it. The public origin must be reachable from the internet.
+
+- **Instance providers:** the root user adds them in **Admin → Mail → Mail providers**. Every workspace can route a domain to them.
+- **Workspace providers:** owners and admins add their own in **Settings → Mail → Providers**, with their own provider account. The root user can turn this off (**Workspaces can add their own providers**). Off stops new ones; existing ones keep receiving. Orbit Cloud keeps it off and receives all mail at its own MX.
+- In **Settings → Mail → Domains**, pick where each domain's mail arrives. The MX record on the page then shows the provider's hosts, and the domain check expects them. The verification TXT record stays required.
+- Add the domain at the provider yourself; Orbit shows the steps for each provider after you add it. Orbit makes the secrets of Cloudflare and Postmark and shows them once. **New secret** on the provider makes new ones: the old ones stop working at once, so set the new ones on the Worker or in Postmark right away.
+- Each request must carry the provider's signature or credentials. Orbit refuses requests older than 5 minutes and Mailgun tokens it has seen.
+- Orbit checks DKIM and DMARC itself and takes SPF from the provider (its `Received-SPF` header, or the verdict of PostShiba or SES).
+- Mail for an address that no mailbox has: Cloudflare bounces it to the sender. The other providers have already accepted it, so Orbit lists it under **Settings → Mail → Failed messages → Not delivered** for 30 days, without its body.
+
+| Provider | MX | At the provider | Notes |
+|---|---|---|---|
+| PostShiba (recommended) | `inbound.postshiba.com` | A sending domain, and an inbox on it: **Root domain** (or a subdomain, which you then add to Orbit), address `*`, webhook URL Orbit's URL, format **PostShiba JSON**. Enter the inbox's signing secret and an API key of a team admin. | Orbit reads the raw message with the API key while the webhook waits (PostShiba keeps it until the webhook succeeds). Receiving is free at PostShiba. |
+| Cloudflare Email Routing | `route1/2/3.mx.cloudflare.net` (Cloudflare adds them) | An Email Worker with Orbit's script; variables `ORBIT_WEBHOOK_URL` and the secret `ORBIT_SIGNING_SECRET`; the catch-all rule sends to the Worker. | Messages up to 25 MiB. The Worker runs while the sender is connected, so unknown addresses bounce and Orbit errors make the sender retry. |
+| Postmark | `inbound.postmarkapp.com` | Inbound webhook URL with Orbit's credentials in it, and **Include raw email content in JSON payload** on. | Postmark retries until Orbit stores the message. |
+| Mailgun | `mxa.mailgun.org`, `mxb.mailgun.org` (EU: `mxa/mxb.eu.mailgun.org`) | A receiving route that matches `.*@<domain>` and forwards to Orbit's URL (it ends in `/mime`); the HTTP webhook signing key. | |
+| Resend | the host Resend shows (enter it in the provider) | A webhook for `email.received`; its signing secret and an API key that can read received emails. | Resend keeps its own copy of each message; Orbit cannot delete it. |
+| Amazon SES | `inbound-smtp.<region>.amazonaws.com` | A receipt rule that stores the message in an S3 bucket and notifies an SNS topic with an HTTPS subscription to Orbit's URL. Enter the region, bucket, prefix and topic ARN. | Orbit confirms the subscription, refuses other topics, and deletes each message from the bucket once stored. The IAM user needs `s3:GetObject` and `s3:DeleteObject` on the bucket. As a backstop, add a bucket lifecycle rule that deletes objects after a few days. |
+
+### Port 25 and the client address
+
+The container runs without capabilities, so the listener uses port 2525. The Compose file maps host port 25 to it (`ports: ['25:2525']`, commented out in [`deploy/compose.yaml`](../deploy/compose.yaml)).
+
+Orbit must see the real client address: relay mode, SPF and the connection limits use it. With the default Docker port proxy, clients can arrive from the Docker gateway address. Do one of these:
+
+- Set `"userland-proxy": false` in `/etc/docker/daemon.json` and restart Docker.
+- Run the Orbit service with `network_mode: host`.
+
+Orbit logs a warning and the health card shows an error when clients connect from a Docker bridge address. Behind a TCP load balancer, turn on PROXY protocol v2 on the balancer and set `ORBIT_MAIL_PROXY_CIDRS` to its addresses.
+
+### Certificate
+
+Get a certificate for `ORBIT_MAIL_HOSTNAME` (for example with certbot) and mount it read-only. UID 65532 must be able to read both files. Orbit checks the files every 60 seconds and loads them again when they change, without a restart. If a new file cannot be read, Orbit keeps the last good certificate. Orbit logs a warning 7 days before the certificate expires.
+
+### DNS records
+
+**Settings → Mail → Domains** shows each record with a copy button and its status:
+
+| Record | Name | Value | Need |
+|---|---|---|---|
+| TXT | `_orbit-verify.<domain>` | `orbit-verify=<token>` | Required. Proves that the workspace owns the domain. |
+| MX | `<domain>` | `10 <ORBIT_MAIL_HOSTNAME>` | Required in direct mode. In relay mode, the MX points to the relay, and Orbit accepts any MX. |
+| TXT | `<selector>._domainkey.<domain>` | `v=DKIM1; k=rsa; p=…` | Recommended. For sending in a later release. The value is longer than 255 bytes: zone files need it as several strings, and the page shows them. |
+| TXT | `<domain>` | `v=spf1 mx ~all` | Recommended. |
+| TXT | `_dmarc.<domain>` | `v=DMARC1; p=none` | Recommended. |
+
+The domain check runs every 10 minutes for a pending domain (for 72 hours) and once a day for a verified domain. **Check now** runs it at once.
+
+- **Pending → verified:** the verify record has the token.
+- **Verified → suspended:** the verify record is gone. A suspended domain receives mail for 7 days, then refuses it. When the record is back, the domain is verified again.
+- A DNS timeout shows `unknown` and changes nothing.
+
+A domain belongs to one workspace. Orbit refuses a domain when it, a parent domain or a subdomain belongs to a different workspace. An instance admin can move a domain without mailboxes to a different workspace.
+
+Also set the PTR (reverse DNS) record of the server's public address to `ORBIT_MAIL_HOSTNAME`. Your hosting provider sets it.
+
+### Health card and test message
+
+**Admin → Mail** shows a health card: the listener runs, the certificate covers the hostname and when it expires, the real client address, and the PTR of each address of the hostname. Each failed item shows a short fix.
+
+To test the whole path, click **Test message**. The card shows a one-time address `check-<random>@<verified domain>`, valid for 1 hour. Send a mail to it from an outside account (for example Gmail). When the mail arrives, the card shows the client address, the TLS version, and the SPF, DKIM and DMARC results. The test message does not go to a mailbox. This checks MX, port 25, TLS and the checks without an external service.
+
+### Failed messages
+
+Orbit stores each accepted message first and then files it into the mailboxes in a background job. If that job fails on its last attempt, the message is **failed**. **Settings → Mail → Failed messages** lists failed messages, and messages that wait for more than one hour without a job, with the sender, the size and the error. Fix the cause, then click **Retry**.
+
+### Cluster
+
+Each server runs a listener. Point the MX records to every server, or put a TCP load balancer in front of them (with PROXY protocol v2, see above). Any server can file any message, because the message goes into the shared database first. The connection limits count on each server. A cluster needs S3 for files (see [Orbit Cloud](#orbit-cloud-one-postgres-several-orbit-servers)), so that each server can read each stored message.
+
+### Data at rest and backups
+
+Orbit encrypts each stored message with a key for each workspace, and seals the DKIM keys with the app key. The database holds the headers and the message text without encryption, for search. Protect the database at rest yourself: use disk encryption or a managed Postgres service with encryption.
+
+Backups contain the mail and are encrypted with the app key. See [Email, registration and the app key](#email-registration-and-the-app-key).
 
 ## Large images
 

@@ -50,7 +50,7 @@ use crate::notion::import::clamp;
 use crate::repositories::attachments::AttachmentRepository;
 use crate::repositories::membership;
 use crate::repositories::tasks::{
-    CommentContent, CreateTask, TaskChanges, TaskRepository, TaskUpdate,
+    CommentContent, CreateTask, ImportedTask, TaskChanges, TaskRepository, TaskUpdate,
 };
 use crate::secret_box::{decrypt_secret, encrypt_secret};
 pub use crate::task_import::JobRun;
@@ -1391,7 +1391,7 @@ impl TrelloImportService {
                     run.workspace_id,
                     run.user_id,
                     input,
-                    completed_at,
+                    ImportedTask::completed(completed_at),
                     &run.request_id,
                     TimestampMillis::now(),
                 )
@@ -1491,6 +1491,9 @@ impl TrelloImportService {
                 .and_then(parse_instant_millis)
                 .map(TimestampMillis::from_millis),
             parent_task_id: None,
+            milestone_id: None,
+            cycle_id: None,
+            estimate: None,
         })
     }
 

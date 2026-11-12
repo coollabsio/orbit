@@ -12,8 +12,16 @@ struct Fixture {
     service: BackupService,
 }
 
+const APP_KEY: [u8; 32] = [7; 32];
+const OTHER_KEY: [u8; 32] = [9; 32];
+
 impl Fixture {
     async fn new() -> Self {
+        Self::with_key(None).await
+    }
+
+    /// A fixture whose service encrypts new backups with `key`.
+    async fn with_key(key: Option<[u8; 32]>) -> Self {
         let root = tempfile::tempdir().unwrap();
         let database = Database::open(&DatabaseConfig::new(root.path().join("orbit.sqlite")))
             .await
@@ -31,7 +39,8 @@ impl Fixture {
         fs::create_dir_all(&attachments).unwrap();
         fs::write(attachments.join("record.txt"), b"attachment contents").unwrap();
 
-        let service = BackupService::new(root.path().join("backups"), &attachments);
+        let service =
+            BackupService::new(root.path().join("backups"), &attachments).with_app_key(key);
         Self {
             _root: root,
             database,
@@ -46,7 +55,7 @@ async fn postgres_restore_replaces_the_database_and_attachments() {
     if !orbit_platform::testing_postgres() {
         return; // SQLite restores are covered by the tests below.
     }
-    let fixture = Fixture::new().await;
+    let fixture = Fixture::with_key(Some(APP_KEY)).await;
     fixture
         .database
         .execute(
@@ -77,6 +86,13 @@ async fn postgres_restore_replaces_the_database_and_attachments() {
             .iter()
             .any(|file| file.path == "database/users.copy.zst")
     );
+    // Every file of the snapshot is encrypted, the table list too.
+    assert!(snapshot.manifest.encryption.is_some());
+    let users = fs::read(snapshot.path.join("database/users.copy.zst")).unwrap();
+    assert!(!contains(&users, b"kept@example.com"));
+    let tables = fs::read(snapshot.path.join("database/tables.json")).unwrap();
+    assert!(serde_json::from_slice::<serde_json::Value>(&tables).is_err());
+    assert!(!contains(&tables, b"normalized_email"));
 
     fixture
         .database
@@ -123,7 +139,10 @@ async fn postgres_restore_replaces_the_database_and_attachments() {
     assert_eq!(initialized, 1);
     let migrations: i64 = fixture
         .database
-        .scalar("SELECT COUNT(*) FROM schema_migrations WHERE version = 96")
+        .scalar(&format!(
+            "SELECT COUNT(*) FROM schema_migrations WHERE version = {}",
+            MigrationRunner::embedded(env!("CARGO_PKG_VERSION")).latest_version()
+        ))
         .await
         .unwrap();
     assert_eq!(migrations, 1);
@@ -230,7 +249,10 @@ async fn snapshot_manifest_checksums_the_database_and_attachment() {
     let snapshot = fixture.service.create(&fixture.database).await.unwrap();
 
     assert_eq!(snapshot.manifest.kind, BackupKind::Snapshot);
-    assert_eq!(snapshot.manifest.schema_version, 96);
+    assert_eq!(
+        snapshot.manifest.schema_version,
+        MigrationRunner::embedded(env!("CARGO_PKG_VERSION")).latest_version()
+    );
     assert_eq!(
         snapshot.manifest.application_version,
         env!("CARGO_PKG_VERSION")
@@ -279,7 +301,7 @@ async fn verify_and_restore_reject_a_newer_schema_before_touching_the_target() {
     let fixture = Fixture::new().await;
     let snapshot = fixture.service.create(&fixture.database).await.unwrap();
     let mut manifest = snapshot.manifest;
-    manifest.schema_version = 999;
+    manifest.schema_version = 99_999_999_999_999;
     fs::write(
         snapshot.path.join("manifest.json"),
         serde_json::to_vec(&manifest).unwrap(),
@@ -677,4 +699,218 @@ async fn failed_snapshot_creation_removes_its_hidden_temporary_directory() {
         !snapshots.exists() || fs::read_dir(snapshots).unwrap().next().is_none(),
         "failed snapshots must not leave hidden temporary trees"
     );
+}
+
+fn contains(haystack: &[u8], needle: &[u8]) -> bool {
+    haystack
+        .windows(needle.len())
+        .any(|window| window == needle)
+}
+
+/// Restores `id` into a fresh SQLite target, or into the fixture's Postgres database.
+async fn restore_into(
+    fixture: &Fixture,
+    service: &BackupService,
+    id: &str,
+) -> Result<(), BackupError> {
+    if orbit_platform::testing_postgres() {
+        service.restore_postgres(id, &fixture.database).await
+    } else {
+        service
+            .restore_to(
+                id,
+                &fixture._root.path().join("restored.sqlite"),
+                &fixture._root.path().join("restored-attachments"),
+            )
+            .await
+    }
+}
+
+/// The restored `installation_state.initialized`, from the target `restore_into` used.
+async fn restored_initialized(fixture: &Fixture) -> i64 {
+    let query = "SELECT initialized FROM installation_state WHERE id = 1";
+    if orbit_platform::testing_postgres() {
+        fixture.database.scalar(query).await.unwrap()
+    } else {
+        Database::open(&DatabaseConfig::new(
+            fixture._root.path().join("restored.sqlite"),
+        ))
+        .await
+        .unwrap()
+        .scalar(query)
+        .await
+        .unwrap()
+    }
+}
+
+#[tokio::test]
+async fn an_encrypted_snapshot_hides_its_files_and_restores_with_the_key() {
+    if orbit_platform::testing_postgres() {
+        return; // Reads the SQLite file; Postgres: postgres_restore_replaces_the_database_and_attachments.
+    }
+    let fixture = Fixture::with_key(Some(APP_KEY)).await;
+    let snapshot = fixture.service.create(&fixture.database).await.unwrap();
+
+    let encryption = snapshot.manifest.encryption.as_ref().unwrap();
+    assert_eq!(encryption.algorithm, "chacha20poly1305-stream");
+    let database = fs::read(snapshot.path.join("database.sqlite")).unwrap();
+    assert!(!database.starts_with(b"SQLite format 3"));
+    let attachment = fs::read(snapshot.path.join("attachments/record.txt")).unwrap();
+    assert!(!contains(&attachment, b"attachment contents"));
+    // The checksums cover the stored (encrypted) bytes, so verify needs no key.
+    let file = snapshot
+        .manifest
+        .files
+        .iter()
+        .find(|file| file.path == "attachments/record.txt")
+        .unwrap();
+    assert_eq!(file.sha256, checksum(&attachment));
+    BackupService::new(
+        fixture._root.path().join("backups"),
+        fixture._root.path().join("attachments"),
+    )
+    .verify(&snapshot.id)
+    .await
+    .unwrap();
+    let manifest = fs::read_to_string(snapshot.path.join("manifest.json")).unwrap();
+    assert!(manifest.contains("key_sealed"));
+
+    restore_into(&fixture, &fixture.service, &snapshot.id)
+        .await
+        .unwrap();
+    assert_eq!(restored_initialized(&fixture).await, 1);
+    assert_eq!(
+        fs::read(fixture._root.path().join("restored-attachments/record.txt")).unwrap(),
+        b"attachment contents"
+    );
+}
+
+#[tokio::test]
+async fn an_encrypted_snapshot_round_trips_large_and_empty_files() {
+    if orbit_platform::testing_postgres() {
+        return; // Attachment files only; the Postgres COPY files are covered above.
+    }
+    let fixture = Fixture::with_key(Some(APP_KEY)).await;
+    let attachments = fixture._root.path().join("attachments");
+    let large: Vec<u8> = (0..(200 * 1024 + 17))
+        .map(|index| (index % 251) as u8)
+        .collect();
+    fs::write(attachments.join("large.bin"), &large).unwrap();
+    fs::write(attachments.join("exact.bin"), vec![1_u8; 64 * 1024]).unwrap();
+    fs::write(attachments.join("empty.bin"), b"").unwrap();
+    let snapshot = fixture.service.create(&fixture.database).await.unwrap();
+
+    restore_into(&fixture, &fixture.service, &snapshot.id)
+        .await
+        .unwrap();
+    let restored = fixture._root.path().join("restored-attachments");
+    assert_eq!(fs::read(restored.join("large.bin")).unwrap(), large);
+    assert_eq!(
+        fs::read(restored.join("exact.bin")).unwrap(),
+        vec![1_u8; 64 * 1024]
+    );
+    assert_eq!(fs::read(restored.join("empty.bin")).unwrap(), b"");
+}
+
+#[tokio::test]
+async fn an_unencrypted_backup_still_restores() {
+    let fixture = Fixture::new().await;
+    let snapshot = fixture.service.create(&fixture.database).await.unwrap();
+    assert!(snapshot.manifest.encryption.is_none());
+    // Backups from before encryption have no such field at all.
+    let manifest = fs::read_to_string(snapshot.path.join("manifest.json")).unwrap();
+    assert!(!manifest.contains("encryption"));
+
+    let keyed = BackupService::new(
+        fixture._root.path().join("backups"),
+        fixture._root.path().join("attachments"),
+    )
+    .with_app_key(Some(APP_KEY));
+    restore_into(&fixture, &keyed, &snapshot.id).await.unwrap();
+    assert_eq!(restored_initialized(&fixture).await, 1);
+}
+
+#[tokio::test]
+async fn an_encrypted_backup_needs_the_app_key() {
+    let fixture = Fixture::with_key(Some(APP_KEY)).await;
+    let snapshot = fixture.service.create(&fixture.database).await.unwrap();
+    let keyless = BackupService::new(
+        fixture._root.path().join("backups"),
+        fixture._root.path().join("attachments"),
+    );
+
+    let error = restore_into(&fixture, &keyless, &snapshot.id)
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, BackupError::KeyRequired { .. }), "{error}");
+}
+
+#[tokio::test]
+async fn a_different_app_key_is_refused_before_the_target_changes() {
+    let fixture = Fixture::with_key(Some(APP_KEY)).await;
+    let snapshot = fixture.service.create(&fixture.database).await.unwrap();
+    let attachments = fixture._root.path().join("attachments");
+    fs::write(attachments.join("record.txt"), b"changed after the backup").unwrap();
+    fixture
+        .database
+        .execute("UPDATE installation_state SET initialized = 0 WHERE id = 1")
+        .await
+        .unwrap();
+    let target_database = fixture._root.path().join("target.sqlite");
+    let target_attachments = fixture._root.path().join("target-attachments");
+    fs::write(&target_database, b"unchanged database").unwrap();
+    fs::create_dir_all(&target_attachments).unwrap();
+    fs::write(target_attachments.join("old.txt"), b"unchanged attachment").unwrap();
+    let wrong = BackupService::new(fixture._root.path().join("backups"), &attachments)
+        .with_app_key(Some(OTHER_KEY));
+
+    let error = if orbit_platform::testing_postgres() {
+        wrong
+            .restore_postgres(&snapshot.id, &fixture.database)
+            .await
+    } else {
+        wrong
+            .restore_to(&snapshot.id, &target_database, &target_attachments)
+            .await
+    }
+    .unwrap_err();
+
+    assert!(matches!(error, BackupError::KeyMismatch { .. }), "{error}");
+    assert_eq!(fs::read(&target_database).unwrap(), b"unchanged database");
+    assert_eq!(
+        fs::read(target_attachments.join("old.txt")).unwrap(),
+        b"unchanged attachment"
+    );
+    assert_eq!(
+        fs::read(attachments.join("record.txt")).unwrap(),
+        b"changed after the backup"
+    );
+    let initialized: i64 = fixture
+        .database
+        .scalar("SELECT initialized FROM installation_state WHERE id = 1")
+        .await
+        .unwrap();
+    assert_eq!(initialized, 0);
+}
+
+#[tokio::test]
+async fn a_tampered_sealed_key_is_refused() {
+    let fixture = Fixture::with_key(Some(APP_KEY)).await;
+    let snapshot = fixture.service.create(&fixture.database).await.unwrap();
+    // The sealed key belongs to its backup id: copying it into another manifest fails to open.
+    let other = fixture.service.create(&fixture.database).await.unwrap();
+    let mut manifest = other.manifest.clone();
+    manifest.encryption = snapshot.manifest.encryption.clone();
+    fs::write(
+        other.path.join("manifest.json"),
+        serde_json::to_vec(&manifest).unwrap(),
+    )
+    .unwrap();
+
+    let error = restore_into(&fixture, &fixture.service, &other.id)
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, BackupError::KeyMismatch { .. }), "{error}");
 }

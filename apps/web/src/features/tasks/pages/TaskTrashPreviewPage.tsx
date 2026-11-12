@@ -180,7 +180,7 @@ function PreviewPane({ title, banner, error, children }: { title: string; banner
 
 function TrashBanner({ text, children }: { text: string; children: ReactNode }) {
   return (
-    <div role="status" data-slot="trash-banner" className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 bg-destructive px-4 py-2 text-[13px] text-white [&_button]:border-white/70 [&_button]:bg-transparent [&_button]:text-white [&_button:hover]:bg-white/15 [&_button:hover]:text-white">
+    <div role="status" data-slot="trash-banner" className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 bg-destructive px-4 py-2 text-[0.8125rem] text-white [&_button]:border-white/70 [&_button]:bg-transparent [&_button]:text-white [&_button:hover]:bg-white/15 [&_button:hover]:text-white">
       <span className="min-w-0 text-center">{text}</span>
       <span className="flex shrink-0 gap-2">{children}</span>
     </div>

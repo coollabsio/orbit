@@ -6,6 +6,7 @@ import { Alert, FlatList, Pressable, View } from 'react-native'
 import { relativeTime } from '../../data/format'
 import { isMention, notificationCopy, notificationLine, notificationTarget } from '../../data/inbox'
 import * as api from '../../data/orbit'
+import type { NotificationRecord } from '../../data/orbit'
 import { useOrbit } from '../../orbit-context'
 import { useNotifications, usePages, usePeople } from '../../queries'
 import { errorMessage } from '../../session-context'
@@ -33,6 +34,17 @@ export default function ActivityScreen() {
 
   const markRead = useMutation({
     mutationFn: (id: string) => api.markNotificationRead(client, workspaceId, id),
+    // the dot goes at once; the refresh confirms it
+    onMutate: async (id: string) => {
+      // a refresh already on its way would bring the dot back
+      await queryClient.cancelQueries({ queryKey: ['notifications', workspaceId] })
+      const readAt = new Date().toISOString()
+      queryClient.setQueriesData({ queryKey: ['notifications', workspaceId] }, (data: unknown) =>
+        Array.isArray(data)
+          ? (data as NotificationRecord[]).map((item) => (item.id === id && !item.read_at ? { ...item, read_at: readAt } : item))
+          : data,
+      )
+    },
     onSettled: refreshInbox,
   })
   const markAll = useMutation({

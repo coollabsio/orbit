@@ -42,6 +42,7 @@ import type {
   BackupSchedule,
   BackupSummary,
   CompressionStatus,
+  EnvironmentView,
   InstanceSettingsView,
   JobLimitsBody,
   JobLimitView,
@@ -62,7 +63,7 @@ import type {
 import { formatBytes } from './account-api'
 import type { OrbitClient } from './orbit'
 
-export type { AdminUser, AdminUserSummary, BackupItem, BackupItemKind, BackupSchedule, BackupSummary, BackupWorkspace, CompressionStatus, InstanceSettingsView, JobLimitView, LimitsView, RecoveryLink, RestoredItem, S3View, SmtpSecurity, SmtpView, StorageView }
+export type { AdminUser, AdminUserSummary, BackupItem, BackupItemKind, BackupSchedule, BackupSummary, BackupWorkspace, CompressionStatus, EnvironmentView, InstanceSettingsView, JobLimitView, LimitsView, RecoveryLink, RestoredItem, S3View, SmtpSecurity, SmtpView, StorageView }
 export type AuditEvent = PageAuditEvent['items'][number]
 
 export interface Page<T> {
@@ -284,8 +285,10 @@ const JOB_LABELS: Record<string, string> = {
 export const jobLabel = (kind: string) => JOB_LABELS[kind] ?? kind
 export const limitText = (limit: number | null | undefined) => (limit == null ? 'no limit' : String(limit))
 
-/** How often the settings refresh: every 2 s while images compress, every 5 s while files move, else not at all. */
+/** How often the settings refresh: every 1 s while Orbit counts the files to move, every 2 s while images
+    compress, every 5 s while files move, else not at all. */
 export function settingsPollInterval(storage: StorageView | undefined): number | false {
+  if (storage?.checking) return 1000
   if (storage?.image_compression?.running) return 2000
   return storage?.files_to_move ? 5000 : false
 }
@@ -402,13 +405,23 @@ export const BACKUP_SCHEDULE_OPTIONS: readonly { value: BackupSchedule; label: s
   { value: 'daily', label: 'Every day' },
 ]
 
-/** The Storage page's options with one change, as the server wants all three. */
+/** The Storage page's options with one change, as the server wants all of them. */
 export function storageOptions(storage: StorageView, change: Partial<StorageOptionsBody>): StorageOptionsBody {
-  return { attachments_in_s3: storage.attachments_in_s3, backups_in_s3: storage.backups_in_s3, backup_schedule: storage.backup_schedule, ...change }
+  return { attachments_in_s3: storage.attachments_in_s3, backups_in_s3: storage.backups_in_s3, backup_schedule: storage.backup_schedule, s3_keep_deleted_days: storage.s3_keep_deleted_days, ...change }
+}
+
+const KEEP_DELETED_DAYS = [1, 7, 14, 30, 40, 90, 180, 365]
+
+/** The choices for "Keep deleted files in S3", with the saved value when it is not a usual one. */
+export function keepDeletedOptions(current: number): { value: string; label: string }[] {
+  return [...new Set([...KEEP_DELETED_DAYS, current])]
+    .sort((left, right) => left - right)
+    .map((days) => ({ value: String(days), label: days === 1 ? '1 day' : `${days} days` }))
 }
 
 /** `3 files left to move to the bucket.`, or `null` when nothing is waiting. */
-export function movingText(storage: Pick<StorageView, 'files_to_move' | 'attachments_in_s3'>): string | null {
+export function movingText(storage: Pick<StorageView, 'checking' | 'files_to_move' | 'attachments_in_s3'>): string | null {
+  if (storage.checking) return 'Checking which files to move…'
   if (storage.files_to_move <= 0) return null
   return `${storage.files_to_move} ${storage.files_to_move === 1 ? 'file' : 'files'} left to move ${storage.attachments_in_s3 ? 'to the bucket' : 'to this server'}.`
 }
@@ -445,4 +458,10 @@ export function jobLimitsBody(kinds: readonly JobLimitView[], draft: JobDraft): 
       workspace_concurrency: limit(draft[kind.kind]?.workspace_concurrency ?? ''),
     })),
   }
+}
+
+/** The line shown once a move the admin started is done, or `null` while it runs or after it failed. */
+export function movedText(storage: Pick<StorageView, 'checking' | 'files_to_move' | 'attachments_in_s3' | 'move_error'>): string | null {
+  if (movingText(storage) || storage.move_error) return null
+  return storage.attachments_in_s3 ? 'Done. All files are in the bucket.' : 'Done. All files are on this server.'
 }

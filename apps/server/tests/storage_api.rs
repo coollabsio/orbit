@@ -234,6 +234,7 @@ async fn settings_another_server_saved_apply_on_reload() {
         true,
         true,
         orbit_server::repositories::instance_settings::BackupSchedule::Off,
+        None,
         "other-server",
         TimestampMillis::now(),
     )
@@ -344,4 +345,153 @@ async fn rejected_s3_credentials_do_not_stop_attachment_reconciliation() {
     assert!(!service.is_finished(), "{:?}", service.await);
     shutdown.cancel();
     service.await.unwrap().unwrap();
+}
+
+fn environment_with(
+    s3: S3Config,
+) -> orbit_server::repositories::environment_settings::EnvironmentSettings {
+    orbit_server::repositories::environment_settings::EnvironmentSettings::from_config(
+        &orbit_platform::InstanceConfig {
+            s3: Some(s3),
+            ..orbit_platform::InstanceConfig::default()
+        },
+        &[7; 32],
+    )
+    .unwrap()
+}
+
+#[tokio::test]
+async fn another_bucket_waits_until_no_attachment_file_is_left_in_the_recorded_one() {
+    use orbit_server::repositories::instance_settings::InstanceSettingsRepository;
+
+    let fixture = fixture().await;
+    let database = (*fixture.database).clone();
+    let repository = InstanceSettingsRepository::new(database.clone());
+    let saved = s3_body().await;
+    assert_eq!(
+        fixture
+            .call("PUT", "/api/v1/admin/settings/s3", Some(saved.clone()))
+            .await
+            .0,
+        StatusCode::OK
+    );
+    let on = json!({"attachments_in_s3": true, "backups_in_s3": false, "backup_schedule": "off"});
+    assert_eq!(
+        fixture
+            .call("PUT", "/api/v1/admin/settings/storage", Some(on))
+            .await
+            .0,
+        StatusCode::OK
+    );
+    let recorded = repository.files_bucket().await.unwrap().unwrap();
+    assert_eq!(
+        (recorded.endpoint.as_str(), recorded.prefix.as_str()),
+        (saved["endpoint"].as_str().unwrap(), "orbit")
+    );
+    let old = S3Bucket::new(S3Config {
+        endpoint: recorded.endpoint.clone(),
+        region: "us-east-1".to_owned(),
+        bucket: recorded.bucket.clone(),
+        prefix: "orbit".to_owned(),
+        access_key_id: "key".to_owned(),
+        secret_access_key: "plain-secret-value".to_owned(),
+        path_style: true,
+    })
+    .unwrap();
+    old.put_bytes("blobs/ab/file", b"attachment".to_vec())
+        .await
+        .unwrap();
+
+    let other = environment_with(start_fake_s3().await);
+    let error = other.check_bucket(&database, &[7; 32]).await.unwrap_err();
+    assert!(error.contains("files are still in it"), "{error}");
+
+    let off = json!({"attachments_in_s3": false, "backups_in_s3": false, "backup_schedule": "off"});
+    assert_eq!(
+        fixture
+            .call("PUT", "/api/v1/admin/settings/storage", Some(off))
+            .await
+            .0,
+        StatusCode::OK
+    );
+    old.delete("blobs/ab/file").await.unwrap();
+    other.check_bucket(&database, &[7; 32]).await.unwrap();
+    assert_eq!(repository.files_bucket().await.unwrap(), None);
+}
+
+#[tokio::test]
+async fn a_recorded_bucket_without_credentials_stays_until_the_operator_forgets_it() {
+    use orbit_server::repositories::instance_settings::{
+        BucketLocation, InstanceSettingsRepository,
+    };
+
+    let fixture = fixture().await;
+    let database = (*fixture.database).clone();
+    let repository = InstanceSettingsRepository::new(database.clone());
+    let first = start_fake_s3().await;
+    repository
+        .keep_files_bucket(&BucketLocation {
+            endpoint: first.endpoint.clone(),
+            bucket: first.bucket.clone(),
+            prefix: first.prefix.clone(),
+        })
+        .await
+        .unwrap();
+
+    environment_with(first)
+        .check_bucket(&database, &[7; 32])
+        .await
+        .unwrap();
+    let second = environment_with(start_fake_s3().await);
+    let error = second.check_bucket(&database, &[7; 32]).await.unwrap_err();
+    assert!(error.contains("no credentials"), "{error}");
+    assert!(error.contains("forget-bucket"), "{error}");
+
+    assert!(
+        repository
+            .forget_files_bucket("test", TimestampMillis::now())
+            .await
+            .unwrap()
+            .is_some()
+    );
+    second.check_bucket(&database, &[7; 32]).await.unwrap();
+    let audited = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM audit_events WHERE action = 'instance.files_bucket_forgotten'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(audited, 1);
+}
+
+#[tokio::test]
+async fn a_mover_that_saw_attachments_off_keeps_the_record_once_they_are_on_again() {
+    use orbit_server::repositories::instance_settings::InstanceSettingsRepository;
+
+    let fixture = fixture().await;
+    let repository = InstanceSettingsRepository::new((*fixture.database).clone());
+    let (status, _) = fixture
+        .call("PUT", "/api/v1/admin/settings/s3", Some(s3_body().await))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let options = |attachments: bool| {
+        json!({"attachments_in_s3": attachments, "backups_in_s3": false, "backup_schedule": "off"})
+    };
+    let (status, _) = fixture
+        .call("PUT", "/api/v1/admin/settings/storage", Some(options(true)))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let recorded = repository.files_bucket().await.unwrap().unwrap();
+
+    // The mover checked the empty bucket while attachments were off; the root user turned them on before it
+    // cleared the record.
+    assert!(!repository.files_bucket_emptied(&recorded, true).await.unwrap());
+    assert_eq!(repository.files_bucket().await.unwrap(), Some(recorded.clone()));
+
+    let (status, _) = fixture
+        .call("PUT", "/api/v1/admin/settings/storage", Some(options(false)))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(repository.files_bucket_emptied(&recorded, true).await.unwrap());
+    assert_eq!(repository.files_bucket().await.unwrap(), None);
 }

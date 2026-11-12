@@ -565,8 +565,10 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
     content: editorRef.current?.getContent() ?? page.content,
   })
 
-  const byId = useMemo(() => new Map(pages.map((item) => [item.id, item])), [pages])
-  // Trashed pages leave the tree, so anything not in it renders as "Missing page".
+  // A database row and its sub-pages are not in the tree: their targets come from the server's sub-page list.
+  const subPages = serverSubPages.data
+  const byId = useMemo(() => new Map([...pages, ...(subPages ?? [])].map((item) => [item.id, item])), [pages, subPages])
+  // Trashed pages leave the tree and the sub-page list, so anything not in either renders as "Missing page".
   const resolvePage = useCallback((id: string): PageRef | null => {
     const found = byId.get(id)
     return found ? { title: found.title, icon: found.icon, trashed: false, database: found.kind === 'database' } : null
@@ -743,7 +745,7 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
                 <Button
                   type="button"
                   variant="ghost"
-                  className="h-auto cursor-pointer rounded-xl border-0 p-0.5 text-[60px] leading-none font-normal drop-shadow-[0_1px_2px_rgb(0_0_0/0.3)] hover:bg-foreground/[0.02] disabled:opacity-100 dark:hover:bg-foreground/[0.02]"
+                  className="h-auto cursor-pointer rounded-xl border-0 p-0.5 text-[3.75rem] leading-none font-normal drop-shadow-[0_1px_2px_rgb(0_0_0/0.3)] hover:bg-foreground/[0.02] disabled:opacity-100 dark:hover:bg-foreground/[0.02]"
                   disabled={readOnly}
                   aria-label="Change icon"
                 />
@@ -810,7 +812,7 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
         </div>
       ) : null}
       <Input
-        className="mb-5 h-auto w-full rounded-none border-0 bg-transparent p-0 text-[30px] leading-[1.25] font-bold text-foreground shadow-none outline-none placeholder:text-muted-foreground/70 focus:outline-none focus-visible:ring-0 md:text-[30px] max-[899px]:mb-3.5 max-[899px]:text-[22px]! dark:bg-transparent"
+        className="mb-5 h-auto w-full rounded-none border-0 bg-transparent p-0 text-[1.875rem] leading-[1.25] font-bold text-foreground shadow-none outline-none placeholder:text-muted-foreground/70 focus:outline-none focus-visible:ring-0 md:text-[1.875rem] max-[899px]:mb-3.5 max-[899px]:text-[1.375rem]! dark:bg-transparent"
         value={title}
         readOnly={readOnly}
         autoFocus={peek?.focusTitle}
@@ -847,7 +849,7 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
               >
                 <ArrowLeft className="size-4" />
               </Button>
-              <nav className="flex min-w-0 items-center gap-1.5 overflow-hidden text-[13px] text-muted-foreground/70" aria-label="Page path">
+              <nav className="flex min-w-0 items-center gap-1.5 overflow-hidden text-[0.8125rem] text-muted-foreground/70" aria-label="Page path">
                 <span className="flex min-w-0 shrink-0 items-center gap-1.5 max-[899px]:hidden" data-space-crumb={space}>
                   <span className="flex max-w-40 min-w-0 items-center gap-1">
                     {space === PRIVATE_SPACE ? <Lock className="size-3.5 shrink-0" aria-hidden="true" /> : null}
@@ -915,7 +917,7 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
               >
                 <CommentIcon className="size-4" />
                 {counts.open > 0 ? (
-                  <span className="min-w-4 rounded-full bg-primary px-1 text-center text-[10px] leading-4 font-semibold text-primary-foreground tabular-nums" data-comments-badge="">
+                  <span className="min-w-4 rounded-full bg-primary px-1 text-center text-[0.625rem] leading-4 font-semibold text-primary-foreground tabular-nums" data-comments-badge="">
                     {counts.open}
                   </span>
                 ) : null}
@@ -1057,7 +1059,7 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
         {status === 'conflict' ? (
           <div
             role="alert"
-            className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border bg-destructive/10 px-3 py-2 text-[13px] text-foreground"
+            className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border bg-destructive/10 px-3 py-2 text-[0.8125rem] text-foreground"
           >
             <span className="min-w-0 flex-1">The title, icon or cover was changed somewhere else. Your change is not saved.</span>
             <Button type="button" variant="outline" size="sm" onClick={() => void reloadFromServer()}>
@@ -1072,7 +1074,7 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
           <div
             role="alert"
             data-sync-notice={notice}
-            className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border bg-destructive/10 px-3 py-2 text-[13px] text-foreground"
+            className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border bg-destructive/10 px-3 py-2 text-[0.8125rem] text-foreground"
           >
             <span className="min-w-0 flex-1">
               {notice === 'too-large'
