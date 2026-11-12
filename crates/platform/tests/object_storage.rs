@@ -209,6 +209,7 @@ fn with_workspace_bucket(
             },
         )]
         .into(),
+        ..ObjectStorageState::default()
     }
 }
 

@@ -7,7 +7,7 @@ import { AdminSignInProvidersPage } from './AdminSignInProvidersPage'
 const originalFetch = globalThis.fetch
 afterEach(() => { globalThis.fetch = originalFetch })
 
-const ENVIRONMENT: EnvironmentView = { registration_open: false, smtp: false, s3: false, attachments_in_s3: false, backups_in_s3: false, backup_schedule: false, sign_in_providers: [] }
+const ENVIRONMENT: EnvironmentView = { registration_open: false, smtp: false, s3: false, attachments_in_s3: false, backups_in_s3: false, backup_schedule: false, s3_keep_deleted_days: false, sign_in_providers: [] }
 const GOOGLE = { provider: 'google', client_id: 'google-client', secret_set: true, callback_url: 'https://orbit.example.com/api/v1/auth/providers/google/callback' }
 
 test('a provider set by the environment is read-only, the other stays editable', async () => {

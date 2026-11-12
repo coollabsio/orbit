@@ -29,6 +29,7 @@ const S3_SECRET_ACCESS_KEY: &str = "ORBIT_S3_SECRET_ACCESS_KEY";
 const S3_PATH_STYLE: &str = "ORBIT_S3_PATH_STYLE";
 const S3_ATTACHMENTS: &str = "ORBIT_S3_ATTACHMENTS";
 const S3_BACKUPS: &str = "ORBIT_S3_BACKUPS";
+const S3_KEEP_DELETED_DAYS: &str = "ORBIT_S3_KEEP_DELETED_DAYS";
 const GOOGLE_CLIENT_ID: &str = "ORBIT_GOOGLE_CLIENT_ID";
 const GOOGLE_CLIENT_SECRET: &str = "ORBIT_GOOGLE_CLIENT_SECRET";
 const GITHUB_CLIENT_ID: &str = "ORBIT_GITHUB_CLIENT_ID";
@@ -58,11 +59,12 @@ const S3_KEYS: [&str; 7] = [
     S3_SECRET_ACCESS_KEY,
     S3_PATH_STYLE,
 ];
-const OTHER_KEYS: [&str; 8] = [
+const OTHER_KEYS: [&str; 9] = [
     OPEN_REGISTRATION,
     AUTOMATIC_BACKUPS,
     S3_ATTACHMENTS,
     S3_BACKUPS,
+    S3_KEEP_DELETED_DAYS,
     GOOGLE_CLIENT_ID,
     GOOGLE_CLIENT_SECRET,
     GITHUB_CLIENT_ID,
@@ -176,6 +178,8 @@ pub struct InstanceConfig {
     pub s3: Option<S3Config>,
     pub attachments_in_s3: Option<bool>,
     pub backups_in_s3: Option<bool>,
+    /// Days (1–365) a deleted or replaced attachment file stays in S3.
+    pub s3_keep_deleted_days: Option<u32>,
     pub google: Option<OAuthClientConfig>,
     pub github: Option<OAuthClientConfig>,
 }
@@ -220,6 +224,21 @@ impl InstanceConfig {
             s3,
             attachments_in_s3,
             backups_in_s3,
+            s3_keep_deleted_days: values
+                .policy(S3_KEEP_DELETED_DAYS)
+                .map(|value| {
+                    value
+                        .parse::<u32>()
+                        .ok()
+                        .filter(|days| (1..=365).contains(days))
+                        .ok_or_else(|| {
+                            invalid(
+                                S3_KEEP_DELETED_DAYS,
+                                "must be a number of days from 1 to 365",
+                            )
+                        })
+                })
+                .transpose()?,
             google: oauth_client(&values, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET)?,
             github: oauth_client(&values, GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET)?,
         };
@@ -276,6 +295,9 @@ impl InstanceConfig {
         }
         if let Some(on) = self.backups_in_s3 {
             push(S3_BACKUPS, &on.to_string());
+        }
+        if let Some(days) = self.s3_keep_deleted_days {
+            push(S3_KEEP_DELETED_DAYS, &days.to_string());
         }
         for (client, id_key, secret_key) in [
             (&self.google, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET),
@@ -608,12 +630,23 @@ mod tests {
     }
 
     #[test]
+    fn s3_keep_deleted_days_is_1_to_365_and_needs_no_bucket() {
+        let days = |value| parse(&[(S3_KEEP_DELETED_DAYS, value)]);
+        assert_eq!(days(" 7 ").unwrap().s3_keep_deleted_days, Some(7));
+        assert_eq!(days("365").unwrap().s3_keep_deleted_days, Some(365));
+        for value in ["0", "366", "-1", "40d"] {
+            assert_eq!(invalid_key(days(value)), S3_KEEP_DELETED_DAYS);
+        }
+    }
+
+    #[test]
     fn an_empty_flag_or_schedule_is_an_error() {
         for key in [
             OPEN_REGISTRATION,
             AUTOMATIC_BACKUPS,
             S3_ATTACHMENTS,
             S3_BACKUPS,
+            S3_KEEP_DELETED_DAYS,
         ] {
             assert_eq!(invalid_key(parse(&[(key, " ")])), key);
         }

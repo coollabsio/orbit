@@ -8,9 +8,9 @@ import { AdminStoragePage } from './AdminStoragePage'
 const originalFetch = globalThis.fetch
 afterEach(() => { globalThis.fetch = originalFetch })
 
-const NO_BUCKET = { s3: null, attachments_in_s3: false, backups_in_s3: false, backup_schedule: 'off', files_to_move: 0, move_error: null }
+const NO_BUCKET = { s3: null, attachments_in_s3: false, backups_in_s3: false, backup_schedule: 'off', s3_keep_deleted_days: 40, files_to_move: 0, move_error: null }
 const S3 = { endpoint: 'http://minio:9000', region: 'us-east-1', bucket: 'orbit-files', prefix: '', access_key_id: 'orbit', path_style: true }
-const ENVIRONMENT: EnvironmentView = { registration_open: false, smtp: false, s3: false, attachments_in_s3: false, backups_in_s3: false, backup_schedule: false, sign_in_providers: [] }
+const ENVIRONMENT: EnvironmentView = { registration_open: false, smtp: false, s3: false, attachments_in_s3: false, backups_in_s3: false, backup_schedule: false, s3_keep_deleted_days: false, sign_in_providers: [] }
 
 test('a bucket is saved first, then a switch sends the other options unchanged', async () => {
   const requests: { url: string; body: unknown }[] = []
@@ -48,7 +48,7 @@ test('a bucket is saved first, then a switch sends the other options unchanged',
   await waitFor(() => expect(requests).toHaveLength(2))
   expect(requests[1]).toEqual({
     url: '/api/v1/admin/settings/storage',
-    body: { attachments_in_s3: true, backups_in_s3: false, backup_schedule: 'daily' },
+    body: { attachments_in_s3: true, backups_in_s3: false, backup_schedule: 'daily', s3_keep_deleted_days: 40 },
   })
 })
 

@@ -74,7 +74,7 @@ test('badges, the audit actor and job wording', () => {
   expect([jobLabel('notion.scan'), jobLabel('mail.sync'), limitText(null), limitText(4)]).toEqual(['Notion scans', 'mail.sync', 'no limit', '4'])
 })
 
-const storage = (fields: Partial<StorageView>): StorageView => ({ attachments_in_s3: false, backups_in_s3: false, backup_schedule: 'off', files_to_move: 0, ...fields })
+const storage = (fields: Partial<StorageView>): StorageView => ({ attachments_in_s3: false, backups_in_s3: false, backup_schedule: 'off', s3_keep_deleted_days: 40, files_to_move: 0, ...fields })
 
 test('the settings poll while images compress or files move', () => {
   expect(settingsPollInterval(undefined)).toBe(false)
@@ -114,7 +114,7 @@ test('the bucket form keeps the saved secret key when the field is empty', () =>
 })
 
 test('storage options change one field and keep the others', () => {
-  expect(storageOptions(storage({ backups_in_s3: true, backup_schedule: 'daily' }), { attachments_in_s3: true })).toEqual({ attachments_in_s3: true, backups_in_s3: true, backup_schedule: 'daily' })
+  expect(storageOptions(storage({ backups_in_s3: true, backup_schedule: 'daily' }), { attachments_in_s3: true })).toEqual({ attachments_in_s3: true, backups_in_s3: true, backup_schedule: 'daily', s3_keep_deleted_days: 40 })
 })
 
 test('moving and compression wording', () => {

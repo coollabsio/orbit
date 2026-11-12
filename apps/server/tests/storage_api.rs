@@ -234,6 +234,7 @@ async fn settings_another_server_saved_apply_on_reload() {
         true,
         true,
         orbit_server::repositories::instance_settings::BackupSchedule::Off,
+        None,
         "other-server",
         TimestampMillis::now(),
     )

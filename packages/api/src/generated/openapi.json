@@ -67551,6 +67551,7 @@
           "attachments_in_s3",
           "backups_in_s3",
           "backup_schedule",
+          "s3_keep_deleted_days",
           "sign_in_providers"
         ],
         "properties": {
@@ -67573,6 +67574,10 @@
           "s3": {
             "type": "boolean",
             "description": "`ORBIT_S3_*`: the bucket."
+          },
+          "s3_keep_deleted_days": {
+            "type": "boolean",
+            "description": "`ORBIT_S3_KEEP_DELETED_DAYS`."
           },
           "sign_in_providers": {
             "type": "array",
@@ -79544,6 +79549,15 @@
           "backups_in_s3": {
             "type": "boolean",
             "description": "New backups are uploaded to the bucket."
+          },
+          "s3_keep_deleted_days": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Days (1–365) a deleted or replaced attachment file stays in S3 before Orbit deletes it. Omitted: unchanged.",
+            "minimum": 0
           }
         },
         "additionalProperties": false
@@ -79554,6 +79568,7 @@
           "attachments_in_s3",
           "backups_in_s3",
           "backup_schedule",
+          "s3_keep_deleted_days",
           "files_to_move"
         ],
         "properties": {
@@ -79602,6 +79617,12 @@
                 "description": "`null` until a bucket is saved."
               }
             ]
+          },
+          "s3_keep_deleted_days": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Days a deleted or replaced attachment file stays in S3, so restoring an older backup still finds it.",
+            "minimum": 0
           }
         }
       },

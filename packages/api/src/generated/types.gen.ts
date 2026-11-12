@@ -2503,6 +2503,10 @@ export type EnvironmentView = {
      */
     s3: boolean;
     /**
+     * `ORBIT_S3_KEEP_DELETED_DAYS`.
+     */
+    s3_keep_deleted_days: boolean;
+    /**
      * `ORBIT_GOOGLE_*`, `ORBIT_GITHUB_*`.
      */
     sign_in_providers: Array<Provider>;
@@ -7412,6 +7416,10 @@ export type StorageOptionsBody = {
      * New backups are uploaded to the bucket.
      */
     backups_in_s3: boolean;
+    /**
+     * Days (1–365) a deleted or replaced attachment file stays in S3 before Orbit deletes it. Omitted: unchanged.
+     */
+    s3_keep_deleted_days?: number | null;
 };
 
 export type StorageView = {
@@ -7434,6 +7442,10 @@ export type StorageView = {
      */
     move_error?: string | null;
     s3?: null | S3View;
+    /**
+     * Days a deleted or replaced attachment file stays in S3, so restoring an older backup still finds it.
+     */
+    s3_keep_deleted_days: number;
 };
 
 /**

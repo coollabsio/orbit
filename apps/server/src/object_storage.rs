@@ -129,6 +129,7 @@ pub fn apply(
         attachments: settings.attachments_in_s3,
         backups: settings.backups_in_s3,
         workspace_buckets,
+        keep_released_millis: i64::from(settings.s3_keep_deleted_days) * 24 * 60 * 60 * 1000,
     });
     Ok(())
 }
