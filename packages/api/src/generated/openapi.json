@@ -73384,9 +73384,15 @@
                 "task_count",
                 "completed_count",
                 "estimate_total",
-                "estimate_completed"
+                "estimate_completed",
+                "carried_over_count"
               ],
               "properties": {
+                "carried_over_count": {
+                  "type": "integer",
+                  "format": "int64",
+                  "description": "Live tasks moved out of this cycle to a later one and not back in it; not in `task_count`."
+                },
                 "completed_count": {
                   "type": "integer",
                   "format": "int64"
@@ -79642,9 +79648,15 @@
                 "task_count",
                 "completed_count",
                 "estimate_total",
-                "estimate_completed"
+                "estimate_completed",
+                "carried_over_count"
               ],
               "properties": {
+                "carried_over_count": {
+                  "type": "integer",
+                  "format": "int64",
+                  "description": "Live tasks that \"move unfinished tasks\" took out of this cycle and that are not back in it.\nThey are not in `task_count`, so a past cycle still shows the work it did not finish."
+                },
                 "completed_count": {
                   "type": "integer",
                   "format": "int64",
@@ -81251,9 +81263,15 @@
           "task_count",
           "completed_count",
           "estimate_total",
-          "estimate_completed"
+          "estimate_completed",
+          "carried_over_count"
         ],
         "properties": {
+          "carried_over_count": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Live tasks moved out of this cycle to a later one and not back in it; not in `task_count`."
+          },
           "completed_count": {
             "type": "integer",
             "format": "int64"
@@ -84850,9 +84868,15 @@
           "task_count",
           "completed_count",
           "estimate_total",
-          "estimate_completed"
+          "estimate_completed",
+          "carried_over_count"
         ],
         "properties": {
+          "carried_over_count": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Live tasks that \"move unfinished tasks\" took out of this cycle and that are not back in it.\nThey are not in `task_count`, so a past cycle still shows the work it did not finish."
+          },
           "completed_count": {
             "type": "integer",
             "format": "int64",

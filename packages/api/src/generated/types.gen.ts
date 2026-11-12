@@ -3245,6 +3245,10 @@ export type ListPublicComment = {
 
 export type ListPublicCycle = {
     items: Array<{
+        /**
+         * Live tasks moved out of this cycle to a later one and not back in it; not in `task_count`.
+         */
+        carried_over_count: number;
         completed_count: number;
         /**
          * Exclusive: the next cycle may start at this instant.
@@ -5736,6 +5740,11 @@ export type PageStatusRecord = {
 export type PageTaskCycle = {
     items: Array<{
         /**
+         * Live tasks that "move unfinished tasks" took out of this cycle and that are not back in it.
+         * They are not in `task_count`, so a past cycle still shows the work it did not finish.
+         */
+        carried_over_count: number;
+        /**
          * Of `task_count`, the tasks in a completed status.
          */
         completed_count: number;
@@ -6476,6 +6485,10 @@ export type PublicCreateTaskBody = {
 };
 
 export type PublicCycle = {
+    /**
+     * Live tasks moved out of this cycle to a later one and not back in it; not in `task_count`.
+     */
+    carried_over_count: number;
     completed_count: number;
     /**
      * Exclusive: the next cycle may start at this instant.
@@ -7997,6 +8010,11 @@ export type TaskConflict = {
 };
 
 export type TaskCycle = {
+    /**
+     * Live tasks that "move unfinished tasks" took out of this cycle and that are not back in it.
+     * They are not in `task_count`, so a past cycle still shows the work it did not finish.
+     */
+    carried_over_count: number;
     /**
      * Of `task_count`, the tasks in a completed status.
      */
