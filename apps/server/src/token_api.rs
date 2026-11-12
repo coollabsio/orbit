@@ -323,6 +323,12 @@ pub struct TaskQuery {
     pub priority: Option<String>,
     pub milestone: Option<MilestoneFilter>,
     pub cycle: Option<CycleFilter>,
+    /// Only tasks due strictly before this moment.
+    pub due_before: Option<TimestampMillis>,
+    /// Only tasks due strictly after this moment.
+    pub due_after: Option<TimestampMillis>,
+    /// `true`: only tasks with a due date; `false`: only tasks without one.
+    pub has_due_date: Option<bool>,
     /// Only the direct sub-issues of this task, which must be in an approved project.
     pub parent_task_id: Option<Id>,
     /// Newest first when unset.
@@ -373,6 +379,16 @@ impl CycleRelative {
             Self::Previous => "previous",
         }
     }
+}
+
+/// A due-date bound: `YYYY-MM-DD` (00:00 UTC of that day) or an RFC 3339 time.
+pub fn parse_due_bound(raw: &str, invalid: &'static str) -> Result<TimestampMillis> {
+    crate::task_import::parse_instant_millis(raw)
+        .or_else(|| {
+            crate::repositories::task_filter::parse_ymd(raw.trim()).map(|day| day * 86_400_000)
+        })
+        .map(TimestampMillis::from_millis)
+        .ok_or(TokenApiError::Invalid(invalid))
 }
 
 /// A milestone ID, or `none` for tasks without a milestone.
@@ -1096,6 +1112,33 @@ impl Authorized<'_> {
                 Value::Null,
             )),
             None => {}
+        }
+        match query.has_due_date {
+            Some(true) => children.push(condition(
+                FilterField::DueDate,
+                FilterOperator::IsNotEmpty,
+                Value::Null,
+            )),
+            Some(false) => children.push(condition(
+                FilterField::DueDate,
+                FilterOperator::IsEmpty,
+                Value::Null,
+            )),
+            None => {}
+        }
+        if let Some(before) = query.due_before {
+            children.push(condition(
+                FilterField::DueDate,
+                FilterOperator::Before,
+                json!({ "instant": before.as_millis() }),
+            ));
+        }
+        if let Some(after) = query.due_after {
+            children.push(condition(
+                FilterField::DueDate,
+                FilterOperator::After,
+                json!({ "instant": after.as_millis() }),
+            ));
         }
         let filter = TaskFilter {
             tree: FilterGroup {

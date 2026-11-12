@@ -34,7 +34,7 @@ use crate::token_api::{
     AssigneeFilter, CommentImport, CycleRelative, CycleView, DOC_TOO_LARGE_DETAIL, DocMove,
     DocPatch, DocVersionView, DocView, Me, MemberView, MovedDocView, Named, NewComment, NewDoc,
     NewTask, TaskPatch, TaskQuery, TaskView, TokenApi, TokenApiError, Written, parse_cycle_filter,
-    parse_milestone_filter,
+    parse_due_bound, parse_milestone_filter,
 };
 use crate::workspace_export::{
     ExportError, ExportMode, WorkspaceExport, WorkspaceExportService, WorkspaceExportStatus,
@@ -871,6 +871,14 @@ struct TasksQuery {
     /// A cycle ID; `current`, `next` or `previous` for that cycle of each task's project; or
     /// `none` for tasks without a cycle.
     cycle_id: Option<String>,
+    /// Only tasks due before this moment: a date (`2026-11-12`, 00:00 UTC) or a UTC time
+    /// (`2026-11-12T15:00:00Z`). Tasks without a due date never match.
+    due_before: Option<String>,
+    /// Only tasks due after this moment, as `due_before` reads it. Tasks without a due date never
+    /// match.
+    due_after: Option<String>,
+    /// `true` for tasks with a due date, `false` for tasks without one.
+    has_due_date: Option<bool>,
     /// Only the direct sub-issues of this task (a UUID or an identifier such as `ENG-12`), which
     /// must be in an approved project.
     parent_task_id: Option<String>,
@@ -1459,6 +1467,21 @@ async fn list_tasks(
                 .as_deref()
                 .map(parse_cycle_filter)
                 .transpose()?,
+            due_before: query
+                .due_before
+                .as_deref()
+                .map(|raw| {
+                    parse_due_bound(raw, "due_before must be a date or a UTC time, as 2026-11-12 or 2026-11-12T15:00:00Z.")
+                })
+                .transpose()?,
+            due_after: query
+                .due_after
+                .as_deref()
+                .map(|raw| {
+                    parse_due_bound(raw, "due_after must be a date or a UTC time, as 2026-11-12 or 2026-11-12T15:00:00Z.")
+                })
+                .transpose()?,
+            has_due_date: query.has_due_date,
             parent_task_id: api
                 .optional_task_id(query.parent_task_id.as_deref())
                 .await?,

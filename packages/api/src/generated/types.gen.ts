@@ -11475,6 +11475,20 @@ export type PublicListTasksData = {
          */
         cycle_id?: string;
         /**
+         * Only tasks due before this moment: a date (`2026-11-12`, 00:00 UTC) or a UTC time
+         * (`2026-11-12T15:00:00Z`). Tasks without a due date never match.
+         */
+        due_before?: string;
+        /**
+         * Only tasks due after this moment, as `due_before` reads it. Tasks without a due date never
+         * match.
+         */
+        due_after?: string;
+        /**
+         * `true` for tasks with a due date, `false` for tasks without one.
+         */
+        has_due_date?: boolean;
+        /**
          * Only the direct sub-issues of this task (a UUID or an identifier such as `ENG-12`), which
          * must be in an approved project.
          */

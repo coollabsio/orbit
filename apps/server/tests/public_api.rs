@@ -1653,6 +1653,87 @@ async fn due_dates_can_be_set_kept_and_cleared() {
 }
 
 #[tokio::test]
+async fn tasks_filter_by_due_date() {
+    let f = Fixture::new().await;
+    let (token, _) = f.token(&[ApiTokenScope::TasksWrite], false).await;
+    let status = f.first_status(f.project).await;
+    for (title, due) in [
+        ("Early", "2026-12-05T09:00:00.000Z"),
+        ("Late", "2026-12-05T18:00:00.000Z"),
+        ("Next day", "2026-12-06T09:00:00.000Z"),
+    ] {
+        let (code, task) = f
+            .call(
+                Some(&token),
+                "POST",
+                "/tasks",
+                Some(json!({"project_id": f.project, "status_id": status, "title": title, "due_at": due})),
+            )
+            .await;
+        assert_eq!(code, StatusCode::CREATED, "{task}");
+    }
+    let titles = |page: &Value| {
+        let mut titles = page["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|task| task["title"].as_str().unwrap().to_owned())
+            .collect::<Vec<_>>();
+        titles.sort();
+        titles
+    };
+    for (query, expected) in [
+        ("due_before=2026-12-06", vec!["Early", "Late"]),
+        ("due_after=2026-12-05", vec!["Early", "Late", "Next day"]),
+        ("due_after=2026-12-06", vec!["Next day"]),
+        (
+            "due_after=2026-12-05T09:00:00Z&due_before=2026-12-06T09:00:00Z",
+            vec!["Late"],
+        ),
+        ("due_before=2026-12-05T09:00:00.000Z", vec![]),
+        ("has_due_date=true", vec!["Early", "Late", "Next day"]),
+        ("has_due_date=false", vec!["Approved task"]),
+        ("has_due_date=false&due_before=2027-01-01", vec![]),
+    ] {
+        let (code, page) = f
+            .call(Some(&token), "GET", &format!("/tasks?{query}"), None)
+            .await;
+        assert_eq!(code, StatusCode::OK, "{query}: {page}");
+        assert_eq!(titles(&page), expected, "{query}");
+    }
+    let (_, page) = f
+        .call(
+            Some(&token),
+            "GET",
+            "/tasks?due_after=2026-12-01&sort=due_date&order=asc&limit=1",
+            None,
+        )
+        .await;
+    let cursor = page["next_cursor"].as_str().unwrap().to_owned();
+    assert_eq!(titles(&page), ["Early"]);
+    let (_, next) = f
+        .call(
+            Some(&token),
+            "GET",
+            &format!("/tasks?due_after=2026-12-01&sort=due_date&order=asc&limit=1&cursor={cursor}"),
+            None,
+        )
+        .await;
+    assert_eq!(titles(&next), ["Late"]);
+    for bad in [
+        "due_before=tomorrow",
+        "due_after=2026-13-40",
+        "due_before=",
+        "has_due_date=maybe",
+    ] {
+        let (code, _) = f
+            .call(Some(&token), "GET", &format!("/tasks?{bad}"), None)
+            .await;
+        assert_eq!(code, StatusCode::BAD_REQUEST, "{bad}");
+    }
+}
+
+#[tokio::test]
 async fn sub_issues_take_a_parent_by_identifier_and_can_move_and_detach() {
     let f = Fixture::new().await;
     let (token, _) = f.token(&[ApiTokenScope::TasksWrite], false).await;

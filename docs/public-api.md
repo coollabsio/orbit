@@ -297,6 +297,9 @@ including completed tasks and sub-issues. Optional parameters: `project_id`,
 `status_id`, `assignee_id` (a user ID, or `none` for tasks without an
 assignee), `label_id`, `priority`, `milestone_id` (a milestone ID, or `none`), `cycle_id` (a
 cycle ID; `current`, `next` or `previous` for that cycle of each task's project; or `none`),
+`due_before` and `due_after` (a date such as
+`2026-11-12`, which means 00:00 UTC, or a UTC time such as `2026-11-12T15:00:00Z`; both bounds are
+exclusive, and tasks without a due date never match), `has_due_date` (`true` or `false`),
 `parent_task_id` (only the direct sub-issues
 of this task, as a UUID or an identifier such as `ENG-12`; the task must be in an approved project), `q` (text in the title or description, or an
 identifier), `sort` (`created_at`, `updated_at`, `priority`, `due_date`,
@@ -307,6 +310,13 @@ identifier), `sort` (`created_at`, `updated_at`, `priority`, `due_date`,
 ```bash
 curl -sS -G "$ORBIT_WS/tasks" -H "Authorization: Bearer $ORBIT_TOKEN" \
   --data-urlencode "project_id=$PROJECT_ID" --data-urlencode 'q=login' -d limit=20
+```
+
+Overdue tasks, oldest first:
+
+```bash
+curl -sS -G "$ORBIT_WS/tasks" -H "Authorization: Bearer $ORBIT_TOKEN" \
+  --data-urlencode "due_before=$(date -u +%Y-%m-%dT%H:%M:%SZ)" -d sort=due_date -d order=asc
 ```
 
 `GET /workspaces/{workspace_id}/tasks/{task}`. Scope: `tasks:read`.

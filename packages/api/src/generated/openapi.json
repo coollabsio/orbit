@@ -5272,6 +5272,33 @@
             }
           },
           {
+            "name": "due_before",
+            "in": "query",
+            "description": "Only tasks due before this moment: a date (`2026-11-12`, 00:00 UTC) or a UTC time\n(`2026-11-12T15:00:00Z`). Tasks without a due date never match.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "due_after",
+            "in": "query",
+            "description": "Only tasks due after this moment, as `due_before` reads it. Tasks without a due date never\nmatch.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "has_due_date",
+            "in": "query",
+            "description": "`true` for tasks with a due date, `false` for tasks without one.",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
             "name": "parent_task_id",
             "in": "query",
             "description": "Only the direct sub-issues of this task (a UUID or an identifier such as `ENG-12`), which\nmust be in an approved project.",
