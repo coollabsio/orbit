@@ -23,6 +23,7 @@ import { phonePath, settingsAreaOf, useSettingsArea, type SettingsAreaName } fro
 import { useIsPhone } from '@/features/chat/pages/useChatViewport'
 import { chatEnabled, docsHidden } from './productNavigation'
 import { hostsPageList } from './sidebarSlot'
+import { PROJECT_SETTINGS_GROUPS, projectSettingsPath, projectSettingsProjectOf } from '@/features/tasks/projectSettingsNav'
 
 const WORKSPACE_LINKS = [
   { to: '/', label: 'Home', icon: Home, enabled: true },
@@ -177,7 +178,7 @@ function SidebarSection({ label, collapsed }: { label: string; collapsed: boolea
   )
 }
 
-const PAGE_LIST_TITLES: Record<string, string> = { docs: 'Docs', chat: 'Chat' }
+const PAGE_LIST_TITLES: Record<string, string> = { docs: 'Docs', chat: 'Chat', mail: 'Mail' }
 
 // The pages opened in this tab, newest last, so Back can leave the current area. Shared by the sidebar and the drawer.
 const recentPaths: string[] = []
@@ -189,10 +190,14 @@ const isTasksPath = (pathname: string) => /^\/(tasks|tasks-trash|tasks-import|vi
 
 /** The area whose links or list replace the app links: a settings area, Tasks, or a page with its own list. */
 function areaOf(pathname: string): string | null {
-  return settingsAreaOf(pathname) ?? (isTasksPath(pathname) ? 'tasks' : hostsPageList(pathname) ? pathname.split('/')[1] : null)
+  return settingsAreaOf(pathname) ?? linkArea(pathname) ?? (hostsPageList(pathname) ? pathname.split('/')[1] : null)
 }
 
-type SidebarArea = SettingsAreaName | 'tasks'
+type SidebarArea = SettingsAreaName | 'tasks' | 'project-settings'
+
+/** A project's settings sit inside Tasks but have their own links, so Back from them returns to Tasks. */
+const linkArea = (pathname: string): 'tasks' | 'project-settings' | null =>
+  projectSettingsProjectOf(pathname) ? 'project-settings' : isTasksPath(pathname) ? 'tasks' : null
 
 /** The task pages ("presets") of the URL's `view`, as the old Personal section listed them. */
 const TASK_PRESETS = [
@@ -386,11 +391,11 @@ function ProjectLinks({ workspaceId, projects, selected, pathOf, onNavigate }: {
  * Coolify's Back row: a small chevron as wide as an icon tile, then the area's name, centred. No tile, a fill on hover.
  * It opens the last page outside the current area.
  */
-function BackToApp({ label, onNavigate, onBack }: { label: string; onNavigate?: () => void; onBack?: () => void }) {
+function BackToApp({ label, fallback = '/', onNavigate, onBack }: { label: string; fallback?: string; onNavigate?: () => void; onBack?: () => void }) {
   const collapsed = useContext(SidebarNavCollapsed)
   const area = areaOf(useLocation().pathname)
   const index = recentPaths.findLastIndex((path) => areaOf(path.split('?')[0]) !== area)
-  const target = recentPaths[index] ?? '/'
+  const target = recentPaths[index] ?? fallback
   // Back pops: the pages after the target are forgotten, so the next Back goes further back instead of returning here
   const goBack = () => {
     backPressed = true
@@ -417,6 +422,27 @@ function BackToApp({ label, onNavigate, onBack }: { label: string; onNavigate?: 
       {/* with `onBack` (the mobile drawer) Back only shows the main menu, like Coolify's drawer: the page stays */}
       {onBack ? <button type="button" {...props} onClick={onBack} /> : <Link {...props} to={target} onClick={goBack} />}
     </Tip>
+  )
+}
+
+/** A project's settings: Back to Tasks under the project's name, then the settings pages in their groups. */
+function ProjectSettingsAreaNav({ onNavigate, onBack }: { onNavigate?: () => void; onBack?: () => void }) {
+  const collapsed = useContext(SidebarNavCollapsed)
+  const projectId = projectSettingsProjectOf(useLocation().pathname) ?? ''
+  const workspaceId = useContext(WorkspaceContext)?.workspace.id ?? ''
+  const project = useProjects(workspaceId, workspaceId !== '').data?.find((item) => item.id === projectId)
+  return (
+    <>
+      <BackToApp label={project?.name ?? 'Project settings'} fallback={`/tasks?project=${projectId}`} onNavigate={onNavigate} onBack={onBack} />
+      {PROJECT_SETTINGS_GROUPS.map((group) => (
+        <Fragment key={group.label}>
+          <SidebarSection label={group.label} collapsed={collapsed} />
+          {group.items.map((item) => (
+            <SidebarNavItem key={item.section} to={projectSettingsPath(projectId, item.section)} icon={item.icon} label={item.label} onClick={onNavigate} />
+          ))}
+        </Fragment>
+      ))}
+    </>
   )
 }
 
@@ -481,7 +507,7 @@ export function SidebarNav({
   // inside Tasks, Settings, Account settings or Admin the area's links and Back replace the app links;
   // a guest has Chat and its account settings only (`GuestWorkspaceGate`)
   const guest = useIsGuest()
-  const pageArea: SidebarArea | null = settingsAreaOf(location.pathname) ?? (isTasksPath(location.pathname) && !guest ? 'tasks' : null)
+  const pageArea: SidebarArea | null = settingsAreaOf(location.pathname) ?? (guest ? null : linkArea(location.pathname))
   // the area whose Back was pressed in the drawer: the main menu shows until the page moves to another area
   const [mainMenuFor, setMainMenuFor] = useState<SidebarArea | null>(null)
   const area = pageArea && pageArea === mainMenuFor ? null : pageArea
@@ -562,7 +588,7 @@ export function SidebarNav({
             </>
           ) : (
             <div className="-mx-1 flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto overscroll-contain px-1 pb-2">
-              {area === 'tasks' ? <TasksAreaNav onNavigate={onNavigate} onBack={backShowsMenu ? () => setMainMenuFor(area) : undefined} /> : area ? <SettingsAreaNav area={area} onNavigate={onNavigate} onBack={backShowsMenu ? () => setMainMenuFor(area) : undefined} /> : guest ? (
+              {area === 'tasks' ? <TasksAreaNav onNavigate={onNavigate} onBack={backShowsMenu ? () => setMainMenuFor(area) : undefined} /> : area === 'project-settings' ? <ProjectSettingsAreaNav onNavigate={onNavigate} onBack={backShowsMenu ? () => setMainMenuFor(area) : undefined} /> : area ? <SettingsAreaNav area={area} onNavigate={onNavigate} onBack={backShowsMenu ? () => setMainMenuFor(area) : undefined} /> : guest ? (
                 <>
                   <SidebarNavItem to="/chat" icon={MessageSquare} label="Chat" badge={chatBadge} unread={chatUnread} onClick={onNavigate} />
                   {isRoot ? (

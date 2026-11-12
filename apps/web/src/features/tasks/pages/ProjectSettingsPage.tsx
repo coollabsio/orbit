@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { useNavigate, useParams } from 'react-router'
-import { ArrowLeft, Check, Lock, UserAdd, MoreH as MoreHorizontal, Edit as Pencil, Add as Plus, TaskSquare as SquareCheck, Trash as Trash2 } from 'reicon-react'
+import { Link, Navigate, useNavigate, useParams } from 'react-router'
+import { ArrowLeft, Check, ChevronRight, Lock, UserAdd, MoreH as MoreHorizontal, Edit as Pencil, Add as Plus, TaskSquare as SquareCheck, Trash as Trash2 } from 'reicon-react'
 import { Button } from '@/components/ui/button'
 import { Tip } from '@/components/common/Tip'
 import { Input } from '@/components/ui/input'
@@ -37,15 +37,22 @@ import { ColorSwatch, CustomColorSwatch } from '@/components/common/ColorSwatch'
 import { ProjectGithubCard, type PendingProjectSave } from '@/features/tasks/components/ProjectGithubCard'
 import { useSlowPending } from '@/lib/useDebouncedValue'
 import { loadFailed } from '@/lib/connection'
+import { useIsPhone } from '@/features/chat/pages/useChatViewport'
+import { PROJECT_SETTINGS_GROUPS, projectSettingsItem, projectSettingsPath } from '@/features/tasks/projectSettingsNav'
 
 
 
 type Editor = { mode: 'new'; category: StatusCategory } | { mode: 'edit'; statusId: string }
 
-/** One-page project configuration (no sub-navigation): general, statuses, danger zone. */
+/**
+ * A project's settings, one page per section (`projectSettingsNav`). The app sidebar lists the sections; on a phone the
+ * bare settings path is a menu of them instead.
+ */
 export function ProjectSettingsPage() {
-  const { projectId } = useParams()
+  const { projectId, section } = useParams()
   const navigate = useNavigate()
+  const phone = useIsPhone()
+  const page = section ? projectSettingsItem(section) : null
   const { workspace } = useWorkspace()
   const projectsQuery = useProjects(workspace.id)
   const statusQuery = useProjectStatuses(workspace.id, projectId)
@@ -77,6 +84,9 @@ export function ProjectSettingsPage() {
     setDropAt(null)
   }
 
+  // desktop opens General, a phone its menu; an unknown section opens the default too
+  if (projectId && (section ? !page : !phone)) return <Navigate to={phone ? `/tasks/projects/${projectId}/settings` : projectSettingsPath(projectId, 'general')} replace />
+
   if (projectsQuery.isPending || statusQuery.isPending || tasksQuery.isPending) {
     return <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background"><Pane><EmptyState icon={SquareCheck} title="Loading project" description="Loading persisted project settings." /></Pane></div>
   }
@@ -87,13 +97,26 @@ export function ProjectSettingsPage() {
   return (
     <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
       <Pane className="relative">
-        <PaneHeader>
-          <Tip label="Back to tasks" side="bottom">
-            <Button variant="ghost" size="icon-sm" className="text-muted-foreground/70" onClick={() => navigate('/tasks')} aria-label="Back to tasks">
+        <PaneHeader className="gap-[7px] text-muted-foreground">
+          {/* a phone's section goes back to the menu; elsewhere Back leaves the settings for the project's tasks */}
+          <Tip label={phone && page ? 'Back to project settings' : 'Back to tasks'} side="bottom">
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="text-muted-foreground/70"
+              onClick={() => navigate(phone && page ? `/tasks/projects/${projectId}/settings` : project ? `/tasks?project=${project.id}` : '/tasks')}
+              aria-label={phone && page ? 'Back to project settings' : 'Back to tasks'}
+            >
               <ArrowLeft className="size-4" />
             </Button>
           </Tip>
-          <PaneTitle>{project ? `${project.name} settings` : 'Project settings'}</PaneTitle>
+          <span className="truncate text-[0.8125rem] font-semibold">{project ? `${project.name} settings` : 'Project settings'}</span>
+          {page ? (
+            <>
+              <span aria-hidden>/</span>
+              <PaneTitle render={<h1 />}>{page.label}</PaneTitle>
+            </>
+          ) : null}
         </PaneHeader>
         {!project ? (
           <div className="min-h-0 flex-1 overflow-y-auto">
@@ -102,8 +125,9 @@ export function ProjectSettingsPage() {
         ) : (
           <div className="min-h-0 flex-1 overflow-y-auto">
             <div className="mx-auto flex w-full max-w-[800px] flex-col gap-6 px-10 pt-7 pb-12 max-[899px]:px-5">
-              <ProjectGeneralCard key={`${project.id}:${project.name}:${project.key}:${project.color}`} project={project} onPendingChange={setGeneralPending} />
+              {section === 'general' ? <ProjectGeneralCard key={`${project.id}:${project.name}:${project.key}:${project.color}`} project={project} onPendingChange={setGeneralPending} /> : null}
 
+              {section === 'statuses' ? (
               <SettingsCard title="Statuses" flush>
                 <div className="flex flex-col py-3 pr-3 pl-[18px]">
                   {CATEGORY_ORDER.map((category) => {
@@ -258,27 +282,32 @@ export function ProjectSettingsPage() {
                 {reorderStatuses.isError ? <p role="alert" className="text-destructive">Status reorder failed. <Button variant="ghost" onClick={() => reorderStatuses.variables && reorderStatuses.mutate(reorderStatuses.variables)}>Retry</Button></p> : null}
                 {statusesSaving ? <p role="status">Saving statuses…</p> : null}
               </SettingsCard>
+              ) : null}
 
-              <ProjectAccessCard project={project} />
+              {section === 'access' ? <ProjectAccessCard project={project} /> : null}
 
-              <ProjectLabelsCard projectId={project.id} />
+              {section === 'labels' ? <ProjectLabelsCard projectId={project.id} /> : null}
 
-              <ProjectMilestonesCard projectId={project.id} />
+              {section === 'milestones' ? <ProjectMilestonesCard projectId={project.id} /> : null}
 
-              <ProjectCyclesCard projectId={project.id} />
+              {section === 'cycles' ? <ProjectCyclesCard projectId={project.id} /> : null}
 
-              <ProjectDocsCard project={project} />
+              {section === 'docs' ? <ProjectDocsCard project={project} /> : null}
 
-              <ProjectGithubCard workspaceId={workspace.id} projectId={project.id} onPendingChange={setGithubPending} />
+              {section === 'github' ? <ProjectGithubCard workspaceId={workspace.id} projectId={project.id} onPendingChange={setGithubPending} /> : null}
 
-              <SubIssueSettingsCard project={project} />
+              {section === 'sub-issues' ? <SubIssueSettingsCard project={project} /> : null}
 
+              {section === 'danger-zone' ? (
               <SettingsCard title="Danger zone" description="Deleting a project moves the project and all of its tasks to trash.">
                 <Button variant="destructive" onClick={() => setConfirmDelete(true)}>
                   Delete project
                 </Button>
                 {deleteProject.isError ? <p role="alert" className="text-destructive">Project deletion failed. <Button variant="ghost" onClick={() => deleteProject.variables && deleteProject.mutate(deleteProject.variables, { onSuccess: () => navigate('/tasks') })}>Retry</Button></p> : null}
               </SettingsCard>
+              ) : null}
+
+              {page ? null : <ProjectSettingsMenu projectId={project.id} />}
             </div>
           </div>
         )}
@@ -318,6 +347,26 @@ export function ProjectSettingsPage() {
       ) : null}
     </div>
   )
+}
+
+/** A phone's project settings menu: the section groups as cards of links, like the workspace settings menu. */
+function ProjectSettingsMenu({ projectId }: { projectId: string }) {
+  return PROJECT_SETTINGS_GROUPS.map((group) => (
+    <nav key={group.label} aria-label={group.label} className="flex flex-col gap-2">
+      <h2 className="px-1 text-xs font-medium text-muted-foreground">{group.label}</h2>
+      <ul className="overflow-hidden rounded-lg bg-card shadow-[0_0_0_1px_var(--border)]">
+        {group.items.map((item) => (
+          <li key={item.section} className="not-first:border-t">
+            <Link to={projectSettingsPath(projectId, item.section)} className="flex min-h-12 items-center gap-3 px-4 text-sm font-medium text-foreground active:bg-muted">
+              <item.icon className="size-[18px] shrink-0 text-muted-foreground" />
+              <span className="min-w-0 flex-1 truncate">{item.label}</span>
+              <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </nav>
+  ))
 }
 
 /**

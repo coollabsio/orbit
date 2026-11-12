@@ -113,7 +113,7 @@ export default function App() {
               <Route element={<GuestWorkspaceGate />}>
                 <Route index element={<HomePage />} />
                 <Route path="tasks" element={<TasksPage />} />
-                <Route path="tasks/projects/:projectId/settings" element={<ProjectSettingsPage />} />
+                <Route path="tasks/projects/:projectId/settings/:section?" element={<ProjectSettingsPage />} />
                 <Route path="tasks/:taskId" element={<TasksPage />} />
                 <Route path="tasks-trash" element={<TaskTrashPage />} />
                 <Route path="tasks-trash/task/:taskId" element={<TrashedTaskPage />} />

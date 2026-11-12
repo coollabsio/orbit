@@ -11,6 +11,7 @@ import { labelKeyOf, projectLabels } from '@/features/tasks/taskMeta'
 import { CheckMark } from '@/components/common/CheckMark'
 import { ColorDot } from '@/components/common/ColorDot'
 import { Tip } from '@/components/common/Tip'
+import { projectSettingsPath } from '@/features/tasks/projectSettingsNav'
 
 /** The label palette: soft tones (the status colours' family) that read on light and dark, each with a name to say. */
 const LABEL_PALETTE = [
@@ -176,7 +177,7 @@ export function LabelPicker({ workspaceId, projectId, labelIds, labels: allLabel
           {createLabel.isError ? <p className="px-3 pb-2 text-xs text-destructive" role="alert">The label could not be created. Try again.</p> : null}
           {editLink ? (
             <div className="-mx-1 -mb-1 mt-1 border-t p-1">
-              <Button type="button" variant="ghost" size="sm" className="w-full justify-start font-normal text-muted-foreground" onClick={() => navigate(`/tasks/projects/${projectId}/settings`)}>
+              <Button type="button" variant="ghost" size="sm" className="w-full justify-start font-normal text-muted-foreground" onClick={() => navigate(projectSettingsPath(projectId, 'labels'))}>
                 <Settings className="size-3.5" />
                 Edit labels
               </Button>
