@@ -1291,10 +1291,69 @@ impl PageRepository {
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<MovedPage, PageError> {
+        self.move_page_expecting(
+            workspace_id,
+            page_id,
+            actor_id,
+            Expected::Version(expected_version),
+            parent_id,
+            space,
+            position,
+            dry_run,
+            request_id,
+            now,
+        )
+        .await
+    }
+
+    /// [`Self::move_page`] that checks the page's [`revision`] instead of its version (the token
+    /// API's doc moves).
+    #[allow(clippy::too_many_arguments)]
+    pub async fn move_page_at_revision(
+        &self,
+        workspace_id: Id,
+        page_id: Id,
+        actor_id: Id,
+        expected_revision: u64,
+        parent_id: Option<Id>,
+        space: SpaceRequest,
+        position: i64,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<MovedPage, PageError> {
+        self.move_page_expecting(
+            workspace_id,
+            page_id,
+            actor_id,
+            Expected::Revision(expected_revision),
+            parent_id,
+            space,
+            position,
+            false,
+            request_id,
+            now,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn move_page_expecting(
+        &self,
+        workspace_id: Id,
+        page_id: Id,
+        actor_id: Id,
+        expected: Expected,
+        parent_id: Option<Id>,
+        space: SpaceRequest,
+        position: i64,
+        dry_run: bool,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<MovedPage, PageError> {
         let mut tx = self.database.immediate_transaction().await?;
         let actor = require_access_tx(&mut tx, workspace_id, actor_id).await?;
         let current = page_in_tx(&mut tx, workspace_id, page_id, actor_id, false).await?;
-        check_version(expected_version, current.version, &current)?;
+        expected.check(&current)?;
         // A row template stays a hidden page of its database.
         if parent_id == Some(page_id) || is_template(&mut tx, page_id).await? {
             return Err(PageError::Invalid { field: "parent_id" });
@@ -1363,7 +1422,7 @@ impl PageRepository {
         .bind(now.as_millis())
         .bind(page_id.to_string())
         .bind(workspace_id.to_string())
-        .bind(expected_version as i64)
+        .bind(current.version as i64)
         .execute(&mut *tx)
         .await?;
         if space != current_space {
@@ -1445,10 +1504,52 @@ impl PageRepository {
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<(), PageError> {
+        self.delete_page_expecting(
+            workspace_id,
+            page_id,
+            actor_id,
+            Expected::Version(expected_version),
+            request_id,
+            now,
+        )
+        .await
+    }
+
+    /// [`Self::delete_page`] that checks the page's [`revision`] instead of its version (the
+    /// token API's doc deletes).
+    pub async fn delete_page_at_revision(
+        &self,
+        workspace_id: Id,
+        page_id: Id,
+        actor_id: Id,
+        expected_revision: u64,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<(), PageError> {
+        self.delete_page_expecting(
+            workspace_id,
+            page_id,
+            actor_id,
+            Expected::Revision(expected_revision),
+            request_id,
+            now,
+        )
+        .await
+    }
+
+    async fn delete_page_expecting(
+        &self,
+        workspace_id: Id,
+        page_id: Id,
+        actor_id: Id,
+        expected: Expected,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<(), PageError> {
         let mut tx = self.database.immediate_transaction().await?;
         require_access_tx(&mut tx, workspace_id, actor_id).await?;
         let current = page_in_tx(&mut tx, workspace_id, page_id, actor_id, false).await?;
-        check_version(expected_version, current.version, &current)?;
+        expected.check(&current)?;
         sqlx::query(
             "WITH RECURSIVE subtree(id) AS ( \
                  SELECT $1 \
