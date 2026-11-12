@@ -8,6 +8,11 @@ import {
   changeMemberRole,
   changePassword as changePasswordRequest,
   createInvitation,
+  createRole,
+  deleteRole,
+  listRoles,
+  setMemberCustomRole,
+  updateRole,
   deleteAccount as deleteAccountRequest,
   deletePasskey as deletePasskeyRequest,
   deletePushSubscription,
@@ -46,7 +51,9 @@ import type {
   InvitationRecord,
   NotificationPrefs,
   PasskeyRecord,
+  Permission,
   PushSubscriptionRecord,
+  RolesResponse,
   S3Body,
   SessionRecord,
   TotpSetup,
@@ -54,6 +61,7 @@ import type {
   UserStatus,
   WorkspaceBucketView,
   WorkspaceRole,
+  WorkspaceRoleRecord,
   WorkspaceStorage,
 } from '@orbit/api/generated/types.gen'
 
@@ -64,7 +72,7 @@ import type { OAuthConnection } from '@orbit/api/mcp'
 import { STORAGE_FILES_PAGE } from '@orbit/api/storage'
 import { relativeTime } from './format'
 
-export type { InvitationRecord, NotificationPrefs, OwnedWorkspace, PasskeyRecord, PushSubscriptionRecord, SessionRecord, TotpSetup, TwoFactorStatus, WorkspaceBucketView, WorkspaceStorage }
+export type { InvitationRecord, NotificationPrefs, OwnedWorkspace, PasskeyRecord, PushSubscriptionRecord, RolesResponse, SessionRecord, TotpSetup, TwoFactorStatus, WorkspaceBucketView, WorkspaceRoleRecord, WorkspaceStorage }
 
 /** Query keys of the account (not per workspace) and of the workspace settings. */
 export const accountKeys = {
@@ -78,6 +86,8 @@ export const accountKeys = {
   oauthConnections: ['account', 'oauth-connections'] as const,
   /** Under the `members` prefix, so the workspace events socket refreshes it with the members. */
   invitations: (workspaceId: string) => ['members', workspaceId, 'invitations'] as const,
+  /** Under the `members` prefix too: a member's custom role changes the role's member count. */
+  roles: (workspaceId: string) => ['members', workspaceId, 'roles'] as const,
   storage: (workspaceId: string) => ['workspace-storage', workspaceId] as const,
   bucket: (workspaceId: string) => ['workspace-bucket', workspaceId] as const,
   authOptions: ['auth-options'] as const,
@@ -376,29 +386,92 @@ export async function authOptions(client: OrbitClient): Promise<AuthOptions> {
 
 export const roleLabel = (role: WorkspaceRole | string) => role.charAt(0).toUpperCase() + role.slice(1)
 
-export type MemberAction = { kind: 'role'; role: 'admin' | 'member' } | { kind: 'transfer' } | { kind: 'remove' }
+export type MemberAction = { kind: 'role'; role: 'admin' | 'member' } | { kind: 'customRole' } | { kind: 'transfer' } | { kind: 'remove' }
 
 /**
  * What the Manage menu offers on a member's row: none on your own row; the server decides the rest. A guest can only
- * become a member ("Convert to member"); nobody becomes a guest.
+ * become a member ("Convert to member"); nobody becomes a guest. Only an ordinary member takes a custom role, and only
+ * from someone who manages roles (`canManageRoles`).
  */
-export function memberActions(member: MemberRecord, myUserId: string): MemberAction[] {
+export function memberActions(member: MemberRecord, myUserId: string, canManageRoles = false): MemberAction[] {
   if (member.user_id === myUserId) return []
   const choices = member.role === 'guest' ? (['member'] as const) : (['admin', 'member'] as const)
   const roles = member.can_change_role ? choices.filter((role) => role !== member.role) : []
   return [
     ...roles.map((role): MemberAction => ({ kind: 'role', role })),
+    ...(canManageRoles && member.role === 'member' ? [{ kind: 'customRole' } as const] : []),
     ...(member.can_transfer_ownership ? [{ kind: 'transfer' } as const] : []),
     ...(member.can_remove ? [{ kind: 'remove' } as const] : []),
   ]
 }
 
-/** Members matching a search over name, email and role, by name. */
+/** Members matching a search over name, email, role and custom role, by name. */
 export function filterMembers(members: readonly MemberRecord[], search: string): MemberRecord[] {
   const query = search.trim().toLowerCase()
   return members
-    .filter((member) => !query || [member.display_name, member.email, member.role].some((value) => value.toLowerCase().includes(query)))
+    .filter((member) => !query || [member.display_name, member.email, member.role, member.custom_role?.name ?? ''].some((value) => value.toLowerCase().includes(query)))
     .sort((a, b) => a.display_name.localeCompare(b.display_name))
+}
+
+/** Gives an ordinary member a custom role, or takes it away with `null`. */
+export async function setCustomRole(client: OrbitClient, workspaceId: string, member: Pick<MemberRecord, 'id' | 'version'>, roleId: string | null): Promise<void> {
+  await setMemberCustomRole({ client, path: { workspace_id: workspaceId, membership_id: member.id }, body: { role_id: roleId, expected_version: member.version }, throwOnError: true })
+}
+
+// ---- custom roles
+
+/** The roles and the permissions a role may carry, in the server's display order. */
+export async function workspaceRoles(client: OrbitClient, workspaceId: string): Promise<RolesResponse> {
+  return (await listRoles({ client, path: { workspace_id: workspaceId }, throwOnError: true })).data
+}
+
+export interface RoleDraft {
+  name: string
+  permissions: Permission[]
+}
+
+export async function createWorkspaceRole(client: OrbitClient, workspaceId: string, draft: RoleDraft): Promise<WorkspaceRoleRecord> {
+  return (await createRole({ client, path: { workspace_id: workspaceId }, body: { name: draft.name.trim(), permissions: draft.permissions }, throwOnError: true })).data
+}
+
+export async function updateWorkspaceRole(client: OrbitClient, workspaceId: string, role: Pick<WorkspaceRoleRecord, 'id' | 'version'>, draft: RoleDraft): Promise<WorkspaceRoleRecord> {
+  return (
+    await updateRole({ client, path: { workspace_id: workspaceId, role_id: role.id }, body: { expected_version: role.version, name: draft.name.trim(), permissions: draft.permissions }, throwOnError: true })
+  ).data
+}
+
+/** Its members become ordinary members. */
+export async function deleteWorkspaceRole(client: OrbitClient, workspaceId: string, roleId: string): Promise<void> {
+  await deleteRole({ client, path: { workspace_id: workspaceId, role_id: roleId }, throwOnError: true })
+}
+
+/** What each permission lets a member do, in words; `help` shows behind the info icon. */
+export const PERMISSION_LABELS: Record<Permission, { label: string; help: string }> = {
+  'workspace.update': { label: 'Edit workspace settings', help: 'Rename the workspace and change its general, storage and integration settings.' },
+  'workspace.delete': { label: 'Delete the workspace', help: 'Move the workspace to the trash.' },
+  'workspace.transfer': { label: 'Transfer ownership', help: 'Make another member the owner.' },
+  'members.manage': { label: 'Manage members', help: 'Invite people, revoke invitations, change roles and remove other members.' },
+  'audit.view': { label: 'View the audit log', help: 'See who changed what in the workspace.' },
+  'api_tokens.manage': { label: 'Manage API tokens', help: 'Create and revoke API tokens and service accounts for integrations.' },
+  'integrations.manage': { label: 'Manage integrations', help: 'Connect and set up GitHub, webhooks and other integrations.' },
+  'teamspaces.delete': { label: 'Delete teamspaces', help: 'Delete teamspaces.' },
+  'pages.purge': { label: 'Delete docs for good', help: 'Permanently delete teamspace docs.' },
+  'views.manage_shared': { label: 'Manage shared views', help: 'Edit and delete workspace views that other members made.' },
+  'comments.moderate': { label: 'Moderate comments', help: 'Delete task comments that other members wrote.' },
+  'chat.manage': { label: 'Manage chat', help: "Manage chat categories and channel order, edit and archive other members' channels, delete their messages, and manage emoji and stickers." },
+  'mail.manage': { label: 'Manage mail', help: "Manage the workspace's mail domains, mailboxes and their addresses and members, labels and failed receipts." },
+  'billing.manage': { label: 'Manage billing', help: "Subscribe to and manage the workspace's Orbit Cloud plan." },
+  'storage.manage': { label: 'Manage file storage', help: "Connect the workspace's own S3 bucket for its files." },
+  'workspace.export': { label: 'Export the workspace', help: 'Export the whole workspace as a ZIP archive and download its exports.' },
+  'workspace.export_personal': { label: 'Export personal data', help: 'Export your own private docs, private channels and direct messages, and create a personal export token.' },
+  'roles.manage': { label: 'Manage roles', help: "Create, change and delete the workspace's custom roles, and give them to members." },
+}
+
+/** The role list's line: `3 members · 2 permissions`. */
+export function roleSummary(role: Pick<WorkspaceRoleRecord, 'member_count' | 'permissions'>): string {
+  const members = `${role.member_count} ${role.member_count === 1 ? 'member' : 'members'}`
+  const count = role.permissions.length
+  return `${members} · ${count === 0 ? 'no extra permissions' : `${count} ${count === 1 ? 'permission' : 'permissions'}`}`
 }
 
 export async function changeRole(client: OrbitClient, workspaceId: string, member: MemberRecord, role: 'admin' | 'member'): Promise<void> {

@@ -31,3 +31,15 @@ test('member records preserve membership versions for protected mutations', () =
     can: { changeRole: true, remove: true, transferOwnership: false },
   })
 })
+
+test('member records carry the custom role an ordinary member holds', () => {
+  const record: MemberRecord = {
+    id: 'membership-2', user_id: 'user-2', display_name: 'Grace', email: 'grace@orbit.test',
+    role: 'member', created_at: '2026-09-04T10:00:00Z', version: 2,
+    can_change_role: true, can_remove: true, can_transfer_ownership: true,
+    custom_role: { id: 'role-1', name: 'Moderator' },
+  }
+
+  expect(memberFromRecord(record).customRole).toEqual({ id: 'role-1', name: 'Moderator' })
+  expect(memberFromRecord({ ...record, custom_role: undefined }).customRole).toBeNull()
+})

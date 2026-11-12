@@ -308,6 +308,23 @@ export function useInvitations(enabled: boolean) {
   return useQuery({ queryKey: account.accountKeys.invitations(workspaceId), queryFn: () => account.pendingInvitations(client, workspaceId), enabled })
 }
 
+export function useWorkspaceRoles(enabled: boolean) {
+  const { client, workspaceId } = useOrbit()
+  return useQuery({ queryKey: account.accountKeys.roles(workspaceId), queryFn: () => account.workspaceRoles(client, workspaceId), enabled })
+}
+
+/** Custom role writes. Each refreshes the members, whose rows name the role (the roles sit under the same prefix). */
+export function useRoleWrites() {
+  const { client, workspaceId } = useOrbit()
+  const queryClient = useQueryClient()
+  const onSettled = () => void queryClient.invalidateQueries({ queryKey: keys.members(workspaceId) })
+  return {
+    create: useMutation({ mutationFn: (draft: account.RoleDraft) => account.createWorkspaceRole(client, workspaceId, draft), onSettled }),
+    update: useMutation({ mutationFn: ({ role, draft }: { role: account.WorkspaceRoleRecord; draft: account.RoleDraft }) => account.updateWorkspaceRole(client, workspaceId, role, draft), onSettled }),
+    remove: useMutation({ mutationFn: (roleId: string) => account.deleteWorkspaceRole(client, workspaceId, roleId), onSettled }),
+  }
+}
+
 /** Member and invitation writes. Each refreshes the members (invitations sit under the same prefix). */
 export function useMemberWrites() {
   const { client, workspace, workspaceId } = useOrbit()
@@ -327,6 +344,7 @@ export function useMemberWrites() {
       onSettled,
     }),
     revokeInvitation: useMutation({ mutationFn: (id: string) => account.revokeInvitation(client, workspaceId, id), onSettled }),
+    setCustomRole: useMutation({ mutationFn: ({ member, roleId }: { member: MemberRecord; roleId: string | null }) => account.setCustomRole(client, workspaceId, member, roleId), onSettled }),
     /** Leaves the workspace: the workspace list drops it and the app opens the next one. */
     leave: useMutation({ mutationFn: (member: MemberRecord) => account.removeMembership(client, workspaceId, member), onSuccess: () => void queryClient.invalidateQueries({ queryKey: keys.workspaces }) }),
   }

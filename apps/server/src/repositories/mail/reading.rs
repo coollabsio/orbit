@@ -18,6 +18,7 @@ use sqlx::{Any, Transaction};
 use utoipa::ToSchema;
 
 use super::domains::parse_id;
+use crate::repositories::membership::parse_permissions;
 use super::ingest::MAIL_TOPIC;
 use super::labels::{Label, load_labels};
 use super::mailboxes::{Mailbox, Scope, load_mailboxes};
@@ -301,7 +302,8 @@ pub(super) async fn reader(
     user_id: Id,
 ) -> Result<Reader, MailError> {
     let row = sqlx::query(
-        "SELECT ms.id, ms.role FROM memberships ms JOIN workspaces w ON w.id = ms.workspace_id \
+        "SELECT ms.id, ms.role, wr.permissions FROM memberships ms JOIN workspaces w ON w.id = ms.workspace_id \
+         LEFT JOIN workspace_roles wr ON wr.id = ms.custom_role_id \
          WHERE ms.workspace_id = $1 AND ms.user_id = $2 AND w.deleted_at IS NULL",
     )
     .bind(workspace_id.to_string())
@@ -312,10 +314,13 @@ pub(super) async fn reader(
     let role: String = row.try_get("role")?;
     Ok(Reader {
         membership_id: parse_id(&row.try_get::<String, _>("id")?)?,
-        actor: Actor {
+        actor: Actor::new(
             user_id,
-            role: WorkspaceRole::parse(&role).ok_or(MailError::NotFound)?,
-        },
+            WorkspaceRole::parse(&role).ok_or(MailError::NotFound)?,
+        )
+        .with_custom_role(parse_permissions(
+            row.try_get::<Option<String>, _>("permissions")?.as_deref(),
+        )),
     })
     // A guest sees only chat.
     .and_then(|reader| {

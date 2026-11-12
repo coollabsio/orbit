@@ -11,7 +11,7 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, patch, post, put};
 use axum::{Json, Router};
-use orbit_domain::WorkspaceRole;
+use orbit_domain::{Permission, WorkspaceRole};
 use orbit_platform::{
     BackupError, BackupKind, BackupService, BackupSnapshot, ClientIp, Id, JobLimits, ObjectStorage,
     PasswordError, PasswordExecutor, PasswordService, RateLimitConfig, RequestId, ThrottleDecision,
@@ -41,6 +41,7 @@ use crate::repositories::instance_settings::{
     adjustable_job_kinds, can_confirm_sign_up,
 };
 use crate::repositories::sign_in_providers::SaveSignInProviderError;
+use crate::repositories::workspace_roles::WorkspaceRoleRecord;
 use crate::repositories::workspace_storage::{WorkspaceStorageError, WorkspaceStorageRepository};
 use crate::repositories::workspaces::{InvitationDelivery, WorkspaceError, WorkspaceRepository};
 use crate::sign_in_providers::Provider;
@@ -221,6 +222,18 @@ pub fn workspace_router(state: WorkspaceState) -> Router {
         .route(
             "/api/v1/workspaces/{workspace_id}/members/{membership_id}",
             patch(change_member_role).delete(remove_member),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/members/{membership_id}/custom-role",
+            put(set_member_custom_role),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/roles",
+            get(list_roles).post(create_role),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/roles/{role_id}",
+            patch(update_role).delete(delete_role),
         )
         .route(
             "/api/v1/workspaces/{workspace_id}/transfer-ownership",
@@ -831,6 +844,169 @@ async fn change_member_role(
         )
         .await
         .map_err(|error| workspace_problem(error, instance, request_id.as_ref()))?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Serialize, ToSchema)]
+struct RolesResponse {
+    items: Vec<WorkspaceRoleRecord>,
+    /// The permissions a custom role may carry, in display order.
+    grantable_permissions: Vec<Permission>,
+}
+
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/roles", params(("workspace_id" = String, Path)), responses((status = 200, body = RolesResponse)))]
+async fn list_roles(
+    State(state): State<WorkspaceState>,
+    Path(workspace_id): Path<String>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<Json<RolesResponse>, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace_id}/roles");
+    let session = authenticate(&state, &headers, &instance, request_id.as_ref()).await?;
+    let workspace_id = parse_id(&workspace_id, &instance, request_id.as_ref())?;
+    let items = state
+        .workspaces
+        .list_roles(workspace_id, session.user.id)
+        .await
+        .map_err(|error| workspace_problem(error, &instance, request_id.as_ref()))?;
+    Ok(Json(RolesResponse {
+        items,
+        grantable_permissions: Permission::grantable(),
+    }))
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+struct RoleCreateBody {
+    /// 1–40 characters after trimming; not Owner, Admin, Member or Guest.
+    name: String,
+    /// What a member with this role may do beyond an ordinary member. Only grantable permissions.
+    permissions: Vec<Permission>,
+}
+
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/roles", params(("workspace_id" = String, Path)), request_body = RoleCreateBody, responses((status = 201, body = WorkspaceRoleRecord)))]
+async fn create_role(
+    State(state): State<WorkspaceState>,
+    Path(workspace_id): Path<String>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<RoleCreateBody>,
+) -> Result<(StatusCode, Json<WorkspaceRoleRecord>), ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace_id}/roles");
+    let session = authenticate(&state, &headers, &instance, request_id.as_ref()).await?;
+    let workspace_id = parse_id(&workspace_id, &instance, request_id.as_ref())?;
+    let role = state
+        .workspaces
+        .create_role(
+            workspace_id,
+            session.user.id,
+            &body.name,
+            &body.permissions,
+            request_id_value(request_id.as_ref()),
+            TimestampMillis::now(),
+        )
+        .await
+        .map_err(|error| workspace_problem(error, &instance, request_id.as_ref()))?;
+    Ok((StatusCode::CREATED, Json(role)))
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+struct RoleUpdateBody {
+    expected_version: u64,
+    name: Option<String>,
+    permissions: Option<Vec<Permission>>,
+}
+
+#[utoipa::path(patch, path = "/api/v1/workspaces/{workspace_id}/roles/{role_id}", params(("workspace_id" = String, Path), ("role_id" = String, Path)), request_body = RoleUpdateBody, responses((status = 200, body = WorkspaceRoleRecord)))]
+async fn update_role(
+    State(state): State<WorkspaceState>,
+    Path((workspace_id, role_id)): Path<(String, String)>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<RoleUpdateBody>,
+) -> Result<Json<WorkspaceRoleRecord>, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace_id}/roles/{role_id}");
+    let session = authenticate(&state, &headers, &instance, request_id.as_ref()).await?;
+    let workspace_id = parse_id(&workspace_id, &instance, request_id.as_ref())?;
+    let role_id = parse_id(&role_id, &instance, request_id.as_ref())?;
+    state
+        .workspaces
+        .update_role(
+            workspace_id,
+            session.user.id,
+            role_id,
+            body.name.as_deref(),
+            body.permissions.as_deref(),
+            body.expected_version,
+            request_id_value(request_id.as_ref()),
+            TimestampMillis::now(),
+        )
+        .await
+        .map(Json)
+        .map_err(|error| workspace_problem(error, &instance, request_id.as_ref()))
+}
+
+#[utoipa::path(delete, path = "/api/v1/workspaces/{workspace_id}/roles/{role_id}", params(("workspace_id" = String, Path), ("role_id" = String, Path)), responses((status = 204)))]
+async fn delete_role(
+    State(state): State<WorkspaceState>,
+    Path((workspace_id, role_id)): Path<(String, String)>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<StatusCode, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace_id}/roles/{role_id}");
+    let session = authenticate(&state, &headers, &instance, request_id.as_ref()).await?;
+    let workspace_id = parse_id(&workspace_id, &instance, request_id.as_ref())?;
+    let role_id = parse_id(&role_id, &instance, request_id.as_ref())?;
+    state
+        .workspaces
+        .delete_role(
+            workspace_id,
+            session.user.id,
+            role_id,
+            request_id_value(request_id.as_ref()),
+            TimestampMillis::now(),
+        )
+        .await
+        .map_err(|error| workspace_problem(error, &instance, request_id.as_ref()))?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+struct CustomRoleBody {
+    /// The custom role to give, or `null` to take the member's custom role away.
+    role_id: Option<String>,
+    expected_version: u64,
+}
+
+#[utoipa::path(put, path = "/api/v1/workspaces/{workspace_id}/members/{membership_id}/custom-role", params(("workspace_id" = String, Path), ("membership_id" = String, Path)), request_body = CustomRoleBody, responses((status = 204)))]
+async fn set_member_custom_role(
+    State(state): State<WorkspaceState>,
+    Path((workspace_id, membership_id)): Path<(String, String)>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<CustomRoleBody>,
+) -> Result<StatusCode, ApiError> {
+    let instance =
+        format!("/api/v1/workspaces/{workspace_id}/members/{membership_id}/custom-role");
+    let session = authenticate(&state, &headers, &instance, request_id.as_ref()).await?;
+    let workspace_id = parse_id(&workspace_id, &instance, request_id.as_ref())?;
+    let membership_id = parse_id(&membership_id, &instance, request_id.as_ref())?;
+    let role_id = optional_id(body.role_id, &instance, request_id.as_ref())?;
+    state
+        .workspaces
+        .set_member_custom_role(
+            workspace_id,
+            session.user.id,
+            membership_id,
+            role_id,
+            body.expected_version,
+            request_id_value(request_id.as_ref()),
+            TimestampMillis::now(),
+        )
+        .await
+        .map_err(|error| workspace_problem(error, &instance, request_id.as_ref()))?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -3985,6 +4161,22 @@ fn workspace_problem(
             "workspace_conflict",
             "Workspace conflict",
             "The workspace operation conflicts with its current state.",
+            instance,
+            request_id,
+        ),
+        WorkspaceError::InvalidRole(detail) => ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_role",
+            "Invalid role",
+            detail,
+            instance,
+            request_id,
+        ),
+        WorkspaceError::RoleNameTaken => ApiError::new(
+            StatusCode::CONFLICT,
+            "role_name_taken",
+            "Role name taken",
+            "A role with that name exists in this workspace.",
             instance,
             request_id,
         ),

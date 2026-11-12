@@ -1,7 +1,7 @@
 import { createOrbitClient } from '@orbit/api/client'
 import { expect, test } from 'bun:test'
 
-import { bucketMovedText, bucketMovingText, bucketPollInterval, confirmsEmail, deleteAccount, filterMembers, formatBytes, invitationProblem, memberActions, ownedWorkspaces, passwordProblem, pickedImageName, requestEmailChange, sortedSessions, storageUse, twoFactorSummary } from './account-api'
+import { bucketMovedText, bucketMovingText, bucketPollInterval, confirmsEmail, createWorkspaceRole, deleteAccount, filterMembers, formatBytes, invitationProblem, memberActions, ownedWorkspaces, passwordProblem, pickedImageName, requestEmailChange, roleSummary, setCustomRole, sortedSessions, storageUse, twoFactorSummary, updateWorkspaceRole } from './account-api'
 import type { MemberRecord } from './orbit'
 
 const member = (id: string, fields: Partial<MemberRecord>): MemberRecord => ({
@@ -146,4 +146,46 @@ test('deleting the account sends the typed email and the password; owned workspa
 test('the typed confirmation matches the email regardless of case and spaces', () => {
   expect(confirmsEmail(' Me@Orbit.test ', 'me@orbit.test')).toBe(true)
   expect(confirmsEmail('me@orbit.tes', 'me@orbit.test')).toBe(false)
+})
+
+test('only someone who manages roles may give an ordinary member a custom role', () => {
+  const bob = member('bob', { can_change_role: true, can_remove: true })
+  expect(memberActions(bob, 'me', true)).toEqual([{ kind: 'role', role: 'admin' }, { kind: 'customRole' }, { kind: 'remove' }])
+  expect(memberActions(bob, 'me')).toEqual([{ kind: 'role', role: 'admin' }, { kind: 'remove' }])
+  expect(memberActions(member('ada', { role: 'admin' }), 'me', true)).toEqual([])
+  expect(memberActions(member('gus', { role: 'guest' }), 'me', true)).toEqual([])
+})
+
+test('members are found by their custom role', () => {
+  const list = [member('ada', { custom_role: { id: 'r1', name: 'Moderator' } }), member('bob', { custom_role: null }), member('eve', {})]
+  expect(filterMembers(list, 'moder').map((m) => m.user_id)).toEqual(['ada'])
+})
+
+test('a role reads as its member and permission counts', () => {
+  expect(roleSummary({ member_count: 1, permissions: ['chat.manage'] })).toBe('1 member · 1 permission')
+  expect(roleSummary({ member_count: 3, permissions: [] })).toBe('3 members · no extra permissions')
+  expect(roleSummary({ member_count: 0, permissions: ['chat.manage', 'audit.view'] })).toBe('0 members · 2 permissions')
+})
+
+const role = { id: 'r1', name: 'Moderator', permissions: ['chat.manage' as const], member_count: 2, version: 4, created_at: '2026-11-12T10:00:00Z', updated_at: '2026-11-12T10:00:00Z' }
+
+test('a role is created and edited with its trimmed name, its permissions and, on an edit, its version', async () => {
+  const created = server({ status: 201, body: role })
+  expect(await createWorkspaceRole(created.client, 'w1', { name: '  Moderator ', permissions: ['chat.manage'] })).toEqual(role)
+  expect(created.sent).toEqual([{ method: 'POST', url: 'https://orbit.test/api/v1/workspaces/w1/roles', body: { name: 'Moderator', permissions: ['chat.manage'] } }])
+  const edited = server({ status: 200, body: role })
+  await updateWorkspaceRole(edited.client, 'w1', role, { name: 'Moderator', permissions: [] })
+  expect(edited.sent).toEqual([{ method: 'PATCH', url: 'https://orbit.test/api/v1/workspaces/w1/roles/r1', body: { expected_version: 4, name: 'Moderator', permissions: [] } }])
+})
+
+test('a custom role is given and taken away with the membership version; a refusal carries the server detail', async () => {
+  const given = server({ status: 204 })
+  await setCustomRole(given.client, 'w1', { id: 'm-bob', version: 7 }, 'r1')
+  await setCustomRole(given.client, 'w1', { id: 'm-bob', version: 8 }, null)
+  expect(given.sent).toEqual([
+    { method: 'PUT', url: 'https://orbit.test/api/v1/workspaces/w1/members/m-bob/custom-role', body: { role_id: 'r1', expected_version: 7 } },
+    { method: 'PUT', url: 'https://orbit.test/api/v1/workspaces/w1/members/m-bob/custom-role', body: { role_id: null, expected_version: 8 } },
+  ])
+  const refused = server({ status: 422, body: problem(422, 'invalid_role') })
+  await expect(setCustomRole(refused.client, 'w1', { id: 'm-ada', version: 1 }, 'r1')).rejects.toThrow('The invalid_role detail.')
 })

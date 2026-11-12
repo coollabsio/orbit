@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test'
+import { afterEach, expect, mock, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render } from '@testing-library/react'
+import { fireEvent, render, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
 import { queryKeys } from '@/api/queryKeys'
@@ -64,4 +64,44 @@ test('page size options escape the card and changing size resets pagination', as
   fireEvent.click(trigger)
   await userEvent.click(document.body)
   expect(trigger.getAttribute('aria-expanded')).toBe('false')
+})
+
+const originalFetch = globalThis.fetch
+afterEach(() => {
+  globalThis.fetch = originalFetch
+})
+
+test('an ordinary member gets a custom role with the membership version', async () => {
+  const requests: { method: string; path: string; body: unknown }[] = []
+  globalThis.fetch = mock(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const request = new Request(input, init)
+    requests.push({ method: request.method, path: new URL(request.url).pathname, body: request.method === 'PUT' ? await request.json() : null })
+    return request.method === 'PUT' ? new Response(null, { status: 204 }) : Response.json({ items: [], next_cursor: null })
+  }) as unknown as typeof fetch
+  const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, retry: false } } })
+  client.setQueryData(queryKeys.currentUser, { id: 'owner' })
+  client.setQueryData(queryKeys.members('workspace-1'), [
+    member('owner', 'Owner'),
+    member('admin', 'Admin', { changeRole: true, remove: true }),
+    { ...member('teammate', 'Member', { changeRole: true, remove: true }), version: 5 },
+  ])
+  client.setQueryData(queryKeys.roles('workspace-1'), {
+    grantable_permissions: ['chat.manage'],
+    items: [{ id: 'role-1', name: 'Moderator', permissions: ['chat.manage'], member_count: 0, version: 1, created_at: '', updated_at: '' }],
+  })
+  const workspace = testWorkspace('owner')
+  const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}><WorkspaceContext.Provider value={{ workspace, workspaces: [workspace], selectWorkspace: () => {} }}>{children}</WorkspaceContext.Provider></QueryClientProvider>
+  const view = render(<MembersPage />, { wrapper })
+
+  const [adminManage, memberManage] = view.getAllByRole('button', { name: 'Manage' })
+  fireEvent.click(adminManage)
+  expect(view.queryByRole('menuitem', { name: 'Give Moderator' })).toBeNull()
+  await userEvent.keyboard('{Escape}')
+  fireEvent.click(memberManage)
+  fireEvent.click(await view.findByRole('menuitem', { name: 'Give Moderator' }))
+
+  await waitFor(() => expect(requests.some((request) => request.method === 'PUT')).toBe(true))
+  expect(requests.find((request) => request.method === 'PUT')).toEqual({
+    method: 'PUT', path: '/api/v1/workspaces/workspace-1/members/membership-teammate/custom-role', body: { role_id: 'role-1', expected_version: 5 },
+  })
 })

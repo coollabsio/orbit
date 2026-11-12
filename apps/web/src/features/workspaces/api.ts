@@ -8,6 +8,8 @@ import {
   previewInvitation,
   changeMemberRole,
   createInvitation,
+  createRole,
+  deleteRole,
   createWorkspace,
   deleteStorageFile,
   deleteWorkspace,
@@ -17,14 +19,17 @@ import {
   saveWorkspaceBucket,
   listInvitations,
   listMembers,
+  listRoles,
   listWorkspaces,
   removeMember,
   renameWorkspace,
   revokeInvitation,
+  setMemberCustomRole,
   transferOwnership,
+  updateRole,
 } from '@orbit/api/generated/sdk.gen'
 import { STORAGE_FILES_PAGE } from '@orbit/api/storage'
-import type { AcceptBody, InvitationBody, MemberRecord, RoleBody, S3Body, WorkspaceBucketView, WorkspaceRecord } from '@orbit/api/generated/types.gen'
+import type { AcceptBody, InvitationBody, MemberRecord, RoleBody, RoleCreateBody, RoleUpdateBody, S3Body, WorkspaceBucketView, WorkspaceRecord } from '@orbit/api/generated/types.gen'
 import type { User } from './models'
 
 type ApiClient = ReturnType<typeof createApiClient>
@@ -68,6 +73,7 @@ export function memberFromRecord(member: MemberRecord): User {
     version: member.version,
     can: { changeRole: member.can_change_role, remove: member.can_remove, transferOwnership: member.can_transfer_ownership },
     suspended: Boolean(member.suspended_at),
+    customRole: member.custom_role ?? null,
   }
 }
 
@@ -228,6 +234,75 @@ export function useChangeMemberRole(workspaceId: string) {
       })
     },
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: queryKeys.members(workspaceId) }),
+  })
+}
+
+export function useWorkspaceRoles(workspaceId: string, enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.roles(workspaceId),
+    enabled,
+    queryFn: async () => {
+      const { data } = await listRoles({ client: apiClient, path: { workspace_id: workspaceId }, throwOnError: true })
+      return required(data, 'Roles response was empty.')
+    },
+  })
+}
+
+/** A role's name and member count show on member rows and the roles list, so both refetch after a change. */
+function useInvalidateRolesAndMembers(workspaceId: string) {
+  const queryClient = useQueryClient()
+  return () => Promise.all([
+    queryClient.invalidateQueries({ queryKey: queryKeys.roles(workspaceId) }),
+    queryClient.invalidateQueries({ queryKey: queryKeys.members(workspaceId) }),
+  ])
+}
+
+export function useCreateWorkspaceRole(workspaceId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (body: RoleCreateBody) => {
+      const { data } = await createRole({ client: apiClient, path: { workspace_id: workspaceId }, body, throwOnError: true })
+      return required(data, 'Create role response was empty.')
+    },
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: queryKeys.roles(workspaceId) }),
+  })
+}
+
+export function useUpdateWorkspaceRole(workspaceId: string) {
+  const invalidate = useInvalidateRolesAndMembers(workspaceId)
+  return useMutation({
+    mutationFn: async (input: { roleId: string; body: RoleUpdateBody }) => {
+      const { data } = await updateRole({ client: apiClient, path: { workspace_id: workspaceId, role_id: input.roleId }, body: input.body, throwOnError: true })
+      return required(data, 'Update role response was empty.')
+    },
+    onSuccess: () => void invalidate(),
+  })
+}
+
+/** Its members become ordinary members. */
+export function useDeleteWorkspaceRole(workspaceId: string) {
+  const invalidate = useInvalidateRolesAndMembers(workspaceId)
+  return useMutation({
+    mutationFn: async (roleId: string) => {
+      await deleteRole({ client: apiClient, path: { workspace_id: workspaceId, role_id: roleId }, throwOnError: true })
+    },
+    onSuccess: () => void invalidate(),
+  })
+}
+
+/** Gives an ordinary member a custom role, or takes it away with `roleId: null`. */
+export function useSetMemberCustomRole(workspaceId: string) {
+  const invalidate = useInvalidateRolesAndMembers(workspaceId)
+  return useMutation({
+    mutationFn: async (input: { membershipId: string; version: number; roleId: string | null }) => {
+      await setMemberCustomRole({
+        client: apiClient,
+        path: { workspace_id: workspaceId, membership_id: input.membershipId },
+        body: { role_id: input.roleId, expected_version: input.version },
+        throwOnError: true,
+      })
+    },
+    onSuccess: () => void invalidate(),
   })
 }
 

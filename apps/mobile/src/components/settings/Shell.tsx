@@ -25,6 +25,7 @@ export interface SettingsNavItem {
 export const WORKSPACE_NAV: readonly SettingsNavItem[] = [
   { href: '/settings', label: 'General', icon: 'settings' },
   { href: '/settings/members', label: 'Members', icon: 'people' },
+  { href: '/settings/roles', label: 'Roles', icon: 'shieldUser', permission: 'roles.manage' },
   { href: '/settings/billing', label: 'Billing', icon: 'card', cloud: true },
   { href: '/settings/emoji', label: 'Emoji', icon: 'smile', permission: 'chat.manage' },
   { href: '/settings/stickers', label: 'Stickers', icon: 'sticker', permission: 'chat.manage' },
