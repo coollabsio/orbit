@@ -3199,6 +3199,25 @@ export type ListPageSummary = {
     next_cursor: string | null;
 };
 
+export type ListPageVersionSummary = {
+    items: Array<{
+        /**
+         * When the version was stored; the page looked like this at that moment.
+         */
+        created_at: string;
+        created_by: null | PageVersionAuthor;
+        icon: string | null;
+        id: string;
+        kind: PageVersionKind;
+        page_id: string;
+        title: string;
+    }>;
+    /**
+     * Send it as `cursor` for the next page; `null` on the last page.
+     */
+    next_cursor: string | null;
+};
+
 export type ListPublicComment = {
     items: Array<{
         author_id: string;
@@ -6550,6 +6569,16 @@ export type PublicDoc = Page & {
     } | null;
 };
 
+/**
+ * A stored version of a doc: its title, icon and content as they were.
+ */
+export type PublicDocVersion = PageVersion & {
+    /**
+     * The content as GitHub-flavored Markdown, as in a doc read.
+     */
+    markdown: string;
+};
+
 export type PublicLabel = {
     color: string;
     id: string;
@@ -6593,6 +6622,46 @@ export type PublicMilestone = {
     target_at: string | null;
     task_count: number;
     version: number;
+};
+
+/**
+ * Where the doc goes. `parent_id` is required: `null` moves the doc to a space root.
+ */
+export type PublicMoveDocBody = {
+    /**
+     * The `version` that you read: an opaque number below 2^53. Compare it for equality only.
+     */
+    expected_version: number;
+    /**
+     * The new parent doc; `null` moves the doc to a space root. The doc and its sub-docs take
+     * the parent's space.
+     */
+    parent_id: string | null;
+    /**
+     * Index among the new siblings, from 0. Omitted, or past the last sibling, puts the doc
+     * last. A doc that enters a database always goes last.
+     */
+    position?: number | null;
+    /**
+     * With `parent_id: null`: `true` moves the doc to the token creator's private space,
+     * `false` out of it (to the default teamspace unless `teamspace_id` is given).
+     */
+    private?: boolean | null;
+    /**
+     * With `parent_id: null`: the target teamspace. Omitted keeps the doc's current space.
+     */
+    teamspace_id?: string | null;
+};
+
+/**
+ * A doc after a move.
+ */
+export type PublicMovedDoc = PublicDoc & {
+    /**
+     * Property values that the move deleted: the doc left its database, or the new database has
+     * no property of the same name and type (or no such option) for them.
+     */
+    dropped_values: number;
 };
 
 export type PublicNamed = {
@@ -9409,6 +9478,88 @@ export type PublicCreateDocResponses = {
 
 export type PublicCreateDocResponse = PublicCreateDocResponses[keyof PublicCreateDocResponses];
 
+export type PublicDeleteDocData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        /**
+         * The token's workspace, from `GET /me`.
+         */
+        workspace_id: string;
+        page_id: string;
+    };
+    query: {
+        /**
+         * The `version` that you read: an opaque number below 2^53. Compare it for equality only.
+         */
+        expected_version: number;
+    };
+    url: '/api/public/v1/workspaces/{workspace_id}/docs/{page_id}';
+};
+
+export type PublicDeleteDocErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: Problem;
+    /**
+     * unauthorized
+     */
+    401: Problem;
+    /**
+     * workspace_read_only
+     */
+    402: Problem;
+    /**
+     * insufficient_scope, origin_forbidden
+     */
+    403: Problem;
+    /**
+     * not_found
+     */
+    404: Problem;
+    /**
+     * contract_mismatch, conflict
+     */
+    409: Problem;
+    /**
+     * request_too_large
+     */
+    413: Problem;
+    /**
+     * rate_limit_exceeded
+     */
+    429: Problem;
+    /**
+     * internal_error
+     */
+    500: Problem;
+    /**
+     * service_unavailable
+     */
+    503: Problem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: Problem;
+};
+
+export type PublicDeleteDocError = PublicDeleteDocErrors[keyof PublicDeleteDocErrors];
+
+export type PublicDeleteDocResponses = {
+    /**
+     * The doc is in the trash
+     */
+    204: void;
+};
+
+export type PublicDeleteDocResponse = PublicDeleteDocResponses[keyof PublicDeleteDocResponses];
+
 export type PublicGetDocData = {
     body?: never;
     headers?: {
@@ -9935,6 +10086,87 @@ export type PublicQueryDatabaseResponses = {
 
 export type PublicQueryDatabaseResponse = PublicQueryDatabaseResponses[keyof PublicQueryDatabaseResponses];
 
+export type PublicMoveDocData = {
+    body: PublicMoveDocBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        /**
+         * The token's workspace, from `GET /me`.
+         */
+        workspace_id: string;
+        page_id: string;
+    };
+    query?: never;
+    url: '/api/public/v1/workspaces/{workspace_id}/docs/{page_id}/move';
+};
+
+export type PublicMoveDocErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: Problem;
+    /**
+     * unauthorized
+     */
+    401: Problem;
+    /**
+     * workspace_read_only
+     */
+    402: Problem;
+    /**
+     * insufficient_scope, origin_forbidden, workspace_action_forbidden
+     */
+    403: Problem;
+    /**
+     * not_found
+     */
+    404: Problem;
+    /**
+     * contract_mismatch, conflict, database_in_database, database_row_limit
+     */
+    409: Problem;
+    /**
+     * request_too_large
+     */
+    413: Problem;
+    /**
+     * validation_failed
+     */
+    422: Problem;
+    /**
+     * rate_limit_exceeded
+     */
+    429: Problem;
+    /**
+     * internal_error
+     */
+    500: Problem;
+    /**
+     * service_unavailable
+     */
+    503: Problem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: Problem;
+};
+
+export type PublicMoveDocError = PublicMoveDocErrors[keyof PublicMoveDocErrors];
+
+export type PublicMoveDocResponses = {
+    /**
+     * The doc after the move
+     */
+    200: PublicMovedDoc;
+};
+
+export type PublicMoveDocResponse = PublicMoveDocResponses[keyof PublicMoveDocResponses];
+
 export type PublicCreateDatabaseRowData = {
     body: PublicCreateDatabaseRowBody;
     headers?: {
@@ -10191,6 +10423,154 @@ export type PublicUpdateDatabaseRowResponses = {
 };
 
 export type PublicUpdateDatabaseRowResponse = PublicUpdateDatabaseRowResponses[keyof PublicUpdateDatabaseRowResponses];
+
+export type PublicListDocVersionsData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        /**
+         * The token's workspace, from `GET /me`.
+         */
+        workspace_id: string;
+        page_id: string;
+    };
+    query?: {
+        /**
+         * The `next_cursor` of the previous page.
+         */
+        cursor?: string;
+        /**
+         * 1 to 100; 50 when unset.
+         */
+        limit?: number;
+    };
+    url: '/api/public/v1/workspaces/{workspace_id}/docs/{page_id}/versions';
+};
+
+export type PublicListDocVersionsErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request, invalid_cursor
+     */
+    400: Problem;
+    /**
+     * unauthorized
+     */
+    401: Problem;
+    /**
+     * insufficient_scope
+     */
+    403: Problem;
+    /**
+     * not_found
+     */
+    404: Problem;
+    /**
+     * contract_mismatch
+     */
+    409: Problem;
+    /**
+     * request_too_large
+     */
+    413: Problem;
+    /**
+     * rate_limit_exceeded
+     */
+    429: Problem;
+    /**
+     * internal_error
+     */
+    500: Problem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: Problem;
+};
+
+export type PublicListDocVersionsError = PublicListDocVersionsErrors[keyof PublicListDocVersionsErrors];
+
+export type PublicListDocVersionsResponses = {
+    /**
+     * A page of versions
+     */
+    200: ListPageVersionSummary;
+};
+
+export type PublicListDocVersionsResponse = PublicListDocVersionsResponses[keyof PublicListDocVersionsResponses];
+
+export type PublicGetDocVersionData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        /**
+         * The token's workspace, from `GET /me`.
+         */
+        workspace_id: string;
+        page_id: string;
+        version_id: string;
+    };
+    query?: never;
+    url: '/api/public/v1/workspaces/{workspace_id}/docs/{page_id}/versions/{version_id}';
+};
+
+export type PublicGetDocVersionErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: Problem;
+    /**
+     * unauthorized
+     */
+    401: Problem;
+    /**
+     * insufficient_scope
+     */
+    403: Problem;
+    /**
+     * not_found
+     */
+    404: Problem;
+    /**
+     * contract_mismatch
+     */
+    409: Problem;
+    /**
+     * request_too_large
+     */
+    413: Problem;
+    /**
+     * rate_limit_exceeded
+     */
+    429: Problem;
+    /**
+     * internal_error
+     */
+    500: Problem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: Problem;
+};
+
+export type PublicGetDocVersionError = PublicGetDocVersionErrors[keyof PublicGetDocVersionErrors];
+
+export type PublicGetDocVersionResponses = {
+    /**
+     * The version
+     */
+    200: PublicDocVersion;
+};
+
+export type PublicGetDocVersionResponse = PublicGetDocVersionResponses[keyof PublicGetDocVersionResponses];
 
 export type PublicListMembersData = {
     body?: never;
@@ -11165,6 +11545,10 @@ export type PublicCreateTaskData = {
     body: PublicCreateTaskBody;
     headers?: {
         /**
+         * Makes a retry safe. A repeat with the same key and body returns the first response (header `Idempotent-Replayed: true`); the same key with another body or path gets `422`. Kept 24 hours per token.
+         */
+        'Idempotency-Key'?: string | null;
+        /**
          * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
          */
         'X-Orbit-Contract'?: string;
@@ -11577,6 +11961,10 @@ export type PublicListCommentsResponse = PublicListCommentsResponses[keyof Publi
 export type PublicCreateCommentData = {
     body: PublicCommentBody;
     headers?: {
+        /**
+         * Makes a retry safe. A repeat with the same key and body returns the first response (header `Idempotent-Replayed: true`); the same key with another body or path gets `422`. Kept 24 hours per token.
+         */
+        'Idempotency-Key'?: string | null;
         /**
          * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
          */

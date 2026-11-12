@@ -1,4 +1,5 @@
 pub mod account;
+pub mod api_idempotency;
 pub mod api_tokens;
 pub mod attachments;
 pub mod backup_items;
