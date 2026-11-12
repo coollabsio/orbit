@@ -47,7 +47,9 @@ pub(super) async fn idempotency(
         }
     };
     let Some(principal) = request.extensions().get::<ApiTokenPrincipal>().cloned() else {
-        return out.error(TokenApiError::Internal);
+        return out.error(TokenApiError::Internal(
+            "the API token principal is missing".to_owned(),
+        ));
     };
     // The handler answers 403 and reads no body.
     if !principal.allows(ApiTokenScope::TasksWrite) {
@@ -95,7 +97,7 @@ pub(super) async fn idempotency(
         }
         Err(error) => {
             tracing::error!(%error, "public API idempotency claim failed");
-            return out.error(TokenApiError::Internal);
+            return out.error(TokenApiError::Internal(error.to_string()));
         }
     }
 
@@ -103,7 +105,9 @@ pub(super) async fn idempotency(
     let (head, body) = response.into_parts();
     let Ok(bytes) = to_bytes(body, MAX_BODY_BYTES).await else {
         release(&state, &principal, &key).await;
-        return out.error(TokenApiError::Internal);
+        return out.error(TokenApiError::Internal(
+            "the response body could not be read".to_owned(),
+        ));
     };
     // Only a success is kept: after an error nothing was made, so a retry may run again.
     match std::str::from_utf8(&bytes) {

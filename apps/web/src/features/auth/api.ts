@@ -6,6 +6,7 @@ import { disablePushForSignOut } from '@/features/realtime/push'
 import { clearViewSessionEdits } from '@/features/views/useViewState'
 import { clearLocalCache, withinTime } from '@/lib/localCache'
 import { connectionRetryDelay, retryConnectionFailure } from '@/lib/connection'
+import { PROVIDER_NAMES } from '@/features/auth/providerSignIn'
 import {
   authOptions,
   changePassword,
@@ -309,6 +310,12 @@ export function useAuthOptions() {
       return data
     },
   })
+}
+
+/** The label of a provider on buttons and rows: the OpenID Connect one is the server's `ORBIT_OIDC_DISPLAY_NAME`. */
+export function useProviderName(): (provider: Provider) => string {
+  const oidcName = useAuthOptions().data?.oidc_name
+  return (provider) => (provider === 'oidc' && oidcName) || PROVIDER_NAMES[provider]
 }
 
 export function useRequestRegistration() {

@@ -1842,7 +1842,8 @@ struct InstanceSettingsView {
     storage: StorageView,
     limits: LimitsView,
     mail: InstanceMailView,
-    /// The Google and GitHub OAuth clients that are saved. A provider that is not listed is off.
+    /// The OAuth clients of the sign-in providers that are on: Google and GitHub saved here or set by the
+    /// environment, and OpenID Connect from `ORBIT_OIDC_*`. A provider that is not listed is off.
     sign_in_providers: Vec<SignInProviderView>,
     /// The settings that `ORBIT_*` environment variables set. They replace the saved values, and changing them
     /// here gives 409 `set_by_environment`.
@@ -1866,7 +1867,7 @@ struct EnvironmentView {
     backup_schedule: bool,
     /// `ORBIT_S3_KEEP_DELETED_DAYS`.
     s3_keep_deleted_days: bool,
-    /// `ORBIT_GOOGLE_*`, `ORBIT_GITHUB_*`.
+    /// `ORBIT_GOOGLE_*`, `ORBIT_GITHUB_*`, `ORBIT_OIDC_*`.
     sign_in_providers: Vec<Provider>,
 }
 
@@ -1919,6 +1920,8 @@ struct InstanceMailView {
 struct SignInProviderView {
     provider: Provider,
     client_id: String,
+    /// The OpenID Connect issuer (`ORBIT_OIDC_ISSUER`); `null` for Google and GitHub.
+    issuer: Option<String>,
     /// A client secret is saved. The secret itself is never returned.
     secret_set: bool,
     /// The redirect URI to register at the provider.
@@ -1976,10 +1979,18 @@ async fn settings_view(
         settings.smtp.is_some(),
         !sign_in_providers.is_empty(),
     );
+    let environment = EnvironmentSettings::of(state.identity.database());
     let sign_in_providers = sign_in_providers
         .into_iter()
         .map(|saved| SignInProviderView {
             provider: saved.provider,
+            issuer: match saved.provider {
+                Provider::Oidc => environment
+                    .oidc
+                    .as_ref()
+                    .map(|oidc| oidc.issuer.as_str().trim_end_matches('/').to_owned()),
+                Provider::Google | Provider::Github => None,
+            },
             client_id: saved.client_id,
             secret_set: !saved.client_secret.is_empty(),
             callback_url: saved.provider.callback_url(&state.public_origin),
@@ -2507,10 +2518,39 @@ fn sign_in_provider_not_found(
         StatusCode::NOT_FOUND,
         "provider_not_found",
         "Unknown provider",
-        "Orbit can sign in with google or github.",
+        "Orbit can sign in with google, github or oidc.",
         instance,
         request_id,
     )
+}
+
+/// 409 `set_by_environment` for a provider the environment sets, and 422 `invalid_sign_in_provider` for OpenID
+/// Connect, which only `ORBIT_OIDC_*` sets.
+fn only_saved_here(
+    database: &orbit_platform::Database,
+    provider: Provider,
+    instance: &str,
+    request_id: Option<&Extension<RequestId>>,
+) -> Result<(), ApiError> {
+    let variables = match provider {
+        Provider::Google => "ORBIT_GOOGLE_CLIENT_ID",
+        Provider::Github => "ORBIT_GITHUB_CLIENT_ID",
+        Provider::Oidc => "ORBIT_OIDC_ISSUER",
+    };
+    if EnvironmentSettings::of(database)
+        .sign_in_provider(provider)
+        .is_some()
+    {
+        return Err(set_by_environment(variables, instance, request_id));
+    }
+    if provider == Provider::Oidc {
+        return Err(invalid_sign_in_provider(
+            "OpenID Connect is set with the ORBIT_OIDC_* environment variables, not here.",
+            instance,
+            request_id,
+        ));
+    }
+    Ok(())
 }
 
 /// Saves the OAuth client of a sign-in provider; the sign-in pages offer it from then on. The secret is encrypted
@@ -2528,16 +2568,7 @@ async fn save_sign_in_provider(
     let session = require_root(&state, &headers, instance, rid).await?;
     let provider =
         Provider::parse(&provider).ok_or_else(|| sign_in_provider_not_found(instance, rid))?;
-    if EnvironmentSettings::of(state.identity.database())
-        .sign_in_provider(provider)
-        .is_some()
-    {
-        let variables = match provider {
-            Provider::Google => "ORBIT_GOOGLE_CLIENT_ID",
-            Provider::Github => "ORBIT_GITHUB_CLIENT_ID",
-        };
-        return Err(set_by_environment(variables, instance, rid));
-    }
+    only_saved_here(state.identity.database(), provider, instance, rid)?;
     let client_id = body.client_id.trim();
     if client_id.is_empty() || client_id.len() > 256 {
         return Err(invalid_sign_in_provider(
@@ -2598,16 +2629,7 @@ async fn remove_sign_in_provider(
     let session = require_root(&state, &headers, instance, rid).await?;
     let provider =
         Provider::parse(&provider).ok_or_else(|| sign_in_provider_not_found(instance, rid))?;
-    if EnvironmentSettings::of(state.identity.database())
-        .sign_in_provider(provider)
-        .is_some()
-    {
-        let variables = match provider {
-            Provider::Google => "ORBIT_GOOGLE_CLIENT_ID",
-            Provider::Github => "ORBIT_GITHUB_CLIENT_ID",
-        };
-        return Err(set_by_environment(variables, instance, rid));
-    }
+    only_saved_here(state.identity.database(), provider, instance, rid)?;
     InstanceSettingsRepository::new(state.identity.database().clone())
         .remove_sign_in_provider(
             session.user.id,

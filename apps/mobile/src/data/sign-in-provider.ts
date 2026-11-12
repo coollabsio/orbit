@@ -1,5 +1,5 @@
 /**
- * Sign-in with Google or GitHub: the server's start → provider → handoff → exchange flow, in the system browser's auth
+ * Sign-in with Google, GitHub or an OpenID Connect provider: the server's start → provider → handoff → exchange flow, in the system browser's auth
  * session. No React and no Expo: the screens pass the device parts (`ProviderDevice`, see `src/sign-in-provider.ts`),
  * so tests run the whole flow over a fake fetch and a fake browser.
  */
@@ -11,7 +11,16 @@ import { type OrbitClient, type SignIn, signedIn } from './orbit'
 
 export type { ConnectedAccount, Provider, SignInIntent }
 
-export const PROVIDER_LABEL: Record<Provider, string> = { google: 'Google', github: 'GitHub' }
+/** Fallback labels; use `providerLabel` for the server's OpenID Connect name. */
+export const PROVIDER_LABEL: Record<Provider, string> = { google: 'Google', github: 'GitHub', oidc: 'SSO' }
+
+/** The order of the providers everywhere they are listed. */
+const PROVIDERS: readonly Provider[] = ['google', 'github', 'oidc']
+
+/** A provider's label: the OpenID Connect one is the server's `oidc_name` (`ORBIT_OIDC_DISPLAY_NAME`) from its auth options. */
+export function providerLabel(provider: Provider, oidcName?: string | null): string {
+  return (provider === 'oidc' && oidcName) || PROVIDER_LABEL[provider]
+}
 
 /** The redirect the server accepts from every build of the app. */
 export const NATIVE_REDIRECT = 'orbit://auth/callback'
@@ -170,9 +179,9 @@ export async function disconnect(client: OrbitClient, provider: Provider): Promi
 }
 
 /** How the account signs in, for the profile: "Password", then each connected provider. */
-export function signInMethods(hasPassword: boolean | undefined, connected: readonly ConnectedAccount[]): string[] {
-  const providers = (['google', 'github'] as const).filter((provider) => connected.some((account) => account.provider === provider))
-  return [...(hasPassword !== false ? ['Password'] : []), ...providers.map((provider) => PROVIDER_LABEL[provider])]
+export function signInMethods(hasPassword: boolean | undefined, connected: readonly ConnectedAccount[], oidcName?: string | null): string[] {
+  const providers = PROVIDERS.filter((provider) => connected.some((account) => account.provider === provider))
+  return [...(hasPassword !== false ? ['Password'] : []), ...providers.map((provider) => providerLabel(provider, oidcName))]
 }
 
 export interface ProviderRow {
@@ -182,8 +191,7 @@ export interface ProviderRow {
 
 /** The Connected accounts card: every configured provider, and any connected one the admin has since removed. */
 export function providerRows(configured: readonly Provider[], connected: readonly ConnectedAccount[]): ProviderRow[] {
-  const order: Provider[] = ['google', 'github']
-  return order
+  return PROVIDERS
     .filter((provider) => configured.includes(provider) || connected.some((account) => account.provider === provider))
     .map((provider) => ({ provider, account: connected.find((account) => account.provider === provider) ?? null }))
 }

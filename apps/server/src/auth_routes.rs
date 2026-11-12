@@ -184,7 +184,7 @@ pub struct AuthState {
     billing_enabled: bool,
     /// Where people open Orbit, without a trailing slash: the provider callback URLs and the web return page.
     public_origin: Arc<str>,
-    /// Google and GitHub over HTTP.
+    /// Google, GitHub and OpenID Connect over HTTP.
     providers: crate::sign_in_providers::ProviderClient,
     /// Where a native provider sign-in may return to.
     native_redirects: Arc<crate::sign_in_providers::NativeRedirects>,
@@ -1687,6 +1687,9 @@ struct AuthOptions {
     providers: Vec<crate::sign_in_providers::Provider>,
     /// A first sign-in with one of `providers` creates an account (registration is open; no mail server needed).
     provider_registration_open: bool,
+    /// The label of the OpenID Connect provider on the sign-in buttons ("Continue with {oidc_name}"), from
+    /// `ORBIT_OIDC_DISPLAY_NAME`. `null` when it is not set up.
+    oidc_name: Option<String>,
     /// The Orbit release this server runs, from `[workspace.package] version` in `Cargo.toml` (for example `0.1.0`).
     version: &'static str,
 }
@@ -1715,6 +1718,17 @@ async fn auth_options(
         billing_enabled: state.billing_enabled,
         mail_enabled,
         provider_registration_open: settings.registration_open && !providers.is_empty(),
+        oidc_name: providers
+            .contains(&crate::sign_in_providers::Provider::Oidc)
+            .then(|| {
+                crate::repositories::environment_settings::EnvironmentSettings::of(
+                    state.repository.database(),
+                )
+                .oidc
+                .as_ref()
+                .map(|oidc| oidc.display_name.clone())
+            })
+            .flatten(),
         providers,
         version: env!("CARGO_PKG_VERSION"),
     }))

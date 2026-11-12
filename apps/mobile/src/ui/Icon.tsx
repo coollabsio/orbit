@@ -5,7 +5,8 @@ import { brandIcons } from './brand-icons'
 import { icons as reicons } from './icons.gen'
 import { useTheme } from '../theme'
 
-const icons = { ...reicons, ...brandIcons }
+// A sign-in provider's `icon={provider}`: any OpenID Connect provider gets a neutral key, not a brand mark.
+const icons = { ...reicons, ...brandIcons, oidc: reicons.key }
 
 export type IconName = keyof typeof icons
 
