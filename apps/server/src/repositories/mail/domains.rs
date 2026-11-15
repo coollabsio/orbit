@@ -824,13 +824,13 @@ impl MailRepository {
     pub async fn record_dns_report(
         &self,
         domain_id: Id,
-        report: DnsReport,
+        mut report: DnsReport,
         now: TimestampMillis,
     ) -> Result<Option<DomainStatus>, MailError> {
         let mut transaction = self.database.immediate_transaction().await?;
         let Some(row) = sqlx::query(
-            "SELECT workspace_id, status, verified_at, last_verified_at, suspended_at, checked_at \
-             FROM mail_domains WHERE id = $1",
+            "SELECT workspace_id, status, verified_at, last_verified_at, suspended_at, checked_at, \
+             dns_report FROM mail_domains WHERE id = $1",
         )
         .bind(domain_id.to_string())
         .fetch_optional(&mut *transaction)
@@ -844,6 +844,15 @@ impl MailRepository {
         let mut last_verified_at: Option<i64> = row.try_get("last_verified_at")?;
         let mut suspended_at: Option<i64> = row.try_get("suspended_at")?;
         let mut checked_at: Option<i64> = row.try_get("checked_at")?;
+        // A timed-out MX lookup says nothing: keep what the last check found, so a blip does
+        // not stop sending.
+        if report.mx == RecordStatus::Unknown
+            && let Some(previous) = row
+                .try_get::<Option<String>, _>("dns_report")?
+                .and_then(|text| serde_json::from_str::<DnsReport>(&text).ok())
+        {
+            report.mx = previous.mx;
+        }
         let verify_ok = report.verify == RecordStatus::Ok;
         let verify_failed = matches!(
             report.verify,

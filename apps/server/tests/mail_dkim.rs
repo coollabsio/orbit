@@ -7,7 +7,9 @@ use orbit_platform::{
     AttachmentMutationCoordinator, Id, LocalBlobStore, MailMode, PasswordService, TestDatabase,
     TimestampMillis, UploadLimits, UploadService,
 };
-use orbit_server::mail_dns::{DnsChecker, FakeDns, RecordKind, expected_records, expected_spf};
+use orbit_server::mail_dns::{
+    DnsChecker, DnsError, FakeDns, RecordKind, expected_records, expected_spf,
+};
 use orbit_server::repositories::identity::{IdentityRepository, SetupRequest};
 use orbit_server::repositories::instance_settings::InstanceSettingsRepository;
 use orbit_server::repositories::mail::{
@@ -537,4 +539,74 @@ async fn spf_row_by_route() {
     let route = fixture.route("postmark", "{}", None).await;
     fixture.use_route(&domain, Some(route)).await;
     assert!(spf_of(&fixture.get(&domain).await).contains("include:spf.mtasv.net"));
+}
+
+#[tokio::test]
+async fn mx_timeout_keeps_previous_status() {
+    let fixture = Fixture::new().await;
+    let start = TimestampMillis::now().as_millis() + MINUTE;
+    let domain = fixture.active("example.com", start).await;
+    let route = fixture.route("smtp", "{}", None).await;
+    fixture.use_route(&domain, Some(route)).await;
+    assert_eq!(
+        fixture.mail.send_readiness(domain.id, None).await.unwrap(),
+        SendReadiness::Ready
+    );
+
+    fixture.dns.fail("example.com", DnsError::Timeout);
+    fixture.check(&domain, start + 1).await;
+    assert_eq!(
+        fixture.mail.send_readiness(domain.id, None).await.unwrap(),
+        SendReadiness::Ready
+    );
+
+    // A real answer still changes it.
+    fixture.dns.remove("example.com");
+    fixture.check(&domain, start + 2).await;
+    assert_eq!(
+        fixture.mail.send_readiness(domain.id, None).await.unwrap(),
+        SendReadiness::NotReady(NotReadyReason::InboundNotLive)
+    );
+}
+
+#[tokio::test]
+async fn dns_timeout_does_not_change_keys() {
+    let fixture = Fixture::new().await;
+    let start = TimestampMillis::now().as_millis() + MINUTE;
+
+    // A pending first key stays pending.
+    let first = fixture.add("pending.example").await;
+    fixture.publish_base(&first);
+    let selector = first.dkim.as_ref().unwrap().selector.clone();
+    fixture.dns.fail(
+        &format!("{selector}._domainkey.pending.example"),
+        DnsError::Timeout,
+    );
+    fixture.check(&first, start).await;
+    assert_eq!(fixture.key_status(&first, &selector).await, "pending");
+
+    // With a rotation under way, the active key stays active.
+    let domain = fixture.active("example.com", start).await;
+    let old = domain.dkim.as_ref().unwrap().selector.clone();
+    let rotated = fixture
+        .mail
+        .rotate_dkim(
+            fixture.workspace,
+            fixture.owner,
+            domain.id,
+            "request",
+            at(start + 1),
+        )
+        .await
+        .unwrap();
+    fixture.dns.fail(
+        &format!("{}._domainkey.example.com", rotated.selector),
+        DnsError::Timeout,
+    );
+    fixture.check(&domain, start + 2).await;
+    assert_eq!(fixture.key_status(&domain, &old).await, "active");
+    assert_eq!(
+        fixture.key_status(&domain, &rotated.selector).await,
+        "pending"
+    );
 }

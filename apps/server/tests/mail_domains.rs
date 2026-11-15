@@ -1622,3 +1622,14 @@ async fn rotating_the_dkim_key_shows_the_new_record_once_at_a_time() {
     assert_eq!(status, StatusCode::CONFLICT);
     assert_eq!(refused["code"], "rotation_pending");
 }
+
+#[tokio::test]
+async fn rotate_other_workspace_domain_404() {
+    let fixture = Fixture::new().await;
+    let domain = fixture.add(fixture.first, "example.com").await;
+    let path = format!("/domains/{}/dkim/rotate", domain["id"].as_str().unwrap());
+    let (status, _) = fixture
+        .call(&fixture.owner, fixture.second, "POST", &path, None)
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
