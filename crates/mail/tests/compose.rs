@@ -117,6 +117,9 @@ fn forward_as_attachment_is_rfc822() {
     let raw = build_message(&c).unwrap();
     let text = String::from_utf8_lossy(&raw).to_string();
     assert!(text.contains("Content-Type: message/rfc822"));
+    assert!(!text.contains("Content-Transfer-Encoding: base64"));
+    assert!(text.contains("Content-Transfer-Encoding: 7bit\r\n"));
+    assert!(text.contains("\r\n\r\nFrom: a@b.c\r\nSubject: Old"));
     let msg = MessageParser::default().parse(&raw).unwrap();
     assert!(msg.parts.iter().any(|p| {
         p.content_type()
@@ -164,7 +167,7 @@ fn rejects_crlf_in_header_values() {
     c.extra_headers.push(("X-A".into(), "v\nBcc: x@y".into()));
     assert!(matches!(
         build_message(&c),
-        Err(ComposeError::InvalidHeader("extra header"))
+        Err(ComposeError::InvalidHeader("extra_headers"))
     ));
     let mut c = base();
     c.to = vec![addr(Some("a\r\nBcc: x"), "b@c.d")];
@@ -208,4 +211,31 @@ fn html_to_text_basic() {
         "a\nb & c <d>"
     );
     assert_eq!(html_to_text("<style>x{}</style>Hi"), "Hi");
+}
+
+#[test]
+fn extra_headers_refuse_reserved_names() {
+    for name in ["Bcc", "message-id", "DKIM-Signature", "Return-Path"] {
+        let mut c = base();
+        c.extra_headers.push((name.into(), "x".into()));
+        assert!(
+            matches!(
+                build_message(&c),
+                Err(ComposeError::InvalidHeader("extra_headers"))
+            ),
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn rejects_malformed_addresses() {
+    for bad in ["nobody", "@example.com", "bob@", "a@b@c"] {
+        let mut c = base();
+        c.to = vec![addr(None, bad)];
+        assert!(
+            matches!(build_message(&c), Err(ComposeError::InvalidHeader("to"))),
+            "{bad}"
+        );
+    }
 }

@@ -70,6 +70,26 @@ pub enum ComposeError {
     Write,
 }
 
+/// Headers the builder or the signer owns: an extra header may not set them.
+const RESERVED_HEADERS: &[&str] = &[
+    "Bcc",
+    "From",
+    "To",
+    "Cc",
+    "Subject",
+    "Date",
+    "Message-ID",
+    "In-Reply-To",
+    "References",
+    "Reply-To",
+    "MIME-Version",
+    "Content-Type",
+    "Content-Transfer-Encoding",
+    "DKIM-Signature",
+    "Sender",
+    "Return-Path",
+];
+
 fn clean(value: &str, field: &'static str) -> Result<(), ComposeError> {
     if value.chars().any(|c| c.is_control()) {
         return Err(ComposeError::InvalidHeader(field));
@@ -82,7 +102,13 @@ fn address(value: &ComposedAddress, field: &'static str) -> Result<Address<'stat
     if let Some(name) = &value.name {
         clean(name, field)?;
     }
-    if value.address.is_empty() || value.address.contains(['<', '>', ',', ' ']) {
+    let valid = value
+        .address
+        .split_once('@')
+        .is_some_and(|(local, domain)| {
+            !local.is_empty() && !domain.is_empty() && !domain.contains('@')
+        });
+    if !valid || value.address.contains(['<', '>', ',', ' ']) {
         return Err(ComposeError::InvalidHeader(field));
     }
     Ok(Address::new_address(
@@ -115,10 +141,19 @@ fn bare_id(value: &str, field: &'static str) -> Result<String, ComposeError> {
 fn file_part(file: &ComposedFile) -> Result<MimePart<'static>, ComposeError> {
     clean(&file.filename, "filename")?;
     clean(&file.content_type, "content type")?;
-    let part = MimePart::new(
+    let mut part = MimePart::new(
         file.content_type.clone(),
         BodyPart::from(file.bytes.clone()),
     );
+    if file.kind == ComposedFileKind::Message {
+        // RFC 2046 section 5.2.1: message/rfc822 may only use 7bit, 8bit or binary.
+        let encoding = if file.bytes.is_ascii() {
+            "7bit"
+        } else {
+            "8bit"
+        };
+        part = part.transfer_encoding(encoding);
+    }
     Ok(match &file.kind {
         ComposedFileKind::Attachment | ComposedFileKind::Message => {
             part.attachment(file.filename.clone())
@@ -166,9 +201,15 @@ pub fn build_message(composed: &Composed) -> Result<Vec<u8>, ComposeError> {
     }
     for (name, value) in &composed.extra_headers {
         if name.is_empty() || !name.bytes().all(|b| b.is_ascii_graphic() && b != b':') {
-            return Err(ComposeError::InvalidHeader("extra header"));
+            return Err(ComposeError::InvalidHeader("extra_headers"));
         }
-        clean(value, "extra header")?;
+        if RESERVED_HEADERS
+            .iter()
+            .any(|reserved| reserved.eq_ignore_ascii_case(name))
+        {
+            return Err(ComposeError::InvalidHeader("extra_headers"));
+        }
+        clean(value, "extra_headers")?;
         builder = builder.header(name.clone(), Raw::new(value.clone()));
     }
 
