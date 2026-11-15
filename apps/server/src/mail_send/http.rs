@@ -15,7 +15,7 @@ use reqwest::{RequestBuilder, StatusCode, Url};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
-use super::{Delivery, DeliveryContext, Outgoing, RecipientOutcome, all, domain_of};
+use super::{Delivery, DeliveryContext, Outgoing, RecipientOutcome, all};
 use crate::repositories::mail::{RouteSecrets, RouteSettings, SendRouteKind};
 
 /// One API call, the message upload included.
@@ -27,17 +27,70 @@ const SES_BATCH: usize = 50;
 const CLOUDFLARE_BATCH: usize = 50;
 const MAILGUN_BATCH: usize = 1000;
 
-/// The client for the HTTP adapters: no redirects, and only public addresses (the provider hosts
-/// are fixed, but an instance route may name another Mailgun base URL).
+/// The client for the HTTP adapters: no redirects, and the name resolved at connect time to
+/// public addresses only, unless `allow_private` (an instance route, which may name its own base
+/// URL on a private host).
 #[must_use]
-pub fn delivery_http_client() -> reqwest::Client {
-    reqwest::Client::builder()
+pub fn delivery_http_client(allow_private: bool) -> reqwest::Client {
+    let mut builder = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(Duration::from_secs(15))
-        .dns_resolver(Arc::new(PublicResolver))
-        .user_agent("Orbit")
-        .build()
-        .expect("the delivery HTTP client builds")
+        .user_agent("Orbit");
+    if !allow_private {
+        builder = builder.dns_resolver(Arc::new(PublicResolver));
+    }
+    builder.build().expect("the delivery HTTP client builds")
+}
+
+/// The API base URL (no trailing slash) of an HTTP route: the provider's, or the route's own
+/// `base_url` when `allow_private` (only an instance route may have one). `Err`: a setting the
+/// kind needs is missing or not valid.
+pub fn api_base(
+    kind: SendRouteKind,
+    settings: &RouteSettings,
+    allow_private: bool,
+) -> Result<String, String> {
+    let provider = match kind {
+        SendRouteKind::Mailgun => match settings.region.as_deref().unwrap_or("us") {
+            "us" => "https://api.mailgun.net".to_owned(),
+            "eu" => "https://api.eu.mailgun.net".to_owned(),
+            "au" => "https://api.au.mailgun.net".to_owned(),
+            _ => return Err("The route's Mailgun region is not valid.".to_owned()),
+        },
+        SendRouteKind::Ses => {
+            let region = settings
+                .region
+                .as_deref()
+                .filter(|region| host_label(region))
+                .ok_or_else(|| "The route has no valid AWS region.".to_owned())?;
+            format!("https://email.{region}.amazonaws.com")
+        }
+        SendRouteKind::Cloudflare => "https://api.cloudflare.com/client/v4".to_owned(),
+        _ => return Err("The route does not send through an HTTP API.".to_owned()),
+    };
+    Ok(settings
+        .base_url
+        .as_deref()
+        .filter(|_| allow_private)
+        .map_or(provider, |url| url.trim_end_matches('/').to_owned()))
+}
+
+/// Who answered, for the error texts and the error rules.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Provider {
+    Mailgun,
+    Ses,
+    Cloudflare,
+}
+
+impl Provider {
+    const fn name(self) -> &'static str {
+        match self {
+            Self::Mailgun => "Mailgun",
+            Self::Ses => "Amazon SES",
+            Self::Cloudflare => "Cloudflare",
+        }
+    }
 }
 
 enum Auth {
@@ -78,27 +131,11 @@ impl Api {
         secrets: &RouteSecrets,
         ctx: &DeliveryContext,
     ) -> Result<Self, String> {
-        // Only an instance route may have its own base URL (the repository clears it on others).
-        let custom = settings
-            .base_url
-            .as_deref()
-            .filter(|_| ctx.allow_private)
-            .map(|url| url.trim_end_matches('/').to_owned());
-        let (base, auth) = match (kind, secrets) {
-            (SendRouteKind::Mailgun, RouteSecrets::Mailgun { api_key, .. }) => {
-                let base = match settings.region.as_deref().unwrap_or("us") {
-                    "us" => "https://api.mailgun.net",
-                    "eu" => "https://api.eu.mailgun.net",
-                    "au" => "https://api.au.mailgun.net",
-                    _ => return Err("The route's Mailgun region is not valid.".to_owned()),
-                };
-                (
-                    custom.unwrap_or_else(|| base.to_owned()),
-                    Auth::Mailgun {
-                        api_key: api_key.clone(),
-                    },
-                )
-            }
+        let base = api_base(kind, settings, ctx.allow_private)?;
+        let auth = match (kind, secrets) {
+            (SendRouteKind::Mailgun, RouteSecrets::Mailgun { api_key, .. }) => Auth::Mailgun {
+                api_key: api_key.clone(),
+            },
             (
                 SendRouteKind::Ses,
                 RouteSecrets::Ses {
@@ -111,14 +148,11 @@ impl Api {
                     .clone()
                     .filter(|region| host_label(region))
                     .ok_or_else(|| "The route has no valid AWS region.".to_owned())?;
-                (
-                    custom.unwrap_or_else(|| format!("https://email.{region}.amazonaws.com")),
-                    Auth::Ses {
-                        region,
-                        access_key_id: access_key_id.clone(),
-                        secret_access_key: secret_access_key.clone(),
-                    },
-                )
+                Auth::Ses {
+                    region,
+                    access_key_id: access_key_id.clone(),
+                    secret_access_key: secret_access_key.clone(),
+                }
             }
             (SendRouteKind::Cloudflare, RouteSecrets::Cloudflare { api_token, .. }) => {
                 let account_id = settings
@@ -126,13 +160,10 @@ impl Api {
                     .clone()
                     .filter(|id| id.len() == 32 && id.bytes().all(|b| b.is_ascii_hexdigit()))
                     .ok_or_else(|| "The route has no valid Cloudflare account ID.".to_owned())?;
-                (
-                    custom.unwrap_or_else(|| "https://api.cloudflare.com/client/v4".to_owned()),
-                    Auth::Cloudflare {
-                        account_id,
-                        api_token: api_token.clone(),
-                    },
-                )
+                Auth::Cloudflare {
+                    account_id,
+                    api_token: api_token.clone(),
+                }
             }
             _ => return Err("The route's secrets do not match its kind.".to_owned()),
         };
@@ -148,17 +179,16 @@ impl Api {
         api_key: &str,
         outgoing: &Outgoing<'_>,
     ) -> Vec<(String, RecipientOutcome)> {
-        let domain = domain_of(outgoing.mail_from);
-        if domain.is_empty()
-            || !domain
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'.')
-        {
+        // Mailgun sends for the From domain; its URL takes the A-label form.
+        let Ok(domain) = orbit_mail::normalize_domain(outgoing.from_domain) else {
             return all(
                 outgoing.recipients,
-                &RecipientOutcome::deferred("The sender has no domain Mailgun can send for"),
+                &RecipientOutcome::deferred(format!(
+                    "Route error: the From domain {:?} is not a domain Mailgun can send for",
+                    outgoing.from_domain
+                )),
             );
-        }
+        };
         let url = format!("{}/v3/{domain}/messages.mime", self.base);
         let mut outcomes = Vec::with_capacity(outgoing.recipients.len());
         for batch in outgoing.recipients.chunks(MAILGUN_BATCH) {
@@ -176,7 +206,7 @@ impl Api {
                 Ok((status, body)) if status.is_success() => RecipientOutcome::Accepted {
                     provider_message_id: json_field(&body, &["id"]),
                 },
-                Ok((status, body)) => failure(status, &body, false),
+                Ok((status, body)) => failure(Provider::Mailgun, status, &body),
                 Err(error) => RecipientOutcome::deferred(error),
             };
             outcomes.extend(all(batch, &outcome));
@@ -246,7 +276,7 @@ impl Api {
                 Ok((status, body)) if status.is_success() => RecipientOutcome::Accepted {
                     provider_message_id: json_field(&body, &["MessageId"]),
                 },
-                Ok((status, body)) => failure(status, &body, true),
+                Ok((status, body)) => failure(Provider::Ses, status, &body),
                 Err(error) => RecipientOutcome::deferred(error),
             };
             outcomes.extend(all(batch, &outcome));
@@ -278,7 +308,9 @@ impl Api {
                 Ok((status, body)) if status.is_success() => {
                     outcomes.extend(cloudflare_outcomes(batch, &body));
                 }
-                Ok((status, body)) => outcomes.extend(all(batch, &failure(status, &body, false))),
+                Ok((status, body)) => {
+                    outcomes.extend(all(batch, &failure(Provider::Cloudflare, status, &body)))
+                }
                 Err(error) => outcomes.extend(all(batch, &RecipientOutcome::deferred(error))),
             }
         }
@@ -365,7 +397,13 @@ async fn call(request: RequestBuilder) -> Result<(StatusCode, String), String> {
             }
         })?;
     let status = response.status();
-    let mut body = Vec::new();
+    // SES names the error in a header; keep it with the body.
+    let mut body: Vec<u8> = response
+        .headers()
+        .get("x-amzn-errortype")
+        .and_then(|value| value.to_str().ok())
+        .map(|kind| format!("{kind}: ").into_bytes())
+        .unwrap_or_default();
     while body.len() < BODY_MAX_BYTES {
         match response.chunk().await {
             Ok(Some(chunk)) => body.extend_from_slice(&chunk),
@@ -376,32 +414,55 @@ async fn call(request: RequestBuilder) -> Result<(StatusCode, String), String> {
     Ok((status, String::from_utf8_lossy(&body).into_owned()))
 }
 
-/// The outcome of a call that failed with `status`. Rate limits, server errors, timeouts and
-/// refused credentials are temporary (the admin can fix a key; the message waits); other 4xx
-/// answers refuse the message for every recipient of the call.
-fn failure(status: StatusCode, body: &str, ses: bool) -> RecipientOutcome {
-    let response = format!("HTTP {}: {}", status.as_u16(), body.trim());
-    let temporary = status == StatusCode::TOO_MANY_REQUESTS
-        || status == StatusCode::REQUEST_TIMEOUT
-        || status == StatusCode::UNAUTHORIZED
-        || status == StatusCode::FORBIDDEN
-        || status.is_server_error()
-        || !status.is_client_error()
-        // SES answers 400 for a paused or throttled account.
-        || (ses
-            && [
-                "Throttling",
-                "TooManyRequests",
-                "LimitExceeded",
-                "SendingPaused",
-                "AccountSuspended",
-            ]
-            .iter()
-            .any(|code| body.contains(code)));
-    if temporary {
-        RecipientOutcome::deferred(response)
-    } else {
-        RecipientOutcome::bounced(response)
+/// SES error types (`x-amzn-ErrorType`) and messages that mean the route, not the recipient, is
+/// at fault: an unverified identity (also the sandbox's unverified recipients), a paused or
+/// suspended account, a missing configuration, throttling.
+const SES_ROUTE_ERRORS: [&str; 12] = [
+    "not verified",
+    "mailfromdomainnotverified",
+    "sendingpaused",
+    "accountsendingpaused",
+    "accountsuspended",
+    "notfoundexception",
+    "throttling",
+    "toomanyrequests",
+    "limitexceeded",
+    "accessdenied",
+    "signaturedoesnotmatch",
+    "unrecognizedclient",
+];
+
+/// The outcome of a call that failed with `status`. Only an answer about the recipients or the
+/// message bounces; anything about the route (credentials, an unknown domain or account, a
+/// paused account, rate limits) or the provider (server errors, timeouts) defers, so the message
+/// waits for the admin's fix and nothing feeds the suppression list or the pause.
+fn failure(provider: Provider, status: StatusCode, body: &str) -> RecipientOutcome {
+    let code = status.as_u16();
+    let body = body.trim();
+    let name = provider.name();
+    let route_error = |what: &str| {
+        RecipientOutcome::deferred(format!("Route error: {name} {what} (HTTP {code}): {body}"))
+    };
+    let lower = body.to_ascii_lowercase();
+    match status {
+        StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => {
+            route_error("refused the route's credentials")
+        }
+        StatusCode::NOT_FOUND => route_error("does not know the route's domain or account"),
+        StatusCode::PAYMENT_REQUIRED => route_error("refused the account"),
+        _ if provider == Provider::Ses
+            && status.is_client_error()
+            && SES_ROUTE_ERRORS.iter().any(|needle| lower.contains(needle)) =>
+        {
+            route_error("refused to send for the route")
+        }
+        _ if status.is_client_error()
+            && status != StatusCode::TOO_MANY_REQUESTS
+            && status != StatusCode::REQUEST_TIMEOUT =>
+        {
+            RecipientOutcome::bounced(format!("{name} refused the message (HTTP {code}): {body}"))
+        }
+        _ => RecipientOutcome::deferred(format!("{name} answered HTTP {code}: {body}")),
     }
 }
 

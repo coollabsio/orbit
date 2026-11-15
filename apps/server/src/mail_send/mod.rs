@@ -22,7 +22,7 @@ use crate::repositories::mail::{
     HostClass, RouteSecrets, RouteSettings, SendRoute, SendRouteKind, classify_ip,
 };
 
-pub use http::delivery_http_client;
+pub use http::{api_base, delivery_http_client};
 
 /// Most characters of a provider's or server's response kept in an outcome.
 const RESPONSE_MAX_CHARS: usize = 500;
@@ -34,6 +34,8 @@ pub struct Outgoing<'a> {
     pub raw: &'a [u8],
     /// The envelope sender (`MAIL FROM`), which may be the provider's; empty for `<>`.
     pub mail_from: &'a str,
+    /// The domain of the `From` header (Mailgun sends for it); Unicode or A-labels.
+    pub from_domain: &'a str,
     pub recipients: &'a [String],
     /// What the provider's events carry back (the provider headers hold it too).
     pub correlation: &'a str,
@@ -149,11 +151,30 @@ pub struct DeliveryContext {
     /// `ORBIT_MAIL_HOSTNAME`: the EHLO name, and the host whose addresses are this server's own.
     pub hostname: Option<String>,
     pub resolver: Arc<dyn MxLookup>,
-    /// For the HTTP adapters. Use [`delivery_http_client`] (no redirects, public addresses only).
-    pub http: reqwest::Client,
-    /// Whether the route may reach private addresses: `true` only for a route of the root user
-    /// (an instance route). It also lets an instance route use its own API base URL.
-    pub allow_private: bool,
+    /// Built with [`delivery_http_client`] for `allow_private`, so the two always agree.
+    http: reqwest::Client,
+    allow_private: bool,
+}
+
+impl DeliveryContext {
+    /// `allow_private`: whether the route may reach private addresses — `true` only for a route
+    /// of the root user (an instance route): its relay host, and its own API base URL, may then be
+    /// private. Direct sending never reaches a private address (the MX hosts come from remote
+    /// DNS), whatever this says.
+    #[must_use]
+    pub fn new(hostname: Option<String>, resolver: Arc<dyn MxLookup>, allow_private: bool) -> Self {
+        Self {
+            hostname,
+            resolver,
+            http: delivery_http_client(allow_private),
+            allow_private,
+        }
+    }
+
+    #[must_use]
+    pub const fn allow_private(&self) -> bool {
+        self.allow_private
+    }
 }
 
 /// The adapter of `route`.

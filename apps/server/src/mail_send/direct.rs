@@ -11,7 +11,6 @@ use super::{
     Delivery, DeliveryContext, MxAnswer, MxLookup, Outgoing, RecipientOutcome, address_allowed,
     all, domain_of,
 };
-use crate::repositories::mail::{HostClass, classify_ip};
 
 const SMTP_PORT: u16 = 25;
 /// MX hosts of one domain tried, best preference first.
@@ -22,7 +21,6 @@ const MAX_CONNECTIONS: usize = 6;
 pub(super) struct Direct {
     hostname: Option<String>,
     resolver: Arc<dyn MxLookup>,
-    allow_private: bool,
 }
 
 impl Direct {
@@ -34,7 +32,6 @@ impl Direct {
                 .map(|name| name.trim().trim_end_matches('.').to_ascii_lowercase())
                 .filter(|name| !name.is_empty()),
             resolver: ctx.resolver.clone(),
-            allow_private: ctx.allow_private,
         }
     }
 
@@ -102,12 +99,9 @@ impl Direct {
                 }
             };
             for ip in addresses {
-                // Remote DNS picks these addresses: never the link-local range (cloud metadata),
-                // even for an instance route.
-                if own.contains(&ip)
-                    || classify_ip(ip) == HostClass::LinkLocal
-                    || !address_allowed(ip, self.allow_private)
-                {
+                // Remote DNS picks these addresses: only public ones, even for an instance
+                // route (spec §11), and never this server's own.
+                if own.contains(&ip) || !address_allowed(ip, false) {
                     refused = true;
                     continue;
                 }

@@ -113,6 +113,14 @@ async fn step<T>(
     }
 }
 
+/// Wait for the server's answer to `QUIT` when a connection is given up or ends.
+const QUIT_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Ends a connection that is given up: `QUIT`, without waiting for a server that never answers.
+async fn close(conn: &mut AsyncSmtpConnection) {
+    let _ = tokio::time::timeout(QUIT_TIMEOUT, conn.abort()).await;
+}
+
 fn tls_parameters(name: &str, verify: bool) -> Result<TlsParameters, ConnectFailure> {
     TlsParameters::builder(name.to_owned())
         .dangerous_accept_invalid_certs(!verify)
@@ -148,7 +156,7 @@ pub(super) async fn transaction(
     let starttls = match target.mode {
         TlsMode::Required => {
             if !conn.can_starttls() {
-                conn.abort().await;
+                close(&mut conn).await;
                 return Err(ConnectFailure::new(
                     "TLS required: the server does not offer STARTTLS",
                 ));
@@ -161,7 +169,7 @@ pub(super) async fn transaction(
     if let Some(verify) = starttls {
         let parameters = tls_parameters(target.tls_name, verify)?;
         if let Err(error) = step(COMMAND_TIMEOUT, conn.starttls(parameters, target.hello)).await {
-            conn.abort().await;
+            close(&mut conn).await;
             return Err(ConnectFailure {
                 response: format!("TLS with {address} failed: {}", error.text()),
                 tls_failed: true,
@@ -171,13 +179,13 @@ pub(super) async fn transaction(
 
     if let Some(credentials) = target.credentials {
         if !conn.is_encrypted() && target.mode != TlsMode::Plain {
-            conn.abort().await;
+            close(&mut conn).await;
             return Err(ConnectFailure::new(
                 "TLS required: the login is never sent without it",
             ));
         }
         if let Err(error) = step(COMMAND_TIMEOUT, conn.auth(target.mechanisms, credentials)).await {
-            conn.abort().await;
+            close(&mut conn).await;
             return Err(ConnectFailure::new(format!(
                 "Login refused: {}",
                 error.text()
@@ -186,7 +194,7 @@ pub(super) async fn transaction(
     }
 
     let outcomes = send(&mut conn, outgoing, recipients).await;
-    let _ = tokio::time::timeout(Duration::from_secs(10), conn.quit()).await;
+    let _ = tokio::time::timeout(QUIT_TIMEOUT, conn.quit()).await;
     Ok(outcomes)
 }
 

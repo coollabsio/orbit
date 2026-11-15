@@ -21,7 +21,7 @@ use orbit_mail::{
 use orbit_platform::{Id, SigV4Credentials, SigV4Request, TimestampMillis, sigv4_authorization};
 use orbit_server::mail_dns::FakeDns;
 use orbit_server::mail_send::{
-    DeliveryContext, Outgoing, RecipientOutcome, adapter_for, provider_headers,
+    DeliveryContext, Outgoing, RecipientOutcome, adapter_for, api_base, provider_headers,
     with_provider_headers,
 };
 use orbit_server::repositories::mail::{
@@ -52,12 +52,11 @@ fn route(kind: SendRouteKind, settings: RouteSettings) -> SendRoute {
 }
 
 fn context(dns: &FakeDns, allow_private: bool) -> DeliveryContext {
-    DeliveryContext {
-        hostname: Some("out.orbit.test".to_owned()),
-        resolver: Arc::new(dns.clone()),
-        http: reqwest::Client::new(),
+    DeliveryContext::new(
+        Some("out.orbit.test".to_owned()),
+        Arc::new(dns.clone()),
         allow_private,
-    }
+    )
 }
 
 fn recipients(list: &[&str]) -> Vec<String> {
@@ -71,10 +70,22 @@ async fn deliver(
     mail_from: &str,
     to: &[String],
 ) -> HashMap<String, RecipientOutcome> {
+    deliver_from(route, secrets, ctx, mail_from, "example.com", to).await
+}
+
+async fn deliver_from(
+    route: &SendRoute,
+    secrets: &RouteSecrets,
+    ctx: &DeliveryContext,
+    mail_from: &str,
+    from_domain: &str,
+    to: &[String],
+) -> HashMap<String, RecipientOutcome> {
     let adapter = adapter_for(route, secrets, ctx);
     let outgoing = Outgoing {
         raw: RAW,
         mail_from,
+        from_domain,
         recipients: to,
         correlation: "corr-1",
     };
@@ -315,6 +326,78 @@ async fn smtp_requires_tls_when_set() {
 }
 
 #[tokio::test]
+async fn smtp_tls_wrapper_never_falls_back_to_plain_text() {
+    let handler = Arc::new(Scripted::default());
+    let port = start_smtp(handler.clone()).await;
+    let to = recipients(&["bob@x.test"]);
+    let outcomes = deliver(
+        &smtp_route("127.0.0.1", port, SmtpSecurity::Tls),
+        &RouteSecrets::Smtp {
+            username: "user".to_owned(),
+            password: "secret".to_owned(),
+        },
+        &context(&FakeDns::new(), true),
+        "bounce+t1@example.com",
+        &to,
+    )
+    .await;
+    assert!(
+        matches!(outcomes["bob@x.test"], RecipientOutcome::Deferred { .. }),
+        "{outcomes:?}"
+    );
+    assert!(handler.messages.lock().unwrap().is_empty());
+}
+
+/// A server that answers the greeting and EHLO (no STARTTLS), then never answers anything
+/// (QUIT included), and keeps the connection open.
+async fn start_silent_smtp() -> u16 {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        while let Ok((stream, _)) = listener.accept().await {
+            tokio::spawn(async move {
+                let (read, mut write) = stream.into_split();
+                let mut lines = BufReader::new(read).lines();
+                let _ = write.write_all(b"220 silent.test ESMTP\r\n").await;
+                while let Ok(Some(line)) = lines.next_line().await {
+                    if line.to_ascii_uppercase().starts_with("EHLO") {
+                        let _ = write
+                            .write_all(b"250-silent.test\r\n250 8BITMIME\r\n")
+                            .await;
+                    }
+                }
+            });
+        }
+    });
+    port
+}
+
+#[tokio::test]
+async fn smtp_gives_up_on_a_server_that_never_answers_quit() {
+    let port = start_silent_smtp().await;
+    let to = recipients(&["bob@x.test"]);
+    let started = std::time::Instant::now();
+    let outcomes = deliver(
+        &smtp_route("127.0.0.1", port, SmtpSecurity::Starttls),
+        &RouteSecrets::None,
+        &context(&FakeDns::new(), true),
+        "bounce+t1@example.com",
+        &to,
+    )
+    .await;
+    assert!(
+        deferred_with(&outcomes["bob@x.test"], "TLS required"),
+        "{outcomes:?}"
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(15),
+        "{:?}",
+        started.elapsed()
+    );
+}
+
+#[tokio::test]
 async fn smtp_plain_route_refused_on_public_address() {
     // A plain relay is only allowed to a private address, even for the root user.
     let dns = FakeDns::new();
@@ -481,8 +564,7 @@ async fn direct_refuses_private_mx() {
     for address in &to {
         assert!(bounced_with(&outcomes[address], "5.4.4"), "{outcomes:?}");
     }
-    // Remote DNS never steers an instance route to the link-local range either.
-    let to = recipients(&["c@meta.example"]);
+    // MX hosts come from remote DNS: an instance route (allow_private) is refused the same.
     let outcomes = deliver(
         &direct_route(),
         &RouteSecrets::None,
@@ -491,7 +573,9 @@ async fn direct_refuses_private_mx() {
         &to,
     )
     .await;
-    assert!(bounced_with(&outcomes["c@meta.example"], "5.4.4"));
+    for address in &to {
+        assert!(bounced_with(&outcomes[address], "5.4.4"), "{outcomes:?}");
+    }
 }
 
 #[tokio::test]
@@ -906,32 +990,122 @@ async fn cloudflare_send_raw_shape() {
     );
 }
 
-#[tokio::test]
-async fn base_url_ignored_for_workspace_routes() {
+#[test]
+fn base_url_only_for_instance_routes() {
     // A workspace route never has a base URL (the repository clears it); if one is there, the
-    // adapter still calls the provider's own host, not the given one.
-    let (base, requests) = start_api(StatusCode::OK, |_| "{}".to_owned()).await;
+    // adapter still calls the provider's own host.
+    let mut settings = RouteSettings {
+        region: Some("eu".to_owned()),
+        base_url: Some("http://10.0.0.5/".to_owned()),
+        ..RouteSettings::default()
+    };
+    assert_eq!(
+        api_base(SendRouteKind::Mailgun, &settings, false).unwrap(),
+        "https://api.eu.mailgun.net"
+    );
+    assert_eq!(
+        api_base(SendRouteKind::Mailgun, &settings, true).unwrap(),
+        "http://10.0.0.5"
+    );
+    settings.region = Some("au".to_owned());
+    assert_eq!(
+        api_base(SendRouteKind::Mailgun, &settings, false).unwrap(),
+        "https://api.au.mailgun.net"
+    );
+    settings.region = Some("eu-west-1".to_owned());
+    assert_eq!(
+        api_base(SendRouteKind::Ses, &settings, false).unwrap(),
+        "https://email.eu-west-1.amazonaws.com"
+    );
+    settings.region = Some("evil.example/x".to_owned());
+    assert!(api_base(SendRouteKind::Ses, &settings, false).is_err());
+    assert_eq!(
+        api_base(SendRouteKind::Cloudflare, &settings, false).unwrap(),
+        "https://api.cloudflare.com/client/v4"
+    );
+}
+
+#[tokio::test]
+async fn mailgun_route_errors_are_deferred() {
+    let to = recipients(&["bob@x.test", "carol@y.test"]);
+    for (status, body) in [
+        (StatusCode::UNAUTHORIZED, "Forbidden"),
+        (
+            StatusCode::NOT_FOUND,
+            "{\"message\":\"Domain not found: example.com\"}",
+        ),
+    ] {
+        let (base, _) = start_api(status, move |_| body.to_owned()).await;
+        let outcomes = deliver(
+            &mailgun_route(&base),
+            &mailgun_secrets(),
+            &context(&FakeDns::new(), true),
+            "alice@example.com",
+            &to,
+        )
+        .await;
+        for address in &to {
+            assert!(
+                deferred_with(&outcomes[address], "Route error"),
+                "{status}: {outcomes:?}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn ses_route_errors_are_deferred() {
+    let (base, _) = start_api(StatusCode::BAD_REQUEST, |_| {
+        json!({ "message": "Email address is not verified. The following identities failed the check in region US-EAST-1: alice@example.com" })
+            .to_string()
+    })
+    .await;
+    let ses = route(
+        SendRouteKind::Ses,
+        RouteSettings {
+            region: Some("us-east-1".to_owned()),
+            base_url: Some(base),
+            max_message_bytes: 40_000_000,
+            ..RouteSettings::default()
+        },
+    );
+    let secrets = RouteSecrets::Ses {
+        access_key_id: "AKIDEXAMPLE".to_owned(),
+        secret_access_key: "secret".to_owned(),
+    };
     let to = recipients(&["bob@x.test"]);
-    let mut ctx = context(&FakeDns::new(), false);
-    // The provider's host goes nowhere, so the test never leaves the machine.
-    ctx.http = reqwest::Client::builder()
-        .resolve("api.mailgun.net", "127.0.0.1:9".parse().unwrap())
-        .timeout(Duration::from_secs(5))
-        .build()
-        .unwrap();
     let outcomes = deliver(
-        &mailgun_route(&base),
-        &mailgun_secrets(),
-        &ctx,
+        &ses,
+        &secrets,
+        &context(&FakeDns::new(), true),
         "alice@example.com",
         &to,
     )
     .await;
-    assert!(matches!(
-        outcomes["bob@x.test"],
-        RecipientOutcome::Deferred { .. }
-    ));
-    assert!(requests.lock().unwrap().is_empty());
+    assert!(
+        deferred_with(&outcomes["bob@x.test"], "Route error"),
+        "{outcomes:?}"
+    );
+}
+
+#[tokio::test]
+async fn mailgun_sends_for_the_from_domain_as_a_label() {
+    let (base, requests) =
+        start_api(StatusCode::OK, |_| json!({ "id": "<mg-2@x>" }).to_string()).await;
+    let to = recipients(&["bob@x.test"]);
+    let outcomes = deliver_from(
+        &mailgun_route(&base),
+        &mailgun_secrets(),
+        &context(&FakeDns::new(), true),
+        // The envelope sender may be a provider's or a bounce address: not the API domain.
+        "bounces@mg.provider.test",
+        "Bücher.example",
+        &to,
+    )
+    .await;
+    assert!(accepted(&outcomes["bob@x.test"]), "{outcomes:?}");
+    let requests = requests.lock().unwrap().clone();
+    assert_eq!(requests[0].path, "/v3/xn--bcher-kva.example/messages.mime");
 }
 
 // ---------------------------------------------------------------- headers
