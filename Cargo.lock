@@ -2839,6 +2839,7 @@ dependencies = [
  "hmac 0.12.1",
  "idna",
  "mail-auth",
+ "mail-builder",
  "mail-parser",
  "rcgen",
  "ring",

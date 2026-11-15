@@ -9,6 +9,7 @@ ammonia = "4"
 base64 = "0.22"
 hmac = "0.12"
 idna = "1"
+mail-builder = "1"
 mail-parser = { version = "0.11", features = ["full_encoding"] }
 ring = "0.17"
 mail-auth = { version = "0.13", default-features = false, features = ["ring"] }
