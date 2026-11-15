@@ -178,8 +178,8 @@ async fn membership(state: &MailState, call: &Call<'_>) -> Result<Id, ApiError> 
 }
 
 /// Starts a draft. A member has one draft for each thread: when there is one, it is returned
-/// (and a different `mode` changes its mode).
-#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/mail/drafts", params(("workspace_id" = String, Path)), request_body = CreateMailDraftBody, responses((status = 201, body = MailDraft)))]
+/// (and a different `mode` changes its mode) with status 200; a new one is 201.
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/mail/drafts", params(("workspace_id" = String, Path)), request_body = CreateMailDraftBody, responses((status = 201, body = MailDraft), (status = 200, body = MailDraft)))]
 pub(crate) async fn create_mail_draft(
     State(state): State<MailState>,
     Path(workspace): Path<String>,
@@ -190,6 +190,11 @@ pub(crate) async fn create_mail_draft(
 ) -> Result<(StatusCode, Json<MailDraft>), ApiError> {
     let call = Call::enter(&state, &headers, &uri, &workspace, &request_id).await?;
     let membership = membership(&state, &call).await?;
+    let thread = body
+        .thread_id
+        .as_deref()
+        .map(|id| call.body_id(id, "thread_id"))
+        .transpose()?;
     let new = NewDraft {
         mode: body.mode,
         thread_id: body
@@ -213,12 +218,39 @@ pub(crate) async fn create_mail_draft(
         subject: body.subject,
         body_html: body.body_html,
     };
-    let draft = state
+    match state
         .mail
         .create_draft(membership, call.workspace_id, new)
         .await
-        .map_err(|error| call.problem(error))?;
-    Ok((StatusCode::CREATED, Json(view(draft))))
+    {
+        Ok((draft, created)) => {
+            let status = if created {
+                StatusCode::CREATED
+            } else {
+                StatusCode::OK
+            };
+            Ok((status, Json(view(draft))))
+        }
+        Err(MailError::Conflict("draft_conflict")) => {
+            // Another request made the thread's draft first: say so, with that draft.
+            let error = call.problem(MailError::Conflict("draft_conflict"));
+            let current = match thread {
+                Some(thread) => state
+                    .mail
+                    .thread_draft(membership, thread)
+                    .await
+                    .map_err(|error| call.problem(error))?,
+                None => None,
+            };
+            Err(match current {
+                Some(current) => error.with_current(
+                    serde_json::to_value(view(current)).unwrap_or(serde_json::Value::Null),
+                ),
+                None => error,
+            })
+        }
+        Err(error) => Err(call.problem(error)),
+    }
 }
 
 #[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/mail/drafts/{draft_id}", params(("workspace_id" = String, Path), ("draft_id" = String, Path)), responses((status = 200, body = MailDraft)))]

@@ -50,6 +50,10 @@ struct Fixture {
 
 impl Fixture {
     async fn new() -> Self {
+        Self::with_limits(UploadLimits::default()).await
+    }
+
+    async fn with_limits(limits: UploadLimits) -> Self {
         let database = TestDatabase::new().await.unwrap();
         let identity = Arc::new(IdentityRepository::new((*database).clone()));
         let now = TimestampMillis::now();
@@ -85,7 +89,7 @@ impl Fixture {
             (*database).clone(),
             Arc::new(LocalBlobStore::new(root.path().join("attachments"))),
             AttachmentMutationCoordinator::default(),
-            UploadLimits::default(),
+            limits,
         );
         let mail = Arc::new(MailRepository::new((*database).clone(), uploads, APP_KEY));
         let intake = MailIntake::new(Arc::clone(&mail), 52_428_800);
@@ -464,7 +468,7 @@ async fn reply_all_recipients_exclude_self() {
     // Reply all: Reply-To, then To; Cc; no address of the mailbox (its alias with a tag too),
     // each address once whatever its case.
     let (status, all) = f.reply(&f.ann, "reply_all", thread).await;
-    assert_eq!(status, StatusCode::CREATED, "{all}");
+    assert_eq!(status, StatusCode::OK, "{all}");
     assert_eq!(all["id"], reply["id"]);
     assert_eq!(all["mode"], "reply_all");
     assert_eq!(
@@ -486,7 +490,11 @@ async fn one_reply_draft_per_thread_per_member() {
     let (_, thread) = f.deliver("team@one.test", f.team_primary).await;
     let (_, first) = f.reply(&f.ann, "reply", thread).await;
     let (status, again) = f.reply(&f.ann, "reply", thread).await;
-    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "an existing draft is returned with 200"
+    );
     assert_eq!(again["id"], first["id"]);
     // An edited draft keeps its recipients when the mode changes.
     let id = first["id"].as_str().unwrap();
@@ -503,7 +511,8 @@ async fn one_reply_draft_per_thread_per_member() {
     assert_eq!(forward["id"], first["id"]);
     assert_eq!(forward["mode"], "forward");
     assert_eq!(strings(&forward["to"]), ["x@y.test"]);
-    assert_eq!(forward["subject"], "Re: Hello");
+    // The subject was not edited: it follows the mode; the edited recipients stay.
+    assert_eq!(forward["subject"], "Fwd: Hello");
     // Another member of the mailbox has a draft of their own.
     let (_, owner) = f.reply(&f.owner, "reply", thread).await;
     assert_ne!(owner["id"], first["id"]);
@@ -782,4 +791,162 @@ async fn drafts_listed_newest_first() {
         )
         .await;
     assert_eq!(mine.as_array().unwrap().len(), 3);
+}
+
+#[tokio::test]
+async fn reply_from_is_the_alias_that_received_the_parent() {
+    let f = Fixture::new().await;
+    let (_, thread) = f.deliver("Support+News@one.test", f.team_alias).await;
+    let (status, reply) = f.reply(&f.ann, "reply", thread).await;
+    assert_eq!(status, StatusCode::CREATED, "{reply}");
+    assert_eq!(reply["from_address_id"], f.team_alias.to_string());
+    // A thread received at the primary address replies from it.
+    let raw = "From: Carl <carl@sender.test>\r\nTo: team@one.test\r\nSubject: Other\r\n\
+               Message-ID: <m9@sender.test>\r\n\r\nHi\r\n"
+        .to_owned();
+    let (_, other) = f.deliver_raw(raw, "team@one.test", f.team_primary).await;
+    let (_, reply) = f.reply(&f.ann, "reply", other).await;
+    assert_eq!(reply["from_address_id"], f.team_primary.to_string());
+}
+
+#[tokio::test]
+async fn from_of_another_mailbox_is_refused() {
+    let f = Fixture::new().await;
+    let (_, thread) = f.deliver("team@one.test", f.team_primary).await;
+    // Ann can send as her personal address, but a reply of the team's thread cannot (D13).
+    let (status, body) = f
+        .call(
+            &f.ann,
+            "POST",
+            "/drafts",
+            Some(json!({"mode": "reply", "thread_id": thread.to_string(),
+                "from_address_id": f.ann_primary.to_string()})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    let (_, draft) = f.reply(&f.ann, "forward", thread).await;
+    let id = draft["id"].as_str().unwrap();
+    let (status, body) = f
+        .call(
+            &f.ann,
+            "PATCH",
+            &format!("/drafts/{id}"),
+            Some(json!({"version": 1, "from_address_id": f.ann_primary.to_string()})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    // Another address of the thread's mailbox is fine.
+    let (status, body) = f
+        .call(
+            &f.ann,
+            "PATCH",
+            &format!("/drafts/{id}"),
+            Some(json!({"version": 1, "from_address_id": f.team_alias.to_string()})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["from_address_id"], f.team_alias.to_string());
+}
+
+#[tokio::test]
+async fn parent_of_another_thread_or_mailbox_is_refused() {
+    let f = Fixture::new().await;
+    let (_, thread) = f.deliver("team@one.test", f.team_primary).await;
+    let other_raw = "From: Carl <carl@sender.test>\r\nTo: team@one.test\r\nSubject: Unrelated\r\n\
+                     Message-ID: <m8@sender.test>\r\n\r\nHi\r\n"
+        .to_owned();
+    let (other_thread_message, _) = f
+        .deliver_raw(other_raw, "team@one.test", f.team_primary)
+        .await;
+    let sales_raw = "From: Carl <carl@sender.test>\r\nTo: sales@one.test\r\nSubject: Sales\r\n\
+                     Message-ID: <m7@sender.test>\r\n\r\nHi\r\n"
+        .to_owned();
+    let (sales_message, _) = f
+        .deliver_raw(sales_raw, "sales@one.test", f.sales_primary)
+        .await;
+    for parent in [other_thread_message, sales_message] {
+        let (status, body) = f
+            .call(
+                &f.ann,
+                "POST",
+                "/drafts",
+                Some(json!({"mode": "reply", "thread_id": thread.to_string(),
+                    "parent_message_id": parent.to_string()})),
+            )
+            .await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    }
+}
+
+#[tokio::test]
+async fn file_over_the_limit_is_refused() {
+    let limits = UploadLimits::new(1024, 1024 * 1024).unwrap();
+    let f = Fixture::with_limits(limits).await;
+    let (_, draft) = f
+        .call(
+            &f.ann,
+            "POST",
+            "/drafts",
+            Some(json!({"mode": "new", "from_address_id": f.ann_primary.to_string()})),
+        )
+        .await;
+    let id = draft["id"].as_str().unwrap();
+    let (status, body) = f.upload(&f.ann, id, "big.bin", &vec![7_u8; 4096]).await;
+    assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE, "{body}");
+    assert_eq!(body["code"], "upload_too_large");
+    let (status, _) = f.upload(&f.ann, id, "ok.bin", &[7_u8; 512]).await;
+    assert_eq!(status, StatusCode::CREATED);
+}
+
+#[tokio::test]
+async fn the_fifty_first_file_is_refused() {
+    let f = Fixture::new().await;
+    let (_, draft) = f
+        .call(
+            &f.ann,
+            "POST",
+            "/drafts",
+            Some(json!({"mode": "new", "from_address_id": f.ann_primary.to_string()})),
+        )
+        .await;
+    let id = draft["id"].as_str().unwrap();
+    for n in 0..50 {
+        let (status, body) = f
+            .upload(
+                &f.ann,
+                id,
+                &format!("f{n}.txt"),
+                format!("file {n}").as_bytes(),
+            )
+            .await;
+        assert_eq!(status, StatusCode::CREATED, "{n}: {body}");
+    }
+    let (status, body) = f.upload(&f.ann, id, "last.txt", b"one more").await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["code"], "draft_files_limit");
+}
+
+#[tokio::test]
+async fn a_draft_without_its_parent_keeps_its_files_on_a_mode_change() {
+    let f = Fixture::new().await;
+    let (_, thread) = f
+        .deliver_raw(with_attachment(), "team@one.test", f.team_primary)
+        .await;
+    let (_, forward) = f.reply(&f.ann, "forward", thread).await;
+    let id = forward["id"].as_str().unwrap();
+    sqlx::query("UPDATE mail_drafts SET parent_message_id = NULL WHERE id = $1")
+        .bind(id)
+        .execute(f.database.pool())
+        .await
+        .unwrap();
+    let (status, changed) = f
+        .call(
+            &f.ann,
+            "PATCH",
+            &format!("/drafts/{id}"),
+            Some(json!({"version": 1, "mode": "reply"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{changed}");
+    assert_eq!(changed["files"].as_array().unwrap().len(), 1);
 }

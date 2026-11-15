@@ -485,13 +485,14 @@ impl MailRepository {
     /// message answered, and the From is the address that received it (`reply_from`) or the
     /// mailbox's primary address. A member has one draft per thread: when there is one already,
     /// it is returned, and a different `mode` changes its mode (see `update_draft`); the other
-    /// fields of `new` are then ignored.
+    /// fields of `new` are then ignored. The flag is `true` when a draft was made. When another
+    /// request made the thread's draft first, the result is `Conflict("draft_conflict")`.
     pub async fn create_draft(
         &self,
         membership_id: Id,
         workspace_id: Id,
         new: NewDraft,
-    ) -> Result<Draft, MailError> {
+    ) -> Result<(Draft, bool), MailError> {
         let to = new.to.as_deref().map(|l| clean_list(l, "to")).transpose()?;
         let cc = new.cc.as_deref().map(|l| clean_list(l, "cc")).transpose()?;
         let bcc = new
@@ -502,7 +503,7 @@ impl MailRepository {
         let subject = new.subject.as_deref().map(clean_subject).transpose()?;
         let body = new.body_html.as_deref().map(clean_body).transpose()?;
         let Some(thread_id) = new.thread_id else {
-            return self
+            let created = self
                 .create_new_draft(
                     membership_id,
                     workspace_id,
@@ -511,7 +512,8 @@ impl MailRepository {
                     subject,
                     body,
                 )
-                .await;
+                .await?;
+            return Ok((created, true));
         };
         if new.mode == DraftMode::New {
             return Err(MailError::Invalid { field: "mode" });
@@ -532,9 +534,9 @@ impl MailRepository {
             let existing = parse_id(&existing)?;
             let current = self.get_draft(membership_id, existing).await?;
             if current.mode == new.mode {
-                return Ok(current);
+                return Ok((current, false));
             }
-            return self
+            let changed = self
                 .update_draft(
                     membership_id,
                     existing,
@@ -544,7 +546,8 @@ impl MailRepository {
                         ..DraftChange::default()
                     },
                 )
-                .await;
+                .await?;
+            return Ok((changed, false));
         }
         let parent = load_parent(&mut read, thread_id, new.parent_message_id).await?;
         read.commit().await?;
@@ -614,7 +617,26 @@ impl MailRepository {
         .await?;
         let created = load_draft(&mut transaction, membership_id, id).await?;
         transaction.commit().await?;
-        Ok(created)
+        Ok((created, true))
+    }
+
+    /// The member's draft of a thread, if any.
+    pub async fn thread_draft(
+        &self,
+        membership_id: Id,
+        thread_id: Id,
+    ) -> Result<Option<Draft>, MailError> {
+        let found: Option<String> = sqlx::query_scalar(
+            "SELECT id FROM mail_drafts WHERE thread_id = $1 AND membership_id = $2",
+        )
+        .bind(thread_id.to_string())
+        .bind(membership_id.to_string())
+        .fetch_optional(self.database.pool())
+        .await?;
+        match found {
+            Some(id) => Ok(Some(self.get_draft(membership_id, parse_id(&id)?).await?)),
+            None => Ok(None),
+        }
     }
 
     async fn create_new_draft(
@@ -727,8 +749,8 @@ impl MailRepository {
     /// thread draft, be an address of the thread's mailbox, D13).
     ///
     /// A different `mode` (between reply, reply all and the forwards of a thread draft) gives the
-    /// recipients and the subject of the new mode only while the member has not edited them (they
-    /// still equal what the old mode made); the forwarded files follow the mode.
+    /// recipients (together) and the subject (on its own) of the new mode only while the member
+    /// has not edited them (they still equal what the old mode made); the forwarded files follow the mode.
     pub async fn update_draft(
         &self,
         membership_id: Id,
@@ -796,15 +818,19 @@ impl MailRepository {
                 let parent = load_parent(&mut transaction, thread_id, Some(parent_id)).await?;
                 let own = own_keys(&mut transaction, current.mailbox_id).await?;
                 let old = defaults_for(current.mode, &parent, &own);
-                if current.to == old.to && current.cc == old.cc && current.subject == old.subject {
-                    let fresh = defaults_for(requested, &parent, &own);
+                let fresh = defaults_for(requested, &parent, &own);
+                // The recipients move together; the subject on its own.
+                if current.to == old.to && current.cc == old.cc {
                     new_to = fresh.to;
                     new_cc = fresh.cc;
+                }
+                if current.subject == old.subject {
                     new_subject = fresh.subject;
                 }
             }
             mode = requested;
-            sync_files = true;
+            // A draft whose parent is gone keeps its files: nothing to copy them from.
+            sync_files = current.parent_message_id.is_some();
         }
         let result = sqlx::query(
             "UPDATE mail_drafts SET mailbox_id = $1, from_address_id = $2, mode = $3, \
