@@ -427,6 +427,20 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::mail_routes::domains::rotate_mail_domain_dkim,
         crate::mail_routes::domains::set_mail_domain_catch_all,
         crate::mail_routes::domains::set_mail_domain_route,
+        crate::mail_routes::domains::set_mail_domain_send_route,
+        crate::mail_routes::send_routes::list_instance_mail_send_routes,
+        crate::mail_routes::send_routes::create_instance_mail_send_route,
+        crate::mail_routes::send_routes::update_instance_mail_send_route,
+        crate::mail_routes::send_routes::delete_instance_mail_send_route,
+        crate::mail_routes::send_routes::test_instance_mail_send_route,
+        crate::mail_routes::send_routes::set_mail_send_default,
+        crate::mail_routes::send_routes::create_instance_mail_provider_send_route,
+        crate::mail_routes::send_routes::list_workspace_mail_send_routes,
+        crate::mail_routes::send_routes::create_workspace_mail_send_route,
+        crate::mail_routes::send_routes::update_workspace_mail_send_route,
+        crate::mail_routes::send_routes::delete_workspace_mail_send_route,
+        crate::mail_routes::send_routes::test_workspace_mail_send_route,
+        crate::mail_routes::send_routes::create_workspace_mail_provider_send_route,
         crate::mail_routes::providers::list_instance_mail_providers,
         crate::mail_routes::providers::create_instance_mail_provider,
         crate::mail_routes::providers::update_instance_mail_provider,
@@ -1325,6 +1339,9 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
         id if database_operation(id) => database_errors(id, &mut responses),
         id if teamspace_operation(id) => teamspace_errors(id, &mut responses),
         id if id.contains("chat") => chat_errors(id, &mut responses),
+        id if id.contains("send_route") || id == "set_mail_send_default" => {
+            mail_send_route_errors(id, &mut responses);
+        }
         id if id.contains("mail_domain") => mail_domain_errors(id, &mut responses),
         id if id.contains("mail_provider") => mail_provider_errors(id, &mut responses),
         id if id.contains("mailbox") || id.contains("mail_label") => {
@@ -2314,6 +2331,41 @@ fn mail_domain_errors(
     }
 }
 
+/// Send route routes: the root user's instance routes, or a workspace's (`mail.manage`).
+fn mail_send_route_errors(
+    operation_id: &str,
+    responses: &mut BTreeMap<&'static str, Vec<&'static str>>,
+) {
+    if operation_id.contains("instance") || operation_id == "set_mail_send_default" {
+        add_code(responses, "403", "installation_admin_required");
+    } else {
+        add_code(responses, "403", "mail_forbidden");
+        add_code(responses, "404", "mail_not_found");
+    }
+    if operation_id.starts_with("create_")
+        || operation_id.starts_with("update_")
+        || operation_id.starts_with("set_")
+        || operation_id.starts_with("test_")
+    {
+        add_code(responses, "400", "invalid_request");
+        add_code(responses, "422", "validation_failed");
+    }
+    if operation_id.starts_with("create_") || operation_id.starts_with("update_") {
+        add_code(responses, "422", "hostname_required");
+        add_code(responses, "422", "private_host_refused");
+        add_code(responses, "422", "plain_smtp_refused");
+    }
+    if operation_id.starts_with("create_workspace_") {
+        add_code(responses, "403", "workspace_providers_disabled");
+    }
+    if operation_id.starts_with("delete_") {
+        add_code(responses, "409", "route_in_use");
+    }
+    if operation_id.contains("instance") {
+        add_code(responses, "404", "mail_not_found");
+    }
+}
+
 /// Mail provider routes: the root user's instance providers, or a workspace's (`mail.manage`).
 fn mail_provider_errors(
     operation_id: &str,
@@ -2380,6 +2432,7 @@ fn workspace_mail_operation(operation_id: &str) -> bool {
     );
     let mail_route = operation_id.contains("mail_domain")
         || operation_id.contains("mail_provider")
+        || operation_id.contains("send_route")
         || operation_id.contains("mailbox")
         || operation_id.contains("mail_label")
         || operation_id.contains("mail_receipt")

@@ -59,7 +59,11 @@ pub use receipts::{
 pub(crate) use receipts::{
     NewReceipt, insert_receipt, insert_receipt_recipient, record_health_test,
 };
-pub use routes::SendRouteKind;
+pub use routes::{
+    HostClass, NewRoute, ProviderRouteInput, RouteChange, RouteSecrets, RouteSettings, RouteStep,
+    RouteStepStatus, SendRoute, SendRouteKind, SmtpSecurity, all_private, all_public, classify_ip,
+    resolve_host, route_aad,
+};
 pub use search::{MailQuery, ThreadCursor, parse_query};
 pub use threads::SEARCH_BODY_BYTES;
 
@@ -73,6 +77,9 @@ pub enum MailError {
     Conflict(&'static str),
     #[error("mail input is invalid: {field}")]
     Invalid { field: &'static str },
+    /// Valid input that Orbit refuses, with a stable code (a 422).
+    #[error("{0}")]
+    Unprocessable(&'static str),
     #[error("the workspace is over its storage quota")]
     QuotaExceeded,
     /// A sealed value did not open: another app key, other associated data or altered bytes.

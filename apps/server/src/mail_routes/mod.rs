@@ -9,6 +9,7 @@ pub(crate) mod inbound;
 pub(crate) mod labels;
 pub(crate) mod mailboxes;
 pub(crate) mod providers;
+pub(crate) mod send_routes;
 pub(crate) mod threads;
 
 use std::sync::Arc;
@@ -189,6 +190,50 @@ pub fn mail_router(state: MailState) -> Router {
         .route(
             "/api/v1/workspaces/{workspace_id}/mail/domains/{domain_id}/route",
             put(domains::set_mail_domain_route),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/domains/{domain_id}/send-route",
+            put(domains::set_mail_domain_send_route),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/send-routes",
+            get(send_routes::list_workspace_mail_send_routes)
+                .post(send_routes::create_workspace_mail_send_route),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/send-routes/{route_id}",
+            patch(send_routes::update_workspace_mail_send_route)
+                .delete(send_routes::delete_workspace_mail_send_route),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/send-routes/{route_id}/test",
+            post(send_routes::test_workspace_mail_send_route),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/providers/{provider_id}/send-route",
+            post(send_routes::create_workspace_mail_provider_send_route),
+        )
+        .route(
+            "/api/v1/admin/mail/send-routes",
+            get(send_routes::list_instance_mail_send_routes)
+                .post(send_routes::create_instance_mail_send_route),
+        )
+        .route(
+            "/api/v1/admin/mail/send-routes/{route_id}",
+            patch(send_routes::update_instance_mail_send_route)
+                .delete(send_routes::delete_instance_mail_send_route),
+        )
+        .route(
+            "/api/v1/admin/mail/send-routes/{route_id}/test",
+            post(send_routes::test_instance_mail_send_route),
+        )
+        .route(
+            "/api/v1/admin/mail/send-default",
+            put(send_routes::set_mail_send_default),
+        )
+        .route(
+            "/api/v1/admin/mail/providers/{provider_id}/send-route",
+            post(send_routes::create_instance_mail_provider_send_route),
         )
         .route(
             "/api/v1/workspaces/{workspace_id}/mail/providers",
@@ -437,6 +482,16 @@ fn detail(code: &'static str) -> &'static str {
         "rotation_pending" => {
             "A new DKIM key waits for its DNS record. Publish it, or wait for the check, first."
         }
+        "route_in_use" => "Use another route on the domains that use this one first.",
+        "hostname_required" => {
+            "Sending directly needs the mail server's host name (ORBIT_MAIL_HOSTNAME)."
+        }
+        "private_host_refused" => {
+            "This host is on a private network or is not a public address. A workspace route can only use a public mail server."
+        }
+        "plain_smtp_refused" => {
+            "A connection without TLS is only possible for an instance route to a host on a private network."
+        }
         "provider_in_use" => "Route the domains that use this provider elsewhere first.",
         _ => "This action is not possible.",
     }
@@ -473,6 +528,14 @@ pub(crate) fn problem(
             request_id,
         ),
         MailError::Invalid { field } => validation(field, instance, request_id),
+        MailError::Unprocessable(code) => ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            code,
+            "Unprocessable",
+            detail(code),
+            instance,
+            request_id,
+        ),
         MailError::QuotaExceeded => ApiError::new(
             StatusCode::PAYLOAD_TOO_LARGE,
             "storage_quota_exceeded",

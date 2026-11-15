@@ -11,7 +11,7 @@ use utoipa::ToSchema;
 use super::{Call, MailState, RequestIdExtension, problem};
 use crate::mail_dns::{RecordKind, expected_records, txt_strings};
 use crate::repositories::mail::{
-    Domain, DomainProvider, DomainStatus, MailError, ProviderKind, RecordStatus,
+    Domain, DomainProvider, DomainStatus, MailError, ProviderKind, RecordStatus, SendRouteKind,
 };
 use crate::task_routes::{ApiError, ApiJson, request_id_value};
 
@@ -46,6 +46,8 @@ pub(crate) struct MailDomain {
     records: Vec<MailDnsRecord>,
     /// The provider that receives the domain's mail; `null`: this server's SMTP listener.
     provider: Option<MailDomainRoute>,
+    /// The send route the domain uses: its own, else the instance default; `null`: none.
+    send_route: Option<MailDomainSendRoute>,
     #[schema(value_type = String, format = DateTime)]
     created_at: TimestampMillis,
 }
@@ -60,6 +62,15 @@ pub(crate) struct MailDomainRoute {
     name: String,
     /// An instance provider (set up by the root user).
     instance: bool,
+}
+
+/// The route a domain sends through.
+#[derive(Serialize, ToSchema)]
+pub(crate) struct MailDomainSendRoute {
+    #[schema(value_type = String)]
+    id: Id,
+    #[schema(value_type = String)]
+    kind: SendRouteKind,
 }
 
 #[derive(Serialize, ToSchema)]
@@ -142,6 +153,10 @@ fn view(domain: Domain, hostname: Option<&str>) -> MailDomain {
         })
         .collect();
     MailDomain {
+        send_route: domain.send_route.as_ref().map(|route| MailDomainSendRoute {
+            id: route.id,
+            kind: route.kind,
+        }),
         grace_ends_at: domain.grace_ends_at(),
         id: domain.id,
         name: domain.name,
@@ -182,6 +197,13 @@ pub(crate) struct CreateMailDomainBody {
 pub(crate) struct MailDomainRouteBody {
     /// An instance provider or one of the workspace; `null`: this server's SMTP listener.
     provider_id: Option<String>,
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct MailDomainSendRouteBody {
+    /// An instance send route or one of the workspace; `null`: the instance default.
+    route_id: Option<String>,
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -449,6 +471,43 @@ pub(crate) async fn set_mail_domain_route(
             call.actor_id,
             domain_id,
             provider_id,
+            call.request_id(),
+        )
+        .await
+        .map_err(|error| call.problem(error))?;
+    let domain = state
+        .mail
+        .get_domain(call.workspace_id, call.actor_id, domain_id)
+        .await
+        .map_err(|error| call.problem(error))?;
+    Ok(Json(view(domain, state.settings.hostname.as_deref())))
+}
+
+/// The send route of the domain: an instance route or one of the workspace, or `null` for the
+/// instance default.
+#[utoipa::path(put, path = "/api/v1/workspaces/{workspace_id}/mail/domains/{domain_id}/send-route", params(("workspace_id" = String, Path), ("domain_id" = String, Path)), request_body = MailDomainSendRouteBody, responses((status = 200, body = MailDomain)))]
+pub(crate) async fn set_mail_domain_send_route(
+    State(state): State<MailState>,
+    Path((workspace, domain)): Path<(String, String)>,
+    headers: HeaderMap,
+    uri: Uri,
+    request_id: RequestIdExtension,
+    ApiJson(body): ApiJson<MailDomainSendRouteBody>,
+) -> Result<Json<MailDomain>, ApiError> {
+    let call = Call::enter(&state, &headers, &uri, &workspace, &request_id).await?;
+    let domain_id = call.id(&domain)?;
+    let route_id = body
+        .route_id
+        .as_deref()
+        .map(|id| call.body_id(id, "route_id"))
+        .transpose()?;
+    state
+        .mail
+        .set_domain_send_route(
+            call.workspace_id,
+            call.actor_id,
+            domain_id,
+            route_id,
             call.request_id(),
         )
         .await
