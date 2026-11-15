@@ -636,8 +636,7 @@ struct SigningKey<'a> {
     region: &'a str,
 }
 
-/// AWS Signature V4 for S3. Adds `x-amz-date` and `x-amz-content-sha256` to `headers` (which must contain
-/// `host`) and returns the `Authorization` value. `query` is already encoded and sorted.
+/// AWS Signature V4 for S3: [`sigv4_authorization`] for service `s3`.
 fn sign(
     key: &SigningKey<'_>,
     method: &str,
@@ -647,6 +646,62 @@ fn sign(
     payload_hash: &str,
     now: DateTime<Utc>,
 ) -> String {
+    sigv4_authorization(
+        "s3",
+        key.region,
+        &SigV4Credentials {
+            access_key_id: key.access_key_id,
+            secret_access_key: key.secret_access_key,
+        },
+        &SigV4Request {
+            method,
+            path,
+            query,
+            payload_hash,
+            now,
+        },
+        headers,
+    )
+}
+
+/// The access key that signs an AWS request.
+#[derive(Clone, Copy)]
+pub struct SigV4Credentials<'a> {
+    pub access_key_id: &'a str,
+    pub secret_access_key: &'a str,
+}
+
+/// What [`sigv4_authorization`] signs besides the headers.
+#[derive(Clone, Copy)]
+pub struct SigV4Request<'a> {
+    pub method: &'a str,
+    /// The URI-encoded path.
+    pub path: &'a str,
+    /// The query, already encoded and sorted; empty for none.
+    pub query: &'a str,
+    /// Lower-case hex SHA-256 of the body (or `UNSIGNED-PAYLOAD` where the service allows it).
+    pub payload_hash: &'a str,
+    pub now: DateTime<Utc>,
+}
+
+/// AWS Signature V4 for `service` (`s3`, `ses`, …) in `region`. Adds `x-amz-date` and
+/// `x-amz-content-sha256` to `headers` (which must contain `host`, exactly as the request sends
+/// it), lower-cases and sorts them, and returns the `Authorization` value. Every header in
+/// `headers` is signed, so the request must send each of them unchanged.
+pub fn sigv4_authorization(
+    service: &str,
+    region: &str,
+    credentials: &SigV4Credentials<'_>,
+    request: &SigV4Request<'_>,
+    headers: &mut Vec<(String, String)>,
+) -> String {
+    let SigV4Request {
+        method,
+        path,
+        query,
+        payload_hash,
+        now,
+    } = *request;
     let amz_date = now.format("%Y%m%dT%H%M%SZ").to_string();
     let date = now.format("%Y%m%d").to_string();
     headers.push(("x-amz-date".to_owned(), amz_date.clone()));
@@ -666,16 +721,16 @@ fn sign(
         .join(";");
     let canonical_request =
         format!("{method}\n{path}\n{query}\n{canonical_headers}\n{signed_headers}\n{payload_hash}");
-    let scope = format!("{date}/{}/s3/aws4_request", key.region);
+    let scope = format!("{date}/{region}/{service}/aws4_request");
     let string_to_sign = format!(
         "AWS4-HMAC-SHA256\n{amz_date}\n{scope}\n{:x}",
         Sha256::digest(canonical_request.as_bytes())
     );
     let mut signing_key = hmac(
-        format!("AWS4{}", key.secret_access_key).as_bytes(),
+        format!("AWS4{}", credentials.secret_access_key).as_bytes(),
         date.as_bytes(),
     );
-    for part in [key.region, "s3", "aws4_request"] {
+    for part in [region, service, "aws4_request"] {
         signing_key = hmac(&signing_key, part.as_bytes());
     }
     let signature: String = hmac(&signing_key, string_to_sign.as_bytes())
@@ -684,7 +739,7 @@ fn sign(
         .collect();
     format!(
         "AWS4-HMAC-SHA256 Credential={}/{scope}, SignedHeaders={signed_headers}, Signature={signature}",
-        key.access_key_id
+        credentials.access_key_id
     )
 }
 

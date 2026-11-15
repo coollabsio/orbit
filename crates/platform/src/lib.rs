@@ -31,8 +31,7 @@ pub use config::{
     ApnsConfig, AppKey, BackupSchedule, BillingConfig, Config, ConfigError, DataConfig,
     EnvironmentMode, HttpConfig, InstanceConfig, JobsConfig, MailConfig, MailMode, MetricsConfig,
     OAuthClientConfig, OidcConfig, Plan, RateLimitConfig, Secret, SmtpConfig, SmtpSecurity,
-    TrialConfig,
-    UploadConfig, redact_database_url,
+    TrialConfig, UploadConfig, redact_database_url,
 };
 pub use db::{
     Access, Backend, Column, Database, DatabaseConfig, DatabaseError, Flag, GuardedMigrationError,
@@ -47,9 +46,9 @@ pub use files::{
     BlobObject, BlobReader, BlobStore, BlobStoreError, ContentDisposition, DownloadMetadata,
     FinalizedAttachment, FinalizedBlob, INLINE_IMAGE_TYPES, LocalBlobStore, NewAttachmentReference,
     ObjectStorage, ObjectStorageState, ReconcileResult, S3_DELETE_DELAY_MILLIS, S3Bucket, S3Config,
-    S3Error, S3Object, SHRINK_MIN_BYTES, StagedUpload, StoredObject, TieredBlobStore, UploadError,
-    UploadFinalization, UploadLimitError, UploadLimits, UploadService, WORKSPACE_STORAGE_USED,
-    WorkspaceBucket, shrink_image,
+    S3Error, S3Object, SHRINK_MIN_BYTES, SigV4Credentials, SigV4Request, StagedUpload,
+    StoredObject, TieredBlobStore, UploadError, UploadFinalization, UploadLimitError, UploadLimits,
+    UploadService, WORKSPACE_STORAGE_USED, WorkspaceBucket, shrink_image, sigv4_authorization,
 };
 pub use health::{HealthCheck, HealthCheckResult, HealthRegistry, ReadinessReport};
 pub use http::{
