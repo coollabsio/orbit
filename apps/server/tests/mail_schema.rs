@@ -741,3 +741,335 @@ async fn workspace_purge_removes_every_mail_row_and_blob() {
     }
     assert!(fixture.search_hits("hello").await.is_empty());
 }
+
+impl Fixture {
+    async fn exec(&self, sql: &str, binds: &[&str]) -> Result<(), sqlx::Error> {
+        let mut query = sqlx::query(sqlx::AssertSqlSafe(sql.to_owned()));
+        for bind in binds {
+            // Millisecond timestamps are numbers; every other value is text.
+            query = match bind.parse::<i64>() {
+                Ok(number) => query.bind(number),
+                Err(_) => query.bind((*bind).to_owned()),
+            };
+        }
+        query.execute(self.database.pool()).await.map(|_| ())
+    }
+
+    async fn send_route(&self, workspace: Option<&str>) -> String {
+        let id = Id::new_v7().to_string();
+        let now = TimestampMillis::now().as_millis();
+        sqlx::query(
+            "INSERT INTO mail_send_routes (id, workspace_id, kind, name, secrets, settings, created_at, updated_at) \
+             VALUES ($1, $2, 'smtp', 'Relay', $3, '{}', $4, $5)",
+        )
+        .bind(&id)
+        .bind(workspace)
+        .bind(b"sealed".to_vec())
+        .bind(now)
+        .bind(now)
+        .execute(self.database.pool())
+        .await
+        .unwrap();
+        id
+    }
+
+    async fn draft(&self, mailbox_id: &str, address_id: &str) -> String {
+        let id = Id::new_v7().to_string();
+        let now = TimestampMillis::now().as_millis();
+        sqlx::query(
+            "INSERT INTO mail_drafts (id, workspace_id, membership_id, mailbox_id, from_address_id, mode, \
+             to_addrs, cc_addrs, bcc_addrs, subject, body_html, version, created_at, updated_at) \
+             VALUES ($1, $2, $3, $4, $5, 'new', '[]', '[]', '[]', 'Hi', '<p>Hi</p>', 1, $6, $7)",
+        )
+        .bind(&id)
+        .bind(&self.workspace_id)
+        .bind(&self.membership_id)
+        .bind(mailbox_id)
+        .bind(address_id)
+        .bind(now)
+        .bind(now)
+        .execute(self.database.pool())
+        .await
+        .unwrap();
+        id
+    }
+
+    async fn outbound(
+        &self,
+        mailbox_id: &str,
+        draft_id: Option<&str>,
+    ) -> Result<String, sqlx::Error> {
+        let id = Id::new_v7().to_string();
+        let now = TimestampMillis::now().as_millis();
+        sqlx::query(
+            "INSERT INTO mail_outbound (id, workspace_id, membership_id, mailbox_id, draft_id, status, \
+             release_at, scheduled, created_at, updated_at) \
+             VALUES ($1, $2, $3, $4, $5, 'held', $6, 0, $7, $8)",
+        )
+        .bind(&id)
+        .bind(&self.workspace_id)
+        .bind(&self.membership_id)
+        .bind(mailbox_id)
+        .bind(draft_id)
+        .bind(now)
+        .bind(now)
+        .bind(now)
+        .execute(self.database.pool())
+        .await?;
+        Ok(id)
+    }
+
+    /// A blob without any reference yet.
+    async fn bare_blob(&self, bytes: &[u8]) -> String {
+        let finalization = self.uploads.begin_finalization().await;
+        let mut tx = self.database.immediate_transaction().await.unwrap();
+        let blob = finalization
+            .finalize_bytes_in_transaction(
+                &mut tx,
+                self.workspace_id.parse().unwrap(),
+                bytes,
+                TimestampMillis::now(),
+            )
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+        blob.id.to_string()
+    }
+
+    async fn file_link(
+        &self,
+        outbound_id: &str,
+        blob_id: &str,
+        token: &str,
+    ) -> Result<(), sqlx::Error> {
+        let now = TimestampMillis::now().as_millis();
+        sqlx::query(
+            "INSERT INTO mail_file_links (id, workspace_id, outbound_id, blob_id, filename, size, token_sha256, \
+             expires_at, downloads, created_at) VALUES ($1, $2, $3, $4, 'a.txt', 5, $5, $6, 0, $7)",
+        )
+        .bind(Id::new_v7().to_string())
+        .bind(&self.workspace_id)
+        .bind(outbound_id)
+        .bind(blob_id)
+        .bind(token)
+        .bind(now + DAY_MILLIS)
+        .bind(now)
+        .execute(self.database.pool())
+        .await
+        .map(|_| ())
+    }
+}
+
+#[tokio::test]
+async fn send_tables_exist() {
+    let f = Fixture::new().await;
+    let now = TimestampMillis::now().as_millis().to_string();
+    let w = f.workspace_id.clone();
+    let m = f.membership_id.clone();
+    let domain = f.domain("example.com").await.unwrap();
+    let mailbox = f.mailbox("personal", Some(&m)).await.unwrap();
+    let address = f
+        .address(&domain, &mailbox, "ann", "primary")
+        .await
+        .unwrap();
+    f.send_route(None).await;
+    let draft = f.draft(&mailbox, &address).await;
+    let blob = f.bare_blob(b"draft file").await;
+    let outbound = f.outbound(&mailbox, Some(&draft)).await.unwrap();
+    f.file_link(&outbound, &blob, &"b".repeat(64))
+        .await
+        .unwrap();
+    let id = || Id::new_v7().to_string();
+
+    f.exec(
+        "INSERT INTO mail_draft_files (id, draft_id, workspace_id, blob_id, filename, content_type, size, as_link, created_at) \
+         VALUES ($1, $2, $3, $4, 'a.txt', 'text/plain', 10, 0, $5)",
+        &[&id(), &draft, &w, &blob, &now],
+    )
+    .await
+    .unwrap();
+    f.exec(
+        "INSERT INTO mail_outbound_recipients (id, outbound_id, workspace_id, membership_id, address, kind, status, \
+         attempts, created_at, updated_at) VALUES ($1, $2, $3, $4, 'bob@example.net', 'to', 'queued', 0, $5, $5)",
+        &[&id(), &outbound, &w, &m, &now],
+    )
+    .await
+    .unwrap();
+    f.exec(
+        "INSERT INTO mail_suppressions (workspace_id, address, reason, created_at) \
+         VALUES ($1, 'bob@example.net', 'hard_bounce', $2)",
+        &[&w, &now],
+    )
+    .await
+    .unwrap();
+    f.exec(
+        "INSERT INTO mail_signatures (id, workspace_id, membership_id, address_id, body_html, created_at, updated_at) \
+         VALUES ($1, $2, $3, $4, '<p>Ann</p>', $5, $5)",
+        &[&id(), &w, &m, &address, &now],
+    )
+    .await
+    .unwrap();
+    f.exec(
+        "INSERT INTO mail_snippets (id, workspace_id, membership_id, name, body_html, created_at, updated_at) \
+         VALUES ($1, $2, $3, 'Thanks', '<p>Thanks</p>', $4, $4)",
+        &[&id(), &w, &m, &now],
+    )
+    .await
+    .unwrap();
+    f.exec(
+        "INSERT INTO mail_member_settings (membership_id, undo_send_seconds, updated_at) VALUES ($1, 10, $2)",
+        &[&m, &now],
+    )
+    .await
+    .unwrap();
+    assert!(
+        f.exec(
+            "UPDATE mail_member_settings SET undo_send_seconds = 7 WHERE membership_id = $1",
+            &[&m],
+        )
+        .await
+        .is_err()
+    );
+    f.exec(
+        "INSERT INTO mail_vacations (mailbox_id, enabled, subject, body_html, contacts_only, created_at, updated_at) \
+         VALUES ($1, 1, 'Away', '<p>Away</p>', 0, $2, $2)",
+        &[&mailbox, &now],
+    )
+    .await
+    .unwrap();
+    f.exec(
+        "INSERT INTO mail_vacation_replies (mailbox_id, sender, replied_at) VALUES ($1, 'bob@example.net', $2)",
+        &[&mailbox, &now],
+    )
+    .await
+    .unwrap();
+    f.exec(
+        "INSERT INTO mail_contacts (workspace_id, membership_id, address, name, send_count, hidden, created_at, updated_at) \
+         VALUES ($1, $2, 'bob@example.net', 'Bob', 1, 0, $3, $3)",
+        &[&w, &m, &now],
+    )
+    .await
+    .unwrap();
+    f.exec(
+        "INSERT INTO mail_send_policies (workspace_id, tier, created_at, updated_at) VALUES ($1, 'new', $2, $2)",
+        &[&w, &now],
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        f.count("SELECT link_days FROM mail_send_policies").await,
+        30
+    );
+    // The new columns of existing tables.
+    assert_eq!(
+        f.count(
+            "SELECT COUNT(*) FROM instance_settings WHERE mail_send_tiers LIKE '%per_user_hour%'"
+        )
+        .await,
+        1
+    );
+    let thread = f.thread(&mailbox).await.0;
+    assert_eq!(
+        f.count("SELECT COUNT(*) FROM mail_threads WHERE last_incoming_at IS NULL AND last_sent_at IS NULL")
+            .await,
+        1
+    );
+    let _ = thread;
+}
+
+#[tokio::test]
+async fn domain_send_route_scope_trigger() {
+    let f = Fixture::new().await;
+    let domain = f.domain("example.com").await.unwrap();
+    let instance = f.send_route(None).await;
+    let own = f.send_route(Some(&f.workspace_id)).await;
+    // A workspace route of another workspace.
+    let now = TimestampMillis::now().as_millis().to_string();
+    let other_workspace = WorkspaceRepository::new((*f.database).clone())
+        .create(
+            f.user_id,
+            "Other".to_owned(),
+            "request",
+            TimestampMillis::now(),
+        )
+        .await
+        .unwrap()
+        .id
+        .to_string();
+    let foreign = f.send_route(Some(&other_workspace)).await;
+    for ok in [&instance, &own] {
+        f.exec(
+            "UPDATE mail_domains SET send_route_id = $1 WHERE id = $2",
+            &[ok, &domain],
+        )
+        .await
+        .unwrap();
+    }
+    assert!(
+        f.exec(
+            "UPDATE mail_domains SET send_route_id = $1 WHERE id = $2",
+            &[&foreign, &domain],
+        )
+        .await
+        .is_err()
+    );
+    // Insert is checked as well.
+    let insert = f
+        .exec(
+            "INSERT INTO mail_domains (id, workspace_id, name, status, verify_token, send_route_id, created_at, updated_at) \
+             VALUES ($1, $2, 'x.example.org', 'pending', 't', $3, $4, $4)",
+            &[&Id::new_v7().to_string(), &f.workspace_id, &foreign, &now],
+        )
+        .await;
+    assert!(insert.is_err());
+}
+
+#[tokio::test]
+async fn outbound_draft_unique() {
+    let f = Fixture::new().await;
+    let mailbox = f.mailbox("personal", Some(&f.membership_id)).await.unwrap();
+    let domain = f.domain("example.com").await.unwrap();
+    let address = f
+        .address(&domain, &mailbox, "ann", "primary")
+        .await
+        .unwrap();
+    let draft = f.draft(&mailbox, &address).await;
+    f.outbound(&mailbox, Some(&draft)).await.unwrap();
+    assert!(f.outbound(&mailbox, Some(&draft)).await.is_err());
+    // System sends have no draft, and any number of them is fine.
+    f.outbound(&mailbox, None).await.unwrap();
+    f.outbound(&mailbox, None).await.unwrap();
+}
+
+#[tokio::test]
+async fn file_link_blob_is_referenced() {
+    let f = Fixture::new().await;
+    let mailbox = f.mailbox("personal", Some(&f.membership_id)).await.unwrap();
+    let outbound = f.outbound(&mailbox, None).await.unwrap();
+    let blob = f.bare_blob(b"linked file").await;
+    f.file_link(&outbound, &blob, &"c".repeat(64))
+        .await
+        .unwrap();
+    assert!(
+        f.file_link(&outbound, &blob, &"c".repeat(64))
+            .await
+            .is_err()
+    );
+
+    let result = f
+        .uploads
+        .reconcile(TimestampMillis::now().as_millis() + 2 * DAY_MILLIS)
+        .await
+        .unwrap();
+    assert_eq!(result.deleted_blobs, 0);
+    assert_eq!(f.count("SELECT COUNT(*) FROM attachment_blobs").await, 1);
+
+    // Once the link is gone, the blob is quarantined and then reclaimed.
+    f.exec("DELETE FROM mail_file_links", &[]).await.unwrap();
+    let result = f
+        .uploads
+        .reconcile(TimestampMillis::now().as_millis() + 3 * DAY_MILLIS)
+        .await
+        .unwrap();
+    assert_eq!(result.deleted_blobs, 1);
+}
