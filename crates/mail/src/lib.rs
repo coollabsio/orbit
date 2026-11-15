@@ -9,6 +9,7 @@ mod dkim;
 mod html;
 pub mod inbound;
 mod parse;
+mod sign;
 mod smtp;
 
 pub use address::{
@@ -34,6 +35,7 @@ pub use parse::{
     AttachmentInfo, Mailbox, ParseError, ParseLimits, ParsedMessage, normalize_subject, parse,
     part_bytes, sniff_image,
 };
+pub use sign::{SIGNED_HEADERS, SignError, SigningKey, sign_message};
 pub use smtp::{
     AcceptedRecipient, CERT_EXPIRY_WARNING, CertInfo, ConnLimiter, ConnPermit,
     DOCKER_DEFAULT_GATEWAY, DataDecision, Envelope, MAX_COMMAND_LINE, MAX_TEXT_LINE, NoTls,
