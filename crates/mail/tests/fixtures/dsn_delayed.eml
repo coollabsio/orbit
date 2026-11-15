@@ -1,0 +1,22 @@
+From: Mail Delivery Subsystem <mailer-daemon@googlemail.com>
+To: bounce+abc@orbit.example.com
+Subject: Delivery Status Notification (Delay)
+MIME-Version: 1.0
+Content-Type: multipart/report; report-type=delivery-status; boundary="b2"
+
+--b2
+Content-Type: text/plain; charset="UTF-8"
+
+Delivery is delayed to slow@example.net.
+
+--b2
+Content-Type: message/delivery-status
+
+Reporting-MTA: dns; googlemail.com
+
+Final-Recipient: rfc822; slow@example.net
+Action: delayed
+Status: 4.4.7
+Will-Retry-Until: Thu, 19 Nov 2026 09:00:00 +0000
+
+--b2--

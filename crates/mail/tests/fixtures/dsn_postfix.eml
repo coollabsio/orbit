@@ -1,0 +1,29 @@
+From: MAILER-DAEMON@mail.example.org (Mail Delivery System)
+To: bounce+abc@orbit.example.com
+Subject: Undelivered Mail Returned to Sender
+MIME-Version: 1.0
+Content-Type: multipart/report; report-type=delivery-status; boundary="b3"
+
+--b3
+Content-Type: text/plain; charset=us-ascii
+
+This is the mail system at host mail.example.org.
+
+--b3
+Content-Description: Delivery report
+Content-Type: message/delivery-status
+
+Reporting-MTA: dns; mail.example.org
+X-Postfix-Queue-ID: 4A1B2C3D
+
+Final-Recipient: rfc822; Gone@Example.org
+Original-Recipient: rfc822;gone@example.org
+Action: failed
+Status: 5.2.2
+Diagnostic-Code: X-Postfix; mailbox full
+
+Final-Recipient: rfc822; other@example.org
+Action: delivered
+Status: 2.0.0
+
+--b3--

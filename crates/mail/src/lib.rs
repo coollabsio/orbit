@@ -4,6 +4,7 @@
 
 mod address;
 mod auth;
+mod bounce;
 mod compose;
 mod dkim;
 mod html;
@@ -19,6 +20,9 @@ pub use auth::{
     AuthError, AuthOutcome, Authenticator, DmarcPolicy, DmarcVerdict, ProviderSpf, SpfHeader,
     StaticDns, Verdict, authentication_results, provider_spf, strip_auth_results,
     trusted_relay_results,
+};
+pub use bounce::{
+    DsnAction, DsnRecipient, bounce_local_part, is_hard, parse_bounce_local_part, parse_dsn,
 };
 pub use compose::{
     ComposeError, Composed, ComposedAddress, ComposedFile, ComposedFileKind, build_message,
