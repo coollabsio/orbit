@@ -179,6 +179,10 @@ pub fn mail_router(state: MailState) -> Router {
             post(domains::check_mail_domain),
         )
         .route(
+            "/api/v1/workspaces/{workspace_id}/mail/domains/{domain_id}/dkim/rotate",
+            post(domains::rotate_mail_domain_dkim),
+        )
+        .route(
             "/api/v1/workspaces/{workspace_id}/mail/domains/{domain_id}/catch-all",
             put(domains::set_mail_domain_catch_all),
         )
@@ -429,6 +433,9 @@ fn detail(code: &'static str) -> &'static str {
         "domain_not_verified" => "A test message needs a verified domain.",
         "workspace_providers_disabled" => {
             "This Orbit server does not let workspaces add their own mail providers. An instance admin can turn it on."
+        }
+        "rotation_pending" => {
+            "A new DKIM key waits for its DNS record. Publish it, or wait for the check, first."
         }
         "provider_in_use" => "Route the domains that use this provider elsewhere first.",
         _ => "This action is not possible.",

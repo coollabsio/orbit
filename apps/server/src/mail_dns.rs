@@ -26,7 +26,7 @@ use thiserror::Error;
 use utoipa::ToSchema;
 
 use crate::repositories::mail::{
-    DnsReport, Domain, DomainStatus, MailError, MailRepository, RecordStatus,
+    DnsReport, Domain, DomainStatus, MailError, MailRepository, RecordStatus, SendRouteKind,
 };
 
 /// Longest wait for one lookup, on top of the resolver's own timeouts.
@@ -549,7 +549,14 @@ pub fn expected_records(domain: &Domain, hostname: Option<&str>) -> Vec<Expected
         kind: RecordKind::Spf,
         record_type: "TXT",
         name: domain.name.clone(),
-        value: "v=spf1 mx ~all".to_owned(),
+        value: expected_spf(
+            domain.send_route.as_ref().map(|route| &route.kind),
+            hostname,
+            domain
+                .send_route
+                .as_ref()
+                .and_then(|route| route.spf.as_deref()),
+        ),
         priority: None,
     });
     records.push(ExpectedRecord {
@@ -560,6 +567,42 @@ pub fn expected_records(domain: &Domain, hostname: Option<&str>) -> Vec<Expected
         priority: None,
     });
     records
+}
+
+/// The SPF record the domain publishes for its send route. The domain's own MX hosts always
+/// stay allowed. Direct sending adds Orbit's host; a provider adds its include. `route_spf` is the
+/// route's `spf` setting for a relay Orbit knows no include of: a mechanism list such as
+/// `include:relay.example` (or a whole `v=spf1 …` record, used as it is).
+#[must_use]
+pub fn expected_spf(
+    route: Option<&SendRouteKind>,
+    hostname: Option<&str>,
+    route_spf: Option<&str>,
+) -> String {
+    let known = match route {
+        Some(SendRouteKind::Postmark) => Some("include:spf.mtasv.net"),
+        Some(SendRouteKind::Resend | SendRouteKind::Ses) => Some("include:amazonses.com"),
+        Some(SendRouteKind::Mailgun) => Some("include:mailgun.org"),
+        _ => None,
+    };
+    let route_spf = route_spf.map(str::trim).filter(|spf| !spf.is_empty());
+    if let (None, Some(spf)) = (known, route_spf)
+        && has_version(spf, "v=spf1")
+    {
+        return spf.to_owned();
+    }
+    let mut parts = vec!["v=spf1".to_owned()];
+    if let (Some(SendRouteKind::Direct), Some(hostname)) = (route, hostname) {
+        parts.push(format!("a:{}", host(hostname)));
+    }
+    parts.push("mx".to_owned());
+    match (known, route_spf) {
+        (Some(include), _) => parts.push(include.to_owned()),
+        (None, Some(spf)) => parts.push(spf.to_owned()),
+        (None, None) => {}
+    }
+    parts.push("~all".to_owned());
+    parts.join(" ")
 }
 
 /// `value` cut into the strings of one TXT record: at most 255 bytes each, on character
@@ -834,9 +877,20 @@ impl DnsChecker {
             self.mode,
         )
         .await;
-        self.repository
+        let dkim_ok = report.dkim == RecordStatus::Ok;
+        let status = self
+            .repository
             .record_dns_report(domain_id, report, now)
-            .await
+            .await?;
+        // The record checked is the newest pending or active key's: when it is a pending key
+        // and its record is published, it takes over.
+        if dkim_ok && let Some(key) = domain.dkim.as_ref().filter(|key| key.status == "pending") {
+            self.repository
+                .activate_dkim(domain_id, &key.selector, now)
+                .await?;
+        }
+        self.repository.retire_dkim_keys(domain_id, now).await?;
+        Ok(status)
     }
 
     /// Checks every domain that is due at `now`; returns how many were checked.

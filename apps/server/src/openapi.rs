@@ -424,6 +424,7 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::mail_routes::domains::get_mail_domain,
         crate::mail_routes::domains::delete_mail_domain,
         crate::mail_routes::domains::check_mail_domain,
+        crate::mail_routes::domains::rotate_mail_domain_dkim,
         crate::mail_routes::domains::set_mail_domain_catch_all,
         crate::mail_routes::domains::set_mail_domain_route,
         crate::mail_routes::providers::list_instance_mail_providers,

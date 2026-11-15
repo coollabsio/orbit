@@ -355,6 +355,44 @@ pub(crate) async fn check_mail_domain(
     Ok(StatusCode::ACCEPTED)
 }
 
+/// Starts a DKIM key rotation: makes a new key and returns the domain with its record to
+/// publish. The DNS check switches to the new key once the record is seen. `409
+/// rotation_pending` while an earlier key still waits for its record.
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/mail/domains/{domain_id}/dkim/rotate", params(("workspace_id" = String, Path), ("domain_id" = String, Path)), responses((status = 200, body = MailDomain)))]
+pub(crate) async fn rotate_mail_domain_dkim(
+    State(state): State<MailState>,
+    Path((workspace, domain)): Path<(String, String)>,
+    headers: HeaderMap,
+    uri: Uri,
+    request_id: RequestIdExtension,
+) -> Result<Json<MailDomain>, ApiError> {
+    let call = Call::enter(&state, &headers, &uri, &workspace, &request_id).await?;
+    let domain_id = call.id(&domain)?;
+    let now = state
+        .mail
+        .database()
+        .database_now()
+        .await
+        .map_err(|error| call.problem(error.into()))?;
+    state
+        .mail
+        .rotate_dkim(
+            call.workspace_id,
+            call.actor_id,
+            domain_id,
+            call.request_id(),
+            now,
+        )
+        .await
+        .map_err(|error| call.problem(error))?;
+    let domain = state
+        .mail
+        .get_domain(call.workspace_id, call.actor_id, domain_id)
+        .await
+        .map_err(|error| call.problem(error))?;
+    Ok(Json(view(domain, state.settings.hostname.as_deref())))
+}
+
 /// Sets the mailbox that receives mail for unknown addresses of the domain, or clears it.
 #[utoipa::path(put, path = "/api/v1/workspaces/{workspace_id}/mail/domains/{domain_id}/catch-all", params(("workspace_id" = String, Path), ("domain_id" = String, Path)), request_body = MailDomainCatchAllBody, responses((status = 200, body = MailDomain)))]
 pub(crate) async fn set_mail_domain_catch_all(
@@ -508,6 +546,7 @@ mod tests {
                 status: "pending".to_owned(),
             }),
             address_count: 0,
+            send_route: None,
         };
         let view = view(domain, Some("mx.orbit.test"));
         let dkim = view

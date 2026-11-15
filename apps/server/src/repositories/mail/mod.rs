@@ -15,6 +15,7 @@ mod mailboxes;
 mod providers;
 mod reading;
 mod receipts;
+mod routes;
 mod search;
 mod threads;
 
@@ -24,8 +25,9 @@ use thiserror::Error;
 
 pub use content::{MessageContent, MessagePart, PartContent};
 pub use domains::{
-    DAILY_CHECK_MS, DNS_CHECK_JOB, DkimPublic, DnsReport, Domain, DomainProvider, DomainStatus,
-    PENDING_CHECK_MS, PENDING_WINDOW_MS, RecordStatus, SUSPENDED_GRACE_MS, dkim_aad, dns_check_job,
+    DAILY_CHECK_MS, DNS_CHECK_JOB, DkimKeyView, DkimPublic, DnsReport, Domain, DomainProvider,
+    DomainSendRoute, DomainStatus, NotReadyReason, PENDING_CHECK_MS, PENDING_WINDOW_MS,
+    RETIRING_KEY_MS, RecordStatus, SUSPENDED_GRACE_MS, SendReadiness, dkim_aad, dns_check_job,
     dns_check_kind,
 };
 pub use health::{HEALTH_TEST_TTL_MS, HealthTest, HealthTestResult, HealthTestStatus, TestDomain};
@@ -57,6 +59,7 @@ pub use receipts::{
 pub(crate) use receipts::{
     NewReceipt, insert_receipt, insert_receipt_recipient, record_health_test,
 };
+pub use routes::SendRouteKind;
 pub use search::{MailQuery, ThreadCursor, parse_query};
 pub use threads::SEARCH_BODY_BYTES;
 

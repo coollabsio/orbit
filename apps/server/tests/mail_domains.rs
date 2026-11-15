@@ -1590,3 +1590,35 @@ async fn new_secrets_replace_the_ones_orbit_made() {
         .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
 }
+
+#[tokio::test]
+async fn rotating_the_dkim_key_shows_the_new_record_once_at_a_time() {
+    let fixture = Fixture::new().await;
+    let domain = fixture.add(fixture.first, "example.com").await;
+    let old = record(&domain, "dkim")["name"].as_str().unwrap().to_owned();
+    publish_all(&fixture.dns, &domain);
+    fixture
+        .check(&domain, at(TimestampMillis::now().as_millis()))
+        .await;
+
+    let path = format!("/domains/{}/dkim/rotate", domain["id"].as_str().unwrap());
+    let member = fixture
+        .user("member", Some((fixture.first, "member")))
+        .await;
+    let (status, _) = fixture
+        .call(&member, fixture.first, "POST", &path, None)
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    let (status, rotated) = fixture
+        .call(&fixture.owner, fixture.first, "POST", &path, None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{rotated}");
+    assert_ne!(record(&rotated, "dkim")["name"].as_str().unwrap(), old);
+
+    let (status, refused) = fixture
+        .call(&fixture.owner, fixture.first, "POST", &path, None)
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(refused["code"], "rotation_pending");
+}
