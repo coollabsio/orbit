@@ -12,6 +12,7 @@ pub mod inbound;
 mod parse;
 mod sign;
 mod smtp;
+mod vacation;
 
 pub use address::{
     Address, AddressError, MAX_ADDRESS_LEN, base_local, normalize_address, normalize_domain,
@@ -47,3 +48,4 @@ pub use smtp::{
     StartTls, TARPIT_DELAY, TlsAcceptorHandle, TlsError, TlsInfo, is_docker_bridge, read_proxy_v2,
     run_session,
 };
+pub use vacation::{VacationInput, vacation_allowed};
