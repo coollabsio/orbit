@@ -473,6 +473,14 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::mail_routes::compose::delete_mail_snippet,
         crate::mail_routes::compose::get_mail_settings,
         crate::mail_routes::compose::put_mail_settings,
+        crate::mail_routes::drafts::list_mail_drafts,
+        crate::mail_routes::drafts::create_mail_draft,
+        crate::mail_routes::drafts::get_mail_draft,
+        crate::mail_routes::drafts::update_mail_draft,
+        crate::mail_routes::drafts::delete_mail_draft,
+        crate::mail_routes::drafts::upload_mail_draft_file,
+        crate::mail_routes::drafts::update_mail_draft_file,
+        crate::mail_routes::drafts::delete_mail_draft_file,
         crate::mail_routes::labels::list_mail_labels,
         crate::mail_routes::labels::create_mail_label,
         crate::mail_routes::labels::update_mail_label,
@@ -1358,6 +1366,7 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             mailbox_errors(id, &mut responses);
         }
         id if mail_compose_operation(id) => mail_compose_errors(id, &mut responses),
+        id if mail_draft_operation(id) => mail_draft_errors(id, &mut responses),
         id if mail_thread_operation(id) => mail_thread_errors(id, &mut responses),
         id if mail_content_operation(id) => mail_content_errors(id, &mut responses),
         _ => {}
@@ -2450,6 +2459,7 @@ fn workspace_mail_operation(operation_id: &str) -> bool {
         || operation_id.contains("mail_receipt")
         || mail_thread_operation(operation_id)
         || mail_compose_operation(operation_id)
+        || mail_draft_operation(operation_id)
         || mail_content_operation(operation_id);
     mail_route && !instance_route && !token_route
 }
@@ -2486,6 +2496,39 @@ fn mail_compose_errors(
     ) {
         add_code(responses, "400", "invalid_request");
         add_code(responses, "422", "validation_failed");
+    }
+}
+
+fn mail_draft_operation(operation_id: &str) -> bool {
+    operation_id.ends_with("_mail_draft")
+        || operation_id.ends_with("_mail_drafts")
+        || operation_id.ends_with("_mail_draft_file")
+}
+
+/// Drafts are the caller's own: another member's id is `mail_not_found`.
+fn mail_draft_errors(
+    operation_id: &str,
+    responses: &mut BTreeMap<&'static str, Vec<&'static str>>,
+) {
+    add_code(responses, "404", "mail_not_found");
+    if matches!(
+        operation_id,
+        "list_mail_drafts" | "create_mail_draft" | "update_mail_draft" | "update_mail_draft_file"
+    ) {
+        add_code(responses, "400", "invalid_request");
+        add_code(responses, "422", "validation_failed");
+    }
+    match operation_id {
+        "create_mail_draft" => add_code(responses, "409", "draft_conflict"),
+        "update_mail_draft" => add_code(responses, "409", "draft_conflict"),
+        "upload_mail_draft_file" => {
+            add_code(responses, "400", "invalid_multipart");
+            add_code(responses, "413", "upload_too_large");
+            add_code(responses, "413", "storage_quota_exceeded");
+            add_code(responses, "422", "validation_failed");
+            add_code(responses, "422", "draft_files_limit");
+        }
+        _ => {}
     }
 }
 

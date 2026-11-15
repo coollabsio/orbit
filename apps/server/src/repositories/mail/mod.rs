@@ -7,6 +7,7 @@
 
 mod content;
 mod domains;
+mod drafts;
 mod health;
 mod ingest;
 mod keys;
@@ -31,6 +32,7 @@ pub use domains::{
     RETIRING_KEY_MS, RecordStatus, SUSPENDED_GRACE_MS, SendReadiness, dkim_aad, dns_check_job,
     dns_check_kind,
 };
+pub use drafts::{Draft, DraftChange, DraftFile, DraftMode, NewDraft};
 pub use health::{HEALTH_TEST_TTL_MS, HealthTest, HealthTestResult, HealthTestStatus, TestDomain};
 pub use ingest::{
     Delivery, IngestOutcome, MAIL_TOPIC, PURGE_JOB, PurgeResult, TRASH_RETENTION_MS,

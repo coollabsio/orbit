@@ -6,6 +6,7 @@ pub(crate) mod admin;
 pub(crate) mod compose;
 pub(crate) mod content;
 pub(crate) mod domains;
+pub(crate) mod drafts;
 pub(crate) mod inbound;
 pub(crate) mod labels;
 pub(crate) mod mailboxes;
@@ -16,7 +17,7 @@ pub(crate) mod threads;
 use std::sync::Arc;
 
 use axum::Router;
-use axum::extract::Extension;
+use axum::extract::{DefaultBodyLimit, Extension};
 use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::routing::{delete, get, patch, post, put};
 use orbit_platform::{Id, MailMode, RequestId};
@@ -299,6 +300,28 @@ pub fn mail_router(state: MailState) -> Router {
             delete(mailboxes::remove_mailbox_address),
         )
         .route(
+            "/api/v1/workspaces/{workspace_id}/mail/drafts",
+            get(drafts::list_mail_drafts).post(drafts::create_mail_draft),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/drafts/{draft_id}",
+            get(drafts::get_mail_draft)
+                .patch(drafts::update_mail_draft)
+                .delete(drafts::delete_mail_draft),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/drafts/{draft_id}/files",
+            // Multipart stays streaming; this bounds boundaries, headers and ignored fields too.
+            post(drafts::upload_mail_draft_file).layer(DefaultBodyLimit::max(
+                usize::try_from(state.mail.uploads().limits().max_request_bytes())
+                    .unwrap_or(usize::MAX),
+            )),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/drafts/{draft_id}/files/{file_id}",
+            patch(drafts::update_mail_draft_file).delete(drafts::delete_mail_draft_file),
+        )
+        .route(
             "/api/v1/workspaces/{workspace_id}/mail/labels",
             get(labels::list_mail_labels).post(labels::create_mail_label),
         )
@@ -516,6 +539,8 @@ fn detail(code: &'static str) -> &'static str {
         "plain_smtp_refused" => {
             "A connection without TLS is only possible for an instance route to a host on a private network."
         }
+        "draft_conflict" => "The draft changed after it was read. Refresh and try again.",
+        "draft_files_limit" => "A draft can have up to 50 files.",
         "provider_in_use" => "Route the domains that use this provider elsewhere first.",
         _ => "This action is not possible.",
     }

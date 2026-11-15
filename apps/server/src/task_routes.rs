@@ -3353,6 +3353,17 @@ impl ApiError {
         error
     }
 
+    /// Adds the current state of the resource to a 409, as `conflict.current`.
+    pub(crate) fn with_current(mut self, current: Value) -> Self {
+        self.body.conflict = Some(ConflictBody {
+            current_version: current.get("version").and_then(Value::as_u64),
+            current: Some(current),
+            refresh: None,
+            field: None,
+        });
+        self
+    }
+
     pub(crate) fn version_conflict(
         current: Value,
         instance: String,

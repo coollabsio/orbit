@@ -68,7 +68,7 @@ fn clean_body(body: &str, max: usize, field: &'static str) -> Result<String, Mai
 
 /// `NotFound` unless the membership can send as the address (a member of its mailbox; for a
 /// personal mailbox, its owner).
-async fn check_sendable(
+pub(super) async fn check_sendable(
     transaction: &mut Transaction<'_, Any>,
     workspace_id: Id,
     membership_id: Id,
