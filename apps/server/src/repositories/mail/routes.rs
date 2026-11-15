@@ -397,8 +397,8 @@ pub struct NewRoute {
 #[derive(Clone, Debug, Default)]
 pub struct RouteChange {
     pub name: Option<String>,
-    /// Replaces the secrets (of the route's kind).
-    pub secrets: Option<RouteSecrets>,
+    /// Secrets to change by name: a non-empty value replaces the stored one, the others stay.
+    pub secrets: Option<BTreeMap<String, String>>,
     pub settings: Option<RouteSettings>,
 }
 
@@ -454,6 +454,8 @@ pub fn classify_ip(ip: IpAddr) -> HostClass {
                 || ip.is_multicast()
                 || a == 0
                 || a >= 240
+                || ip.octets()[..3] == [192, 0, 0]
+                || (a == 198 && (b == 18 || b == 19))
             {
                 HostClass::Unusable
             } else if ip.is_private() || (a == 100 && (64..128).contains(&b)) {
@@ -466,13 +468,25 @@ pub fn classify_ip(ip: IpAddr) -> HostClass {
             if let Some(mapped) = ip.to_ipv4_mapped() {
                 return classify_ip(IpAddr::V4(mapped));
             }
-            let first = ip.segments()[0];
+            let segments = ip.segments();
+            let first = segments[0];
+            let compatible = segments[..6].iter().all(|part| *part == 0);
+            let nat64 =
+                first == 0x64 && segments[1] == 0xff9b && segments[2..6].iter().all(|p| *p == 0);
             if ip.is_loopback() {
                 HostClass::Loopback
-            } else if ip.is_unspecified() || ip.is_multicast() {
+            } else if ip.is_unspecified()
+                || ip.is_multicast()
+                || compatible
+                || nat64
+                || first == 0x2002
+            {
+                // IPv4-compatible, NAT64 and 6to4 addresses wrap an IPv4 address of any kind
                 HostClass::Unusable
             } else if first & 0xffc0 == 0xfe80 {
                 HostClass::LinkLocal
+            } else if first & 0xffc0 == 0xfec0 {
+                HostClass::Private
             } else if first & 0xfe00 == 0xfc00 {
                 HostClass::Private
             } else {
@@ -649,18 +663,20 @@ async fn clean_settings(
             clean.base_url = clean_base_url(scope, settings.base_url)?;
         }
         SendRouteKind::Ses => {
-            clean.region = Some(
-                clean_text(settings.region, "region")?
-                    .map(|region| region.to_ascii_lowercase())
-                    .ok_or(MailError::Invalid { field: "region" })?,
-            );
+            let region = clean_text(settings.region, "region")?
+                .map(|region| region.to_ascii_lowercase())
+                .filter(|region| valid_aws_region(region))
+                .ok_or(MailError::Invalid { field: "region" })?;
+            clean.region = Some(region);
         }
         SendRouteKind::Cloudflare => {
-            clean.account_id = Some(clean_text(settings.account_id, "account_id")?.ok_or(
-                MailError::Invalid {
+            let account_id = clean_text(settings.account_id, "account_id")?
+                .map(|id| id.to_ascii_lowercase())
+                .filter(|id| id.len() == 32 && id.bytes().all(|b| b.is_ascii_hexdigit()))
+                .ok_or(MailError::Invalid {
                     field: "account_id",
-                },
-            )?);
+                })?;
+            clean.account_id = Some(account_id);
         }
         SendRouteKind::Postmark => {
             clean.stream = Some(
@@ -670,6 +686,22 @@ async fn clean_settings(
         _ => {}
     }
     Ok(clean)
+}
+
+/// An AWS region such as `us-east-1`: it goes into a host name, so nothing else passes.
+fn valid_aws_region(region: &str) -> bool {
+    let parts: Vec<&str> = region.split('-').collect();
+    let [first, middle @ .., last] = parts.as_slice() else {
+        return false;
+    };
+    !middle.is_empty()
+        && first.len() == 2
+        && first.bytes().all(|b| b.is_ascii_lowercase())
+        && middle
+            .iter()
+            .all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_lowercase()))
+        && !last.is_empty()
+        && last.bytes().all(|b| b.is_ascii_digit())
 }
 
 /// An API base URL: HTTPS, and only on a route of the root user (it makes the server call it).
@@ -979,8 +1011,27 @@ impl MailRepository {
             .transpose()?
             .unwrap_or(route.name);
         let secrets = match change.secrets {
-            Some(given) if given.fits(route.kind) && given.complete() => given,
-            Some(_) => return Err(MailError::Invalid { field: "secrets" }),
+            Some(given) => {
+                let mut merged: BTreeMap<String, String> = route_secrets
+                    .fields()
+                    .into_iter()
+                    .map(|(name, value)| (name.to_owned(), value.to_owned()))
+                    .collect();
+                if given
+                    .keys()
+                    .any(|name| !route.kind.secret_names().contains(&name.as_str()))
+                {
+                    return Err(MailError::Invalid { field: "secrets" });
+                }
+                for (name, value) in given {
+                    if !value.trim().is_empty() {
+                        merged.insert(name, value);
+                    }
+                }
+                RouteSecrets::from_fields(route.kind, &merged)
+                    .filter(RouteSecrets::complete)
+                    .ok_or(MailError::Invalid { field: "secrets" })?
+            }
             None => route_secrets,
         };
         let settings = match change.settings {
@@ -1022,8 +1073,8 @@ impl MailRepository {
         Ok(route)
     }
 
-    /// Refuses a route that a domain still uses (`Conflict("route_in_use")`). The instance
-    /// default route may go: the default is then none.
+    /// Refuses a route that a domain still uses (`Conflict("route_in_use")`) and the instance
+    /// default (`Conflict("route_is_default")`): the root user clears or changes it first.
     pub async fn delete_route(
         &self,
         scope: ProviderScope,
@@ -1039,6 +1090,13 @@ impl MailRepository {
             .await?;
         if route.domain_count > 0 {
             return Err(MailError::Conflict("route_in_use"));
+        }
+        let default: Option<String> =
+            sqlx::query_scalar("SELECT mail_send_route_id FROM instance_settings WHERE id = 1")
+                .fetch_one(&mut *transaction)
+                .await?;
+        if default.as_deref() == Some(route_id.to_string().as_str()) {
+            return Err(MailError::Conflict("route_is_default"));
         }
         sqlx::query("DELETE FROM mail_send_routes WHERE id = $1")
             .bind(route_id.to_string())

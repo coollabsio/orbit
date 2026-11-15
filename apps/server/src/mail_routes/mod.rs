@@ -482,6 +482,7 @@ fn detail(code: &'static str) -> &'static str {
         "rotation_pending" => {
             "A new DKIM key waits for its DNS record. Publish it, or wait for the check, first."
         }
+        "route_is_default" => "Choose another default route, or clear it, first.",
         "route_in_use" => "Use another route on the domains that use this one first.",
         "hostname_required" => {
             "Sending directly needs the mail server's host name (ORBIT_MAIL_HOSTNAME)."

@@ -2360,6 +2360,7 @@ fn mail_send_route_errors(
     }
     if operation_id.starts_with("delete_") {
         add_code(responses, "409", "route_in_use");
+        add_code(responses, "409", "route_is_default");
     }
     if operation_id.contains("instance") {
         add_code(responses, "404", "mail_not_found");

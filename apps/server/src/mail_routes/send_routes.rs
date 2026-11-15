@@ -92,7 +92,7 @@ pub(crate) struct CreateMailSendRouteBody {
 pub(crate) struct UpdateMailSendRouteBody {
     #[serde(default)]
     name: Option<String>,
-    /// Replaces every secret of the route.
+    /// Changes the named secrets; the ones left out keep their values.
     #[serde(default)]
     secrets: Option<BTreeMap<String, String>>,
     #[serde(default)]
@@ -316,19 +316,6 @@ async fn update(
 ) -> Result<Json<MailSendRouteView>, ApiError> {
     let fail = |error| problem(error, instance, request_id);
     let route_id: Id = route.parse().map_err(|_| fail(MailError::NotFound))?;
-    let secrets = match &body.secrets {
-        Some(given) => {
-            // the caller's routes only: another scope's route is not found
-            let kind = state
-                .mail
-                .get_route(scope, actor_id, route_id)
-                .await
-                .map_err(fail)?
-                .kind;
-            Some(secrets_of(kind, given).map_err(fail)?)
-        }
-        None => None,
-    };
     let changed = state
         .mail
         .update_route(
@@ -337,7 +324,7 @@ async fn update(
             route_id,
             RouteChange {
                 name: body.name,
-                secrets,
+                secrets: body.secrets,
                 settings: body.settings,
             },
             state.settings.hostname.as_deref(),
@@ -458,7 +445,7 @@ pub(crate) async fn update_instance_mail_send_route(
     .await
 }
 
-/// Removes an instance send route that no domain uses.
+/// Removes an instance send route that no domain uses and that is not the default route.
 #[utoipa::path(delete, path = "/api/v1/admin/mail/send-routes/{route_id}", params(("route_id" = String, Path)), responses((status = 204)))]
 pub(crate) async fn delete_instance_mail_send_route(
     State(state): State<MailState>,

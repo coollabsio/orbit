@@ -16,6 +16,7 @@ use orbit_server::repositories::instance_settings::InstanceSettingsRepository;
 use orbit_server::repositories::mail::{
     HostClass, MailRepository, RouteSecrets, SendRouteKind, classify_ip,
 };
+use orbit_server::repositories::workspaces::WorkspaceRepository;
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
@@ -221,6 +222,20 @@ impl Fixture {
         }
     }
 
+    /// A second workspace, owned by the owner.
+    async fn second_workspace(&self) -> Id {
+        WorkspaceRepository::new((*self.database).clone())
+            .create(
+                self.owner.id,
+                "Second".to_owned(),
+                "request",
+                TimestampMillis::now(),
+            )
+            .await
+            .unwrap()
+            .id
+    }
+
     async fn switch(&self, enabled: bool) {
         InstanceSettingsRepository::new((*self.database).clone())
             .set_mail_workspace_providers_enabled(
@@ -374,6 +389,7 @@ async fn workspace_smtp_route_refuses_private_host() {
         "0.0.0.0",
         "224.0.0.1",
         "::1",
+        "localhost",
         "fd00::1",
         "fe80::1",
         "::ffff:10.0.0.5",
@@ -448,6 +464,14 @@ fn ip_classes() {
     assert_eq!(class("224.0.0.1"), HostClass::Unusable);
     assert_eq!(class("ff02::1"), HostClass::Unusable);
     assert_eq!(class("::ffff:127.0.0.1"), HostClass::Loopback);
+    assert_eq!(class("::10.0.0.5"), HostClass::Unusable);
+    assert_eq!(class("64:ff9b::a00:5"), HostClass::Unusable);
+    assert_eq!(class("2002:a00:5::1"), HostClass::Unusable);
+    assert_eq!(class("fec0::1"), HostClass::Private);
+    assert_eq!(class("192.0.0.8"), HostClass::Unusable);
+    assert_eq!(class("198.18.0.1"), HostClass::Unusable);
+    assert_eq!(class("198.19.255.1"), HostClass::Unusable);
+    assert_eq!(class("198.20.0.1"), HostClass::Public);
 }
 
 #[tokio::test]
@@ -536,17 +560,32 @@ async fn domain_falls_back_to_instance_default() {
         )
         .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
-    // a route a domain picked itself stays; deleting the default clears it
+    // a route a domain picked itself stays
     fixture
         .ws("PUT", &domain_path, Some(json!({ "route_id": shared_id })))
         .await;
-    let (status, _) = fixture
+    let (status, value) = fixture
         .admin("DELETE", &format!("/send-routes/{shared_id}"), None)
         .await;
-    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(
+        (status, code(&value)),
+        (StatusCode::CONFLICT, "route_in_use")
+    );
     fixture
         .ws("PUT", &domain_path, Some(json!({ "route_id": null })))
         .await;
+    // the default stays until the root user clears it
+    let (status, value) = fixture
+        .admin("DELETE", &format!("/send-routes/{shared_id}"), None)
+        .await;
+    assert_eq!(
+        (status, code(&value)),
+        (StatusCode::CONFLICT, "route_is_default")
+    );
+    let (status, _) = fixture
+        .admin("PUT", "/send-default", Some(json!({ "route_id": null })))
+        .await;
+    assert_eq!(status, StatusCode::OK);
     let (status, _) = fixture
         .admin("DELETE", &format!("/send-routes/{shared_id}"), None)
         .await;
@@ -596,7 +635,7 @@ async fn secrets_never_in_responses() {
         .admin(
             "PATCH",
             &format!("/send-routes/{id}"),
-            Some(json!({ "secrets": { "username": "u2" } })),
+            Some(json!({ "secrets": { "api_key": "u2" } })),
         )
         .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
@@ -737,7 +776,7 @@ async fn member_cannot_manage_routes() {
             );
         }
     }
-    // an admin of another workspace cannot touch this one's route
+    // the admin of this workspace deletes the route it made
     let (status, _) = fixture.raw(&admin, "DELETE", &one, None).await;
     assert_eq!(status, StatusCode::NO_CONTENT);
 }
@@ -776,4 +815,294 @@ async fn send_test_reports_each_step() {
         )
         .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn region_and_account_id_are_checked() {
+    let fixture = Fixture::new().await;
+    let ses = |region: &str| {
+        json!({
+            "kind": "ses", "name": "SES",
+            "secrets": { "access_key_id": "a", "secret_access_key": "b" },
+            "settings": { "region": region },
+        })
+    };
+    for region in [
+        "x@169.254.169.254/?",
+        "us-east-1.evil.test",
+        "us_east_1",
+        "",
+        "east-1",
+        "us-east-",
+        "US-EAST-1/x",
+    ] {
+        let (status, _) = fixture
+            .admin("POST", "/send-routes", Some(ses(region)))
+            .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{region}");
+    }
+    let (status, route) = fixture
+        .admin("POST", "/send-routes", Some(ses("eu-west-1")))
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{route}");
+    let cloudflare = |account: &str| {
+        json!({
+            "kind": "cloudflare", "name": "CF",
+            "secrets": { "api_token": "t", "event_secret": "e" },
+            "settings": { "account_id": account },
+        })
+    };
+    for account in ["../../x", "abc", "zz".repeat(16).as_str(), "a@b/?"] {
+        let (status, _) = fixture
+            .admin("POST", "/send-routes", Some(cloudflare(account)))
+            .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{account}");
+    }
+    let (status, _) = fixture
+        .admin("POST", "/send-routes", Some(cloudflare(&"0a".repeat(16))))
+        .await;
+    assert_eq!(status, StatusCode::CREATED);
+    // a region copied from a provider goes through the same check
+    let (_, provider) = fixture
+        .admin(
+            "POST",
+            "/providers",
+            Some(json!({
+                "kind": "ses", "name": "SES in",
+                "secrets": { "access_key_id": "a", "secret_access_key": "b" },
+                "settings": { "region": "us-east-1", "bucket": "b", "topic_arn": "arn:aws:sns:us-east-1:1:t" },
+            })),
+        )
+        .await;
+    let id = provider["id"].as_str().unwrap();
+    sqlx::query("UPDATE mail_providers SET settings = $1 WHERE id = $2")
+        .bind(r#"{"region":"x@169.254.169.254/?","mx_hosts":[]}"#)
+        .bind(id)
+        .execute(fixture.database.pool())
+        .await
+        .unwrap();
+    let (status, _) = fixture
+        .admin(
+            "POST",
+            &format!("/providers/{id}/send-route"),
+            Some(json!({})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn moving_a_domain_clears_its_workspace_route() {
+    let fixture = Fixture::new().await;
+    let second = fixture.second_workspace().await;
+    let domain = fixture
+        .mail
+        .create_domain(fixture.first, fixture.owner.id, "moving.example", "request")
+        .await
+        .unwrap();
+    let (_, own) = fixture.smtp(false, "203.0.113.9", "starttls").await;
+    let (_, shared) = fixture.smtp(true, "smtp.relay.test", "tls").await;
+    let (status, _) = fixture
+        .ws(
+            "PUT",
+            &format!("/domains/{}/send-route", domain.id),
+            Some(json!({ "route_id": own["id"] })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let move_to = |workspace: Id| Some(json!({ "workspace_id": workspace.to_string() }));
+    let (status, value) = fixture
+        .admin("PUT", "/domains/moving.example/workspace", move_to(second))
+        .await;
+    assert!(status.is_success(), "{status} {value}");
+    let stored: Option<String> =
+        sqlx::query_scalar("SELECT send_route_id FROM mail_domains WHERE id = $1")
+            .bind(domain.id.to_string())
+            .fetch_one(fixture.database.pool())
+            .await
+            .unwrap();
+    assert!(stored.is_none());
+    // an instance route stays through a move
+    sqlx::query("UPDATE mail_domains SET send_route_id = $1 WHERE id = $2")
+        .bind(shared["id"].as_str().unwrap())
+        .bind(domain.id.to_string())
+        .execute(fixture.database.pool())
+        .await
+        .unwrap();
+    let (status, value) = fixture
+        .admin(
+            "PUT",
+            "/domains/moving.example/workspace",
+            move_to(fixture.first),
+        )
+        .await;
+    assert!(status.is_success(), "{status} {value}");
+    let stored: Option<String> =
+        sqlx::query_scalar("SELECT send_route_id FROM mail_domains WHERE id = $1")
+            .bind(domain.id.to_string())
+            .fetch_one(fixture.database.pool())
+            .await
+            .unwrap();
+    assert_eq!(stored.as_deref(), shared["id"].as_str());
+}
+
+#[tokio::test]
+async fn one_secret_can_change_alone() {
+    let fixture = Fixture::new().await;
+    let (_, provider) = fixture
+        .admin(
+            "POST",
+            "/providers",
+            Some(json!({ "kind": "postmark", "name": "Postmark" })),
+        )
+        .await;
+    let (_, route) = fixture
+        .admin(
+            "POST",
+            &format!("/providers/{}/send-route", provider["id"].as_str().unwrap()),
+            Some(json!({ "secrets": { "server_token": "old-token" } })),
+        )
+        .await;
+    let id: Id = route["id"].as_str().unwrap().parse().unwrap();
+    let (_, before) = fixture.mail.load_route(id).await.unwrap().unwrap();
+    let (status, value) = fixture
+        .admin(
+            "PATCH",
+            &format!("/send-routes/{id}"),
+            Some(json!({ "secrets": { "server_token": "new-token" } })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{value}");
+    let (_, after) = fixture.mail.load_route(id).await.unwrap().unwrap();
+    let (
+        RouteSecrets::Postmark {
+            webhook_user: u1,
+            webhook_password: p1,
+            ..
+        },
+        RouteSecrets::Postmark {
+            server_token,
+            webhook_user: u2,
+            webhook_password: p2,
+        },
+    ) = (before, after)
+    else {
+        panic!("not Postmark secrets");
+    };
+    assert_eq!(server_token, "new-token");
+    assert_eq!((u1, p1), (u2, p2));
+    // an unknown name is refused
+    let (status, _) = fixture
+        .admin(
+            "PATCH",
+            &format!("/send-routes/{id}"),
+            Some(json!({ "secrets": { "nope": "x" } })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn manager_of_another_workspace_gets_nothing() {
+    let fixture = Fixture::new().await;
+    let second = fixture.second_workspace().await;
+    let b_manager = fixture.user("bmanager", Some((second, "admin"))).await;
+    let a_path = format!("/api/v1/workspaces/{}/mail/send-routes", fixture.first);
+    let b_path = format!("/api/v1/workspaces/{second}/mail/send-routes");
+    let (_, a_route) = fixture.smtp(false, "203.0.113.9", "starttls").await;
+    let (_, shared) = fixture.smtp(true, "smtp.relay.test", "tls").await;
+    let a_one = format!("{a_path}/{}", a_route["id"].as_str().unwrap());
+    // B's manager reaches A's route through B's own path: not found
+    let b_via_b = format!("{b_path}/{}", a_route["id"].as_str().unwrap());
+    let shared_via_b = format!("{b_path}/{}", shared["id"].as_str().unwrap());
+    for uri in [&b_via_b, &shared_via_b] {
+        for (method, payload) in [
+            ("PATCH", Some(json!({ "name": "X" }))),
+            ("DELETE", None),
+            ("POST", Some(json!({ "to": "a@b.test" }))),
+        ] {
+            let uri = if method == "POST" {
+                format!("{uri}/test")
+            } else {
+                uri.clone()
+            };
+            let (status, _) = fixture.raw(&b_manager, method, &uri, payload).await;
+            assert_eq!(status, StatusCode::NOT_FOUND, "{method} {uri}");
+        }
+    }
+    // and through A's path: not a member of A
+    let (status, value) = fixture.raw(&b_manager, "GET", &a_path, None).await;
+    assert_eq!(
+        (status, code(&value)),
+        (StatusCode::NOT_FOUND, "mail_not_found")
+    );
+    for (method, payload) in [("PATCH", Some(json!({ "name": "X" }))), ("DELETE", None)] {
+        let (status, value) = fixture.raw(&b_manager, method, &a_one, payload).await;
+        assert_eq!(
+            (status, code(&value)),
+            (StatusCode::NOT_FOUND, "mail_not_found"),
+            "{method}"
+        );
+    }
+    // B's list does not show A's route
+    let (_, listed) = fixture.raw(&b_manager, "GET", &b_path, None).await;
+    let ids: Vec<&str> = listed["routes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["id"].as_str().unwrap())
+        .collect();
+    assert!(!ids.contains(&a_route["id"].as_str().unwrap()));
+    // a domain of B cannot use A's route; A's domain cannot use B's route
+    let (_, b_route) = fixture
+        .raw(
+            &fixture.owner,
+            "POST",
+            &b_path,
+            Some(json!({ "kind": "smtp", "name": "B", "settings": { "host": "203.0.113.10" } })),
+        )
+        .await;
+    let a_domain = fixture
+        .mail
+        .create_domain(fixture.first, fixture.owner.id, "a.example", "request")
+        .await
+        .unwrap();
+    let (status, _) = fixture
+        .ws(
+            "PUT",
+            &format!("/domains/{}/send-route", a_domain.id),
+            Some(json!({ "route_id": b_route["id"] })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let b_domain = fixture
+        .mail
+        .create_domain(second, fixture.owner.id, "b.example", "request")
+        .await
+        .unwrap();
+    let (status, _) = fixture
+        .raw(
+            &b_manager,
+            "PUT",
+            &format!(
+                "/api/v1/workspaces/{second}/mail/domains/{}/send-route",
+                b_domain.id
+            ),
+            Some(json!({ "route_id": a_route["id"] })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    // B's manager cannot change A's domain either
+    let (status, _) = fixture
+        .raw(
+            &b_manager,
+            "PUT",
+            &format!(
+                "/api/v1/workspaces/{second}/mail/domains/{}/send-route",
+                a_domain.id
+            ),
+            Some(json!({ "route_id": null })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
 }

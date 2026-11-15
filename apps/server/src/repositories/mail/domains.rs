@@ -1172,7 +1172,8 @@ impl MailRepository {
     }
 
     /// Moves a domain to another workspace (instance admins). Only a domain without addresses
-    /// moves; its catch-all is cleared, as that mailbox stays behind.
+    /// moves; its catch-all is cleared, as that mailbox stays behind, and so are a send route and a provider of
+    /// the old workspace.
     pub async fn move_domain(
         &self,
         name: &str,
@@ -1217,6 +1218,12 @@ impl MailRepository {
         .await?;
         sqlx::query(
             "UPDATE mail_domains SET workspace_id = $1, catch_all_mailbox_id = NULL, \
+             send_route_id = CASE WHEN send_route_id IN \
+                 (SELECT id FROM mail_send_routes WHERE workspace_id IS NOT NULL) \
+                 THEN NULL ELSE send_route_id END, \
+             provider_id = CASE WHEN provider_id IN \
+                 (SELECT id FROM mail_providers WHERE workspace_id IS NOT NULL) \
+                 THEN NULL ELSE provider_id END, \
              updated_at = $2 WHERE id = $3",
         )
         .bind(target_workspace_id.to_string())
