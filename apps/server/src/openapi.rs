@@ -463,6 +463,16 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::mail_routes::mailboxes::remove_mailbox_address,
         crate::mail_routes::mailboxes::preview_personal_mailboxes,
         crate::mail_routes::mailboxes::create_personal_mailboxes,
+        crate::mail_routes::compose::list_from_addresses,
+        crate::mail_routes::compose::get_mail_signature,
+        crate::mail_routes::compose::put_mail_signature,
+        crate::mail_routes::compose::delete_mail_signature,
+        crate::mail_routes::compose::list_mail_snippets,
+        crate::mail_routes::compose::create_mail_snippet,
+        crate::mail_routes::compose::update_mail_snippet,
+        crate::mail_routes::compose::delete_mail_snippet,
+        crate::mail_routes::compose::get_mail_settings,
+        crate::mail_routes::compose::put_mail_settings,
         crate::mail_routes::labels::list_mail_labels,
         crate::mail_routes::labels::create_mail_label,
         crate::mail_routes::labels::update_mail_label,
@@ -1347,6 +1357,7 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
         id if id.contains("mailbox") || id.contains("mail_label") => {
             mailbox_errors(id, &mut responses);
         }
+        id if mail_compose_operation(id) => mail_compose_errors(id, &mut responses),
         id if mail_thread_operation(id) => mail_thread_errors(id, &mut responses),
         id if mail_content_operation(id) => mail_content_errors(id, &mut responses),
         _ => {}
@@ -2438,8 +2449,44 @@ fn workspace_mail_operation(operation_id: &str) -> bool {
         || operation_id.contains("mail_label")
         || operation_id.contains("mail_receipt")
         || mail_thread_operation(operation_id)
+        || mail_compose_operation(operation_id)
         || mail_content_operation(operation_id);
     mail_route && !instance_route && !token_route
+}
+
+fn mail_compose_operation(operation_id: &str) -> bool {
+    matches!(
+        operation_id,
+        "list_from_addresses"
+            | "get_mail_signature"
+            | "put_mail_signature"
+            | "delete_mail_signature"
+            | "list_mail_snippets"
+            | "create_mail_snippet"
+            | "update_mail_snippet"
+            | "delete_mail_snippet"
+            | "get_mail_settings"
+            | "put_mail_settings"
+    )
+}
+
+/// Compose routes are the caller's own: another member's id is `mail_not_found`.
+fn mail_compose_errors(
+    operation_id: &str,
+    responses: &mut BTreeMap<&'static str, Vec<&'static str>>,
+) {
+    add_code(responses, "404", "mail_not_found");
+    if matches!(
+        operation_id,
+        "list_from_addresses"
+            | "put_mail_signature"
+            | "create_mail_snippet"
+            | "update_mail_snippet"
+            | "put_mail_settings"
+    ) {
+        add_code(responses, "400", "invalid_request");
+        add_code(responses, "422", "validation_failed");
+    }
 }
 
 fn mail_thread_operation(operation_id: &str) -> bool {

@@ -17,6 +17,7 @@ mod reading;
 mod receipts;
 mod routes;
 mod search;
+mod signatures;
 mod threads;
 
 use orbit_platform::{Database, Id, TimestampMillis, UploadError, UploadService};
@@ -65,6 +66,7 @@ pub use routes::{
     resolve_host, route_aad,
 };
 pub use search::{MailQuery, ThreadCursor, parse_query};
+pub use signatures::{FromAddress, Snippet, UNDO_SEND_SECONDS};
 pub use threads::SEARCH_BODY_BYTES;
 
 #[derive(Debug, Error)]

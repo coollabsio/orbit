@@ -27,7 +27,7 @@ pub use bounce::{
 };
 pub use compose::{
     ComposeError, Composed, ComposedAddress, ComposedFile, ComposedFileKind, build_message,
-    forward_block, html_to_text, new_message_id, quote_reply, trim_references,
+    clean_html, forward_block, html_to_text, new_message_id, quote_reply, trim_references,
 };
 pub use dkim::{DkimKey, dkim_txt, generate_dkim_key, new_selector};
 pub use html::{

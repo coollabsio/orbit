@@ -3,6 +3,7 @@
 //! is for instance admins only.
 
 pub(crate) mod admin;
+pub(crate) mod compose;
 pub(crate) mod content;
 pub(crate) mod domains;
 pub(crate) mod inbound;
@@ -328,6 +329,28 @@ pub fn mail_router(state: MailState) -> Router {
         .route(
             "/api/v1/workspaces/{workspace_id}/mail/me",
             get(threads::get_mail_me),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/from-addresses",
+            get(compose::list_from_addresses),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/signatures/{address_id}",
+            get(compose::get_mail_signature)
+                .put(compose::put_mail_signature)
+                .delete(compose::delete_mail_signature),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/snippets",
+            get(compose::list_mail_snippets).post(compose::create_mail_snippet),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/snippets/{snippet_id}",
+            patch(compose::update_mail_snippet).delete(compose::delete_mail_snippet),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/settings/me",
+            get(compose::get_mail_settings).put(compose::put_mail_settings),
         )
         .route(
             "/api/v1/workspaces/{workspace_id}/mail/messages/{message_id}/view-url",

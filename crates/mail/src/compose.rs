@@ -308,6 +308,12 @@ fn format_date(unix: i64) -> String {
     )
 }
 
+/// Sanitizes an HTML fragment the user wrote (a signature or a snippet): the same `ammonia` policy as the
+/// quoted original of a reply.
+pub fn clean_html(html: &str) -> String {
+    ammonia::clean(html)
+}
+
 /// The quoted original of a reply as HTML: "On {date}, {from} wrote:" and the original in a `blockquote`. The
 /// original HTML is sanitized again here.
 pub fn quote_reply(
