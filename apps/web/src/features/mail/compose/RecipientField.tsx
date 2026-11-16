@@ -77,15 +77,20 @@ export function RecipientField({ label, addresses, onChange, names, onName, trai
     setActive(0)
     input.current?.focus()
   }
+  /** Focuses the chip at `index` as rendered now, or the field when there is none. */
   const focusChip = (index: number) => {
-    if (index >= 0 && index < addresses.length) chips.current[index]?.focus()
+    const chip = index >= 0 ? chips.current[index] : null
+    if (chip?.isConnected) chip.focus()
     else input.current?.focus()
   }
-  const remove = (index: number, focusAfter?: number) => {
-    update(addresses.filter((_, at) => at !== index))
-    if (focusAfter === undefined) return
-    // the list renders again first; the chip at `focusAfter` is then the right one
-    requestAnimationFrame(() => focusChip(focusAfter))
+  /** Removes a chip; from the keyboard, focus moves to the chip before it (Backspace) or after it (Delete). */
+  const remove = (index: number, move?: 'back' | 'forward') => {
+    const next = update(addresses.filter((_, at) => at !== index))
+    if (!move) return
+    // a neighbour in the new list: Backspace on the first chip goes to the new first one
+    const target = next.length === 0 ? -1 : move === 'back' ? Math.max(0, index - 1) : Math.min(index, next.length - 1)
+    // the list renders again first
+    requestAnimationFrame(() => focusChip(target))
   }
   /** A chip goes back into the field to be fixed; text typed there is added first. One change of the list. */
   const edit = (index: number) => {
@@ -140,8 +145,8 @@ export function RecipientField({ label, addresses, onChange, names, onName, trai
     const key = event.key
     if (key === 'ArrowLeft') focusChip(Math.max(0, index - 1))
     else if (key === 'ArrowRight') focusChip(index + 1)
-    else if (key === 'Backspace') remove(index, index > 0 ? index - 1 : addresses.length - 1)
-    else if (key === 'Delete') remove(index, index < addresses.length - 1 ? index : addresses.length - 1)
+    else if (key === 'Backspace') remove(index, 'back')
+    else if (key === 'Delete') remove(index, 'forward')
     else if (key === 'Enter' || key === 'F2') edit(index)
     else return
     event.preventDefault()

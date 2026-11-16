@@ -1,7 +1,7 @@
 // The mail composer (§9.1): one draft, saved on the server as the user types. `inline` is the reply at the end of a
 // thread (recipients as one line until clicked, U1), `window` the floating composer and `full` its expanded form
 // (U2, both placed by the dock). ⌘Enter sends; the pre-send checks show above Send and ⌘Enter again sends anyway (U5).
-import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode, type RefObject } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode } from 'react'
 import { ChevronDown, Danger, Paperclip2, Send, TextBlock, Trash, Xmark as X } from 'reicon-react'
 import { toast } from 'sonner'
 import { cn } from 'cn'
@@ -59,6 +59,7 @@ export function Composer(props: ComposerProps) {
   // set while the body is shown again: the old body must not save its text on the way out
   const reloading = useRef(false)
   const seenRestore = useRef(saver.restore)
+  const isReloading = useCallback(() => reloading.current, [])
   const onLoaded = useCallback((version: number) => {
     loadedVersion.current = version
     reloading.current = false
@@ -127,7 +128,7 @@ export function Composer(props: ComposerProps) {
       fromAddresses={fromQuery.data ?? []}
       saver={saver}
       onLoaded={onLoaded}
-      reloading={reloading}
+      isReloading={isReloading}
       onRestore={restoreText}
     />
   )
@@ -143,8 +144,8 @@ interface BodyProps extends ComposerProps {
   fromAddresses: readonly MailFromAddress[]
   saver: Saver
   onLoaded: (version: number) => void
-  /** True while this body is replaced by a fresh one (conflict, Restore): it must not save its text. */
-  reloading: RefObject<boolean>
+  /** This body is being replaced by a fresh one (conflict, Restore): it must not save its text. */
+  isReloading: () => boolean
   onRestore: () => void
 }
 
@@ -154,7 +155,7 @@ const BODY_EXPORT_MS = 400
 const lower = (address: string) => address.trim().toLowerCase()
 const isFileDrag = (event: DragEvent) => event.dataTransfer.types.includes('Files')
 
-function ComposerBody({ draft, seed, fromAddresses, saver, onLoaded, reloading, onRestore, draftId, placement, onClose, onSent, headerActions, className }: BodyProps) {
+function ComposerBody({ draft, seed, fromAddresses, saver, onLoaded, isReloading, onRestore, draftId, placement, onClose, onSent, headerActions, className }: BodyProps) {
   const [initial] = useState(() => ({ ...draft, ...seed }))
   const [to, setTo] = useState<string[]>(initial.to)
   const [cc, setCc] = useState<string[]>(initial.cc)
@@ -234,17 +235,23 @@ function ComposerBody({ draft, seed, fromAddresses, saver, onLoaded, reloading, 
     const exportHtml = takeBody()
     if (exportHtml) saver.save({ body_html: exportHtml() })
   }
-  const saveBodyRef = useRef(saveBody)
+  const saveRef = useRef(saver.save)
   useEffect(() => {
-    saveBodyRef.current = saveBody
+    saveRef.current = saver.save
   })
-  // Layout cleanup: before the saver's last flush (a passive cleanup of the parent) runs.
-  useLayoutEffect(
-    () => () => {
-      if (!reloading.current) saveBodyRef.current()
-    },
-    [reloading],
-  )
+  // On the way out the waiting export is always dropped (its timer would read a destroyed editor later). Closing
+  // saves it first, in a layout cleanup: before the saver's last flush (a passive cleanup of the parent). A body
+  // replaced after a conflict or Restore saves nothing: its text is old.
+  useLayoutEffect(() => {
+    const timer = bodyTimer
+    const pendingExport = bodyExport
+    return () => {
+      clearTimeout(timer.current)
+      const exportHtml = pendingExport.current
+      pendingExport.current = null
+      if (exportHtml && !isReloading()) saveRef.current({ body_html: exportHtml() })
+    }
+  }, [isReloading])
   const onBodyChange = (exportHtml: () => string) => {
     bodyExport.current = exportHtml
     clearTimeout(bodyTimer.current)

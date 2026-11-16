@@ -141,7 +141,7 @@ test('a refused message always offers at least its largest linkable file', () =>
 test('typed text is committed into the recipient list, without duplicates', () => {
   expect(commitTyped(['ann@acme.io'], ' bob@acme.io, ANN@acme.io ')).toEqual(['ann@acme.io', 'bob@acme.io'])
   expect(commitTyped(['ann@acme.io'], '   ')).toEqual(['ann@acme.io'])
-  // a chip being fixed: removed, then the fixed text appended
+  // text that is not an address is still added (it shows as a red chip)
   expect(commitTyped(['ann@acme.io'], 'carl@acme')).toEqual(['ann@acme.io', 'carl@acme'])
 })
 
