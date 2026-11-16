@@ -51,6 +51,7 @@ export function ThreadReply({ threadId, last, ref }: ThreadReplyProps) {
   const drafts = useDrafts(undefined, openId === null)
   const composer = useRef<ComposerHandle>(null)
   const box = useRef<HTMLDivElement>(null)
+  const actions = useRef<HTMLDivElement>(null)
   // Undo of a reply sent from here brings it back here
   useInlineReplyHost(threadId, setOpenId)
 
@@ -73,12 +74,19 @@ export function ThreadReply({ threadId, last, ref }: ThreadReplyProps) {
     create.mutate({ mode, thread_id: threadId }, { onSuccess: (draft) => show(draft.id, click), onError: (error) => toast.error(problemText(error, 'The reply could not be started.')) })
   }
 
-  /** The reply closed (Esc, Delete, sent): the focus goes back where it was, when that is still on the page. */
+  /**
+   * The reply closed (Esc, Delete, sent): the focus goes back where it was. The Reply button that opened it is gone
+   * with the reply; then the focus goes to the Reply button shown again in its place.
+   */
   const collapse = () => {
     setOpenId(null)
     const target = returnFocus.current
     returnFocus.current = null
-    if (target?.isConnected) requestAnimationFrame(() => target.focus({ preventScroll: true }))
+    if (!target) return
+    requestAnimationFrame(() => {
+      const next = target.isConnected ? target : actions.current?.querySelector<HTMLElement>('button:not([disabled])')
+      next?.focus({ preventScroll: true })
+    })
   }
 
   useImperativeHandle(ref, () => ({
@@ -150,7 +158,7 @@ export function ThreadReply({ threadId, last, ref }: ThreadReplyProps) {
           </Button>
         </p>
       ) : null}
-      <div className="flex flex-wrap items-center gap-2">
+      <div ref={actions} className="flex flex-wrap items-center gap-2">
         <ReplyButton label="Reply" command="mail.reply" icon={<Reply />} disabled={create.isPending} onClick={() => start('reply', true)} />
         {replyAll ? <ReplyButton label="Reply all" command="mail.replyAll" icon={<Reply />} disabled={create.isPending} onClick={() => start('reply_all', true)} /> : null}
         <ReplyButton label="Forward" command="mail.forward" icon={<ForwardRight />} disabled={create.isPending} onClick={() => start('forward', true)} />

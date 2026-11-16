@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useSyncExternalStore } from 'react'
 import { Button } from '@/components/ui/button'
 import { Kbd } from '@/components/ui/kbd'
 
 /** The toast's content: what happened, **Undo (Z)**, and the bar that runs out when the message goes. */
 export function UndoSendToast({ title, countdownMs, onUndo }: { title: string; countdownMs: number | null; onUndo: () => void }) {
+  const reducedMotion = useSyncExternalStore(subscribeReducedMotion, prefersReducedMotion)
   return (
     <div
       data-slot="undo-send-toast"
@@ -13,7 +14,7 @@ export function UndoSendToast({ title, countdownMs, onUndo }: { title: string; c
         {title}
       </span>
       {/* reduced motion: the seconds left, as text, in place of the moving bar */}
-      {countdownMs !== null ? <Countdown ms={countdownMs} /> : null}
+      {countdownMs !== null && reducedMotion ? <Countdown ms={countdownMs} /> : null}
       <Button size="sm" variant="ghost" className="shrink-0 gap-1.5" aria-keyshortcuts="Z" aria-label="Undo (Z)" onClick={onUndo}>
         Undo
         <Kbd>Z</Kbd>
@@ -30,7 +31,15 @@ export function UndoSendToast({ title, countdownMs, onUndo }: { title: string; c
   )
 }
 
-/** "8 s": the seconds before the message goes, shown only with reduced motion (the bar shows it otherwise). */
+const REDUCED_MOTION = '(prefers-reduced-motion: reduce)'
+const prefersReducedMotion = () => window.matchMedia(REDUCED_MOTION).matches
+const subscribeReducedMotion = (onChange: () => void) => {
+  const media = window.matchMedia(REDUCED_MOTION)
+  media.addEventListener('change', onChange)
+  return () => media.removeEventListener('change', onChange)
+}
+
+/** "8 s": the seconds before the message goes, with reduced motion only (the bar shows it otherwise). */
 function Countdown({ ms }: { ms: number }) {
   const [end] = useState(() => Date.now() + ms)
   const [left, setLeft] = useState(() => Math.ceil(ms / 1000))
@@ -39,7 +48,7 @@ function Countdown({ ms }: { ms: number }) {
     return () => clearInterval(timer)
   }, [end])
   return (
-    <span aria-hidden="true" className="hidden shrink-0 text-xs text-muted-foreground tabular-nums motion-reduce:inline">
+    <span aria-hidden="true" className="shrink-0 text-xs text-muted-foreground tabular-nums">
       {left} s
     </span>
   )

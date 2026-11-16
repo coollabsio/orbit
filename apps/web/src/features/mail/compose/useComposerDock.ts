@@ -97,20 +97,21 @@ export function useArchiveAfterSend() {
   const queryClient = useQueryClient()
   const workspaceId = useWorkspace().workspace.id
   const update = useUpdateThread()
-  const mutate = useRef(update.mutate)
+  // the promise form: its error still shows when the composer that sent is gone (mutate's callbacks would not run)
+  const mutate = useRef(update.mutateAsync)
   useEffect(() => {
-    mutate.current = update.mutate
+    mutate.current = update.mutateAsync
   })
   return useCallback(
     (threadId: string): (() => void) => {
       const before: MailFolder | undefined = queryClient.getQueryData<MailThreadDetail>(mailKeys.thread(workspaceId, threadId))?.thread.folder
-      const onError = (error: Error) => toast.error(problemText(error, 'The conversation could not be moved.'))
+      const move = (folder: MailFolder) =>
+        mutate.current({ threadId, change: { folder } }).catch((error: unknown) => toast.error(problemText(error, 'The conversation could not be moved.')))
       const host = archiveHosts.get(threadId)
       if (host) host()
-      else mutate.current({ threadId, change: { folder: 'archive' } }, { onError })
+      else void move('archive')
       return () => {
-        if (before === 'archive') return
-        mutate.current({ threadId, change: { folder: before ?? 'inbox' } }, { onError })
+        if (before !== 'archive') void move(before ?? 'inbox')
       }
     },
     [queryClient, workspaceId],

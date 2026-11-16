@@ -79,7 +79,7 @@ export function ComposerDock() {
   return (
     <div data-slot="composer-dock" className="pointer-events-none fixed right-4 bottom-4 z-40 flex items-end justify-end gap-3 max-[899px]:right-2 max-[899px]:bottom-2">
       {checked && layout.pills.length > 0 ? (
-        <div className="flex max-w-[50vw] flex-wrap-reverse items-end justify-end gap-2 max-[899px]:max-w-none">
+        <div inert={layout.full !== null} className="flex max-w-[50vw] flex-wrap-reverse items-end justify-end gap-2 max-[899px]:max-w-none">
           {layout.pills.map((id) => (
             <DockPill key={id} draftId={id} onOpen={() => store.open(id, { animate: true })} onClose={() => store.close(id)} />
           ))}
@@ -90,7 +90,14 @@ export function ComposerDock() {
         {state.windows
           .filter((entry) => kept.has(entry.draftId) || (checked && visible.has(entry.draftId)))
           .map((entry) => (
-            <DockWindowFrame key={entry.draftId} entry={entry} visible={visible.has(entry.draftId)} store={store} autoFocus={entry.openedAt > mountSequence} />
+            <DockWindowFrame
+              key={entry.draftId}
+              entry={entry}
+              visible={visible.has(entry.draftId)}
+              behindModal={layout.full !== null && layout.full !== entry.draftId}
+              store={store}
+              autoFocus={entry.openedAt > mountSequence}
+            />
           ))}
       </div>
     </div>
@@ -104,7 +111,20 @@ function draftTitle(draft: { subject: string; mode: string } | undefined): strin
   return draft.mode.startsWith('forward') ? 'Forward' : 'Reply'
 }
 
-function DockWindowFrame({ entry, visible, store, autoFocus }: { entry: DockWindow; visible: boolean; store: ComposerDockStore; autoFocus: boolean }) {
+function DockWindowFrame({
+  entry,
+  visible,
+  behindModal,
+  store,
+  autoFocus,
+}: {
+  entry: DockWindow
+  visible: boolean
+  /** Another window is full screen: this one is inert. */
+  behindModal: boolean
+  store: ComposerDockStore
+  autoFocus: boolean
+}) {
   const { draftId, state, openedAt, animate } = entry
   const full = state === 'full'
   const title = draftTitle(useDraft(draftId).data)
@@ -126,6 +146,32 @@ function DockWindowFrame({ entry, visible, store, autoFocus }: { entry: DockWind
     seen.current = openedAt
     handle.current?.focus()
   }, [visible, openedAt])
+  // Full screen is modal: the app beside the dock is inert, so the focus stays in (the other windows and pills get
+  // `inert` from the dock). The Sonner toaster and portaled menus are outside the shell and stay usable. Declared after
+  // the effect that notes where the focus was (before the page goes inert) and before the ones that give it back
+  // (on close its cleanup runs first, so the focus can go back to the page).
+  useLayoutEffect(() => {
+    const dock = section.current?.closest('[data-slot=composer-dock]')
+    const shell = dock?.parentElement
+    if (!full || !visible || !dock || !shell) return
+    const made: Element[] = []
+    const cover = (element: Element) => {
+      if (element === dock || element.hasAttribute('inert')) return
+      element.setAttribute('inert', '')
+      made.push(element)
+    }
+    for (const element of shell.children) cover(element)
+    // and what the shell shows while full screen lasts
+    const observer = new MutationObserver((records) => {
+      for (const record of records) for (const node of record.addedNodes) if (node instanceof Element) cover(node)
+    })
+    observer.observe(shell, { childList: true })
+    return () => {
+      observer.disconnect()
+      for (const element of made) element.removeAttribute('inert')
+    }
+  }, [full, visible])
+
   const giveBackFocus = useRef(() => {
     const target = returnFocus.current
     returnFocus.current = null
@@ -140,21 +186,6 @@ function DockWindowFrame({ entry, visible, store, autoFocus }: { entry: DockWind
     const giveBack = giveBackFocus.current
     return () => giveBack()
   }, [])
-
-  // Full screen is modal: the app behind it (and the other windows and pills) is inert, so the focus stays in.
-  useEffect(() => {
-    const own = section.current
-    const dock = own?.closest('[data-slot=composer-dock]')
-    if (!full || !visible || !own || !dock?.parentElement) return
-    const behind = [
-      ...[...dock.parentElement.children].filter((element) => element !== dock),
-      ...dock.querySelectorAll('[data-slot=composer-window], [data-slot=composer-pill]'),
-    ].filter((element) => element !== own && !element.hasAttribute('inert'))
-    for (const element of behind) element.setAttribute('inert', '')
-    return () => {
-      for (const element of behind) element.removeAttribute('inert')
-    }
-  }, [full, visible])
 
   const onSent: SentHandler = (outbound, draft, { archive }) => {
     // ⌘⇧Enter: archived (the next thread opens when the mail page shows this one); Undo puts it back
@@ -173,6 +204,7 @@ function DockWindowFrame({ entry, visible, store, autoFocus }: { entry: DockWind
       aria-modal={full}
       aria-label={`Draft: ${title}`}
       hidden={!visible}
+      inert={behindModal}
       data-slot="composer-window"
       data-state={state}
       className={cn(
