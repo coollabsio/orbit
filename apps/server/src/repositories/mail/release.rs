@@ -451,7 +451,11 @@ impl MailRepository {
             if file.forwarded {
                 return Err(MailError::Unprocessable("link_forwarded"));
             }
-            if file.content_id.as_ref().is_some_and(|id| !id.trim().is_empty()) {
+            if file
+                .content_id
+                .as_ref()
+                .is_some_and(|id| !id.trim().is_empty())
+            {
                 return Err(MailError::Unprocessable("link_inline"));
             }
             if raw_refs.get(&file.blob_id).copied().unwrap_or(false) {
@@ -634,8 +638,9 @@ impl MailRepository {
         // message has the URL (the database keeps the token's hash only).
         for link in &planned {
             content.parsed.body_text = content.parsed.body_text.replace(&link.url, "[link]");
-            content.parsed.snippet = content.parsed.snippet.replace(&link.url, "[link]");
         }
+        // Derived from the masked text: a URL cut by the snippet limit would no longer match.
+        content.parsed.snippet = orbit_mail::snippet(&content.parsed.body_text);
 
         between.await;
         let finalization = self.uploads.begin_finalization().await;

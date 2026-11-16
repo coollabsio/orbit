@@ -40,7 +40,7 @@ pub use html::{
 pub use mail_auth::hickory_resolver;
 pub use parse::{
     AttachmentInfo, Mailbox, ParseError, ParseLimits, ParsedMessage, normalize_subject, parse,
-    part_bytes, sniff_image,
+    part_bytes, sniff_image, snippet,
 };
 pub use sign::{SIGNED_HEADERS, SignError, SigningKey, sign_message};
 pub use smtp::{

@@ -692,9 +692,22 @@ struct Reply {
 impl Fixture {
     /// Sends a message with `name` as a link file and releases it.
     async fn linked(&self, name: &str, file: &[u8]) -> Linked {
+        self.linked_with(name, file, "<p>Hi</p>").await
+    }
+
+    async fn linked_with(&self, name: &str, file: &[u8], body_html: &str) -> Linked {
         self.signing().await;
         self.no_undo().await;
         let draft = self.draft(&["x@out.test"]).await;
+        let (status, patched) = self
+            .call(
+                &self.ann,
+                "PATCH",
+                &format!("/drafts/{draft}"),
+                Some(json!({"version": 1, "body_html": body_html})),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "{patched}");
         let (status, uploaded) = self.upload(&self.ann, &draft, name, file).await;
         assert_eq!(status, StatusCode::CREATED, "{uploaded}");
         let (status, set) = self
@@ -1185,4 +1198,91 @@ async fn inline_and_forwarded_files_cannot_be_links() {
         .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
     assert_eq!(body["code"], "link_forwarded");
+}
+
+#[tokio::test]
+async fn a_url_cut_by_the_snippet_limit_leaves_no_token_prefix() {
+    // Where the URL starts in the text of a short message.
+    let first = Fixture::new().await;
+    let probe = first.linked("a.bin", b"data").await;
+    let text: String = sqlx::query_scalar("SELECT body_text FROM mail_messages WHERE id = $1")
+        .bind(probe.message.to_string())
+        .fetch_one(first.database.pool())
+        .await
+        .unwrap();
+    let collapsed = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let at = collapsed.find("[link]").unwrap();
+    // Pad the body so that the URL starts 50 characters before the snippet's 200th.
+    let pad = "a".repeat(150 - at - 1);
+    let f = Fixture::new().await;
+    let linked = f
+        .linked_with("a.bin", b"data", &format!("<p>Hi {pad}</p>"))
+        .await;
+    let snippet: String = sqlx::query_scalar("SELECT snippet FROM mail_messages WHERE id = $1")
+        .bind(linked.message.to_string())
+        .fetch_one(f.database.pool())
+        .await
+        .unwrap();
+    assert!(
+        snippet.contains("[link]"),
+        "The cut falls after the mask: {snippet}"
+    );
+    assert!(!snippet.contains(&linked.token[..10]), "{snippet}");
+    assert!(!snippet.contains("/mail/f/"), "{snippet}");
+}
+
+#[tokio::test]
+async fn release_refuses_inline_and_forwarded_link_files() {
+    use orbit_server::repositories::mail::MailError;
+    let f = Fixture::new().await;
+    f.signing().await;
+    f.no_undo().await;
+    let draft = f.draft(&["x@out.test"]).await;
+    let (_, uploaded) = f.upload(&f.ann, &draft, "a.png", b"png").await;
+    assert_eq!(uploaded["as_link"], false);
+    f.sql("UPDATE mail_draft_files SET as_link = 1, content_id = 'logo@one.test'")
+        .await;
+    let (_, sent) = f.send(&draft, json!({})).await;
+    let id: Id = sent["id"].as_str().unwrap().parse().unwrap();
+    let (_, release_at, _) = f.outbound_row(&id.to_string()).await;
+    let error = f.mail.release(id, None, at(release_at)).await.unwrap_err();
+    assert!(
+        matches!(error, MailError::Unprocessable("link_inline")),
+        "{error:?}"
+    );
+
+    // A forwarded file, flagged in the database directly.
+    let raw = "From: Carl <carl@sender.test>\r\nTo: team@one.test\r\nSubject: Report\r\n\
+         Message-ID: <m3@sender.test>\r\nMIME-Version: 1.0\r\n\
+         Content-Type: multipart/mixed; boundary=\"b\"\r\n\r\n\
+         --b\r\nContent-Type: text/plain\r\n\r\nSee attached\r\n\
+         --b\r\nContent-Type: application/pdf; name=\"report.pdf\"\r\n\
+         Content-Disposition: attachment; filename=\"report.pdf\"\r\n\
+         Content-Transfer-Encoding: base64\r\n\r\nJVBERi0xLjQK\r\n--b--\r\n";
+    let (_, thread) = f
+        .deliver_raw(raw.to_owned(), "team@one.test", f.team_primary)
+        .await;
+    let forward = f.thread_draft("forward", thread).await;
+    let (status, body) = f
+        .call(
+            &f.ann,
+            "PATCH",
+            &format!("/drafts/{forward}"),
+            Some(json!({"version": 1, "to": ["x@out.test"]})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    f.sql(&format!(
+        "UPDATE mail_draft_files SET as_link = 1 WHERE draft_id = '{forward}'"
+    ))
+    .await;
+    let (status, sent) = f.send(&forward, json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{sent}");
+    let id: Id = sent["id"].as_str().unwrap().parse().unwrap();
+    let (_, release_at, _) = f.outbound_row(&id.to_string()).await;
+    let error = f.mail.release(id, None, at(release_at)).await.unwrap_err();
+    assert!(
+        matches!(error, MailError::Unprocessable("link_forwarded")),
+        "{error:?}"
+    );
 }
