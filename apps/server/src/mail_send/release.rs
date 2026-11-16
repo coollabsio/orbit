@@ -4,8 +4,8 @@
 //! not due or not held any more (undone, an old job of a message sent again) does nothing.
 //!
 //! A lasting release failure keeps the message held with its reason (for example
-//! `dkim_inactive`: never sent unsigned) and fails the job; a database or blob store error holds
-//! it with `release_failed` and is retried.
+//! `dkim_inactive`: never sent unsigned, or `release_error` for an error without a code) and
+//! fails the job; a database or blob store error holds it with `release_failed` and is retried.
 
 use std::sync::Arc;
 
@@ -52,13 +52,7 @@ pub async fn run_send_job(
         Ok(None) => return Ok(()),
         Err(error) => error,
     };
-    let (reason, retry) = match &error {
-        MailError::Unprocessable(code) => (*code, false),
-        MailError::QuotaExceeded => ("storage_quota", false),
-        MailError::Crypto => ("decrypt_failed", false),
-        MailError::Unavailable(_) | MailError::Upload(_) => ("release_failed", true),
-        _ => ("release_failed", false),
-    };
+    let (reason, retry) = release_failure(&error);
     if let Err(record) = state.mail.hold_release(outbound_id, reason, now).await {
         tracing::warn!(error = %record, outbound_id = %outbound_id, "recording a mail release failure");
     }
@@ -68,6 +62,20 @@ pub async fn run_send_job(
         Err(JobError::Retryable(text))
     } else {
         Err(JobError::Permanent(text))
+    }
+}
+
+/// The hold reason of a failed release and whether the job retries it. Only `release_failed`
+/// (a passing database or blob store error) is retried and swept again; any other error is
+/// permanent: `release_error` when it has no code of its own, which the sweep leaves alone.
+#[must_use]
+pub fn release_failure(error: &MailError) -> (&'static str, bool) {
+    match error {
+        MailError::Unprocessable(code) => (*code, false),
+        MailError::QuotaExceeded => ("storage_quota", false),
+        MailError::Crypto => ("decrypt_failed", false),
+        MailError::Unavailable(_) | MailError::Upload(_) => ("release_failed", true),
+        _ => ("release_error", false),
     }
 }
 

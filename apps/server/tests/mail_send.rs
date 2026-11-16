@@ -2143,3 +2143,47 @@ async fn undo_during_build_releases_nothing() {
             .is_some()
     );
 }
+
+#[tokio::test]
+async fn permanent_release_errors_are_not_swept() {
+    use orbit_server::mail_send::release_failure;
+    use orbit_server::repositories::mail::MailError;
+    // Only a passing store error is retried; an error without a code is `release_error`.
+    assert_eq!(
+        release_failure(&MailError::Unavailable(sqlx::Error::PoolTimedOut)),
+        ("release_failed", true)
+    );
+    assert_eq!(
+        release_failure(&MailError::Conflict("already_filed")),
+        ("release_error", false)
+    );
+    assert_eq!(
+        release_failure(&MailError::NotFound),
+        ("release_error", false)
+    );
+    let f = Fixture::new().await;
+    let draft = f.new_draft(f.ann_primary, &["x@out.test"], &[], &[]).await;
+    let (_, sent) = f.send(&draft, json!({})).await;
+    let id: Id = sent["id"].as_str().unwrap().parse().unwrap();
+    let (_, release_at, _) = f.outbound_row(&id.to_string()).await;
+    f.sql("DELETE FROM jobs WHERE kind = 'mail.send'").await;
+    for reason in [
+        "release_error",
+        "build_failed",
+        "file_missing",
+        "send_as_denied",
+        "storage_quota",
+        "decrypt_failed",
+    ] {
+        f.mail
+            .hold_release(id, reason, at(release_at))
+            .await
+            .unwrap();
+        assert_eq!(
+            f.mail.sweep_releases(at(release_at + 1)).await.unwrap(),
+            0,
+            "{reason}"
+        );
+    }
+    assert_eq!(f.queued_send_jobs(id).await, 0);
+}
