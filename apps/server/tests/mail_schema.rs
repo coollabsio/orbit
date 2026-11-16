@@ -698,6 +698,97 @@ async fn workspace_purge_removes_every_mail_row_and_blob() {
         .await
         .unwrap();
 
+    // The send tables: a draft with a file, a message to send with a recipient and a file link,
+    // and the member's and workspace's settings.
+    let (w, m) = (fixture.workspace_id.clone(), fixture.membership_id.clone());
+    let n = now.to_string();
+    let id = || Id::new_v7().to_string();
+    fixture.send_route(Some(&w)).await;
+    let draft = fixture.draft(&mailbox, &address).await;
+    let draft_blob = fixture.bare_blob(b"draft file").await;
+    let link_blob = fixture.bare_blob(b"linked file").await;
+    fixture
+        .exec(
+            "INSERT INTO mail_draft_files (id, draft_id, workspace_id, blob_id, filename, content_type, size, as_link, created_at) \
+             VALUES ($1, $2, $3, $4, 'a.txt', 'text/plain', 10, 0, $5)",
+            &[&id(), &draft, &w, &draft_blob, &n],
+        )
+        .await
+        .unwrap();
+    let outbound = fixture.outbound(&mailbox, Some(&draft)).await.unwrap();
+    fixture
+        .file_link(&outbound, &link_blob, &"d".repeat(64))
+        .await
+        .unwrap();
+    fixture
+        .exec(
+            "INSERT INTO mail_outbound_recipients (id, outbound_id, workspace_id, membership_id, address, kind, status, \
+             attempts, created_at, updated_at) VALUES ($1, $2, $3, $4, 'bob@example.net', 'to', 'queued', 0, $5, $5)",
+            &[&id(), &outbound, &w, &m, &n],
+        )
+        .await
+        .unwrap();
+    fixture
+        .exec(
+            "INSERT INTO mail_suppressions (workspace_id, address, reason, created_at) VALUES ($1, 'bob@example.net', 'manual', $2)",
+            &[&w, &n],
+        )
+        .await
+        .unwrap();
+    fixture
+        .exec(
+            "INSERT INTO mail_signatures (id, workspace_id, membership_id, address_id, body_html, created_at, updated_at) \
+             VALUES ($1, $2, $3, $4, '<p>Ann</p>', $5, $5)",
+            &[&id(), &w, &m, &address, &n],
+        )
+        .await
+        .unwrap();
+    fixture
+        .exec(
+            "INSERT INTO mail_snippets (id, workspace_id, membership_id, name, body_html, created_at, updated_at) \
+             VALUES ($1, $2, $3, 'Thanks', '<p>Thanks</p>', $4, $4)",
+            &[&id(), &w, &m, &n],
+        )
+        .await
+        .unwrap();
+    fixture
+        .exec(
+            "INSERT INTO mail_member_settings (membership_id, undo_send_seconds, updated_at) VALUES ($1, 10, $2)",
+            &[&m, &n],
+        )
+        .await
+        .unwrap();
+    fixture
+        .exec(
+            "INSERT INTO mail_vacations (mailbox_id, enabled, subject, body_html, contacts_only, created_at, updated_at) \
+             VALUES ($1, 1, 'Away', '<p>Away</p>', 0, $2, $2)",
+            &[&mailbox, &n],
+        )
+        .await
+        .unwrap();
+    fixture
+        .exec(
+            "INSERT INTO mail_vacation_replies (mailbox_id, sender, replied_at) VALUES ($1, 'bob@example.net', $2)",
+            &[&mailbox, &n],
+        )
+        .await
+        .unwrap();
+    fixture
+        .exec(
+            "INSERT INTO mail_contacts (workspace_id, membership_id, address, name, send_count, hidden, created_at, updated_at) \
+             VALUES ($1, $2, 'bob@example.net', 'Bob', 1, 0, $3, $3)",
+            &[&w, &m, &n],
+        )
+        .await
+        .unwrap();
+    fixture
+        .exec(
+            "INSERT INTO mail_send_policies (workspace_id, tier, created_at, updated_at) VALUES ($1, 'new', $2, $2)",
+            &[&w, &n],
+        )
+        .await
+        .unwrap();
+
     sqlx::query("UPDATE workspaces SET deleted_at = $1 WHERE id = $2")
         .bind(now - 31 * DAY_MILLIS)
         .bind(&fixture.workspace_id)
@@ -711,7 +802,7 @@ async fn workspace_purge_removes_every_mail_row_and_blob() {
             .unwrap();
 
     assert_eq!(summary.workspaces_purged, 1);
-    assert_eq!(summary.attachment_blobs_purged, 1);
+    assert_eq!(summary.attachment_blobs_purged, 3);
     for table in [
         "mail_domains",
         "mail_dkim_keys",
@@ -730,6 +821,20 @@ async fn workspace_purge_removes_every_mail_row_and_blob() {
         "mail_thread_labels",
         "mail_health_tests",
         "mail_sender_prefs",
+        "mail_send_routes",
+        "mail_send_policies",
+        "mail_drafts",
+        "mail_draft_files",
+        "mail_outbound",
+        "mail_outbound_recipients",
+        "mail_file_links",
+        "mail_suppressions",
+        "mail_signatures",
+        "mail_snippets",
+        "mail_member_settings",
+        "mail_vacations",
+        "mail_vacation_replies",
+        "mail_contacts",
     ] {
         assert_eq!(
             fixture

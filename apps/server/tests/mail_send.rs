@@ -31,6 +31,7 @@ struct Member {
 struct Fixture {
     _root: tempfile::TempDir,
     database: TestDatabase,
+    uploads: UploadService,
     identity: Arc<IdentityRepository>,
     mail: Arc<MailRepository>,
     intake: MailIntake,
@@ -95,8 +96,9 @@ impl Fixture {
             AttachmentMutationCoordinator::default(),
             limits,
         );
-        let mail =
-            Arc::new(MailRepository::new((*database).clone(), uploads, APP_KEY).with_cloud(cloud));
+        let mail = Arc::new(
+            MailRepository::new((*database).clone(), uploads.clone(), APP_KEY).with_cloud(cloud),
+        );
         let intake = MailIntake::new(Arc::clone(&mail), 52_428_800);
         let owner_membership: String = sqlx::query_scalar(
             "SELECT id FROM memberships WHERE workspace_id = $1 AND user_id = $2",
@@ -125,6 +127,7 @@ impl Fixture {
         let mut fixture = Self {
             _root: root,
             database,
+            uploads,
             identity,
             mail,
             intake,
@@ -2223,4 +2226,217 @@ async fn cloud_workspace_is_new_after_its_first_release() {
     use sqlx::Row;
     assert_eq!(row.get::<String, _>("tier"), "new");
     assert!(row.get::<Option<i64>, _>("first_release_at").is_some());
+}
+
+impl Fixture {
+    async fn outbound_with(&self, status: &str, at: i64) -> Id {
+        let id = Id::new_v7();
+        self.sql(&format!(
+            "INSERT INTO mail_outbound (id, workspace_id, membership_id, mailbox_id, status, release_at, \
+             created_at, updated_at) VALUES ('{id}', '{}', '{}', '{}', '{status}', {at}, {at}, {at})",
+            self.workspace, self.ann.membership, self.ann_personal
+        ))
+        .await;
+        id
+    }
+
+    async fn recipient_with(&self, outbound: Id, status: &str, released: i64) {
+        self.sql(&format!(
+            "INSERT INTO mail_outbound_recipients (id, outbound_id, workspace_id, membership_id, address, \
+             kind, status, last_response, released_at, created_at, updated_at) VALUES ('{}', '{outbound}', \
+             '{}', '{}', 'r@out.test', 'to', '{status}', '250 ok', {released}, {released}, {released})",
+            Id::new_v7(),
+            self.workspace,
+            self.ann.membership
+        ))
+        .await;
+    }
+
+    async fn link_with(
+        &self,
+        outbound: Id,
+        bytes: &[u8],
+        expires: i64,
+        revoked: Option<i64>,
+    ) -> String {
+        let finalization = self.uploads.begin_finalization().await;
+        let mut tx = self.database.immediate_transaction().await.unwrap();
+        let blob = finalization
+            .finalize_bytes_in_transaction(&mut tx, self.workspace, bytes, TimestampMillis::now())
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+        let id = Id::new_v7();
+        let revoked = revoked.map_or("NULL".to_owned(), |at| at.to_string());
+        self.sql(&format!(
+            "INSERT INTO mail_file_links (id, workspace_id, outbound_id, blob_id, filename, size, \
+             token_sha256, expires_at, revoked_at, downloads, created_at) VALUES ('{id}', '{}', \
+             '{outbound}', '{}', 'a.txt', 5, '{}', {expires}, {revoked}, 0, 1)",
+            self.workspace,
+            blob.id,
+            format!("{:0>64}", id.to_string().replace('-', ""))
+        ))
+        .await;
+        id.to_string()
+    }
+
+    async fn total(&self, sql: &str) -> i64 {
+        sqlx::query_scalar(sqlx::AssertSqlSafe(sql.to_owned()))
+            .fetch_one(self.database.pool())
+            .await
+            .unwrap()
+    }
+}
+
+#[tokio::test]
+async fn purge_send_rows() {
+    let f = Fixture::new().await;
+    let now = TimestampMillis::now().as_millis();
+    let day = 86_400_000;
+
+    // Cancelled messages: one over a day old goes, a fresh one stays; so do held and released ones.
+    let old_cancelled = f.outbound_with("cancelled", now - 2 * day).await;
+    f.recipient_with(old_cancelled, "cancelled", now - 2 * day)
+        .await;
+    let new_cancelled = f.outbound_with("cancelled", now - 3_600_000).await;
+    let held = f.outbound_with("held", now - 10 * day).await;
+    let released = f.outbound_with("released", now - 10 * day).await;
+    f.recipient_with(released, "deferred", now - 100 * day)
+        .await;
+
+    // File links: expired and long-revoked go (with their blobs); live and just-revoked stay.
+    let sent = f.outbound_with("done", now - 10 * day).await;
+    f.recipient_with(sent, "delivered", now - 10 * day).await;
+    f.link_with(sent, b"expired", now - 1_000, None).await;
+    f.link_with(sent, b"revoked long ago", now + day, Some(now - 2 * day))
+        .await;
+    let live = f.link_with(sent, b"live", now + day, None).await;
+    let revoked_now = f
+        .link_with(sent, b"revoked now", now + day, Some(now - 1_000))
+        .await;
+
+    // Vacation replies.
+    f.sql(&format!(
+        "INSERT INTO mail_vacation_replies (mailbox_id, sender, replied_at) VALUES \
+         ('{0}', 'old@out.test', {1}), ('{0}', 'new@out.test', {2})",
+        f.ann_personal,
+        now - 8 * day,
+        now - 6 * day
+    ))
+    .await;
+
+    // Recipients over 90 days: summarized and removed; a recent one and an open one stay.
+    let ancient = f.outbound_with("done", now - 120 * day).await;
+    f.recipient_with(ancient, "delivered", now - 100 * day)
+        .await;
+    f.sql(&format!(
+        "INSERT INTO mail_outbound_recipients (id, outbound_id, workspace_id, membership_id, address, \
+         kind, status, last_response, bounce_kind, released_at, created_at, updated_at) VALUES ('{}', \
+         '{ancient}', '{}', '{}', 'bad@out.test', 'cc', 'bounced', '550 no such user', 'hard', {3}, {3}, {3})",
+        Id::new_v7(),
+        f.workspace,
+        f.ann.membership,
+        now - 100 * day
+    ))
+    .await;
+
+    f.mail.purge(at(now)).await.unwrap();
+
+    assert_eq!(
+        f.total(&format!(
+            "SELECT COUNT(*) FROM mail_outbound WHERE id = '{old_cancelled}'"
+        ))
+        .await,
+        0
+    );
+    assert_eq!(
+        f.total(&format!(
+            "SELECT COUNT(*) FROM mail_outbound_recipients WHERE outbound_id = '{old_cancelled}'"
+        ))
+        .await,
+        0
+    );
+    for kept in [new_cancelled, held, released, sent] {
+        assert_eq!(
+            f.total(&format!(
+                "SELECT COUNT(*) FROM mail_outbound WHERE id = '{kept}'"
+            ))
+            .await,
+            1,
+            "{kept}"
+        );
+    }
+    assert_eq!(
+        f.total(&format!(
+            "SELECT COUNT(*) FROM mail_outbound_recipients WHERE outbound_id = '{released}'"
+        ))
+        .await,
+        1
+    );
+    let links: Vec<String> = sqlx::query_scalar("SELECT id FROM mail_file_links ORDER BY id")
+        .fetch_all(f.database.pool())
+        .await
+        .unwrap();
+    let mut expected = vec![live, revoked_now];
+    expected.sort();
+    assert_eq!(links, expected);
+    // the blobs of the removed links go on the next reconcile
+    let far = now + 40 * day;
+    f.uploads.reconcile(far).await.unwrap();
+    assert_eq!(
+        f.total("SELECT COUNT(*) FROM attachment_blobs WHERE deleted_at IS NULL")
+            .await,
+        2
+    );
+    assert_eq!(
+        f.total("SELECT COUNT(*) FROM mail_vacation_replies").await,
+        1
+    );
+    assert_eq!(
+        f.total("SELECT COUNT(*) FROM mail_vacation_replies WHERE sender = 'new@out.test'")
+            .await,
+        1
+    );
+
+    // 90 days: the rows are gone, the summary keeps each recipient's final status.
+    assert_eq!(
+        f.total(&format!(
+            "SELECT COUNT(*) FROM mail_outbound_recipients WHERE outbound_id = '{ancient}'"
+        ))
+        .await,
+        0
+    );
+    assert_eq!(
+        f.total(&format!(
+            "SELECT COUNT(*) FROM mail_outbound_recipients WHERE outbound_id = '{sent}'"
+        ))
+        .await,
+        1
+    );
+    let summary: String =
+        sqlx::query_scalar("SELECT delivery_summary FROM mail_outbound WHERE id = $1")
+            .bind(ancient.to_string())
+            .fetch_one(f.database.pool())
+            .await
+            .unwrap();
+    let summary: Value = serde_json::from_str(&summary).unwrap();
+    let rows = summary.as_array().unwrap();
+    assert_eq!(rows.len(), 2);
+    let bad = rows
+        .iter()
+        .find(|row| row["address"] == "bad@out.test")
+        .unwrap();
+    assert_eq!(bad["status"], "bounced");
+    assert_eq!(bad["bounce_kind"], "hard");
+    assert_eq!(bad["kind"], "cc");
+    // the status view reads the summary once the rows are gone
+    let statuses = f.mail.outbound_recipients(ancient, at(now)).await.unwrap();
+    assert_eq!(statuses.len(), 2);
+    assert!(
+        statuses
+            .iter()
+            .any(|status| status.address == "bad@out.test"
+                && status.status == "bounced"
+                && status.last_response.as_deref() == Some("550 no such user"))
+    );
 }

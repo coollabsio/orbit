@@ -739,13 +739,16 @@ async fn next_due(
     Ok(next.map(TimestampMillis::from_millis))
 }
 
+/// Kept of a recipient's last response in `delivery_summary`.
+const SUMMARY_RESPONSE_BYTES: usize = 500;
+
 /// The `delivery_summary` of the message: `[{address, kind, status, response, bounce_kind}]`.
-async fn delivery_summary(
+pub(super) async fn delivery_summary(
     transaction: &mut Transaction<'_, Any>,
     outbound_id: Id,
 ) -> Result<String, MailError> {
     let rows = sqlx::query(
-        "SELECT address, kind, status, last_response, bounce_kind FROM mail_outbound_recipients \
+        "SELECT id, address, kind, status, last_response, bounce_kind FROM mail_outbound_recipients \
          WHERE outbound_id = $1 ORDER BY created_at, id",
     )
     .bind(outbound_id.to_string())
@@ -753,11 +756,16 @@ async fn delivery_summary(
     .await?;
     let mut summary = Vec::with_capacity(rows.len());
     for row in &rows {
+        let mut response = row.try_get::<Option<String>, _>("last_response")?;
+        if let Some(response) = &mut response {
+            super::threads::truncate(response, SUMMARY_RESPONSE_BYTES);
+        }
         summary.push(json!({
+            "id": row.try_get::<String, _>("id")?,
             "address": row.try_get::<String, _>("address")?,
             "kind": row.try_get::<String, _>("kind")?,
             "status": row.try_get::<String, _>("status")?,
-            "response": row.try_get::<Option<String>, _>("last_response")?,
+            "response": response,
             "bounce_kind": row.try_get::<Option<String>, _>("bounce_kind")?,
         }));
     }
@@ -1237,7 +1245,8 @@ impl MailRepository {
             bounced_thread_to_inbox(&mut transaction, outbound_id, now).await?;
         }
         if let Some(workspace_id) = hard_bounced {
-            self.check_pause(&mut transaction, workspace_id, now).await?;
+            self.check_pause(&mut transaction, workspace_id, now)
+                .await?;
         }
         let done = finish_if_done(&mut transaction, outbound_id, now).await?;
         let next_at = next_due(&mut transaction, outbound_id, now).await?;
@@ -1347,6 +1356,10 @@ impl MailRepository {
         .bind(outbound_id.to_string())
         .fetch_all(self.database.pool())
         .await?;
+        if rows.is_empty() {
+            // purged after 90 days: the summary written then is all that is left
+            return self.summarized_recipients(outbound_id).await;
+        }
         rows.iter()
             .map(|row| {
                 let status: String = row.try_get("status")?;
@@ -1371,6 +1384,48 @@ impl MailRepository {
                 })
             })
             .collect()
+    }
+
+    /// The recipients of a message whose recipient rows were purged, from `delivery_summary`.
+    async fn summarized_recipients(
+        &self,
+        outbound_id: Id,
+    ) -> Result<Vec<RecipientStatus>, MailError> {
+        let summary: Option<String> =
+            sqlx::query_scalar("SELECT delivery_summary FROM mail_outbound WHERE id = $1")
+                .bind(outbound_id.to_string())
+                .fetch_optional(self.database.pool())
+                .await?
+                .flatten();
+        let Some(summary) = summary else {
+            return Ok(Vec::new());
+        };
+        let entries: Vec<serde_json::Value> = serde_json::from_str(&summary).unwrap_or_default();
+        let text = |entry: &serde_json::Value, key: &str| {
+            entry
+                .get(key)
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+        };
+        Ok(entries
+            .iter()
+            .map(|entry| RecipientStatus {
+                id: text(entry, "id")
+                    .and_then(|id| id.parse().ok())
+                    .unwrap_or_else(Id::new_v7),
+                address: text(entry, "address").unwrap_or_default(),
+                kind: text(entry, "kind").unwrap_or_else(|| "to".to_owned()),
+                status: text(entry, "status").unwrap_or_else(|| "delivered".to_owned()),
+                attempts: 0,
+                next_attempt_at: None,
+                last_response: text(entry, "response"),
+                provider_message_id: None,
+                delayed: false,
+                bounce_kind: text(entry, "bounce_kind")
+                    .as_deref()
+                    .and_then(BounceKind::parse),
+            })
+            .collect())
     }
 
     /// The thread of the message's sent copy and its mailbox's readers; `None` when it is gone.
