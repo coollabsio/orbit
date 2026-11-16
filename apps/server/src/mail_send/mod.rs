@@ -25,8 +25,8 @@ use crate::repositories::mail::{
 };
 
 pub use crate::repositories::mail::{
-    BounceKind, DELAYED_AFTER_MS, GAVE_UP, LOCAL_DOMAIN_UNAVAILABLE, LOCAL_MAILBOX_SUSPENDED,
-    LOCAL_TOO_LARGE, RETRY_STEPS_MS, ROUTE_ERROR, ROUTE_TOO_LARGE, SEND_TIMEOUT_MS,
+    AttemptResult, BounceKind, DELAYED_AFTER_MS, DeferCause, GAVE_UP, LOCAL_DOMAIN_UNAVAILABLE,
+    LOCAL_MAILBOX_SUSPENDED, LOCAL_TOO_LARGE, RETRY_STEPS_MS, ROUTE_TOO_LARGE, SEND_TIMEOUT_MS,
     SENDING_LEASE_MS, UNREADABLE,
 };
 pub use deliver::{NextRun, deliver_due};
@@ -50,7 +50,9 @@ pub struct Outgoing<'a> {
     pub correlation: &'a str,
 }
 
-/// What became of one recipient.
+/// What became of one recipient. The kind of a failure is data set by the code that decides it,
+/// never read from a response's text: a remote server's text cannot make itself a route error or
+/// one of Orbit's own refusals.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RecipientOutcome {
     Accepted {
@@ -59,23 +61,50 @@ pub enum RecipientOutcome {
     /// A temporary failure: try again later.
     Deferred {
         response: String,
+        /// The route is at fault (its credentials, settings, host or account), not the
+        /// recipient: a give-up after it is `bounce_kind = 'route'`.
+        route_error: bool,
     },
     /// A permanent failure.
     Bounced {
         response: String,
+        /// Orbit refused the message itself (too large for the route, a capability the next hop
+        /// lacks, a local domain or mailbox that is unavailable): `bounce_kind = 'rejected'`,
+        /// not a bad address. `false`: a refusal of the address (`hard`).
+        rejected: bool,
     },
 }
 
 impl RecipientOutcome {
-    fn deferred(response: impl Into<String>) -> Self {
+    /// A temporary failure of the next hop (a 4xx, a network error, a timeout).
+    pub fn deferred(response: impl Into<String>) -> Self {
         Self::Deferred {
             response: clip(response.into()),
+            route_error: false,
         }
     }
 
-    fn bounced(response: impl Into<String>) -> Self {
+    /// A temporary failure that is the route's fault.
+    pub fn route_error(response: impl Into<String>) -> Self {
+        Self::Deferred {
+            response: clip(response.into()),
+            route_error: true,
+        }
+    }
+
+    /// A permanent refusal of the address.
+    pub fn bounced(response: impl Into<String>) -> Self {
         Self::Bounced {
             response: clip(response.into()),
+            rejected: false,
+        }
+    }
+
+    /// A permanent refusal of the message by Orbit itself.
+    pub fn rejected(response: impl Into<String>) -> Self {
+        Self::Bounced {
+            response: clip(response.into()),
+            rejected: true,
         }
     }
 }
@@ -252,7 +281,7 @@ impl Delivery for Checked {
             if outgoing.raw.len() > self.max_bytes {
                 return all(
                     outgoing.recipients,
-                    &RecipientOutcome::bounced(format!(
+                    &RecipientOutcome::rejected(format!(
                         "{ROUTE_TOO_LARGE} ({} bytes)",
                         self.max_bytes
                     )),
@@ -313,7 +342,12 @@ impl Delivery for Refuse {
         &'a self,
         outgoing: &'a Outgoing<'a>,
     ) -> BoxFuture<'a, Vec<(String, RecipientOutcome)>> {
-        Box::pin(async move { all(outgoing.recipients, &RecipientOutcome::deferred(&*self.0)) })
+        Box::pin(async move {
+            all(
+                outgoing.recipients,
+                &RecipientOutcome::route_error(&*self.0),
+            )
+        })
     }
 }
 

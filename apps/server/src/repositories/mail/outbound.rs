@@ -518,10 +518,8 @@ pub const SEND_TIMEOUT_MS: i64 = 20 * 60_000;
 pub const SENDING_LEASE_MS: i64 = 30 * 60_000;
 /// The response of a recipient that was still deferred after the last retry step.
 pub const GAVE_UP: &str = "Gave up after 5 days";
-/// How the response of a recipient starts when the sent message could not be read.
+/// The response of a recipient when the sent message could not be read (then `: <error>`).
 pub const UNREADABLE: &str = "The message could not be read";
-/// The start of a response that blames the route, not the recipient (Task 8 adapters).
-pub const ROUTE_ERROR: &str = "Route error:";
 /// Orbit's own refusal of a message larger than the route allows (the adapter pre-check).
 pub const ROUTE_TOO_LARGE: &str = "5.3.4 The message is larger than the route allows";
 /// This instance's intake refused a local message as too large.
@@ -531,17 +529,58 @@ pub const LOCAL_DOMAIN_UNAVAILABLE: &str = "550 5.7.1 The domain does not accept
 /// The local receiving mailbox is suspended.
 pub const LOCAL_MAILBOX_SUSPENDED: &str = "550 5.2.1 The mailbox is not active";
 
-/// Whether a bounce response is one of Orbit's own refusals of the message
-/// ([`BounceKind::Rejected`]), not of the address.
-fn is_rejection(response: &str) -> bool {
-    [
-        ROUTE_TOO_LARGE,
-        LOCAL_TOO_LARGE,
-        LOCAL_DOMAIN_UNAVAILABLE,
-        LOCAL_MAILBOX_SUSPENDED,
-    ]
-    .iter()
-    .any(|prefix| response.starts_with(prefix))
+/// Why a recipient was deferred; at the give-up it picks the [`BounceKind`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DeferCause {
+    /// A 4xx, a network error or a timeout of the next hop: [`BounceKind::GaveUp`].
+    Temporary,
+    /// The route is at fault (an adapter's route error): [`BounceKind::Route`].
+    Route,
+    /// The sent message could not be read: [`BounceKind::Unreadable`].
+    Unreadable,
+}
+
+/// The result of one attempt for one recipient, as recorded. The kinds are data set by the code
+/// that decided them (the adapter's flags, intake, delivery), never read from a response's
+/// text, so a remote server cannot pass as Orbit or as the route.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AttemptResult {
+    Delivered { provider_message_id: Option<String> },
+    Bounced { response: String, kind: BounceKind },
+    Deferred { response: String, cause: DeferCause },
+}
+
+impl From<crate::mail_send::RecipientOutcome> for AttemptResult {
+    /// An adapter's or intake's outcome: its flags pick the kind.
+    fn from(outcome: crate::mail_send::RecipientOutcome) -> Self {
+        use crate::mail_send::RecipientOutcome;
+        match outcome {
+            RecipientOutcome::Accepted {
+                provider_message_id,
+            } => Self::Delivered {
+                provider_message_id,
+            },
+            RecipientOutcome::Bounced { response, rejected } => Self::Bounced {
+                response,
+                kind: if rejected {
+                    BounceKind::Rejected
+                } else {
+                    BounceKind::Hard
+                },
+            },
+            RecipientOutcome::Deferred {
+                response,
+                route_error,
+            } => Self::Deferred {
+                response,
+                cause: if route_error {
+                    DeferCause::Route
+                } else {
+                    DeferCause::Temporary
+                },
+            },
+        }
+    }
 }
 
 /// Why a bounced recipient bounced (`mail_outbound_recipients.bounce_kind`). Only [`Self::Hard`]
@@ -1018,24 +1057,21 @@ impl MailRepository {
 
     /// The results of attempt `attempt_id`, in one writer transaction. Only recipients still
     /// `sending` with that attempt change (one that a lease end handed to another attempt is
-    /// left to it, and a late result of this attempt changes nothing). Accepted → `delivered`;
-    /// bounced → `bounced` ([`BounceKind::Hard`]; [`BounceKind::Unreadable`] for a response
-    /// starting with [`UNREADABLE`]; [`BounceKind::Rejected`] for Orbit's own refusals of the
-    /// message: [`ROUTE_TOO_LARGE`], [`LOCAL_TOO_LARGE`], [`LOCAL_DOMAIN_UNAVAILABLE`],
-    /// [`LOCAL_MAILBOX_SUSPENDED`]); deferred → `deferred` until the next step of
-    /// [`RETRY_STEPS_MS`], or `bounced` with [`GAVE_UP`] after the last one
-    /// ([`BounceKind::Route`] when the last response was a [`ROUTE_ERROR`],
-    /// [`BounceKind::Unreadable`], else [`BounceKind::GaveUp`]). A
+    /// left to it, and a late result of this attempt changes nothing). Delivered → `delivered`;
+    /// bounced → `bounced` with its [`BounceKind`]; deferred → `deferred` until the next step of
+    /// [`RETRY_STEPS_MS`], or `bounced` with [`GAVE_UP`] after the last one, its kind from the
+    /// last attempt's [`DeferCause`] (route → [`BounceKind::Route`], unreadable →
+    /// [`BounceKind::Unreadable`], else [`BounceKind::GaveUp`]). No kind is read from a
+    /// response's text. A
     /// bounce moves the thread back to the Inbox (from the archive), unread for its readers.
     /// The message is `done` with its summary once every recipient is final.
     pub async fn record_outcomes(
         &self,
         outbound_id: Id,
         attempt_id: Id,
-        outcomes: &[(Id, crate::mail_send::RecipientOutcome)],
+        outcomes: &[(Id, AttemptResult)],
         now: TimestampMillis,
     ) -> Result<Recorded, MailError> {
-        use crate::mail_send::RecipientOutcome;
         let mut transaction = self.database.immediate_transaction().await?;
         let mut bounced = false;
         for (recipient_id, outcome) in outcomes {
@@ -1052,26 +1088,17 @@ impl MailRepository {
                 continue;
             };
             let (status, response, next, provider_id, kind) = match outcome {
-                RecipientOutcome::Accepted {
+                AttemptResult::Delivered {
                     provider_message_id,
                 } => ("delivered", None, None, provider_message_id.clone(), None),
-                RecipientOutcome::Bounced { response } => {
-                    let kind = if response.starts_with(UNREADABLE) {
-                        BounceKind::Unreadable
-                    } else if is_rejection(response) {
-                        BounceKind::Rejected
-                    } else {
-                        BounceKind::Hard
-                    };
-                    (
-                        "bounced",
-                        Some(plain_line(response)),
-                        None,
-                        None,
-                        Some(kind),
-                    )
-                }
-                RecipientOutcome::Deferred { response } => {
+                AttemptResult::Bounced { response, kind } => (
+                    "bounced",
+                    Some(plain_line(response)),
+                    None,
+                    None,
+                    Some(*kind),
+                ),
+                AttemptResult::Deferred { response, cause } => {
                     let step = usize::try_from(attempts - 1).ok();
                     match step.and_then(|step| RETRY_STEPS_MS.get(step)) {
                         Some(wait) => (
@@ -1082,12 +1109,10 @@ impl MailRepository {
                             None,
                         ),
                         None => {
-                            let kind = if response.starts_with(ROUTE_ERROR) {
-                                BounceKind::Route
-                            } else if response.starts_with(UNREADABLE) {
-                                BounceKind::Unreadable
-                            } else {
-                                BounceKind::GaveUp
+                            let kind = match cause {
+                                DeferCause::Route => BounceKind::Route,
+                                DeferCause::Unreadable => BounceKind::Unreadable,
+                                DeferCause::Temporary => BounceKind::GaveUp,
                             };
                             (
                                 "bounced",

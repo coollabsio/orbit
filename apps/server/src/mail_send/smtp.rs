@@ -214,7 +214,7 @@ async fn send(
         if !info.supports_feature(Extension::SmtpUtfEight) {
             return all(
                 recipients,
-                &RecipientOutcome::bounced(
+                &RecipientOutcome::rejected(
                     "5.6.7 The server does not take international addresses (no SMTPUTF8)",
                 ),
             );
@@ -225,7 +225,7 @@ async fn send(
         if !info.supports_feature(Extension::EightBitMime) {
             return all(
                 recipients,
-                &RecipientOutcome::bounced("5.6.3 The server does not take 8-bit messages"),
+                &RecipientOutcome::rejected("5.6.3 The server does not take 8-bit messages"),
             );
         }
         parameters.push(MailParameter::Body(MailBodyParameter::EightBitMime));
@@ -238,7 +238,7 @@ async fn send(
             Err(_) => {
                 return all(
                     recipients,
-                    &RecipientOutcome::bounced("5.1.7 The sender address is not valid"),
+                    &RecipientOutcome::rejected("5.1.7 The sender address is not valid"),
                 );
             }
         }
@@ -455,7 +455,8 @@ impl Delivery for Relay {
             let addresses = match self.addresses().await {
                 Ok(addresses) => addresses,
                 Err(problem) => {
-                    return all(outgoing.recipients, &RecipientOutcome::deferred(problem));
+                    // The route's host: unresolvable, refused or without an address.
+                    return all(outgoing.recipients, &RecipientOutcome::route_error(problem));
                 }
             };
             let mut last = String::new();

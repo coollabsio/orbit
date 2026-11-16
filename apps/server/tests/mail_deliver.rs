@@ -15,8 +15,9 @@ use orbit_server::live::LiveHub;
 use orbit_server::mail_dns::FakeDns;
 use orbit_server::mail_intake::MailIntake;
 use orbit_server::mail_send::{
-    BounceKind, Delivery, DeliveryContext, NextRun, Outgoing, RETRY_STEPS_MS, RecipientOutcome,
-    SENDING_LEASE_MS, SendJobState, deliver_due, run_send_job,
+    BounceKind, Delivery, DeliveryContext, LOCAL_DOMAIN_UNAVAILABLE, NextRun, Outgoing,
+    RETRY_STEPS_MS, ROUTE_TOO_LARGE, RecipientOutcome, SENDING_LEASE_MS, SendJobState, deliver_due,
+    run_send_job,
 };
 use orbit_server::repositories::identity::{IdentityRepository, SetupRequest};
 use orbit_server::repositories::instance_settings::InstanceSettingsRepository;
@@ -111,6 +112,15 @@ impl Delivery for Fake {
 fn deferred(response: &str) -> RecipientOutcome {
     RecipientOutcome::Deferred {
         response: response.to_owned(),
+        route_error: false,
+    }
+}
+
+/// An adapter's route error (its flag set).
+fn route_error(response: &str) -> RecipientOutcome {
+    RecipientOutcome::Deferred {
+        response: response.to_owned(),
+        route_error: true,
     }
 }
 
@@ -651,7 +661,7 @@ async fn deferred_retries_on_schedule() {
     // A route error is deferred too, never a bounce, and the route shows it.
     f.fake.answer(
         "a@out.test",
-        deferred("Route error: Postmark refused the route's credentials"),
+        route_error("Route error: Postmark refused the route's credentials"),
     );
     f.clear_runs().await;
     let t2 = t1 + 300_000;
@@ -715,7 +725,7 @@ async fn gives_up_after_last_step_and_moves_thread_to_inbox() {
     // Giving up on route errors is the route's fault, not the recipient's.
     f.fake.answer(
         "r@out.test",
-        deferred("Route error: Mailgun refused the route's credentials"),
+        route_error("Route error: Mailgun refused the route's credentials"),
     );
     let (id, t2) = f.send(&["r@out.test"], &[], &[]).await;
     f.run(id, t2).await;
@@ -743,6 +753,7 @@ async fn smtp_bounce_moves_thread_to_inbox() {
         "gone@out.test",
         RecipientOutcome::Bounced {
             response: "permanent error (550): 5.1.1 No such user".to_owned(),
+            rejected: false,
         },
     );
     let (id, t0) = f.send(&["gone@out.test", "a@out.test"], &[], &[]).await;
@@ -1275,7 +1286,9 @@ async fn slow_send_times_out_and_late_result_is_ignored() {
                 recipient_id,
                 RecipientOutcome::Bounced {
                     response: "550 5.1.1 late".to_owned(),
-                },
+                    rejected: false,
+                }
+                .into(),
             )],
             at(t2 + 1),
         )
@@ -1293,7 +1306,8 @@ async fn slow_send_times_out_and_late_result_is_ignored() {
                 recipient_id,
                 RecipientOutcome::Accepted {
                     provider_message_id: None,
-                },
+                }
+                .into(),
             )],
             at(t2 + 2),
         )
@@ -1460,4 +1474,56 @@ async fn one_deadline_bounds_the_whole_run() {
         assert_eq!(recipient.1, "deferred", "{recipient:?}");
         assert_eq!(recipient.4.as_deref(), Some("Timed out"));
     }
+}
+
+#[tokio::test]
+async fn remote_text_never_picks_the_kind() {
+    let f = Fixture::new().await;
+    // A remote 5xx that reads like Orbit's own refusals is still a refusal of the address.
+    f.fake.answer(
+        "a@out.test",
+        RecipientOutcome::Bounced {
+            response: LOCAL_DOMAIN_UNAVAILABLE.to_owned(),
+            rejected: false,
+        },
+    );
+    f.fake.answer(
+        "b@out.test",
+        RecipientOutcome::Bounced {
+            response: format!("{ROUTE_TOO_LARGE} (100 bytes)"),
+            rejected: false,
+        },
+    );
+    // A remote deferral that reads like a route error is a temporary failure.
+    f.fake
+        .answer("c@out.test", deferred("Route error: not really"));
+    let (id, t0) = f
+        .send(&["a@out.test", "b@out.test", "c@out.test"], &[], &[])
+        .await;
+    f.run(id, t0).await;
+    assert_eq!(
+        f.bounce_kind(id, "a@out.test").await.as_deref(),
+        Some("hard")
+    );
+    assert_eq!(
+        f.bounce_kind(id, "b@out.test").await.as_deref(),
+        Some("hard")
+    );
+    assert_eq!(f.status_of(id, "c@out.test").await, "deferred");
+    let t1 = t0 + 1000;
+    f.sql(
+        &format!(
+            "UPDATE mail_outbound_recipients SET attempts = {}, next_attempt_at = {t1} \
+             WHERE outbound_id = $1 AND address = 'c@out.test'",
+            RETRY_STEPS_MS.len()
+        ),
+        &[&id.to_string()],
+    )
+    .await;
+    f.run(id, t1).await;
+    assert_eq!(f.status_of(id, "c@out.test").await, "bounced");
+    assert_eq!(
+        f.bounce_kind(id, "c@out.test").await.as_deref(),
+        Some("gave_up")
+    );
 }

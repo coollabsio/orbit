@@ -29,10 +29,13 @@
 //!   network).
 //! - **Results.** Accepted → `delivered`; 5xx → `bounced` with `bounce_kind = 'hard'`, or
 //!   `'rejected'` for Orbit's own refusals of the message (too large for the route or this
-//!   server, local domain or mailbox unavailable) (the thread goes back to the Inbox, unread); 4xx, a network error, a timeout or a route error
-//!   (`Route error: …`) → `deferred` until the next retry step, then `bounced` with "Gave up
-//!   after 5 days" (`gave_up`, or `route` after a route error). A sent message that cannot be
-//!   read bounces as `unreadable` (it is deferred while the store may recover). Only `hard`
+//!   server, local domain or mailbox unavailable); the thread goes back to the Inbox, unread.
+//!   4xx, a network error, a timeout or a route error → `deferred` until the next retry step,
+//!   then `bounced` with "Gave up after 5 days" (`gave_up`, or `route` when the last attempt was
+//!   a route error). A sent message that cannot be read bounces as `unreadable` (it is deferred
+//!   while the store may recover). The kinds are flags set by the code that decides them
+//!   (`RecipientOutcome`'s `rejected` and `route_error`, `AttemptResult`), never read from a
+//!   response's text, so a remote server cannot pass as Orbit or as the route. Only `hard`
 //!   counts as a bounce of the recipient. Each change sends `thread.updated` on the `mail` topic.
 
 use std::collections::HashMap;
@@ -51,7 +54,8 @@ use super::{
 };
 use crate::mail_intake::{InboundMessage, IntakeError, Recipient, Source};
 use crate::repositories::mail::{
-    Claim, MailError, OutboundDelivery, RecipientLookup, RecipientRow, SendRouteKind,
+    AttemptResult, BounceKind, Claim, DeferCause, MailError, OutboundDelivery, RecipientLookup,
+    RecipientRow, SendRouteKind,
 };
 
 /// The response of the recipients of a call that took longer than the send timeout.
@@ -123,8 +127,12 @@ pub async fn deliver_due(
     // recipients it claimed (a per-call timeout would add up over the calls).
     let deadline = Instant::now() + state.send_timeout;
 
-    let outcomes = match mail.read_sent_raw(outbound.receipt_id).await {
-        Ok(raw) => send(state, &outbound, &recipients, &raw, now, deadline).await?,
+    let outcomes: Vec<(Id, AttemptResult)> = match mail.read_sent_raw(outbound.receipt_id).await {
+        Ok(raw) => send(state, &outbound, &recipients, &raw, now, deadline)
+            .await?
+            .into_iter()
+            .map(|(id, outcome)| (id, outcome.into()))
+            .collect(),
         Err(MailError::Unavailable(error)) => {
             // The claimed recipients stay `sending` until the lease ends, then go again.
             return Err(JobError::Retryable(error.to_string()));
@@ -136,10 +144,17 @@ pub async fn deliver_due(
             recipients
                 .iter()
                 .map(|recipient| {
+                    let response = response.clone();
                     let outcome = if lasting {
-                        RecipientOutcome::bounced(&*response)
+                        AttemptResult::Bounced {
+                            response,
+                            kind: BounceKind::Unreadable,
+                        }
                     } else {
-                        RecipientOutcome::deferred(&*response)
+                        AttemptResult::Deferred {
+                            response,
+                            cause: DeferCause::Unreadable,
+                        }
                     };
                     (recipient.id, outcome)
                 })
@@ -244,12 +259,22 @@ async fn deliver_local<'r>(
                 not_local.push(*recipient);
                 continue;
             }
-            RecipientLookup::UnknownUser => "550 5.1.1 No such user here",
-            RecipientLookup::DomainUnavailable => LOCAL_DOMAIN_UNAVAILABLE,
-            RecipientLookup::MailboxSuspended => LOCAL_MAILBOX_SUSPENDED,
-            RecipientLookup::Invalid => "501 5.1.3 The address is not valid",
+            // A bad address.
+            RecipientLookup::UnknownUser => {
+                RecipientOutcome::bounced("550 5.1.1 No such user here")
+            }
+            RecipientLookup::Invalid => {
+                RecipientOutcome::bounced("501 5.1.3 The address is not valid")
+            }
+            // The receiving side's state, not the address.
+            RecipientLookup::DomainUnavailable => {
+                RecipientOutcome::rejected(LOCAL_DOMAIN_UNAVAILABLE)
+            }
+            RecipientLookup::MailboxSuspended => {
+                RecipientOutcome::rejected(LOCAL_MAILBOX_SUSPENDED)
+            }
         };
-        outcomes.push((recipient.id, RecipientOutcome::bounced(refused)));
+        outcomes.push((recipient.id, refused));
     }
     if intake_recipients.is_empty() {
         return Ok((outcomes, not_local));
@@ -285,7 +310,7 @@ async fn deliver_local<'r>(
         Ok(Ok(_)) => RecipientOutcome::Accepted {
             provider_message_id: None,
         },
-        Ok(Err(IntakeError::TooLarge)) => RecipientOutcome::bounced(LOCAL_TOO_LARGE),
+        Ok(Err(IntakeError::TooLarge)) => RecipientOutcome::rejected(LOCAL_TOO_LARGE),
         Ok(Err(IntakeError::QuotaExceeded)) => RecipientOutcome::deferred(
             "452 4.2.2 The recipient's workspace is over its storage quota",
         ),
@@ -309,7 +334,7 @@ async fn deliver_by_route(
     let all = |response: &str| -> Vec<(Id, RecipientOutcome)> {
         recipients
             .iter()
-            .map(|recipient| (recipient.id, RecipientOutcome::deferred(response)))
+            .map(|recipient| (recipient.id, RecipientOutcome::route_error(response)))
             .collect()
     };
     let Some(domain_id) = outbound.domain_id else {
@@ -418,7 +443,7 @@ async fn deliver_by_route(
             .iter()
             .position(|(address, _)| *address == recipient.address)
             .map_or_else(
-                || RecipientOutcome::deferred("Route error: the route gave no result."),
+                || RecipientOutcome::route_error("Route error: the route gave no result."),
                 |index| by_address.swap_remove(index).1,
             );
         outcomes.push((recipient.id, outcome));
@@ -428,7 +453,7 @@ async fn deliver_by_route(
         .iter()
         .any(|(_, outcome)| matches!(outcome, RecipientOutcome::Accepted { .. }));
     let failure = outcomes.iter().find_map(|(_, outcome)| match outcome {
-        RecipientOutcome::Deferred { response } => Some(response.as_str()),
+        RecipientOutcome::Deferred { response, .. } => Some(response.as_str()),
         _ => None,
     });
     let error = if accepted { None } else { failure };

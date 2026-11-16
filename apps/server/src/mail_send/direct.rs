@@ -159,7 +159,7 @@ impl Delivery for Direct {
             let Some(hostname) = self.hostname.as_deref() else {
                 return all(
                     outgoing.recipients,
-                    &RecipientOutcome::deferred(
+                    &RecipientOutcome::route_error(
                         "ORBIT_MAIL_HOSTNAME is not set: direct sending needs it",
                     ),
                 );

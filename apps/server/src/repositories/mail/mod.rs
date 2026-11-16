@@ -50,9 +50,9 @@ pub use mailboxes::{
     NewMailbox, Proposal, RecipientLookup, local_part_for, lookup_recipient,
 };
 pub use outbound::{
-    BounceKind, Claim, DELAYED_AFTER_MS, GAVE_UP, LOCAL_DOMAIN_UNAVAILABLE,
-    LOCAL_MAILBOX_SUSPENDED, LOCAL_TOO_LARGE, Outbound, OutboundDelivery, OutboundItem,
-    OutboundView, RETRY_STEPS_MS, ROUTE_ERROR, ROUTE_TOO_LARGE, RecipientRow, RecipientStatus,
+    AttemptResult, BounceKind, Claim, DELAYED_AFTER_MS, DeferCause, GAVE_UP,
+    LOCAL_DOMAIN_UNAVAILABLE, LOCAL_MAILBOX_SUSPENDED, LOCAL_TOO_LARGE, Outbound, OutboundDelivery,
+    OutboundItem, OutboundView, RETRY_STEPS_MS, ROUTE_TOO_LARGE, RecipientRow, RecipientStatus,
     Recorded, SEND_JOB, SEND_TIMEOUT_MS, SENDING_LEASE_MS, ThreadAudience, UNREADABLE,
     mail_send_kind,
 };

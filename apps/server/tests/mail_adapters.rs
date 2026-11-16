@@ -101,11 +101,11 @@ fn accepted(outcome: &RecipientOutcome) -> bool {
 }
 
 fn deferred_with(outcome: &RecipientOutcome, text: &str) -> bool {
-    matches!(outcome, RecipientOutcome::Deferred { response } if response.contains(text))
+    matches!(outcome, RecipientOutcome::Deferred { response, .. } if response.contains(text))
 }
 
 fn bounced_with(outcome: &RecipientOutcome, text: &str) -> bool {
-    matches!(outcome, RecipientOutcome::Bounced { response } if response.contains(text))
+    matches!(outcome, RecipientOutcome::Bounced { response, .. } if response.contains(text))
 }
 
 // ---------------------------------------------------------------- SMTP server
@@ -245,6 +245,14 @@ async fn smtp_one_rcpt_550_others_delivered() {
         bounced_with(&outcomes["nobody@x.test"], "550"),
         "{outcomes:?}"
     );
+    // The server refused the address: a hard bounce, whatever its text says.
+    assert!(matches!(
+        outcomes["nobody@x.test"],
+        RecipientOutcome::Bounced {
+            rejected: false,
+            ..
+        }
+    ));
     let messages = handler.messages.lock().unwrap();
     assert_eq!(messages.len(), 1);
     let rcpts: Vec<&str> = messages[0]
@@ -501,6 +509,11 @@ async fn message_over_route_limit_bounces() {
         bounced_with(&outcomes["bob@x.test"], "5.3.4"),
         "{outcomes:?}"
     );
+    // Orbit's own refusal of the message, not of the address.
+    assert!(matches!(
+        outcomes["bob@x.test"],
+        RecipientOutcome::Bounced { rejected: true, .. }
+    ));
 }
 
 // ---------------------------------------------------------------- direct
@@ -767,6 +780,14 @@ async fn http_429_is_deferred() {
     )
     .await;
     assert!(outcomes.values().all(|o| deferred_with(o, "502")));
+    // A provider's server error is temporary, not the route's fault.
+    assert!(outcomes.values().all(|o| matches!(
+        o,
+        RecipientOutcome::Deferred {
+            route_error: false,
+            ..
+        }
+    )));
 
     // 4xx: bounced, with the body as the response.
     let (base, _) = start_api(StatusCode::BAD_REQUEST, |_| {
@@ -1049,6 +1070,13 @@ async fn mailgun_route_errors_are_deferred() {
                 deferred_with(&outcomes[address], "Route error"),
                 "{status}: {outcomes:?}"
             );
+            assert!(matches!(
+                outcomes[address],
+                RecipientOutcome::Deferred {
+                    route_error: true,
+                    ..
+                }
+            ));
         }
     }
 }

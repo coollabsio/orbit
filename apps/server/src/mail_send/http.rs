@@ -183,7 +183,7 @@ impl Api {
         let Ok(domain) = orbit_mail::normalize_domain(outgoing.from_domain) else {
             return all(
                 outgoing.recipients,
-                &RecipientOutcome::deferred(format!(
+                &RecipientOutcome::route_error(format!(
                     "Route error: the From domain {:?} is not a domain Mailgun can send for",
                     outgoing.from_domain
                 )),
@@ -225,7 +225,7 @@ impl Api {
             Err(error) => {
                 return all(
                     outgoing.recipients,
-                    &RecipientOutcome::deferred(format!("The SES URL is not valid: {error}")),
+                    &RecipientOutcome::route_error(format!("The SES URL is not valid: {error}")),
                 );
             }
         };
@@ -235,7 +235,7 @@ impl Api {
         }) else {
             return all(
                 outgoing.recipients,
-                &RecipientOutcome::deferred("The SES URL has no host"),
+                &RecipientOutcome::route_error("The SES URL has no host"),
             );
         };
         let data = BASE64.encode(outgoing.raw);
@@ -293,7 +293,7 @@ impl Api {
         let Ok(mime_message) = std::str::from_utf8(outgoing.raw) else {
             return all(
                 outgoing.recipients,
-                &RecipientOutcome::bounced("5.6.0 Cloudflare takes only UTF-8 messages"),
+                &RecipientOutcome::rejected("5.6.0 Cloudflare takes only UTF-8 messages"),
             );
         };
         let url = format!("{}/accounts/{account_id}/email/sending/send_raw", self.base);
@@ -441,7 +441,7 @@ fn failure(provider: Provider, status: StatusCode, body: &str) -> RecipientOutco
     let body = body.trim();
     let name = provider.name();
     let route_error = |what: &str| {
-        RecipientOutcome::deferred(format!("Route error: {name} {what} (HTTP {code}): {body}"))
+        RecipientOutcome::route_error(format!("Route error: {name} {what} (HTTP {code}): {body}"))
     };
     let lower = body.to_ascii_lowercase();
     match status {
