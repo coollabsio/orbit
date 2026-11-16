@@ -6,10 +6,12 @@
 
 use std::collections::BTreeSet;
 
-use orbit_platform::{Id, Job, JobKind, JobStore, Row, TimestampMillis};
+use orbit_platform::{Id, Job, JobKind, JobStore, Row, SqlBuilder, TimestampMillis};
+use serde::Serialize;
 use serde_json::json;
 use sqlx::any::AnyRow;
 use sqlx::{Any, Transaction};
+use utoipa::ToSchema;
 
 use super::domains::parse_id;
 use super::drafts::{Draft, load_draft};
@@ -55,6 +57,7 @@ pub struct Outbound {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OutboundItem {
     pub outbound: Outbound,
+    pub mailbox_id: Id,
     pub draft_id: Option<Id>,
     pub subject: String,
     pub to: Vec<String>,
@@ -463,6 +466,7 @@ impl MailRepository {
         &self,
         membership_id: Id,
         view: OutboundView,
+        mailbox_id: Option<Id>,
     ) -> Result<Vec<OutboundItem>, MailError> {
         let condition = match view {
             OutboundView::Scheduled => "o.status = 'held' AND o.scheduled = 1",
@@ -471,17 +475,22 @@ impl MailRepository {
             }
         };
         // A held message reads its draft; a released one (its draft is deleted) the sent message.
-        let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
-            "SELECT o.id, o.status, o.release_at, o.scheduled, o.hold_reason, o.draft_id, \
-             d.subject, d.to_addrs, m.subject AS sent_subject, m.to_addrs AS sent_to \
+        let mut sql = SqlBuilder::new(format!(
+            "SELECT o.id, o.mailbox_id, o.status, o.release_at, o.scheduled, o.hold_reason, \
+             o.draft_id, d.subject, d.to_addrs, m.subject AS sent_subject, m.to_addrs AS sent_to \
              FROM mail_outbound o \
              LEFT JOIN mail_drafts d ON d.id = o.draft_id \
              LEFT JOIN mail_messages m ON m.id = o.message_id \
-             WHERE o.membership_id = $1 AND {condition} ORDER BY o.release_at, o.id"
-        )))
-        .bind(membership_id.to_string())
-        .fetch_all(self.database.pool())
-        .await?;
+             WHERE EXISTS (SELECT 1 FROM mailbox_members mm WHERE mm.mailbox_id = o.mailbox_id \
+             AND mm.membership_id = o.membership_id) AND {condition} AND o.membership_id = "
+        ));
+        sql.push_bind(membership_id.to_string());
+        if let Some(mailbox_id) = mailbox_id {
+            sql.push(" AND o.mailbox_id = ")
+                .push_bind(mailbox_id.to_string());
+        }
+        sql.push(" ORDER BY o.release_at, o.id");
+        let rows = sql.build().fetch_all(self.database.pool()).await?;
         rows.iter()
             .map(|row| {
                 let draft_id: Option<String> = row.try_get("draft_id")?;
@@ -506,6 +515,7 @@ impl MailRepository {
                 };
                 Ok(OutboundItem {
                     outbound: outbound(row)?,
+                    mailbox_id: parse_id(&row.try_get::<String, _>("mailbox_id")?)?,
                     draft_id: draft_id.map(|id| parse_id(&id)).transpose()?,
                     subject,
                     to,
@@ -1401,31 +1411,7 @@ impl MailRepository {
             // purged after 90 days: the summary written then is all that is left
             return self.summarized_recipients(outbound_id).await;
         }
-        rows.iter()
-            .map(|row| {
-                let status: String = row.try_get("status")?;
-                let released: Option<i64> = row.try_get("released_at")?;
-                Ok(RecipientStatus {
-                    id: parse_id(&row.try_get::<String, _>("id")?)?,
-                    address: row.try_get("address")?,
-                    kind: row.try_get("kind")?,
-                    delayed: status == "deferred"
-                        && released.is_some_and(|at| now.as_millis() - at > DELAYED_AFTER_MS),
-                    retryable: matches!(status.as_str(), "bounced" | "suppressed"),
-                    status,
-                    attempts: row.try_get("attempts")?,
-                    next_attempt_at: row
-                        .try_get::<Option<i64>, _>("next_attempt_at")?
-                        .map(TimestampMillis::from_millis),
-                    last_response: row.try_get("last_response")?,
-                    provider_message_id: row.try_get("provider_message_id")?,
-                    bounce_kind: row
-                        .try_get::<Option<String>, _>("bounce_kind")?
-                        .as_deref()
-                        .and_then(BounceKind::parse),
-                })
-            })
-            .collect()
+        rows.iter().map(|row| recipient_status(row, now)).collect()
     }
 
     /// The recipients of a message whose recipient rows were purged, from `delivery_summary`.
@@ -1439,39 +1425,7 @@ impl MailRepository {
                 .fetch_optional(self.database.pool())
                 .await?
                 .flatten();
-        let Some(summary) = summary else {
-            return Ok(Vec::new());
-        };
-        let entries: Vec<serde_json::Value> = serde_json::from_str(&summary).unwrap_or_default();
-        let text = |entry: &serde_json::Value, key: &str| {
-            entry
-                .get(key)
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_owned)
-        };
-        Ok(entries
-            .iter()
-            .enumerate()
-            .map(|(index, entry)| RecipientStatus {
-                // A summary written before it held IDs has none: a stable ID from the message's
-                // ID and the position, so two reads answer the same. It is never retryable.
-                id: text(entry, "id")
-                    .and_then(|id| id.parse().ok())
-                    .unwrap_or_else(|| legacy_recipient_id(outbound_id, index)),
-                address: text(entry, "address").unwrap_or_default(),
-                kind: text(entry, "kind").unwrap_or_else(|| "to".to_owned()),
-                status: text(entry, "status").unwrap_or_else(|| "delivered".to_owned()),
-                attempts: 0,
-                next_attempt_at: None,
-                last_response: text(entry, "response"),
-                provider_message_id: None,
-                delayed: false,
-                bounce_kind: text(entry, "bounce_kind")
-                    .as_deref()
-                    .and_then(BounceKind::parse),
-                retryable: false,
-            })
-            .collect())
+        Ok(summary_recipients(outbound_id, summary.as_deref()))
     }
 
     /// The thread of the message's sent copy and its mailbox's readers; `None` when it is gone.
@@ -1524,4 +1478,191 @@ impl MailRepository {
             .and_then(|domain| domain.report)
             .is_some_and(|report| report.mx == super::RecordStatus::Ok))
     }
+}
+
+fn recipient_status(row: &AnyRow, now: TimestampMillis) -> Result<RecipientStatus, MailError> {
+    let status: String = row.try_get("status")?;
+    let released: Option<i64> = row.try_get("released_at")?;
+    Ok(RecipientStatus {
+        id: parse_id(&row.try_get::<String, _>("id")?)?,
+        address: row.try_get("address")?,
+        kind: row.try_get("kind")?,
+        delayed: status == "deferred"
+            && released.is_some_and(|at| now.as_millis() - at > DELAYED_AFTER_MS),
+        retryable: matches!(status.as_str(), "bounced" | "suppressed"),
+        status,
+        attempts: row.try_get("attempts")?,
+        next_attempt_at: row
+            .try_get::<Option<i64>, _>("next_attempt_at")?
+            .map(TimestampMillis::from_millis),
+        last_response: row.try_get("last_response")?,
+        provider_message_id: row.try_get("provider_message_id")?,
+        bounce_kind: row
+            .try_get::<Option<String>, _>("bounce_kind")?
+            .as_deref()
+            .and_then(BounceKind::parse),
+    })
+}
+
+/// The recipients written into `delivery_summary` when the recipient rows were purged.
+fn summary_recipients(outbound_id: Id, summary: Option<&str>) -> Vec<RecipientStatus> {
+    let Some(summary) = summary else {
+        return Vec::new();
+    };
+    let entries: Vec<serde_json::Value> = serde_json::from_str(summary).unwrap_or_default();
+    let text = |entry: &serde_json::Value, key: &str| {
+        entry
+            .get(key)
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned)
+    };
+    entries
+        .iter()
+        .enumerate()
+        .map(|(index, entry)| RecipientStatus {
+            // A summary written before it held IDs has none: a stable ID from the message's
+            // ID and the position, so two reads answer the same. It is never retryable.
+            id: text(entry, "id")
+                .and_then(|id| id.parse().ok())
+                .unwrap_or_else(|| legacy_recipient_id(outbound_id, index)),
+            address: text(entry, "address").unwrap_or_default(),
+            kind: text(entry, "kind").unwrap_or_else(|| "to".to_owned()),
+            status: text(entry, "status").unwrap_or_else(|| "delivered".to_owned()),
+            attempts: 0,
+            next_attempt_at: None,
+            last_response: text(entry, "response"),
+            provider_message_id: None,
+            delayed: false,
+            bounce_kind: text(entry, "bounce_kind")
+                .as_deref()
+                .and_then(BounceKind::parse),
+            retryable: false,
+        })
+        .collect()
+}
+
+/// The delivery status of each recipient of one sent message.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct MailOutboundRecipient {
+    #[schema(value_type = String)]
+    pub id: Id,
+    pub address: String,
+    /// `to`, `cc` or `bcc`.
+    pub kind: String,
+    /// `queued`, `sending`, `delivered`, `deferred`, `bounced`, `suppressed` or `cancelled`.
+    pub status: String,
+    pub attempts: i64,
+    #[schema(value_type = Option<String>, format = DateTime)]
+    pub next_attempt_at: Option<TimestampMillis>,
+    pub last_response: Option<String>,
+    /// Deferred for more than 4 hours.
+    pub delayed: bool,
+    /// Why a bounced recipient bounced: `hard`, `rejected`, `gave_up`, `route` or `unreadable`.
+    pub bounce_kind: Option<String>,
+    /// **Retry** is possible. False once the recipient row is purged (after 90 days).
+    pub retryable: bool,
+}
+
+impl From<RecipientStatus> for MailOutboundRecipient {
+    fn from(status: RecipientStatus) -> Self {
+        Self {
+            id: status.id,
+            address: status.address,
+            kind: status.kind,
+            status: status.status,
+            attempts: status.attempts,
+            next_attempt_at: status.next_attempt_at,
+            last_response: status.last_response,
+            delayed: status.delayed,
+            retryable: status.retryable,
+            bounce_kind: status.bounce_kind.map(|kind| kind.as_str().to_owned()),
+        }
+    }
+}
+
+/// How an outgoing message of a thread went, per recipient.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct MailDelivery {
+    #[schema(value_type = String)]
+    pub outbound_id: Id,
+    pub recipients: Vec<MailOutboundRecipient>,
+}
+
+/// The delivery of every outgoing message of a thread, by message ID: two queries for the whole
+/// thread (the recipient rows, and the summaries of the messages whose rows were purged).
+pub(super) async fn thread_deliveries(
+    transaction: &mut Transaction<'_, Any>,
+    thread_id: Id,
+    now: TimestampMillis,
+) -> Result<std::collections::HashMap<String, MailDelivery>, MailError> {
+    let mut deliveries = std::collections::HashMap::new();
+    let mut by_outbound: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+    let mut summaries = Vec::new();
+    for row in sqlx::query(
+        "SELECT DISTINCT o.id, o.message_id, o.delivery_summary FROM mail_outbound o \
+         JOIN mail_thread_messages tm ON tm.message_id = o.message_id \
+         WHERE tm.thread_id = $1 AND tm.outgoing = 1",
+    )
+    .bind(thread_id.to_string())
+    .fetch_all(&mut **transaction)
+    .await?
+    {
+        let outbound: String = row.try_get("id")?;
+        let message: String = row.try_get("message_id")?;
+        by_outbound.insert(outbound.clone(), message.clone());
+        deliveries.insert(
+            message,
+            MailDelivery {
+                outbound_id: parse_id(&outbound)?,
+                recipients: Vec::new(),
+            },
+        );
+        summaries.push((
+            outbound,
+            row.try_get::<Option<String>, _>("delivery_summary")?,
+        ));
+    }
+    if deliveries.is_empty() {
+        return Ok(deliveries);
+    }
+    let mut with_rows = BTreeSet::new();
+    for row in sqlx::query(
+        "SELECT r.id, r.outbound_id, r.address, r.kind, r.status, r.attempts, r.next_attempt_at, \
+         r.last_response, r.provider_message_id, r.released_at, r.bounce_kind \
+         FROM mail_outbound_recipients r JOIN mail_outbound o ON o.id = r.outbound_id \
+         JOIN mail_thread_messages tm ON tm.message_id = o.message_id \
+         WHERE tm.thread_id = $1 AND tm.outgoing = 1 ORDER BY r.created_at, r.id",
+    )
+    .bind(thread_id.to_string())
+    .fetch_all(&mut **transaction)
+    .await?
+    {
+        let outbound: String = row.try_get("outbound_id")?;
+        let Some(delivery) = by_outbound
+            .get(&outbound)
+            .and_then(|message| deliveries.get_mut(message))
+        else {
+            continue;
+        };
+        delivery
+            .recipients
+            .push(recipient_status(&row, now)?.into());
+        with_rows.insert(outbound);
+    }
+    for (outbound, summary) in summaries {
+        if with_rows.contains(&outbound) {
+            continue;
+        }
+        if let Some(delivery) = by_outbound
+            .get(&outbound)
+            .and_then(|message| deliveries.get_mut(message))
+        {
+            delivery.recipients = summary_recipients(delivery.outbound_id, summary.as_deref())
+                .into_iter()
+                .map(Into::into)
+                .collect();
+        }
+    }
+    Ok(deliveries)
 }

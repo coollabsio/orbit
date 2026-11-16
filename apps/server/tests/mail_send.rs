@@ -1471,7 +1471,7 @@ async fn release_files_reply_in_thread_and_sent() {
     );
     let outbox = f
         .mail
-        .list_outbound(f.ann.membership, OutboundView::Outbox)
+        .list_outbound(f.ann.membership, OutboundView::Outbox, None)
         .await
         .unwrap();
     assert_eq!(outbox.len(), 1);
@@ -2511,4 +2511,125 @@ async fn purge_send_rows() {
                 && status.status == "bounced"
                 && status.last_response.as_deref() == Some("550 no such user"))
     );
+}
+
+// ---- Delivery status in the thread view, the Outbox filter and Sent recipients (Task G2) ----
+
+#[tokio::test]
+async fn message_view_has_delivery_for_outgoing_only() {
+    let f = Fixture::new().await;
+    f.signing().await;
+    let (_, thread) = f.deliver("ann@one.test", f.ann_primary).await;
+    let draft = f.thread_draft("reply", thread).await;
+    let (outbound, _, _) = f.send_and_release(&draft).await;
+    let (status, detail) = f
+        .call(&f.ann, "GET", &format!("/threads/{thread}"), None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    let messages = detail["messages"].as_array().unwrap();
+    assert_eq!(messages.len(), 2, "{detail}");
+    assert!(messages[0]["delivery"].is_null(), "{detail}");
+    let delivery = &messages[1]["delivery"];
+    assert_eq!(delivery["outbound_id"], outbound.to_string(), "{detail}");
+    let recipients = delivery["recipients"].as_array().unwrap();
+    assert_eq!(recipients.len(), 1, "{detail}");
+    assert_eq!(recipients[0]["address"], "carl@sender.test");
+    assert_eq!(recipients[0]["kind"], "to");
+    assert_eq!(recipients[0]["status"], "queued");
+    assert_eq!(recipients[0]["retryable"], false);
+
+    // After the rows are purged the summary answers.
+    f.sql(&format!(
+        "UPDATE mail_outbound SET delivery_summary = '[{{\"address\":\"carl@sender.test\",\
+         \"kind\":\"to\",\"status\":\"delivered\"}}]' WHERE id = '{outbound}'"
+    ))
+    .await;
+    f.sql(&format!(
+        "DELETE FROM mail_outbound_recipients WHERE outbound_id = '{outbound}'"
+    ))
+    .await;
+    let (_, detail) = f
+        .call(&f.ann, "GET", &format!("/threads/{thread}"), None)
+        .await;
+    let recipients = &detail["messages"][1]["delivery"]["recipients"];
+    assert_eq!(recipients[0]["status"], "delivered", "{detail}");
+    assert_eq!(recipients[0]["retryable"], false);
+
+    // Not a member of the mailbox: the thread is not found, as before.
+    let (status, _) = f
+        .call(&f.owner, "GET", &format!("/threads/{thread}"), None)
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn outbound_list_filters_by_mailbox() {
+    let f = Fixture::new().await;
+    let personal = f.new_draft(f.ann_primary, &["x@out.test"], &[], &[]).await;
+    let team = f.new_draft(f.team_primary, &["y@out.test"], &[], &[]).await;
+    for draft in [&personal, &team] {
+        let (status, sent) = f.send(draft, json!({})).await;
+        assert_eq!(status, StatusCode::OK, "{sent}");
+    }
+    let (_, all) = f.call(&f.ann, "GET", "/outbound?view=outbox", None).await;
+    assert_eq!(all.as_array().unwrap().len(), 2, "{all}");
+    let (_, only) = f
+        .call(
+            &f.ann,
+            "GET",
+            &format!("/outbound?view=outbox&mailbox_id={}", f.team),
+            None,
+        )
+        .await;
+    let only = only.as_array().unwrap();
+    assert_eq!(only.len(), 1, "{only:?}");
+    assert_eq!(only[0]["mailbox_id"], f.team.to_string());
+    assert_eq!(only[0]["to"], json!(["y@out.test"]));
+    // A mailbox the member is not in lists nothing.
+    let (_, none) = f
+        .call(
+            &f.owner,
+            "GET",
+            &format!("/outbound?view=outbox&mailbox_id={}", f.ann_personal),
+            None,
+        )
+        .await;
+    assert_eq!(none, json!([]));
+}
+
+#[tokio::test]
+async fn sent_summary_has_recipients() {
+    let f = Fixture::new().await;
+    f.signing().await;
+    let draft = f
+        .new_draft(
+            f.team_primary,
+            &["a@out.test", "b@out.test", "c@out.test"],
+            &["d@out.test", "e@out.test", "f@out.test"],
+            &[],
+        )
+        .await;
+    f.send_and_release(&draft).await;
+    let (status, page) = f
+        .call(
+            &f.ann,
+            "GET",
+            &format!("/threads?mailbox_id={}&sent=true", f.team),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{page}");
+    let item = &page["items"][0];
+    assert_eq!(
+        item["sent_to"],
+        json!([
+            "a@out.test",
+            "b@out.test",
+            "c@out.test",
+            "d@out.test",
+            "e@out.test"
+        ]),
+        "{page}"
+    );
+    assert_eq!(item["sent_to_more"], 1);
 }

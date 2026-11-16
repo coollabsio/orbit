@@ -3669,6 +3669,14 @@ export type MailCounts = {
     mailboxes: Array<MailboxUnread>;
 };
 
+/**
+ * How an outgoing message of a thread went, per recipient.
+ */
+export type MailDelivery = {
+    outbound_id: string;
+    recipients: Array<MailOutboundRecipient>;
+};
+
 export type MailDnsRecord = {
     kind: MailDnsRecordKind;
     /**
@@ -4032,6 +4040,7 @@ export type MailMessageView = {
     auth: MailAuthSummary;
     body_text: string;
     cc: Array<MailPerson>;
+    delivery?: null | MailDelivery;
     /**
      * Came from outside the workspace into a thread that started inside it.
      */
@@ -4101,12 +4110,13 @@ export type MailOutbound = {
 
 export type MailOutboundItem = MailOutbound & {
     draft_id?: string | null;
+    mailbox_id: string;
     subject: string;
     to: Array<string>;
 };
 
 /**
- * The delivery status of one recipient of a sent message.
+ * The delivery status of each recipient of one sent message.
  */
 export type MailOutboundRecipient = {
     address: string;
@@ -4538,6 +4548,14 @@ export type MailThreadSummary = {
     last_sent_at?: string | null;
     mailbox_id: string;
     message_count: number;
+    /**
+     * Sent view: the To and Cc addresses of the newest message sent (at most 5).
+     */
+    sent_to: Array<string>;
+    /**
+     * Sent view: how many more recipients `sent_to` leaves out.
+     */
+    sent_to_more: number;
     snippet: string;
     starred: boolean;
     subject: string;
@@ -31596,6 +31614,10 @@ export type ListMailOutboundData = {
          * `scheduled` or `outbox`.
          */
         view: string;
+        /**
+         * Only the messages sent from this mailbox.
+         */
+        mailbox_id?: string;
     };
     url: '/api/v1/workspaces/{workspace_id}/mail/outbound';
 };

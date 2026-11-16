@@ -98,6 +98,10 @@ pub struct MailThreadSummary {
     /// A message has an attachment that is not an inline image.
     pub has_attachments: bool,
     pub folder: MailFolder,
+    /// Sent view: the To and Cc addresses of the newest message sent (at most 5).
+    pub sent_to: Vec<String>,
+    /// Sent view: how many more recipients `sent_to` leaves out.
+    pub sent_to_more: i64,
 }
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
@@ -243,6 +247,8 @@ pub struct MailMessageView {
     pub warning: Option<String>,
     /// The files this message sends as links: only for the member who sent it.
     pub file_links: Vec<super::MailFileLinkView>,
+    /// How an outgoing message went, per recipient; null for received mail.
+    pub delivery: Option<super::MailDelivery>,
 }
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
@@ -625,6 +631,9 @@ impl MailRepository {
         {
             file_links.entry(message).or_default().push(link);
         }
+        let now = self.database.database_now().await?;
+        let mut deliveries =
+            super::outbound::thread_deliveries(&mut transaction, thread_id, now).await?;
         let mut messages = Vec::with_capacity(rows.len());
         for row in &rows {
             let id: String = row.try_get("id")?;
@@ -664,6 +673,7 @@ impl MailRepository {
                 lookalike_member,
                 warning: row.try_get("warning")?,
                 file_links: file_links.remove(&id).unwrap_or_default(),
+                delivery: deliveries.remove(&id),
                 id: parse_id(&id)?,
             });
         }

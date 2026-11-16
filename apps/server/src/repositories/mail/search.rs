@@ -411,9 +411,16 @@ pub(super) async fn select_threads(
             labels: Vec::new(),
             has_attachments: row.try_get("has_attachments")?,
             folder: MailFolder::parse(&folder).ok_or(MailError::Invalid { field: "folder" })?,
+            sent_to: Vec::new(),
+            sent_to_more: 0,
         });
     }
-    hydrate(transaction, &mut threads).await?;
+    hydrate(
+        transaction,
+        &mut threads,
+        matches!(selection.folders, Folders::Sent),
+    )
+    .await?;
     Ok((threads, more))
 }
 
@@ -421,6 +428,7 @@ pub(super) async fn select_threads(
 async fn hydrate(
     transaction: &mut Transaction<'_, Any>,
     threads: &mut [MailThreadSummary],
+    sent: bool,
 ) -> Result<(), MailError> {
     if threads.is_empty() {
         return Ok(());
@@ -463,8 +471,40 @@ async fn hydrate(
             .or_default()
             .push(parse_id(&row.try_get::<String, _>("label_id")?)?);
     }
+    // Sent rows show whom the newest message sent from the mailbox went to.
+    let mut sent_to: HashMap<String, Vec<String>> = HashMap::new();
+    if sent {
+        let mut recipients = SqlBuilder::new(
+            "SELECT tm.thread_id, m.to_addrs, m.cc_addrs FROM mail_thread_messages tm \
+             JOIN mail_messages m ON m.id = tm.message_id \
+             WHERE tm.outgoing = 1 AND tm.thread_id IN (",
+        );
+        let mut list = recipients.separated(", ");
+        for thread in threads.iter() {
+            list.push_bind(thread.id.to_string());
+        }
+        recipients.push(") ORDER BY m.received_at, m.id");
+        for row in recipients.build().fetch_all(&mut **transaction).await? {
+            let mut addresses: Vec<String> = Vec::new();
+            for column in ["to_addrs", "cc_addrs"] {
+                for person in people(&row.try_get::<String, _>(column)?) {
+                    if !addresses.contains(&person.address) {
+                        addresses.push(person.address);
+                    }
+                }
+            }
+            // later rows are newer: the last message wins
+            sent_to.insert(row.try_get("thread_id")?, addresses);
+        }
+    }
     for thread in threads {
         let key = thread.id.to_string();
+        if let Some(mut addresses) = sent_to.remove(&key) {
+            thread.sent_to_more =
+                i64::try_from(addresses.len().saturating_sub(LIST_SENDERS)).unwrap_or(i64::MAX);
+            addresses.truncate(LIST_SENDERS);
+            thread.sent_to = addresses;
+        }
         thread.from = from.remove(&key).unwrap_or_default();
         thread.labels = by_thread.remove(&key).unwrap_or_default();
     }

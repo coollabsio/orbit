@@ -41,6 +41,8 @@ fn outbound_view(outbound: Outbound) -> MailOutbound {
 pub(crate) struct MailOutboundItem {
     #[serde(flatten)]
     outbound: MailOutbound,
+    #[schema(value_type = String)]
+    mailbox_id: Id,
     #[schema(value_type = Option<String>)]
     draft_id: Option<Id>,
     subject: String,
@@ -50,6 +52,7 @@ pub(crate) struct MailOutboundItem {
 fn item_view(item: OutboundItem) -> MailOutboundItem {
     MailOutboundItem {
         outbound: outbound_view(item.outbound),
+        mailbox_id: item.mailbox_id,
         draft_id: item.draft_id,
         subject: item.subject,
         to: item.to,
@@ -70,6 +73,9 @@ pub(crate) struct SendMailDraftBody {
 pub(crate) struct ListMailOutboundQuery {
     /// `scheduled` or `outbox`.
     view: String,
+    /// Only the messages sent from this mailbox.
+    #[param(value_type = Option<String>)]
+    mailbox_id: Option<String>,
 }
 
 async fn membership(state: &MailState, call: &Call<'_>) -> Result<Id, ApiError> {
@@ -151,9 +157,14 @@ pub(crate) async fn list_mail_outbound(
         "outbox" => OutboundView::Outbox,
         _ => return Err(call.problem(MailError::Invalid { field: "view" })),
     };
+    let mailbox_id = query
+        .mailbox_id
+        .as_deref()
+        .map(|id| call.id(id))
+        .transpose()?;
     let items = state
         .mail
-        .list_outbound(membership, view)
+        .list_outbound(membership, view, mailbox_id)
         .await
         .map_err(|error| call.problem(error))?;
     Ok(Json(items.into_iter().map(item_view).collect()))

@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
 use super::{Call, MailState, RequestIdExtension};
-use crate::repositories::mail::{BounceKind, RecipientStatus, Suppression};
+use crate::repositories::mail::{MailOutboundRecipient, Suppression};
 use crate::task_routes::{ApiError, ApiQuery};
 
 #[derive(Serialize, ToSchema)]
@@ -51,45 +51,6 @@ pub(crate) struct ListMailSuppressionsQuery {
     /// Only addresses that contain this text.
     q: Option<String>,
     cursor: Option<String>,
-}
-
-/// The delivery status of one recipient of a sent message.
-#[derive(Serialize, ToSchema)]
-pub(crate) struct MailOutboundRecipient {
-    #[schema(value_type = String)]
-    id: Id,
-    address: String,
-    /// `to`, `cc` or `bcc`.
-    kind: String,
-    /// `queued`, `sending`, `delivered`, `deferred`, `bounced`, `suppressed` or `cancelled`.
-    status: String,
-    attempts: i64,
-    #[schema(value_type = Option<String>, format = DateTime)]
-    next_attempt_at: Option<TimestampMillis>,
-    last_response: Option<String>,
-    /// Deferred for more than 4 hours.
-    delayed: bool,
-    /// Why a bounced recipient bounced: `hard`, `rejected`, `gave_up`, `route` or `unreadable`.
-    bounce_kind: Option<String>,
-    /// **Retry** is possible. False once the recipient row is purged (after 90 days).
-    retryable: bool,
-}
-
-fn recipient_view(status: RecipientStatus) -> MailOutboundRecipient {
-    MailOutboundRecipient {
-        id: status.id,
-        address: status.address,
-        kind: status.kind,
-        status: status.status,
-        attempts: status.attempts,
-        next_attempt_at: status.next_attempt_at,
-        last_response: status.last_response,
-        delayed: status.delayed,
-        retryable: status.retryable,
-        bounce_kind: status
-            .bounce_kind
-            .map(|kind| BounceKind::as_str(kind).to_owned()),
-    }
 }
 
 async fn now(state: &MailState, call: &Call<'_>) -> Result<TimestampMillis, ApiError> {
@@ -185,5 +146,5 @@ pub(crate) async fn retry_mail_recipient(
         )
         .await
         .map_err(|error| call.problem(error))?;
-    Ok(Json(recipient_view(status)))
+    Ok(Json(status.into()))
 }

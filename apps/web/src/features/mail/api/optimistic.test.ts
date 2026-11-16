@@ -8,7 +8,7 @@ const W = 'w1'
 
 const summary = (id: string, overrides: Partial<MailThreadSummary> = {}): MailThreadSummary => ({
   id, mailbox_id: 'mb1', folder: 'inbox', from: [], has_attachments: false, labels: [], last_message_at: '2026-10-23T10:00:00Z',
-  message_count: 1, snippet: '', starred: false, subject: id, unread: false, ...overrides,
+  message_count: 1, sent_to: [], sent_to_more: 0, snippet: '', starred: false, subject: id, unread: false, ...overrides,
 })
 const pages = (...items: MailThreadSummary[]): InfiniteData<MailThreadPage> => ({
   pages: [{ items, cursor: null }],

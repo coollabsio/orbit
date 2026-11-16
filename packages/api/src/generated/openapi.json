@@ -48438,6 +48438,15 @@
             }
           },
           {
+            "name": "mailbox_id",
+            "in": "query",
+            "description": "Only the messages sent from this mailbox.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "X-Orbit-Contract",
             "in": "header",
             "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
@@ -81578,6 +81587,25 @@
           }
         }
       },
+      "MailDelivery": {
+        "type": "object",
+        "description": "How an outgoing message of a thread went, per recipient.",
+        "required": [
+          "outbound_id",
+          "recipients"
+        ],
+        "properties": {
+          "outbound_id": {
+            "type": "string"
+          },
+          "recipients": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MailOutboundRecipient"
+            }
+          }
+        }
+      },
       "MailDnsRecord": {
         "type": "object",
         "required": [
@@ -82447,6 +82475,17 @@
               "$ref": "#/components/schemas/MailPerson"
             }
           },
+          "delivery": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/MailDelivery",
+                "description": "How an outgoing message went, per recipient; null for received mail."
+              }
+            ]
+          },
           "external": {
             "type": "boolean",
             "description": "Came from outside the workspace into a thread that started inside it."
@@ -82583,6 +82622,7 @@
           {
             "type": "object",
             "required": [
+              "mailbox_id",
               "subject",
               "to"
             ],
@@ -82592,6 +82632,9 @@
                   "string",
                   "null"
                 ]
+              },
+              "mailbox_id": {
+                "type": "string"
               },
               "subject": {
                 "type": "string"
@@ -82608,7 +82651,7 @@
       },
       "MailOutboundRecipient": {
         "type": "object",
-        "description": "The delivery status of one recipient of a sent message.",
+        "description": "The delivery status of each recipient of one sent message.",
         "required": [
           "id",
           "address",
@@ -83604,7 +83647,9 @@
           "starred",
           "labels",
           "has_attachments",
-          "folder"
+          "folder",
+          "sent_to",
+          "sent_to_more"
         ],
         "properties": {
           "folder": {
@@ -83649,6 +83694,18 @@
           "message_count": {
             "type": "integer",
             "format": "int64"
+          },
+          "sent_to": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Sent view: the To and Cc addresses of the newest message sent (at most 5)."
+          },
+          "sent_to_more": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Sent view: how many more recipients `sent_to` leaves out."
           },
           "snippet": {
             "type": "string"
