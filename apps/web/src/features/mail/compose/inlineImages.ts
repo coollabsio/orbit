@@ -17,8 +17,14 @@ export function createInlineImages(load: (fileId: string) => Promise<Blob>, file
   const fileOf = new Map<string, string>()
   const urls = new Map<string, Promise<string>>()
   const created: string[] = []
-  const objectUrl = (blob: Blob) => {
+  // bumped by `dispose`: a load that started before it ends with its URL revoked at once
+  let generation = 0
+  const objectUrl = (blob: Blob, started = generation) => {
     const url = URL.createObjectURL(blob)
+    if (started !== generation) {
+      URL.revokeObjectURL(url)
+      return ''
+    }
     created.push(url)
     return url
   }
@@ -35,7 +41,8 @@ export function createInlineImages(load: (fileId: string) => Promise<Blob>, file
       const fileId = fileOf.get(contentId)
       // not a file of this draft (yet): nothing to show, and nothing cached, so a later try can find it
       if (!fileId) return Promise.resolve('')
-      const loading = load(fileId).then(objectUrl, () => {
+      const started = generation
+      const loading = load(fileId).then((blob) => objectUrl(blob, started), () => {
         urls.delete(contentId)
         return ''
       })
@@ -45,6 +52,7 @@ export function createInlineImages(load: (fileId: string) => Promise<Blob>, file
     put: (contentId, blob) => void urls.set(contentId, Promise.resolve(objectUrl(blob))),
     setFiles,
     dispose: () => {
+      generation += 1
       for (const url of created.splice(0)) URL.revokeObjectURL(url)
       urls.clear()
     },

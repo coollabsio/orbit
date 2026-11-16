@@ -17,6 +17,8 @@ import { problemText, type DraftText } from '../mailLib'
 import { useDeleteDraft, useRemoveDraftFile, useSaveDraft, useSetDraftFileLink, useUploadDraftFile } from '../api/mutations'
 import { fetchDraftFile, useDraft, useDraftCheck, useFromAddresses, useSnippets, useThread } from '../api/queries'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
+import { useQueryClient } from '@tanstack/react-query'
+import { mailKeys } from '../api/keys'
 import { notReadyText, recipientSummary, recipientsKey, type SuppressedRecipient } from './composeLib'
 import { createInlineImages } from './inlineImages'
 import { ComposerFiles, type PendingUpload } from './ComposerFiles'
@@ -181,6 +183,7 @@ function ComposerBody({ draft, seed, fromAddresses, saver, onLoaded, isReloading
   const fileInput = useRef<HTMLInputElement>(null)
   const mounted = useRef(true)
   const workspaceId = useWorkspace().workspace.id
+  const queryClient = useQueryClient()
   // previews of the images in the text; the object URLs go when the composer closes
   const [inlineImages] = useState(() => createInlineImages((fileId) => fetchDraftFile(workspaceId, draftId, fileId), draft.files))
   useEffect(() => inlineImages.setFiles(draft.files), [inlineImages, draft.files])
@@ -290,6 +293,7 @@ function ComposerBody({ draft, seed, fromAddresses, saver, onLoaded, isReloading
       }
     },
     removeFiles: (ids) => Promise.all(ids.map((id) => removeFile.mutateAsync(id))),
+    draftFiles: () => queryClient.getQueryData<MailDraft>(mailKeys.draft(workspaceId, draftId))?.files ?? draft.files,
     onRecipientProblem: () => {
       setFieldsOpen(true)
       requestAnimationFrame(() => toField.current?.focus())

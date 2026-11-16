@@ -45,8 +45,10 @@ export interface ComposerSendOptions {
   blocked: string | null
   fromAddresses: readonly MailFromAddress[]
   collect: () => ComposedMessage
-  /** Removes draft files (inline images no longer in the text). */
+  /** Removes draft files (inline images no longer in the text); rejects when one could not be removed. */
   removeFiles: (ids: string[]) => Promise<unknown>
+  /** The draft's files as cached now (after removals). */
+  draftFiles: () => MailDraft['files']
   /** No recipient, or one is invalid: show the fields. */
   onRecipientProblem: () => void
   onSent?: (outbound: MailOutbound, draft: MailDraft) => void
@@ -69,7 +71,7 @@ function workspaceDomains(addresses: readonly string[], messages: readonly { fro
   return [...domains]
 }
 
-export function useComposerSend({ draft, saver, blocked, fromAddresses, collect, removeFiles, onRecipientProblem, onSent, onClose }: ComposerSendOptions) {
+export function useComposerSend({ draft, saver, blocked, fromAddresses, collect, removeFiles, draftFiles, onRecipientProblem, onSent, onClose }: ComposerSendOptions) {
   const queryClient = useQueryClient()
   const workspaceId = useWorkspace().workspace.id
   const [warnings, setWarnings] = useState<Warning[]>([])
@@ -140,14 +142,11 @@ export function useComposerSend({ draft, saver, blocked, fromAddresses, collect,
     setNotice(null)
     setTooLarge(null)
     const bodyBytes = MESSAGE_OVERHEAD_BYTES + utf8Length(message.subject) + utf8Length(message.html)
-    let files = draft.files
+    // The server sends every inline file: images deleted from the text are removed, but only once every check has
+    // passed (until then ⌘Z can bring the block back). The checks count the files the message will have.
+    const unused = unusedInlineFiles(draft.files, message.html)
+    const files = draft.files.filter((file) => !unused.includes(file.id))
     try {
-      // the server sends every inline file: images deleted from the text go first
-      const unused = unusedInlineFiles(files, message.html)
-      if (unused.length > 0) {
-        await removeFiles(unused).catch(() => {})
-        files = files.filter((file) => !unused.includes(file.id))
-      }
       // over the route's limit: it would be refused, so offer links now
       const limit = fromAddresses.find((address) => address.address_id === message.fromId)?.max_message_bytes
       const over = sizeCheck(sizedFiles(files), bodyBytes, limit)
@@ -177,6 +176,14 @@ export function useComposerSend({ draft, saver, blocked, fromAddresses, collect,
           return
         }
       }
+      if (unused.length > 0) {
+        // a failed delete stops the send; the files that were deleted leave the cached draft, the others stay
+        const results = await Promise.allSettled(unused.map((id) => removeFiles([id])))
+        if (results.some((result) => result.status === 'rejected')) {
+          toast.error('An image removed from the text could not be deleted. Try sending again.')
+          return
+        }
+      }
       const outbound = await sendDraft.mutateAsync({ draftId: draft.id, body: scheduledAt ? { scheduled_at: scheduledAt.toISOString() } : undefined })
       saver.stop()
       const sent: MailDraft = { ...draft, files, to: message.to, cc: message.cc, bcc: message.bcc, subject: message.subject, from_address_id: message.fromId, body_html: message.html }
@@ -188,7 +195,8 @@ export function useComposerSend({ draft, saver, blocked, fromAddresses, collect,
       if (error instanceof ApiProblem && error.code === 'message_too_large') {
         // the server says its limit and the size it counted
         const sizes = error.problem as { limit_bytes?: number | null; size_bytes?: number | null }
-        const offer = offerLinks(sizedFiles(files), bodyBytes, sizes.limit_bytes)
+        // the files as they are now (inline images may have been removed just before)
+        const offer = offerLinks(sizedFiles(draftFiles()), bodyBytes, sizes.limit_bytes)
         setTooLarge({ ...offer, size: sizes.size_bytes || offer.size })
       } else {
         setNotice(problemText(error, 'The message could not be sent. Try again.'))
