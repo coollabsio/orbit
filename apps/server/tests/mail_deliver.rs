@@ -1342,7 +1342,8 @@ async fn suspended_domain_is_local_in_grace_and_refused_after() {
     assert!(recipient.4.unwrap().contains("5.7.1"));
     assert_eq!(
         f.bounce_kind(id, "carl@two.test").await.as_deref(),
-        Some("hard")
+        Some("rejected"),
+        "the domain's state, not a bad address"
     );
 }
 
@@ -1378,4 +1379,85 @@ async fn unreadable_message_bounces_as_unreadable() {
         Some("unreadable")
     );
     assert_eq!(f.outbound(id).await.0, "done");
+}
+
+#[tokio::test]
+async fn orbit_refusals_are_rejected_not_hard() {
+    let f = Fixture::new().await;
+    // Too large for the route (its limit went down after Send).
+    let (id, t0) = f.send(&["a@out.test"], &[], &[]).await;
+    f.sql(
+        "UPDATE mail_send_routes SET settings = '{\"max_message_bytes\": 100}' WHERE id = $1",
+        &[&f.route.to_string()],
+    )
+    .await;
+    f.run(id, t0).await;
+    assert!(f.fake.calls().is_empty());
+    let recipient = f.recipients(id).await.remove(0);
+    assert_eq!(recipient.1, "bounced");
+    assert!(recipient.4.unwrap().starts_with("5.3.4"));
+    assert_eq!(
+        f.bounce_kind(id, "a@out.test").await.as_deref(),
+        Some("rejected")
+    );
+    let summary: Value = serde_json::from_str(&f.outbound(id).await.2.unwrap()).unwrap();
+    assert_eq!(summary[0]["bounce_kind"], "rejected");
+    f.sql("UPDATE mail_send_routes SET settings = '{}'", &[])
+        .await;
+
+    // A suspended mailbox on this instance refuses it; an unknown user there is a bad address.
+    f.second_workspace("ok").await;
+    f.sql(
+        "UPDATE mailboxes SET status = 'suspended' WHERE name = 'Carl'",
+        &[],
+    )
+    .await;
+    let (id, t1) = f.send(&["carl@two.test"], &["nobody@two.test"], &[]).await;
+    f.run(id, t1).await;
+    assert!(f.fake.calls().is_empty());
+    assert_eq!(f.status_of(id, "carl@two.test").await, "bounced");
+    assert_eq!(
+        f.bounce_kind(id, "carl@two.test").await.as_deref(),
+        Some("rejected")
+    );
+    assert_eq!(
+        f.bounce_kind(id, "nobody@two.test").await.as_deref(),
+        Some("hard")
+    );
+    let statuses = f.mail.outbound_recipients(id, at(t1)).await.unwrap();
+    assert!(
+        statuses
+            .iter()
+            .any(|status| status.bounce_kind == Some(BounceKind::Rejected))
+    );
+}
+
+#[tokio::test]
+async fn one_deadline_bounds_the_whole_run() {
+    let f = Fixture::new().await;
+    *f.fake.delay.lock().unwrap() = Some(Duration::from_secs(2));
+    let to: Vec<String> = (0..12).map(|n| format!("r{n}@out.test")).collect();
+    let to: Vec<&str> = to.iter().map(String::as_str).collect();
+    let (id, t0) = f.send(&to, &[], &[]).await;
+    f.mail
+        .release(id, Some("mx.orbit.test"), at(t0))
+        .await
+        .unwrap()
+        .expect("released");
+    let started = std::time::Instant::now();
+    let next = deliver_due(&f.state_with(Duration::from_millis(500)), id, at(t0))
+        .await
+        .unwrap();
+    let took = started.elapsed();
+    // Eight calls start, are cut off at the deadline, and the other four never start: with a
+    // timeout for each call this would take two rounds (1 s).
+    assert!(took < Duration::from_millis(950), "{took:?}");
+    assert_eq!(f.fake.calls().len(), 8);
+    assert_eq!(next, NextRun::At(at(t0 + RETRY_STEPS_MS[0])));
+    let recipients = f.recipients(id).await;
+    assert_eq!(recipients.len(), 12);
+    for recipient in &recipients {
+        assert_eq!(recipient.1, "deferred", "{recipient:?}");
+        assert_eq!(recipient.4.as_deref(), Some("Timed out"));
+    }
 }

@@ -25,7 +25,8 @@ use crate::repositories::mail::{
 };
 
 pub use crate::repositories::mail::{
-    BounceKind, DELAYED_AFTER_MS, GAVE_UP, RETRY_STEPS_MS, ROUTE_ERROR, SEND_TIMEOUT_MS,
+    BounceKind, DELAYED_AFTER_MS, GAVE_UP, LOCAL_DOMAIN_UNAVAILABLE, LOCAL_MAILBOX_SUSPENDED,
+    LOCAL_TOO_LARGE, RETRY_STEPS_MS, ROUTE_ERROR, ROUTE_TOO_LARGE, SEND_TIMEOUT_MS,
     SENDING_LEASE_MS, UNREADABLE,
 };
 pub use deliver::{NextRun, deliver_due};
@@ -252,7 +253,7 @@ impl Delivery for Checked {
                 return all(
                     outgoing.recipients,
                     &RecipientOutcome::bounced(format!(
-                        "5.3.4 The message is larger than the route allows ({} bytes)",
+                        "{ROUTE_TOO_LARGE} ({} bytes)",
                         self.max_bytes
                     )),
                 );

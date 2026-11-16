@@ -901,6 +901,12 @@ async fn send_tables_exist() {
     )
     .await
     .unwrap();
+    f.exec(
+        "UPDATE mail_outbound_recipients SET bounce_kind = 'rejected'",
+        &[],
+    )
+    .await
+    .unwrap();
     assert!(
         f.exec(
             "UPDATE mail_outbound_recipients SET bounce_kind = 'soft'",

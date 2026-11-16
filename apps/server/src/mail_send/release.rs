@@ -33,8 +33,9 @@ pub struct SendJobState {
     /// Local delivery (D11).
     pub intake: MailIntake,
     pub live: LiveHub,
-    /// The longest one adapter or intake call may take ([`super::SEND_TIMEOUT_MS`]; shorter in
-    /// tests). Must stay below [`super::SENDING_LEASE_MS`].
+    /// The deadline of all the adapter and intake calls of one run, from its claim
+    /// ([`super::SEND_TIMEOUT_MS`]; shorter in tests). Must stay below
+    /// [`super::SENDING_LEASE_MS`].
     pub send_timeout: std::time::Duration,
 }
 

@@ -507,12 +507,13 @@ pub const RETRY_STEPS_MS: [i64; 12] = [
 ];
 /// A deferred recipient whose first attempt (`released_at`) is older than this shows **Delayed**.
 pub const DELAYED_AFTER_MS: i64 = 4 * 3_600_000;
-/// The longest one adapter call (or one local intake call) may take; after it, its recipients
-/// are deferred with "Timed out".
+/// The deadline of all the adapter and intake calls of one delivery run, from its claim; the
+/// recipients of calls not finished by then are deferred with "Timed out".
 pub const SEND_TIMEOUT_MS: i64 = 20 * 60_000;
 /// A recipient that stays `sending` longer than this was left by a worker that stopped between
 /// the claim and the result: it is deferred and sent again (at least once, spec §5.4). Longer
-/// than [`SEND_TIMEOUT_MS`], so an attempt that is still running is never handed to another;
+/// than the run deadline [`SEND_TIMEOUT_MS`], so an attempt that is still running is never
+/// handed to another;
 /// the late result of an attempt that was handed on is ignored ([`MailRepository::record_outcomes`]).
 pub const SENDING_LEASE_MS: i64 = 30 * 60_000;
 /// The response of a recipient that was still deferred after the last retry step.
@@ -521,13 +522,39 @@ pub const GAVE_UP: &str = "Gave up after 5 days";
 pub const UNREADABLE: &str = "The message could not be read";
 /// The start of a response that blames the route, not the recipient (Task 8 adapters).
 pub const ROUTE_ERROR: &str = "Route error:";
+/// Orbit's own refusal of a message larger than the route allows (the adapter pre-check).
+pub const ROUTE_TOO_LARGE: &str = "5.3.4 The message is larger than the route allows";
+/// This instance's intake refused a local message as too large.
+pub const LOCAL_TOO_LARGE: &str = "552 5.3.4 The message is larger than this server accepts";
+/// The local receiving domain is disabled, or suspended past its grace period.
+pub const LOCAL_DOMAIN_UNAVAILABLE: &str = "550 5.7.1 The domain does not accept mail";
+/// The local receiving mailbox is suspended.
+pub const LOCAL_MAILBOX_SUSPENDED: &str = "550 5.2.1 The mailbox is not active";
+
+/// Whether a bounce response is one of Orbit's own refusals of the message
+/// ([`BounceKind::Rejected`]), not of the address.
+fn is_rejection(response: &str) -> bool {
+    [
+        ROUTE_TOO_LARGE,
+        LOCAL_TOO_LARGE,
+        LOCAL_DOMAIN_UNAVAILABLE,
+        LOCAL_MAILBOX_SUSPENDED,
+    ]
+    .iter()
+    .any(|prefix| response.starts_with(prefix))
+}
 
 /// Why a bounced recipient bounced (`mail_outbound_recipients.bounce_kind`). Only [`Self::Hard`]
-/// (and complaints) count toward the bounce rate and the suppression list.
+/// (and complaints) count toward the bounce rate and the suppression list: every other kind is
+/// not a bad address.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BounceKind {
-    /// A 5xx refusal of the recipient (SMTP, a provider's API, or this instance's intake).
+    /// A 5xx refusal of the address (SMTP, a provider's API, or an unknown user at this
+    /// instance's intake).
     Hard,
+    /// Orbit refused the message itself, not the address: larger than the route or this server
+    /// allows, or the local receiving domain or mailbox is unavailable.
+    Rejected,
     /// Still deferred after the last retry step.
     GaveUp,
     /// Gave up, and the last attempt failed on the route (`Route error: …`).
@@ -541,6 +568,7 @@ impl BounceKind {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Hard => "hard",
+            Self::Rejected => "rejected",
             Self::GaveUp => "gave_up",
             Self::Route => "route",
             Self::Unreadable => "unreadable",
@@ -551,6 +579,7 @@ impl BounceKind {
     pub fn parse(value: &str) -> Option<Self> {
         match value {
             "hard" => Some(Self::Hard),
+            "rejected" => Some(Self::Rejected),
             "gave_up" => Some(Self::GaveUp),
             "route" => Some(Self::Route),
             "unreadable" => Some(Self::Unreadable),
@@ -990,8 +1019,10 @@ impl MailRepository {
     /// The results of attempt `attempt_id`, in one writer transaction. Only recipients still
     /// `sending` with that attempt change (one that a lease end handed to another attempt is
     /// left to it, and a late result of this attempt changes nothing). Accepted → `delivered`;
-    /// bounced → `bounced` ([`BounceKind::Hard`], or [`BounceKind::Unreadable`] for a response
-    /// starting with [`UNREADABLE`]); deferred → `deferred` until the next step of
+    /// bounced → `bounced` ([`BounceKind::Hard`]; [`BounceKind::Unreadable`] for a response
+    /// starting with [`UNREADABLE`]; [`BounceKind::Rejected`] for Orbit's own refusals of the
+    /// message: [`ROUTE_TOO_LARGE`], [`LOCAL_TOO_LARGE`], [`LOCAL_DOMAIN_UNAVAILABLE`],
+    /// [`LOCAL_MAILBOX_SUSPENDED`]); deferred → `deferred` until the next step of
     /// [`RETRY_STEPS_MS`], or `bounced` with [`GAVE_UP`] after the last one
     /// ([`BounceKind::Route`] when the last response was a [`ROUTE_ERROR`],
     /// [`BounceKind::Unreadable`], else [`BounceKind::GaveUp`]). A
@@ -1027,6 +1058,8 @@ impl MailRepository {
                 RecipientOutcome::Bounced { response } => {
                     let kind = if response.starts_with(UNREADABLE) {
                         BounceKind::Unreadable
+                    } else if is_rejection(response) {
+                        BounceKind::Rejected
                     } else {
                         BounceKind::Hard
                     };

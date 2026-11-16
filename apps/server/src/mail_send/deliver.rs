@@ -3,11 +3,13 @@
 //!
 //! - **No double send.** The recipients are `sending` with the attempt's ID and committed
 //!   before anything is sent (`MailRepository::claim_recipients`); only then do they go out,
-//!   and the results are recorded for that attempt only. Each adapter call and each intake call
-//!   is cut off after `SendJobState::send_timeout` (20 min, [`super::SEND_TIMEOUT_MS`]): its
-//!   recipients are deferred with "Timed out". A worker that stops in between leaves them
-//!   `sending` until [`SENDING_LEASE_MS`] (30 min, longer than the timeout) ends; they are then
-//!   deferred and sent again (at least once), and a late result of the old attempt is ignored.
+//!   and the results are recorded for that attempt only. All the calls of a run (adapter and
+//!   intake) share one deadline, `SendJobState::send_timeout` (20 min,
+//!   [`super::SEND_TIMEOUT_MS`]) after the claim: a call still running then is cut off, a call
+//!   not started does not start, and their recipients are deferred with "Timed out". A worker
+//!   that stops in between leaves them `sending` until [`SENDING_LEASE_MS`] (30 min, longer than
+//!   the deadline) ends; they are then deferred and sent again (at least once), and a late
+//!   result of the old attempt is ignored.
 //! - **Local recipients** (D11): an address of a domain of this instance (verified, or
 //!   suspended) whose stored MX status is OK (its last DNS check found the MX record right)
 //!   goes straight to intake (`MailIntake::accept`, `Source::Local`) with the same signed bytes,
@@ -25,8 +27,9 @@
 //!   in front of the signed bytes. A `direct` route and a workspace's route never reach a
 //!   private address; an instance route of another kind may (a relay on the instance's
 //!   network).
-//! - **Results.** Accepted → `delivered`; 5xx → `bounced` with `bounce_kind = 'hard'` (the
-//!   thread goes back to the Inbox, unread); 4xx, a network error, a timeout or a route error
+//! - **Results.** Accepted → `delivered`; 5xx → `bounced` with `bounce_kind = 'hard'`, or
+//!   `'rejected'` for Orbit's own refusals of the message (too large for the route or this
+//!   server, local domain or mailbox unavailable) (the thread goes back to the Inbox, unread); 4xx, a network error, a timeout or a route error
 //!   (`Route error: …`) → `deferred` until the next retry step, then `bounced` with "Gave up
 //!   after 5 days" (`gave_up`, or `route` after a route error). A sent message that cannot be
 //!   read bounces as `unreadable` (it is deferred while the store may recover). Only `hard`
@@ -39,11 +42,12 @@ use futures_util::StreamExt;
 use futures_util::future::BoxFuture;
 use orbit_mail::{AuthOutcome, DmarcVerdict, Verdict, bounce_local_part};
 use orbit_platform::{Id, JobError, TimestampMillis};
+use tokio::time::{Instant, timeout_at};
 
 use super::release::SendJobState;
 use super::{
-    Outgoing, RecipientOutcome, SENDING_LEASE_MS, UNREADABLE, adapter_for, domain_of,
-    provider_headers, with_provider_headers,
+    LOCAL_DOMAIN_UNAVAILABLE, LOCAL_MAILBOX_SUSPENDED, LOCAL_TOO_LARGE, Outgoing, RecipientOutcome,
+    SENDING_LEASE_MS, UNREADABLE, adapter_for, domain_of, provider_headers, with_provider_headers,
 };
 use crate::mail_intake::{InboundMessage, IntakeError, Recipient, Source};
 use crate::repositories::mail::{
@@ -115,9 +119,12 @@ pub async fn deliver_due(
         let next = mail.next_delivery(outbound_id, now).await.map_err(retry)?;
         return Ok(next.map_or(NextRun::Done, NextRun::At));
     }
+    // One deadline for every call of this run, so the run ends well inside the lease of the
+    // recipients it claimed (a per-call timeout would add up over the calls).
+    let deadline = Instant::now() + state.send_timeout;
 
     let outcomes = match mail.read_sent_raw(outbound.receipt_id).await {
-        Ok(raw) => send(state, &outbound, &recipients, &raw, now).await?,
+        Ok(raw) => send(state, &outbound, &recipients, &raw, now, deadline).await?,
         Err(MailError::Unavailable(error)) => {
             // The claimed recipients stay `sending` until the lease ends, then go again.
             return Err(JobError::Retryable(error.to_string()));
@@ -158,6 +165,7 @@ async fn send(
     recipients: &[RecipientRow],
     raw: &[u8],
     now: TimestampMillis,
+    deadline: Instant,
 ) -> Result<Vec<(Id, RecipientOutcome)>, JobError> {
     let mut local_domains: HashMap<String, bool> = HashMap::new();
     let mut local = Vec::new();
@@ -179,11 +187,12 @@ async fn send(
         }
     }
     let mut outcomes = Vec::with_capacity(recipients.len());
-    let (local_outcomes, by_route) = deliver_local(state, outbound, &local, raw, now).await?;
+    let (local_outcomes, by_route) =
+        deliver_local(state, outbound, &local, raw, now, deadline).await?;
     outcomes.extend(local_outcomes);
     remote.extend(by_route);
     if !remote.is_empty() {
-        outcomes.extend(deliver_by_route(state, outbound, &remote, raw, now).await?);
+        outcomes.extend(deliver_by_route(state, outbound, &remote, raw, now, deadline).await?);
     }
     Ok(outcomes)
 }
@@ -196,6 +205,7 @@ async fn deliver_local<'r>(
     recipients: &[&'r RecipientRow],
     raw: &[u8],
     now: TimestampMillis,
+    deadline: Instant,
 ) -> Result<(Vec<(Id, RecipientOutcome)>, Vec<&'r RecipientRow>), JobError> {
     let mut outcomes = Vec::new();
     let mut not_local = Vec::new();
@@ -235,8 +245,8 @@ async fn deliver_local<'r>(
                 continue;
             }
             RecipientLookup::UnknownUser => "550 5.1.1 No such user here",
-            RecipientLookup::DomainUnavailable => "550 5.7.1 The domain does not accept mail",
-            RecipientLookup::MailboxSuspended => "550 5.2.1 The mailbox is not active",
+            RecipientLookup::DomainUnavailable => LOCAL_DOMAIN_UNAVAILABLE,
+            RecipientLookup::MailboxSuspended => LOCAL_MAILBOX_SUSPENDED,
             RecipientLookup::Invalid => "501 5.1.3 The address is not valid",
         };
         outcomes.push((recipient.id, RecipientOutcome::bounced(refused)));
@@ -270,15 +280,12 @@ async fn deliver_local<'r>(
             from_domain: Some(outbound.from_domain.clone()),
         },
     };
-    let outcome = match tokio::time::timeout(state.send_timeout, state.intake.accept(message)).await
-    {
+    let outcome = match timeout_at(deadline, state.intake.accept(message)).await {
         Err(_) => RecipientOutcome::deferred(TIMED_OUT),
         Ok(Ok(_)) => RecipientOutcome::Accepted {
             provider_message_id: None,
         },
-        Ok(Err(IntakeError::TooLarge)) => {
-            RecipientOutcome::bounced("552 5.3.4 The message is larger than this server accepts")
-        }
+        Ok(Err(IntakeError::TooLarge)) => RecipientOutcome::bounced(LOCAL_TOO_LARGE),
         Ok(Err(IntakeError::QuotaExceeded)) => RecipientOutcome::deferred(
             "452 4.2.2 The recipient's workspace is over its storage quota",
         ),
@@ -297,6 +304,7 @@ async fn deliver_by_route(
     recipients: &[&RecipientRow],
     raw: &[u8],
     now: TimestampMillis,
+    deadline: Instant,
 ) -> Result<Vec<(Id, RecipientOutcome)>, JobError> {
     let all = |response: &str| -> Vec<(Id, RecipientOutcome)> {
         recipients
@@ -324,7 +332,6 @@ async fn deliver_by_route(
         &state.delivery
     };
     let adapter = adapter_for(&route, &secrets, ctx);
-    let timeout = state.send_timeout;
     let bounce_key = state.mail.bounce_key();
     let one_by_one = matches!(
         route.kind,
@@ -366,7 +373,11 @@ async fn deliver_by_route(
                     recipients: &address,
                     correlation: &correlation,
                 };
-                match tokio::time::timeout(timeout, adapter.deliver(&outgoing)).await {
+                // A call that would start after the deadline does not start.
+                if Instant::now() >= deadline {
+                    return vec![(address[0].clone(), RecipientOutcome::deferred(TIMED_OUT))];
+                }
+                match timeout_at(deadline, adapter.deliver(&outgoing)).await {
                     Ok(results) => results,
                     Err(_) => vec![(address[0].clone(), RecipientOutcome::deferred(TIMED_OUT))],
                 }
@@ -391,7 +402,7 @@ async fn deliver_by_route(
             recipients: &addresses,
             correlation: &correlation,
         };
-        match tokio::time::timeout(timeout, adapter.deliver(&outgoing)).await {
+        match timeout_at(deadline, adapter.deliver(&outgoing)).await {
             Ok(results) => by_address.extend(results),
             Err(_) => by_address.extend(
                 addresses
