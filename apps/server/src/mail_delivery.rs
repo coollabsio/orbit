@@ -519,7 +519,10 @@ impl ProviderIntake {
             }
             seen.push(rcpt.to_ascii_lowercase());
             match self.route(provider, rcpt, now).await {
-                Ok(Ok(recipient)) => recipients.push(recipient),
+                Ok(Ok(Some(recipient))) => recipients.push(recipient),
+                // a forged or expired bounce address: the provider took the message already, so
+                // it is dropped without a trace
+                Ok(Ok(None)) => {}
                 Ok(Err((reason, workspace_id))) => rejected.push(NewRejection {
                     // a workspace provider lists only in its own workspace: its owner signs
                     // what it sends, and must not write into another workspace's list
@@ -533,6 +536,12 @@ impl ProviderIntake {
             }
         }
         let rejected_count = rejected.len();
+        if recipients.is_empty() && rejected.is_empty() {
+            return DeliveryResult::Stored {
+                receipts: 0,
+                rejected: 0,
+            };
+        }
         if recipients.is_empty() {
             let (reason, recipient) = rejected
                 .first()
@@ -613,14 +622,15 @@ impl ProviderIntake {
         Ok(())
     }
 
-    /// The recipient if `rcpt` is on a domain routed to `provider` and has a mailbox (or a test
-    /// address); otherwise why not, with the domain's workspace when it has one.
+    /// The recipient if `rcpt` is on a domain routed to `provider` and has a mailbox (or is a
+    /// test or valid bounce address); `None` for a bad bounce address (dropped); otherwise why
+    /// not, with the domain's workspace when it has one.
     async fn route(
         &self,
         provider: &MailProvider,
         rcpt: &str,
         now: TimestampMillis,
-    ) -> Result<Result<Recipient, (RejectReason, Option<orbit_platform::Id>)>, String> {
+    ) -> Result<Result<Option<Recipient>, (RejectReason, Option<orbit_platform::Id>)>, String> {
         let Ok(address) = orbit_mail::normalize_address(rcpt) else {
             return Ok(Err((RejectReason::UnknownAddress, None)));
         };
@@ -647,18 +657,25 @@ impl ProviderIntake {
                 workspace_id,
                 ..
             } => {
-                return Ok(Ok(Recipient::Mailbox {
+                return Ok(Ok(Some(Recipient::Mailbox {
                     workspace_id,
                     address_id,
                     rcpt: rcpt.to_owned(),
-                }));
+                })));
             }
             RecipientLookup::HealthTest { test_id } => {
-                return Ok(Ok(Recipient::HealthTest {
+                return Ok(Ok(Some(Recipient::HealthTest {
                     test_id,
                     rcpt: rcpt.to_owned(),
-                }));
+                })));
             }
+            RecipientLookup::Bounce { recipient_id } => {
+                return Ok(Ok(Some(Recipient::Bounce {
+                    recipient_id,
+                    rcpt: rcpt.to_owned(),
+                })));
+            }
+            RecipientLookup::BadBounce => return Ok(Ok(None)),
             RecipientLookup::UnknownUser | RecipientLookup::Invalid => RejectReason::UnknownAddress,
             RecipientLookup::NotLocal | RecipientLookup::DomainUnavailable => {
                 RejectReason::DomainUnavailable

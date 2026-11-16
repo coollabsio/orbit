@@ -13,6 +13,7 @@ pub(crate) mod mailboxes;
 pub(crate) mod providers;
 pub(crate) mod send;
 pub(crate) mod send_routes;
+pub(crate) mod suppressions;
 pub(crate) mod threads;
 
 use std::sync::Arc;
@@ -331,6 +332,18 @@ pub fn mail_router(state: MailState) -> Router {
             get(send::list_mail_outbound),
         )
         .route(
+            "/api/v1/workspaces/{workspace_id}/mail/outbound/{outbound_id}/recipients/{recipient_id}/retry",
+            post(suppressions::retry_mail_recipient),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/suppressions",
+            get(suppressions::list_mail_suppressions),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/suppressions/{address}",
+            delete(suppressions::delete_mail_suppression),
+        )
+        .route(
             "/api/v1/workspaces/{workspace_id}/mail/drafts/{draft_id}/files/{file_id}",
             patch(drafts::update_mail_draft_file).delete(drafts::delete_mail_draft_file),
         )
@@ -569,6 +582,7 @@ fn detail(code: &'static str) -> &'static str {
             "This message is too large for the send route. Send big files as a link."
         }
         "provider_in_use" => "Route the domains that use this provider elsewhere first.",
+        "recipient_not_failed" => "Only a recipient that was not delivered can be retried.",
         _ => "This action is not possible.",
     }
 }

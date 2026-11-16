@@ -255,12 +255,21 @@ async fn deliver_local<'r>(
                 accepted.push(recipient.id);
                 continue;
             }
+            // A bounce address of this instance: intake reads it as a DSN and drops it.
+            RecipientLookup::Bounce { recipient_id } => {
+                intake_recipients.push(Recipient::Bounce {
+                    recipient_id,
+                    rcpt: recipient.address.clone(),
+                });
+                accepted.push(recipient.id);
+                continue;
+            }
             RecipientLookup::NotLocal => {
                 not_local.push(*recipient);
                 continue;
             }
             // A bad address.
-            RecipientLookup::UnknownUser => {
+            RecipientLookup::UnknownUser | RecipientLookup::BadBounce => {
                 RecipientOutcome::bounced("550 5.1.1 No such user here")
             }
             RecipientLookup::Invalid => {

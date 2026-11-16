@@ -199,6 +199,12 @@ pub enum RecipientLookup {
     },
     /// An active test address of the Admin health card; it never reaches a mailbox.
     HealthTest { test_id: Id },
+    /// A bounce address (`bounce+{token}@domain`, spec §5.7) of a sent recipient: the message is
+    /// a delivery status notification for it and never reaches a mailbox.
+    Bounce { recipient_id: Id },
+    /// A bounce address whose token is forged, or whose recipient is gone or was sent more than
+    /// 7 days ago: `550 5.1.1` at the listener; provider intake drops it.
+    BadBounce,
     /// `550 5.1.1`
     UnknownUser,
     /// Not a domain of this server, or one whose claim is not verified yet: `554 5.7.1`.
@@ -747,13 +753,33 @@ async fn proposals(
 }
 
 impl MailRepository {
-    /// [`lookup_recipient`] on the pool.
+    /// [`lookup_recipient`] on the pool, and the bounce addresses: on a domain that takes mail
+    /// here, a local part `bounce+…` is a bounce address ([`RecipientLookup::Bounce`] when its
+    /// token is valid, else [`RecipientLookup::BadBounce`]), never a mailbox's `+tag`.
     pub async fn lookup_recipient(
         &self,
         rcpt: &str,
         now: TimestampMillis,
     ) -> Result<RecipientLookup, MailError> {
-        Ok(lookup_recipient(self.database.pool(), rcpt, now).await?)
+        let lookup = lookup_recipient(self.database.pool(), rcpt, now).await?;
+        if matches!(
+            lookup,
+            RecipientLookup::NotLocal
+                | RecipientLookup::DomainUnavailable
+                | RecipientLookup::Invalid
+        ) {
+            return Ok(lookup);
+        }
+        let Ok(address) = orbit_mail::normalize_address(rcpt) else {
+            return Ok(lookup);
+        };
+        if !super::suppressions::is_bounce_local(&address.local) {
+            return Ok(lookup);
+        }
+        Ok(match self.bounce_recipient(&address.local, now).await? {
+            Some(recipient_id) => RecipientLookup::Bounce { recipient_id },
+            None => RecipientLookup::BadBounce,
+        })
     }
 
     /// Owners and admins: every mailbox of the workspace (the management view). Other members:

@@ -17,6 +17,7 @@ use super::limits::load_limits;
 use super::routes::{RouteSettings, SendRouteKind};
 use super::search::people;
 use super::signatures::check_sendable;
+use super::suppressions::{SuppressionReason, suppresses_response};
 use super::{MailError, MailRepository, SendReadiness};
 use crate::live::{LiveHub, NewEvent, Recipients};
 
@@ -735,22 +736,11 @@ async fn next_due(
     Ok(next.map(TimestampMillis::from_millis))
 }
 
-/// Marks the message `done` with the summary of its recipients once none is open.
-async fn finish_if_done(
+/// The `delivery_summary` of the message: `[{address, kind, status, response, bounce_kind}]`.
+async fn delivery_summary(
     transaction: &mut Transaction<'_, Any>,
     outbound_id: Id,
-    now: TimestampMillis,
-) -> Result<bool, MailError> {
-    let open: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
-        "SELECT CAST(COUNT(*) AS BIGINT) FROM mail_outbound_recipients \
-         WHERE outbound_id = $1 AND status IN {OPEN}"
-    )))
-    .bind(outbound_id.to_string())
-    .fetch_one(&mut **transaction)
-    .await?;
-    if open > 0 {
-        return Ok(false);
-    }
+) -> Result<String, MailError> {
     let rows = sqlx::query(
         "SELECT address, kind, status, last_response, bounce_kind FROM mail_outbound_recipients \
          WHERE outbound_id = $1 ORDER BY created_at, id",
@@ -768,11 +758,31 @@ async fn finish_if_done(
             "bounce_kind": row.try_get::<Option<String>, _>("bounce_kind")?,
         }));
     }
+    Ok(serde_json::Value::Array(summary).to_string())
+}
+
+/// Marks the message `done` with the summary of its recipients once none is open.
+pub(super) async fn finish_if_done(
+    transaction: &mut Transaction<'_, Any>,
+    outbound_id: Id,
+    now: TimestampMillis,
+) -> Result<bool, MailError> {
+    let open: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+        "SELECT CAST(COUNT(*) AS BIGINT) FROM mail_outbound_recipients \
+         WHERE outbound_id = $1 AND status IN {OPEN}"
+    )))
+    .bind(outbound_id.to_string())
+    .fetch_one(&mut **transaction)
+    .await?;
+    if open > 0 {
+        return Ok(false);
+    }
+    let summary = delivery_summary(transaction, outbound_id).await?;
     let done = sqlx::query(
         "UPDATE mail_outbound SET status = 'done', hold_reason = NULL, delivery_summary = $1, \
          updated_at = $2 WHERE id = $3 AND status = 'released'",
     )
-    .bind(serde_json::Value::Array(summary).to_string())
+    .bind(summary)
     .bind(now.as_millis())
     .bind(outbound_id.to_string())
     .execute(&mut **transaction)
@@ -781,7 +791,62 @@ async fn finish_if_done(
     Ok(done == 1)
 }
 
-fn plain_line(text: &str) -> String {
+/// A message that is `done` already gets its summary written again (a later bounce changed a
+/// recipient); one still going is marked `done` when nothing is open.
+pub(super) async fn update_summary(
+    transaction: &mut Transaction<'_, Any>,
+    outbound_id: Id,
+    now: TimestampMillis,
+) -> Result<(), MailError> {
+    if finish_if_done(transaction, outbound_id, now).await? {
+        return Ok(());
+    }
+    let summary = delivery_summary(transaction, outbound_id).await?;
+    sqlx::query(
+        "UPDATE mail_outbound SET delivery_summary = $1, updated_at = $2 \
+         WHERE id = $3 AND status = 'done'",
+    )
+    .bind(summary)
+    .bind(now.as_millis())
+    .bind(outbound_id.to_string())
+    .execute(&mut **transaction)
+    .await?;
+    Ok(())
+}
+
+/// A recipient of the message bounced: its thread goes back to the Inbox (from the archive), unread
+/// for every reader (spec §5.7).
+pub(super) async fn bounced_thread_to_inbox(
+    transaction: &mut Transaction<'_, Any>,
+    outbound_id: Id,
+    now: TimestampMillis,
+) -> Result<(), MailError> {
+    let threads: Vec<String> = sqlx::query_scalar(
+        "SELECT tm.thread_id FROM mail_outbound o \
+         JOIN mail_thread_messages tm ON tm.message_id = o.message_id \
+         AND tm.mailbox_id = o.mailbox_id WHERE o.id = $1",
+    )
+    .bind(outbound_id.to_string())
+    .fetch_all(&mut **transaction)
+    .await?;
+    for thread_id in threads {
+        sqlx::query(
+            "UPDATE mail_threads SET folder = 'inbox', updated_at = $1 \
+             WHERE id = $2 AND folder = 'archive'",
+        )
+        .bind(now.as_millis())
+        .bind(&thread_id)
+        .execute(&mut **transaction)
+        .await?;
+        sqlx::query("UPDATE mail_thread_user_state SET last_read_at = NULL WHERE thread_id = $1")
+            .bind(&thread_id)
+            .execute(&mut **transaction)
+            .await?;
+    }
+    Ok(())
+}
+
+pub(super) fn plain_line(text: &str) -> String {
     text.chars()
         .map(|c| if c.is_control() { ' ' } else { c })
         .take(500)
@@ -1062,9 +1127,10 @@ impl MailRepository {
     /// [`RETRY_STEPS_MS`], or `bounced` with [`GAVE_UP`] after the last one, its kind from the
     /// last attempt's [`DeferCause`] (route → [`BounceKind::Route`], unreadable →
     /// [`BounceKind::Unreadable`], else [`BounceKind::GaveUp`]). No kind is read from a
-    /// response's text. A
-    /// bounce moves the thread back to the Inbox (from the archive), unread for its readers.
-    /// The message is `done` with its summary once every recipient is final.
+    /// response's text. A hard bounce of a bad address (`super::suppresses`, which reads only
+    /// its status codes) puts the address on the workspace's suppression list. A bounce moves
+    /// the thread back to the Inbox (from the archive), unread for its readers. The message is
+    /// `done` with its summary once every recipient is final.
     pub async fn record_outcomes(
         &self,
         outbound_id: Id,
@@ -1075,18 +1141,19 @@ impl MailRepository {
         let mut transaction = self.database.immediate_transaction().await?;
         let mut bounced = false;
         for (recipient_id, outcome) in outcomes {
-            let attempts: Option<i64> = sqlx::query_scalar(
-                "SELECT attempts FROM mail_outbound_recipients WHERE id = $1 AND outbound_id = $2 \
-                 AND attempt_id = $3 AND status = 'sending'",
+            let row = sqlx::query(
+                "SELECT attempts, workspace_id, address FROM mail_outbound_recipients \
+                 WHERE id = $1 AND outbound_id = $2 AND attempt_id = $3 AND status = 'sending'",
             )
             .bind(recipient_id.to_string())
             .bind(outbound_id.to_string())
             .bind(attempt_id.to_string())
             .fetch_optional(&mut *transaction)
             .await?;
-            let Some(attempts) = attempts else {
+            let Some(row) = row else {
                 continue;
             };
+            let attempts: i64 = row.try_get("attempts")?;
             let (status, response, next, provider_id, kind) = match outcome {
                 AttemptResult::Delivered {
                     provider_message_id,
@@ -1132,7 +1199,7 @@ impl MailRepository {
                  bounce_kind = $5, updated_at = $6 WHERE id = $7",
             )
             .bind(status)
-            .bind(response)
+            .bind(response.clone())
             .bind(next)
             .bind(provider_id)
             .bind(kind.map(BounceKind::as_str))
@@ -1140,32 +1207,23 @@ impl MailRepository {
             .bind(recipient_id.to_string())
             .execute(&mut *transaction)
             .await?;
-        }
-        if bounced {
-            let threads: Vec<String> = sqlx::query_scalar(
-                "SELECT tm.thread_id FROM mail_outbound o \
-                 JOIN mail_thread_messages tm ON tm.message_id = o.message_id \
-                 AND tm.mailbox_id = o.mailbox_id WHERE o.id = $1",
-            )
-            .bind(outbound_id.to_string())
-            .fetch_all(&mut *transaction)
-            .await?;
-            for thread_id in threads {
-                sqlx::query(
-                    "UPDATE mail_threads SET folder = 'inbox', updated_at = $1 \
-                     WHERE id = $2 AND folder = 'archive'",
+            if let (Some(kind), Some(response)) = (kind, &response)
+                && suppresses_response(kind, response)
+            {
+                Self::add_suppression(
+                    &mut transaction,
+                    parse_id(&row.try_get::<String, _>("workspace_id")?)?,
+                    &row.try_get::<String, _>("address")?,
+                    SuppressionReason::HardBounce,
+                    Some(response),
+                    Some(*recipient_id),
+                    now,
                 )
-                .bind(now.as_millis())
-                .bind(&thread_id)
-                .execute(&mut *transaction)
-                .await?;
-                sqlx::query(
-                    "UPDATE mail_thread_user_state SET last_read_at = NULL WHERE thread_id = $1",
-                )
-                .bind(&thread_id)
-                .execute(&mut *transaction)
                 .await?;
             }
+        }
+        if bounced {
+            bounced_thread_to_inbox(&mut transaction, outbound_id, now).await?;
         }
         let done = finish_if_done(&mut transaction, outbound_id, now).await?;
         let next_at = next_due(&mut transaction, outbound_id, now).await?;

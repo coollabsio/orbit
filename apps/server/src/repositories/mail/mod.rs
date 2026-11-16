@@ -22,6 +22,7 @@ mod release;
 mod routes;
 mod search;
 mod signatures;
+mod suppressions;
 mod threads;
 
 use orbit_platform::{Database, Id, TimestampMillis, UploadError, UploadService};
@@ -81,6 +82,10 @@ pub use routes::{
 };
 pub use search::{MailQuery, ThreadCursor, parse_query};
 pub use signatures::{FromAddress, Snippet, UNDO_SEND_SECONDS};
+pub use suppressions::{
+    BOUNCE_TOKEN_TTL_MS, SUPPRESSION_PAGE, Suppression, SuppressionPage, SuppressionReason,
+    bounce_codes, is_bounce_local, suppresses, suppresses_response,
+};
 pub use threads::SEARCH_BODY_BYTES;
 
 #[derive(Debug, Error)]
