@@ -37,6 +37,14 @@ const subscribe = (listener: () => void) => {
 const snapshot = () => pending
 
 /** `Z` undoes the newest send while its toast shows; the command (and its ⌘K entry) exists only then. */
+/** The Undo toast of a sent message. */
+const undoToastId = (outboundId: string) => `mail-sent-${outboundId}`
+
+/** The message was undone elsewhere (the thread's "Undo to edit"): its Undo toast leaves, so it is not undone twice. */
+export function dismissUndoToast(outboundId: string) {
+  toast.dismiss(undoToastId(outboundId))
+}
+
 export function useUndoSendShortcut() {
   const entries = useSyncExternalStore(subscribe, snapshot)
   useCommand('mail.undoSend', () => entries.at(-1)?.undo(), { enabled: entries.length > 0 })
@@ -65,7 +73,7 @@ export function useAnnounceSent() {
         toast.success('Message sent')
         return
       }
-      const id = `mail-sent-${outbound.id}`
+      const id = undoToastId(outbound.id)
       let settled = false
       let timer: ReturnType<typeof setTimeout> | undefined
       // the toast leaves when the message goes (not on Sonner's timer: hovering pauses that one, the server does not wait)

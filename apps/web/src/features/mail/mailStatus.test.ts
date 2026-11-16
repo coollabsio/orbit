@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import { ApiProblem } from '@orbit/api/problem'
-import { bounceReason, deliverySummary, outboxStatus, recipientState, retryErrorText, vacationState } from './mailStatus'
+import { bounceReason, deliverySummary, mayChangeVacation, outboxStatus, recipientState, recipientTag, retryErrorText, vacationState } from './mailStatus'
 
 const recipient = (address: string, status: string, delayed = false) => ({ address, status, delayed })
 
@@ -83,4 +83,18 @@ test('a failed Retry says why: too old, or the server text', () => {
   expect(retryErrorText(problem(409, 'recipient_expired', 'Gone.'))).toBe('This message is too old to retry')
   expect(retryErrorText(problem(409, 'not_retryable', 'Only a bounced recipient can be sent again.'))).toBe('Only a bounced recipient can be sent again.')
   expect(retryErrorText(new Error('network'))).toBe('The message could not be sent again.')
+})
+
+test('a Bcc recipient is labelled Bcc; To and Cc are not', () => {
+  expect(recipientTag('bcc')).toBe('Bcc')
+  expect(recipientTag('to')).toBeNull()
+  expect(recipientTag('cc')).toBeNull()
+})
+
+test('Turn off: the owner of a personal mailbox, or a mail manager for a shared one', () => {
+  expect(mayChangeVacation('personal', { owner: true, canManage: false })).toBe(true)
+  // a manager cannot change someone else's personal vacation
+  expect(mayChangeVacation('personal', { owner: false, canManage: true })).toBe(false)
+  expect(mayChangeVacation('shared', { owner: false, canManage: true })).toBe(true)
+  expect(mayChangeVacation('shared', { owner: false, canManage: false })).toBe(false)
 })

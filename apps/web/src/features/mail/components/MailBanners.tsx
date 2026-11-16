@@ -9,7 +9,7 @@ import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { useSetVacation } from '@/features/mail/api/mutations'
 import { useSendPolicy, useVacation } from '@/features/mail/api/queries'
 import { problemText } from '@/features/mail/mailLib'
-import { vacationState } from '@/features/mail/mailStatus'
+import { mayChangeVacation, vacationState } from '@/features/mail/mailStatus'
 
 /** The vacation reply of one mailbox, while it is on (§9.1 U13), with **Turn off**. */
 function VacationBanner({ mailbox, canManage, several }: { mailbox: MailMeMailbox; canManage: boolean; several: boolean }) {
@@ -19,8 +19,9 @@ function VacationBanner({ mailbox, canManage, several }: { mailbox: MailMeMailbo
   const [now] = useState(() => new Date())
   const data = vacation.data
   if (!data || vacationState(data, now) !== 'on') return null
-  // the owner of a personal mailbox, or a mail manager for a shared one
-  const mayChange = mailbox.kind === 'personal' || canManage
+  // The owner of a personal mailbox, or a mail manager for a shared one. The server reads a personal mailbox's
+  // vacation only for its owner (anyone else gets a 404), so a personal one that loaded is the viewer's own.
+  const mayChange = mayChangeVacation(mailbox.kind, { owner: mailbox.kind === 'personal' && vacation.isSuccess, canManage })
   const until = data.ends_at ? ` until ${fullDate(data.ends_at)}, ${timeOfDay(data.ends_at)}` : ''
   return (
     <Alert data-slot="vacation-banner">

@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test'
-import { applyDraftConflict, frameHeight, mailThreadPath, mailViewPath, parseMailPath, railFolders, searchSuggestions, sentRecipients, threadFilterOf, type MailView } from './mailLib'
+import { ApiProblem } from '@orbit/api/problem'
+import { applyDraftConflict, frameHeight, mailThreadPath, mailViewPath, parseMailPath, railFolders, searchSuggestions, sendingOutboundId, sentRecipients, threadFilterOf, type MailView } from './mailLib'
 
 test('a message frame takes only a finite height from its own window, clamped to 80–20,000 px', () => {
   const frame = { name: 'frame' }
@@ -98,4 +99,13 @@ test('a Sent row names the recipients of the newest message sent', () => {
   expect(sentRecipients(thread(['ana@x.test', 'bob@x.test'], 3))).toBe('To: ana@x.test, bob@x.test +3')
   // nothing sent (or not known): the senders, as in other lists
   expect(sentRecipients(thread([], 0))).toBe('Me')
+})
+
+test('a reply being sent: the 409 names the message to undo', () => {
+  const problem = (code: string, extra: Record<string, unknown> = {}) =>
+    new ApiProblem({ type: 'about:blank', title: 'Conflict', status: 409, code, detail: 'x', instance: '/x', request_id: 'r', ...extra })
+  expect(sendingOutboundId(problem('draft_sending', { outbound_id: 'ob1' }))).toBe('ob1')
+  expect(sendingOutboundId(problem('draft_sending'))).toBeNull()
+  expect(sendingOutboundId(problem('draft_conflict', { outbound_id: 'ob1' }))).toBeNull()
+  expect(sendingOutboundId(new Error('x'))).toBeNull()
 })

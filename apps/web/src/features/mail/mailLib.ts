@@ -245,3 +245,14 @@ export function conflictDraft<T>(error: unknown): T | null {
   const current = (error.problem.conflict as { current?: unknown } | null | undefined)?.current
   return current && typeof current === 'object' ? (current as T) : null
 }
+
+/**
+ * The message a 409 `draft_sending` names: the reply of that thread is held for sending (undo time, scheduled, or a
+ * hold), so no draft can open until it is undone. `null` for any other error. Read untyped: the generated `Problem`
+ * lacks `outbound_id`.
+ */
+export function sendingOutboundId(error: unknown): string | null {
+  if (!(error instanceof ApiProblem) || error.status !== 409 || error.code !== 'draft_sending') return null
+  const id = (error.problem as { outbound_id?: unknown }).outbound_id
+  return typeof id === 'string' && id !== '' ? id : null
+}

@@ -1,7 +1,7 @@
 // The reply at the end of a thread (§9.1 U1): Reply / Reply all / Forward, or R / A / F, open it in place with the
 // focus in the text. No motion: it opens many times a day, mostly from the keyboard. A thread has one draft for each
 // member: a draft left earlier shows as a "Draft" line to continue; one popped out to a window says so.
-import { useImperativeHandle, useLayoutEffect, useRef, useState, type ReactNode, type Ref } from 'react'
+import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type ReactNode, type Ref } from 'react'
 import { ForwardRight, Reply } from 'reicon-react'
 import { toast } from 'sonner'
 import type { MailMessageView } from '@orbit/api/generated/types.gen'
@@ -9,13 +9,14 @@ import { Tip } from '@/components/common/Tip'
 import { Button } from '@/components/ui/button'
 import type { CommandId } from '@/shortcuts/commands'
 import { Shortcut } from '@/shortcuts/Shortcut'
-import { useCreateDraft } from '../api/mutations'
+import { useCancelOutbound, useCreateDraft } from '../api/mutations'
 import { useDrafts } from '../api/queries'
-import { problemText } from '../mailLib'
+import { ApiProblem } from '@orbit/api/problem'
+import { problemText, sendingOutboundId } from '../mailLib'
 import { Composer, type ComposerHandle } from './Composer'
 import { reopenDraft, useArchiveAfterSend, useComposerDock, useInlineReplyHost } from './useComposerDock'
 import { draftText, recipientSummary } from './composeLib'
-import { useAnnounceSent } from './undoSend'
+import { dismissUndoToast, useAnnounceSent } from './undoSend'
 import type { SentHandler } from './useComposerSend'
 
 export type ReplyMode = 'reply' | 'reply_all' | 'forward'
@@ -45,8 +46,15 @@ export function ThreadReply({ threadId, last, ref }: ThreadReplyProps) {
   const composer = useRef<ComposerHandle>(null)
   const box = useRef<HTMLDivElement>(null)
   const actions = useRef<HTMLDivElement>(null)
+  // the reply of this thread is held for sending (undo time, scheduled, a hold): no draft opens until it is undone
+  const [sendingId, setSendingId] = useState<string | null>(null)
+  const cancel = useCancelOutbound()
+  const undoButton = useRef<HTMLButtonElement>(null)
   // Undo of a reply sent from here brings it back here
-  useInlineReplyHost(threadId, setOpenId)
+  useInlineReplyHost(threadId, (draftId) => {
+    setSendingId(null)
+    setOpenId(draftId)
+  })
 
   const saved = drafts.data?.find((draft) => draft.thread_id === threadId)
   const savedInDock = saved !== undefined && dock.windows.some((entry) => entry.draftId === saved.id)
@@ -61,10 +69,47 @@ export function ThreadReply({ threadId, last, ref }: ThreadReplyProps) {
     setOpenId(draftId)
   }
 
-  const start = (mode: ReplyMode, click: boolean) => {
+  /** R / A / F and Continue: one draft per thread, so the server answers with the existing one when there is one. */
+  const start = (mode: string, click: boolean) => {
     if (create.isPending) return
-    // one draft per thread: the server answers with the existing one when there is one
-    create.mutate({ mode, thread_id: threadId }, { onSuccess: (draft) => show(draft.id, click), onError: (error) => toast.error(problemText(error, 'The reply could not be started.')) })
+    create.mutate(
+      { mode, thread_id: threadId },
+      {
+        onSuccess: (draft) => {
+          setSendingId(null)
+          show(draft.id, click)
+        },
+        onError: (error) => {
+          const held = sendingOutboundId(error)
+          if (held) setSendingId(held)
+          else toast.error(problemText(error, 'The reply could not be started.'))
+        },
+      },
+    )
+  }
+
+  // a key that ran into a held reply leads to its Undo
+  useEffect(() => {
+    if (sendingId) undoButton.current?.focus({ preventScroll: true })
+  }, [sendingId])
+
+  /** **Undo to edit**: the same as the send's Undo, the reply comes back here as a draft. */
+  const undoToEdit = () => {
+    if (!sendingId || cancel.isPending) return
+    const outboundId = sendingId
+    cancel.mutate(outboundId, {
+      onSuccess: (draft) => {
+        dismissUndoToast(outboundId)
+        setSendingId(null)
+        reopenDraft(draft, store, 'inline')
+      },
+      onError: (error) => {
+        if (error instanceof ApiProblem && error.code === 'already_sent') {
+          setSendingId(null)
+          toast.error('Too late: the message was already sent.')
+        } else toast.error(problemText(error, 'The message could not be stopped. Check Sent.'))
+      },
+    })
   }
 
   /**
@@ -135,7 +180,7 @@ export function ThreadReply({ threadId, last, ref }: ThreadReplyProps) {
         <button
           type="button"
           className="flex min-w-0 items-baseline gap-2 rounded-xl border bg-card px-4 py-3 text-left text-[0.8125rem] shadow-xs transition-colors duration-100 outline-none hover:bg-muted/40 focus-visible:ring-3 focus-visible:ring-ring/50"
-          onClick={() => show(saved.id, true)}
+          onClick={() => start(saved.mode, true)}
           aria-label="Continue the draft"
         >
           <span className="shrink-0 font-semibold text-destructive">Draft</span>
@@ -148,6 +193,14 @@ export function ThreadReply({ threadId, last, ref }: ThreadReplyProps) {
           Your reply is open in a window.
           <Button size="xs" variant="outline" onClick={() => store.open(saved.id, { animate: true })}>
             Show
+          </Button>
+        </p>
+      ) : null}
+      {sendingId ? (
+        <p role="status" data-slot="reply-sending" className="flex items-center gap-2 text-[0.8125rem] text-muted-foreground">
+          This reply is being sent.
+          <Button ref={undoButton} size="xs" variant="outline" disabled={cancel.isPending} onClick={undoToEdit}>
+            Undo to edit
           </Button>
         </p>
       ) : null}

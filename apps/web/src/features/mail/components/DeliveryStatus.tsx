@@ -13,6 +13,7 @@ import {
   deliverySummary,
   RECIPIENT_LABEL,
   recipientState,
+  recipientTag,
   retryErrorText,
   type RecipientState,
   SUPPRESSED_REASON,
@@ -94,6 +95,9 @@ export function DeliveryStatus({ outboundId, recipients }: { outboundId: string;
               <li key={recipient.id} className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
                 <StateIcon state={recipientNow} />
                 <span className="min-w-0 truncate text-foreground/90">{recipient.address}</span>
+                {recipientTag(recipient.kind) ? (
+                  <span className="rounded border px-1 text-[0.625rem] leading-4 text-muted-foreground">{recipientTag(recipient.kind)}</span>
+                ) : null}
                 <span className={TONE[recipientNow]}>{RECIPIENT_LABEL[recipientNow]}</span>
                 {reason ? (
                   // the server's reply as text, never as HTML

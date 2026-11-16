@@ -1,6 +1,6 @@
 // Delivery of sent mail in plain words (§9.1 U10): the status of each recipient, the summary of a message, why a
 // recipient bounced, why an Outbox message waits, and whether a vacation reply is on.
-import type { MailOutboundRecipient, MailVacation } from '@orbit/api/generated/types.gen'
+import type { MailboxKind, MailOutboundRecipient, MailVacation } from '@orbit/api/generated/types.gen'
 import { ApiProblem } from '@orbit/api/problem'
 
 export type DeliveryLabel = 'Sending' | 'Delivered' | 'Delayed' | 'Bounced' | 'Suppressed' | 'Partly delivered'
@@ -123,4 +123,15 @@ export function vacationState(vacation: Pick<MailVacation, 'enabled' | 'starts_a
 export function retryErrorText(error: unknown): string {
   if (error instanceof ApiProblem && error.code === 'recipient_expired') return 'This message is too old to retry'
   return error instanceof ApiProblem && error.detail ? error.detail : 'The message could not be sent again.'
+}
+
+/** The tag after a recipient's address: Bcc recipients are marked (only the sender sees them). */
+export const recipientTag = (kind: string): 'Bcc' | null => (kind === 'bcc' ? 'Bcc' : null)
+
+/**
+ * Who may change a mailbox's vacation reply (the server's rule): a personal mailbox only its owner, a shared one a
+ * member with `mail.manage`.
+ */
+export function mayChangeVacation(kind: MailboxKind, viewer: { owner: boolean; canManage: boolean }): boolean {
+  return kind === 'personal' ? viewer.owner : viewer.canManage
 }
