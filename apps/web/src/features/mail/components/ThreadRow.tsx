@@ -7,7 +7,7 @@ import { UserAvatar } from '@/components/common/UserAvatar'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { relativeTime } from '@/lib/format'
-import { personName, threadSenders } from '@/features/mail/mailLib'
+import { personName, sentRecipients, threadSenders } from '@/features/mail/mailLib'
 
 interface ThreadRowProps {
   thread: MailThreadSummary
@@ -19,7 +19,7 @@ interface ThreadRowProps {
   selecting: boolean
   /** The user has a draft in this thread: a red "Draft" (§9.1 U9). */
   draft?: boolean
-  /** The Sent list: the time is that of the last message sent. */
+  /** The Sent list: the recipients and the time of the last message sent. */
   sentView?: boolean
   onOpen: (threadId: string) => void
   onSelect: (threadId: string) => void
@@ -30,6 +30,7 @@ interface ThreadRowProps {
 export function ThreadRow({ thread, labels, active, focused, selected, selecting, draft = false, sentView = false, onOpen, onSelect, onStar }: ThreadRowProps) {
   const chips = thread.labels.flatMap((id) => labels.get(id) ?? [])
   const time = (sentView && thread.last_sent_at) || thread.last_message_at
+  const who = sentView ? sentRecipients(thread) : threadSenders(thread)
   return (
     <div
       data-slot="mail-thread-row"
@@ -41,7 +42,7 @@ export function ThreadRow({ thread, labels, active, focused, selected, selecting
       data-unread={thread.unread || undefined}
       role="button"
       tabIndex={0}
-      aria-label={`${thread.unread ? 'Unread, ' : ''}${threadSenders(thread)}: ${thread.subject || '(no subject)'}${draft ? ', draft' : ''}`}
+      aria-label={`${thread.unread ? 'Unread, ' : ''}${who}: ${thread.subject || '(no subject)'}${draft ? ', draft' : ''}`}
       onClick={() => onOpen(thread.id)}
       onKeyDown={(event) => {
         if (event.key === 'Enter' && event.target === event.currentTarget) onOpen(thread.id)
@@ -52,7 +53,7 @@ export function ThreadRow({ thread, labels, active, focused, selected, selecting
       </span>
       <span className="relative flex size-8 shrink-0 items-center justify-center" onClick={(event) => event.stopPropagation()}>
         <span className="group-data-selecting/row:invisible hover-fine:group-hover/row:invisible">
-          <UserAvatar user={null} name={personName(thread.from[0])} size={32} />
+          <UserAvatar user={null} name={(sentView && thread.sent_to[0]) || personName(thread.from[0])} size={32} />
         </span>
         <span className="invisible absolute inset-0 flex items-center justify-center group-data-selecting/row:visible hover-fine:group-hover/row:visible">
           <Checkbox aria-label="Select conversation" checked={selected} onCheckedChange={() => onSelect(thread.id)} />
@@ -61,7 +62,7 @@ export function ThreadRow({ thread, labels, active, focused, selected, selecting
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <div className="flex items-baseline gap-2">
           <span className="min-w-0 truncate text-[0.8125rem] font-normal text-foreground group-data-unread/row:font-semibold">
-            {threadSenders(thread)}
+            {who}
             {thread.message_count > 1 ? <span className="ml-1 text-xs font-normal text-muted-foreground/70">{thread.message_count}</span> : null}
           </span>
           {draft ? <span className="shrink-0 text-[0.8125rem] font-normal text-destructive">Draft</span> : null}

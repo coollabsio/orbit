@@ -44,7 +44,7 @@ export const mailKeys = {
   fromAddresses: (workspaceId: string, threadId?: string) => ['mail', workspaceId, 'from-addresses', threadId ?? null] as const,
   /** Prefix of every outbound view (`scheduled`, `outbox`). */
   outboundAll: (workspaceId: string) => ['mail', workspaceId, 'outbound'] as const,
-  outbound: (workspaceId: string, view: OutboundView) => ['mail', workspaceId, 'outbound', view] as const,
+  outbound: (workspaceId: string, view: OutboundView, mailboxId?: string) => ['mail', workspaceId, 'outbound', view, mailboxId ?? null] as const,
   contacts: (workspaceId: string, query: string) => ['mail', workspaceId, 'contacts', query] as const,
   signatures: (workspaceId: string) => ['mail', workspaceId, 'signatures'] as const,
   snippets: (workspaceId: string) => ['mail', workspaceId, 'snippets'] as const,

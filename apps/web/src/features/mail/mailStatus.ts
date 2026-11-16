@@ -1,6 +1,7 @@
 // Delivery of sent mail in plain words (§9.1 U10): the status of each recipient, the summary of a message, why a
 // recipient bounced, why an Outbox message waits, and whether a vacation reply is on.
 import type { MailOutboundRecipient, MailVacation } from '@orbit/api/generated/types.gen'
+import { ApiProblem } from '@orbit/api/problem'
 
 export type DeliveryLabel = 'Sending' | 'Delivered' | 'Delayed' | 'Bounced' | 'Suppressed' | 'Partly delivered'
 
@@ -116,4 +117,10 @@ export function vacationState(vacation: Pick<MailVacation, 'enabled' | 'starts_a
   if (vacation.ends_at && new Date(vacation.ends_at).getTime() <= now.getTime()) return 'off'
   if (vacation.starts_at && new Date(vacation.starts_at).getTime() > now.getTime()) return 'scheduled'
   return 'on'
+}
+
+/** Why **Retry** failed: a purged recipient (after 90 days) is too old; else the server's text. */
+export function retryErrorText(error: unknown): string {
+  if (error instanceof ApiProblem && error.code === 'recipient_expired') return 'This message is too old to retry'
+  return error instanceof ApiProblem && error.detail ? error.detail : 'The message could not be sent again.'
 }

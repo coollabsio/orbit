@@ -173,9 +173,15 @@ export function searchSuggestions(query: string, known: { labels: readonly strin
 export const personName = (person: MailPerson | null | undefined) => person?.name?.trim() || person?.address || 'Unknown sender'
 
 /** The senders of a list row: first names when there are several. */
-export function threadSenders(thread: MailThreadSummary): string {
+export function threadSenders(thread: Pick<MailThreadSummary, 'from'>): string {
   if (thread.from.length <= 1) return personName(thread.from[0])
   return thread.from.map((person) => personName(person).split(/\s+/)[0]).join(', ')
+}
+
+/** The Sent list's row: the recipients of the newest message sent ("To: ana@x.test, bob@x.test +3"), else the senders. */
+export function sentRecipients(thread: Pick<MailThreadSummary, 'sent_to' | 'sent_to_more' | 'from'>): string {
+  if (thread.sent_to.length === 0) return threadSenders(thread)
+  return `To: ${thread.sent_to.join(', ')}${thread.sent_to_more > 0 ? ` +${thread.sent_to_more}` : ''}`
 }
 
 /** The first line of text, for a collapsed message. */

@@ -14,6 +14,7 @@ import { useSetSenderPref } from '@/features/mail/api/mutations'
 import { useRawMessage } from '@/features/mail/api/queries'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { firstLine, mailAttachment, personName, problemText, rawMessageUrl } from '@/features/mail/mailLib'
+import { DeliveryStatus } from './DeliveryStatus'
 import { FileLinks } from './FileLinks'
 import { MailHtmlFrame } from './MailHtmlFrame'
 import { SafetyBanner } from './SafetyBanner'
@@ -137,6 +138,7 @@ export function MessageItem({ threadId, message, expanded, onToggle, onPrint }: 
             {message.cc.length > 0 ? <span className="truncate">Cc: {people(message.cc)}</span> : null}
             {message.sender ? <span className="truncate">Sent by {message.sender}</span> : null}
           </div>
+          {message.delivery ? <DeliveryStatus outboundId={message.delivery.outbound_id} recipients={message.delivery.recipients} /> : null}
           <SafetyBanner message={message} />
           {offerImages ? (
             <div data-print-hide="" className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border px-2.5 py-1.5 text-[0.8125rem] text-muted-foreground">

@@ -7,13 +7,13 @@ import { InfoTip } from '@/components/common/InfoTip'
 import { Tip } from '@/components/common/Tip'
 import { Button } from '@/components/ui/button'
 import { useRetryRecipient } from '@/features/mail/api/mutations'
-import { problemText } from '@/features/mail/mailLib'
 import {
   bounceReason,
   type DeliveryLabel,
   deliverySummary,
   RECIPIENT_LABEL,
   recipientState,
+  retryErrorText,
   type RecipientState,
   SUPPRESSED_REASON,
 } from '@/features/mail/mailStatus'
@@ -118,7 +118,7 @@ export function DeliveryStatus({ outboundId, recipients }: { outboundId: string;
                           { outboundId, recipientId: recipient.id },
                           {
                             onSuccess: () => toast(`Sending to ${recipient.address} again.`),
-                            onError: (error) => toast.error(problemText(error, 'The message could not be sent again.')),
+                            onError: (error) => toast.error(retryErrorText(error)),
                           },
                         )
                       }

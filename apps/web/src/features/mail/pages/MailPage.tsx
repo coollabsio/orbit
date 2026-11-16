@@ -16,7 +16,7 @@ import { MailSearch } from '@/features/mail/components/MailSearch'
 import { DraftList, OutboundList } from '@/features/mail/components/SendLists'
 import { ThreadList } from '@/features/mail/components/ThreadList'
 import { LabelMenu, ThreadView, type LabelState } from '@/features/mail/components/ThreadView'
-import { useArchiveNextHost, useNewEmail } from '@/features/mail/compose/useComposerDock'
+import { reopenDraft, useArchiveNextHost, useComposerDock, useNewEmail } from '@/features/mail/compose/useComposerDock'
 import type { ReplyMode, ThreadReplyHandle } from '@/features/mail/compose/ThreadReply'
 import {
   FOLDERS,
@@ -76,9 +76,17 @@ function MailApp({ view, threadId }: { view: MailView; threadId: string | null }
   // a send folder has no threads (the idle list query may hold another folder's cached rows)
   const threads = sendView ? [] : (source.data ?? [])
   const detail = useThread(threadId)
+  // with a mailbox open, the send folders are that mailbox's
+  const scope = view.kind === 'folder' ? view.mailboxId : undefined
   const drafts = useDrafts()
-  const scheduled = useOutbound('scheduled', sendView === 'scheduled')
-  const outbox = useOutbound('outbox')
+  const scheduled = useOutbound('scheduled', scope, sendView === 'scheduled')
+  const outbox = useOutbound('outbox', scope)
+  // last changed first
+  const scopedDrafts = (drafts.data ?? []).filter((draft) => !scope || draft.mailbox_id === scope).sort((a, b) => b.updated_at.localeCompare(a.updated_at))
+  const outboundItems = (sendView === 'scheduled' ? scheduled.data : outbox.data) ?? []
+  // the rows j / k move through in a send folder (`null`: the thread list's)
+  const sendRowIds = sendView === 'drafts' ? scopedDrafts.map((draft) => draft.id) : sendView ? outboundItems.map((item) => item.id) : null
+  const { store: dock } = useComposerDock()
   const update = useUpdateThread()
   const bulk = useBulkUpdateThreads()
   const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set())
@@ -176,6 +184,12 @@ function MailApp({ view, threadId }: { view: MailView; threadId: string | null }
     })
 
   const move = (step: 1 | -1) => {
+    if (sendRowIds) {
+      if (sendRowIds.length === 0) return
+      const current = focusedId ? sendRowIds.indexOf(focusedId) : -1
+      setFocusedId(sendRowIds[current < 0 ? 0 : Math.min(sendRowIds.length - 1, Math.max(0, current + step))])
+      return
+    }
     if (threads.length === 0) return
     const current = threads.findIndex((thread) => thread.id === (focusedId ?? threadId))
     const index = current < 0 ? 0 : Math.min(threads.length - 1, Math.max(0, current + step))
@@ -190,8 +204,16 @@ function MailApp({ view, threadId }: { view: MailView; threadId: string | null }
 
   useCommand('mail.down', () => move(1))
   useCommand('mail.up', () => move(-1))
-  useCommand('mail.open', () => focusedId && open(focusedId), { available: () => focusedId !== null })
-  useCommand('mail.openEnter', () => focusedId && open(focusedId), { available: () => focusedId !== null && focusedId !== threadId && !focusOnControl() })
+  // in Drafts, o / Enter continue the focused draft (a key: the window opens without motion); Scheduled and Outbox
+  // rows open nothing
+  const focusedDraft = sendView === 'drafts' ? scopedDrafts.find((draft) => draft.id === focusedId) : undefined
+  const openFocused = () => {
+    if (focusedDraft) reopenDraft(focusedDraft, dock, 'inline')
+    else if (!sendView && focusedId) open(focusedId)
+  }
+  const canOpenFocused = () => (sendView ? focusedDraft !== undefined : focusedId !== null)
+  useCommand('mail.open', openFocused, { available: canOpenFocused })
+  useCommand('mail.openEnter', openFocused, { available: () => canOpenFocused() && focusedId !== threadId && !focusOnControl() })
   useCommand(
     'mail.close',
     () => {
@@ -211,7 +233,7 @@ function MailApp({ view, threadId }: { view: MailView; threadId: string | null }
   useCommand('mail.select', () => {
     const id = focusedId ?? threadId
     if (id) toggleSelect(id)
-  }, { available: () => (focusedId ?? threadId) !== null })
+  }, { available: () => !sendView && (focusedId ?? threadId) !== null })
   useCommand('mail.search', () => searchInput.current?.focus())
   useCommand('mail.compose', () => void newEmail(), { enabled: mailboxes.length > 0 })
   const reply = (mode: ReplyMode) => {
@@ -223,7 +245,7 @@ function MailApp({ view, threadId }: { view: MailView; threadId: string | null }
     }
   }
   // with a thread open its messages must be there; in the list, a row must have the focus
-  const canReply = () => (threadId ? detail.data !== undefined : focusedId !== null)
+  const canReply = () => (threadId ? detail.data !== undefined : !sendView && focusedId !== null)
   useCommand('mail.reply', () => reply('reply'), { available: canReply })
   useCommand('mail.replyAll', () => reply('reply_all'), { available: canReply })
   useCommand('mail.forward', () => reply('forward'), { available: canReply })
@@ -291,16 +313,13 @@ function MailApp({ view, threadId }: { view: MailView; threadId: string | null }
     )
   }
 
-  const scope = view.kind === 'folder' ? view.mailboxId : undefined
   const inScope = scope ? mailboxes.filter((mailbox) => mailbox.id === scope) : mailboxes
   const sendSource = sendView === 'drafts' ? drafts : sendView === 'scheduled' ? scheduled : sendView === 'outbox' ? outbox : null
-  const scopedDrafts = (drafts.data ?? []).filter((draft) => !scope || draft.mailbox_id === scope)
-  const outboundItems = (sendView === 'scheduled' ? scheduled.data : outbox.data) ?? []
   const sendRows =
     sendView === 'drafts'
-      ? { count: scopedDrafts.length, content: <DraftList drafts={scopedDrafts} /> }
+      ? { count: scopedDrafts.length, content: <DraftList drafts={scopedDrafts} focusedId={focusedId} onFocus={setFocusedId} /> }
       : sendView
-        ? { count: outboundItems.length, content: <OutboundList view={sendView} items={outboundItems} /> }
+        ? { count: outboundItems.length, content: <OutboundList view={sendView} items={outboundItems} focusedId={focusedId} onFocus={setFocusedId} /> }
         : undefined
   const people = [...new Set(threads.flatMap((thread) => thread.from.map((person) => person.address)))]
   const picked = threads.filter((thread) => selected.has(thread.id))

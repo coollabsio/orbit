@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test'
-import { bounceReason, deliverySummary, outboxStatus, recipientState, vacationState } from './mailStatus'
+import { ApiProblem } from '@orbit/api/problem'
+import { bounceReason, deliverySummary, outboxStatus, recipientState, retryErrorText, vacationState } from './mailStatus'
 
 const recipient = (address: string, status: string, delayed = false) => ({ address, status, delayed })
 
@@ -74,4 +75,12 @@ test('a vacation reply is on between its start and its end', () => {
   // the end is exclusive
   expect(vacationState({ ...vacation, ends_at: '2026-11-16T10:00:00Z' }, now)).toBe('off')
   expect(vacationState({ ...vacation, ends_at: '2026-11-20T00:00:00Z' }, now)).toBe('on')
+})
+
+test('a failed Retry says why: too old, or the server text', () => {
+  const problem = (status: number, code: string, detail: string) =>
+    new ApiProblem({ type: 'about:blank', title: 'x', status, code, detail, instance: '/x', request_id: 'r' })
+  expect(retryErrorText(problem(409, 'recipient_expired', 'Gone.'))).toBe('This message is too old to retry')
+  expect(retryErrorText(problem(409, 'not_retryable', 'Only a bounced recipient can be sent again.'))).toBe('Only a bounced recipient can be sent again.')
+  expect(retryErrorText(new Error('network'))).toBe('The message could not be sent again.')
 })

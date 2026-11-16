@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { applyDraftConflict, frameHeight, mailThreadPath, mailViewPath, parseMailPath, railFolders, searchSuggestions, threadFilterOf, type MailView } from './mailLib'
+import { applyDraftConflict, frameHeight, mailThreadPath, mailViewPath, parseMailPath, railFolders, searchSuggestions, sentRecipients, threadFilterOf, type MailView } from './mailLib'
 
 test('a message frame takes only a finite height from its own window, clamped to 80–20,000 px', () => {
   const frame = { name: 'frame' }
@@ -90,4 +90,12 @@ test('the rail shows the Outbox only while it has something', () => {
   const names = (showOutbox: boolean) => railFolders(showOutbox).map(({ folder }) => folder)
   expect(names(false)).toEqual(['drafts', 'sent', 'scheduled', 'archive', 'spam', 'trash'])
   expect(names(true)).toEqual(['drafts', 'sent', 'scheduled', 'outbox', 'archive', 'spam', 'trash'])
+})
+
+test('a Sent row names the recipients of the newest message sent', () => {
+  const thread = (sent_to: string[], sent_to_more: number) => ({ sent_to, sent_to_more, from: [{ address: 'me@x.test', name: 'Me' }] })
+  expect(sentRecipients(thread(['ana@x.test'], 0))).toBe('To: ana@x.test')
+  expect(sentRecipients(thread(['ana@x.test', 'bob@x.test'], 3))).toBe('To: ana@x.test, bob@x.test +3')
+  // nothing sent (or not known): the senders, as in other lists
+  expect(sentRecipients(thread([], 0))).toBe('Me')
 })

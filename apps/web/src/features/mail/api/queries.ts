@@ -369,14 +369,16 @@ export async function fetchDraftFile(workspaceId: string, draftId: string, fileI
   return data as unknown as Blob
 }
 
-/** Scheduled or waiting (outbox) messages of the user, with why they wait; live through `thread.updated`. */
-export function useOutbound(view: OutboundView, enabled = true) {
+/** Scheduled or waiting (outbox) messages of the user (of one mailbox, or all), with why they wait; live through `thread.updated`. */
+export function useOutbound(view: OutboundView, mailboxId?: string, enabled = true) {
   const workspaceId = useWorkspaceId()
   return useQuery({
     enabled,
-    queryKey: mailKeys.outbound(workspaceId, view),
+    queryKey: mailKeys.outbound(workspaceId, view, mailboxId),
     queryFn: async () =>
-      required((await listMailOutbound({ client: apiClient, path: { workspace_id: workspaceId }, query: { view }, throwOnError: true })).data),
+      required(
+        (await listMailOutbound({ client: apiClient, path: { workspace_id: workspaceId }, query: { view, mailbox_id: mailboxId }, throwOnError: true })).data,
+      ),
     staleTime: LIVE_STALE_MS,
   })
 }
