@@ -202,13 +202,15 @@ export const rawMessageUrl = (workspaceId: string, messageId: string) =>
 export const problemText = (error: unknown, fallback: string) => (error instanceof ApiProblem && error.detail ? error.detail : fallback)
 
 /** The fields of a draft the user edits. */
-const DRAFT_TEXT_FIELDS = ['subject', 'body_html', 'to', 'cc', 'bcc'] as const
+const DRAFT_TEXT_FIELDS = ['subject', 'body_html', 'to', 'cc', 'bcc', 'from_address_id', 'mode'] as const
 export interface DraftText {
   subject?: string
   body_html?: string
   to?: string[]
   cc?: string[]
   bcc?: string[]
+  from_address_id?: string
+  mode?: string
 }
 
 /**

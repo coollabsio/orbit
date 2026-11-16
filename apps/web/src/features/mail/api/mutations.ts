@@ -1,4 +1,4 @@
-import { type QueryClient, type QueryKey, useMutation, useQueryClient } from '@tanstack/react-query'
+import { hashKey, type QueryClient, type QueryKey, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { apiClient } from '@/api/client'
 import {
@@ -45,7 +45,6 @@ import type {
   MailDraft,
   MailOutbound,
   SendMailDraftBody,
-  UpdateMailDraftBody,
   CreateMailLabelBody,
   CreateMailProviderBody,
   CreatePersonalMailboxesBody,
@@ -61,7 +60,8 @@ import { queryKeys } from '@/api/queryKeys'
 import { useContext } from 'react'
 import { useWorkspace, WorkspaceContext } from '@/features/workspaces/workspaceContext'
 import { ApiProblem } from '@orbit/api/problem'
-import { applyDraftConflict, conflictDraft, type DraftText } from '../mailLib'
+import { conflictDraft, type DraftText } from '../mailLib'
+import { createDraftSaver, type DraftSaver, type DraftSaverState } from './draftSaver'
 import { mailKeys } from './keys'
 import type { ProviderScope } from './queries'
 import { applyThreadChange, type MailSnapshot, reconcileThreads, restoreMailSnapshot, type ThreadChange } from './optimistic'
@@ -550,94 +550,72 @@ export function useDeleteDraft() {
 /** The wait before a change is saved: typing makes one save, not one per key. */
 export const DRAFT_SAVE_DELAY_MS = 2000
 
-type DraftChange = DraftText & Pick<UpdateMailDraftBody, 'from_address_id' | 'mode'>
-
-/** What a save ended with, when it did not save. */
-export type DraftSaveProblem = 'sending' | 'error'
+const INITIAL_SAVE_STATE: DraftSaverState = { saving: false, problem: null, restore: null }
 
 /**
- * Debounced autosave of one draft (`save(change)` waits 2 s after the last call; `flush()` saves at once, as on
- * close). Every save sends the `version` it was made from. On 409 `draft_conflict` the server copy replaces the
- * cached draft and the text the user typed waits in `restore` (the "Restore my text" banner: `applyRestore()` puts it
- * back as a new change, `dismissRestore()` drops it). On 409 `draft_sending` (the draft was sent) saving stops.
+ * Debounced autosave of one draft (the state machine is `createDraftSaver`). `save(change)` waits 2 s after the last
+ * call; `flush()` saves at once. Every save sends the `version` of the cached draft. On 409 `draft_conflict` the server
+ * copy replaces the cached draft and the user's text waits in `restore` (the "Restore my text" banner:
+ * `applyRestore()` puts it back as a change, `dismissRestore()` drops it). On 409 `draft_sending` the text goes to
+ * `restore` too and saving holds until the cached draft is replaced (Undo). Closing the editor saves what is left once.
+ * A draft that is no longer cached (sent) is not saved.
  */
 export function useSaveDraft(draftId: string | null | undefined) {
   const queryClient = useQueryClient()
   const workspaceId = useWorkspaceId()
-  const pending = useRef<DraftChange>({})
-  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-  const running = useRef(false)
-  const stopped = useRef(false)
-  const [saving, setSaving] = useState(false)
-  const [restore, setRestore] = useState<DraftText | null>(null)
-  const [problem, setProblem] = useState<DraftSaveProblem | null>(null)
+  const [state, setState] = useState<DraftSaverState>(INITIAL_SAVE_STATE)
+  const saver = useRef<DraftSaver | null>(null)
 
-  const run = useCallback(async () => {
-    if (!draftId || running.current || stopped.current || Object.keys(pending.current).length === 0) return
-    running.current = true
-    setSaving(true)
-    const change = pending.current
-    pending.current = {}
+  useEffect(() => {
+    if (!draftId) return
     const key = mailKeys.draft(workspaceId, draftId)
-    const cached = queryClient.getQueryData<MailDraft>(key)
-    let failed = false
-    try {
-      if (!cached) throw new Error('The draft is not loaded.')
-      const body: UpdateMailDraftBody = { ...change, version: cached.version }
-      const draft = required((await updateMailDraft({ client: apiClient, path: { workspace_id: workspaceId, draft_id: draftId }, body, throwOnError: true })).data)
-      queryClient.setQueryData(key, draft)
-      setProblem(null)
-    } catch (error) {
-      const current = conflictDraft<MailDraft>(error)
-      if (current) {
-        const result = applyDraftConflict(change, current)
-        queryClient.setQueryData(key, result.draft)
-        // changes typed during the save are unsaved too: they are part of the text to restore
-        const unsaved = { ...change, ...pending.current }
-        pending.current = {}
-        setRestore(applyDraftConflict(unsaved, current).restore)
-      } else if (error instanceof ApiProblem && error.status === 409 && error.code === 'draft_sending') {
-        stopped.current = true
-        pending.current = {}
-        setProblem('sending')
-      } else {
-        // keep the text for the next try; newer changes win
-        pending.current = { ...change, ...pending.current }
-        failed = true
-        setProblem('error')
-      }
-    } finally {
-      running.current = false
-      setSaving(false)
+    const hash = hashKey(key)
+    const instance = createDraftSaver<MailDraft>({
+      read: () => queryClient.getQueryData<MailDraft>(key),
+      write: (draft) => queryClient.setQueryData(key, draft),
+      send: async (change, version) =>
+        required(
+          (
+            await updateMailDraft({
+              client: apiClient,
+              path: { workspace_id: workspaceId, draft_id: draftId },
+              body: { ...change, version },
+              throwOnError: true,
+            })
+          ).data,
+        ),
+      classify: (error) => {
+        const current = conflictDraft<MailDraft>(error)
+        if (current) return { kind: 'conflict', current }
+        if (error instanceof ApiProblem && error.status === 409 && error.code === 'draft_sending') return { kind: 'sending' }
+        return { kind: 'other' }
+      },
+      onState: setState,
+      onSaved: () => void queryClient.invalidateQueries({ queryKey: mailKeys.draftsAll(workspaceId) }),
+      setTimer: (run, ms) => setTimeout(run, ms),
+      clearTimer: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+      delayMs: DRAFT_SAVE_DELAY_MS,
+    })
+    saver.current = instance
+    // the cached draft was replaced (Undo seeds it again): a held or stopped saver goes on
+    const unsubscribe = queryClient.getQueryCache().subscribe((event) => {
+      if (event.type === 'updated' && event.action.type === 'success' && event.query.queryHash === hash) instance.reset()
+    })
+    return () => {
+      unsubscribe()
+      instance.dispose()
+      if (saver.current === instance) saver.current = null
     }
-    if (Object.keys(pending.current).length > 0 && !stopped.current && !failed) timer.current = setTimeout(() => void run(), DRAFT_SAVE_DELAY_MS)
   }, [draftId, queryClient, workspaceId])
 
-  const flush = useCallback(async () => {
-    clearTimeout(timer.current)
-    timer.current = undefined
-    await run()
-  }, [run])
-
-  const save = useCallback(
-    (change: DraftChange) => {
-      pending.current = { ...pending.current, ...change }
-      clearTimeout(timer.current)
-      timer.current = setTimeout(() => void run(), DRAFT_SAVE_DELAY_MS)
-    },
-    [run],
-  )
-
-  // a draft that was closed saves what is left (the timer must not outlive the editor silently)
-  useEffect(() => () => clearTimeout(timer.current), [])
-
-  const applyRestore = useCallback(() => {
-    if (!restore) return
-    setRestore(null)
-    save(restore)
-  }, [restore, save])
-
-  return { save, flush, saving, problem, restore, applyRestore, dismissRestore: () => setRestore(null) }
+  return {
+    ...state,
+    save: useCallback((change: DraftText) => saver.current?.save(change), []),
+    flush: useCallback(async () => saver.current?.flush(), []),
+    stop: useCallback(() => saver.current?.stop(), []),
+    applyRestore: useCallback(() => saver.current?.applyRestore(), []),
+    dismissRestore: useCallback(() => saver.current?.dismissRestore(), []),
+  }
 }
 
 /** Sends a draft: after the undo time, or at `scheduled_at`. The answer says when it goes. */
