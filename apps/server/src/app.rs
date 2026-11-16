@@ -389,12 +389,25 @@ impl App {
             config.mail.hostname.clone(),
             config.mail.mode,
         );
+        // One context for each `allow_private` (each has its own HTTP client): workspace routes
+        // and direct sending reach public addresses only; an instance relay may be private.
+        let send_resolver: Arc<dyn crate::mail_send::MxLookup> =
+            Arc::new(HickoryDns::new(config.mail.dns_resolver));
         let send_jobs = crate::mail_send::SendJobState {
             mail: Arc::clone(&mail),
             delivery: crate::mail_send::DeliveryContext::new(
                 config.mail.hostname.clone(),
-                Arc::new(HickoryDns::new(config.mail.dns_resolver)),
+                Arc::clone(&send_resolver),
                 false,
+            ),
+            instance_delivery: crate::mail_send::DeliveryContext::new(
+                config.mail.hostname.clone(),
+                send_resolver,
+                true,
+            ),
+            intake: MailIntake::new(
+                Arc::clone(&mail),
+                config.mail.max_message_bytes + TRACE_HEADROOM,
             ),
             live: crate::live::LiveHub::of(&database),
         };
@@ -1390,6 +1403,9 @@ async fn initialize_production_services(
                         .await
                         .map_err(|error| JobError::Retryable(error.to_string()))?;
                     mail.sweep_releases(now)
+                        .await
+                        .map_err(|error| JobError::Retryable(error.to_string()))?;
+                    mail.sweep_deliveries(now)
                         .await
                         .map(|_| ())
                         .map_err(|error| JobError::Retryable(error.to_string()))

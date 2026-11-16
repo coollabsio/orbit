@@ -49,7 +49,11 @@ pub use mailboxes::{
     AddressKind, BulkResult, MailAddress, Mailbox, MailboxKind, MailboxStatus, NamePattern,
     NewMailbox, Proposal, RecipientLookup, local_part_for, lookup_recipient,
 };
-pub use outbound::{Outbound, OutboundItem, OutboundView, SEND_JOB, mail_send_kind};
+pub use outbound::{
+    Claim, DELAYED_AFTER_MS, GAVE_UP, Outbound, OutboundDelivery, OutboundItem, OutboundView,
+    RETRY_STEPS_MS, RecipientRow, RecipientStatus, Recorded, SEND_JOB, SENDING_LEASE_MS,
+    ThreadAudience, mail_send_kind,
+};
 pub use providers::{
     CreatedProvider, MailProvider, NewProvider, NewRejection, ProviderChange, ProviderKind,
     ProviderScope, ProviderSecrets, ProviderSettings, REJECTED_RETENTION_MS, RejectReason,
@@ -150,6 +154,18 @@ impl MailRepository {
     /// The app key, for keys derived from it (mail view URLs).
     pub(crate) fn app_key(&self) -> &[u8; 32] {
         &self.app_key
+    }
+
+    /// The key of the bounce tokens in envelope senders (`bounce+{token}@domain`, spec §5.7):
+    /// HMAC-SHA256 of the label `orbit-bounce-token-v1` with the app key. Sending makes tokens
+    /// with it and the bounce handler reads them with it.
+    #[must_use]
+    pub fn bounce_key(&self) -> [u8; 32] {
+        use hmac::{Hmac, Mac};
+        let mut mac = Hmac::<sha2::Sha256>::new_from_slice(&self.app_key)
+            .expect("HMAC takes a key of any length");
+        mac.update(b"orbit-bounce-token-v1");
+        mac.finalize().into_bytes().into()
     }
 }
 

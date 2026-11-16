@@ -7,6 +7,7 @@
 //! host name is used only for TLS (SNI and the certificate check), so a name that changes between
 //! the check and the connection (DNS rebinding) cannot reach another address.
 
+mod deliver;
 mod direct;
 mod http;
 mod release;
@@ -23,6 +24,8 @@ use crate::repositories::mail::{
     HostClass, RouteSecrets, RouteSettings, SendRoute, SendRouteKind, classify_ip,
 };
 
+pub use crate::repositories::mail::{DELAYED_AFTER_MS, GAVE_UP, RETRY_STEPS_MS, SENDING_LEASE_MS};
+pub use deliver::{NextRun, deliver_due};
 pub use http::{api_base, delivery_http_client};
 pub use release::{SendJobState, release_failure, run_send_job, send_job_outbound};
 
@@ -156,6 +159,8 @@ pub struct DeliveryContext {
     /// Built with [`delivery_http_client`] for `allow_private`, so the two always agree.
     http: reqwest::Client,
     allow_private: bool,
+    /// Tests: the adapter of every route.
+    adapter: Option<Arc<dyn Delivery>>,
 }
 
 impl DeliveryContext {
@@ -170,7 +175,16 @@ impl DeliveryContext {
             resolver,
             http: delivery_http_client(allow_private),
             allow_private,
+            adapter: None,
         }
+    }
+
+    /// Sends every route through `adapter` (tests); the checks of [`adapter_for`] still apply.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn with_adapter(mut self, adapter: Arc<dyn Delivery>) -> Self {
+        self.adapter = Some(adapter);
+        self
     }
 
     #[must_use]
@@ -190,7 +204,9 @@ pub fn adapter_for(
         .ok()
         .filter(|bytes| *bytes > 0)
         .unwrap_or_else(|| usize::try_from(route.kind.default_max_bytes()).unwrap_or(usize::MAX));
-    let inner: Box<dyn Delivery> = if secrets.fits(route.kind) {
+    let inner: Box<dyn Delivery> = if let Some(adapter) = &ctx.adapter {
+        Box::new(Shared(Arc::clone(adapter)))
+    } else if secrets.fits(route.kind) {
         match route.kind {
             SendRouteKind::Direct => Box::new(direct::Direct::new(ctx)),
             SendRouteKind::Smtp
@@ -269,6 +285,18 @@ impl Delivery for Checked {
             ordered.extend(outcomes);
             ordered
         })
+    }
+}
+
+/// An adapter given to [`DeliveryContext::with_adapter`].
+struct Shared(Arc<dyn Delivery>);
+
+impl Delivery for Shared {
+    fn deliver<'a>(
+        &'a self,
+        outgoing: &'a Outgoing<'a>,
+    ) -> BoxFuture<'a, Vec<(String, RecipientOutcome)>> {
+        self.0.deliver(outgoing)
     }
 }
 

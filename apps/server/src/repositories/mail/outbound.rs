@@ -484,3 +484,682 @@ impl MailRepository {
             .collect()
     }
 }
+
+// ---- Delivery (spec §5.3 steps 5–7, §5.4) ----
+
+/// The waits after each deferred attempt: 1 m, 5 m, 15 m, 30 m, 1 h, 2 h, 4 h, 8 h, 12 h, 24 h,
+/// 24 h, 24 h (RFC 5321 §4.5.4.1). A recipient deferred again after the last one has bounced
+/// ([`GAVE_UP`]).
+pub const RETRY_STEPS_MS: [i64; 12] = [
+    60_000,
+    5 * 60_000,
+    15 * 60_000,
+    30 * 60_000,
+    3_600_000,
+    2 * 3_600_000,
+    4 * 3_600_000,
+    8 * 3_600_000,
+    12 * 3_600_000,
+    24 * 3_600_000,
+    24 * 3_600_000,
+    24 * 3_600_000,
+];
+/// A deferred recipient whose first attempt (`released_at`) is older than this shows **Delayed**.
+pub const DELAYED_AFTER_MS: i64 = 4 * 3_600_000;
+/// A recipient that stays `sending` longer than this was left by a worker that stopped between
+/// the claim and the result: it is deferred and sent again (at least once, spec §5.4). Longer
+/// than the slowest adapter (SMTP: 60 s to connect, 5 min a command, 15 min for the data).
+pub const SENDING_LEASE_MS: i64 = 30 * 60_000;
+/// The response of a recipient that was still deferred after the last retry step.
+pub const GAVE_UP: &str = "Gave up after 5 days";
+
+/// A recipient claimed for one attempt.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RecipientRow {
+    pub id: Id,
+    /// Normalized (`local@domain`, the domain in lower-case A-labels).
+    pub address: String,
+    /// `to`, `cc` or `bcc`.
+    pub kind: String,
+    /// With this attempt.
+    pub attempts: i64,
+}
+
+/// A released message, as delivery needs it.
+#[derive(Clone, Debug)]
+pub struct OutboundDelivery {
+    pub outbound_id: Id,
+    pub workspace_id: Id,
+    pub mailbox_id: Id,
+    /// The sent message's receipt: its sealed raw bytes are what goes out.
+    pub receipt_id: Id,
+    /// The `From` address.
+    pub from_address: String,
+    /// The domain of the `From` address.
+    pub from_domain: String,
+    /// That domain's row in the workspace (its send route); `None` when it was removed.
+    pub domain_id: Option<Id>,
+}
+
+/// What [`MailRepository::claim_recipients`] did.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Claim {
+    /// The message is not released (held, cancelled, done) or is gone.
+    NotReleased,
+    /// The workspace's sending is paused: the message waits with `hold_reason = 'paused'` and no
+    /// run until the pause is lifted.
+    Paused,
+    /// Over a send limit: the message waits with `hold_reason = 'limit'` until then.
+    Limited(TimestampMillis),
+    /// These recipients are `sending` with the attempt's ID. `changed`: a status changed
+    /// (claimed or suppressed).
+    Claimed {
+        recipients: Vec<RecipientRow>,
+        changed: bool,
+    },
+}
+
+/// What [`MailRepository::record_outcomes`] did.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Recorded {
+    /// Every recipient is final: the message is `done`.
+    pub done: bool,
+    /// When a recipient is due again (a deferred one, or one another attempt is sending).
+    pub next_at: Option<TimestampMillis>,
+    /// A recipient bounced now: the thread went back to the Inbox, unread.
+    pub bounced: bool,
+}
+
+/// The delivery status of one recipient (the Outbox and the message's status line).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RecipientStatus {
+    pub id: Id,
+    pub address: String,
+    pub kind: String,
+    /// `queued`, `sending`, `delivered`, `deferred`, `bounced`, `suppressed` or `cancelled`.
+    pub status: String,
+    pub attempts: i64,
+    pub next_attempt_at: Option<TimestampMillis>,
+    pub last_response: Option<String>,
+    pub provider_message_id: Option<String>,
+    /// Deferred, and the first attempt is more than [`DELAYED_AFTER_MS`] ago.
+    pub delayed: bool,
+}
+
+/// The readers of an outbound message's thread, for `thread.updated`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ThreadAudience {
+    pub workspace_id: Id,
+    pub mailbox_id: Id,
+    pub thread_id: Id,
+    pub users: Vec<Id>,
+}
+
+/// Statuses a recipient leaves only by an attempt.
+const OPEN: &str = "('queued', 'sending', 'deferred')";
+
+/// When a recipient of the message is due again: a queued one now, a deferred one at its next
+/// attempt, one that another attempt is sending when its lease ends.
+async fn next_due(
+    transaction: &mut Transaction<'_, Any>,
+    outbound_id: Id,
+    now: TimestampMillis,
+) -> Result<Option<TimestampMillis>, MailError> {
+    let next: Option<i64> = sqlx::query_scalar(
+        "SELECT MIN(CASE WHEN status = 'deferred' THEN next_attempt_at \
+         WHEN status = 'queued' THEN $1 ELSE updated_at + $2 END) \
+         FROM mail_outbound_recipients WHERE outbound_id = $3 \
+         AND status IN ('queued', 'sending', 'deferred')",
+    )
+    .bind(now.as_millis())
+    .bind(SENDING_LEASE_MS)
+    .bind(outbound_id.to_string())
+    .fetch_one(&mut **transaction)
+    .await?;
+    Ok(next.map(TimestampMillis::from_millis))
+}
+
+/// Marks the message `done` with the summary of its recipients once none is open.
+async fn finish_if_done(
+    transaction: &mut Transaction<'_, Any>,
+    outbound_id: Id,
+    now: TimestampMillis,
+) -> Result<bool, MailError> {
+    let open: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+        "SELECT CAST(COUNT(*) AS BIGINT) FROM mail_outbound_recipients \
+         WHERE outbound_id = $1 AND status IN {OPEN}"
+    )))
+    .bind(outbound_id.to_string())
+    .fetch_one(&mut **transaction)
+    .await?;
+    if open > 0 {
+        return Ok(false);
+    }
+    let rows = sqlx::query(
+        "SELECT address, kind, status, last_response FROM mail_outbound_recipients \
+         WHERE outbound_id = $1 ORDER BY created_at, id",
+    )
+    .bind(outbound_id.to_string())
+    .fetch_all(&mut **transaction)
+    .await?;
+    let mut summary = Vec::with_capacity(rows.len());
+    for row in &rows {
+        summary.push(json!({
+            "address": row.try_get::<String, _>("address")?,
+            "kind": row.try_get::<String, _>("kind")?,
+            "status": row.try_get::<String, _>("status")?,
+            "response": row.try_get::<Option<String>, _>("last_response")?,
+        }));
+    }
+    let done = sqlx::query(
+        "UPDATE mail_outbound SET status = 'done', hold_reason = NULL, delivery_summary = $1, \
+         updated_at = $2 WHERE id = $3 AND status = 'released'",
+    )
+    .bind(serde_json::Value::Array(summary).to_string())
+    .bind(now.as_millis())
+    .bind(outbound_id.to_string())
+    .execute(&mut **transaction)
+    .await?
+    .rows_affected();
+    Ok(done == 1)
+}
+
+fn plain_line(text: &str) -> String {
+    text.chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .take(500)
+        .collect::<String>()
+        .trim()
+        .to_owned()
+}
+
+impl MailRepository {
+    /// The signed bytes of a sent message (its receipt's sealed raw), as delivery sends them.
+    pub async fn read_sent_raw(&self, receipt_id: Id) -> Result<Vec<u8>, MailError> {
+        self.read_raw(receipt_id).await
+    }
+
+    /// The released message `outbound_id` with what delivery needs; `None` when it is not
+    /// released. A released message whose sent copy is gone (deleted from the thread and purged)
+    /// cannot be sent: its open recipients are cancelled.
+    pub async fn outbound_delivery(
+        &self,
+        outbound_id: Id,
+        now: TimestampMillis,
+    ) -> Result<Option<OutboundDelivery>, MailError> {
+        let Some(row) = sqlx::query(
+            "SELECT o.workspace_id, o.mailbox_id, m.receipt_id, r.mail_from \
+             FROM mail_outbound o \
+             LEFT JOIN mail_messages m ON m.id = o.message_id \
+             LEFT JOIN mail_receipts r ON r.id = m.receipt_id \
+             WHERE o.id = $1 AND o.status = 'released'",
+        )
+        .bind(outbound_id.to_string())
+        .fetch_optional(self.database.pool())
+        .await?
+        else {
+            return Ok(None);
+        };
+        let workspace_id = parse_id(&row.try_get::<String, _>("workspace_id")?)?;
+        let mailbox_id = parse_id(&row.try_get::<String, _>("mailbox_id")?)?;
+        let receipt: Option<String> = row.try_get("receipt_id")?;
+        let from: Option<String> = row.try_get("mail_from")?;
+        let (Some(receipt), Some(from_address)) = (receipt, from) else {
+            self.cancel_open_recipients(outbound_id, "The sent message was deleted.", now)
+                .await?;
+            return Ok(None);
+        };
+        let from_domain = from_address
+            .rsplit_once('@')
+            .map(|(_, domain)| domain.to_owned())
+            .unwrap_or_default();
+        let domain: Option<String> =
+            sqlx::query_scalar("SELECT id FROM mail_domains WHERE name = $1 AND workspace_id = $2")
+                .bind(&from_domain)
+                .bind(workspace_id.to_string())
+                .fetch_optional(self.database.pool())
+                .await?;
+        Ok(Some(OutboundDelivery {
+            outbound_id,
+            workspace_id,
+            mailbox_id,
+            receipt_id: parse_id(&receipt)?,
+            from_address,
+            from_domain,
+            domain_id: domain.map(|id| parse_id(&id)).transpose()?,
+        }))
+    }
+
+    async fn cancel_open_recipients(
+        &self,
+        outbound_id: Id,
+        reason: &str,
+        now: TimestampMillis,
+    ) -> Result<(), MailError> {
+        let mut transaction = self.database.immediate_transaction().await?;
+        sqlx::query(
+            "UPDATE mail_outbound_recipients SET status = 'cancelled', last_response = $1, \
+             next_attempt_at = NULL, updated_at = $2 WHERE outbound_id = $3 \
+             AND status IN ('queued', 'deferred')",
+        )
+        .bind(reason)
+        .bind(now.as_millis())
+        .bind(outbound_id.to_string())
+        .execute(&mut *transaction)
+        .await?;
+        finish_if_done(&mut transaction, outbound_id, now).await?;
+        transaction.commit().await?;
+        Ok(())
+    }
+
+    /// One attempt's claim (spec §5.4), in one writer transaction: a paused workspace holds the
+    /// message (`paused`); recipients on the workspace's suppression list become `suppressed`;
+    /// recipients never tried yet are checked against the send limits (without the message's own
+    /// rows) and hold it (`limit`, their `released_at` cleared so they do not count) when over;
+    /// then every queued recipient and every deferred one that is due becomes `sending` with
+    /// `attempt_id`, and is returned. The caller sends to them after this commit.
+    pub async fn claim_recipients(
+        &self,
+        outbound_id: Id,
+        attempt_id: Id,
+        now: TimestampMillis,
+    ) -> Result<Claim, MailError> {
+        let mut transaction = self.database.immediate_transaction().await?;
+        let Some(row) = sqlx::query(
+            "SELECT workspace_id, membership_id, hold_reason FROM mail_outbound \
+             WHERE id = $1 AND status = 'released'",
+        )
+        .bind(outbound_id.to_string())
+        .fetch_optional(&mut *transaction)
+        .await?
+        else {
+            return Ok(Claim::NotReleased);
+        };
+        let workspace_id = parse_id(&row.try_get::<String, _>("workspace_id")?)?;
+        let membership_id = parse_id(&row.try_get::<String, _>("membership_id")?)?;
+        let hold: Option<String> = row.try_get("hold_reason")?;
+        let paused: Option<i64> =
+            sqlx::query_scalar("SELECT paused_at FROM mail_send_policies WHERE workspace_id = $1")
+                .bind(workspace_id.to_string())
+                .fetch_optional(&mut *transaction)
+                .await?
+                .flatten();
+        if paused.is_some() {
+            sqlx::query(
+                "UPDATE mail_outbound SET hold_reason = 'paused', updated_at = $1 WHERE id = $2",
+            )
+            .bind(now.as_millis())
+            .bind(outbound_id.to_string())
+            .execute(&mut *transaction)
+            .await?;
+            transaction.commit().await?;
+            return Ok(Claim::Paused);
+        }
+        let suppressed = sqlx::query(
+            "UPDATE mail_outbound_recipients SET status = 'suppressed', \
+             last_response = 'The address is on the suppression list.', next_attempt_at = NULL, \
+             updated_at = $1 WHERE outbound_id = $2 AND status IN ('queued', 'deferred') \
+             AND EXISTS (SELECT 1 FROM mail_suppressions s \
+             WHERE s.workspace_id = mail_outbound_recipients.workspace_id \
+             AND s.address = lower(mail_outbound_recipients.address))",
+        )
+        .bind(now.as_millis())
+        .bind(outbound_id.to_string())
+        .execute(&mut *transaction)
+        .await?
+        .rows_affected();
+        let fresh: i64 = sqlx::query_scalar(
+            "SELECT CAST(COUNT(*) AS BIGINT) FROM mail_outbound_recipients \
+             WHERE outbound_id = $1 AND status = 'queued' AND attempts = 0",
+        )
+        .bind(outbound_id.to_string())
+        .fetch_one(&mut *transaction)
+        .await?;
+        if fresh > 0
+            && let Some(room) = self
+                .window_allows(
+                    &mut transaction,
+                    workspace_id,
+                    membership_id,
+                    fresh,
+                    now,
+                    Some(outbound_id),
+                )
+                .await?
+        {
+            sqlx::query(
+                "UPDATE mail_outbound_recipients SET released_at = NULL, updated_at = $1 \
+                 WHERE outbound_id = $2 AND status = 'queued' AND attempts = 0",
+            )
+            .bind(now.as_millis())
+            .bind(outbound_id.to_string())
+            .execute(&mut *transaction)
+            .await?;
+            sqlx::query(
+                "UPDATE mail_outbound SET hold_reason = 'limit', updated_at = $1 WHERE id = $2",
+            )
+            .bind(now.as_millis())
+            .bind(outbound_id.to_string())
+            .execute(&mut *transaction)
+            .await?;
+            transaction.commit().await?;
+            return Ok(Claim::Limited(room));
+        }
+        // They count against the limits from now (a row held for a limit has none).
+        sqlx::query(
+            "UPDATE mail_outbound_recipients SET released_at = $1 \
+             WHERE outbound_id = $2 AND status = 'queued' AND released_at IS NULL",
+        )
+        .bind(now.as_millis())
+        .bind(outbound_id.to_string())
+        .execute(&mut *transaction)
+        .await?;
+        if hold.is_some() {
+            sqlx::query(
+                "UPDATE mail_outbound SET hold_reason = NULL, updated_at = $1 WHERE id = $2",
+            )
+            .bind(now.as_millis())
+            .bind(outbound_id.to_string())
+            .execute(&mut *transaction)
+            .await?;
+        }
+        let claimed = sqlx::query(
+            "UPDATE mail_outbound_recipients SET status = 'sending', attempt_id = $1, \
+             attempts = attempts + 1, next_attempt_at = NULL, updated_at = $2 \
+             WHERE outbound_id = $3 AND (status = 'queued' \
+             OR (status = 'deferred' AND next_attempt_at <= $2))",
+        )
+        .bind(attempt_id.to_string())
+        .bind(now.as_millis())
+        .bind(outbound_id.to_string())
+        .execute(&mut *transaction)
+        .await?
+        .rows_affected();
+        let rows = sqlx::query(
+            "SELECT id, address, kind, attempts FROM mail_outbound_recipients \
+             WHERE outbound_id = $1 AND attempt_id = $2 AND status = 'sending' \
+             ORDER BY created_at, id",
+        )
+        .bind(outbound_id.to_string())
+        .bind(attempt_id.to_string())
+        .fetch_all(&mut *transaction)
+        .await?;
+        let recipients = rows
+            .iter()
+            .map(|row| {
+                Ok(RecipientRow {
+                    id: parse_id(&row.try_get::<String, _>("id")?)?,
+                    address: row.try_get("address")?,
+                    kind: row.try_get("kind")?,
+                    attempts: row.try_get("attempts")?,
+                })
+            })
+            .collect::<Result<Vec<_>, MailError>>()?;
+        if suppressed > 0 {
+            finish_if_done(&mut transaction, outbound_id, now).await?;
+        }
+        transaction.commit().await?;
+        Ok(Claim::Claimed {
+            recipients,
+            changed: suppressed > 0 || claimed > 0,
+        })
+    }
+
+    /// The results of attempt `attempt_id`, in one writer transaction. Only recipients still
+    /// `sending` with that attempt change (one that a lease end handed to another attempt is
+    /// left to it). Accepted → `delivered`; bounced → `bounced`; deferred → `deferred` until the
+    /// next step of [`RETRY_STEPS_MS`], or `bounced` with [`GAVE_UP`] after the last one. A
+    /// bounce moves the thread back to the Inbox (from the archive), unread for its readers.
+    /// The message is `done` with its summary once every recipient is final.
+    pub async fn record_outcomes(
+        &self,
+        outbound_id: Id,
+        attempt_id: Id,
+        outcomes: &[(Id, crate::mail_send::RecipientOutcome)],
+        now: TimestampMillis,
+    ) -> Result<Recorded, MailError> {
+        use crate::mail_send::RecipientOutcome;
+        let mut transaction = self.database.immediate_transaction().await?;
+        let mut bounced = false;
+        for (recipient_id, outcome) in outcomes {
+            let attempts: Option<i64> = sqlx::query_scalar(
+                "SELECT attempts FROM mail_outbound_recipients WHERE id = $1 AND outbound_id = $2 \
+                 AND attempt_id = $3 AND status = 'sending'",
+            )
+            .bind(recipient_id.to_string())
+            .bind(outbound_id.to_string())
+            .bind(attempt_id.to_string())
+            .fetch_optional(&mut *transaction)
+            .await?;
+            let Some(attempts) = attempts else {
+                continue;
+            };
+            let (status, response, next, provider_id) = match outcome {
+                RecipientOutcome::Accepted {
+                    provider_message_id,
+                } => ("delivered", None, None, provider_message_id.clone()),
+                RecipientOutcome::Bounced { response } => {
+                    ("bounced", Some(plain_line(response)), None, None)
+                }
+                RecipientOutcome::Deferred { response } => {
+                    let step = usize::try_from(attempts - 1).ok();
+                    match step.and_then(|step| RETRY_STEPS_MS.get(step)) {
+                        Some(wait) => (
+                            "deferred",
+                            Some(plain_line(response)),
+                            Some(now.as_millis() + wait),
+                            None,
+                        ),
+                        None => (
+                            "bounced",
+                            Some(plain_line(&format!("{GAVE_UP}: {response}"))),
+                            None,
+                            None,
+                        ),
+                    }
+                }
+            };
+            bounced |= status == "bounced";
+            sqlx::query(
+                "UPDATE mail_outbound_recipients SET status = $1, last_response = $2, \
+                 next_attempt_at = $3, provider_message_id = COALESCE($4, provider_message_id), \
+                 updated_at = $5 WHERE id = $6",
+            )
+            .bind(status)
+            .bind(response)
+            .bind(next)
+            .bind(provider_id)
+            .bind(now.as_millis())
+            .bind(recipient_id.to_string())
+            .execute(&mut *transaction)
+            .await?;
+        }
+        if bounced {
+            let threads: Vec<String> = sqlx::query_scalar(
+                "SELECT tm.thread_id FROM mail_outbound o \
+                 JOIN mail_thread_messages tm ON tm.message_id = o.message_id \
+                 AND tm.mailbox_id = o.mailbox_id WHERE o.id = $1",
+            )
+            .bind(outbound_id.to_string())
+            .fetch_all(&mut *transaction)
+            .await?;
+            for thread_id in threads {
+                sqlx::query(
+                    "UPDATE mail_threads SET folder = 'inbox', updated_at = $1 \
+                     WHERE id = $2 AND folder = 'archive'",
+                )
+                .bind(now.as_millis())
+                .bind(&thread_id)
+                .execute(&mut *transaction)
+                .await?;
+                sqlx::query(
+                    "UPDATE mail_thread_user_state SET last_read_at = NULL WHERE thread_id = $1",
+                )
+                .bind(&thread_id)
+                .execute(&mut *transaction)
+                .await?;
+            }
+        }
+        let done = finish_if_done(&mut transaction, outbound_id, now).await?;
+        let next_at = next_due(&mut transaction, outbound_id, now).await?;
+        transaction.commit().await?;
+        Ok(Recorded {
+            done,
+            next_at,
+            bounced,
+        })
+    }
+
+    /// When a recipient of the released message is due again; `None` when none is open.
+    pub async fn next_delivery(
+        &self,
+        outbound_id: Id,
+        now: TimestampMillis,
+    ) -> Result<Option<TimestampMillis>, MailError> {
+        let mut transaction = self.database.pool().begin().await?;
+        let next = next_due(&mut transaction, outbound_id, now).await?;
+        transaction.commit().await?;
+        Ok(next)
+    }
+
+    /// Recipients left `sending` for longer than `lease_ms` (a worker stopped between the claim
+    /// and the result) become `deferred` and due now: sent again, at least once (spec §5.4).
+    pub async fn requeue_stale_sending(
+        &self,
+        lease_ms: i64,
+        now: TimestampMillis,
+    ) -> Result<u64, MailError> {
+        let mut transaction = self.database.immediate_transaction().await?;
+        let changed = sqlx::query(
+            "UPDATE mail_outbound_recipients SET status = 'deferred', next_attempt_at = $1, \
+             last_response = 'The attempt was interrupted.', updated_at = $1 \
+             WHERE status = 'sending' AND updated_at <= $2",
+        )
+        .bind(now.as_millis())
+        .bind(now.as_millis() - lease_ms)
+        .execute(&mut *transaction)
+        .await?
+        .rows_affected();
+        transaction.commit().await?;
+        Ok(changed)
+    }
+
+    /// Queues the next `mail.send` run of the message at `at`, unless one is queued by then.
+    pub async fn queue_send_run(
+        &self,
+        outbound_id: Id,
+        at: TimestampMillis,
+    ) -> Result<(), MailError> {
+        let mut transaction = self.database.immediate_transaction().await?;
+        let workspace: Option<String> =
+            sqlx::query_scalar("SELECT workspace_id FROM mail_outbound WHERE id = $1")
+                .bind(outbound_id.to_string())
+                .fetch_optional(&mut *transaction)
+                .await?;
+        let Some(workspace) = workspace else {
+            return Ok(());
+        };
+        let queued: Option<i64> = sqlx::query_scalar(
+            "SELECT 1 FROM jobs WHERE kind = 'mail.send' AND state = 'queued' \
+             AND payload_json = $1 AND available_at <= $2 LIMIT 1",
+        )
+        .bind(json!({ "outbound_id": outbound_id.to_string() }).to_string())
+        .bind(at.as_millis())
+        .fetch_optional(&mut *transaction)
+        .await?;
+        if queued.is_none() {
+            enqueue(
+                &mut transaction,
+                &send_job(outbound_id, parse_id(&workspace)?, at),
+            )
+            .await?;
+        }
+        transaction.commit().await?;
+        Ok(())
+    }
+
+    /// The delivery status of each recipient of the message at `now`.
+    pub async fn outbound_recipients(
+        &self,
+        outbound_id: Id,
+        now: TimestampMillis,
+    ) -> Result<Vec<RecipientStatus>, MailError> {
+        let rows = sqlx::query(
+            "SELECT id, address, kind, status, attempts, next_attempt_at, last_response, \
+             provider_message_id, released_at FROM mail_outbound_recipients \
+             WHERE outbound_id = $1 ORDER BY created_at, id",
+        )
+        .bind(outbound_id.to_string())
+        .fetch_all(self.database.pool())
+        .await?;
+        rows.iter()
+            .map(|row| {
+                let status: String = row.try_get("status")?;
+                let released: Option<i64> = row.try_get("released_at")?;
+                Ok(RecipientStatus {
+                    id: parse_id(&row.try_get::<String, _>("id")?)?,
+                    address: row.try_get("address")?,
+                    kind: row.try_get("kind")?,
+                    delayed: status == "deferred"
+                        && released.is_some_and(|at| now.as_millis() - at > DELAYED_AFTER_MS),
+                    status,
+                    attempts: row.try_get("attempts")?,
+                    next_attempt_at: row
+                        .try_get::<Option<i64>, _>("next_attempt_at")?
+                        .map(TimestampMillis::from_millis),
+                    last_response: row.try_get("last_response")?,
+                    provider_message_id: row.try_get("provider_message_id")?,
+                })
+            })
+            .collect()
+    }
+
+    /// The thread of the message's sent copy and its mailbox's readers; `None` when it is gone.
+    pub async fn outbound_audience(
+        &self,
+        outbound_id: Id,
+    ) -> Result<Option<ThreadAudience>, MailError> {
+        let mut transaction = self.database.pool().begin().await?;
+        let row = sqlx::query(
+            "SELECT o.workspace_id, o.mailbox_id, tm.thread_id FROM mail_outbound o \
+             JOIN mail_thread_messages tm ON tm.message_id = o.message_id \
+             AND tm.mailbox_id = o.mailbox_id WHERE o.id = $1",
+        )
+        .bind(outbound_id.to_string())
+        .fetch_optional(&mut *transaction)
+        .await?;
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        let mailbox_id = parse_id(&row.try_get::<String, _>("mailbox_id")?)?;
+        let users = super::threads::mailbox_users(&mut transaction, mailbox_id).await?;
+        let audience = ThreadAudience {
+            workspace_id: parse_id(&row.try_get::<String, _>("workspace_id")?)?,
+            mailbox_id,
+            thread_id: parse_id(&row.try_get::<String, _>("thread_id")?)?,
+            users,
+        };
+        transaction.commit().await?;
+        Ok(Some(audience))
+    }
+
+    /// Whether mail to `domain` stays on this instance (spec D11): a verified domain whose MX
+    /// record pointed here at its last DNS check. A verified domain whose MX is elsewhere goes
+    /// out by the route.
+    pub async fn is_local_domain(&self, domain: &str) -> Result<bool, MailError> {
+        let id: Option<String> = sqlx::query_scalar(
+            "SELECT id FROM mail_domains WHERE name = $1 AND status = 'verified'",
+        )
+        .bind(domain)
+        .fetch_optional(self.database.pool())
+        .await?;
+        let Some(id) = id else {
+            return Ok(false);
+        };
+        Ok(self
+            .domain_for_check(parse_id(&id)?)
+            .await?
+            .and_then(|domain| domain.report)
+            .is_some_and(|report| report.mx == super::RecordStatus::Ok))
+    }
+}

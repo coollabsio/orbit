@@ -27,7 +27,8 @@
 //! **Sweep.** `mail.send_sweep` ([`SEND_SWEEP_JOB`], every [`SEND_SWEEP_MS`]) queues `mail.send`
 //! again for held, due rows that are stranded: `release_failed` (the job gave up after its
 //! retries) and `dkim_inactive` once the domain has an active key again. A row whose `mail.send`
-//! job is still queued or running is left alone.
+//! job is still queued or running is left alone. It also queues `mail.send` again for released
+//! rows whose delivery was stranded ([`MailRepository::sweep_deliveries`]).
 
 use std::collections::{BTreeSet, HashMap};
 
@@ -761,6 +762,38 @@ impl MailRepository {
              JOIN mail_addresses a ON a.id = d.from_address_id \
              JOIN mail_dkim_keys k ON k.domain_id = a.domain_id AND k.status = 'active' \
              WHERE d.id = o.draft_id))) \
+             AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.kind = 'mail.send' \
+             AND j.state IN ('queued', 'running') \
+             AND j.payload_json = '{\"outbound_id\":\"' || o.id || '\"}') \
+             ORDER BY o.release_at, o.id LIMIT $2",
+        )
+        .bind(now.as_millis())
+        .bind(SWEEP_BATCH)
+        .fetch_all(&mut *transaction)
+        .await?;
+        for row in &rows {
+            let id = parse_id(&row.try_get::<String, _>("id")?)?;
+            let workspace_id = parse_id(&row.try_get::<String, _>("workspace_id")?)?;
+            enqueue(&mut transaction, &send_job(id, workspace_id, now)).await?;
+        }
+        transaction.commit().await?;
+        Ok(rows.len() as u64)
+    }
+
+    /// `mail.send_sweep`, delivery side: recipients left `sending` past
+    /// [`super::SENDING_LEASE_MS`] are deferred ([`Self::requeue_stale_sending`]), then
+    /// `mail.send` is queued again for released messages with a due recipient (queued, or
+    /// deferred and due) and no queued or running job (the job store gave up on a crash). A
+    /// paused message waits for the resume. Returns how many were queued.
+    pub async fn sweep_deliveries(&self, now: TimestampMillis) -> Result<u64, MailError> {
+        self.requeue_stale_sending(super::SENDING_LEASE_MS, now)
+            .await?;
+        let mut transaction = self.database.immediate_transaction().await?;
+        let rows = sqlx::query(
+            "SELECT o.id, o.workspace_id FROM mail_outbound o WHERE o.status = 'released' \
+             AND (o.hold_reason IS NULL OR o.hold_reason <> 'paused') \
+             AND EXISTS (SELECT 1 FROM mail_outbound_recipients r WHERE r.outbound_id = o.id \
+             AND (r.status = 'queued' OR (r.status = 'deferred' AND r.next_attempt_at <= $1))) \
              AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.kind = 'mail.send' \
              AND j.state IN ('queued', 'running') \
              AND j.payload_json = '{\"outbound_id\":\"' || o.id || '\"}') \

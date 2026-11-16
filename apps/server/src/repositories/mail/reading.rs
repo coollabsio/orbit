@@ -172,6 +172,18 @@ impl MailAuthSummary {
     fn of(auth: &str) -> Self {
         match serde_json::from_str::<AuthOutcome>(auth) {
             Ok(outcome) => Self::from_outcome(outcome),
+            // Local delivery (`{"local":true}`): signed by a domain of this instance, not checked.
+            Err(_)
+                if serde_json::from_str::<serde_json::Value>(auth)
+                    .is_ok_and(|value| value["local"] == serde_json::Value::Bool(true)) =>
+            {
+                Self {
+                    spf: MailAuthResult::None,
+                    dkim: MailAuthResult::Pass,
+                    dmarc: MailAuthResult::None,
+                    aligned_domain: None,
+                }
+            }
             Err(_) => Self {
                 spf: MailAuthResult::None,
                 dkim: MailAuthResult::None,

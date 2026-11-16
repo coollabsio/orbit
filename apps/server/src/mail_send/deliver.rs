@@ -1,0 +1,423 @@
+//! Delivery of a released message (spec §5.3 steps 5–7, §5.4): each run of `mail.send` claims
+//! the due recipients, sends to them and records each result, then says when to run again.
+//!
+//! - **No double send.** The recipients are `sending` with the attempt's ID and committed before
+//!   anything is sent ([`MailRepository::claim_recipients`]); only then do they go out, and the
+//!   results are recorded for that attempt only. A worker that stops in between leaves them
+//!   `sending` until [`SENDING_LEASE_MS`] ends; they are then deferred and sent again (at least
+//!   once).
+//! - **Local recipients** (D11): an address of a verified domain of this instance whose MX
+//!   points here goes straight to intake ([`MailIntake::accept`], `Source::Local`) with the same
+//!   signed bytes, so a copy to the sender's own mailbox is deduped like any other (`mailbox_id`,
+//!   `raw_sha256`). A verified domain whose MX is elsewhere goes by the route.
+//! - **Routes.** The From domain's route ([`MailRepository::route_for_domain`]). `direct` and
+//!   `smtp` send one envelope per recipient, with the VERP sender `bounce+{token}@{from domain}`
+//!   (the token holds the recipient's ID, [`MailRepository::bounce_key`]) and the recipient's ID as
+//!   correlation; `resend` one per recipient with the From address and the correlation
+//!   `{outbound id}:{recipient id}` (its idempotency key); the other kinds one call for all
+//!   recipients with the From address and the outbound's ID as correlation (their events name
+//!   the address). Provider headers are put in front of the signed bytes. A `direct` route and a
+//!   workspace's route never reach a private address; an instance route of another kind may (a
+//!   relay on the instance's network).
+//! - **Results.** Accepted → `delivered`; 5xx → `bounced` (the thread goes back to the Inbox,
+//!   unread); 4xx, a network error or a route error (`Route error: …`) → `deferred` until the next
+//!   step of [`RETRY_STEPS_MS`], then `bounced` with [`GAVE_UP`]. A route error is never a bounce
+//!   of the recipient. Each change sends `thread.updated` on the `mail` topic.
+
+use std::collections::HashMap;
+use std::net::{IpAddr, Ipv4Addr};
+
+use futures_util::StreamExt;
+use futures_util::future::BoxFuture;
+use orbit_mail::{AuthOutcome, DmarcVerdict, Verdict, bounce_local_part};
+use orbit_platform::{Id, JobError, TimestampMillis};
+use serde_json::json;
+
+use super::release::SendJobState;
+use super::{
+    Outgoing, RecipientOutcome, SENDING_LEASE_MS, adapter_for, domain_of, provider_headers,
+    with_provider_headers,
+};
+use crate::live::{NewEvent, Recipients};
+use crate::mail_intake::{InboundMessage, IntakeError, Recipient, Source};
+use crate::repositories::mail::{
+    Claim, MAIL_TOPIC, MailError, OutboundDelivery, RecipientLookup, RecipientRow, SendRouteKind,
+};
+
+/// At most this many single-recipient sends of one run go at the same time.
+const PARALLEL_SENDS: usize = 8;
+
+/// When the message's next `mail.send` run is due.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NextRun {
+    /// No run: every recipient is final, or the message waits for something else (a pause).
+    Done,
+    At(TimestampMillis),
+}
+
+fn retry(error: MailError) -> JobError {
+    JobError::Retryable(error.to_string())
+}
+
+/// One delivery run for released message `outbound_id` at `now` (see the module docs).
+pub async fn deliver_due(
+    state: &SendJobState,
+    outbound_id: Id,
+    now: TimestampMillis,
+) -> Result<NextRun, JobError> {
+    let mail = &state.mail;
+    mail.requeue_stale_sending(SENDING_LEASE_MS, now)
+        .await
+        .map_err(retry)?;
+    let Some(outbound) = mail
+        .outbound_delivery(outbound_id, now)
+        .await
+        .map_err(retry)?
+    else {
+        return Ok(NextRun::Done);
+    };
+    let attempt_id = Id::new_v7();
+    let recipients = match mail
+        .claim_recipients(outbound_id, attempt_id, now)
+        .await
+        .map_err(retry)?
+    {
+        Claim::NotReleased => return Ok(NextRun::Done),
+        // The Outbox shows why it waits.
+        Claim::Paused => {
+            announce(state, outbound_id).await;
+            return Ok(NextRun::Done);
+        }
+        Claim::Limited(at) => {
+            announce(state, outbound_id).await;
+            return Ok(NextRun::At(at));
+        }
+        Claim::Claimed {
+            recipients,
+            changed,
+        } => {
+            if changed {
+                announce(state, outbound_id).await;
+            }
+            recipients
+        }
+    };
+    if recipients.is_empty() {
+        let next = mail.next_delivery(outbound_id, now).await.map_err(retry)?;
+        return Ok(next.map_or(NextRun::Done, NextRun::At));
+    }
+
+    let outcomes = match mail.read_sent_raw(outbound.receipt_id).await {
+        Ok(raw) => send(state, &outbound, &recipients, &raw, now).await?,
+        Err(MailError::Unavailable(error)) => {
+            // The claimed recipients stay `sending` until the lease ends, then go again.
+            return Err(JobError::Retryable(error.to_string()));
+        }
+        Err(error) => {
+            let response = format!("The message could not be read: {error}");
+            recipients
+                .iter()
+                .map(|recipient| (recipient.id, RecipientOutcome::deferred(&*response)))
+                .collect()
+        }
+    };
+    let recorded = mail
+        .record_outcomes(outbound_id, attempt_id, &outcomes, now)
+        .await
+        .map_err(retry)?;
+    announce(state, outbound_id).await;
+    Ok(match recorded.next_at {
+        Some(at) if !recorded.done => NextRun::At(at),
+        _ => NextRun::Done,
+    })
+}
+
+/// Sends `raw` to the claimed recipients: the local ones through intake, the others by the
+/// route. One outcome for each recipient.
+async fn send(
+    state: &SendJobState,
+    outbound: &OutboundDelivery,
+    recipients: &[RecipientRow],
+    raw: &[u8],
+    now: TimestampMillis,
+) -> Result<Vec<(Id, RecipientOutcome)>, JobError> {
+    let mut local_domains: HashMap<String, bool> = HashMap::new();
+    let mut local = Vec::new();
+    let mut remote = Vec::new();
+    for recipient in recipients {
+        let domain = domain_of(&recipient.address);
+        let is_local = match local_domains.get(&domain) {
+            Some(known) => *known,
+            None => {
+                let found = state.mail.is_local_domain(&domain).await.map_err(retry)?;
+                local_domains.insert(domain, found);
+                found
+            }
+        };
+        if is_local {
+            local.push(recipient);
+        } else {
+            remote.push(recipient);
+        }
+    }
+    let mut outcomes = Vec::with_capacity(recipients.len());
+    let (local_outcomes, by_route) = deliver_local(state, outbound, &local, raw, now).await?;
+    outcomes.extend(local_outcomes);
+    remote.extend(by_route);
+    if !remote.is_empty() {
+        outcomes.extend(deliver_by_route(state, outbound, &remote, raw, now).await?);
+    }
+    Ok(outcomes)
+}
+
+/// Local recipients go to intake in one message (all or nothing, as from the listener). Returns
+/// their outcomes and the recipients that turned out not to be local after all.
+async fn deliver_local<'r>(
+    state: &SendJobState,
+    outbound: &OutboundDelivery,
+    recipients: &[&'r RecipientRow],
+    raw: &[u8],
+    now: TimestampMillis,
+) -> Result<(Vec<(Id, RecipientOutcome)>, Vec<&'r RecipientRow>), JobError> {
+    let mut outcomes = Vec::new();
+    let mut not_local = Vec::new();
+    let mut accepted = Vec::new();
+    let mut intake_recipients = Vec::new();
+    for recipient in recipients {
+        let found = state
+            .mail
+            .lookup_recipient(&recipient.address, now)
+            .await
+            .map_err(retry)?;
+        // The listener's answers at `RCPT TO`, as a remote sender would get them.
+        let refused = match found {
+            RecipientLookup::Accept {
+                address_id,
+                workspace_id,
+                ..
+            } => {
+                intake_recipients.push(Recipient::Mailbox {
+                    workspace_id,
+                    address_id,
+                    rcpt: recipient.address.clone(),
+                });
+                accepted.push(recipient.id);
+                continue;
+            }
+            RecipientLookup::HealthTest { test_id } => {
+                intake_recipients.push(Recipient::HealthTest {
+                    test_id,
+                    rcpt: recipient.address.clone(),
+                });
+                accepted.push(recipient.id);
+                continue;
+            }
+            RecipientLookup::NotLocal => {
+                not_local.push(*recipient);
+                continue;
+            }
+            RecipientLookup::UnknownUser => "550 5.1.1 No such user here",
+            RecipientLookup::DomainUnavailable => "550 5.7.1 The domain does not accept mail",
+            RecipientLookup::MailboxSuspended => "550 5.2.1 The mailbox is not active",
+            RecipientLookup::Invalid => "501 5.1.3 The address is not valid",
+        };
+        outcomes.push((recipient.id, RecipientOutcome::bounced(refused)));
+    }
+    if intake_recipients.is_empty() {
+        return Ok((outcomes, not_local));
+    }
+    let message = InboundMessage {
+        source: Source::Local,
+        raw: raw.to_vec(),
+        trace_len: 0,
+        mail_from: Some(outbound.from_address.clone()),
+        recipients: intake_recipients,
+        peer_ip: IpAddr::V4(Ipv4Addr::LOCALHOST),
+        helo: state
+            .delivery
+            .hostname
+            .clone()
+            .unwrap_or_else(|| "orbit".to_owned()),
+        tls: None,
+        // Not stored for a local message (its receipt says `{"local":true}`); a health test
+        // records it.
+        auth: AuthOutcome {
+            spf: Verdict::None,
+            dkim: Verdict::Pass,
+            dmarc: DmarcVerdict::None,
+            aligned_domain: None,
+            temp_error: false,
+            spf_domain: None,
+            dkim_domain: Some(outbound.from_domain.clone()),
+            from_domain: Some(outbound.from_domain.clone()),
+        },
+    };
+    let outcome = match state.intake.accept(message).await {
+        Ok(_) => RecipientOutcome::Accepted {
+            provider_message_id: None,
+        },
+        Err(IntakeError::TooLarge) => {
+            RecipientOutcome::bounced("552 5.3.4 The message is larger than this server accepts")
+        }
+        Err(IntakeError::QuotaExceeded) => RecipientOutcome::deferred(
+            "452 4.2.2 The recipient's workspace is over its storage quota",
+        ),
+        Err(IntakeError::Temporary(error)) => RecipientOutcome::deferred(format!(
+            "451 4.3.0 The message could not be stored: {error}"
+        )),
+    };
+    outcomes.extend(accepted.into_iter().map(|id| (id, outcome.clone())));
+    Ok((outcomes, not_local))
+}
+
+/// The route's outcomes for `recipients` (see the module docs for the envelopes).
+async fn deliver_by_route(
+    state: &SendJobState,
+    outbound: &OutboundDelivery,
+    recipients: &[&RecipientRow],
+    raw: &[u8],
+    now: TimestampMillis,
+) -> Result<Vec<(Id, RecipientOutcome)>, JobError> {
+    let all = |response: &str| -> Vec<(Id, RecipientOutcome)> {
+        recipients
+            .iter()
+            .map(|recipient| (recipient.id, RecipientOutcome::deferred(response)))
+            .collect()
+    };
+    let Some(domain_id) = outbound.domain_id else {
+        return Ok(all("Route error: the sending domain was removed."));
+    };
+    let (route, secrets) = match state.mail.route_for_domain(domain_id).await {
+        Ok(Some(found)) => found,
+        Ok(None) => return Ok(all("Route error: the domain has no send route.")),
+        Err(MailError::Unavailable(error)) => return Err(JobError::Retryable(error.to_string())),
+        Err(error) => {
+            return Ok(all(&format!(
+                "Route error: the route cannot be read ({error})."
+            )));
+        }
+    };
+    // A relay of the instance may be on its own network; direct sending never is.
+    let ctx = if route.workspace_id.is_none() && route.kind != SendRouteKind::Direct {
+        &state.instance_delivery
+    } else {
+        &state.delivery
+    };
+    let adapter = adapter_for(&route, &secrets, ctx);
+    let bounce_key = state.mail.bounce_key();
+    let one_by_one = matches!(
+        route.kind,
+        SendRouteKind::Direct | SendRouteKind::Smtp | SendRouteKind::Resend
+    );
+    let mut by_address: Vec<(String, RecipientOutcome)> = Vec::with_capacity(recipients.len());
+    if one_by_one {
+        // Boxed one by one: a lazy iterator of borrowing futures is not `Send` for the job.
+        let mut sends: Vec<BoxFuture<'_, Vec<(String, RecipientOutcome)>>> =
+            Vec::with_capacity(recipients.len());
+        for recipient in recipients {
+            let (mail_from, correlation) = if route.kind == SendRouteKind::Resend {
+                (
+                    outbound.from_address.clone(),
+                    format!("{}:{}", outbound.outbound_id, recipient.id),
+                )
+            } else {
+                (
+                    format!(
+                        "{}@{}",
+                        bounce_local_part(&recipient.id.to_bytes(), &bounce_key),
+                        outbound.from_domain
+                    ),
+                    recipient.id.to_string(),
+                )
+            };
+            let bytes = with_provider_headers(
+                &provider_headers(route.kind, &route.settings, &correlation),
+                raw,
+            );
+            let address = vec![recipient.address.clone()];
+            let adapter = &adapter;
+            let from_domain = outbound.from_domain.as_str();
+            sends.push(Box::pin(async move {
+                let outgoing = Outgoing {
+                    raw: &bytes,
+                    mail_from: &mail_from,
+                    from_domain,
+                    recipients: &address,
+                    correlation: &correlation,
+                };
+                adapter.deliver(&outgoing).await
+            }));
+        }
+        let mut stream = futures_util::stream::iter(sends).buffer_unordered(PARALLEL_SENDS);
+        while let Some(results) = stream.next().await {
+            by_address.extend(results);
+        }
+    } else {
+        let correlation = outbound.outbound_id.to_string();
+        let headers = provider_headers(route.kind, &route.settings, &correlation);
+        let bytes = with_provider_headers(&headers, raw);
+        let addresses: Vec<String> = recipients
+            .iter()
+            .map(|recipient| recipient.address.clone())
+            .collect();
+        let outgoing = Outgoing {
+            raw: &bytes,
+            mail_from: &outbound.from_address,
+            from_domain: &outbound.from_domain,
+            recipients: &addresses,
+            correlation: &correlation,
+        };
+        by_address.extend(adapter.deliver(&outgoing).await);
+    }
+
+    let mut outcomes = Vec::with_capacity(recipients.len());
+    for recipient in recipients {
+        let outcome = by_address
+            .iter()
+            .position(|(address, _)| *address == recipient.address)
+            .map_or_else(
+                || RecipientOutcome::deferred("Route error: the route gave no result."),
+                |index| by_address.swap_remove(index).1,
+            );
+        outcomes.push((recipient.id, outcome));
+    }
+    // The route's last send: its time when anything went, else the first temporary failure.
+    let accepted = outcomes
+        .iter()
+        .any(|(_, outcome)| matches!(outcome, RecipientOutcome::Accepted { .. }));
+    let failure = outcomes.iter().find_map(|(_, outcome)| match outcome {
+        RecipientOutcome::Deferred { response } => Some(response.as_str()),
+        _ => None,
+    });
+    let error = if accepted { None } else { failure };
+    if (accepted || error.is_some())
+        && let Err(record) = state.mail.record_route_result(route.id, now, error).await
+    {
+        tracing::warn!(error = %record, route_id = %route.id, "recording a send route result");
+    }
+    Ok(outcomes)
+}
+
+/// `thread.updated` to the readers of the message's thread; the change is stored either way.
+pub(super) async fn announce(state: &SendJobState, outbound_id: Id) {
+    let audience = match state.mail.outbound_audience(outbound_id).await {
+        Ok(Some(audience)) if !audience.users.is_empty() => audience,
+        Ok(_) => return,
+        Err(error) => {
+            tracing::warn!(error = %error, outbound_id = %outbound_id, "mail delivery audience");
+            return;
+        }
+    };
+    let events = [NewEvent {
+        recipients: Recipients::Users(audience.users),
+        topic: MAIL_TOPIC,
+        event: json!({
+            "type": "thread.updated",
+            "mailbox_id": audience.mailbox_id.to_string(),
+            "thread_id": audience.thread_id.to_string(),
+        }),
+    }];
+    if let Err(error) = state.live.publish(audience.workspace_id, &events).await {
+        tracing::warn!(error = %error, "mail events for the live socket");
+    }
+}

@@ -1273,6 +1273,12 @@ impl Fixture {
                 Arc::new(FakeDns::new()),
                 false,
             ),
+            instance_delivery: DeliveryContext::new(
+                Some("mx.orbit.test".to_owned()),
+                Arc::new(FakeDns::new()),
+                true,
+            ),
+            intake: self.intake.clone(),
             live: LiveHub::of(&self.database),
         }
     }

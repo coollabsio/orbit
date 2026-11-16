@@ -1,7 +1,9 @@
 //! The `mail.send` job (spec §5.3). Its first run for a held message releases it
 //! ([`MailRepository::release`]: build, sign, seal, file into Sent and the thread, queue the
 //! recipients) and tells the mailbox's readers with `thread.updated`. A run for a message that is
-//! not due or not held any more (undone, an old job of a message sent again) does nothing.
+//! not due or not held any more (undone, an old job of a message sent again) releases nothing.
+//! Every run then delivers what is due of a released message ([`deliver_due`]) and queues the
+//! next run for when a recipient is due again.
 //!
 //! A lasting release failure keeps the message held with its reason (for example
 //! `dkim_inactive`: never sent unsigned, or `release_error` for an error without a code) and
@@ -13,15 +15,23 @@ use orbit_platform::{Id, JobError, TimestampMillis};
 use serde_json::{Value, json};
 
 use super::DeliveryContext;
+use super::deliver::{NextRun, deliver_due};
 use crate::live::{LiveHub, NewEvent, Recipients};
+use crate::mail_intake::MailIntake;
 use crate::repositories::mail::{MAIL_TOPIC, MailError, MailRepository, Released};
 
 /// What the `mail.send` job works with.
 #[derive(Clone)]
 pub struct SendJobState {
     pub mail: Arc<MailRepository>,
+    /// Public addresses only (`allow_private = false`): direct sending and workspace routes.
     /// Its `hostname` is the `HELO` recorded on a sent message's receipt.
     pub delivery: DeliveryContext,
+    /// `allow_private = true`: instance routes other than direct (a relay on the instance's own
+    /// network, such as Mailpit in development).
+    pub instance_delivery: DeliveryContext,
+    /// Local delivery (D11).
+    pub intake: MailIntake,
     pub live: LiveHub,
 }
 
@@ -45,11 +55,21 @@ pub async fn run_send_job(
         .release(outbound_id, state.delivery.hostname.as_deref(), now)
         .await
     {
-        Ok(Some(released)) => {
-            announce(&state.live, &released).await;
+        Ok(released) => {
+            if let Some(released) = released {
+                announce(&state.live, &released).await;
+            }
+            if let NextRun::At(at) = deliver_due(state, outbound_id, now).await? {
+                // Never sooner than a second from now, so a run cannot spin.
+                let at = TimestampMillis::from_millis(at.as_millis().max(now.as_millis() + 1000));
+                state
+                    .mail
+                    .queue_send_run(outbound_id, at)
+                    .await
+                    .map_err(|error| JobError::Retryable(error.to_string()))?;
+            }
             return Ok(());
         }
-        Ok(None) => return Ok(()),
         Err(error) => error,
     };
     let (reason, retry) = release_failure(&error);

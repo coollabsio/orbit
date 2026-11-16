@@ -26,11 +26,15 @@ use crate::repositories::mail::{
 
 pub type ReceiptId = Id;
 
-/// How a message arrived: Orbit's SMTP listener, or a provider's webhook (provider intake).
+/// How a message arrived: Orbit's SMTP listener, a provider's webhook (provider intake), or a
+/// message sent from this instance to one of its own domains (local delivery, spec D11).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Source {
     Smtp,
     Provider(ProviderKind),
+    /// Sent by a mailbox of this instance: no SMTP peer and no checks. The receipt's `auth` is
+    /// `{"local":true}` (shown as DKIM pass); `InboundMessage::auth` is not stored.
+    Local,
 }
 
 impl Source {
@@ -39,6 +43,7 @@ impl Source {
         match self {
             Self::Smtp => "smtp",
             Self::Provider(kind) => kind.as_str(),
+            Self::Local => "local",
         }
     }
 }
@@ -157,7 +162,10 @@ impl MailIntake {
             .as_ref()
             .map(serde_json::to_string)
             .transpose()?;
-        let auth = serde_json::to_string(&message.auth)?;
+        let auth = match message.source {
+            Source::Local => json!({ "local": true }).to_string(),
+            Source::Smtp | Source::Provider(_) => serde_json::to_string(&message.auth)?,
+        };
         let peer_ip = message.peer_ip.to_string();
 
         let database = self.repo.database();

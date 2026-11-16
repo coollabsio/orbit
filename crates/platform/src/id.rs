@@ -14,6 +14,21 @@ impl Id {
     pub fn new_v7() -> Self {
         Self(Uuid::now_v7())
     }
+
+    /// The 16 bytes of the identifier.
+    #[must_use]
+    pub const fn to_bytes(self) -> [u8; 16] {
+        self.0.into_bytes()
+    }
+
+    /// The identifier of 16 bytes made by [`Self::to_bytes`]; `None` for bytes that are not a
+    /// UUIDv7.
+    #[must_use]
+    pub fn from_bytes(bytes: [u8; 16]) -> Option<Self> {
+        let uuid = Uuid::from_bytes(bytes);
+        (uuid.get_version_num() == 7 && uuid.get_variant() == Variant::RFC4122)
+            .then_some(Self(uuid))
+    }
 }
 
 impl fmt::Debug for Id {

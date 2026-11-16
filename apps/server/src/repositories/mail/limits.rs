@@ -138,13 +138,14 @@ async fn due_held(
     Ok(list)
 }
 
-/// The filter of the released recipients of a scope in a window.
+/// The filter of the released recipients of a scope in a window, without those of `exclude`.
 fn released_filter(
     head: &str,
     workspace_id: Id,
     membership_id: Option<Id>,
     since: i64,
     now: i64,
+    exclude: Option<Id>,
 ) -> orbit_platform::SqlBuilder {
     let mut sql = orbit_platform::SqlBuilder::new(head);
     sql.push_bind(since);
@@ -155,6 +156,10 @@ fn released_filter(
     if let Some(membership_id) = membership_id {
         sql.push(" AND membership_id = ");
         sql.push_bind(membership_id.to_string());
+    }
+    if let Some(exclude) = exclude {
+        sql.push(" AND outbound_id <> ");
+        sql.push_bind(exclude.to_string());
     }
     sql
 }
@@ -189,6 +194,7 @@ async fn scope_allows(
         membership_id,
         since,
         now,
+        exclude,
     );
     let released: i64 = counted
         .build()
@@ -206,6 +212,7 @@ async fn scope_allows(
         membership_id,
         since,
         now,
+        exclude,
     );
     let rows = times.build().fetch_all(&mut **transaction).await?;
     for row in rows {
@@ -243,8 +250,8 @@ impl MailRepository {
 
     /// Whether `count` more recipients fit in the hour and day windows of the member and of the
     /// workspace at `now`: `None` when they do, else the first time they would (the latest of the
-    /// four windows). `exclude` is the outbound row being checked (a release checks a row that
-    /// is itself held and due).
+    /// four windows). `exclude` is the outbound row being checked: neither its draft (a held,
+    /// due row) nor its own recipient rows (a released row that delivery checks) count.
     pub async fn window_allows(
         &self,
         transaction: &mut Transaction<'_, Any>,
