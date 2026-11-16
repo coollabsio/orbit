@@ -57,9 +57,9 @@ use crate::page_routes::PageState;
 use crate::repositories::api_tokens::ApiTokenRepository;
 use crate::repositories::identity::IdentityRepository;
 use crate::repositories::mail::{
-    DNS_CHECK_JOB, MailRepository, PENDING_CHECK_MS, PURGE_JOB, SEND_SWEEP_JOB, SEND_SWEEP_MS,
-    dns_check_kind, mail_ingest_kind, mail_purge_kind, mail_send_kind, mail_send_sweep_kind,
-    run_ingest_job,
+    DNS_CHECK_JOB, MailRepository, PENDING_CHECK_MS, PURGE_JOB, SEND_POLICY_JOB, SEND_SWEEP_JOB,
+    SEND_SWEEP_MS, dns_check_kind, mail_ingest_kind, mail_purge_kind, mail_send_kind,
+    mail_send_sweep_kind, run_ingest_job, send_policy_kind,
 };
 use crate::repositories::page_files::PageFileRepository;
 use crate::repositories::tasks::TaskRepository;
@@ -336,11 +336,10 @@ impl App {
         // `validate` requires the app key.
         let mail_key =
             app_key.ok_or_else(|| AppError::Config("ORBIT_APP_KEY is required".to_owned()))?;
-        let mail = Arc::new(MailRepository::new(
-            database.clone(),
-            attachment_state.uploads.clone(),
-            mail_key,
-        ));
+        let mail = Arc::new(
+            MailRepository::new(database.clone(), attachment_state.uploads.clone(), mail_key)
+                .with_cloud(config.billing.is_some()),
+        );
         let mail_listener = if config.mail.enabled {
             let intake = MailIntake::new(
                 Arc::clone(&mail),
@@ -1417,6 +1416,23 @@ async fn initialize_production_services(
         })
         .and_then(|worker| {
             let mail = Arc::clone(&mail);
+            worker.with_handler(send_policy_kind(), move |_| {
+                let mail = Arc::clone(&mail);
+                async move {
+                    let now = mail
+                        .database()
+                        .database_now()
+                        .await
+                        .map_err(|error| JobError::Retryable(error.to_string()))?;
+                    mail.run_send_policy(now)
+                        .await
+                        .map(|_| ())
+                        .map_err(|error| JobError::Retryable(error.to_string()))
+                }
+            })
+        })
+        .and_then(|worker| {
+            let mail = Arc::clone(&mail);
             worker.with_handler(mail_purge_kind(), move |_| {
                 let mail = Arc::clone(&mail);
                 async move {
@@ -1493,6 +1509,14 @@ async fn initialize_production_services(
         &scheduler,
         SEND_SWEEP_JOB,
         Duration::from_millis(SEND_SWEEP_MS.unsigned_abs()),
+        now,
+    )
+    .await?;
+    // Promotes `new` workspaces that sent cleanly for 14 days.
+    ensure_schedule(
+        &scheduler,
+        SEND_POLICY_JOB,
+        Duration::from_secs(24 * 60 * 60),
         now,
     )
     .await?;

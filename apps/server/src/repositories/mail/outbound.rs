@@ -267,7 +267,7 @@ impl MailRepository {
 
         between.await;
         let mut transaction = self.database.immediate_transaction().await?;
-        let limits = load_limits(&mut transaction, workspace_id).await?;
+        let limits = load_limits(&mut transaction, workspace_id, self.cloud).await?;
         if all.len() as i64 > limits.max_recipients {
             return Err(MailError::Unprocessable("too_many_recipients"));
         }
@@ -1147,6 +1147,7 @@ impl MailRepository {
     ) -> Result<Recorded, MailError> {
         let mut transaction = self.database.immediate_transaction().await?;
         let mut bounced = false;
+        let mut hard_bounced = None;
         for (recipient_id, outcome) in outcomes {
             let row = sqlx::query(
                 "SELECT attempts, workspace_id, address FROM mail_outbound_recipients \
@@ -1200,6 +1201,9 @@ impl MailRepository {
                 }
             };
             bounced |= status == "bounced";
+            if kind == Some(BounceKind::Hard) {
+                hard_bounced = Some(parse_id(&row.try_get::<String, _>("workspace_id")?)?);
+            }
             sqlx::query(
                 "UPDATE mail_outbound_recipients SET status = $1, last_response = $2, \
                  next_attempt_at = $3, provider_message_id = COALESCE($4, provider_message_id), \
@@ -1231,6 +1235,9 @@ impl MailRepository {
         }
         if bounced {
             bounced_thread_to_inbox(&mut transaction, outbound_id, now).await?;
+        }
+        if let Some(workspace_id) = hard_bounced {
+            Self::check_pause(&mut transaction, workspace_id, now).await?;
         }
         let done = finish_if_done(&mut transaction, outbound_id, now).await?;
         let next_at = next_due(&mut transaction, outbound_id, now).await?;

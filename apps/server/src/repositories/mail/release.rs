@@ -724,6 +724,16 @@ impl MailRepository {
             .bind(outbound_id.to_string())
             .execute(&mut *transaction)
             .await?;
+        // The first release makes the workspace's policy row (spec §5.8) and starts its 14 days.
+        sqlx::query(
+            "INSERT INTO mail_send_policies (workspace_id, tier, created_at, updated_at) \
+             VALUES ($1, $2, $3, $3) ON CONFLICT (workspace_id) DO NOTHING",
+        )
+        .bind(workspace_id.to_string())
+        .bind(super::limits::default_tier(self.cloud))
+        .bind(now.as_millis())
+        .execute(&mut *transaction)
+        .await?;
         sqlx::query(
             "UPDATE mail_send_policies SET first_release_at = $1, updated_at = $2 \
              WHERE workspace_id = $3 AND first_release_at IS NULL",

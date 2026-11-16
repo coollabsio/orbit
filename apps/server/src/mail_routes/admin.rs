@@ -13,8 +13,8 @@ use super::{Call, MailState, RequestIdExtension, problem};
 use crate::mail_dns::{PtrStatus, check_ptr};
 use crate::repositories::instance_settings::InstanceSettingsRepository;
 use crate::repositories::mail::{
-    FailedReceipt, HealthTest, HealthTestStatus, MailAuthSummary, MailError, ReceiptProblem,
-    RejectReason, RejectedDelivery,
+    FailedReceipt, HealthTest, HealthTestStatus, Limits, MailAuthSummary, MailError,
+    ReceiptProblem, RejectReason, RejectedDelivery, SendPolicyView, SendTier,
 };
 use crate::task_routes::{ApiError, ApiJson, authenticate_session, request_id_value};
 
@@ -491,4 +491,194 @@ pub(crate) async fn retry_mail_receipt(
         .await
         .map_err(|error| call.problem(error))?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// A workspace's send policy (spec §5.8).
+#[derive(Serialize, ToSchema)]
+pub(crate) struct MailSendPolicy {
+    #[schema(value_type = String)]
+    workspace_id: Id,
+    workspace_name: String,
+    tier: SendTier,
+    /// The numbers that apply now (the tier's, or the custom ones).
+    limits: Limits,
+    /// Recipients the workspace released in the last hour and day.
+    use_hour: i64,
+    use_day: i64,
+    /// Recipients released in the last 7 days.
+    recipients_7d: i64,
+    /// Percent of them that bounced hard.
+    hard_bounce_rate_7d: f64,
+    /// Percent of them that complained.
+    complaint_rate_7d: f64,
+    /// Set while sending is paused.
+    #[schema(value_type = Option<String>, format = DateTime)]
+    paused_at: Option<TimestampMillis>,
+    pause_reason: Option<String>,
+    #[schema(value_type = Option<String>, format = DateTime)]
+    first_release_at: Option<TimestampMillis>,
+}
+
+#[derive(Serialize, ToSchema)]
+pub(crate) struct MailSendPolicyList {
+    items: Vec<MailSendPolicy>,
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct SetMailSendPolicyBody {
+    tier: SendTier,
+    /// Required for `custom`, ignored otherwise.
+    custom_limits: Option<Limits>,
+}
+
+fn policy_view(policy: SendPolicyView) -> MailSendPolicy {
+    MailSendPolicy {
+        workspace_id: policy.workspace_id,
+        workspace_name: policy.workspace_name,
+        tier: policy.tier,
+        limits: policy.limits,
+        use_hour: policy.use_hour,
+        use_day: policy.use_day,
+        recipients_7d: policy.recipients_7d,
+        hard_bounce_rate_7d: policy.hard_bounce_rate_7d,
+        complaint_rate_7d: policy.complaint_rate_7d,
+        paused_at: policy.paused_at,
+        pause_reason: policy.pause_reason,
+        first_release_at: policy.first_release_at,
+    }
+}
+
+async fn database_now(
+    state: &MailState,
+    instance: &str,
+    request_id: RequestIdRef<'_>,
+) -> Result<TimestampMillis, ApiError> {
+    state
+        .mail
+        .database()
+        .database_now()
+        .await
+        .map_err(|error| problem(MailError::Unavailable(error), instance, request_id))
+}
+
+fn path_workspace(
+    workspace: &str,
+    instance: &str,
+    request_id: RequestIdRef<'_>,
+) -> Result<Id, ApiError> {
+    workspace
+        .parse()
+        .map_err(|_| problem(MailError::NotFound, instance, request_id))
+}
+
+/// Every workspace's send tier, use and rates, paused ones first (instance admins).
+#[utoipa::path(get, path = "/api/v1/admin/mail/send-policies", responses((status = 200, body = MailSendPolicyList)))]
+pub(crate) async fn list_mail_send_policies(
+    State(state): State<MailState>,
+    headers: HeaderMap,
+    uri: Uri,
+    request_id: RequestIdExtension,
+) -> Result<Json<MailSendPolicyList>, ApiError> {
+    let request_id = request_id.as_ref();
+    let (_, instance) = require_root(&state, &headers, &uri, request_id).await?;
+    let now = database_now(&state, &instance, request_id).await?;
+    let items = state
+        .mail
+        .list_send_policies(now)
+        .await
+        .map_err(|error| problem(error, &instance, request_id))?;
+    Ok(Json(MailSendPolicyList {
+        items: items.into_iter().map(policy_view).collect(),
+    }))
+}
+
+/// One workspace's send policy (instance admins).
+#[utoipa::path(get, path = "/api/v1/admin/mail/send-policies/{workspace_id}", params(("workspace_id" = String, Path)), responses((status = 200, body = MailSendPolicy)))]
+pub(crate) async fn get_mail_send_policy_admin(
+    State(state): State<MailState>,
+    Path(workspace): Path<String>,
+    headers: HeaderMap,
+    uri: Uri,
+    request_id: RequestIdExtension,
+) -> Result<Json<MailSendPolicy>, ApiError> {
+    let request_id = request_id.as_ref();
+    let (_, instance) = require_root(&state, &headers, &uri, request_id).await?;
+    let workspace_id = path_workspace(&workspace, &instance, request_id)?;
+    let now = database_now(&state, &instance, request_id).await?;
+    let view = state
+        .mail
+        .send_policy(workspace_id, now)
+        .await
+        .map_err(|error| problem(error, &instance, request_id))?;
+    Ok(Json(policy_view(view)))
+}
+
+/// Sets a workspace's tier and, for `custom`, its numbers (instance admins).
+#[utoipa::path(put, path = "/api/v1/admin/mail/send-policies/{workspace_id}", params(("workspace_id" = String, Path)), request_body = SetMailSendPolicyBody, responses((status = 200, body = MailSendPolicy)))]
+pub(crate) async fn set_mail_send_policy(
+    State(state): State<MailState>,
+    Path(workspace): Path<String>,
+    headers: HeaderMap,
+    uri: Uri,
+    request_id: RequestIdExtension,
+    ApiJson(body): ApiJson<SetMailSendPolicyBody>,
+) -> Result<Json<MailSendPolicy>, ApiError> {
+    let request_id = request_id.as_ref();
+    let (_, instance) = require_root(&state, &headers, &uri, request_id).await?;
+    let workspace_id = path_workspace(&workspace, &instance, request_id)?;
+    let now = database_now(&state, &instance, request_id).await?;
+    let view = state
+        .mail
+        .set_send_policy(workspace_id, body.tier, body.custom_limits, now)
+        .await
+        .map_err(|error| problem(error, &instance, request_id))?;
+    Ok(Json(policy_view(view)))
+}
+
+/// Resumes the sending of a paused workspace (instance admins). Its held messages go at the
+/// next sweep.
+#[utoipa::path(post, path = "/api/v1/admin/mail/send-policies/{workspace_id}/resume", params(("workspace_id" = String, Path)), responses((status = 200, body = MailSendPolicy)))]
+pub(crate) async fn resume_mail_sending(
+    State(state): State<MailState>,
+    Path(workspace): Path<String>,
+    headers: HeaderMap,
+    uri: Uri,
+    request_id: RequestIdExtension,
+) -> Result<Json<MailSendPolicy>, ApiError> {
+    let request_id = request_id.as_ref();
+    let (actor_id, instance) = require_root(&state, &headers, &uri, request_id).await?;
+    let workspace_id = path_workspace(&workspace, &instance, request_id)?;
+    let now = database_now(&state, &instance, request_id).await?;
+    let view = state
+        .mail
+        .resume_sending(workspace_id, actor_id, now)
+        .await
+        .map_err(|error| problem(error, &instance, request_id))?;
+    Ok(Json(policy_view(view)))
+}
+
+/// The workspace's send policy, use and rates, for the banner and the limits card (owners and
+/// admins; read only).
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/mail/send-policy", params(("workspace_id" = String, Path)), responses((status = 200, body = MailSendPolicy)))]
+pub(crate) async fn get_mail_send_policy(
+    State(state): State<MailState>,
+    Path(workspace): Path<String>,
+    headers: HeaderMap,
+    uri: Uri,
+    request_id: RequestIdExtension,
+) -> Result<Json<MailSendPolicy>, ApiError> {
+    let call = Call::enter(&state, &headers, &uri, &workspace, &request_id).await?;
+    let now = state
+        .mail
+        .database()
+        .database_now()
+        .await
+        .map_err(|error| call.problem(error.into()))?;
+    let view = state
+        .mail
+        .workspace_send_policy(call.workspace_id, call.actor_id, now)
+        .await
+        .map_err(|error| call.problem(error))?;
+    Ok(Json(policy_view(view)))
 }

@@ -46,7 +46,7 @@ pub use ingest::{
 };
 pub use keys::{MailKeys, open_blob, receipt_aad, seal_blob};
 pub use labels::Label;
-pub use limits::Limits;
+pub use limits::{Limits, SEND_POLICY_JOB, SendPolicyView, SendTier, send_policy_kind};
 pub(crate) use mailboxes::suspend_owned_mailboxes;
 pub use mailboxes::{
     AddressKind, BulkResult, MailAddress, Mailbox, MailboxKind, MailboxStatus, NamePattern,
@@ -132,6 +132,8 @@ pub struct MailRepository {
     keys: MailKeys,
     /// Seals DKIM private keys (associated data [`dkim_aad`]).
     app_key: [u8; 32],
+    /// Orbit Cloud (`ORBIT_CLOUD=true`): a workspace starts on the `new` tier.
+    cloud: bool,
 }
 
 impl MailRepository {
@@ -142,7 +144,16 @@ impl MailRepository {
             database,
             uploads,
             app_key,
+            cloud: false,
         }
+    }
+
+    /// Sets whether this is Orbit Cloud: a workspace without a send policy is then `new`, else
+    /// `standard` (spec §5.8).
+    #[must_use]
+    pub const fn with_cloud(mut self, cloud: bool) -> Self {
+        self.cloud = cloud;
+        self
     }
 
     #[must_use]

@@ -445,6 +445,22 @@ pub fn mail_router(state: MailState) -> Router {
             get(admin::get_mail_admin).put(admin::set_mail_admin),
         )
         .route(
+            "/api/v1/admin/mail/send-policies",
+            get(admin::list_mail_send_policies),
+        )
+        .route(
+            "/api/v1/admin/mail/send-policies/{workspace_id}",
+            get(admin::get_mail_send_policy_admin).put(admin::set_mail_send_policy),
+        )
+        .route(
+            "/api/v1/admin/mail/send-policies/{workspace_id}/resume",
+            post(admin::resume_mail_sending),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/send-policy",
+            get(admin::get_mail_send_policy),
+        )
+        .route(
             "/api/v1/admin/mail/test-address",
             post(admin::create_mail_test_address),
         )
