@@ -43,6 +43,7 @@ use crate::mail_dns::{DnsChecker, DnsLookup, HickoryDns};
 use crate::mail_intake::MailIntake;
 use crate::mail_listener::{MailListener, MailListenerStatus, TRACE_HEADROOM};
 use crate::mail_routes::{MailSettings, MailState};
+use crate::mail_send::{run_send_job, send_job_outbound};
 use crate::metrics::Metrics;
 use crate::notion::client::NotionClientConfig;
 use crate::notion::import::{NotionImportService, NotionImportSettings};
@@ -57,7 +58,7 @@ use crate::repositories::api_tokens::ApiTokenRepository;
 use crate::repositories::identity::IdentityRepository;
 use crate::repositories::mail::{
     DNS_CHECK_JOB, MailRepository, PENDING_CHECK_MS, PURGE_JOB, dns_check_kind, mail_ingest_kind,
-    mail_purge_kind, run_ingest_job,
+    mail_purge_kind, mail_send_kind, run_ingest_job,
 };
 use crate::repositories::page_files::PageFileRepository;
 use crate::repositories::tasks::TaskRepository;
@@ -387,6 +388,15 @@ impl App {
             config.mail.hostname.clone(),
             config.mail.mode,
         );
+        let send_jobs = crate::mail_send::SendJobState {
+            mail: Arc::clone(&mail),
+            delivery: crate::mail_send::DeliveryContext::new(
+                config.mail.hostname.clone(),
+                Arc::new(HickoryDns::new(config.mail.dns_resolver)),
+                false,
+            ),
+            live: crate::live::LiveHub::of(&database),
+        };
 
         let linear_imports = LinearImportService::new(
             database.clone(),
@@ -476,6 +486,7 @@ impl App {
             notion_imports.clone(),
             dns_checker,
             Arc::clone(&mail),
+            send_jobs,
             asana_imports.clone(),
             linear_imports.clone(),
             trello_imports.clone(),
@@ -1178,6 +1189,7 @@ async fn initialize_production_services(
     notion_imports: NotionImportService,
     dns_checker: DnsChecker,
     mail: Arc<MailRepository>,
+    send_jobs: crate::mail_send::SendJobState,
     asana_imports: AsanaImportService,
     linear_imports: LinearImportService,
     trello_imports: TrelloImportService,
@@ -1348,6 +1360,21 @@ async fn initialize_production_services(
                         context.job.max_attempts,
                     )
                     .await
+                }
+            })
+        })
+        .and_then(|worker| {
+            worker.with_handler(mail_send_kind(), move |context| {
+                let send = send_jobs.clone();
+                async move {
+                    let outbound_id = send_job_outbound(&context.job.payload)?;
+                    let now = send
+                        .mail
+                        .database()
+                        .database_now()
+                        .await
+                        .map_err(|error| JobError::Retryable(error.to_string()))?;
+                    run_send_job(&send, outbound_id, now).await
                 }
             })
         })

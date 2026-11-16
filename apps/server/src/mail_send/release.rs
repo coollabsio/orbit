@@ -1,0 +1,91 @@
+//! The `mail.send` job (spec §5.3). Its first run for a held message releases it
+//! ([`MailRepository::release`]: build, sign, seal, file into Sent and the thread, queue the
+//! recipients) and tells the mailbox's readers with `thread.updated`. A run for a message that is
+//! not due or not held any more (undone, an old job of a message sent again) does nothing.
+//!
+//! A lasting release failure keeps the message held with its reason (for example
+//! `dkim_inactive`: never sent unsigned) and fails the job; a database or blob store error holds
+//! it with `release_failed` and is retried.
+
+use std::sync::Arc;
+
+use orbit_platform::{Id, JobError, TimestampMillis};
+use serde_json::{Value, json};
+
+use super::DeliveryContext;
+use crate::live::{LiveHub, NewEvent, Recipients};
+use crate::repositories::mail::{MAIL_TOPIC, MailError, MailRepository, Released};
+
+/// What the `mail.send` job works with.
+#[derive(Clone)]
+pub struct SendJobState {
+    pub mail: Arc<MailRepository>,
+    /// Its `hostname` is the `HELO` recorded on a sent message's receipt.
+    pub delivery: DeliveryContext,
+    pub live: LiveHub,
+}
+
+/// The outbound id of a `mail.send` payload (`{"outbound_id": "<id>"}`).
+pub fn send_job_outbound(payload: &Value) -> Result<Id, JobError> {
+    payload
+        .get("outbound_id")
+        .and_then(Value::as_str)
+        .and_then(|id| id.parse::<Id>().ok())
+        .ok_or_else(|| JobError::Permanent("mail.send needs an outbound_id".to_owned()))
+}
+
+/// One run of `mail.send` for `outbound_id` at `now` (the database's time).
+pub async fn run_send_job(
+    state: &SendJobState,
+    outbound_id: Id,
+    now: TimestampMillis,
+) -> Result<(), JobError> {
+    let error = match state
+        .mail
+        .release(outbound_id, state.delivery.hostname.as_deref(), now)
+        .await
+    {
+        Ok(Some(released)) => {
+            announce(&state.live, &released).await;
+            return Ok(());
+        }
+        Ok(None) => return Ok(()),
+        Err(error) => error,
+    };
+    let (reason, retry) = match &error {
+        MailError::Unprocessable(code) => (*code, false),
+        MailError::QuotaExceeded => ("storage_quota", false),
+        MailError::Crypto => ("decrypt_failed", false),
+        MailError::Unavailable(_) | MailError::Upload(_) => ("release_failed", true),
+        _ => ("release_failed", false),
+    };
+    if let Err(record) = state.mail.hold_release(outbound_id, reason, now).await {
+        tracing::warn!(error = %record, outbound_id = %outbound_id, "recording a mail release failure");
+    }
+    let text = format!("{reason}: {error}");
+    tracing::warn!(error = %text, outbound_id = %outbound_id, "mail release failed");
+    if retry {
+        Err(JobError::Retryable(text))
+    } else {
+        Err(JobError::Permanent(text))
+    }
+}
+
+/// `thread.updated` to the mailbox's readers; the message is stored either way.
+async fn announce(live: &LiveHub, released: &Released) {
+    if released.users.is_empty() {
+        return;
+    }
+    let events = [NewEvent {
+        recipients: Recipients::Users(released.users.clone()),
+        topic: MAIL_TOPIC,
+        event: json!({
+            "type": "thread.updated",
+            "mailbox_id": released.mailbox_id.to_string(),
+            "thread_id": released.thread_id.to_string(),
+        }),
+    }];
+    if let Err(error) = live.publish(released.workspace_id, &events).await {
+        tracing::warn!(error = %error, "mail events for the live socket");
+    }
+}

@@ -314,6 +314,16 @@ pub fn clean_html(html: &str) -> String {
     ammonia::clean(html)
 }
 
+/// Sanitizes the HTML body of a message to send (a draft, on save and again when the message is built): the
+/// `ammonia` defaults of [`clean_html`] (no `style`, `class`, scripts or event handlers; `http`, `https` and
+/// `mailto` links and images stay) plus `cid:` URLs, which show the message's own inline images.
+pub fn clean_outgoing_html(html: &str) -> String {
+    ammonia::Builder::default()
+        .add_url_schemes(&["cid"])
+        .clean(html)
+        .to_string()
+}
+
 /// The quoted original of a reply as HTML: "On {date}, {from} wrote:" and the original in a `blockquote`. The
 /// original HTML is sanitized again here.
 pub fn quote_reply(

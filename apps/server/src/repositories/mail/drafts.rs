@@ -167,7 +167,7 @@ fn clean_body(body: &str) -> Result<String, MailError> {
     if body.len() > BODY_MAX_BYTES {
         return Err(MailError::Invalid { field: "body_html" });
     }
-    Ok(orbit_mail::clean_html(body))
+    Ok(orbit_mail::clean_outgoing_html(body))
 }
 
 /// `Re: x` / `Fwd: x`, without doubling a prefix the subject has already.

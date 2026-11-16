@@ -9,6 +9,7 @@
 
 mod direct;
 mod http;
+mod release;
 mod smtp;
 
 use std::net::IpAddr;
@@ -23,6 +24,7 @@ use crate::repositories::mail::{
 };
 
 pub use http::{api_base, delivery_http_client};
+pub use release::{SendJobState, run_send_job, send_job_outbound};
 
 /// Most characters of a provider's or server's response kept in an outcome.
 const RESPONSE_MAX_CHARS: usize = 500;

@@ -83,13 +83,13 @@ struct Receipt {
 }
 
 /// The parsed message, or the raw text with a warning when it did not parse.
-struct Content {
-    parsed: ParsedMessage,
+pub(super) struct Content {
+    pub(super) parsed: ParsedMessage,
     warning: Option<&'static str>,
 }
 
 impl Content {
-    fn of(raw: &[u8]) -> Self {
+    pub(super) fn of(raw: &[u8]) -> Self {
         match parse(raw, &ParseLimits::default()) {
             Ok(parsed) => Self {
                 parsed,
@@ -105,7 +105,7 @@ impl Content {
         }
     }
 
-    fn has_attachments(&self) -> bool {
+    pub(super) fn has_attachments(&self) -> bool {
         self.parsed
             .attachments
             .iter()
@@ -113,7 +113,7 @@ impl Content {
     }
 
     /// `In-Reply-To` and `References`, without duplicates.
-    fn thread_ids(&self) -> Vec<String> {
+    pub(super) fn thread_ids(&self) -> Vec<String> {
         let mut ids: Vec<String> = Vec::new();
         for id in self
             .parsed
@@ -166,7 +166,7 @@ fn snippet(text: &str) -> String {
 }
 
 /// Postgres text cannot hold NUL; mail text can.
-fn clean(text: &str) -> Cow<'_, str> {
+pub(super) fn clean(text: &str) -> Cow<'_, str> {
     if text.contains('\0') {
         Cow::Owned(text.replace('\0', ""))
     } else {
@@ -254,8 +254,14 @@ impl MailRepository {
             Some("ingested") => return Ok(IngestOutcome::AlreadyIngested),
             Some(_) => {}
         }
-        let message_id =
-            insert_message(&mut transaction, receipt_id, &receipt, &content, now).await?;
+        let stored = Stored {
+            receipt_id,
+            workspace_id: receipt.workspace_id,
+            raw_sha256: &receipt.raw_sha256,
+            size: receipt.size,
+            received_at: receipt.received_at,
+        };
+        let message_id = insert_message(&mut transaction, &stored, &content, now).await?;
         let domains: Vec<String> = sqlx::query_scalar(
             "SELECT name FROM mail_domains WHERE workspace_id = $1 \
              AND status IN ('verified', 'suspended')",
@@ -516,15 +522,24 @@ async fn load_receipt(pool: &sqlx::AnyPool, receipt_id: Id) -> Result<Option<Rec
     }))
 }
 
+/// The receipt a message is read from.
+pub(super) struct Stored<'a> {
+    pub(super) receipt_id: Id,
+    pub(super) workspace_id: Id,
+    pub(super) raw_sha256: &'a str,
+    pub(super) size: i64,
+    pub(super) received_at: TimestampMillis,
+}
+
 /// Inserts the receipt's message (once: a re-run reads the existing one) and, the first time,
 /// its attachments. Returns the message id.
-async fn insert_message(
+pub(super) async fn insert_message(
     transaction: &mut Transaction<'_, Any>,
-    receipt_id: Id,
-    receipt: &Receipt,
+    receipt: &Stored<'_>,
     content: &Content,
     now: TimestampMillis,
 ) -> Result<Id, MailError> {
+    let receipt_id = receipt.receipt_id;
     let parsed = &content.parsed;
     let message_id = Id::new_v7();
     let from = parsed.from.as_ref();
@@ -538,7 +553,7 @@ async fn insert_message(
     .bind(message_id.to_string())
     .bind(receipt.workspace_id.to_string())
     .bind(receipt_id.to_string())
-    .bind(&receipt.raw_sha256)
+    .bind(receipt.raw_sha256)
     .bind(clean_opt(parsed.message_id.as_deref()))
     .bind(clean_opt(parsed.in_reply_to.first().map(String::as_str)))
     .bind(

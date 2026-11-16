@@ -1,7 +1,7 @@
 use mail_parser::{MessageParser, MimeHeaders};
 use orbit_mail::{
     ComposeError, Composed, ComposedAddress, ComposedFile, ComposedFileKind, ParseLimits,
-    build_message, html_to_text, new_message_id, parse, trim_references,
+    build_message, clean_outgoing_html, html_to_text, new_message_id, parse, trim_references,
 };
 
 fn addr(name: Option<&str>, address: &str) -> ComposedAddress {
@@ -198,6 +198,24 @@ fn message_id_shape() {
     let id = new_message_id("orbit.test");
     assert!(id.starts_with('<') && id.ends_with("@orbit.test>"));
     assert_ne!(id, new_message_id("orbit.test"));
+}
+
+#[test]
+fn outgoing_html_keeps_cid_images_only_safe_markup() {
+    let clean = clean_outgoing_html(
+        "<p onclick=\"x()\" style=\"color:red\">Hi</p><img src=\"cid:logo@orbit\">\
+         <script>alert(1)</script><a href=\"javascript:x()\">bad</a><img src=\"https://a.test/i.png\">",
+    );
+    assert!(clean.contains("src=\"cid:logo@orbit\""), "{clean}");
+    assert!(clean.contains("https://a.test/i.png"), "{clean}");
+    assert!(
+        !clean.contains("onclick") && !clean.contains("style="),
+        "{clean}"
+    );
+    assert!(
+        !clean.contains("script") && !clean.contains("javascript"),
+        "{clean}"
+    );
 }
 
 #[test]

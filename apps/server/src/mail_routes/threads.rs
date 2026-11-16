@@ -30,6 +30,10 @@ pub(crate) struct MailThreadQuery {
     /// Only the caller's starred threads.
     #[serde(default)]
     starred: bool,
+    /// Sent: threads with mail sent from the mailbox, newest sent first, in every folder but
+    /// trash. Not together with `folder`.
+    #[serde(default)]
+    sent: bool,
     /// The `cursor` of the page before.
     cursor: Option<String>,
     /// 1–100; default 50.
@@ -150,6 +154,7 @@ pub(crate) async fn list_mail_threads(
         folder: query.folder,
         label_id: optional_id(&call, query.label_id.as_deref(), "label_id")?,
         starred: query.starred,
+        sent: query.sent,
         cursor: query.cursor,
         limit: query.limit,
     };

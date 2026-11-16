@@ -85,6 +85,9 @@ pub struct MailThreadSummary {
     pub from: Vec<MailPerson>,
     #[schema(value_type = String, format = DateTime)]
     pub last_message_at: TimestampMillis,
+    /// The last message sent from the mailbox; null when it sent none (Sent is ordered by it).
+    #[schema(value_type = Option<String>, format = DateTime)]
+    pub last_sent_at: Option<TimestampMillis>,
     pub message_count: i64,
     /// A message arrived after the caller last read the thread.
     pub unread: bool,
@@ -272,6 +275,9 @@ pub struct ThreadListInput {
     pub folder: Option<MailFolder>,
     pub label_id: Option<Id>,
     pub starred: bool,
+    /// Sent (spec §5.10): threads with mail sent from the mailbox, by the last one sent, in
+    /// every folder but Trash. Not with `folder`.
+    pub sent: bool,
     pub cursor: Option<String>,
     pub limit: Option<usize>,
 }
@@ -354,10 +360,17 @@ fn page_limit(limit: Option<usize>) -> Result<usize, MailError> {
     }
 }
 
-fn page(threads: Vec<MailThreadSummary>, more: bool) -> MailThreadPage {
+/// A page of threads; the cursor holds the time the list is ordered by (`last_sent_at` for
+/// Sent).
+fn page(threads: Vec<MailThreadSummary>, more: bool, sent: bool) -> MailThreadPage {
     let cursor = threads.last().filter(|_| more).map(|thread| {
+        let at = if sent {
+            thread.last_sent_at.unwrap_or(thread.last_message_at)
+        } else {
+            thread.last_message_at
+        };
         ThreadCursor {
-            last_message_at: thread.last_message_at.as_millis(),
+            last_message_at: at.as_millis(),
             id: thread.id,
         }
         .encode()
@@ -438,7 +451,9 @@ impl MailRepository {
             .await?;
         }
         let folders = match input.folder {
+            Some(_) if input.sent => return Err(MailError::Invalid { field: "sent" }),
             Some(folder) => Folders::One(folder),
+            None if input.sent => Folders::Sent,
             None if input.label_id.is_some() || input.starred => Folders::Kept,
             None => Folders::One(MailFolder::Inbox),
         };
@@ -457,7 +472,7 @@ impl MailRepository {
         )
         .await?;
         transaction.commit().await?;
-        Ok(page(threads, more))
+        Ok(page(threads, more, input.sent))
     }
 
     /// Search (spec §8.3) over the mailboxes the caller reads; an empty page when `q` names
@@ -475,7 +490,7 @@ impl MailRepository {
         let mut transaction = self.database.pool().begin().await?;
         let reader = reader(&mut transaction, workspace_id, user_id).await?;
         let Some(selection) = Selection::search(query, self.postgres()) else {
-            return Ok(page(Vec::new(), false));
+            return Ok(page(Vec::new(), false, false));
         };
         let (threads, more) = select_threads(
             &mut transaction,
@@ -488,7 +503,7 @@ impl MailRepository {
         )
         .await?;
         transaction.commit().await?;
-        Ok(page(threads, more))
+        Ok(page(threads, more, false))
     }
 
     /// A thread with its messages, oldest first.
@@ -904,6 +919,7 @@ async fn unread_counts(
          JOIN mailbox_members mm ON mm.mailbox_id = t.mailbox_id AND mm.membership_id = $1 \
          LEFT JOIN mail_thread_user_state s ON s.thread_id = t.id AND s.membership_id = $2 \
          WHERE t.workspace_id = $3 AND (s.last_read_at IS NULL OR s.last_read_at < t.last_message_at) \
+         AND NOT (t.folder = 'archive' AND t.last_incoming_at IS NULL) \
          GROUP BY t.mailbox_id, t.folder",
     )
     .bind(membership_id.to_string())

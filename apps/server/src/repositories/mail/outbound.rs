@@ -15,6 +15,7 @@ use super::domains::parse_id;
 use super::drafts::{Draft, load_draft};
 use super::limits::load_limits;
 use super::routes::{RouteSettings, SendRouteKind};
+use super::search::people;
 use super::signatures::check_sendable;
 use super::{MailError, MailRepository, SendReadiness};
 
@@ -406,7 +407,8 @@ impl MailRepository {
     }
 
     /// The release side of the race with [`Self::cancel_outbound`]: `held → released` when the
-    /// message is due. `true` for the one caller that got it.
+    /// message is due. `true` for the one caller that got it. [`Self::release`] claims with the
+    /// same condition inside its own transaction, so a failed build leaves the row held.
     pub async fn claim_release(
         &self,
         outbound_id: Id,
@@ -435,10 +437,13 @@ impl MailRepository {
                 "((o.status = 'held' AND o.scheduled = 0) OR o.status = 'released')"
             }
         };
+        // A held message reads its draft; a released one (its draft is deleted) the sent message.
         let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
             "SELECT o.id, o.status, o.release_at, o.scheduled, o.hold_reason, o.draft_id, \
-             d.subject, d.to_addrs FROM mail_outbound o \
+             d.subject, d.to_addrs, m.subject AS sent_subject, m.to_addrs AS sent_to \
+             FROM mail_outbound o \
              LEFT JOIN mail_drafts d ON d.id = o.draft_id \
+             LEFT JOIN mail_messages m ON m.id = o.message_id \
              WHERE o.membership_id = $1 AND {condition} ORDER BY o.release_at, o.id"
         )))
         .bind(membership_id.to_string())
@@ -448,15 +453,29 @@ impl MailRepository {
             .map(|row| {
                 let draft_id: Option<String> = row.try_get("draft_id")?;
                 let to: Option<String> = row.try_get("to_addrs")?;
+                let to = match to {
+                    Some(json) => serde_json::from_str(&json).unwrap_or_default(),
+                    None => row
+                        .try_get::<Option<String>, _>("sent_to")?
+                        .map(|json| {
+                            people(&json)
+                                .into_iter()
+                                .map(|person| person.address)
+                                .collect()
+                        })
+                        .unwrap_or_default(),
+                };
+                let subject = match row.try_get::<Option<String>, _>("subject")? {
+                    Some(subject) => subject,
+                    None => row
+                        .try_get::<Option<String>, _>("sent_subject")?
+                        .unwrap_or_default(),
+                };
                 Ok(OutboundItem {
                     outbound: outbound(row)?,
                     draft_id: draft_id.map(|id| parse_id(&id)).transpose()?,
-                    subject: row
-                        .try_get::<Option<String>, _>("subject")?
-                        .unwrap_or_default(),
-                    to: to
-                        .and_then(|json| serde_json::from_str(&json).ok())
-                        .unwrap_or_default(),
+                    subject,
+                    to,
                 })
             })
             .collect()

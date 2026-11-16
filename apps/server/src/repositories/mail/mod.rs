@@ -18,6 +18,7 @@ mod outbound;
 mod providers;
 mod reading;
 mod receipts;
+mod release;
 mod routes;
 mod search;
 mod signatures;
@@ -63,6 +64,7 @@ pub use receipts::{
     FailedReceipt, FailedReceipts, INGEST_JOB, ReceiptProblem, RejectedDelivery, STUCK_RECEIPT_MS,
     mail_ingest_kind,
 };
+pub use release::Released;
 pub(crate) use receipts::{
     NewReceipt, insert_receipt, insert_receipt_recipient, record_health_test,
 };

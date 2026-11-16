@@ -1125,3 +1125,774 @@ async fn another_members_held_draft_is_not_found() {
         .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
+
+// ---- Release (Task 12): build, sign, file into Sent and the thread ----
+
+use orbit_mail::{Authenticator, ParseLimits, StaticDns};
+use orbit_server::live::LiveHub;
+use orbit_server::mail_dns::FakeDns;
+use orbit_server::mail_send::{DeliveryContext, SendJobState, run_send_job};
+use orbit_server::repositories::mail::{OutboundView, Released};
+
+impl Fixture {
+    /// Gives the domain a real active DKIM key (the fixture's is a placeholder); returns its
+    /// selector and its TXT record.
+    async fn signing(&self) -> (String, String) {
+        let key = self
+            .mail
+            .rotate_dkim(
+                self.workspace,
+                user_of(self, &self.owner).await,
+                self.domain,
+                "request",
+                TimestampMillis::now(),
+            )
+            .await
+            .unwrap();
+        self.sql(&format!(
+            "DELETE FROM mail_dkim_keys WHERE domain_id = '{}' AND selector <> '{}'",
+            self.domain, key.selector
+        ))
+        .await;
+        self.sql(&format!(
+            "UPDATE mail_dkim_keys SET status = 'active' WHERE domain_id = '{}'",
+            self.domain
+        ))
+        .await;
+        (
+            key.selector,
+            format!("v=DKIM1; k=rsa; p={}", key.public_key),
+        )
+    }
+
+    async fn new_draft(&self, from: Id, to: &[&str], cc: &[&str], bcc: &[&str]) -> String {
+        let (status, draft) = self
+            .call(
+                &self.ann,
+                "POST",
+                "/drafts",
+                Some(json!({"mode": "new", "from_address_id": from.to_string(), "to": to,
+                            "cc": cc, "bcc": bcc, "subject": "Hello",
+                            "body_html": "<p onclick=\"x()\">Hi <img src=\"cid:logo@one.test\"></p>"})),
+            )
+            .await;
+        assert_eq!(status, StatusCode::CREATED, "{draft}");
+        draft["id"].as_str().unwrap().to_owned()
+    }
+
+    async fn thread_draft(&self, mode: &str, thread: Id) -> String {
+        let (status, draft) = self
+            .call(
+                &self.ann,
+                "POST",
+                "/drafts",
+                Some(json!({"mode": mode, "thread_id": thread.to_string(),
+                            "body_html": "<p>Thanks</p>"})),
+            )
+            .await;
+        assert_eq!(status, StatusCode::CREATED, "{draft}");
+        draft["id"].as_str().unwrap().to_owned()
+    }
+
+    /// Sends Ann's draft and releases it at its time.
+    async fn send_and_release(&self, draft: &str) -> (Id, Released, i64) {
+        let (status, sent) = self.send(draft, json!({})).await;
+        assert_eq!(status, StatusCode::OK, "{sent}");
+        let id: Id = sent["id"].as_str().unwrap().parse().unwrap();
+        let (_, release_at, _) = self.outbound_row(&id.to_string()).await;
+        let released = self
+            .mail
+            .release(id, Some("mx.orbit.test"), at(release_at))
+            .await
+            .unwrap()
+            .expect("released");
+        (id, released, release_at)
+    }
+
+    async fn raw_of(&self, message: Id) -> Vec<u8> {
+        self.mail
+            .message_raw(self.workspace, user_of(self, &self.ann).await, message)
+            .await
+            .unwrap()
+            .0
+    }
+
+    async fn text(&self, sql: &str, id: impl ToString) -> Option<String> {
+        sqlx::query_scalar(sqlx::AssertSqlSafe(sql.to_owned()))
+            .bind(id.to_string())
+            .fetch_one(self.database.pool())
+            .await
+            .unwrap()
+    }
+
+    async fn number(&self, sql: &str, id: impl ToString) -> Option<i64> {
+        sqlx::query_scalar(sqlx::AssertSqlSafe(sql.to_owned()))
+            .bind(id.to_string())
+            .fetch_one(self.database.pool())
+            .await
+            .unwrap()
+    }
+
+    async fn thread_ids(&self, member: &Member, query: &str) -> Vec<String> {
+        let (status, page) = self
+            .call(member, "GET", &format!("/threads?{query}"), None)
+            .await;
+        assert_eq!(status, StatusCode::OK, "{page}");
+        page["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|item| item["id"].as_str().unwrap().to_owned())
+            .collect()
+    }
+
+    async fn unread(&self, member: &Member, thread: Id) -> bool {
+        let (status, detail) = self
+            .call(member, "GET", &format!("/threads/{thread}"), None)
+            .await;
+        assert_eq!(status, StatusCode::OK, "{detail}");
+        detail["thread"]["unread"].as_bool().unwrap()
+    }
+
+    /// Ann sends at once (no undo time), so the release happens now and mail delivered after it
+    /// is newer.
+    async fn no_undo(&self) {
+        self.sql(&format!(
+            "INSERT INTO mail_member_settings (membership_id, undo_send_seconds, updated_at) \
+             VALUES ('{}', 0, 0)",
+            self.ann.membership
+        ))
+        .await;
+    }
+
+    fn job_state(&self) -> SendJobState {
+        SendJobState {
+            mail: Arc::clone(&self.mail),
+            delivery: DeliveryContext::new(
+                Some("mx.orbit.test".to_owned()),
+                Arc::new(FakeDns::new()),
+                false,
+            ),
+            live: LiveHub::of(&self.database),
+        }
+    }
+}
+
+fn parsed(raw: &[u8]) -> orbit_mail::ParsedMessage {
+    orbit_mail::parse(raw, &ParseLimits::default()).unwrap()
+}
+
+#[tokio::test]
+async fn release_files_reply_in_thread_and_sent() {
+    let f = Fixture::new().await;
+    f.signing().await;
+    let (_, thread) = f.deliver("ann@one.test", f.ann_primary).await;
+    let (status, body) = f
+        .call(
+            &f.ann,
+            "PATCH",
+            &format!("/threads/{thread}"),
+            Some(json!({"folder": "archive"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let draft = f.thread_draft("reply", thread).await;
+    let (outbound, released, release_at) = f.send_and_release(&draft).await;
+    assert_eq!(released.thread_id, thread);
+    assert!(!released.new_thread);
+
+    // Appended without moving the thread.
+    let row = sqlx::query(
+        "SELECT folder, message_count, last_sent_at, last_incoming_at FROM mail_threads WHERE id = $1",
+    )
+    .bind(thread.to_string())
+    .fetch_one(f.database.pool())
+    .await
+    .unwrap();
+    use sqlx::Row;
+    assert_eq!(row.get::<String, _>("folder"), "archive");
+    assert_eq!(row.get::<i64, _>("message_count"), 2);
+    assert_eq!(row.get::<Option<i64>, _>("last_sent_at"), Some(release_at));
+    assert!(row.get::<Option<i64>, _>("last_incoming_at").is_some());
+    assert_eq!(
+        f.number(
+            "SELECT outgoing FROM mail_thread_messages WHERE message_id = $1",
+            released.message_id
+        )
+        .await,
+        Some(1)
+    );
+    // Filed like a received message, from source `sent`.
+    let receipt = sqlx::query(
+        "SELECT r.source, r.status, r.peer_ip, r.helo, r.auth, m.in_reply_to FROM mail_messages m \
+         JOIN mail_receipts r ON r.id = m.receipt_id WHERE m.id = $1",
+    )
+    .bind(released.message_id.to_string())
+    .fetch_one(f.database.pool())
+    .await
+    .unwrap();
+    assert_eq!(receipt.get::<String, _>("source"), "sent");
+    assert_eq!(receipt.get::<String, _>("status"), "ingested");
+    assert_eq!(receipt.get::<String, _>("peer_ip"), "");
+    assert_eq!(receipt.get::<String, _>("helo"), "mx.orbit.test");
+    assert_eq!(receipt.get::<String, _>("auth"), "{}");
+    assert_eq!(
+        receipt.get::<Option<String>, _>("in_reply_to").as_deref(),
+        Some("m1@sender.test")
+    );
+    // One queued recipient; the outbound row points at the message; the draft is gone.
+    let recipients = sqlx::query(
+        "SELECT address, kind, status FROM mail_outbound_recipients WHERE outbound_id = $1",
+    )
+    .bind(outbound.to_string())
+    .fetch_all(f.database.pool())
+    .await
+    .unwrap();
+    assert_eq!(recipients.len(), 1);
+    assert_eq!(
+        recipients[0].get::<String, _>("address"),
+        "carl@sender.test"
+    );
+    assert_eq!(recipients[0].get::<String, _>("kind"), "to");
+    assert_eq!(recipients[0].get::<String, _>("status"), "queued");
+    let row = sqlx::query("SELECT status, message_id, draft_id FROM mail_outbound WHERE id = $1")
+        .bind(outbound.to_string())
+        .fetch_one(f.database.pool())
+        .await
+        .unwrap();
+    assert_eq!(row.get::<String, _>("status"), "released");
+    assert_eq!(
+        row.get::<Option<String>, _>("message_id"),
+        Some(released.message_id.to_string())
+    );
+    assert_eq!(row.get::<Option<String>, _>("draft_id"), None);
+    let (status, _) = f
+        .call(&f.ann, "GET", &format!("/drafts/{draft}"), None)
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // Sent and Archive both list it; the Outbox reads the sent message now.
+    assert!(
+        f.thread_ids(&f.ann, "sent=true")
+            .await
+            .contains(&thread.to_string())
+    );
+    assert!(
+        f.thread_ids(&f.ann, "folder=archive")
+            .await
+            .contains(&thread.to_string())
+    );
+    let outbox = f
+        .mail
+        .list_outbound(f.ann.membership, OutboundView::Outbox)
+        .await
+        .unwrap();
+    assert_eq!(outbox.len(), 1);
+    assert_eq!(outbox[0].subject, "Re: Hello");
+    assert_eq!(outbox[0].to, vec!["carl@sender.test".to_owned()]);
+    // The quoted original is under the reply.
+    let message = parsed(&f.raw_of(released.message_id).await);
+    assert!(
+        message.body_text.contains("wrote:"),
+        "{}",
+        message.body_text
+    );
+}
+
+#[tokio::test]
+async fn new_message_thread_in_archive_hidden_from_archive_list_and_in_sent() {
+    let f = Fixture::new().await;
+    f.signing().await;
+    let draft = f.new_draft(f.team_primary, &["x@out.test"], &[], &[]).await;
+    let (_, released, _) = f.send_and_release(&draft).await;
+    assert!(released.new_thread);
+    let thread = released.thread_id.to_string();
+    assert_eq!(
+        f.text("SELECT folder FROM mail_threads WHERE id = $1", &thread)
+            .await
+            .as_deref(),
+        Some("archive")
+    );
+    assert_eq!(
+        f.number(
+            "SELECT last_incoming_at FROM mail_threads WHERE id = $1",
+            &thread
+        )
+        .await,
+        None
+    );
+    let team = f.team;
+    for member in [&f.owner, &f.ann] {
+        assert!(
+            !f.thread_ids(member, &format!("mailbox_id={team}&folder=archive"))
+                .await
+                .contains(&thread)
+        );
+        assert!(
+            !f.thread_ids(member, &format!("mailbox_id={team}"))
+                .await
+                .contains(&thread)
+        );
+        assert_eq!(
+            f.thread_ids(member, &format!("mailbox_id={team}&sent=true"))
+                .await,
+            vec![thread.clone()]
+        );
+    }
+    // The other member's unread count of Archive leaves it out too.
+    let (status, counts) = f.call(&f.owner, "GET", "/counts", None).await;
+    assert_eq!(status, StatusCode::OK, "{counts}");
+    let team_counts = counts["mailboxes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|mailbox| mailbox["mailbox_id"] == f.team.to_string())
+        .unwrap()
+        .clone();
+    assert_eq!(team_counts["archive"], 0);
+    // Sent is a view, not a folder.
+    let (status, _) = f
+        .call(&f.ann, "GET", "/threads?sent=true&folder=inbox", None)
+        .await;
+    assert!(status.is_client_error());
+}
+
+#[tokio::test]
+async fn release_signs_with_active_key() {
+    let f = Fixture::new().await;
+    let (selector, txt) = f.signing().await;
+    let draft = f
+        .new_draft(
+            f.ann_primary,
+            &["x@out.test"],
+            &["y@out.test"],
+            &["z@hidden.test"],
+        )
+        .await;
+    let (outbound, released, _) = f.send_and_release(&draft).await;
+    let raw = f.raw_of(released.message_id).await;
+    let dns = StaticDns::new().txt(&format!("{selector}._domainkey.one.test"), &txt);
+    let outcome = Authenticator::with_static_dns(dns)
+        .unwrap()
+        .check(
+            &raw,
+            IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10)),
+            "mx.orbit.test",
+            Some("ann@one.test"),
+        )
+        .await;
+    assert_eq!(outcome.dkim, Verdict::Pass);
+    let message = parsed(&raw);
+    let from = message.from.unwrap();
+    assert_eq!(from.address, "ann@one.test");
+    assert_eq!(from.name.as_deref(), Some("Ann Lee"));
+    // Bcc only in the envelope; the HTML is sanitized again, inline `cid:` images kept.
+    let text = String::from_utf8_lossy(&raw).into_owned();
+    assert!(!text.contains("z@hidden.test"), "{text}");
+    assert!(!text.to_ascii_lowercase().contains("bcc:"), "{text}");
+    let html = String::from_utf8(orbit_mail::part_bytes(&raw, message.html_part.unwrap()).unwrap())
+        .unwrap();
+    assert!(!html.contains("onclick"), "{html}");
+    assert!(html.contains("cid:logo@one.test"), "{html}");
+    let kinds: Vec<(String, String)> = sqlx::query_as(
+        "SELECT address, kind FROM mail_outbound_recipients WHERE outbound_id = $1 ORDER BY address",
+    )
+    .bind(outbound.to_string())
+    .fetch_all(f.database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        kinds,
+        vec![
+            ("x@out.test".to_owned(), "to".to_owned()),
+            ("y@out.test".to_owned(), "cc".to_owned()),
+            ("z@hidden.test".to_owned(), "bcc".to_owned()),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn release_without_active_key_stays_held() {
+    let f = Fixture::new().await;
+    let draft = f.new_draft(f.ann_primary, &["x@out.test"], &[], &[]).await;
+    // Sent while the domain had its key (D8); the key is gone at release.
+    let (status, sent) = f.send(&draft, json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{sent}");
+    f.sql("DELETE FROM mail_dkim_keys").await;
+    let id: Id = sent["id"].as_str().unwrap().parse().unwrap();
+    let (_, release_at, _) = f.outbound_row(&id.to_string()).await;
+    let result = run_send_job(&f.job_state(), id, at(release_at)).await;
+    assert!(
+        matches!(result, Err(orbit_platform::JobError::Permanent(_))),
+        "{result:?}"
+    );
+    let row =
+        sqlx::query("SELECT status, hold_reason, message_id FROM mail_outbound WHERE id = $1")
+            .bind(id.to_string())
+            .fetch_one(f.database.pool())
+            .await
+            .unwrap();
+    use sqlx::Row;
+    assert_eq!(row.get::<String, _>("status"), "held");
+    assert_eq!(
+        row.get::<Option<String>, _>("hold_reason").as_deref(),
+        Some("dkim_inactive")
+    );
+    assert_eq!(row.get::<Option<String>, _>("message_id"), None);
+    let sent_receipts: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM mail_receipts WHERE source = 'sent'")
+            .fetch_one(f.database.pool())
+            .await
+            .unwrap();
+    assert_eq!(sent_receipts, 0, "Never sent unsigned");
+    // Undo still brings the draft back.
+    let (status, _) = f
+        .call(&f.ann, "POST", &format!("/outbound/{id}/cancel"), None)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn release_skips_cancelled() {
+    let f = Fixture::new().await;
+    f.signing().await;
+    let draft = f.new_draft(f.ann_primary, &["x@out.test"], &[], &[]).await;
+    let (_, sent) = f.send(&draft, json!({})).await;
+    let id: Id = sent["id"].as_str().unwrap().parse().unwrap();
+    let (_, first_release, _) = f.outbound_row(&id.to_string()).await;
+    // Not due yet.
+    assert!(
+        f.mail
+            .release(id, None, at(first_release - 1))
+            .await
+            .unwrap()
+            .is_none()
+    );
+    let (status, _) = f
+        .call(&f.ann, "POST", &format!("/outbound/{id}/cancel"), None)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        f.mail
+            .release(id, None, at(first_release))
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(f.outbound_row(&id.to_string()).await.0, "cancelled");
+    // Sent again later: the first job, at the first time, releases nothing.
+    f.sql(&format!(
+        "INSERT INTO mail_member_settings (membership_id, undo_send_seconds, updated_at) \
+         VALUES ('{}', 30, 0)",
+        f.ann.membership
+    ))
+    .await;
+    let (status, _) = f.send(&draft, json!({})).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        f.mail
+            .release(id, None, at(first_release))
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(f.outbound_row(&id.to_string()).await.0, "held");
+    let (status, _) = f
+        .call(&f.ann, "GET", &format!("/drafts/{draft}"), None)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let sent_receipts: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM mail_receipts WHERE source = 'sent'")
+            .fetch_one(f.database.pool())
+            .await
+            .unwrap();
+    assert_eq!(sent_receipts, 0);
+}
+
+#[tokio::test]
+async fn sent_message_read_for_sender() {
+    let f = Fixture::new().await;
+    f.signing().await;
+    f.no_undo().await;
+    let (_, thread) = f.deliver("team@one.test", f.team_primary).await;
+    let draft = f.thread_draft("reply", thread).await;
+    f.send_and_release(&draft).await;
+    assert!(!f.unread(&f.ann, thread).await, "Read for the sender");
+    assert!(
+        f.unread(&f.owner, thread).await,
+        "Unread for the other member"
+    );
+
+    // A message that arrives after the reply was written stays unread.
+    let (_, second) = f
+        .deliver_raw(
+            "From: Carl <carl@sender.test>\r\nTo: team@one.test\r\nSubject: Re: Hello\r\n\
+             Message-ID: <m2@sender.test>\r\nIn-Reply-To: <m1@sender.test>\r\n\r\nMore\r\n"
+                .to_owned(),
+            "team@one.test",
+            f.team_primary,
+        )
+        .await;
+    assert_eq!(second, thread);
+    let draft = f.thread_draft("reply", thread).await;
+    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    f.deliver_raw(
+        "From: Carl <carl@sender.test>\r\nTo: team@one.test\r\nSubject: Re: Hello\r\n\
+         Message-ID: <m3@sender.test>\r\nIn-Reply-To: <m2@sender.test>\r\n\r\nAnd more\r\n"
+            .to_owned(),
+        "team@one.test",
+        f.team_primary,
+    )
+    .await;
+    f.send_and_release(&draft).await;
+    assert!(
+        f.unread(&f.ann, thread).await,
+        "The newer message is unread"
+    );
+}
+
+#[tokio::test]
+async fn reply_to_self_dedupes() {
+    let f = Fixture::new().await;
+    f.signing().await;
+    let draft = f
+        .new_draft(f.ann_primary, &["ann@one.test"], &[], &[])
+        .await;
+    let (_, released, _) = f.send_and_release(&draft).await;
+    let raw = f.raw_of(released.message_id).await;
+    // The copy delivered to the own mailbox has the same bytes: the mailbox keeps one.
+    let ids = f
+        .intake
+        .accept(InboundMessage {
+            source: Source::Smtp,
+            trace_len: 0,
+            raw,
+            mail_from: Some("ann@one.test".to_owned()),
+            recipients: vec![Recipient::Mailbox {
+                workspace_id: f.workspace,
+                address_id: f.ann_primary,
+                rcpt: "ann@one.test".to_owned(),
+            }],
+            peer_ip: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+            helo: "mx.orbit.test".to_owned(),
+            tls: None,
+            auth: AuthOutcome {
+                spf: Verdict::Pass,
+                dkim: Verdict::Pass,
+                dmarc: DmarcVerdict::Pass,
+                aligned_domain: Some("one.test".to_owned()),
+                temp_error: false,
+                spf_domain: Some("one.test".to_owned()),
+                dkim_domain: Some("one.test".to_owned()),
+                from_domain: Some("one.test".to_owned()),
+            },
+        })
+        .await
+        .unwrap();
+    let IngestOutcome::Ingested { deliveries, .. } =
+        f.mail.ingest(ids[0], TimestampMillis::now()).await.unwrap()
+    else {
+        panic!("not ingested");
+    };
+    assert!(deliveries.is_empty(), "{deliveries:?}");
+    assert_eq!(
+        f.number(
+            "SELECT message_count FROM mail_threads WHERE id = $1",
+            released.thread_id
+        )
+        .await,
+        Some(1)
+    );
+}
+
+#[tokio::test]
+async fn references_trimmed_on_long_chain() {
+    let f = Fixture::new().await;
+    f.signing().await;
+    let refs: Vec<String> = (1..=40).map(|n| format!("<r{n}@sender.test>")).collect();
+    let (_, thread) = f
+        .deliver_raw(
+            format!(
+                "From: Carl <carl@sender.test>\r\nTo: ann@one.test\r\nSubject: Hello\r\n\
+                 Message-ID: <p@sender.test>\r\nReferences: {}\r\n\r\nHi\r\n",
+                refs.join(" ")
+            ),
+            "ann@one.test",
+            f.ann_primary,
+        )
+        .await;
+    let draft = f.thread_draft("reply", thread).await;
+    let (_, released, _) = f.send_and_release(&draft).await;
+    let message = parsed(&f.raw_of(released.message_id).await);
+    assert_eq!(message.in_reply_to, vec!["p@sender.test".to_owned()]);
+    assert_eq!(message.references.len(), 20);
+    assert_eq!(message.references[0], "r1@sender.test");
+    assert_eq!(message.references[1], "r23@sender.test");
+    assert_eq!(message.references[18], "r40@sender.test");
+    assert_eq!(message.references[19], "p@sender.test");
+    // The answer to the reply still finds the thread.
+    let sent_id = message.message_id.unwrap();
+    let mut chain = message
+        .references
+        .iter()
+        .map(|id| format!("<{id}>"))
+        .collect::<Vec<_>>();
+    chain.push(format!("<{sent_id}>"));
+    let (_, answer) = f
+        .deliver_raw(
+            format!(
+                "From: Carl <carl@sender.test>\r\nTo: ann@one.test\r\nSubject: Re: Hello\r\n\
+                 Message-ID: <a@sender.test>\r\nIn-Reply-To: <{sent_id}>\r\nReferences: {}\r\n\r\nOk\r\n",
+                chain.join(" ")
+            ),
+            "ann@one.test",
+            f.ann_primary,
+        )
+        .await;
+    assert_eq!(answer, thread);
+}
+
+#[tokio::test]
+async fn incoming_reply_moves_thread_to_inbox() {
+    let f = Fixture::new().await;
+    f.signing().await;
+    f.no_undo().await;
+    let draft = f
+        .new_draft(f.ann_primary, &["carl@sender.test"], &[], &[])
+        .await;
+    let (_, released, _) = f.send_and_release(&draft).await;
+    let sent_id = parsed(&f.raw_of(released.message_id).await)
+        .message_id
+        .unwrap();
+    let (message, thread) = f
+        .deliver_raw(
+            format!(
+                "From: Carl <carl@sender.test>\r\nTo: ann@one.test\r\nSubject: Re: Hello\r\n\
+                 Message-ID: <answer@sender.test>\r\nIn-Reply-To: <{sent_id}>\r\n\r\nSure\r\n"
+            ),
+            "ann@one.test",
+            f.ann_primary,
+        )
+        .await;
+    assert_eq!(thread, released.thread_id);
+    let row = sqlx::query(
+        "SELECT folder, message_count, last_incoming_at, last_sent_at FROM mail_threads WHERE id = $1",
+    )
+    .bind(thread.to_string())
+    .fetch_one(f.database.pool())
+    .await
+    .unwrap();
+    use sqlx::Row;
+    assert_eq!(row.get::<String, _>("folder"), "inbox");
+    assert_eq!(row.get::<i64, _>("message_count"), 2);
+    assert!(row.get::<Option<i64>, _>("last_incoming_at").is_some());
+    assert!(row.get::<Option<i64>, _>("last_sent_at").is_some());
+    // The person written to is not an outsider in this thread.
+    assert_eq!(
+        f.number(
+            "SELECT external FROM mail_thread_messages WHERE message_id = $1",
+            message
+        )
+        .await,
+        Some(0)
+    );
+    assert!(f.unread(&f.ann, thread).await);
+    assert!(f.thread_ids(&f.ann, "").await.contains(&thread.to_string()));
+}
+
+#[tokio::test]
+async fn forwards_carry_the_original() {
+    let f = Fixture::new().await;
+    f.signing().await;
+    let raw = "From: Carl <carl@sender.test>\r\nTo: ann@one.test\r\nSubject: Report\r\n\
+               Message-ID: <rep@sender.test>\r\nMIME-Version: 1.0\r\n\
+               Content-Type: multipart/mixed; boundary=\"b\"\r\n\r\n\
+               --b\r\nContent-Type: text/html\r\n\r\n<p>See <b>attached</b></p>\r\n\
+               --b\r\nContent-Type: application/pdf\r\nContent-Disposition: attachment; filename=\"r.pdf\"\r\n\
+               Content-Transfer-Encoding: base64\r\n\r\nJVBERi0xLjQK\r\n--b--\r\n";
+    let (_, thread) = f
+        .deliver_raw(raw.to_owned(), "ann@one.test", f.ann_primary)
+        .await;
+    let draft = f.thread_draft("forward", thread).await;
+    let (status, body) = f
+        .call(
+            &f.ann,
+            "PATCH",
+            &format!("/drafts/{draft}"),
+            Some(json!({"version": 1, "to": ["x@out.test"]})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = f.upload(&f.ann, &draft, "notes.txt", b"my notes").await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let (_, released, _) = f.send_and_release(&draft).await;
+    let raw = f.raw_of(released.message_id).await;
+    let message = parsed(&raw);
+    assert!(
+        message.body_text.contains("Forwarded message")
+            && message.body_text.contains("See attached"),
+        "{}",
+        message.body_text
+    );
+    let names: Vec<Option<String>> = message
+        .attachments
+        .iter()
+        .map(|attachment| attachment.filename.clone())
+        .collect();
+    assert!(names.contains(&Some("r.pdf".to_owned())), "{names:?}");
+    assert!(names.contains(&Some("notes.txt".to_owned())), "{names:?}");
+    let pdf = message
+        .attachments
+        .iter()
+        .find(|attachment| attachment.filename.as_deref() == Some("r.pdf"))
+        .unwrap();
+    assert_eq!(
+        orbit_mail::part_bytes(&raw, pdf.part_id).unwrap(),
+        b"%PDF-1.4\n".to_vec()
+    );
+
+    // Forward as attachment: the original as message/rfc822.
+    let (_, other) = f.deliver("ann@one.test", f.ann_primary).await;
+    let draft = f.thread_draft("forward_attached", other).await;
+    f.call(
+        &f.ann,
+        "PATCH",
+        &format!("/drafts/{draft}"),
+        Some(json!({"version": 1, "to": ["x@out.test"]})),
+    )
+    .await;
+    let (_, released, _) = f.send_and_release(&draft).await;
+    let raw = f.raw_of(released.message_id).await;
+    let message = parsed(&raw);
+    assert!(
+        message
+            .attachments
+            .iter()
+            .any(|attachment| attachment.declared_type == "message/rfc822"),
+        "{:?}",
+        message.attachments
+    );
+}
+
+#[tokio::test]
+async fn send_job_releases_due_message() {
+    let f = Fixture::new().await;
+    f.signing().await;
+    let draft = f.new_draft(f.ann_primary, &["x@out.test"], &[], &[]).await;
+    let (_, sent) = f.send(&draft, json!({})).await;
+    let id: Id = sent["id"].as_str().unwrap().parse().unwrap();
+    let (_, release_at, _) = f.outbound_row(&id.to_string()).await;
+    let state = f.job_state();
+    run_send_job(&state, id, at(release_at - 1)).await.unwrap();
+    assert_eq!(f.outbound_row(&id.to_string()).await.0, "held");
+    run_send_job(&state, id, at(release_at)).await.unwrap();
+    assert_eq!(f.outbound_row(&id.to_string()).await.0, "released");
+    // A second run (an old job) does nothing.
+    run_send_job(&state, id, at(release_at + 1)).await.unwrap();
+    let sent_receipts: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM mail_receipts WHERE source = 'sent'")
+            .fetch_one(f.database.pool())
+            .await
+            .unwrap();
+    assert_eq!(sent_receipts, 1);
+}
