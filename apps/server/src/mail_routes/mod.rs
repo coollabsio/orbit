@@ -288,6 +288,18 @@ pub fn mail_router(state: MailState) -> Router {
                 .delete(mailboxes::delete_mailbox),
         )
         .route(
+            "/api/v1/workspaces/{workspace_id}/mail/mailboxes/{mailbox_id}/vacation",
+            get(mailboxes::get_mailbox_vacation).put(mailboxes::put_mailbox_vacation),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/contacts",
+            get(compose::search_mail_contacts),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/contacts/{address}",
+            delete(compose::delete_mail_contact),
+        )
+        .route(
             "/api/v1/workspaces/{workspace_id}/mail/mailboxes/{mailbox_id}/status",
             put(mailboxes::set_mailbox_status),
         )

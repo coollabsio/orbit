@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
 use super::{Call, MailState, RequestIdExtension};
-use crate::repositories::mail::{FromAddress, SendReadiness, Snippet};
+use crate::repositories::mail::{CONTACT_LIMIT, ContactKind, FromAddress, SendReadiness, Snippet};
 use crate::task_routes::{ApiError, ApiJson, ApiQuery};
 
 #[derive(Serialize, ToSchema)]
@@ -386,4 +386,88 @@ pub(crate) async fn put_mail_settings(
         .await
         .map_err(|error| call.problem(error))?;
     Ok(Json(MailMemberSettings { undo_send_seconds }))
+}
+
+#[derive(Deserialize, IntoParams)]
+#[serde(deny_unknown_fields)]
+#[into_params(parameter_in = Query)]
+pub(crate) struct ContactQuery {
+    /// Part of a name or an address, any case. Empty: the members.
+    q: Option<String>,
+}
+
+#[derive(Serialize, ToSchema)]
+pub(crate) struct MailContact {
+    address: String,
+    name: Option<String>,
+    /// `member`, `contact` or `seen`.
+    kind: ContactKind,
+}
+
+/// Address suggestions for the composer (at most 8): workspace members first, then the people
+/// the caller wrote to by how often and how lately, then senders of mail in the caller's own
+/// mailboxes.
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/mail/contacts", params(("workspace_id" = String, Path), ContactQuery), responses((status = 200, body = Vec<MailContact>)))]
+pub(crate) async fn search_mail_contacts(
+    State(state): State<MailState>,
+    Path(workspace): Path<String>,
+    headers: HeaderMap,
+    uri: Uri,
+    request_id: RequestIdExtension,
+    ApiQuery(query): ApiQuery<ContactQuery>,
+) -> Result<Json<Vec<MailContact>>, ApiError> {
+    let call = Call::enter(&state, &headers, &uri, &workspace, &request_id).await?;
+    let membership = state
+        .mail
+        .mail_membership(call.workspace_id, call.actor_id)
+        .await
+        .map_err(|error| call.problem(error))?;
+    let hits = state
+        .mail
+        .search_contacts(
+            call.workspace_id,
+            membership,
+            query.q.as_deref().unwrap_or(""),
+            CONTACT_LIMIT,
+            TimestampMillis::now(),
+        )
+        .await
+        .map_err(|error| call.problem(error))?;
+    Ok(Json(
+        hits.into_iter()
+            .map(|hit| MailContact {
+                address: hit.address,
+                name: hit.name,
+                kind: hit.kind,
+            })
+            .collect(),
+    ))
+}
+
+/// Removes an address from the caller's contacts and suggestions.
+#[utoipa::path(delete, path = "/api/v1/workspaces/{workspace_id}/mail/contacts/{address}", params(("workspace_id" = String, Path), ("address" = String, Path)), responses((status = 204)))]
+pub(crate) async fn delete_mail_contact(
+    State(state): State<MailState>,
+    Path((workspace, address)): Path<(String, String)>,
+    headers: HeaderMap,
+    uri: Uri,
+    request_id: RequestIdExtension,
+) -> Result<StatusCode, ApiError> {
+    let call = Call::enter(&state, &headers, &uri, &workspace, &request_id).await?;
+    let membership = state
+        .mail
+        .mail_membership(call.workspace_id, call.actor_id)
+        .await
+        .map_err(|error| call.problem(error))?;
+    state
+        .mail
+        .hide_contact(
+            call.workspace_id,
+            membership,
+            &address,
+            TimestampMillis::now(),
+        )
+        .await
+        .map_err(|error| call.problem(error))?;
+    Ok(StatusCode::NO_CONTENT)
 }

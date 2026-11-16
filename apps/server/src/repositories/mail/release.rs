@@ -44,6 +44,7 @@ use orbit_mail::{
 use orbit_platform::{BlobStoreError, Id, JobKind, Row, S3Error, TimestampMillis, UploadError};
 use sha2::{Digest, Sha256};
 
+use super::contacts::upsert_contacts;
 use super::domains::parse_id;
 use super::drafts::{Draft, DraftMode, load_draft};
 use super::ingest::{Content, Stored, clean, insert_message};
@@ -53,6 +54,7 @@ use super::receipts::{NewReceipt, insert_receipt};
 use super::search::people;
 use super::signatures::check_sendable;
 use super::threads::{Incoming, file_outgoing};
+use super::vacation::AutoReply;
 use super::{MailError, MailRepository, receipt_aad, seal_blob};
 
 /// The recurring job that queues stranded releases again (see the module docs).
@@ -244,6 +246,45 @@ fn bracketed(id: &str) -> String {
     format!("<{id}>")
 }
 
+/// The draft a vacation reply is sent as (never stored).
+fn auto_draft(auto: &AutoReply, mailbox_id: Id, now: TimestampMillis) -> Result<Draft, MailError> {
+    Ok(Draft {
+        id: Id::new_v7(),
+        mailbox_id,
+        from_address_id: parse_id(&auto.from_address_id)?,
+        thread_id: Some(parse_id(&auto.thread_id)?),
+        parent_message_id: Some(parse_id(&auto.parent_message_id)?),
+        mode: DraftMode::Reply,
+        to: vec![auto.to.clone()],
+        cc: Vec::new(),
+        bcc: Vec::new(),
+        subject: auto.subject.clone(),
+        body_html: auto.body_html.clone(),
+        version: 0,
+        files: Vec::new(),
+        created_at: now,
+        updated_at: now,
+    })
+}
+
+/// The display name a recipient is known by in mail the mailbox received, newest first.
+async fn known_name(
+    connection: &mut sqlx::Transaction<'_, sqlx::Any>,
+    mailbox_id: Id,
+    address: &str,
+) -> Result<Option<String>, MailError> {
+    let name: Option<Option<String>> = sqlx::query_scalar(
+        "SELECT m.from_name FROM mail_thread_messages tm JOIN mail_messages m ON m.id = tm.message_id \
+         WHERE tm.mailbox_id = $1 AND tm.outgoing = 0 AND lower(m.from_addr) = $2 \
+         AND m.from_name IS NOT NULL AND m.from_name <> '' ORDER BY m.received_at DESC LIMIT 1",
+    )
+    .bind(mailbox_id.to_string())
+    .bind(address)
+    .fetch_optional(&mut **connection)
+    .await?;
+    Ok(name.flatten())
+}
+
 async fn load_sender(
     connection: &mut sqlx::Transaction<'_, sqlx::Any>,
     address_id: Id,
@@ -377,8 +418,8 @@ impl MailRepository {
     ) -> Result<Option<Released>, MailError> {
         let mut read = self.database.pool().begin().await?;
         let Some(row) = sqlx::query(
-            "SELECT workspace_id, membership_id, mailbox_id, draft_id, release_at, updated_at \
-             FROM mail_outbound WHERE id = $1 AND status = 'held' AND release_at <= $2",
+            "SELECT workspace_id, membership_id, mailbox_id, draft_id, release_at, updated_at, \
+             auto_reply FROM mail_outbound WHERE id = $1 AND status = 'held' AND release_at <= $2",
         )
         .bind(outbound_id.to_string())
         .bind(now.as_millis())
@@ -393,14 +434,21 @@ impl MailRepository {
         let draft_id: Option<String> = row.try_get("draft_id")?;
         let read_at: i64 = row.try_get("updated_at")?;
         let read_release: i64 = row.try_get("release_at")?;
-        let draft = match draft_id.map(|id| parse_id(&id)).transpose()? {
-            Some(draft_id) => match load_draft(&mut read, membership_id, draft_id).await {
+        // A vacation reply has no draft: it is built from its `auto_reply` (module docs of
+        // `vacation`), as a reply to the message it answers, without a quote.
+        let auto: Option<AutoReply> = row
+            .try_get::<Option<String>, _>("auto_reply")?
+            .and_then(|json| serde_json::from_str(&json).ok());
+        let draft = match (draft_id.map(|id| parse_id(&id)).transpose()?, &auto) {
+            (Some(draft_id), _) => match load_draft(&mut read, membership_id, draft_id).await {
                 Ok(draft) => Some(draft),
                 Err(MailError::NotFound) => None,
                 Err(error) => return Err(error),
             },
-            None => None,
+            (None, Some(auto)) => Some(auto_draft(auto, mailbox_id, now)?),
+            (None, None) => None,
         };
+        let is_auto = auto.is_some();
         let Some(draft) = draft else {
             read.commit().await?;
             self.cancel_release(outbound_id, read_at, now).await?;
@@ -546,19 +594,21 @@ impl MailRepository {
                         references = trim_references(&refs, &id);
                         in_reply_to = Some(id);
                     }
-                    let original = parent_html().await?;
+                    let original = if is_auto { None } else { parent_html().await? };
                     let who = parent
                         .from_name
                         .clone()
                         .filter(|name| !name.trim().is_empty())
                         .or_else(|| parent.from_addr.clone())
                         .unwrap_or_default();
-                    html.push_str(&quote_reply(
-                        original.as_deref(),
-                        &parent.body_text,
-                        &who,
-                        parent.date,
-                    ));
+                    if !is_auto {
+                        html.push_str(&quote_reply(
+                            original.as_deref(),
+                            &parent.body_text,
+                            &who,
+                            parent.date,
+                        ));
+                    }
                 }
                 DraftMode::Forward => {
                     let original = parent_html().await?;
@@ -622,7 +672,11 @@ impl MailRepository {
             text: orbit_mail::html_to_text(&html),
             html,
             files: composed_files,
-            extra_headers: Vec::new(),
+            extra_headers: if is_auto {
+                vec![("Auto-Submitted".to_owned(), "auto-replied".to_owned())]
+            } else {
+                Vec::new()
+            },
         };
         let unsigned =
             build_message(&composed).map_err(|_| MailError::Unprocessable("build_failed"))?;
@@ -752,13 +806,15 @@ impl MailRepository {
         )
         .await?
         .ok_or(MailError::Conflict("already_filed"))?;
-        let read = match before {
-            None => true,
-            Some((last_message_at, last_read_at)) => {
-                last_read_at.is_some_and(|at| at >= last_message_at)
-                    || draft.updated_at.as_millis() >= last_message_at
-            }
-        };
+        // An automatic reply is not the member's own act: the thread stays as unread as it was.
+        let read = !is_auto
+            && match before {
+                None => true,
+                Some((last_message_at, last_read_at)) => {
+                    last_read_at.is_some_and(|at| at >= last_message_at)
+                        || draft.updated_at.as_millis() >= last_message_at
+                }
+            };
         if read {
             sqlx::query(
                 "INSERT INTO mail_thread_user_state (thread_id, membership_id, last_read_at, starred) \
@@ -786,6 +842,26 @@ impl MailRepository {
             .execute(&mut *transaction)
             .await?;
         }
+        if !is_auto {
+            let recipients: Vec<(String, Option<String>)> = {
+                let mut named = Vec::new();
+                for (address, _) in &recipients {
+                    named.push((
+                        address.clone(),
+                        known_name(&mut transaction, mailbox_id, address).await?,
+                    ));
+                }
+                named
+            };
+            upsert_contacts(
+                &mut transaction,
+                workspace_id,
+                membership_id,
+                &recipients,
+                now,
+            )
+            .await?;
+        }
         sqlx::query("UPDATE mail_outbound SET message_id = $1, draft_id = NULL WHERE id = $2")
             .bind(message_id.to_string())
             .bind(outbound_id.to_string())
@@ -811,10 +887,12 @@ impl MailRepository {
         .execute(&mut *transaction)
         .await?;
         create_links_for(&mut transaction, workspace_id, outbound_id, &planned, now).await?;
-        sqlx::query("DELETE FROM mail_drafts WHERE id = $1")
-            .bind(draft.id.to_string())
-            .execute(&mut *transaction)
-            .await?;
+        if !is_auto {
+            sqlx::query("DELETE FROM mail_drafts WHERE id = $1")
+                .bind(draft.id.to_string())
+                .execute(&mut *transaction)
+                .await?;
+        }
         transaction.commit().await?;
         drop(finalization);
         Ok(Some(Released {

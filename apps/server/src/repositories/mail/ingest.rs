@@ -344,6 +344,16 @@ impl MailRepository {
             // The mail is stored; the clients see it on their next refresh.
             tracing::warn!(error = %error, "mail events for the live socket");
         }
+        // Vacation replies, after the commit and each in its own transaction: a failure to queue
+        // one never fails the ingest (the message is filed and the receipt is done).
+        for delivery in &deliveries {
+            if let Err(error) = self
+                .maybe_vacation_reply(delivery.mailbox_id, delivery.thread_id, message_id, now)
+                .await
+            {
+                tracing::warn!(error = %error, "mail vacation reply");
+            }
+        }
         Ok(IngestOutcome::Ingested {
             message_id,
             deliveries,

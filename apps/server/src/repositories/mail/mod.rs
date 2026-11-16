@@ -5,6 +5,7 @@
 //! ([`MailKeys`]); `mail_receipts.blob_id` references it, so the blob reconcile removes a blob
 //! that no receipt uses. No HTML is stored: it is sanitized from the raw message on each view.
 
+mod contacts;
 mod content;
 mod domains;
 mod drafts;
@@ -26,11 +27,13 @@ mod search;
 mod signatures;
 mod suppressions;
 mod threads;
+mod vacation;
 
 use orbit_platform::{Database, Id, TimestampMillis, UploadError, UploadService};
 use sqlx::{Any, Transaction};
 use thiserror::Error;
 
+pub use contacts::{CONTACT_LIMIT, ContactHit, ContactKind};
 pub use content::{MessageContent, MessagePart, PartContent};
 pub use domains::{
     DAILY_CHECK_MS, DNS_CHECK_JOB, DkimKeyView, DkimPublic, DnsReport, Domain, DomainProvider,
@@ -91,6 +94,7 @@ pub use suppressions::{
     bounce_codes, is_bounce_local, suppresses, suppresses_response,
 };
 pub use threads::SEARCH_BODY_BYTES;
+pub use vacation::{REPLY_INTERVAL_MS, Vacation, VacationChange};
 
 #[derive(Debug, Error)]
 pub enum MailError {

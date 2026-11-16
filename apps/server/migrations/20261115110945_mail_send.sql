@@ -132,6 +132,9 @@ CREATE TABLE mail_outbound (
     release_at INTEGER NOT NULL,
     scheduled INTEGER NOT NULL DEFAULT 0 CHECK (scheduled IN (0, 1)),
     hold_reason TEXT,
+    -- A vacation reply (no draft): the message answered, the address it goes from and to, the
+    -- subject and the sanitized body (JSON), read at release.
+    auto_reply TEXT CHECK (auto_reply IS NULL OR json_valid(auto_reply)),
     -- The final status of each recipient (JSON), kept after the recipient rows are purged.
     delivery_summary TEXT CHECK (delivery_summary IS NULL OR json_valid(delivery_summary)),
     created_at INTEGER NOT NULL,
