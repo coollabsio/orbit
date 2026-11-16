@@ -290,3 +290,26 @@ test('flush during a save waits for it, then saves the text typed meanwhile', as
   expect(t.cached()).toEqual({ version: 3, subject: 'a', body_html: 'more' })
   expect(t.timers()).toBe(0)
 })
+
+test('flush during a save that fails: it waits, tries the unsaved text once more, and ends with the error', async () => {
+  const t = setup()
+  t.saver.save({ subject: 'a' })
+  await t.advance(2000)
+  t.saver.save({ body_html: 'more' })
+  let flushed = false
+  void t.saver.flush().then(() => void (flushed = true))
+  t.fail({ kind: 'other' })
+  t.sends[0].reject(new Error('offline'))
+  await t.settle()
+  // the failed text and the text typed meanwhile go out together, once
+  expect(t.sends).toHaveLength(2)
+  expect(t.sends[1]).toMatchObject({ change: { subject: 'a', body_html: 'more' }, version: 1 })
+  expect(flushed).toBe(false)
+  t.sends[1].reject(new Error('offline'))
+  await t.settle()
+  expect(flushed).toBe(true)
+  expect(t.state().problem).toBe('error')
+  // no retry on a timer after a failure: the user retries
+  expect(t.timers()).toBe(0)
+  expect(t.sends).toHaveLength(2)
+})

@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Kbd } from '@/components/ui/kbd'
 
@@ -11,6 +12,8 @@ export function UndoSendToast({ title, countdownMs, onUndo }: { title: string; c
       <span role="status" className="min-w-0 flex-1 truncate font-medium">
         {title}
       </span>
+      {/* reduced motion: the seconds left, as text, in place of the moving bar */}
+      {countdownMs !== null ? <Countdown ms={countdownMs} /> : null}
       <Button size="sm" variant="ghost" className="shrink-0 gap-1.5" aria-keyshortcuts="Z" aria-label="Undo (Z)" onClick={onUndo}>
         Undo
         <Kbd>Z</Kbd>
@@ -24,5 +27,20 @@ export function UndoSendToast({ title, countdownMs, onUndo }: { title: string; c
         />
       ) : null}
     </div>
+  )
+}
+
+/** "8 s": the seconds before the message goes, shown only with reduced motion (the bar shows it otherwise). */
+function Countdown({ ms }: { ms: number }) {
+  const [end] = useState(() => Date.now() + ms)
+  const [left, setLeft] = useState(() => Math.ceil(ms / 1000))
+  useEffect(() => {
+    const timer = setInterval(() => setLeft(Math.max(0, Math.ceil((end - Date.now()) / 1000))), 250)
+    return () => clearInterval(timer)
+  }, [end])
+  return (
+    <span aria-hidden="true" className="hidden shrink-0 text-xs text-muted-foreground tabular-nums motion-reduce:inline">
+      {left} s
+    </span>
   )
 }

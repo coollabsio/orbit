@@ -14,7 +14,7 @@ import { MailboxNotice } from '@/features/mail/components/MailboxNotice'
 import { MailSearch } from '@/features/mail/components/MailSearch'
 import { ThreadList } from '@/features/mail/components/ThreadList'
 import { LabelMenu, ThreadView, type LabelState } from '@/features/mail/components/ThreadView'
-import { useNewEmail } from '@/features/mail/compose/useComposerDock'
+import { useArchiveNextHost, useNewEmail } from '@/features/mail/compose/useComposerDock'
 import type { ReplyMode, ThreadReplyHandle } from '@/features/mail/compose/ThreadReply'
 import {
   FOLDERS,
@@ -71,8 +71,8 @@ function MailApp({ view, threadId }: { view: MailView; threadId: string | null }
   const [labelMenu, setLabelMenu] = useState<'thread' | 'bulk' | null>(null)
   const searchInput = useRef<HTMLInputElement>(null)
   const replyRef = useRef<ThreadReplyHandle>(null)
-  // R / A / F on a row of the list: the thread opens, then its reply
-  const [pendingReply, setPendingReply] = useState<{ threadId: string; mode: ReplyMode } | null>(null)
+  // R / A / F on a row of the list: the thread opens, then its reply (`from`: the thread open when the key was pressed)
+  const [pendingReply, setPendingReply] = useState<{ threadId: string; from: string | null; mode: ReplyMode } | null>(null)
   const newEmail = useNewEmail()
 
   const labels = me.data?.labels ?? []
@@ -200,7 +200,7 @@ function MailApp({ view, threadId }: { view: MailView; threadId: string | null }
     if (threadId) {
       replyRef.current?.reply(mode)
     } else if (focusedId) {
-      setPendingReply({ threadId: focusedId, mode })
+      setPendingReply({ threadId: focusedId, from: threadId, mode })
       open(focusedId)
     }
   }
@@ -209,21 +209,26 @@ function MailApp({ view, threadId }: { view: MailView; threadId: string | null }
   useCommand('mail.reply', () => reply('reply'), { available: canReply })
   useCommand('mail.replyAll', () => reply('reply_all'), { available: canReply })
   useCommand('mail.forward', () => reply('forward'), { available: canReply })
+  // the user went elsewhere before the thread opened: the reply is dropped
+  if (pendingReply && threadId !== pendingReply.threadId && threadId !== pendingReply.from) setPendingReply(null)
   useEffect(() => {
-    if (!pendingReply || pendingReply.threadId !== threadId || !detail.data || !replyRef.current) return
+    if (!pendingReply || threadId !== pendingReply.threadId || !detail.data || !replyRef.current) return
     replyRef.current.reply(pendingReply.mode)
     setPendingReply(null)
   }, [pendingReply, threadId, detail.data])
 
-  // ⌘⇧Enter in the reply: the thread is archived and the next one opens (the one below, else above; else the list)
-  const archiveAndNext = () => {
+  // ⌘⇧Enter on a reply to the open thread (inline or in a window): it is archived and the next one opens (the one
+  // below, else above; else the list). Registered for the open thread only: a send that ends after the page moved on
+  // only archives.
+  useArchiveNextHost(threadId, () => {
     if (!threadId) return
     const index = threads.findIndex((thread) => thread.id === threadId)
     const next = index < 0 ? undefined : (threads[index + 1] ?? threads[index - 1])
     if (openThread) apply([openThread], { folder: 'archive' }, false)
+    else update.mutate({ threadId, change: { folder: 'archive' } }, { onError: (error) => toast.error(problemText(error, 'The change could not be saved.')) })
     if (next) open(next.id)
     else close()
-  }
+  })
   useCommand('mail.starred', () => navigate(mailViewPath({ kind: 'starred' })))
   useCommand('mail.trashFolder', () => navigate(mailViewPath({ kind: 'folder', folder: 'trash' })))
 
@@ -375,7 +380,6 @@ function MailApp({ view, threadId }: { view: MailView; threadId: string | null }
             labelMenuOpen={labelMenu === 'thread'}
             onLabelMenuOpenChange={(next) => setLabelMenu(next ? 'thread' : null)}
             replyRef={replyRef}
-            onSentArchive={archiveAndNext}
           />
         ) : (
           <div className="flex min-h-0 flex-1 flex-col">

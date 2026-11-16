@@ -16,6 +16,7 @@ import {
   signatureStart,
   splitRecipients,
   suggestLinks,
+  isUntouchedDraft,
   type PreSendInput,
   zonedDateTime,
 } from './composeLib'
@@ -276,4 +277,25 @@ test('send time label: today, tomorrow, this week, later', () => {
   expect(sendTimeLabel(new Date('2026-11-17T07:00:00Z'), now, tz, true)).toBe('tomorrow 8:00')
   expect(sendTimeLabel(new Date('2026-11-19T07:00:00Z'), now, tz)).toBe('Thu, Nov 19, 8:00')
   expect(sendTimeLabel(new Date('2027-01-04T07:00:00Z'), now, tz)).toBe('Mon, Jan 4, 2027, 8:00')
+})
+
+test('an untouched draft: nothing changed since it opened, never saved, in every mode', () => {
+  const opened = { version: 1, created_at: '2026-11-16T08:00:00Z', updated_at: '2026-11-16T08:00:00Z', to: ['ann@acme.io'], cc: [], bcc: [], subject: 'Re: Plans', from_address_id: 'a1' }
+  const now = { to: ['ann@acme.io'], cc: [], bcc: [], subject: 'Re: Plans', fromId: 'a1', bodyWritten: false, files: 0 }
+  expect(isUntouchedDraft(opened, now)).toBe(true)
+  // a new message with nothing in it
+  expect(isUntouchedDraft({ ...opened, to: [], subject: '' }, { ...now, to: [], subject: '' })).toBe(true)
+  // any change keeps it
+  expect(isUntouchedDraft(opened, { ...now, bodyWritten: true })).toBe(false)
+  expect(isUntouchedDraft(opened, { ...now, subject: 'Re: Plans!' })).toBe(false)
+  expect(isUntouchedDraft(opened, { ...now, to: [] })).toBe(false)
+  expect(isUntouchedDraft(opened, { ...now, cc: ['bo@acme.io'] })).toBe(false)
+  expect(isUntouchedDraft(opened, { ...now, bcc: ['bo@acme.io'] })).toBe(false)
+  expect(isUntouchedDraft(opened, { ...now, fromId: 'a2' })).toBe(false)
+  expect(isUntouchedDraft(opened, { ...now, files: 1 })).toBe(false)
+  // the same people in another case or order is no change
+  expect(isUntouchedDraft({ ...opened, to: ['Ann@acme.io', 'bo@acme.io'] }, { ...now, to: ['bo@acme.io', 'ann@acme.io'] })).toBe(true)
+  // a draft saved before it opened here (another device, an earlier visit, an Undo) is never thrown away
+  expect(isUntouchedDraft({ ...opened, version: 2 }, now)).toBe(false)
+  expect(isUntouchedDraft({ ...opened, updated_at: '2026-11-16T08:05:00Z' }, now)).toBe(false)
 })

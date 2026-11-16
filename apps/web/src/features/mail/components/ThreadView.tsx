@@ -104,8 +104,6 @@ interface ThreadViewProps {
   onLabelMenuOpenChange: (open: boolean) => void
   /** R / A / F act on the reply at the end of the thread. */
   replyRef?: Ref<ThreadReplyHandle>
-  /** A reply went with ⌘⇧Enter: archive the thread and open the next one. */
-  onSentArchive: () => void
 }
 
 function HeaderButton({ label, onClick, children, pressed }: { label: string; onClick: () => void; children: ReactNode; pressed?: boolean }) {
@@ -119,7 +117,7 @@ function HeaderButton({ label, onClick, children, pressed }: { label: string; on
 }
 
 /** The reading pane: the thread's actions, then its messages, oldest first; only the newest is open at first. */
-export function ThreadView({ detail, status, onRetry, labels, labelsById, canManage, onBack, actions, labelMenuOpen, onLabelMenuOpenChange, replyRef, onSentArchive }: ThreadViewProps) {
+export function ThreadView({ detail, status, onRetry, labels, labelsById, canManage, onBack, actions, labelMenuOpen, onLabelMenuOpenChange, replyRef }: ThreadViewProps) {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   if (!detail) {
     return (
@@ -253,7 +251,7 @@ export function ThreadView({ detail, status, onRetry, labels, labelsById, canMan
               />
             )
           })}
-          <ThreadReply ref={replyRef} threadId={thread.id} last={messages.at(-1)} onSentArchive={onSentArchive} />
+          <ThreadReply ref={replyRef} threadId={thread.id} last={messages.at(-1)} />
         </div>
       </div>
     </>

@@ -3,9 +3,10 @@
 import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import type { MailDraft } from '@orbit/api/generated/types.gen'
+import type { MailDraft, MailFolder, MailThreadDetail } from '@orbit/api/generated/types.gen'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
-import { useCreateDraft } from '../api/mutations'
+import { mailKeys } from '../api/keys'
+import { useCreateDraft, useUpdateThread } from '../api/mutations'
 import { fromAddressesQuery } from '../api/queries'
 import { problemText } from '../mailLib'
 import { createComposerDockStore, type ComposerDockStore } from './composerDockStore'
@@ -56,11 +57,64 @@ export function useInlineReplyHost(threadId: string, show: (draftId: string) => 
   }, [threadId])
 }
 
-/** Shows a draft that Undo gave back: in its thread's inline reply when that is on screen, else in a window. */
-export function reopenDraft(draft: MailDraft, store: ComposerDockStore) {
-  const host = draft.thread_id && !store.has(draft.id) ? inlineHosts.get(draft.thread_id) : undefined
+/**
+ * Shows a draft that Undo gave back where it was sent from: a reply written in its thread goes back there when that
+ * thread is still on screen (else to a window); a window's draft goes back to a window. No open animation (Undo is
+ * a key or a toast button, not a click on the window).
+ */
+export function reopenDraft(draft: MailDraft, store: ComposerDockStore, from: 'inline' | 'window') {
+  const host = from === 'inline' && draft.thread_id && !store.has(draft.id) ? inlineHosts.get(draft.thread_id) : undefined
   if (host) host(draft.id)
   else store.open(draft.id)
+}
+
+// The mail page's open thread: ⌘⇧Enter on a reply to it archives it and opens the next one there.
+type ArchiveNext = () => void
+const archiveHosts = new Map<string, ArchiveNext>()
+
+/** The mail page registers its open thread (`null`: none) while it shows it. */
+export function useArchiveNextHost(threadId: string | null, archiveNext: ArchiveNext) {
+  const latest = useRef(archiveNext)
+  useEffect(() => {
+    latest.current = archiveNext
+  })
+  useEffect(() => {
+    if (!threadId) return
+    const host = () => latest.current()
+    archiveHosts.set(threadId, host)
+    return () => {
+      if (archiveHosts.get(threadId) === host) archiveHosts.delete(threadId)
+    }
+  }, [threadId])
+}
+
+/**
+ * After ⌘⇧Enter: archives the thread. When the mail page shows that thread, the next one opens there; otherwise
+ * (another page, another thread, the page moved on since Send) it is only archived. Returns the undo: Undo send puts
+ * the thread back in the folder it was in.
+ */
+export function useArchiveAfterSend() {
+  const queryClient = useQueryClient()
+  const workspaceId = useWorkspace().workspace.id
+  const update = useUpdateThread()
+  const mutate = useRef(update.mutate)
+  useEffect(() => {
+    mutate.current = update.mutate
+  })
+  return useCallback(
+    (threadId: string): (() => void) => {
+      const before: MailFolder | undefined = queryClient.getQueryData<MailThreadDetail>(mailKeys.thread(workspaceId, threadId))?.thread.folder
+      const onError = (error: Error) => toast.error(problemText(error, 'The conversation could not be moved.'))
+      const host = archiveHosts.get(threadId)
+      if (host) host()
+      else mutate.current({ threadId, change: { folder: 'archive' } }, { onError })
+      return () => {
+        if (before === 'archive') return
+        mutate.current({ threadId, change: { folder: before ?? 'inbox' } }, { onError })
+      }
+    },
+    [queryClient, workspaceId],
+  )
 }
 
 /** Starts a new message from the user's first address that can send (else the first: Send then says why) in a window. */

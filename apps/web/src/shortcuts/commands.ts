@@ -114,7 +114,7 @@ const REGISTRY = [
   { id: 'mail.search', title: 'Search mail', group: 'Mail', keys: '/', context: 'mail', shadows: 'search.open' },
   { id: 'mail.starred', title: 'Go to starred', group: 'Mail', keys: 'G S', context: 'mail', shadows: 'nav.settings' },
   { id: 'mail.trashFolder', title: 'Go to trash', group: 'Mail', keys: 'G T', context: 'mail', shadows: 'nav.tasks' },
-  { id: 'mail.compose', title: 'New email', group: 'Mail', keys: 'C', context: 'mail', shadows: 'task.create' },
+  { id: 'mail.compose', title: 'New email (mail page)', group: 'Mail', keys: 'C', context: 'mail', shadows: 'task.create' },
   { id: 'mail.reply', title: 'Reply', group: 'Mail', keys: 'R', context: 'mail' },
   { id: 'mail.replyAll', title: 'Reply all', group: 'Mail', keys: 'A', context: 'mail' },
   { id: 'mail.forward', title: 'Forward', group: 'Mail', keys: 'F', context: 'mail' },

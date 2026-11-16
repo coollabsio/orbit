@@ -6,20 +6,17 @@ import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } fr
 import { useLocation } from 'react-router'
 import { useQueryClient } from '@tanstack/react-query'
 import { Edit, Maximize4, Minimize, Minus, Xmark as X } from 'reicon-react'
-import { toast } from 'sonner'
 import { cn } from 'cn'
 import { Tip } from '@/components/common/Tip'
 import { Button } from '@/components/ui/button'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { ShortcutKeys } from '@/shortcuts/Shortcut'
 import { useCommand } from '@/shortcuts/useCommand'
-import { useUpdateThread } from '../api/mutations'
 import { draftsQuery, useDraft, useMailMe } from '../api/queries'
-import { problemText } from '../mailLib'
 import { Composer, type ComposerHandle } from './Composer'
 import { dockCapacity, layoutDock, type ComposerDockStore, type DockWindow } from './composerDockStore'
 import { useAnnounceSent, useUndoSendShortcut } from './undoSend'
-import { reopenDraft, useComposerDock, useNewEmail } from './useComposerDock'
+import { reopenDraft, useArchiveAfterSend, useComposerDock, useNewEmail } from './useComposerDock'
 import type { SentHandler } from './useComposerSend'
 
 const subscribeResize = (onChange: () => void) => {
@@ -84,7 +81,7 @@ export function ComposerDock() {
       {checked && layout.pills.length > 0 ? (
         <div className="flex max-w-[50vw] flex-wrap-reverse items-end justify-end gap-2 max-[899px]:max-w-none">
           {layout.pills.map((id) => (
-            <DockPill key={id} draftId={id} onOpen={() => store.open(id)} onClose={() => store.close(id)} />
+            <DockPill key={id} draftId={id} onOpen={() => store.open(id, { animate: true })} onClose={() => store.close(id)} />
           ))}
         </div>
       ) : null}
@@ -100,44 +97,92 @@ export function ComposerDock() {
   )
 }
 
+/** A window's name: its subject, else what kind of message it is. */
+function draftTitle(draft: { subject: string; mode: string } | undefined): string {
+  if (draft?.subject.trim()) return draft.subject.trim()
+  if (!draft || draft.mode === 'new') return 'New message'
+  return draft.mode.startsWith('forward') ? 'Forward' : 'Reply'
+}
+
 function DockWindowFrame({ entry, visible, store, autoFocus }: { entry: DockWindow; visible: boolean; store: ComposerDockStore; autoFocus: boolean }) {
-  const { draftId, state, openedAt } = entry
+  const { draftId, state, openedAt, animate } = entry
   const full = state === 'full'
+  const title = draftTitle(useDraft(draftId).data)
+  const section = useRef<HTMLElement>(null)
   const handle = useRef<ComposerHandle>(null)
   const announce = useAnnounceSent()
-  const updateThread = useUpdateThread()
+  const archiveAfterSend = useArchiveAfterSend()
 
-  // Brought to the front again (a pill clicked, the reply key, full screen and back): the focus goes in. The first
-  // open focuses by itself (autoFocus).
+  // Where the focus was before the window showed: it goes back there when the window is minimized or closed.
+  const returnFocus = useRef<HTMLElement | null>(null)
+  // Brought to the front again (a pill, the reply key, full screen and back): the focus goes in. The first open
+  // focuses by itself (autoFocus).
   const seen = useRef(openedAt)
   useLayoutEffect(() => {
-    if (!visible || seen.current === openedAt) return
+    if (!visible) return
+    const active = document.activeElement
+    if (active instanceof HTMLElement && active !== document.body && !section.current?.contains(active)) returnFocus.current = active
+    if (seen.current === openedAt) return
     seen.current = openedAt
     handle.current?.focus()
   }, [visible, openedAt])
+  const giveBackFocus = useRef(() => {
+    const target = returnFocus.current
+    returnFocus.current = null
+    const active = document.activeElement
+    // only when the focus was in this window (or got lost with it), never away from another window
+    if (target?.isConnected && (!active || active === document.body || section.current?.contains(active))) target.focus({ preventScroll: true })
+  })
+  useLayoutEffect(() => {
+    if (!visible) giveBackFocus.current()
+  }, [visible])
+  useLayoutEffect(() => {
+    const giveBack = giveBackFocus.current
+    return () => giveBack()
+  }, [])
+
+  // Full screen is modal: the app behind it (and the other windows and pills) is inert, so the focus stays in.
+  useEffect(() => {
+    const own = section.current
+    const dock = own?.closest('[data-slot=composer-dock]')
+    if (!full || !visible || !own || !dock?.parentElement) return
+    const behind = [
+      ...[...dock.parentElement.children].filter((element) => element !== dock),
+      ...dock.querySelectorAll('[data-slot=composer-window], [data-slot=composer-pill]'),
+    ].filter((element) => element !== own && !element.hasAttribute('inert'))
+    for (const element of behind) element.setAttribute('inert', '')
+    return () => {
+      for (const element of behind) element.removeAttribute('inert')
+    }
+  }, [full, visible])
 
   const onSent: SentHandler = (outbound, draft, { archive }) => {
-    announce(outbound, (restored) => reopenDraft(restored, store))
-    if (archive && draft.thread_id) {
-      updateThread.mutate(
-        { threadId: draft.thread_id, change: { folder: 'archive' } },
-        { onError: (error) => toast.error(problemText(error, 'The conversation could not be archived.')) },
-      )
-    }
+    // ⌘⇧Enter: archived (the next thread opens when the mail page shows this one); Undo puts it back
+    const undoArchive = archive && draft.thread_id ? archiveAfterSend(draft.thread_id) : undefined
+    announce(outbound, (restored) => {
+      undoArchive?.()
+      reopenDraft(restored, store, 'window')
+    })
   }
 
   return (
     <section
-      aria-label="Email draft"
+      ref={section}
+      role="dialog"
+      // a window sits beside the page (the page keeps its keys); full screen is modal
+      aria-modal={full}
+      aria-label={`Draft: ${title}`}
+      hidden={!visible}
       data-slot="composer-window"
       data-state={state}
       className={cn(
         'pointer-events-auto flex flex-col',
         full
           ? 'fixed inset-0 z-50'
-          : // opens in 200 ms from the bottom right; reduced motion keeps only the fade. A hidden window that shows
-            // again plays it again (display: none restarts the animation); full screen and back does not.
-            'h-[min(620px,calc(100svh-2rem))] w-[520px] origin-bottom-right animate-composer-window-enter motion-reduce:animate-composer-window-fade max-[899px]:fixed max-[899px]:inset-2 max-[899px]:h-auto max-[899px]:w-auto',
+          : 'h-[min(620px,calc(100svh-2rem))] w-[520px] origin-bottom-right max-[899px]:fixed max-[899px]:inset-2 max-[899px]:h-auto max-[899px]:w-auto',
+        // opened by a click: 200 ms from the bottom right (reduced motion: the fade only). Opened by a key, and full
+        // screen and back: at once. A hidden window shown again by a click plays it again (display: none restarts it).
+        !full && animate && 'animate-composer-window-enter motion-reduce:animate-composer-window-fade',
         !visible && 'hidden',
       )}
     >
@@ -191,8 +236,7 @@ function DockWindowFrame({ entry, visible, store, autoFocus }: { entry: DockWind
 
 /** A minimized window: its subject; a click opens it again. No motion (pills come and go often). */
 function DockPill({ draftId, onOpen, onClose }: { draftId: string; onOpen: () => void; onClose: () => void }) {
-  const draft = useDraft(draftId).data
-  const title = draft?.subject.trim() || (draft?.mode === 'new' || !draft ? 'New message' : draft.mode.startsWith('forward') ? 'Forward' : 'Reply')
+  const title = draftTitle(useDraft(draftId).data)
   return (
     <div data-slot="composer-pill" className="pointer-events-auto flex h-9 max-w-60 min-w-36 items-center rounded-lg border bg-popover text-[0.8125rem] text-popover-foreground shadow-lg">
       <button

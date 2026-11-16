@@ -94,6 +94,8 @@ export function useAnnounceSent() {
         id,
         duration: Infinity,
         onDismiss: finish,
+        // bottom left: clear of the dock's windows and their Send buttons (the dock leaves room for it)
+        position: 'bottom-left',
         // enters from the bottom in 200 ms on the strong ease-out (Sonner's own move is 400 ms)
         className: 'duration-200! ease-(--ease-out)!',
       })

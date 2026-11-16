@@ -13,7 +13,7 @@ import { useCreateDraft } from '../api/mutations'
 import { useDrafts } from '../api/queries'
 import { problemText } from '../mailLib'
 import { Composer, type ComposerHandle } from './Composer'
-import { reopenDraft, useComposerDock, useInlineReplyHost } from './useComposerDock'
+import { reopenDraft, useArchiveAfterSend, useComposerDock, useInlineReplyHost } from './useComposerDock'
 import { recipientSummary } from './composeLib'
 import { useAnnounceSent } from './undoSend'
 import type { SentHandler } from './useComposerSend'
@@ -29,8 +29,6 @@ interface ThreadReplyProps {
   threadId: string
   /** The newest message: Reply all shows when it went to more than one person. */
   last: MailMessageView | undefined
-  /** ⌘⇧Enter sent the reply: archive the thread and open the next one. */
-  onSentArchive: () => void
   ref?: Ref<ThreadReplyHandle>
 }
 
@@ -41,10 +39,13 @@ function plainText(html: string): string {
   return text.replace(/\s+/g, ' ').trim()
 }
 
-export function ThreadReply({ threadId, last, onSentArchive, ref }: ThreadReplyProps) {
+export function ThreadReply({ threadId, last, ref }: ThreadReplyProps) {
   const { state: dock, store } = useComposerDock()
   const create = useCreateDraft()
   const announce = useAnnounceSent()
+  const archiveAfterSend = useArchiveAfterSend()
+  // where the focus was before the reply opened: it goes back there when the reply closes
+  const returnFocus = useRef<HTMLElement | null>(null)
   const [openId, setOpenId] = useState<string | null>(null)
   // a draft left in this thread; not read while writing here (every autosave would read the list again)
   const drafts = useDrafts(undefined, openId === null)
@@ -56,21 +57,33 @@ export function ThreadReply({ threadId, last, onSentArchive, ref }: ThreadReplyP
   const saved = drafts.data?.find((draft) => draft.thread_id === threadId)
   const savedInDock = saved !== undefined && dock.windows.some((entry) => entry.draftId === saved.id)
 
-  /** Shows a draft of this thread: in its window when it is in the dock, else here. */
-  const show = (draftId: string) => {
-    if (store.has(draftId)) store.open(draftId)
-    else setOpenId(draftId)
+  /** Shows a draft of this thread: in its window when it is in the dock (animated only for a click), else here. */
+  const show = (draftId: string, click: boolean) => {
+    if (store.has(draftId)) {
+      store.open(draftId, { animate: click })
+      return
+    }
+    returnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    setOpenId(draftId)
   }
 
-  const start = (mode: ReplyMode) => {
+  const start = (mode: ReplyMode, click: boolean) => {
     if (create.isPending) return
     // one draft per thread: the server answers with the existing one when there is one
-    create.mutate({ mode, thread_id: threadId }, { onSuccess: (draft) => show(draft.id), onError: (error) => toast.error(problemText(error, 'The reply could not be started.')) })
+    create.mutate({ mode, thread_id: threadId }, { onSuccess: (draft) => show(draft.id, click), onError: (error) => toast.error(problemText(error, 'The reply could not be started.')) })
+  }
+
+  /** The reply closed (Esc, Delete, sent): the focus goes back where it was, when that is still on the page. */
+  const collapse = () => {
+    setOpenId(null)
+    const target = returnFocus.current
+    returnFocus.current = null
+    if (target?.isConnected) requestAnimationFrame(() => target.focus({ preventScroll: true }))
   }
 
   useImperativeHandle(ref, () => ({
     // already writing here: the key only brings the focus back
-    reply: (mode) => (openId ? composer.current?.focus() : start(mode)),
+    reply: (mode) => (openId ? composer.current?.focus() : start(mode, false)),
   }))
 
   // the reply opens at the end of a long thread: bring it into view at once (no smooth scroll)
@@ -79,17 +92,22 @@ export function ThreadReply({ threadId, last, onSentArchive, ref }: ThreadReplyP
   }, [openId])
 
   const onSent: SentHandler = (outbound, _draft, { archive }) => {
-    announce(outbound, (restored) => reopenDraft(restored, store))
-    if (archive) onSentArchive()
+    // ⌘⇧Enter: archived (and the next thread opens when the page still shows this one); Undo puts it back
+    const undoArchive = archive ? archiveAfterSend(threadId) : undefined
+    announce(outbound, (restored) => {
+      undoArchive?.()
+      reopenDraft(restored, store, 'inline')
+    })
   }
 
-  const popOut = async () => {
+  const popOut = async (how: 'key' | 'click') => {
     const id = openId
     if (!id) return
     // the window starts from the server copy: save what was typed here first
     await composer.current?.handOff()
     setOpenId(null)
-    store.popOut(id)
+    returnFocus.current = null
+    store.popOut(id, { animate: how === 'click' })
   }
 
   const replyAll = last ? last.to.length + last.cc.length > 1 : false
@@ -102,9 +120,9 @@ export function ThreadReply({ threadId, last, onSentArchive, ref }: ThreadReplyP
           draftId={openId}
           placement="inline"
           handleRef={composer}
-          onClose={() => setOpenId(null)}
+          onClose={collapse}
           onSent={onSent}
-          onPopOut={() => void popOut()}
+          onPopOut={(how) => void popOut(how)}
         />
       </div>
     )
@@ -116,7 +134,7 @@ export function ThreadReply({ threadId, last, onSentArchive, ref }: ThreadReplyP
         <button
           type="button"
           className="flex min-w-0 items-baseline gap-2 rounded-xl border bg-card px-4 py-3 text-left text-[0.8125rem] shadow-xs transition-colors duration-100 outline-none hover:bg-muted/40 focus-visible:ring-3 focus-visible:ring-ring/50"
-          onClick={() => setOpenId(saved.id)}
+          onClick={() => show(saved.id, true)}
           aria-label="Continue the draft"
         >
           <span className="shrink-0 font-semibold text-destructive">Draft</span>
@@ -127,15 +145,15 @@ export function ThreadReply({ threadId, last, onSentArchive, ref }: ThreadReplyP
       {saved && savedInDock ? (
         <p className="flex items-center gap-2 text-[0.8125rem] text-muted-foreground">
           Your reply is open in a window.
-          <Button size="xs" variant="outline" onClick={() => store.open(saved.id)}>
+          <Button size="xs" variant="outline" onClick={() => store.open(saved.id, { animate: true })}>
             Show
           </Button>
         </p>
       ) : null}
       <div className="flex flex-wrap items-center gap-2">
-        <ReplyButton label="Reply" command="mail.reply" icon={<Reply />} disabled={create.isPending} onClick={() => start('reply')} />
-        {replyAll ? <ReplyButton label="Reply all" command="mail.replyAll" icon={<Reply />} disabled={create.isPending} onClick={() => start('reply_all')} /> : null}
-        <ReplyButton label="Forward" command="mail.forward" icon={<ForwardRight />} disabled={create.isPending} onClick={() => start('forward')} />
+        <ReplyButton label="Reply" command="mail.reply" icon={<Reply />} disabled={create.isPending} onClick={() => start('reply', true)} />
+        {replyAll ? <ReplyButton label="Reply all" command="mail.replyAll" icon={<Reply />} disabled={create.isPending} onClick={() => start('reply_all', true)} /> : null}
+        <ReplyButton label="Forward" command="mail.forward" icon={<ForwardRight />} disabled={create.isPending} onClick={() => start('forward', true)} />
       </div>
     </div>
   )

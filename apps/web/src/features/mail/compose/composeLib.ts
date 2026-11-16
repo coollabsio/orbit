@@ -397,6 +397,53 @@ export function sendTimeLabel(at: Date, now: Date, timeZone: string, midSentence
   return `${date}, ${time}`
 }
 
+// Untouched drafts
+
+/** The draft as it was when the composer opened. */
+export interface OpenedDraft {
+  version: number
+  created_at: string
+  updated_at: string
+  to: readonly string[]
+  cc: readonly string[]
+  bcc: readonly string[]
+  subject: string
+  from_address_id: string
+}
+
+/** The composer now. `bodyWritten`: the text has more than the signature put in at the start. */
+export interface DraftNow {
+  to: readonly string[]
+  cc: readonly string[]
+  bcc: readonly string[]
+  subject: string
+  fromId: string
+  bodyWritten: boolean
+  /** Files attached or uploading. */
+  files: number
+}
+
+const sameList = (a: readonly string[], b: readonly string[]) => recipientsKey(a) === recipientsKey(b)
+
+/**
+ * A draft that can go when its composer closes: it was never saved (it was made just now, by R, C or Forward) and
+ * nothing changed since: the text has only its signature, and the subject, To, Cc, Bcc and From are what the server
+ * put in. A draft saved before (on another device, an earlier visit, given back by Undo) is always kept.
+ */
+export function isUntouchedDraft(opened: OpenedDraft, now: DraftNow): boolean {
+  const neverSaved = opened.version === 1 && opened.created_at === opened.updated_at
+  return (
+    neverSaved &&
+    !now.bodyWritten &&
+    now.files === 0 &&
+    now.subject === opened.subject &&
+    now.fromId === opened.from_address_id &&
+    sameList(now.to, opened.to) &&
+    sameList(now.cc, opened.cc) &&
+    sameList(now.bcc, opened.bcc)
+  )
+}
+
 // Signature
 
 const normalized = (text: string) => text.replace(/\s+/g, ' ').trim()

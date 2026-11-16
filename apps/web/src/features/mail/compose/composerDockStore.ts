@@ -9,6 +9,17 @@ export interface DockWindow {
   state: DockWindowState
   /** When it was last opened, as a sequence number: the lowest is the oldest. */
   openedAt: number
+  /**
+   * The last open was a click: the window plays its open animation (U2). Opened by a key (C, ⌘K, ⌘⇧E, R, Undo) it
+   * shows at once, as does a full screen window going back to a window. Not stored: a reload shows windows at once.
+   */
+  animate: boolean
+}
+
+/** How a window was opened. */
+export interface OpenOptions {
+  /** A click: the window plays its open animation. */
+  animate?: boolean
 }
 
 /** Windows in the order they were first opened (their order on screen). */
@@ -40,30 +51,32 @@ function enforceLimit(state: DockState, keep: string): DockState {
   return { windows: state.windows.map((window) => (oldest.has(window.draftId) ? { ...window, state: 'minimized' } : window)) }
 }
 
-function show(state: DockState, draftId: string, as: 'open' | 'full'): DockState {
+function show(state: DockState, draftId: string, as: 'open' | 'full', options: OpenOptions): DockState {
   const openedAt = nextSequence(state)
-  const exists = state.windows.some((window) => window.draftId === draftId)
-  const windows = exists
+  const current = state.windows.find((window) => window.draftId === draftId)
+  // full screen and back is the same window resizing, not a window opening
+  const animate = as === 'open' && current?.state !== 'full' && options.animate === true
+  const windows = current
     ? state.windows.map((window) =>
         window.draftId === draftId
-          ? { ...window, state: as, openedAt }
+          ? { ...window, state: as, openedAt, animate }
           : // one full screen window at a time: the one that was goes back to a window
             as === 'full' && window.state === 'full'
-            ? { ...window, state: 'open' as const }
+            ? { ...window, state: 'open' as const, animate: false }
             : window,
       )
-    : [...state.windows.map((window) => (as === 'full' && window.state === 'full' ? { ...window, state: 'open' as const } : window)), { draftId, state: as, openedAt }]
+    : [...state.windows.map((window) => (as === 'full' && window.state === 'full' ? { ...window, state: 'open' as const, animate: false } : window)), { draftId, state: as, openedAt, animate }]
   return enforceLimit({ windows }, draftId)
 }
 
 /** Opens a draft as a window (a new one, a pill, or a full screen one going back to a window). */
-export const openWindow = (state: DockState, draftId: string): DockState => show(state, draftId, 'open')
+export const openWindow = (state: DockState, draftId: string, options: OpenOptions = {}): DockState => show(state, draftId, 'open', options)
 
 /** The inline reply moves to a window. */
 export const popOutWindow = openWindow
 
 /** Full screen (adds the draft when it is not in the dock). */
-export const expandWindow = (state: DockState, draftId: string): DockState => show(state, draftId, 'full')
+export const expandWindow = (state: DockState, draftId: string): DockState => show(state, draftId, 'full', {})
 
 export function minimizeWindow(state: DockState, draftId: string): DockState {
   const window = state.windows.find((entry) => entry.draftId === draftId)
@@ -109,10 +122,12 @@ export function layoutDock(state: DockState, capacity: number): { windows: strin
 export const DOCK_WINDOW_WIDTH = 520
 export const DOCK_GAP = 12
 const DOCK_MARGIN = 32
+/** The "Message sent" toast sits at the bottom left (Sonner: 356 px wide, 24 px in): windows stay clear of it. */
+const TOAST_RESERVE = 24 + 356 + 12
 
-/** How many windows fit side by side in a viewport `width` px wide (1 to 3). */
+/** How many windows fit side by side in a viewport `width` px wide (1 to 3), beside the undo toast. */
 export function dockCapacity(width: number): number {
-  const fit = Math.floor((width - DOCK_MARGIN + DOCK_GAP) / (DOCK_WINDOW_WIDTH + DOCK_GAP))
+  const fit = Math.floor((width - DOCK_MARGIN - TOAST_RESERVE + DOCK_GAP) / (DOCK_WINDOW_WIDTH + DOCK_GAP))
   return Math.min(MAX_OPEN_WINDOWS, Math.max(1, fit))
 }
 
@@ -135,7 +150,7 @@ export function parseDock(raw: string | null): DockState {
     for (const entry of value.windows as Array<{ id?: unknown; state?: unknown; at?: unknown }>) {
       if (typeof entry?.id !== 'string' || !entry.id || windows.some((window) => window.draftId === entry.id)) continue
       const state = STATES.includes(entry.state as DockWindowState) ? (entry.state as DockWindowState) : 'open'
-      windows.push({ draftId: entry.id, state, openedAt: typeof entry.at === 'number' && Number.isFinite(entry.at) ? entry.at : 0 })
+      windows.push({ draftId: entry.id, state, openedAt: typeof entry.at === 'number' && Number.isFinite(entry.at) ? entry.at : 0, animate: false })
     }
     return { windows }
   } catch {
@@ -182,8 +197,8 @@ export function createComposerDockStore({ workspaceId, storage }: { workspaceId:
     /** The drafts that were in the dock when it loaded. */
     restoredIds: () => restoredIds,
     has: (draftId: string) => state.windows.some((window) => window.draftId === draftId),
-    open: (draftId: string) => set(openWindow(state, draftId)),
-    popOut: (draftId: string) => set(popOutWindow(state, draftId)),
+    open: (draftId: string, options?: OpenOptions) => set(openWindow(state, draftId, options)),
+    popOut: (draftId: string, options?: OpenOptions) => set(popOutWindow(state, draftId, options)),
     expand: (draftId: string) => set(expandWindow(state, draftId)),
     minimize: (draftId: string) => set(minimizeWindow(state, draftId)),
     close: (draftId: string) => set(closeWindow(state, draftId)),

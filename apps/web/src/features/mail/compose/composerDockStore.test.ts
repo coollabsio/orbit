@@ -94,11 +94,13 @@ test('a broken or foreign stored value restores an empty dock', () => {
   expect(parseDock('not json')).toEqual(EMPTY_DOCK)
   expect(parseDock('{"v":99,"windows":[]}')).toEqual(EMPTY_DOCK)
   expect(parseDock(JSON.stringify({ v: 1, windows: [{ id: 'a', state: 'open', at: 1 }, { id: 3 }, { id: 'a', state: 'open', at: 2 }, { id: 'b', state: 'weird', at: 2 }] })).windows).toEqual([
-    { draftId: 'a', state: 'open', openedAt: 1 },
-    { draftId: 'b', state: 'open', openedAt: 2 },
+    { draftId: 'a', state: 'open', openedAt: 1, animate: false },
+    { draftId: 'b', state: 'open', openedAt: 2, animate: false },
   ])
   const state = openWindow(openWindow(EMPTY_DOCK, 'a'), 'b')
   expect(parseDock(serializeDock(state))).toEqual(state)
+  // the open animation is not kept: a reload shows windows at once
+  expect(parseDock(serializeDock(openWindow(EMPTY_DOCK, 'a', { animate: true }))).windows[0]?.animate).toBe(false)
 })
 
 test('drops_missing_drafts', () => {
@@ -143,8 +145,31 @@ test('the layout shows the newest open windows that fit; the rest are pills', ()
 })
 
 test('dock capacity follows the viewport width', () => {
+  // the windows leave the bottom left to the undo toast
   expect(dockCapacity(375)).toBe(1)
-  expect(dockCapacity(1280)).toBe(2)
-  expect(dockCapacity(1920)).toBe(3)
+  expect(dockCapacity(1280)).toBe(1)
+  expect(dockCapacity(1600)).toBe(2)
+  expect(dockCapacity(1920)).toBe(2)
+  expect(dockCapacity(2400)).toBe(3)
   expect(dockCapacity(4000)).toBe(3)
+})
+
+test('only a click animates the open; keys and full screen and back do not', () => {
+  const animated = (state: DockState, id: string) => state.windows.find((window) => window.draftId === id)?.animate
+  // a click (a pill, Show, Pop out)
+  let state = openWindow(EMPTY_DOCK, 'a', { animate: true })
+  expect(animated(state, 'a')).toBe(true)
+  // a key (C, ⌘K, R, Undo): no options
+  state = openWindow(state, 'b')
+  expect(animated(state, 'b')).toBe(false)
+  // minimized, then brought back by a key: at once
+  state = openWindow(minimizeWindow(state, 'a'), 'a')
+  expect(animated(state, 'a')).toBe(false)
+  // full screen and back, even by a click: the same window, no open animation
+  state = openWindow(expandWindow(state, 'b'), 'b', { animate: true })
+  expect(animated(state, 'b')).toBe(false)
+  // another window going full screen sends the full one back without the animation
+  state = expandWindow(openWindow(expandWindow(state, 'a'), 'c', { animate: true }), 'c')
+  expect(animated(state, 'a')).toBe(false)
+  expect(state.windows.find((window) => window.draftId === 'c')?.state).toBe('full')
 })

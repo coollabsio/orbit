@@ -35,7 +35,7 @@ import { fetchDraftFile, useDraft, useDraftCheck, useFromAddresses, useSnippets,
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { useQueryClient } from '@tanstack/react-query'
 import { mailKeys } from '../api/keys'
-import { notReadyText, recipientSummary, recipientsKey, type SuppressedRecipient } from './composeLib'
+import { isUntouchedDraft, notReadyText, recipientSummary, recipientsKey, type SuppressedRecipient } from './composeLib'
 import { createInlineImages } from './inlineImages'
 import { ComposerFiles, type PendingUpload } from './ComposerFiles'
 import { FromPicker } from './FromPicker'
@@ -61,16 +61,17 @@ export interface ComposerProps {
   draftId: string
   placement: ComposerPlacement
   /**
-   * Close the composer; the draft stays (what is not saved yet is saved on the way out). A draft with nothing written
-   * in it is deleted first: a reply opened by mistake leaves no "Draft" behind.
+   * Close the composer; the draft stays (what is not saved yet is saved on the way out). An untouched draft
+   * (`isUntouchedDraft`: made just now, nothing changed) is deleted first: a reply opened by mistake leaves no "Draft"
+   * behind. The inline reply also deletes it when it goes away without Close (R, then J to the next thread).
    */
   onClose: () => void
   /** The server took the message (it waits for the undo time or its scheduled time). Without it a toast says so. */
   onSent?: SentHandler
   /** Esc (when no menu in the composer takes it). Without it, Esc closes the composer like `onClose`. */
   onEscape?: () => void
-  /** ⌘⇧E: pop the inline reply out to a window, or expand / shrink a window. Without it the key does nothing. */
-  onPopOut?: () => void
+  /** ⌘⇧E (`key`) or the Pop out button (`click`): the inline reply to a window, or a window to full screen and back. */
+  onPopOut?: (how: 'key' | 'click') => void
   /** Focus the text (or To) when the composer opens. Off for windows brought back by a reload. */
   autoFocus?: boolean
   handleRef?: Ref<ComposerHandle>
@@ -188,6 +189,14 @@ interface BodyProps extends ComposerProps {
   onRestore: () => void
 }
 
+// Untouched inline drafts are deleted a moment after their composer goes; one that mounts again at once (React's
+// development double mount) keeps its draft.
+const pendingDeletes = new Map<string, ReturnType<typeof setTimeout>>()
+const keepDraft = (draftId: string) => {
+  clearTimeout(pendingDeletes.get(draftId))
+  pendingDeletes.delete(draftId)
+}
+
 /** Exporting the body to HTML walks the whole document: it waits for a pause in typing. */
 const BODY_EXPORT_MS = 400
 
@@ -235,6 +244,8 @@ function ComposerBody({
   const bccField = useRef<RecipientFieldHandle>(null)
   const fileInput = useRef<HTMLInputElement>(null)
   const mounted = useRef(true)
+  /** Set when the composer goes on purpose (closed, sent, popped out, deleted): its unmount deletes nothing. */
+  const leaving = useRef(false)
   const workspaceId = useWorkspace().workspace.id
   const queryClient = useQueryClient()
   // previews of the images in the text; the object URLs go when the composer closes
@@ -352,7 +363,11 @@ function ComposerBody({
       requestAnimationFrame(() => toField.current?.focus())
     },
     onSent,
-    onClose,
+    // sent: the composer goes on purpose, its unmount deletes nothing
+    onClose: () => {
+      leaving.current = true
+      onClose()
+    },
   })
   const { send, sending, warnings, notice, tooLarge, clearTooLarge: dismissTooLarge, recheck } = composer
 
@@ -461,6 +476,20 @@ function ComposerBody({
     for (const id of ids) withBusy(id, setLink.mutateAsync({ fileId: id, asLink: true }), 'The file could not be changed.')
   }
 
+  /** Nothing changed since the composer opened, on a draft made just now: it can go when the composer closes. */
+  const untouched = () =>
+    saver.problem !== 'sending' &&
+    !saver.restore &&
+    isUntouchedDraft(initial, {
+      to,
+      cc,
+      bcc,
+      subject,
+      fromId,
+      bodyWritten: editor.current?.hasWriting(signatureOf(fromId)) ?? initial.body_html.trim() !== '',
+      files: draft.files.length + pending.length,
+    })
+
   /** The user wrote something: the signature put in at the start and a subject the server filled in (Re:, Fwd:) do not count. */
   const written = () => {
     const subjectWritten = draft.mode === 'new' ? subject.trim() !== '' : subject !== initial.subject
@@ -469,6 +498,7 @@ function ComposerBody({
 
   const discard = async () => {
     if (written() && !(await confirmAction({ title: 'Delete this draft?', description: 'Its text and files are deleted.', confirmLabel: 'Delete', danger: true }))) return
+    leaving.current = true
     saver.stop()
     deleteDraft.mutate(draftId, {
       onSuccess: () => {
@@ -479,16 +509,36 @@ function ComposerBody({
     })
   }
 
-  /** Closes the composer. A draft with nothing written in it is deleted on the way (a new one: nobody to send to either). */
+  // tidying up, not something the user asked for: a failure leaves an empty draft in Drafts and says nothing
+  const deleteUntouched = () => deleteDraft.mutate(draftId, { onError: (error) => console.warn('An untouched draft could not be deleted.', error) })
+
+  /** Closes the composer, deleting an untouched draft on the way. */
   const close = () => {
-    const untouched = !written() && (draft.mode !== 'new' || to.length + cc.length + bcc.length === 0) && saver.problem !== 'sending' && !saver.restore
-    if (untouched) {
+    leaving.current = true
+    if (untouched()) {
       saver.stop()
-      // tidying up, not something the user asked for: a failure leaves an empty draft in Drafts and says nothing
-      deleteDraft.mutate(draftId, { onError: (error) => console.warn('An empty draft could not be deleted.', error) })
+      deleteUntouched()
     }
     onClose()
   }
+
+  // R, then J to the next thread: the inline reply goes without Close. An untouched draft goes with it.
+  const onUnmount = useRef<() => void>(() => {})
+  useEffect(() => {
+    onUnmount.current = () => {
+      if (placement !== 'inline' || leaving.current || isReloading() || !untouched()) return
+      saver.stop()
+      pendingDeletes.set(draftId, setTimeout(() => {
+        pendingDeletes.delete(draftId)
+        deleteUntouched()
+      }, 0))
+    }
+  })
+  useLayoutEffect(() => {
+    keepDraft(draftId)
+    const current = onUnmount
+    return () => current.current()
+  }, [draftId])
 
   useImperativeHandle(handleRef, () => ({
     focus: () => {
@@ -496,6 +546,7 @@ function ComposerBody({
       else editor.current?.focus()
     },
     handOff: async () => {
+      leaving.current = true
       // typed recipients become chips (their change is saved), then the text, then everything at once
       toField.current?.commit()
       ccField.current?.commit()
@@ -516,7 +567,7 @@ function ComposerBody({
     } else if (mod && event.shiftKey && event.code === 'KeyE') {
       event.preventDefault()
       event.stopPropagation()
-      onPopOut?.()
+      onPopOut?.('key')
     }
   }
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -746,7 +797,7 @@ function ComposerBody({
               </span>
             }
           >
-            <Button variant="ghost" size="icon-sm" className="text-muted-foreground" aria-label="Pop out" onClick={onPopOut}>
+            <Button variant="ghost" size="icon-sm" className="text-muted-foreground" aria-label="Pop out" onClick={() => onPopOut('click')}>
               <Export />
             </Button>
           </Tip>
