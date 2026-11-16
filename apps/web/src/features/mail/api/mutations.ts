@@ -7,9 +7,12 @@ import {
   cancelMailOutbound,
   createMailDraft,
   deleteMailDraft,
+  deleteMailDraftFile,
   retryMailRecipient,
   sendMailDraft,
   updateMailDraft,
+  updateMailDraftFile,
+  uploadMailDraftFile,
   checkMailDomain,
   createMailbox,
   createMailDomain,
@@ -43,6 +46,7 @@ import type {
   CreateMailboxBody,
   CreateMailDraftBody,
   MailDraft,
+  MailDraftFile,
   MailOutbound,
   SendMailDraftBody,
   CreateMailLabelBody,
@@ -547,6 +551,68 @@ export function useDeleteDraft() {
   })
 }
 
+/** Changes the files of the cached draft (file changes do not change its `version`). */
+function useDraftFilesWrite<Variables>(
+  draftId: string,
+  send: (workspaceId: string, variables: Variables) => Promise<MailDraftFile | null>,
+  apply: (files: MailDraftFile[], result: MailDraftFile | null, variables: Variables) => MailDraftFile[],
+) {
+  const queryClient = useQueryClient()
+  const workspaceId = useWorkspaceId()
+  return useMutation({
+    mutationFn: (variables: Variables) => send(workspaceId, variables),
+    onSuccess: (result, variables) => {
+      queryClient.setQueryData<MailDraft>(mailKeys.draft(workspaceId, draftId), (draft) =>
+        draft ? { ...draft, files: apply(draft.files, result, variables) } : draft,
+      )
+      void queryClient.invalidateQueries({ queryKey: mailKeys.draftsAll(workspaceId) })
+    },
+  })
+}
+
+/** Attaches one file to a draft (413 `upload_too_large`, 422 `draft_files_limit`). */
+export function useUploadDraftFile(draftId: string) {
+  return useDraftFilesWrite<File>(
+    draftId,
+    async (workspaceId, file) =>
+      required(
+        (await uploadMailDraftFile({ client: apiClient, path: { workspace_id: workspaceId, draft_id: draftId }, body: { file }, throwOnError: true }))
+          .data,
+      ),
+    (files, file) => (file ? [...files.filter((entry) => entry.id !== file.id), file] : files),
+  )
+}
+
+export function useRemoveDraftFile(draftId: string) {
+  return useDraftFilesWrite<string>(
+    draftId,
+    async (workspaceId, fileId) => {
+      await deleteMailDraftFile({ client: apiClient, path: { workspace_id: workspaceId, draft_id: draftId, file_id: fileId }, throwOnError: true })
+      return null
+    },
+    (files, _result, fileId) => files.filter((file) => file.id !== fileId),
+  )
+}
+
+/** Sends a file as a download link, or back as an attachment (422 `link_inline`, `link_forwarded`). */
+export function useSetDraftFileLink(draftId: string) {
+  return useDraftFilesWrite<{ fileId: string; asLink: boolean }>(
+    draftId,
+    async (workspaceId, { fileId, asLink }) =>
+      required(
+        (
+          await updateMailDraftFile({
+            client: apiClient,
+            path: { workspace_id: workspaceId, draft_id: draftId, file_id: fileId },
+            body: { as_link: asLink },
+            throwOnError: true,
+          })
+        ).data,
+      ),
+    (files, file) => (file ? files.map((entry) => (entry.id === file.id ? file : entry)) : files),
+  )
+}
+
 /** The wait before a change is saved: typing makes one save, not one per key. */
 export const DRAFT_SAVE_DELAY_MS = 2000
 
@@ -563,7 +629,13 @@ const INITIAL_SAVE_STATE: DraftSaverState = { saving: false, problem: null, rest
 export function useSaveDraft(draftId: string | null | undefined) {
   const queryClient = useQueryClient()
   const workspaceId = useWorkspaceId()
-  const [state, setState] = useState<DraftSaverState>(INITIAL_SAVE_STATE)
+  const [state, setStateValue] = useState<DraftSaverState>(INITIAL_SAVE_STATE)
+  // the latest state at once, for code that awaits `flush()` (React state shows it only after a render)
+  const latest = useRef<DraftSaverState>(INITIAL_SAVE_STATE)
+  const setState = useCallback((next: DraftSaverState) => {
+    latest.current = next
+    setStateValue(next)
+  }, [])
   const saver = useRef<DraftSaver | null>(null)
 
   useEffect(() => {
@@ -608,10 +680,12 @@ export function useSaveDraft(draftId: string | null | undefined) {
       instance.dispose()
       if (saver.current === instance) saver.current = null
     }
-  }, [draftId, queryClient, workspaceId])
+  }, [draftId, queryClient, workspaceId, setState])
 
   return {
     ...state,
+    /** The state as it is now (after an awaited `flush()`, before React shows it). */
+    current: useCallback(() => latest.current, []),
     save: useCallback((change: DraftText) => saver.current?.save(change), []),
     flush: useCallback(async () => saver.current?.flush(), []),
     stop: useCallback(() => saver.current?.stop(), []),
