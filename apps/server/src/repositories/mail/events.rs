@@ -17,9 +17,11 @@
 //!   address (reason `complaint`) and leaves the recipient as it is. A temporary failure makes a
 //!   `delivered` recipient `deferred` with no next attempt: the provider retries, Orbit does
 //!   not (Orbit's claim, suppression and cancel leave such a row alone). A delivery makes a
-//!   `deferred` recipient `delivered`. Both count only when the event is newer than the row's
-//!   last change (`updated_at`), so a late or redelivered event cannot undo a later one; an
-//!   event without a time changes no status. A provider-deferred row with no last word
+//!   recipient that is not final (`queued`, `sending`, `deferred`) `delivered`, whatever its
+//!   time: delivery wins over a deferral, and the late result of an attempt in flight cannot
+//!   change it. A deferral counts only when it is newer than the row's last change
+//!   (`updated_at`), so a late or redelivered one cannot undo a later change; one without a
+//!   time is ignored. A provider-deferred row with no last word
 //!   [`PROVIDER_DEFER_GIVE_UP_MS`] after it went bounces as given up
 //!   ([`MailRepository::give_up_provider_deferred`], in `mail.send_sweep`). Final statuses (`bounced`,
 //!   `suppressed`, `cancelled`) never change.
@@ -261,9 +263,9 @@ impl MailRepository {
                 .await?;
                 EventOutcome::Applied
             }
-            // a status event only counts when it is newer than the row's last change, so a late
-            // or redelivered one cannot undo a later change
-            ProviderEvent::Deferred { .. } | ProviderEvent::Delivered
+            // a deferral only counts when it is newer than the row's last change, so a late or
+            // redelivered one cannot undo a later change
+            ProviderEvent::Deferred { .. }
                 if event.at_ms.is_none_or(|at| at <= recipient.updated_at) =>
             {
                 EventOutcome::Ignored
@@ -290,11 +292,15 @@ impl MailRepository {
                     EventOutcome::Ignored
                 }
             }
+            // delivery wins over any deferral, whatever its time: a row Orbit deferred (a
+            // timeout after the provider took it) or is sending is not sent again; the late
+            // result of an attempt in flight changes nothing (`record_outcomes` needs `sending`)
             ProviderEvent::Delivered => {
                 let changed = sqlx::query(
                     "UPDATE mail_outbound_recipients SET status = 'delivered', \
-                     next_attempt_at = NULL, last_response = NULL, updated_at = $1 \
-                     WHERE id = $2 AND status = 'deferred' AND updated_at < $3 \
+                     next_attempt_at = NULL, attempt_id = NULL, last_response = NULL, \
+                     updated_at = $1 \
+                     WHERE id = $2 AND status IN ('queued', 'sending', 'deferred') \
                      AND (retried_at IS NULL OR retried_at <= $3)",
                 )
                 .bind(now.as_millis())

@@ -27,8 +27,8 @@ use orbit_server::mail_send::{
 use orbit_server::repositories::identity::{IdentityRepository, SetupRequest};
 use orbit_server::repositories::instance_settings::InstanceSettingsRepository;
 use orbit_server::repositories::mail::{
-    DraftMode, MailRepository, MailboxKind, NewDraft, NewMailbox, NewRoute,
-    PROVIDER_DEFER_GIVE_UP_MS, ProviderScope, RouteChange, RouteSecrets, RouteSettings,
+    AttemptResult, DeferCause, DraftMode, MailRepository, MailboxKind, NewDraft, NewMailbox,
+    NewRoute, PROVIDER_DEFER_GIVE_UP_MS, ProviderScope, RouteChange, RouteSecrets, RouteSettings,
     SendRouteKind,
 };
 use orbit_server::repositories::workspaces::WorkspaceRepository;
@@ -612,6 +612,116 @@ async fn soft_event_defers_without_a_run_and_delivery_clears_it() {
         (StatusCode::OK, json!(1))
     );
     assert_eq!(f.state_of(slow).await.0, "delivered");
+}
+
+#[tokio::test]
+async fn delivered_event_wins_over_orbit_deferral_and_attempt_in_flight() {
+    let f = Fixture::mailgun().await;
+    let id = f.send(&["ann@out.test", "bob@out.test"]).await;
+    let ann = f.recipient(id, "ann@out.test").await;
+    let bob = f.recipient(id, "bob@out.test").await;
+    // Orbit's call timed out after the provider took the message: deferred to a next attempt,
+    // without the provider's message ID
+    let now = TimestampMillis::now().as_millis();
+    sqlx::query(
+        "UPDATE mail_outbound_recipients SET status = 'deferred', next_attempt_at = $1, \
+         last_response = 'Timed out', provider_message_id = NULL, updated_at = $2 WHERE id = $3",
+    )
+    .bind(now + 60_000)
+    .bind(now)
+    .bind(ann.to_string())
+    .execute(f.database.pool())
+    .await
+    .unwrap();
+    sqlx::query("UPDATE mail_outbound SET status = 'released' WHERE id = $1")
+        .bind(id.to_string())
+        .execute(f.database.pool())
+        .await
+        .unwrap();
+    // the provider's delivery happened before Orbit recorded the timeout: it still wins
+    #[allow(clippy::cast_precision_loss)]
+    let earlier = (now - 3_600_000) as f64 / 1000.0;
+    let delivered = |address: &str| {
+        json!({
+            "event": "delivered",
+            "timestamp": earlier,
+            "message": { "headers": { "message-id": "unknown@mailgun" } },
+            "recipient": address,
+            "user-variables": { "orbit": id.to_string() },
+            "delivery-status": { "code": 250, "message": "OK" }
+        })
+    };
+    let (status, body) = f
+        .mailgun_post(f.route, MAILGUN_KEY, &delivered("ann@out.test"))
+        .await;
+    assert_eq!(
+        (status, body["applied"].clone()),
+        (StatusCode::OK, json!(1))
+    );
+    let (state, _, response, next) = f.state_of(ann).await;
+    assert_eq!((state.as_str(), response, next), ("delivered", None, None));
+    assert_eq!(f.outbound_status(id).await.0, "done");
+    // no further claim: a run (even after the old next attempt) sends nothing
+    sqlx::query("UPDATE mail_outbound SET status = 'released' WHERE id = $1")
+        .bind(id.to_string())
+        .execute(f.database.pool())
+        .await
+        .unwrap();
+    let attempts = |recipient: Id| {
+        let pool = f.database.pool().clone();
+        async move {
+            sqlx::query_scalar::<_, i64>(
+                "SELECT attempts FROM mail_outbound_recipients WHERE id = $1",
+            )
+            .bind(recipient.to_string())
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+        }
+    };
+    let before = attempts(ann).await;
+    run_send_job(&f.state(), id, TimestampMillis::from_millis(now + 120_000))
+        .await
+        .unwrap();
+    assert_eq!(attempts(ann).await, before);
+    assert_eq!(f.state_of(ann).await.0, "delivered");
+
+    // Orbit's own attempt is in flight for bob: the provider's delivery applies, and the
+    // attempt's late result changes nothing
+    let attempt = Id::new_v7();
+    sqlx::query(
+        "UPDATE mail_outbound_recipients SET status = 'sending', attempt_id = $1 WHERE id = $2",
+    )
+    .bind(attempt.to_string())
+    .bind(bob.to_string())
+    .execute(f.database.pool())
+    .await
+    .unwrap();
+    let (status, body) = f
+        .mailgun_post(f.route, MAILGUN_KEY, &delivered("bob@out.test"))
+        .await;
+    assert_eq!(
+        (status, body["applied"].clone()),
+        (StatusCode::OK, json!(1))
+    );
+    assert_eq!(f.state_of(bob).await.0, "delivered");
+    f.mail
+        .record_outcomes(
+            id,
+            attempt,
+            &[(
+                bob,
+                AttemptResult::Deferred {
+                    response: "451 4.4.1 Timed out".to_owned(),
+                    cause: DeferCause::Temporary,
+                },
+            )],
+            TimestampMillis::now(),
+        )
+        .await
+        .unwrap();
+    let (state, _, response, next) = f.state_of(bob).await;
+    assert_eq!((state.as_str(), response, next), ("delivered", None, None));
 }
 
 /// Defers `address` of the message by a provider event now (`deferred`, no next attempt).
