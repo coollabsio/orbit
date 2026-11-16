@@ -70,6 +70,8 @@ CREATE TABLE mail_send_policies (
     first_release_at BIGINT,
     paused_at BIGINT,
     pause_reason TEXT,
+    -- The first time sending was paused: a workspace that was ever paused is never promoted.
+    first_paused_at BIGINT,
     resumed_by TEXT REFERENCES users(id) ON DELETE SET NULL,
     created_at BIGINT NOT NULL,
     updated_at BIGINT NOT NULL
@@ -177,6 +179,8 @@ CREATE TABLE mail_outbound_recipients (
     -- When a user last retried it (**Retry**). A delivery status notification is then ignored: it
     -- may be about the send before the retry.
     retried_at BIGINT,
+    -- When a provider reported a complaint about this recipient: counts toward the complaint rate.
+    complained_at BIGINT,
     created_at BIGINT NOT NULL,
     updated_at BIGINT NOT NULL
 );

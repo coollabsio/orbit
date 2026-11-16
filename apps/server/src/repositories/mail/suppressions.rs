@@ -451,7 +451,7 @@ impl MailRepository {
             .await?;
         }
         if hard {
-            Self::check_pause(&mut transaction, workspace_id, now).await?;
+            self.check_pause(&mut transaction, workspace_id, now).await?;
         }
         bounced_thread_to_inbox(&mut transaction, outbound_id, now).await?;
         update_summary(&mut transaction, outbound_id, now).await?;

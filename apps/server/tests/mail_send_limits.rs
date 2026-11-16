@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode, header};
+use orbit_mail::events::{ParsedEvent, ProviderEvent};
 use orbit_mail::{DsnAction, DsnRecipient};
 use orbit_platform::{
     AttachmentMutationCoordinator, AuthenticatedUser, Id, LocalBlobStore, MailMode,
@@ -13,7 +14,9 @@ use orbit_server::auth_routes::CookieMode;
 use orbit_server::mail_routes::{MailSettings, MailState, mail_router};
 use orbit_server::repositories::identity::{IdentityRepository, SetupRequest};
 use orbit_server::repositories::instance_settings::InstanceSettingsRepository;
-use orbit_server::repositories::mail::{Limits, MailRepository, SendTier};
+use orbit_server::repositories::mail::{
+    AttemptResult, BounceKind, Limits, MailRepository, SendTier,
+};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
@@ -241,13 +244,15 @@ impl Fixture {
 
     async fn check_pause(&self, now: i64) -> bool {
         let mut transaction = self.database.immediate_transaction().await.unwrap();
-        let paused = MailRepository::check_pause(
-            &mut transaction,
-            self.workspace,
-            TimestampMillis::from_millis(now),
-        )
-        .await
-        .unwrap();
+        let paused = self
+            .mail
+            .check_pause(
+                &mut transaction,
+                self.workspace,
+                TimestampMillis::from_millis(now),
+            )
+            .await
+            .unwrap();
         transaction.commit().await.unwrap();
         paused
     }
@@ -268,16 +273,77 @@ impl Fixture {
             .unwrap()
     }
 
-    async fn complaints(&self, count: usize, at: i64) {
-        for _ in 0..count {
+    /// Marks `ids` as complained about (a provider's complaint) at `at`.
+    async fn complained(&self, ids: &[Id], at: i64) {
+        for id in ids {
             self.sql(&format!(
-                "INSERT INTO mail_suppressions (workspace_id, address, reason, created_at) \
-                 VALUES ('{}', 'c{}@out.test', 'complaint', {at})",
-                self.workspace,
-                Id::new_v7()
+                "UPDATE mail_outbound_recipients SET complained_at = {at} WHERE id = '{id}'"
             ))
             .await;
         }
+    }
+
+    /// A send route of `kind` postmark that the outbound `outbound` went through.
+    async fn route(&self, outbound: Id) -> Id {
+        let route = Id::new_v7();
+        sqlx::query(
+            "INSERT INTO mail_send_routes (id, workspace_id, kind, name, secrets, settings, \
+             created_at, updated_at) VALUES ($1, $2, 'postmark', 'Route', $3, '{}', 1, 1)",
+        )
+        .bind(route.to_string())
+        .bind(self.workspace.to_string())
+        .bind(vec![0_u8])
+        .execute(self.database.pool())
+        .await
+        .unwrap();
+        self.sql(&format!(
+            "UPDATE mail_outbound SET route_id = '{route}' WHERE id = '{outbound}'"
+        ))
+        .await;
+        route
+    }
+
+    async fn event(&self, route: Id, recipient: Id, event: ProviderEvent) {
+        let address: String =
+            sqlx::query_scalar("SELECT address FROM mail_outbound_recipients WHERE id = $1")
+                .bind(recipient.to_string())
+                .fetch_one(self.database.pool())
+                .await
+                .unwrap();
+        self.mail
+            .apply_provider_event(
+                route,
+                &ParsedEvent {
+                    provider_message_id: None,
+                    correlation: Some(recipient.to_string()),
+                    message_id: None,
+                    recipient: address,
+                    at_ms: None,
+                    event,
+                },
+                TimestampMillis::now(),
+            )
+            .await
+            .unwrap();
+    }
+
+    async fn audits(&self, action: &str) -> i64 {
+        sqlx::query_scalar(
+            "SELECT COUNT(*) FROM audit_events WHERE workspace_id = $1 AND action = $2",
+        )
+        .bind(self.workspace.to_string())
+        .bind(action)
+        .fetch_one(self.database.pool())
+        .await
+        .unwrap()
+    }
+
+    async fn first_paused_at(&self) -> Option<i64> {
+        sqlx::query_scalar("SELECT first_paused_at FROM mail_send_policies WHERE workspace_id = $1")
+            .bind(self.workspace.to_string())
+            .fetch_one(self.database.pool())
+            .await
+            .unwrap()
     }
 
     async fn call(
@@ -465,9 +531,10 @@ async fn pause_at_5_percent_hard_bounces_with_100_recipients() {
 async fn no_pause_under_100_recipients() {
     let f = Fixture::new().await;
     f.policy("standard", "").await;
-    f.sent(f.owner_membership, 99, 50, now() - HOUR, "done")
+    let (_, ids) = f
+        .sent(f.owner_membership, 99, 50, now() - HOUR, "done")
         .await;
-    f.complaints(5, now()).await;
+    f.complained(&ids[..5], now()).await;
     assert!(!f.check_pause(now()).await);
     // recipients older than 7 days do not count toward the 100
     f.sent(f.owner_membership, 100, 0, now() - 8 * DAY, "done")
@@ -480,11 +547,12 @@ async fn no_pause_under_100_recipients() {
 async fn pause_at_complaints_over_0_3_percent() {
     let f = Fixture::new().await;
     f.policy("standard", "").await;
-    f.sent(f.owner_membership, 1000, 0, now() - HOUR, "done")
+    let (_, ids) = f
+        .sent(f.owner_membership, 1000, 0, now() - HOUR, "done")
         .await;
-    f.complaints(3, now()).await;
+    f.complained(&ids[..3], now()).await;
     assert!(!f.check_pause(now()).await, "0.3 % is not over");
-    f.complaints(1, now() - MINUTE).await;
+    f.complained(&ids[3..4], now() - MINUTE).await;
     assert!(f.check_pause(now()).await, "4 of 1000 is over 0.3 %");
     let reason: String =
         sqlx::query_scalar("SELECT pause_reason FROM mail_send_policies WHERE workspace_id = $1")
@@ -644,9 +712,10 @@ async fn promotion_after_14_clean_days() {
     // a complaint rate of 0.1 % is not under 0.1 %
     let c = Fixture::new().await;
     c.policy("new", "").await;
-    c.sent(c.owner_membership, 1000, 0, now() - DAY, "done")
+    let (_, ids) = c
+        .sent(c.owner_membership, 1000, 0, now() - DAY, "done")
         .await;
-    c.complaints(1, now()).await;
+    c.complained(&ids[..1], now()).await;
     assert_eq!(
         c.mail
             .run_send_policy(TimestampMillis::now())
@@ -669,7 +738,7 @@ async fn promotion_after_14_clean_days() {
 #[tokio::test]
 async fn no_promotion_if_ever_paused() {
     let f = Fixture::new().await;
-    f.policy("new", "pause_reason = 'old pause', resumed_by = NULL")
+    f.policy("new", "first_paused_at = 5")
         .await;
     assert_eq!(
         f.mail
@@ -691,7 +760,7 @@ async fn no_promotion_if_ever_paused() {
     .await;
     assert!(g.check_pause(now()).await);
     g.mail
-        .resume_sending(g.workspace, g.root_user, TimestampMillis::now())
+        .resume_sending(g.workspace, g.root_user, "request", TimestampMillis::now())
         .await
         .unwrap();
     g.sql("UPDATE mail_outbound_recipients SET bounce_kind = NULL, status = 'delivered'")
@@ -703,4 +772,154 @@ async fn no_promotion_if_ever_paused() {
             .unwrap(),
         0
     );
+}
+
+#[tokio::test]
+async fn smtp_time_hard_bounce_pauses() {
+    let f = Fixture::new().await;
+    f.policy("standard", "").await;
+    let (outbound, ids) = f
+        .sent(f.owner_membership, 100, 5, now() - HOUR, "released")
+        .await;
+    let attempt = Id::new_v7();
+    f.sql(&format!(
+        "UPDATE mail_outbound_recipients SET status = 'sending', attempt_id = '{attempt}', \
+         attempts = 1 WHERE id = '{}'",
+        ids[60]
+    ))
+    .await;
+    f.mail
+        .record_outcomes(
+            outbound,
+            attempt,
+            &[(
+                ids[60],
+                AttemptResult::Bounced {
+                    response: "550 5.1.1 no such user".to_owned(),
+                    kind: BounceKind::Hard,
+                },
+            )],
+            TimestampMillis::now(),
+        )
+        .await
+        .unwrap();
+    assert!(f.paused_at().await.is_some());
+    assert!(f.first_paused_at().await.is_some());
+}
+
+#[tokio::test]
+async fn provider_hard_bounce_pauses_without_a_policy_row() {
+    let f = Fixture::with_cloud(true).await;
+    let (outbound, ids) = f
+        .sent(f.owner_membership, 100, 5, now() - HOUR, "done")
+        .await;
+    let route = f.route(outbound).await;
+    f.event(
+        route,
+        ids[70],
+        ProviderEvent::Bounced {
+            hard: true,
+            diagnostic: Some("550 5.1.1 unknown".to_owned()),
+        },
+    )
+    .await;
+    // the row was made with the Cloud default tier, and paused
+    assert_eq!(f.tier().await, "new");
+    assert!(f.paused_at().await.is_some());
+}
+
+#[tokio::test]
+async fn provider_complaints_pause_even_for_suppressed_addresses() {
+    let f = Fixture::new().await;
+    f.policy("standard", "").await;
+    let (outbound, ids) = f
+        .sent(f.owner_membership, 1000, 0, now() - HOUR, "done")
+        .await;
+    let route = f.route(outbound).await;
+    // the first four addresses are on the list already
+    for id in &ids[..4] {
+        f.sql(&format!(
+            "INSERT INTO mail_suppressions (workspace_id, address, reason, created_at) \
+             SELECT workspace_id, address, 'hard_bounce', 1 FROM mail_outbound_recipients \
+             WHERE id = '{id}'"
+        ))
+        .await;
+    }
+    for id in &ids[..3] {
+        f.event(route, *id, ProviderEvent::Complained).await;
+    }
+    assert_eq!(f.paused_at().await, None, "3 of 1000 is not over 0.3 %");
+    // a repeated event counts once
+    f.event(route, ids[0], ProviderEvent::Complained).await;
+    assert_eq!(f.paused_at().await, None);
+    f.event(route, ids[3], ProviderEvent::Complained).await;
+    assert!(f.paused_at().await.is_some());
+}
+
+#[tokio::test]
+async fn pause_without_a_policy_row_makes_it() {
+    let f = Fixture::new().await;
+    f.sent(f.owner_membership, 100, 10, now() - HOUR, "done")
+        .await;
+    assert!(f.check_pause(now()).await);
+    assert_eq!(f.tier().await, "standard");
+    assert!(f.paused_at().await.is_some());
+}
+
+#[tokio::test]
+async fn admin_changes_are_audited() {
+    let f = Fixture::new().await;
+    let uri = format!("/api/v1/admin/mail/send-policies/{}", f.workspace);
+    let (status, _) = f
+        .call(&f.root_cookie, "PUT", &uri, Some(json!({"tier": "new"})))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(f.audits("instance.mail_send_policy_updated").await, 1);
+    f.sql(&format!(
+        "UPDATE mail_send_policies SET paused_at = 5 WHERE workspace_id = '{}'",
+        f.workspace
+    ))
+    .await;
+    let (status, _) = f
+        .call(&f.root_cookie, "POST", &format!("{uri}/resume"), None)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(f.audits("instance.mail_sending_resumed").await, 1);
+}
+
+#[tokio::test]
+async fn an_outsider_gets_not_found_for_the_workspace_policy() {
+    let f = Fixture::new().await;
+    let id = Id::new_v7();
+    let now = TimestampMillis::now();
+    sqlx::query(
+        "INSERT INTO users (id, email, normalized_email, display_name, password_hash, created_at, updated_at) \
+         VALUES ($1, 'out@example.com', 'out@example.com', 'Out', 'unused', $2, $2)",
+    )
+    .bind(id.to_string())
+    .bind(now.as_millis())
+    .execute(f.database.pool())
+    .await
+    .unwrap();
+    let session = f
+        .identity
+        .create_session(
+            &AuthenticatedUser {
+                id,
+                email: "out@example.com".to_owned(),
+                display_name: "Out".to_owned(),
+            },
+            now,
+        )
+        .await
+        .unwrap();
+    let (status, _) = f
+        .call(
+            &format!("__Host-orbit_session={}", session.token),
+            "GET",
+            &format!("/api/v1/workspaces/{}/mail/send-policy", f.workspace),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
 }

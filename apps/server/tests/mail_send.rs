@@ -54,6 +54,10 @@ impl Fixture {
     }
 
     async fn with_limits(limits: UploadLimits) -> Self {
+        Self::build(limits, false).await
+    }
+
+    async fn build(limits: UploadLimits, cloud: bool) -> Self {
         let database = TestDatabase::new().await.unwrap();
         let identity = Arc::new(IdentityRepository::new((*database).clone()));
         let now = TimestampMillis::now();
@@ -91,7 +95,8 @@ impl Fixture {
             AttachmentMutationCoordinator::default(),
             limits,
         );
-        let mail = Arc::new(MailRepository::new((*database).clone(), uploads, APP_KEY));
+        let mail =
+            Arc::new(MailRepository::new((*database).clone(), uploads, APP_KEY).with_cloud(cloud));
         let intake = MailIntake::new(Arc::clone(&mail), 52_428_800);
         let owner_membership: String = sqlx::query_scalar(
             "SELECT id FROM memberships WHERE workspace_id = $1 AND user_id = $2",
@@ -2193,4 +2198,29 @@ async fn permanent_release_errors_are_not_swept() {
         );
     }
     assert_eq!(f.queued_send_jobs(id).await, 0);
+}
+
+#[tokio::test]
+async fn cloud_workspace_is_new_after_its_first_release() {
+    let f = Fixture::build(UploadLimits::default(), true).await;
+    f.signing().await;
+    let none: Option<String> =
+        sqlx::query_scalar("SELECT tier FROM mail_send_policies WHERE workspace_id = $1")
+            .bind(f.workspace.to_string())
+            .fetch_optional(f.database.pool())
+            .await
+            .unwrap();
+    assert_eq!(none, None);
+    let draft = f.new_draft(f.ann_primary, &["x@out.test"], &[], &[]).await;
+    f.send_and_release(&draft).await;
+    let row = sqlx::query(
+        "SELECT tier, first_release_at FROM mail_send_policies WHERE workspace_id = $1",
+    )
+    .bind(f.workspace.to_string())
+    .fetch_one(f.database.pool())
+    .await
+    .unwrap();
+    use sqlx::Row;
+    assert_eq!(row.get::<String, _>("tier"), "new");
+    assert!(row.get::<Option<i64>, _>("first_release_at").is_some());
 }

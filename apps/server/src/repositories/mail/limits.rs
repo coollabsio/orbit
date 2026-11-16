@@ -93,7 +93,8 @@ pub struct SendPolicyView {
 
 /// Hard bounces and complaints among the recipients released in the 7 days up to `now`:
 /// (recipients, hard bounces, complaints). A complaint is a `complaint` suppression made in the
-/// window (one per address): a complaint on an address that is already on the list adds none.
+/// window: a recipient a provider reported a complaint about (`complained_at`), also when its
+/// address was on the suppression list already.
 async fn rates(
     connection: &mut AnyConnection,
     workspace_id: Id,
@@ -108,7 +109,8 @@ async fn rates(
     .fetch_one(&mut *connection)
     .await?;
     let complaints: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM mail_suppressions WHERE workspace_id = $1 AND reason = 'complaint'          AND created_at > $2 AND created_at <= $3",
+        "SELECT COUNT(*) FROM mail_outbound_recipients WHERE workspace_id = $1 \
+         AND complained_at > $2 AND complained_at <= $3",
     )
     .bind(workspace_id.to_string())
     .bind(now - WEEK_MS)
@@ -402,8 +404,9 @@ impl MailRepository {
     /// sending when it has at least 100 recipients released in the last 7 days and more than 5 %
     /// of them bounced hard or more than 0.3 % complained (spec §5.8). A new Send is then refused
     /// (`sending_paused`) and released messages wait with `paused`. Returns whether it paused
-    /// the workspace now. The policy row exists once the workspace released a message.
+    /// the workspace now. A workspace without a policy row gets one (default tier) first.
     pub async fn check_pause(
+        &self,
         transaction: &mut Transaction<'_, Any>,
         workspace_id: Id,
         now: TimestampMillis,
@@ -426,9 +429,19 @@ impl MailRepository {
         } else {
             return Ok(false);
         };
+        sqlx::query(
+            "INSERT INTO mail_send_policies (workspace_id, tier, created_at, updated_at) \
+             VALUES ($1, $2, $3, $3) ON CONFLICT (workspace_id) DO NOTHING",
+        )
+        .bind(workspace_id.to_string())
+        .bind(default_tier(self.cloud))
+        .bind(now)
+        .execute(&mut **transaction)
+        .await?;
         let paused = sqlx::query(
             "UPDATE mail_send_policies SET paused_at = $1, pause_reason = $2, resumed_by = NULL, \
-             updated_at = $1 WHERE workspace_id = $3 AND paused_at IS NULL",
+             first_paused_at = COALESCE(first_paused_at, $1), updated_at = $1 \
+             WHERE workspace_id = $3 AND paused_at IS NULL",
         )
         .bind(now)
         .bind(reason)
@@ -440,7 +453,7 @@ impl MailRepository {
     }
 
     /// `mail.send_policy`: moves a `new` workspace to `standard` when its first release is at
-    /// least 14 days old, it was never paused (`pause_reason` stays after a resume), and over the
+    /// least 14 days old, it was never paused (`first_paused_at` stays after a resume), and over the
     /// last 7 days its hard bounce rate is under 2 % and its complaint rate under 0.1 %.
     /// Returns how many were promoted.
     pub async fn run_send_policy(&self, now: TimestampMillis) -> Result<u64, MailError> {
@@ -448,7 +461,7 @@ impl MailRepository {
         let rows = sqlx::query(
             "SELECT workspace_id FROM mail_send_policies WHERE tier = 'new' \
              AND first_release_at IS NOT NULL AND first_release_at <= $1 \
-             AND paused_at IS NULL AND pause_reason IS NULL ORDER BY workspace_id",
+             AND first_paused_at IS NULL AND paused_at IS NULL AND pause_reason IS NULL ORDER BY workspace_id",
         )
         .bind(now.as_millis() - PROMOTE_AFTER_MS)
         .fetch_all(&mut *transaction)
@@ -598,8 +611,10 @@ impl MailRepository {
     pub async fn set_send_policy(
         &self,
         workspace_id: Id,
+        actor_id: Id,
         tier: SendTier,
         custom: Option<Limits>,
+        request_id: &str,
         now: TimestampMillis,
     ) -> Result<SendPolicyView, MailError> {
         let custom_json = match (tier, custom) {
@@ -651,6 +666,19 @@ impl MailRepository {
         .bind(now.as_millis())
         .execute(&mut *transaction)
         .await?;
+        crate::audit::record(
+            &mut transaction,
+            workspace_id,
+            Some(actor_id),
+            "instance.mail_send_policy_updated",
+            crate::audit::AuditOutcome::Success,
+            "mail_send_policy",
+            Some(workspace_id),
+            request_id,
+            serde_json::json!({ "tier": tier.as_str(), "custom_limits": custom }),
+            now,
+        )
+        .await?;
         let view = self
             .policy_view(&mut transaction, workspace_id, now)
             .await?;
@@ -665,6 +693,7 @@ impl MailRepository {
         &self,
         workspace_id: Id,
         by: Id,
+        request_id: &str,
         now: TimestampMillis,
     ) -> Result<SendPolicyView, MailError> {
         let mut transaction = self.database.immediate_transaction().await?;
@@ -681,6 +710,19 @@ impl MailRepository {
         if found == 0 {
             return Err(MailError::NotFound);
         }
+        crate::audit::record(
+            &mut transaction,
+            workspace_id,
+            Some(by),
+            "instance.mail_sending_resumed",
+            crate::audit::AuditOutcome::Success,
+            "mail_send_policy",
+            Some(workspace_id),
+            request_id,
+            serde_json::json!({}),
+            now,
+        )
+        .await?;
         let view = self
             .policy_view(&mut transaction, workspace_id, now)
             .await?;

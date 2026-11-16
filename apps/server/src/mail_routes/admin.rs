@@ -625,12 +625,19 @@ pub(crate) async fn set_mail_send_policy(
     ApiJson(body): ApiJson<SetMailSendPolicyBody>,
 ) -> Result<Json<MailSendPolicy>, ApiError> {
     let request_id = request_id.as_ref();
-    let (_, instance) = require_root(&state, &headers, &uri, request_id).await?;
+    let (actor_id, instance) = require_root(&state, &headers, &uri, request_id).await?;
     let workspace_id = path_workspace(&workspace, &instance, request_id)?;
     let now = database_now(&state, &instance, request_id).await?;
     let view = state
         .mail
-        .set_send_policy(workspace_id, body.tier, body.custom_limits, now)
+        .set_send_policy(
+            workspace_id,
+            actor_id,
+            body.tier,
+            body.custom_limits,
+            request_id_value(request_id),
+            now,
+        )
         .await
         .map_err(|error| problem(error, &instance, request_id))?;
     Ok(Json(policy_view(view)))
@@ -652,7 +659,7 @@ pub(crate) async fn resume_mail_sending(
     let now = database_now(&state, &instance, request_id).await?;
     let view = state
         .mail
-        .resume_sending(workspace_id, actor_id, now)
+        .resume_sending(workspace_id, actor_id, request_id_value(request_id), now)
         .await
         .map_err(|error| problem(error, &instance, request_id))?;
     Ok(Json(policy_view(view)))

@@ -246,7 +246,8 @@ impl MailRepository {
                         .await?;
                     }
                     if *hard {
-                        Self::check_pause(&mut transaction, recipient.workspace_id, now).await?;
+                        self.check_pause(&mut transaction, recipient.workspace_id, now)
+                            .await?;
                     }
                     bounced_thread_to_inbox(&mut transaction, recipient.outbound_id, now).await?;
                     changed_status = true;
@@ -264,7 +265,16 @@ impl MailRepository {
                     now,
                 )
                 .await?;
-                Self::check_pause(&mut transaction, recipient.workspace_id, now).await?;
+                sqlx::query(
+                    "UPDATE mail_outbound_recipients SET complained_at = $1 \
+                     WHERE id = $2 AND complained_at IS NULL",
+                )
+                .bind(now.as_millis())
+                .bind(recipient.id.to_string())
+                .execute(&mut *transaction)
+                .await?;
+                self.check_pause(&mut transaction, recipient.workspace_id, now)
+                    .await?;
                 EventOutcome::Applied
             }
             // a deferral only counts when it is newer than the row's last change, so a late or

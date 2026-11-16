@@ -1237,7 +1237,7 @@ impl MailRepository {
             bounced_thread_to_inbox(&mut transaction, outbound_id, now).await?;
         }
         if let Some(workspace_id) = hard_bounced {
-            Self::check_pause(&mut transaction, workspace_id, now).await?;
+            self.check_pause(&mut transaction, workspace_id, now).await?;
         }
         let done = finish_if_done(&mut transaction, outbound_id, now).await?;
         let next_at = next_due(&mut transaction, outbound_id, now).await?;
