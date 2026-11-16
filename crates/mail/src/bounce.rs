@@ -91,7 +91,10 @@ pub enum DsnAction {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DsnRecipient {
+    /// `Final-Recipient`, lower case, without its address type and `<>`.
     pub address: String,
+    /// `Original-Recipient` (the address as sent, before an alias expanded it), in the same form.
+    pub original: Option<String>,
     pub action: DsnAction,
     pub status: String,
     pub diagnostic: Option<String>,
@@ -138,17 +141,11 @@ pub fn parse_dsn(raw: &[u8]) -> Option<Vec<DsnRecipient>> {
     let mut recipients = Vec::new();
     // Group 0 is the per-message block; every later group describes one recipient.
     for group in groups(&text).into_iter().skip(1) {
-        let Some(final_recipient) = field(&group, "final-recipient") else {
+        let Some(address) = field(&group, "final-recipient").and_then(|value| recipient(&value))
+        else {
             continue;
         };
-        let address = final_recipient
-            .split_once(';')
-            .map_or(final_recipient.as_str(), |(_, rest)| rest)
-            .trim()
-            .to_ascii_lowercase();
-        if address.is_empty() {
-            continue;
-        }
+        let original = field(&group, "original-recipient").and_then(|value| recipient(&value));
         let action = match field(&group, "action")
             .unwrap_or_default()
             .to_ascii_lowercase()
@@ -161,12 +158,27 @@ pub fn parse_dsn(raw: &[u8]) -> Option<Vec<DsnRecipient>> {
         };
         recipients.push(DsnRecipient {
             address,
+            original,
             action,
             status: field(&group, "status").unwrap_or_default(),
             diagnostic: field(&group, "diagnostic-code").filter(|value| !value.is_empty()),
         });
     }
     (!recipients.is_empty()).then_some(recipients)
+}
+
+/// An address field of a DSN (`rfc822; <Ann@Example.org>`): without the address type and the
+/// angle brackets, lower case; `None` when empty.
+fn recipient(value: &str) -> Option<String> {
+    let address = value
+        .split_once(';')
+        .map_or(value, |(_, rest)| rest)
+        .trim()
+        .trim_start_matches('<')
+        .trim_end_matches('>')
+        .trim()
+        .to_ascii_lowercase();
+    (!address.is_empty()).then_some(address)
 }
 
 /// Splits header-like text into blank-line separated groups of unfolded `(lowercase name, value)` fields.

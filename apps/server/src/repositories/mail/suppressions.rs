@@ -346,13 +346,16 @@ impl MailRepository {
     }
 
     /// Applies a delivery status notification that came to the bounce address of `recipient_id`
-    /// (spec §5.7). Only the report of the recipient's own address counts (any case): a DSN
-    /// cannot bounce another address. `failed` → `bounced` (`hard` with a `5.x.x` status, else
-    /// `gave_up`: the remote side gave up), unless the recipient bounced, was suppressed or
-    /// cancelled already (a recipient a relay accepted, `delivered`, does bounce); then the
-    /// suppression rule ([`suppresses`]), the thread to the Inbox unread, and `thread.updated`.
-    /// `delayed` and `delivered` change nothing (a deferred recipient stays deferred). Returns
-    /// whether the recipient changed.
+    /// (spec §5.7). Only the report of the recipient's own address counts (any case): its
+    /// `Final-Recipient`, else its `Original-Recipient` (an alias at the receiving side expanded
+    /// it); a DSN cannot bounce another address. `failed` → `bounced` (`hard` with a `5.x.x`
+    /// status, else `gave_up`: the remote side gave up). Only a recipient that is `delivered`
+    /// (the next hop, a relay or a forwarding server, accepted it) or `deferred` changes, and
+    /// only if it was never retried (`retried_at` is NULL): the token names the recipient, not
+    /// the attempt, so after **Retry** a DSN may be about the send before it and is ignored.
+    /// Then the suppression rule ([`suppresses`]), the thread to the Inbox unread, and
+    /// `thread.updated`. `delayed` and `delivered` reports change nothing (a deferred recipient
+    /// stays deferred). Returns whether the recipient changed.
     pub async fn process_dsn(
         &self,
         recipient_id: Id,
@@ -361,8 +364,8 @@ impl MailRepository {
     ) -> Result<bool, MailError> {
         let mut transaction = self.database.immediate_transaction().await?;
         let Some(row) = sqlx::query(
-            "SELECT outbound_id, workspace_id, address, status FROM mail_outbound_recipients \
-             WHERE id = $1",
+            "SELECT outbound_id, workspace_id, address, status, retried_at \
+             FROM mail_outbound_recipients WHERE id = $1",
         )
         .bind(recipient_id.to_string())
         .fetch_optional(&mut *transaction)
@@ -372,12 +375,24 @@ impl MailRepository {
         };
         let address: String = row.try_get("address")?;
         let status: String = row.try_get("status")?;
-        let Some(report) = dsn.iter().find(|report| {
-            report.action == DsnAction::Failed && report.address.eq_ignore_ascii_case(&address)
-        }) else {
+        let retried: Option<i64> = row.try_get("retried_at")?;
+        let failed = |report: &&DsnRecipient| report.action == DsnAction::Failed;
+        let Some(report) = dsn
+            .iter()
+            .filter(failed)
+            .find(|report| report.address.eq_ignore_ascii_case(&address))
+            .or_else(|| {
+                dsn.iter().filter(failed).find(|report| {
+                    report
+                        .original
+                        .as_deref()
+                        .is_some_and(|original| original.eq_ignore_ascii_case(&address))
+                })
+            })
+        else {
             return Ok(false);
         };
-        if matches!(status.as_str(), "bounced" | "suppressed" | "cancelled") {
+        if !matches!(status.as_str(), "delivered" | "deferred") || retried.is_some() {
             return Ok(false);
         }
         let outbound_id = parse_id(&row.try_get::<String, _>("outbound_id")?)?;
@@ -411,7 +426,7 @@ impl MailRepository {
         let changed = sqlx::query(
             "UPDATE mail_outbound_recipients SET status = 'bounced', bounce_kind = $1, \
              last_response = $2, next_attempt_at = NULL, updated_at = $3 \
-             WHERE id = $4 AND status NOT IN ('bounced', 'suppressed', 'cancelled')",
+             WHERE id = $4 AND status IN ('delivered', 'deferred') AND retried_at IS NULL",
         )
         .bind(kind.as_str())
         .bind(&response)
@@ -445,7 +460,8 @@ impl MailRepository {
     /// **Retry** of a recipient that was not delivered (`bounced` or `suppressed`), by the
     /// message's author or a member of its mailbox (`NotFound` for anyone else): its address
     /// leaves the suppression list, and it is queued again as never tried (limits apply again)
-    /// with a `mail.send` run now. A message that was `done` is released again.
+    /// with a `mail.send` run now. A message that was `done` is released again. `retried_at` is
+    /// set, so a late DSN of an earlier send is ignored ([`Self::process_dsn`]).
     pub async fn retry_recipient(
         &self,
         workspace_id: Id,
@@ -490,7 +506,7 @@ impl MailRepository {
         sqlx::query(
             "UPDATE mail_outbound_recipients SET status = 'queued', attempts = 0, \
              attempt_id = NULL, next_attempt_at = NULL, last_response = NULL, bounce_kind = NULL, \
-             released_at = NULL, updated_at = $1 WHERE id = $2",
+             released_at = NULL, retried_at = $1, updated_at = $1 WHERE id = $2",
         )
         .bind(now.as_millis())
         .bind(recipient_id.to_string())

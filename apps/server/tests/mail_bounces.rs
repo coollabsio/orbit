@@ -33,10 +33,11 @@ use orbit_server::mail_send::{
 use orbit_server::repositories::identity::{IdentityRepository, SetupRequest};
 use orbit_server::repositories::instance_settings::InstanceSettingsRepository;
 use orbit_server::repositories::mail::{
-    DraftMode, MailRepository, MailboxKind, NewDraft, NewMailbox, NewProvider, NewRoute,
+    DraftMode, MailError, MailRepository, MailboxKind, NewDraft, NewMailbox, NewProvider, NewRoute,
     ProviderKind, ProviderScope, ProviderSettings, RecipientLookup, RouteSecrets, RouteSettings,
     SendRouteKind, SuppressionReason, bounce_codes, suppresses, suppresses_response,
 };
+use orbit_server::repositories::workspaces::WorkspaceRepository;
 use serde_json::{Value, json};
 use sqlx::Row;
 use tokio_util::sync::CancellationToken;
@@ -541,12 +542,29 @@ impl Fixture {
     }
 
     async fn call(&self, member: &Member, method: &str, path: &str) -> (StatusCode, Value) {
-        let request = Request::builder()
+        self.call_in(self.workspace, member, method, path, None)
+            .await
+    }
+
+    async fn call_in(
+        &self,
+        workspace: Id,
+        member: &Member,
+        method: &str,
+        path: &str,
+        body: Option<Value>,
+    ) -> (StatusCode, Value) {
+        let builder = Request::builder()
             .method(method)
-            .uri(format!("/api/v1/workspaces/{}/mail{path}", self.workspace))
-            .header(header::COOKIE, &member.cookie)
-            .body(Body::empty())
-            .unwrap();
+            .uri(format!("/api/v1/workspaces/{workspace}/mail{path}"))
+            .header(header::COOKIE, &member.cookie);
+        let request = match body {
+            Some(body) => builder
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body.to_string())),
+            None => builder.body(Body::empty()),
+        }
+        .unwrap();
         let response = self.app().oneshot(request).await.unwrap();
         let status = response.status();
         let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
@@ -886,6 +904,7 @@ async fn hard_dsn_bounces_and_suppresses() {
                 bob,
                 &[DsnRecipient {
                     address: "bob@out.test".to_owned(),
+                    original: None,
                     action: DsnAction::Failed,
                     status: "5.1.1".to_owned(),
                     diagnostic: None,
@@ -1220,4 +1239,222 @@ async fn member_cannot_list_suppressions() {
             .await
             .unwrap()
     );
+}
+
+/// A DSN from a server where an alias expanded the address: `Final-Recipient` is the inner
+/// address, `Original-Recipient` the one Orbit sent to.
+fn alias_dsn(original: &str, final_recipient: &str) -> Vec<u8> {
+    format!(
+        "From: MAILER-DAEMON@mx.out.test\r\n\
+         To: x\r\n\
+         MIME-Version: 1.0\r\n\
+         Content-Type: multipart/report; report-type=delivery-status; boundary=\"b1\"\r\n\
+         \r\n\
+         --b1\r\n\
+         Content-Type: message/delivery-status\r\n\
+         \r\n\
+         Reporting-MTA: dns; mx.out.test\r\n\
+         \r\n\
+         Original-Recipient: rfc822;<{original}>\r\n\
+         Final-Recipient: rfc822; <{final_recipient}>\r\n\
+         Action: failed\r\n\
+         Status: 5.1.1\r\n\
+         Diagnostic-Code: smtp; 550 5.1.1 User unknown\r\n\
+         \r\n\
+         --b1--\r\n"
+    )
+    .into_bytes()
+}
+
+#[tokio::test]
+async fn alias_expanded_dsn_matches_original_recipient() {
+    let f = Fixture::new().await;
+    let id = f.send(&["bob@out.test", "carl@out.test"]).await;
+    let bob = f.recipient(id, "bob@out.test").await;
+    // An original recipient that is another address does not bounce Bob.
+    f.receive(
+        &[&f.bounce_address(bob)],
+        alias_dsn("carl@out.test", "bob.smith@inner.out.test"),
+    )
+    .await;
+    assert_eq!(f.state_of(bob).await.0, "delivered");
+    f.receive(
+        &[&f.bounce_address(bob)],
+        alias_dsn("Bob@out.test", "bob.smith@inner.out.test"),
+    )
+    .await;
+    let (status, kind, _, _) = f.state_of(bob).await;
+    assert_eq!(status, "bounced");
+    assert_eq!(kind.as_deref(), Some("hard"));
+    assert!(f.suppressed("bob@out.test").await.is_some());
+    assert_eq!(f.suppressed("bob.smith@inner.out.test").await, None);
+}
+
+#[tokio::test]
+async fn failed_dsn_with_temporary_status_gives_up_without_suppressing() {
+    let f = Fixture::new().await;
+    let id = f.send(&["bob@out.test"]).await;
+    let bob = f.recipient(id, "bob@out.test").await;
+    f.receive(
+        &[&f.bounce_address(bob)],
+        dsn(
+            "x",
+            "bob@out.test",
+            "failed",
+            "4.4.7",
+            "421 4.4.7 Message expired",
+        ),
+    )
+    .await;
+    let (status, kind, _, _) = f.state_of(bob).await;
+    assert_eq!(status, "bounced");
+    assert_eq!(kind.as_deref(), Some("gave_up"));
+    assert_eq!(f.suppressed("bob@out.test").await, None);
+    assert_eq!(f.thread_state(id).await, ("inbox".to_owned(), false));
+}
+
+#[tokio::test]
+async fn late_dsn_after_retry_is_ignored() {
+    let f = Fixture::new().await;
+    f.fake.answer(
+        "bob@out.test",
+        RecipientOutcome::bounced("permanent error (550): 5.1.1 No such user"),
+    );
+    let id = f.send(&["bob@out.test"]).await;
+    let bob = f.recipient(id, "bob@out.test").await;
+    f.fake.answer(
+        "bob@out.test",
+        RecipientOutcome::Accepted {
+            provider_message_id: None,
+        },
+    );
+    let path = format!("/outbound/{id}/recipients/{bob}/retry");
+    let (status, _) = f.call(&f.owner, "POST", &path).await;
+    assert_eq!(status, StatusCode::OK);
+    let late = dsn(
+        "x",
+        "bob@out.test",
+        "failed",
+        "5.1.1",
+        "550 5.1.1 User unknown",
+    );
+    let reports = orbit_mail::parse_dsn(&late).unwrap();
+    // While queued (its bounce address is not valid then either).
+    assert!(
+        !f.mail
+            .process_dsn(bob, &reports, TimestampMillis::now())
+            .await
+            .unwrap()
+    );
+    assert_eq!(
+        f.mail
+            .lookup_recipient(&f.bounce_address(bob), TimestampMillis::now())
+            .await
+            .unwrap(),
+        RecipientLookup::BadBounce
+    );
+    run_send_job(&f.state(), id, TimestampMillis::now())
+        .await
+        .unwrap();
+    assert_eq!(f.state_of(bob).await.0, "delivered");
+    // After the new send: a DSN of the first send is ignored.
+    f.receive(&[&f.bounce_address(bob)], late).await;
+    assert_eq!(f.state_of(bob).await.0, "delivered");
+    assert_eq!(f.suppressed("bob@out.test").await, None);
+}
+
+#[tokio::test]
+async fn mailbox_member_can_retry_and_other_workspace_cannot() {
+    let f = Fixture::new().await;
+    f.fake.answer(
+        "gone@out.test",
+        RecipientOutcome::bounced("permanent error (550): 5.1.1 No such user"),
+    );
+    let id = f.send(&["gone@out.test"]).await;
+    let gone = f.recipient(id, "gone@out.test").await;
+    let path = format!("/outbound/{id}/recipients/{gone}/retry");
+
+    // The same caller through another workspace of theirs.
+    let other = WorkspaceRepository::new((*f.database).clone())
+        .create(
+            f.owner.user,
+            "Second".to_owned(),
+            "request",
+            TimestampMillis::now(),
+        )
+        .await
+        .unwrap()
+        .id;
+    let (status, _) = f.call_in(other, &f.owner, "POST", &path, None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // A member of the mailbox who did not write the message.
+    let ann = f.member("Ann").await;
+    let (status, _) = f.call(&ann, "POST", &path).await;
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "not a member of the mailbox yet"
+    );
+    f.mail
+        .add_member(
+            f.workspace,
+            f.owner.user,
+            f.mailbox,
+            ann.membership,
+            "request",
+        )
+        .await
+        .unwrap();
+    let (status, body) = f.call(&ann, "POST", &path).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["status"], "queued");
+    assert_eq!(f.suppressed("gone@out.test").await, None);
+}
+
+#[tokio::test]
+async fn bounce_local_part_is_reserved() {
+    let f = Fixture::new().await;
+    let created = f
+        .mail
+        .create_mailbox(
+            f.workspace,
+            f.owner.user,
+            NewMailbox {
+                kind: MailboxKind::Shared,
+                name: "Bounces".to_owned(),
+                domain_id: f.domain,
+                local_part: "Bounce".to_owned(),
+                owner_membership_id: None,
+                member_ids: vec![],
+            },
+            "request",
+        )
+        .await;
+    assert!(
+        matches!(created, Err(MailError::Unprocessable("reserved_address"))),
+        "{created:?}"
+    );
+    let (status, body) = f
+        .call_in(
+            f.workspace,
+            &f.owner,
+            "POST",
+            &format!("/mailboxes/{}/addresses", f.mailbox),
+            Some(json!({ "domain_id": f.domain.to_string(), "local_part": "bounce" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["code"], "reserved_address");
+    // Other local parts that start with it are fine.
+    let (status, body) = f
+        .call_in(
+            f.workspace,
+            &f.owner,
+            "POST",
+            &format!("/mailboxes/{}/addresses", f.mailbox),
+            Some(json!({ "domain_id": f.domain.to_string(), "local_part": "bounces" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
 }

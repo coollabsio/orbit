@@ -583,6 +583,7 @@ fn detail(code: &'static str) -> &'static str {
         }
         "provider_in_use" => "Route the domains that use this provider elsewhere first.",
         "recipient_not_failed" => "Only a recipient that was not delivered can be retried.",
+        "reserved_address" => "This address is reserved for bounces. Choose another one.",
         _ => "This action is not possible.",
     }
 }

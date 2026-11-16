@@ -414,8 +414,12 @@ fn clean_name(name: &str) -> Result<String, MailError> {
     Ok(name.to_owned())
 }
 
+/// The local part of the bounce addresses (`bounce+{token}@domain`, spec §5.7): no mailbox can
+/// have it, since every `bounce+…` address is read as a bounce, never as a `+tag`.
+pub const RESERVED_LOCAL_PART: &str = "bounce";
+
 /// A local part an address can have on `domain`: lower case, a plain dot-atom, no `+` (that
-/// starts a tag).
+/// starts a tag), not [`RESERVED_LOCAL_PART`] (`Unprocessable("reserved_address")`).
 fn clean_local(local: &str, domain: &str) -> Result<String, MailError> {
     let local = local.trim();
     if local.contains('+') {
@@ -423,11 +427,15 @@ fn clean_local(local: &str, domain: &str) -> Result<String, MailError> {
             field: "local_part",
         });
     }
-    orbit_mail::normalize_address(&format!("{local}@{domain}"))
+    let local = orbit_mail::normalize_address(&format!("{local}@{domain}"))
         .map(|address| address.local)
         .map_err(|_| MailError::Invalid {
             field: "local_part",
-        })
+        })?;
+    if local.eq_ignore_ascii_case(RESERVED_LOCAL_PART) {
+        return Err(MailError::Unprocessable("reserved_address"));
+    }
+    Ok(local)
 }
 
 /// Any member of the workspace; `NotFound` for outsiders.
@@ -1348,5 +1356,12 @@ mod tests {
         for bad in ["ann+x", "", "a b", ".a", "a..b", "\"a\"", "a%b", "a@b"] {
             assert!(clean_local(bad, "example.com").is_err(), "{bad:?}");
         }
+        for reserved in ["bounce", " Bounce "] {
+            assert!(matches!(
+                clean_local(reserved, "example.com"),
+                Err(MailError::Unprocessable("reserved_address"))
+            ));
+        }
+        assert_eq!(clean_local("bounces", "example.com").unwrap(), "bounces");
     }
 }

@@ -174,6 +174,9 @@ CREATE TABLE mail_outbound_recipients (
         'route', 'unreadable')),
     -- When the send counted against the limits.
     released_at BIGINT,
+    -- When a user last retried it (**Retry**). A delivery status notification is then ignored: it
+    -- may be about the send before the retry.
+    retried_at BIGINT,
     created_at BIGINT NOT NULL,
     updated_at BIGINT NOT NULL
 );

@@ -93,3 +93,33 @@ fn non_dsn_is_none() {
     assert!(parse_dsn(&fixture("dsn_not_a_dsn.eml")).is_none());
     assert!(parse_dsn(&fixture("plain.eml")).is_none());
 }
+
+#[test]
+fn reads_original_recipient_and_strips_brackets() {
+    let raw = b"From: MAILER-DAEMON@mx.example.org\r\n\
+To: bounce+x@one.test\r\n\
+MIME-Version: 1.0\r\n\
+Content-Type: multipart/report; report-type=delivery-status; boundary=\"b\"\r\n\
+\r\n\
+--b\r\n\
+Content-Type: text/plain\r\n\
+\r\n\
+Failed.\r\n\
+--b\r\n\
+Content-Type: message/delivery-status\r\n\
+\r\n\
+Reporting-MTA: dns; mx.example.org\r\n\
+\r\n\
+Original-Recipient: rfc822;<Ann@Example.org>\r\n\
+Final-Recipient: RFC822; <ann.lee@internal.example.org>\r\n\
+Action: failed\r\n\
+Status: 5.1.1\r\n\
+\r\n\
+--b--\r\n";
+    let dsn = parse_dsn(raw).unwrap();
+    assert_eq!(dsn.len(), 1);
+    assert_eq!(dsn[0].address, "ann.lee@internal.example.org");
+    assert_eq!(dsn[0].original.as_deref(), Some("ann@example.org"));
+    let dsn = parse_dsn(&fixture("dsn_gmail_hard.eml")).unwrap();
+    assert_eq!(dsn[0].original, None);
+}
