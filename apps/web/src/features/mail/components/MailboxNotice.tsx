@@ -15,7 +15,7 @@ export function MailboxNotice({ mailboxes, canManage }: { mailboxes: MailMeMailb
   const [first] = suspended
   const one = suspended.length === 1
   return (
-    <Alert data-slot="mailbox-notice" className="m-3 w-auto">
+    <Alert data-slot="mailbox-notice">
       <PauseCircle />
       <AlertTitle>{one ? `${first.name} is suspended` : `${suspended.length} mailboxes are suspended`}</AlertTitle>
       <AlertDescription>

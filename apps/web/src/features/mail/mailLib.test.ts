@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { applyDraftConflict, frameHeight, mailThreadPath, mailViewPath, parseMailPath, searchSuggestions, threadFilterOf, type MailView } from './mailLib'
+import { applyDraftConflict, frameHeight, mailThreadPath, mailViewPath, parseMailPath, railFolders, searchSuggestions, threadFilterOf, type MailView } from './mailLib'
 
 test('a message frame takes only a finite height from its own window, clamped to 80–20,000 px', () => {
   const frame = { name: 'frame' }
@@ -68,9 +68,11 @@ test('parses_new_folders', () => {
     expect(parseMailPath(`mb1/${folder}/t/th1`)).toEqual({ view: { kind: 'folder', folder, mailboxId: 'mb1' }, threadId: 'th1' })
     expect(mailViewPath({ kind: 'folder', folder })).toBe(`/mail/${folder}`)
     expect(mailViewPath({ kind: 'folder', folder, mailboxId: 'mb1' })).toBe(`/mail/mb1/${folder}`)
-    // these folders are not thread lists
-    expect(threadFilterOf({ kind: 'folder', folder })).toBeNull()
+    // Sent is a thread list; the others are not
+    if (folder !== 'sent') expect(threadFilterOf({ kind: 'folder', folder })).toBeNull()
   }
+  expect(threadFilterOf({ kind: 'folder', folder: 'sent' })).toEqual({ sent: true })
+  expect(threadFilterOf({ kind: 'folder', folder: 'sent', mailboxId: 'mb1' })).toEqual({ mailboxId: 'mb1', sent: true })
 })
 
 test('draft_conflict_keeps_local_text', () => {
@@ -82,4 +84,10 @@ test('draft_conflict_keeps_local_text', () => {
   expect(result.restore).toEqual({ subject: 'Mine', body_html: '<p>mine</p>', to: ['b@x.test'] })
   // nothing differs: no banner
   expect(applyDraftConflict({ ...server, version: 4 }, server).restore).toBeNull()
+})
+
+test('the rail shows the Outbox only while it has something', () => {
+  const names = (showOutbox: boolean) => railFolders(showOutbox).map(({ folder }) => folder)
+  expect(names(false)).toEqual(['drafts', 'sent', 'scheduled', 'archive', 'spam', 'trash'])
+  expect(names(true)).toEqual(['drafts', 'sent', 'scheduled', 'outbox', 'archive', 'spam', 'trash'])
 })

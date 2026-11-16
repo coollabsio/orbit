@@ -246,6 +246,13 @@ export function commitTyped(addresses: readonly string[], typed: string): string
   return next
 }
 
+/** The text of a draft's body on one line, for the "Draft" line of a thread and the Drafts list (browser only). */
+export function draftText(html: string): string {
+  if (!html) return ''
+  const text = new DOMParser().parseFromString(html, 'text/html').body.textContent ?? ''
+  return text.replace(/\s+/g, ' ').trim()
+}
+
 /** The one-line recipients of an inline reply: "To Andras +2". */
 export function recipientSummary(to: readonly Recipient[], cc: readonly Recipient[], bcc: readonly Recipient[]): string {
   const [label, list] = to.length > 0 ? ['To', to] : cc.length > 0 ? ['Cc', cc] : bcc.length > 0 ? ['Bcc', bcc] : [null, []]

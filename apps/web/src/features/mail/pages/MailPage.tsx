@@ -7,11 +7,13 @@ import { Tip } from '@/components/common/Tip'
 import { PaneHeader } from '@/components/common/Pane'
 import { Button } from '@/components/ui/button'
 import { useBulkUpdateThreads, useUpdateThread, type ThreadChange } from '@/features/mail/api/mutations'
-import { useMailCounts, useMailMe, useMailSearch, useThread, useThreads } from '@/features/mail/api/queries'
+import { useDrafts, useMailCounts, useMailMe, useMailSearch, useOutbound, useThread, useThreads } from '@/features/mail/api/queries'
 import { FolderRail } from '@/features/mail/components/FolderRail'
 import { MailEmptyState } from '@/features/mail/components/MailEmptyState'
+import { PausedBanner, VacationBanners } from '@/features/mail/components/MailBanners'
 import { MailboxNotice } from '@/features/mail/components/MailboxNotice'
 import { MailSearch } from '@/features/mail/components/MailSearch'
+import { DraftList, OutboundList } from '@/features/mail/components/SendLists'
 import { ThreadList } from '@/features/mail/components/ThreadList'
 import { LabelMenu, ThreadView, type LabelState } from '@/features/mail/components/ThreadView'
 import { useArchiveNextHost, useNewEmail } from '@/features/mail/compose/useComposerDock'
@@ -44,7 +46,14 @@ const EMPTY_FOLDER: Record<ListFolder, { title: string; description: string }> =
   outbox: { title: 'Outbox is empty', description: 'Mail that is waiting to go shows up here.' },
 }
 
-/** `/mail/*`: the read-only mail client (spec §8.3). */
+/** The reading pane of the Drafts, Scheduled and Outbox folders, which open no thread. */
+const SEND_PANE: Record<'drafts' | 'scheduled' | 'outbox', { title: string; description: string }> = {
+  drafts: { title: 'Select a draft', description: 'It opens in a window, where you keep writing.' },
+  scheduled: { title: 'Scheduled mail', description: 'Each message goes at its time. Cancel send brings it back as a draft.' },
+  outbox: { title: 'Outbox', description: 'Messages wait here during their undo time, over a send limit, or when something stops them.' },
+}
+
+/** `/mail/*`: the mail client (spec §8.3, §9.1). */
 export function MailPage() {
   const route = parseMailPath(useParams()['*'] ?? '')
   if (!route) return <Navigate to="/mail" replace />
@@ -61,9 +70,15 @@ function MailApp({ view, threadId }: { view: MailView; threadId: string | null }
   const filter = threadFilterOf(view)
   const list = useThreads(filter ?? {}, filter !== null)
   const search = useMailSearch(query)
+  // Drafts, Scheduled and Outbox read the drafts and the outbound queue; every list marks the threads with a draft
+  const sendView = view.kind === 'folder' && (view.folder === 'drafts' || view.folder === 'scheduled' || view.folder === 'outbox') ? view.folder : null
   const source = view.kind === 'search' ? search : list
-  const threads = source.data ?? []
+  // a send folder has no threads (the idle list query may hold another folder's cached rows)
+  const threads = sendView ? [] : (source.data ?? [])
   const detail = useThread(threadId)
+  const drafts = useDrafts()
+  const scheduled = useOutbound('scheduled', sendView === 'scheduled')
+  const outbox = useOutbound('outbox')
   const update = useUpdateThread()
   const bulk = useBulkUpdateThreads()
   const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set())
@@ -78,6 +93,9 @@ function MailApp({ view, threadId }: { view: MailView; threadId: string | null }
   const labels = me.data?.labels ?? []
   const labelsById = new Map(labels.map((label) => [label.id, label]))
   const mailboxes = me.data?.mailboxes ?? []
+  const draftThreads = new Set((drafts.data ?? []).flatMap((draft) => (draft.thread_id ? [draft.thread_id] : [])))
+  // the Outbox shows while something waits or failed, and while it is the open folder
+  const showOutbox = (outbox.data?.length ?? 0) > 0 || sendView === 'outbox'
   const openThread = detail.data?.thread ?? threads.find((thread) => thread.id === threadId)
 
   const pathOf = (id: string | null) => {
@@ -273,6 +291,17 @@ function MailApp({ view, threadId }: { view: MailView; threadId: string | null }
     )
   }
 
+  const scope = view.kind === 'folder' ? view.mailboxId : undefined
+  const inScope = scope ? mailboxes.filter((mailbox) => mailbox.id === scope) : mailboxes
+  const sendSource = sendView === 'drafts' ? drafts : sendView === 'scheduled' ? scheduled : sendView === 'outbox' ? outbox : null
+  const scopedDrafts = (drafts.data ?? []).filter((draft) => !scope || draft.mailbox_id === scope)
+  const outboundItems = (sendView === 'scheduled' ? scheduled.data : outbox.data) ?? []
+  const sendRows =
+    sendView === 'drafts'
+      ? { count: scopedDrafts.length, content: <DraftList drafts={scopedDrafts} /> }
+      : sendView
+        ? { count: outboundItems.length, content: <OutboundList view={sendView} items={outboundItems} /> }
+        : undefined
   const people = [...new Set(threads.flatMap((thread) => thread.from.map((person) => person.address)))]
   const picked = threads.filter((thread) => selected.has(thread.id))
   const bulkBar =
@@ -329,15 +358,15 @@ function MailApp({ view, threadId }: { view: MailView; threadId: string | null }
 
   return (
     <div className="group/mail flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background" data-view={threadId ? 'thread' : 'list'}>
-      <FolderRail view={view} mailboxes={mailboxes} labels={labels} counts={counts.data} />
+      <FolderRail view={view} mailboxes={mailboxes} labels={labels} counts={counts.data} showOutbox={showOutbox} />
       <ThreadList
         title={title}
         view={view}
         threads={threads}
         labels={labelsById}
-        status={view.kind === 'search' && !query ? 'success' : source.status}
-        onRetry={() => void source.refetch()}
-        hasMore={source.hasNextPage}
+        status={view.kind === 'search' && !query ? 'success' : (sendSource ?? source).status}
+        onRetry={() => void (sendSource ?? source).refetch()}
+        hasMore={!sendView && source.hasNextPage}
         loadingMore={source.isFetchingNextPage}
         onLoadMore={() => void source.fetchNextPage()}
         activeThreadId={threadId}
@@ -356,11 +385,15 @@ function MailApp({ view, threadId }: { view: MailView; threadId: string | null }
         }
         bulkBar={bulkBar}
         notice={
-          <MailboxNotice
-            mailboxes={view.kind === 'folder' && view.mailboxId ? mailboxes.filter((mailbox) => mailbox.id === view.mailboxId) : mailboxes}
-            canManage={me.data?.can_manage ?? false}
-          />
+          <div data-slot="mail-notices" className="flex flex-col gap-3 p-3 empty:hidden">
+            <PausedBanner />
+            <VacationBanners mailboxes={inScope} canManage={me.data?.can_manage ?? false} />
+            <MailboxNotice mailboxes={inScope} canManage={me.data?.can_manage ?? false} />
+          </div>
         }
+        draftThreads={draftThreads}
+        showOutbox={showOutbox}
+        rows={sendRows}
         onOpen={open}
         onSelect={toggleSelect}
         onStar={(thread) => star([thread])}
@@ -383,7 +416,7 @@ function MailApp({ view, threadId }: { view: MailView; threadId: string | null }
           />
         ) : (
           <div className="flex min-h-0 flex-1 flex-col">
-            <MailEmptyState icon={Mail} title="Select a conversation" description="Choose a conversation from the list to read it here." />
+            <MailEmptyState icon={Mail} {...(sendView ? SEND_PANE[sendView] : { title: 'Select a conversation', description: 'Choose a conversation from the list to read it here.' })} />
           </div>
         )}
       </section>

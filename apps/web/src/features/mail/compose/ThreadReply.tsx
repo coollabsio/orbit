@@ -14,7 +14,7 @@ import { useDrafts } from '../api/queries'
 import { problemText } from '../mailLib'
 import { Composer, type ComposerHandle } from './Composer'
 import { reopenDraft, useArchiveAfterSend, useComposerDock, useInlineReplyHost } from './useComposerDock'
-import { recipientSummary } from './composeLib'
+import { draftText, recipientSummary } from './composeLib'
 import { useAnnounceSent } from './undoSend'
 import type { SentHandler } from './useComposerSend'
 
@@ -30,13 +30,6 @@ interface ThreadReplyProps {
   /** The newest message: Reply all shows when it went to more than one person. */
   last: MailMessageView | undefined
   ref?: Ref<ThreadReplyHandle>
-}
-
-/** The text of a draft's body, for the "Draft" line. */
-function plainText(html: string): string {
-  if (!html) return ''
-  const text = new DOMParser().parseFromString(html, 'text/html').body.textContent ?? ''
-  return text.replace(/\s+/g, ' ').trim()
 }
 
 export function ThreadReply({ threadId, last, ref }: ThreadReplyProps) {
@@ -147,7 +140,7 @@ export function ThreadReply({ threadId, last, ref }: ThreadReplyProps) {
         >
           <span className="shrink-0 font-semibold text-destructive">Draft</span>
           <span className="shrink-0 text-muted-foreground">{recipientSummary(saved.to, saved.cc, saved.bcc)}</span>
-          <span className="min-w-0 truncate text-foreground/80">{plainText(saved.body_html)}</span>
+          <span className="min-w-0 truncate text-foreground/80">{draftText(saved.body_html)}</span>
         </button>
       ) : null}
       {saved && savedInDock ? (

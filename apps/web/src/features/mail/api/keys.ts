@@ -1,18 +1,20 @@
 import type { MailFolder, MailNamePattern } from '@orbit/api/generated/types.gen'
 
 /**
- * Which threads a list shows. Without `folder`: the inbox, or with `labelId` or `starred` the inbox and the archive.
- * Without `mailboxId`: every mailbox the user reads.
+ * Which threads a list shows. Without `folder`: the inbox, or with `labelId` or `starred` the inbox and the archive,
+ * or with `sent` every folder but the trash. Without `mailboxId`: every mailbox the user reads.
  */
 export interface ThreadFilter {
   mailboxId?: string
   folder?: MailFolder
   labelId?: string
   starred?: boolean
+  /** Sent: threads the mailbox sent mail in, every folder but the trash (not with `folder`). */
+  sent?: boolean
 }
 
-/** The outbound queue views the server lists (`GET mail/outbound?view=`). */
-export type OutboundView = 'sent' | 'scheduled' | 'outbox'
+/** The outbound queue views the server lists (`GET mail/outbound?view=`). Sent is a thread list (`ThreadFilter.sent`). */
+export type OutboundView = 'scheduled' | 'outbox'
 
 /**
  * Deliberately outside the `['workspace', id]` prefix (like `chatKeys`): workspace events invalidate that whole
@@ -40,7 +42,7 @@ export const mailKeys = {
   draftCheck: (workspaceId: string, draftId: string, recipients: string) => ['mail', workspaceId, 'draft-check', draftId, recipients] as const,
   /** The addresses the user sends as; of a thread, the one that received it comes first. */
   fromAddresses: (workspaceId: string, threadId?: string) => ['mail', workspaceId, 'from-addresses', threadId ?? null] as const,
-  /** Prefix of every outbound view (`sent`, `scheduled`, `outbox`). */
+  /** Prefix of every outbound view (`scheduled`, `outbox`). */
   outboundAll: (workspaceId: string) => ['mail', workspaceId, 'outbound'] as const,
   outbound: (workspaceId: string, view: OutboundView) => ['mail', workspaceId, 'outbound', view] as const,
   contacts: (workspaceId: string, query: string) => ['mail', workspaceId, 'contacts', query] as const,

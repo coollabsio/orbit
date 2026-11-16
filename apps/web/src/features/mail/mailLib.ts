@@ -21,6 +21,9 @@ export const FOLDERS: ReadonlyArray<{ folder: ListFolder; label: string; icon: I
   { folder: 'trash', label: 'Trash', icon: Trash },
 ]
 
+/** The folders of the rail after the inbox: the Outbox only while something waits in it or failed (§9.1 U11). */
+export const railFolders = (showOutbox: boolean) => FOLDERS.slice(1).filter(({ folder }) => showOutbox || folder !== 'outbox')
+
 const FOLDER_NAMES = new Set<string>(FOLDERS.map(({ folder }) => folder))
 const SEND_FOLDERS = new Set<string>(['drafts', 'sent', 'scheduled', 'outbox'])
 export const isSendFolder = (folder: ListFolder): folder is SendFolder => SEND_FOLDERS.has(folder)
@@ -84,10 +87,11 @@ export const mailThreadPath = (view: MailView, threadId: string) => `${mailViewP
 /** A key per view, so the page state (selection, focus) starts over in another view. */
 export const mailViewKey = (view: MailView) => mailViewPath(view)
 
-/** The thread list query of a view; `null` for a search or a drafts/sent/scheduled/outbox folder, which have their own queries. */
+/** The thread list query of a view; `null` for a search or a drafts/scheduled/outbox folder, which have their own queries. */
 export function threadFilterOf(view: MailView): ThreadFilter | null {
   switch (view.kind) {
     case 'folder':
+      if (view.folder === 'sent') return view.mailboxId ? { mailboxId: view.mailboxId, sent: true } : { sent: true }
       if (isSendFolder(view.folder)) return null
       return view.mailboxId ? { mailboxId: view.mailboxId, folder: view.folder } : { folder: view.folder }
     case 'label':

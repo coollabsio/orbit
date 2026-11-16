@@ -24,6 +24,7 @@ export function fitsFilter(thread: MailThreadSummary, filter: ThreadFilter): boo
   if (filter.mailboxId && thread.mailbox_id !== filter.mailboxId) return false
   if (filter.labelId && !thread.labels.includes(filter.labelId)) return false
   if (filter.starred && !thread.starred) return false
+  if (filter.sent) return thread.last_sent_at != null && thread.folder !== 'trash'
   if (filter.folder) return thread.folder === filter.folder
   if (filter.labelId || filter.starred) return thread.folder === 'inbox' || thread.folder === 'archive'
   return thread.folder === 'inbox'

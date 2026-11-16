@@ -244,6 +244,7 @@ export function ThreadView({ detail, status, onRetry, labels, labelsById, canMan
             return (
               <MessageItem
                 key={message.id}
+                threadId={thread.id}
                 message={message}
                 expanded={open}
                 onToggle={() => setExpanded((previous) => ({ ...previous, [message.id]: !open }))}

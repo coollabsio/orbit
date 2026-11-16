@@ -8,7 +8,9 @@ import {
   createMailDraft,
   deleteMailDraft,
   deleteMailDraftFile,
+  putMailboxVacation,
   retryMailRecipient,
+  revokeMailFileLink,
   sendMailDraft,
   updateMailDraft,
   updateMailDraftFile,
@@ -48,6 +50,7 @@ import type {
   MailDraft,
   MailDraftFile,
   MailOutbound,
+  PutMailVacationBody,
   SendMailDraftBody,
   CreateMailLabelBody,
   CreateMailProviderBody,
@@ -755,6 +758,37 @@ export function useRetryRecipient() {
           })
         ).data,
       ),
-    onSettled: () => queryClient.invalidateQueries({ queryKey: mailKeys.outboundAll(workspaceId) }),
+    // the recipient's status shows in the Outbox and on the sent message
+    onSettled: () => invalidate(queryClient, [mailKeys.outboundAll(workspaceId), mailKeys.threadDetails(workspaceId)]),
+  })
+}
+
+/** **Revoke** a file link of a message the user sent: the link stops working at once. */
+export function useRevokeFileLink() {
+  const queryClient = useQueryClient()
+  const workspaceId = useWorkspaceId()
+  return useMutation({
+    mutationFn: async ({ threadId, messageId, linkId }: { threadId: string; messageId: string; linkId: string }) =>
+      required(
+        (
+          await revokeMailFileLink({
+            client: apiClient,
+            path: { workspace_id: workspaceId, thread_id: threadId, message_id: messageId, link_id: linkId },
+            throwOnError: true,
+          })
+        ).data,
+      ),
+    onSettled: (_link, _error, { threadId }) => queryClient.invalidateQueries({ queryKey: mailKeys.thread(workspaceId, threadId) }),
+  })
+}
+
+/** Sets a mailbox's vacation reply (the whole of it: the server replaces every field). */
+export function useSetVacation() {
+  const queryClient = useQueryClient()
+  const workspaceId = useWorkspaceId()
+  return useMutation({
+    mutationFn: async ({ mailboxId, body }: { mailboxId: string; body: PutMailVacationBody }) =>
+      required((await putMailboxVacation({ client: apiClient, path: { workspace_id: workspaceId, mailbox_id: mailboxId }, body, throwOnError: true })).data),
+    onSuccess: (vacation, { mailboxId }) => queryClient.setQueryData(mailKeys.vacation(workspaceId, mailboxId), vacation),
   })
 }

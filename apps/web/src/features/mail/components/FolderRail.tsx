@@ -9,13 +9,15 @@ import { PaneHeader, PaneTitle } from '@/components/common/Pane'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { cn } from 'cn'
-import { FOLDERS, mailViewPath, type MailView } from '@/features/mail/mailLib'
+import { FOLDERS, mailViewPath, railFolders, type MailView } from '@/features/mail/mailLib'
 
 interface FolderRailProps {
   view: MailView
   mailboxes: MailMeMailbox[]
   labels: MailLabel[]
   counts: MailCounts | undefined
+  /** The Outbox has something waiting or failed: only then its folder shows (§9.1 U11). */
+  showOutbox: boolean
 }
 
 function RailRow({
@@ -62,7 +64,7 @@ function RailSection({ children }: { children: string }) {
  * The mail sidebar: the inbox of every mailbox, each mailbox with its unread count (when there are several), Starred,
  * the folders and the labels. With a mailbox open, the folders are that mailbox's.
  */
-export function FolderRail({ view, mailboxes, labels, counts }: FolderRailProps) {
+export function FolderRail({ view, mailboxes, labels, counts, showOutbox }: FolderRailProps) {
   const navigate = useNavigate()
   const unread = (mailboxId: string | undefined, folder: 'inbox' | 'spam') =>
     (counts?.mailboxes ?? []).filter((mailbox) => !mailboxId || mailbox.mailbox_id === mailboxId).reduce((sum, mailbox) => sum + mailbox[folder], 0)
@@ -100,7 +102,7 @@ export function FolderRail({ view, mailboxes, labels, counts }: FolderRailProps)
             ))
           : null}
         <RailRow icon={Star} label="Starred" active={view.kind === 'starred'} onClick={() => go({ kind: 'starred' })} />
-        {FOLDERS.slice(1).map(({ folder, label, icon }) => (
+        {railFolders(showOutbox).map(({ folder, label, icon }) => (
           <RailRow
             key={folder}
             icon={icon}

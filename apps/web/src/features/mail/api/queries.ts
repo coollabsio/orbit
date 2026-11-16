@@ -83,6 +83,7 @@ export function useThreads(filter: ThreadFilter, enabled = true) {
           folder: filter.folder,
           label_id: filter.labelId,
           starred: filter.starred || undefined,
+          sent: filter.sent || undefined,
           cursor: pageParam,
         },
         throwOnError: true,
@@ -368,10 +369,11 @@ export async function fetchDraftFile(workspaceId: string, draftId: string, fileI
   return data as unknown as Blob
 }
 
-/** Sent, scheduled or waiting (outbox) messages with their delivery state; live through `thread.updated`. */
-export function useOutbound(view: OutboundView) {
+/** Scheduled or waiting (outbox) messages of the user, with why they wait; live through `thread.updated`. */
+export function useOutbound(view: OutboundView, enabled = true) {
   const workspaceId = useWorkspaceId()
   return useQuery({
+    enabled,
     queryKey: mailKeys.outbound(workspaceId, view),
     queryFn: async () =>
       required((await listMailOutbound({ client: apiClient, path: { workspace_id: workspaceId }, query: { view }, throwOnError: true })).data),
@@ -466,10 +468,11 @@ export function useSendRoutes(scope: ProviderScope) {
   })
 }
 
-/** The workspace's send limits, tier and whether it is paused. */
-export function useSendPolicy() {
+/** The workspace's send limits, tier and whether it is paused (owners and admins only). */
+export function useSendPolicy(enabled = true) {
   const workspaceId = useWorkspaceId()
   return useQuery({
+    enabled,
     queryKey: mailKeys.sendPolicy(workspaceId),
     queryFn: async () => required((await getMailSendPolicy({ client: apiClient, path: { workspace_id: workspaceId }, throwOnError: true })).data),
   })

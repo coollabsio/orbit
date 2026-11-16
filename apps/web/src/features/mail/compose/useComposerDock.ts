@@ -9,7 +9,7 @@ import { mailKeys } from '../api/keys'
 import { useCreateDraft, useUpdateThread } from '../api/mutations'
 import { fromAddressesQuery } from '../api/queries'
 import { problemText } from '../mailLib'
-import { createComposerDockStore, type ComposerDockStore } from './composerDockStore'
+import { createComposerDockStore, type ComposerDockStore, type OpenOptions } from './composerDockStore'
 
 // One dock for each workspace, shared by the shell (which shows it) and the mail page (which opens windows in it).
 const stores = new Map<string, ComposerDockStore>()
@@ -58,14 +58,14 @@ export function useInlineReplyHost(threadId: string, show: (draftId: string) => 
 }
 
 /**
- * Shows a draft that Undo gave back where it was sent from: a reply written in its thread goes back there when that
- * thread is still on screen (else to a window); a window's draft goes back to a window. No open animation (Undo is
- * a key or a toast button, not a click on the window).
+ * Shows a draft where it belongs: a reply goes to its thread's inline reply when that thread is on screen (else to
+ * a window); a window's draft goes back to a window. Undo gives no `animate` (a key or a toast button, not a click on
+ * the window); a click on a row of the Drafts list does.
  */
-export function reopenDraft(draft: MailDraft, store: ComposerDockStore, from: 'inline' | 'window') {
+export function reopenDraft(draft: MailDraft, store: ComposerDockStore, from: 'inline' | 'window', options?: OpenOptions) {
   const host = from === 'inline' && draft.thread_id && !store.has(draft.id) ? inlineHosts.get(draft.thread_id) : undefined
   if (host) host(draft.id)
-  else store.open(draft.id)
+  else store.open(draft.id, options)
 }
 
 // The mail page's open thread: ⌘⇧Enter on a reply to it archives it and opens the next one there.

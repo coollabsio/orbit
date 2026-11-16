@@ -6,7 +6,7 @@ import { PaneHeader, PaneTitle } from '@/components/common/Pane'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Spinner } from '@/components/ui/spinner'
-import { FOLDERS, mailViewPath, type MailView } from '@/features/mail/mailLib'
+import { mailViewPath, railFolders, type MailView } from '@/features/mail/mailLib'
 import { MailEmptyState } from './MailEmptyState'
 import { ThreadRow } from './ThreadRow'
 
@@ -34,15 +34,21 @@ interface ThreadListProps {
   bulkBar: ReactNode
   /** Over the list, e.g. a suspended mailbox. */
   notice?: ReactNode
+  /** The threads with a draft of the user's. */
+  draftThreads: ReadonlySet<string>
+  /** The Outbox has something: its folder shows (§9.1 U11). */
+  showOutbox: boolean
+  /** Drafts, Scheduled and Outbox: their rows in place of threads, `count` of them. */
+  rows?: { count: number; content: ReactNode }
   onOpen: (threadId: string) => void
   onSelect: (threadId: string) => void
   onStar: (thread: MailThreadSummary) => void
 }
 
-const MOBILE_VIEWS: Array<{ view: MailView; label: string }> = [
+const mobileViews = (showOutbox: boolean): Array<{ view: MailView; label: string }> => [
   { view: { kind: 'folder', folder: 'inbox' }, label: 'Inbox' },
   { view: { kind: 'starred' }, label: 'Starred' },
-  ...FOLDERS.slice(1).map(({ folder, label }) => ({ view: { kind: 'folder', folder } as MailView, label })),
+  ...railFolders(showOutbox).map(({ folder, label }) => ({ view: { kind: 'folder', folder } as MailView, label })),
 ]
 
 /** The middle pane: a virtual list of threads, newest first, that loads the next page near its end. */
@@ -63,6 +69,9 @@ export function ThreadList({
   search,
   bulkBar,
   notice,
+  draftThreads,
+  showOutbox,
+  rows,
   onOpen,
   onSelect,
   onStar,
@@ -89,6 +98,8 @@ export function ThreadList({
   }, [focusedIndex, virtualizer])
 
   const currentPath = mailViewPath(view)
+  const sentView = view.kind === 'folder' && view.folder === 'sent'
+  const count = rows ? rows.count : threads.length
   return (
     <section
       aria-label={title}
@@ -102,7 +113,7 @@ export function ThreadList({
         </PaneHeader>
       )}
       <div className="hidden min-h-10 items-center gap-1.5 overflow-x-auto border-b px-3 py-1 [scrollbar-width:none] max-[899px]:flex">
-        {MOBILE_VIEWS.map((entry) => (
+        {mobileViews(showOutbox).map((entry) => (
           <Button
             key={entry.label}
             type="button"
@@ -123,7 +134,7 @@ export function ThreadList({
             <Skeleton key={index} className="h-14 w-full" />
           ))}
         </div>
-      ) : status === 'error' && threads.length === 0 ? (
+      ) : status === 'error' && count === 0 ? (
         <div className="flex min-h-0 flex-1 flex-col">
           <MailEmptyState
             icon={empty.icon}
@@ -136,9 +147,13 @@ export function ThreadList({
             }
           />
         </div>
-      ) : threads.length === 0 ? (
+      ) : count === 0 ? (
         <div className="flex min-h-0 flex-1 flex-col">
           <MailEmptyState icon={empty.icon} title={empty.title} description={empty.description} action={empty.action} />
+        </div>
+      ) : rows ? (
+        <div data-slot="mail-send-list" className="min-h-0 flex-1 overflow-y-auto">
+          {rows.content}
         </div>
       ) : (
         <div ref={scroller} data-slot="mail-thread-list" className="min-h-0 flex-1 overflow-y-auto">
@@ -154,6 +169,8 @@ export function ThreadList({
                     focused={thread.id === focusedId}
                     selected={selected.has(thread.id)}
                     selecting={selected.size > 0}
+                    draft={draftThreads.has(thread.id)}
+                    sentView={sentView}
                     onOpen={onOpen}
                     onSelect={onSelect}
                     onStar={onStar}

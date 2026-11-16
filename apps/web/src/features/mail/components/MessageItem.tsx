@@ -14,10 +14,12 @@ import { useSetSenderPref } from '@/features/mail/api/mutations'
 import { useRawMessage } from '@/features/mail/api/queries'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { firstLine, mailAttachment, personName, problemText, rawMessageUrl } from '@/features/mail/mailLib'
+import { FileLinks } from './FileLinks'
 import { MailHtmlFrame } from './MailHtmlFrame'
 import { SafetyBanner } from './SafetyBanner'
 
 interface MessageItemProps {
+  threadId: string
   message: MailMessageView
   expanded: boolean
   onToggle: () => void
@@ -58,7 +60,7 @@ function OriginalMessage({ messageId, onClose }: { messageId: string; onClose: (
 }
 
 /** One message of a thread: a header that expands it, then the warnings, the body and the attachments. */
-export function MessageItem({ message, expanded, onToggle, onPrint }: MessageItemProps) {
+export function MessageItem({ threadId, message, expanded, onToggle, onPrint }: MessageItemProps) {
   const { workspace } = useWorkspace()
   const [imagesLoaded, setImagesLoaded] = useState(false)
   const [originalOpen, setOriginalOpen] = useState(false)
@@ -174,6 +176,7 @@ export function MessageItem({ message, expanded, onToggle, onPrint }: MessageIte
             )}
           </div>
           {files.length > 0 ? <Attachments attachments={files} /> : null}
+          <FileLinks threadId={threadId} messageId={message.id} links={message.file_links} />
         </div>
       ) : (
         <div className="mt-1.5 truncate pl-[42px] text-[0.8125rem] text-muted-foreground">{firstLine(message.body_text)}</div>

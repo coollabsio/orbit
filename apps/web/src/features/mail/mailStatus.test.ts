@@ -1,0 +1,77 @@
+import { expect, test } from 'bun:test'
+import { bounceReason, deliverySummary, outboxStatus, recipientState, vacationState } from './mailStatus'
+
+const recipient = (address: string, status: string, delayed = false) => ({ address, status, delayed })
+
+test('summary_all_delivered', () => {
+  expect(deliverySummary([recipient('a@x.test', 'delivered'), recipient('b@x.test', 'delivered')])).toEqual({ label: 'Delivered', bounced: [] })
+  // a cancelled recipient never goes: it does not count
+  expect(deliverySummary([recipient('a@x.test', 'delivered'), recipient('c@x.test', 'cancelled')]).label).toBe('Delivered')
+})
+
+test('summary_partly', () => {
+  expect(deliverySummary([recipient('a@x.test', 'delivered'), recipient('b@x.test', 'bounced')])).toEqual({ label: 'Partly delivered', bounced: ['b@x.test'] })
+  expect(deliverySummary([recipient('a@x.test', 'delivered'), recipient('b@x.test', 'suppressed')]).label).toBe('Partly delivered')
+  // one still on its way: the message is still sending
+  expect(deliverySummary([recipient('a@x.test', 'delivered'), recipient('b@x.test', 'queued')]).label).toBe('Sending')
+  expect(deliverySummary([recipient('a@x.test', 'delivered'), recipient('b@x.test', 'sending')]).label).toBe('Sending')
+  expect(deliverySummary([]).label).toBe('Sending')
+})
+
+test('delayed_after_4h', () => {
+  // the server sets `delayed` once a deferred recipient's first attempt is more than 4 hours ago
+  expect(deliverySummary([recipient('a@x.test', 'deferred', false)]).label).toBe('Sending')
+  expect(deliverySummary([recipient('a@x.test', 'deferred', true)]).label).toBe('Delayed')
+  expect(deliverySummary([recipient('a@x.test', 'delivered'), recipient('b@x.test', 'deferred', true)]).label).toBe('Delayed')
+  expect(recipientState(recipient('a@x.test', 'deferred', false))).toBe('sending')
+  expect(recipientState(recipient('a@x.test', 'deferred', true))).toBe('delayed')
+})
+
+test('bounced_lists_addresses', () => {
+  const summary = deliverySummary([recipient('a@x.test', 'bounced'), recipient('b@x.test', 'delivered'), recipient('c@x.test', 'bounced')])
+  expect(summary.bounced).toEqual(['a@x.test', 'c@x.test'])
+  expect(deliverySummary([recipient('a@x.test', 'bounced'), recipient('c@x.test', 'bounced')])).toEqual({ label: 'Bounced', bounced: ['a@x.test', 'c@x.test'] })
+  // none delivered: a bounce weighs more than a suppression
+  expect(deliverySummary([recipient('a@x.test', 'bounced'), recipient('b@x.test', 'suppressed')]).label).toBe('Bounced')
+  expect(deliverySummary([recipient('b@x.test', 'suppressed')])).toEqual({ label: 'Suppressed', bounced: [] })
+})
+
+test('a bounce reason in plain words for each kind', () => {
+  expect(bounceReason('hard', '550 5.1.1 no such user')).toBe('The address does not exist or refused the message')
+  expect(bounceReason('gave_up', null)).toBe('Gave up after 5 days')
+  expect(bounceReason('route', 'Route error: 401')).toBe('The sending route has a problem')
+  expect(bounceReason('unreadable', null)).toBe('Orbit could not read the sent message')
+  // Orbit refused it itself: its own text is the reason
+  expect(bounceReason('rejected', '  5.3.4 The message is larger than the route allows  ')).toBe('5.3.4 The message is larger than the route allows')
+  expect(bounceReason('rejected', null)).toBe('Orbit refused to send it')
+  expect(bounceReason(null, null)).toBe('The message was not delivered')
+})
+
+test('an outbox row says when it goes and why it waits', () => {
+  const now = new Date('2026-11-16T10:00:00Z')
+  const item = { status: 'held', hold_reason: null, release_at: '2026-11-16T10:00:08Z', scheduled: false }
+  expect(outboxStatus(item, now)).toEqual({ text: 'Sending in 8 s', problem: false, canCancel: true })
+  expect(outboxStatus({ ...item, release_at: '2026-11-16T09:59:00Z' }, now)).toEqual({ text: 'Sending', problem: false, canCancel: true })
+  expect(outboxStatus({ ...item, status: 'released' }, now)).toEqual({ text: 'Sending', problem: false, canCancel: false })
+  expect(outboxStatus({ ...item, hold_reason: 'rate_limit' }, now).text).toBe('Over the send limit: it goes when the limit allows')
+  expect(outboxStatus({ ...item, hold_reason: 'limit', status: 'released' }, now)).toEqual({
+    text: 'Over the send limit: it goes when the limit allows',
+    problem: false,
+    canCancel: false,
+  })
+  expect(outboxStatus({ ...item, hold_reason: 'paused' }, now)).toEqual({ text: 'Sending is paused for this workspace', problem: true, canCancel: true })
+  expect(outboxStatus({ ...item, hold_reason: 'dkim_inactive' }, now).problem).toBe(true)
+  expect(outboxStatus({ ...item, hold_reason: 'something_new' }, now).text).toBe('Waiting: something went wrong')
+})
+
+test('a vacation reply is on between its start and its end', () => {
+  const now = new Date('2026-11-16T10:00:00Z')
+  const vacation = { enabled: true, starts_at: null, ends_at: null }
+  expect(vacationState(vacation, now)).toBe('on')
+  expect(vacationState({ ...vacation, enabled: false }, now)).toBe('off')
+  expect(vacationState({ ...vacation, starts_at: '2026-11-16T10:00:00Z' }, now)).toBe('on')
+  expect(vacationState({ ...vacation, starts_at: '2026-11-17T00:00:00Z' }, now)).toBe('scheduled')
+  // the end is exclusive
+  expect(vacationState({ ...vacation, ends_at: '2026-11-16T10:00:00Z' }, now)).toBe('off')
+  expect(vacationState({ ...vacation, ends_at: '2026-11-20T00:00:00Z' }, now)).toBe('on')
+})

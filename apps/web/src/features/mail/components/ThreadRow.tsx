@@ -17,14 +17,19 @@ interface ThreadRowProps {
   selected: boolean
   /** Some row is selected: every row shows its checkbox. */
   selecting: boolean
+  /** The user has a draft in this thread: a red "Draft" (§9.1 U9). */
+  draft?: boolean
+  /** The Sent list: the time is that of the last message sent. */
+  sentView?: boolean
   onOpen: (threadId: string) => void
   onSelect: (threadId: string) => void
   onStar: (thread: MailThreadSummary) => void
 }
 
-/** A row of the thread list: sender, subject, snippet, time, label chips, star, unread dot, attachment icon. */
-export function ThreadRow({ thread, labels, active, focused, selected, selecting, onOpen, onSelect, onStar }: ThreadRowProps) {
+/** A row of the thread list: sender, subject, snippet, time, label chips, star, unread dot, attachment icon, draft. */
+export function ThreadRow({ thread, labels, active, focused, selected, selecting, draft = false, sentView = false, onOpen, onSelect, onStar }: ThreadRowProps) {
   const chips = thread.labels.flatMap((id) => labels.get(id) ?? [])
+  const time = (sentView && thread.last_sent_at) || thread.last_message_at
   return (
     <div
       data-slot="mail-thread-row"
@@ -36,7 +41,7 @@ export function ThreadRow({ thread, labels, active, focused, selected, selecting
       data-unread={thread.unread || undefined}
       role="button"
       tabIndex={0}
-      aria-label={`${thread.unread ? 'Unread, ' : ''}${threadSenders(thread)}: ${thread.subject || '(no subject)'}`}
+      aria-label={`${thread.unread ? 'Unread, ' : ''}${threadSenders(thread)}: ${thread.subject || '(no subject)'}${draft ? ', draft' : ''}`}
       onClick={() => onOpen(thread.id)}
       onKeyDown={(event) => {
         if (event.key === 'Enter' && event.target === event.currentTarget) onOpen(thread.id)
@@ -59,9 +64,10 @@ export function ThreadRow({ thread, labels, active, focused, selected, selecting
             {threadSenders(thread)}
             {thread.message_count > 1 ? <span className="ml-1 text-xs font-normal text-muted-foreground/70">{thread.message_count}</span> : null}
           </span>
+          {draft ? <span className="shrink-0 text-[0.8125rem] font-normal text-destructive">Draft</span> : null}
           <span className="flex-1" />
-          <span className="shrink-0 text-xs text-muted-foreground/70" title={new Date(thread.last_message_at).toLocaleString()}>
-            {relativeTime(thread.last_message_at)}
+          <span className="shrink-0 text-xs text-muted-foreground/70" title={new Date(time).toLocaleString()}>
+            {relativeTime(time)}
           </span>
         </div>
         <div className="truncate text-[0.8125rem] text-foreground group-data-unread/row:font-semibold">{thread.subject || '(no subject)'}</div>

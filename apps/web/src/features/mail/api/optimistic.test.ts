@@ -63,3 +63,14 @@ test('unstarring leaves the starred list; a restore leaves the trash list', () =
   expect(ids(mailKeys.threads(W, { starred: true }))).toEqual([])
   expect(ids(mailKeys.threads(W, { folder: 'trash' }))).toEqual([])
 })
+
+test('the Sent list keeps sent threads in every folder but the trash', () => {
+  const { client, ids } = setup()
+  const sent = { last_sent_at: '2026-10-23T10:00:00Z' }
+  client.setQueryData(mailKeys.threads(W, { sent: true }), pages(summary('t4', sent), summary('t5', { ...sent, folder: 'archive' })))
+  applyThreadChange(client, W, ['t4'], { folder: 'archive' })
+  applyThreadChange(client, W, ['t5'], { starred: true })
+  expect(ids(mailKeys.threads(W, { sent: true }))).toEqual(['t4', 't5'])
+  applyThreadChange(client, W, ['t4'], { folder: 'trash' })
+  expect(ids(mailKeys.threads(W, { sent: true }))).toEqual(['t5'])
+})
