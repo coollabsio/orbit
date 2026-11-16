@@ -781,7 +781,8 @@ impl MailRepository {
     }
 
     /// `mail.send_sweep`, delivery side: recipients left `sending` past
-    /// [`super::SENDING_LEASE_MS`] are deferred ([`Self::requeue_stale_sending`]), then
+    /// [`super::SENDING_LEASE_MS`] are deferred ([`Self::requeue_stale_sending`]), recipients
+    /// a provider deferred 5 days ago give up ([`Self::give_up_provider_deferred`]), then
     /// `mail.send` is queued again for released messages with a due recipient (queued, or
     /// deferred and due) and no queued or running job (the job store gave up on a crash). The
     /// messages of a paused workspace (`mail_send_policies.paused_at`) wait for the resume.
@@ -789,6 +790,7 @@ impl MailRepository {
     pub async fn sweep_deliveries(&self, now: TimestampMillis) -> Result<u64, MailError> {
         self.requeue_stale_sending(super::SENDING_LEASE_MS, now)
             .await?;
+        self.give_up_provider_deferred(now).await?;
         let mut transaction = self.database.immediate_transaction().await?;
         let rows = sqlx::query(
             "SELECT o.id, o.workspace_id FROM mail_outbound o WHERE o.status = 'released' \

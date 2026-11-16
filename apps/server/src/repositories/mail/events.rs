@@ -16,7 +16,12 @@
 //!   provider to send the event again ([`EventOutcome::Busy`]). A complaint suppresses the
 //!   address (reason `complaint`) and leaves the recipient as it is. A temporary failure makes a
 //!   `delivered` recipient `deferred` with no next attempt: the provider retries, Orbit does
-//!   not. A delivery makes a `deferred` recipient `delivered`. Final statuses (`bounced`,
+//!   not (Orbit's claim, suppression and cancel leave such a row alone). A delivery makes a
+//!   `deferred` recipient `delivered`. Both count only when the event is newer than the row's
+//!   last change (`updated_at`), so a late or redelivered event cannot undo a later one; an
+//!   event without a time changes no status. A provider-deferred row with no last word
+//!   [`PROVIDER_DEFER_GIVE_UP_MS`] after it went bounces as given up
+//!   ([`MailRepository::give_up_provider_deferred`], in `mail.send_sweep`). Final statuses (`bounced`,
 //!   `suppressed`, `cancelled`) never change.
 
 use orbit_mail::events::{ParsedEvent, ProviderEvent};
@@ -25,7 +30,7 @@ use sqlx::any::AnyRow;
 use sqlx::{Any, Transaction};
 
 use super::domains::parse_id;
-use super::outbound::{BounceKind, bounced_thread_to_inbox, plain_line, update_summary};
+use super::outbound::{BounceKind, GAVE_UP, bounced_thread_to_inbox, plain_line, update_summary};
 use super::suppressions::{SuppressionReason, bounce_codes, suppresses};
 use super::{MailError, MailRepository};
 
@@ -46,7 +51,11 @@ pub enum EventOutcome {
 }
 
 const RECIPIENT_COLUMNS: &str =
-    "r.id, r.outbound_id, r.workspace_id, r.address, r.status, r.retried_at";
+    "r.id, r.outbound_id, r.workspace_id, r.address, r.status, r.retried_at, r.updated_at";
+
+/// How long a recipient that a provider deferred may wait for the provider's last word, from
+/// when it went (`released_at`): then it bounces as given up, like Orbit's own retries.
+pub const PROVIDER_DEFER_GIVE_UP_MS: i64 = 5 * 24 * 3_600_000;
 
 struct Found {
     id: Id,
@@ -55,6 +64,7 @@ struct Found {
     address: String,
     status: String,
     retried_at: Option<i64>,
+    updated_at: i64,
 }
 
 fn found(row: &AnyRow) -> Result<Found, MailError> {
@@ -65,6 +75,7 @@ fn found(row: &AnyRow) -> Result<Found, MailError> {
         address: row.try_get("address")?,
         status: row.try_get("status")?,
         retried_at: row.try_get("retried_at")?,
+        updated_at: row.try_get("updated_at")?,
     })
 }
 
@@ -250,12 +261,19 @@ impl MailRepository {
                 .await?;
                 EventOutcome::Applied
             }
+            // a status event only counts when it is newer than the row's last change, so a late
+            // or redelivered one cannot undo a later change
+            ProviderEvent::Deferred { .. } | ProviderEvent::Delivered
+                if event.at_ms.is_none_or(|at| at <= recipient.updated_at) =>
+            {
+                EventOutcome::Ignored
+            }
             ProviderEvent::Deferred { diagnostic } => {
                 let response = plain_line(diagnostic.as_deref().unwrap_or(DEFERRED_DEFAULT));
                 let changed = sqlx::query(
                     "UPDATE mail_outbound_recipients SET status = 'deferred', \
                      next_attempt_at = NULL, last_response = $1, updated_at = $2 \
-                     WHERE id = $3 AND status = 'delivered' \
+                     WHERE id = $3 AND status = 'delivered' AND updated_at < $4 \
                      AND (retried_at IS NULL OR retried_at <= $4)",
                 )
                 .bind(&response)
@@ -276,7 +294,7 @@ impl MailRepository {
                 let changed = sqlx::query(
                     "UPDATE mail_outbound_recipients SET status = 'delivered', \
                      next_attempt_at = NULL, last_response = NULL, updated_at = $1 \
-                     WHERE id = $2 AND status = 'deferred' \
+                     WHERE id = $2 AND status = 'deferred' AND updated_at < $3 \
                      AND (retried_at IS NULL OR retried_at <= $3)",
                 )
                 .bind(now.as_millis())
@@ -301,5 +319,54 @@ impl MailRepository {
             self.announce_outbounds(&[recipient.outbound_id]).await;
         }
         Ok(outcome)
+    }
+
+    /// Recipients a provider deferred (`deferred`, no next attempt) that went more than
+    /// [`PROVIDER_DEFER_GIVE_UP_MS`] ago and heard nothing final since: `bounced` with
+    /// [`GAVE_UP`] (kind `gave_up`, never suppressed), the thread back to the Inbox. Returns how
+    /// many changed.
+    pub async fn give_up_provider_deferred(&self, now: TimestampMillis) -> Result<u64, MailError> {
+        let cutoff = now.as_millis() - PROVIDER_DEFER_GIVE_UP_MS;
+        let mut transaction = self.database.immediate_transaction().await?;
+        let rows = sqlx::query(
+            "SELECT id, outbound_id, last_response FROM mail_outbound_recipients \
+             WHERE status = 'deferred' AND next_attempt_at IS NULL \
+             AND released_at IS NOT NULL AND released_at <= $1 \
+             ORDER BY released_at, id LIMIT 500",
+        )
+        .bind(cutoff)
+        .fetch_all(&mut *transaction)
+        .await?;
+        let mut outbounds: Vec<Id> = Vec::new();
+        for row in &rows {
+            let id: String = row.try_get("id")?;
+            let outbound_id = parse_id(&row.try_get::<String, _>("outbound_id")?)?;
+            let last: Option<String> = row.try_get("last_response")?;
+            let response = plain_line(&match last {
+                Some(last) => format!("{GAVE_UP}: {last}"),
+                None => GAVE_UP.to_owned(),
+            });
+            sqlx::query(
+                "UPDATE mail_outbound_recipients SET status = 'bounced', bounce_kind = $1, \
+                 last_response = $2, updated_at = $3 \
+                 WHERE id = $4 AND status = 'deferred' AND next_attempt_at IS NULL",
+            )
+            .bind(BounceKind::GaveUp.as_str())
+            .bind(&response)
+            .bind(now.as_millis())
+            .bind(&id)
+            .execute(&mut *transaction)
+            .await?;
+            if !outbounds.contains(&outbound_id) {
+                outbounds.push(outbound_id);
+            }
+        }
+        for outbound_id in &outbounds {
+            bounced_thread_to_inbox(&mut transaction, *outbound_id, now).await?;
+            update_summary(&mut transaction, *outbound_id, now).await?;
+        }
+        transaction.commit().await?;
+        self.announce_outbounds(&outbounds).await;
+        Ok(rows.len() as u64)
     }
 }

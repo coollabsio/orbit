@@ -925,7 +925,7 @@ impl MailRepository {
         sqlx::query(
             "UPDATE mail_outbound_recipients SET status = 'cancelled', last_response = $1, \
              next_attempt_at = NULL, updated_at = $2 WHERE outbound_id = $3 \
-             AND status IN ('queued', 'deferred')",
+             AND (status = 'queued' OR (status = 'deferred' AND next_attempt_at IS NOT NULL))",
         )
         .bind(reason)
         .bind(now.as_millis())
@@ -974,6 +974,8 @@ impl MailRepository {
     /// rows) and hold it (`limit`) when over: their `released_at` is set to now, so they keep
     /// their room against messages that come later (first come, first served), and set again
     /// when they go;
+    /// a recipient that a provider's event deferred (no `next_attempt_at`) is left to the
+    /// provider: never suppressed, claimed or cancelled here;
     /// then every queued recipient and every deferred one that is due becomes `sending` with
     /// `attempt_id`, and is returned. The caller sends to them after this commit.
     pub async fn claim_recipients(
@@ -1016,7 +1018,8 @@ impl MailRepository {
         let suppressed = sqlx::query(
             "UPDATE mail_outbound_recipients SET status = 'suppressed', \
              last_response = 'The address is on the suppression list.', next_attempt_at = NULL, \
-             updated_at = $1 WHERE outbound_id = $2 AND status IN ('queued', 'deferred') \
+             updated_at = $1 WHERE outbound_id = $2 \
+             AND (status = 'queued' OR (status = 'deferred' AND next_attempt_at IS NOT NULL)) \
              AND EXISTS (SELECT 1 FROM mail_suppressions s \
              WHERE s.workspace_id = mail_outbound_recipients.workspace_id \
              AND s.address = lower(mail_outbound_recipients.address))",
@@ -1085,7 +1088,8 @@ impl MailRepository {
             "UPDATE mail_outbound_recipients SET status = 'sending', attempt_id = $1, \
              attempts = attempts + 1, next_attempt_at = NULL, updated_at = $2 \
              WHERE outbound_id = $3 AND (status = 'queued' \
-             OR (status = 'deferred' AND next_attempt_at <= $2))",
+             OR (status = 'deferred' AND next_attempt_at IS NOT NULL \
+             AND next_attempt_at <= $2))",
         )
         .bind(attempt_id.to_string())
         .bind(now.as_millis())

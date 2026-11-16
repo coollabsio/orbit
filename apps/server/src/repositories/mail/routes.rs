@@ -298,11 +298,11 @@ impl RouteSecrets {
 }
 
 /// What a provider already knows of a route's secrets (**Also send through this provider**).
+/// Not the webhook secret of PostShiba or Resend: each of their webhook endpoints has its own
+/// secret (the inbound one is not the events one), so the admin enters it for the route.
 fn provider_prefill(secrets: &ProviderSecrets) -> Vec<(&'static str, String)> {
     match secrets {
-        ProviderSecrets::Postshiba { webhook_secret, .. } => {
-            vec![("webhook_secret", webhook_secret.clone())]
-        }
+        ProviderSecrets::Postshiba { .. } => Vec::new(),
         ProviderSecrets::Mailgun { signing_key } => {
             vec![("webhook_signing_key", signing_key.clone())]
         }
@@ -323,13 +323,7 @@ fn provider_prefill(secrets: &ProviderSecrets) -> Vec<(&'static str, String)> {
             ("webhook_user", basic_user.clone()),
             ("webhook_password", basic_password.clone()),
         ],
-        ProviderSecrets::Resend {
-            api_key,
-            webhook_secret,
-        } => vec![
-            ("api_key", api_key.clone()),
-            ("webhook_secret", webhook_secret.clone()),
-        ],
+        ProviderSecrets::Resend { api_key, .. } => vec![("api_key", api_key.clone())],
     }
 }
 
@@ -364,7 +358,7 @@ pub struct RouteSettings {
     pub stream: Option<String>,
     /// The SPF include (`include:…`, or a whole `v=spf1 …` record) the domain's SPF record shows.
     pub spf: Option<String>,
-    /// SES: the SNS topic (`arn:aws:sns:…`) the configuration set publishes bounces, complaints
+    /// SES: the SNS topic (`arn:aws:sns:…`, or the `aws-cn`/`aws-us-gov` partition) the configuration set publishes bounces, complaints
     /// and deliveries to. Orbit takes events of this topic only (SNS signs every topic's
     /// messages); without it, SES events are refused.
     pub topic_arn: Option<String>,
@@ -676,7 +670,7 @@ async fn clean_settings(
             if clean
                 .topic_arn
                 .as_deref()
-                .is_some_and(|arn| !arn.starts_with("arn:aws:sns:"))
+                .is_some_and(|arn| !sns_topic_arn(arn))
             {
                 return Err(MailError::Invalid { field: "topic_arn" });
             }
@@ -698,6 +692,14 @@ async fn clean_settings(
         _ => {}
     }
     Ok(clean)
+}
+
+/// An SNS topic ARN of any AWS partition: `arn:aws:sns:…`, `arn:aws-cn:sns:…` or
+/// `arn:aws-us-gov:sns:…`.
+fn sns_topic_arn(arn: &str) -> bool {
+    ["arn:aws:sns:", "arn:aws-cn:sns:", "arn:aws-us-gov:sns:"]
+        .iter()
+        .any(|prefix| arn.starts_with(prefix) && arn.len() > prefix.len())
 }
 
 /// An AWS region such as `us-east-1`: it goes into a host name, so nothing else passes.

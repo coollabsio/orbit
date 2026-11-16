@@ -38,7 +38,7 @@ pub use domains::{
     dns_check_kind,
 };
 pub use drafts::{Draft, DraftChange, DraftFile, DraftMode, NewDraft};
-pub use events::EventOutcome;
+pub use events::{EventOutcome, PROVIDER_DEFER_GIVE_UP_MS};
 pub use health::{HEALTH_TEST_TTL_MS, HealthTest, HealthTestResult, HealthTestStatus, TestDomain};
 pub use ingest::{
     Delivery, IngestOutcome, MAIL_TOPIC, PURGE_JOB, PurgeResult, TRASH_RETENTION_MS,

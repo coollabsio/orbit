@@ -664,11 +664,20 @@ async fn send_route_from_provider() {
         .await;
     assert_eq!(status, StatusCode::CREATED, "{provider}");
     let provider_id = provider["id"].as_str().unwrap().to_owned();
-    let (status, route) = fixture
+    // the inbound webhook's secret is not the events webhook's: the admin enters it
+    let (status, _) = fixture
         .admin(
             "POST",
             &format!("/providers/{provider_id}/send-route"),
             Some(json!({})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let (status, route) = fixture
+        .admin(
+            "POST",
+            &format!("/providers/{provider_id}/send-route"),
+            Some(json!({ "secrets": { "webhook_secret": "whsec_events" } })),
         )
         .await;
     assert_eq!(status, StatusCode::CREATED, "{route}");
@@ -690,7 +699,7 @@ async fn send_route_from_provider() {
         secrets,
         RouteSecrets::Resend {
             api_key: "re_key".to_owned(),
-            webhook_secret: "whsec_x".to_owned()
+            webhook_secret: "whsec_events".to_owned()
         }
     );
     // Postmark: the webhook login is Orbit's, the server token is missing

@@ -27,8 +27,9 @@ use orbit_server::mail_send::{
 use orbit_server::repositories::identity::{IdentityRepository, SetupRequest};
 use orbit_server::repositories::instance_settings::InstanceSettingsRepository;
 use orbit_server::repositories::mail::{
-    DraftMode, MailRepository, MailboxKind, NewDraft, NewMailbox, NewRoute, ProviderScope,
-    RouteChange, RouteSecrets, RouteSettings, SendRouteKind,
+    DraftMode, MailRepository, MailboxKind, NewDraft, NewMailbox, NewRoute,
+    PROVIDER_DEFER_GIVE_UP_MS, ProviderScope, RouteChange, RouteSecrets, RouteSettings,
+    SendRouteKind,
 };
 use orbit_server::repositories::workspaces::WorkspaceRepository;
 use serde_json::{Value, json};
@@ -550,6 +551,7 @@ async fn soft_event_defers_without_a_run_and_delivery_clears_it() {
     f.answer_id("slow@out.test", "<slow.1@one.test>");
     let id = f.send(&["slow@out.test"]).await;
     let slow = f.recipient(id, "slow@out.test").await;
+    tokio::time::sleep(Duration::from_millis(5)).await;
     let event = mailgun_failed(
         "slow@out.test",
         "slow.1@one.test",
@@ -577,6 +579,7 @@ async fn soft_event_defers_without_a_run_and_delivery_clears_it() {
     );
     assert_eq!(f.outbound_status(id).await.0, "done");
 
+    tokio::time::sleep(Duration::from_millis(5)).await;
     let delivered = json!({
         "event": "delivered",
         "timestamp": now_secs(),
@@ -591,6 +594,155 @@ async fn soft_event_defers_without_a_run_and_delivery_clears_it() {
     );
     let (state, _, response, _) = f.state_of(slow).await;
     assert_eq!((state.as_str(), response), ("delivered", None));
+
+    // the provider sends the earlier deferral again (out of order, or a retry of its webhook):
+    // it is older than the delivery, so it changes nothing
+    let (status, body) = f.mailgun_post(f.route, MAILGUN_KEY, &event).await;
+    assert_eq!(
+        (status, body["ignored"].clone()),
+        (StatusCode::OK, json!(1))
+    );
+    assert_eq!(f.state_of(slow).await.0, "delivered");
+    // an event without a time changes no status
+    let mut timeless = event.clone();
+    timeless.as_object_mut().unwrap().remove("timestamp");
+    let (status, body) = f.mailgun_post(f.route, MAILGUN_KEY, &timeless).await;
+    assert_eq!(
+        (status, body["ignored"].clone()),
+        (StatusCode::OK, json!(1))
+    );
+    assert_eq!(f.state_of(slow).await.0, "delivered");
+}
+
+/// Defers `address` of the message by a provider event now (`deferred`, no next attempt).
+async fn provider_defer(f: &Fixture, address: &str, message_id: &str) {
+    tokio::time::sleep(Duration::from_millis(5)).await;
+    let event = mailgun_failed(
+        address,
+        message_id,
+        "temporary",
+        "4.2.2 Mailbox full",
+        now_secs(),
+    );
+    let (status, body) = f.mailgun_post(f.route, MAILGUN_KEY, &event).await;
+    assert_eq!(
+        (status, body["applied"].clone()),
+        (StatusCode::OK, json!(1))
+    );
+}
+
+#[tokio::test]
+async fn provider_deferred_rows_are_left_to_the_provider() {
+    let f = Fixture::mailgun().await;
+    f.answer_id("ann@out.test", "<left.1@one.test>");
+    f.answer_id("bob@out.test", "<left.1@one.test>");
+    let id = f.send(&["ann@out.test", "bob@out.test"]).await;
+    let ann = f.recipient(id, "ann@out.test").await;
+    let bob = f.recipient(id, "bob@out.test").await;
+    provider_defer(&f, "ann@out.test", "left.1@one.test").await;
+
+    // the message runs again (bob queued) while ann's address is on the list: ann is neither
+    // suppressed nor sent again
+    sqlx::query(
+        "INSERT INTO mail_suppressions (workspace_id, address, reason, created_at) \
+         VALUES ($1, 'ann@out.test', 'manual', 0)",
+    )
+    .bind(f.workspace.to_string())
+    .execute(f.database.pool())
+    .await
+    .unwrap();
+    let requeue = |bob: Id| {
+        let pool = f.database.pool().clone();
+        async move {
+            sqlx::query("UPDATE mail_outbound_recipients SET status = 'queued' WHERE id = $1")
+                .bind(bob.to_string())
+                .execute(&pool)
+                .await
+                .unwrap();
+            sqlx::query("UPDATE mail_outbound SET status = 'released' WHERE id = $1")
+                .bind(id.to_string())
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+    };
+    requeue(bob).await;
+    run_send_job(&f.state(), id, TimestampMillis::now())
+        .await
+        .unwrap();
+    let (state, _, response, next) = f.state_of(ann).await;
+    assert_eq!(
+        (state.as_str(), response.as_deref(), next),
+        ("deferred", Some("550 4.2.2 Mailbox full"), None)
+    );
+    assert_eq!(f.state_of(bob).await.0, "delivered");
+    // the provider-deferred row does not hold the message open
+    assert_eq!(f.outbound_status(id).await.0, "done");
+
+    // the sent copy is gone: Orbit cancels what it still has to send, not ann
+    requeue(bob).await;
+    sqlx::query("UPDATE mail_outbound SET message_id = NULL WHERE id = $1")
+        .bind(id.to_string())
+        .execute(f.database.pool())
+        .await
+        .unwrap();
+    run_send_job(&f.state(), id, TimestampMillis::now())
+        .await
+        .unwrap();
+    assert_eq!(f.state_of(bob).await.0, "cancelled");
+    assert_eq!(f.state_of(ann).await.0, "deferred");
+}
+
+#[tokio::test]
+async fn provider_deferred_rows_give_up_after_five_days() {
+    let f = Fixture::mailgun().await;
+    f.answer_id("ann@out.test", "<late.1@one.test>");
+    f.answer_id("bob@out.test", "<late.1@one.test>");
+    let id = f.send(&["ann@out.test", "bob@out.test"]).await;
+    let ann = f.recipient(id, "ann@out.test").await;
+    let bob = f.recipient(id, "bob@out.test").await;
+    provider_defer(&f, "ann@out.test", "late.1@one.test").await;
+    provider_defer(&f, "bob@out.test", "late.1@one.test").await;
+    let now = TimestampMillis::now().as_millis();
+    // ann went 5 days and a minute ago, bob 4 days ago
+    for (recipient, ago) in [
+        (ann, PROVIDER_DEFER_GIVE_UP_MS + 60_000),
+        (bob, 4 * 24 * 3_600_000),
+    ] {
+        sqlx::query("UPDATE mail_outbound_recipients SET released_at = $1 WHERE id = $2")
+            .bind(now - ago)
+            .bind(recipient.to_string())
+            .execute(f.database.pool())
+            .await
+            .unwrap();
+    }
+    f.mail
+        .sweep_deliveries(TimestampMillis::now())
+        .await
+        .unwrap();
+    let (state, kind, response, _) = f.state_of(ann).await;
+    assert_eq!(
+        (state.as_str(), kind.as_deref()),
+        ("bounced", Some("gave_up"))
+    );
+    assert_eq!(
+        response.as_deref(),
+        Some("Gave up after 5 days: 550 4.2.2 Mailbox full")
+    );
+    assert_eq!(f.suppressed(f.workspace, "ann@out.test").await, None);
+    assert_eq!(f.thread_folder(id).await, "inbox");
+    assert_eq!(f.state_of(bob).await.0, "deferred");
+    let (_, summary) = f.outbound_status(id).await;
+    assert!(summary.unwrap().contains("gave_up"));
+    // no run is queued for either
+    assert_eq!(
+        f.count(
+            "SELECT CAST(COUNT(*) AS BIGINT) FROM jobs WHERE kind = 'mail.send'",
+            &[]
+        )
+        .await,
+        0
+    );
 }
 
 #[tokio::test]
@@ -1001,6 +1153,33 @@ async fn ses_route_needs_its_topic_and_refuses_other_topics() {
         .await
         .unwrap_err();
     assert!(error.to_string().contains("topic_arn"), "{error}");
+    // every AWS partition
+    for (arn, ok) in [
+        ("arn:aws-cn:sns:cn-north-1:123456789012:t", true),
+        ("arn:aws-us-gov:sns:us-gov-west-1:123456789012:t", true),
+        ("arn:aws-xx:sns:us-east-1:123456789012:t", false),
+        ("arn:aws:sqs:us-east-1:123456789012:t", false),
+    ] {
+        let result = f
+            .mail
+            .update_route(
+                ProviderScope::Instance,
+                f.user,
+                f.route,
+                RouteChange {
+                    settings: Some(RouteSettings {
+                        region: Some("us-east-1".to_owned()),
+                        topic_arn: Some(arn.to_owned()),
+                        ..RouteSettings::default()
+                    }),
+                    ..RouteChange::default()
+                },
+                None,
+                "request",
+            )
+            .await;
+        assert_eq!(result.is_ok(), ok, "{arn}");
+    }
     f.mail
         .update_route(
             ProviderScope::Instance,
