@@ -37,12 +37,12 @@ export function blockText(block: { content?: unknown }): string {
     .join('')
 }
 
-/** Every line of the document, children after their parent. */
-export function mailText(blocks: readonly MailBlock[]): string {
+/** Every line of the document, children after their parent; without code blocks with `skipCode`. */
+export function mailText(blocks: readonly MailBlock[], { skipCode = false } = {}): string {
   const lines: string[] = []
   const walk = (list: readonly MailBlock[]) => {
     for (const block of list) {
-      lines.push(blockText(block))
+      if (!(skipCode && block.type === 'codeBlock')) lines.push(blockText(block))
       walk(block.children as MailBlock[])
     }
   }

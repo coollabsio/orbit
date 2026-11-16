@@ -1,7 +1,8 @@
 // One recipient field (To, Cc or Bcc): chips, autocomplete from the user's contacts (members first, §9.1 U12),
 // pasting many addresses at once, invalid addresses as red chips. Keyboard: Enter, Tab, comma or semicolon add;
-// ↑/↓ move in the list; Backspace on an empty field selects the last chip, again removes it.
-import { useEffect, useId, useLayoutEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent, type ReactNode, type RefObject } from 'react'
+// ↑/↓ move in the list. ← at the start of the field (or Backspace on an empty one) moves to the chips: ←/→ move
+// between them, Enter edits one, Backspace or Delete removes it.
+import { useEffect, useId, useImperativeHandle, useLayoutEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent, type ReactNode, type Ref, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import { Xmark as X } from 'reicon-react'
 import { cn } from 'cn'
@@ -10,13 +11,19 @@ import { UserAvatar } from '@/components/common/UserAvatar'
 import { Tip } from '@/components/common/Tip'
 import { useDebouncedValue } from '@/lib/useDebouncedValue'
 import { useContacts } from '../api/queries'
-import { isValidAddress, splitRecipients } from './composeLib'
+import { commitTyped, isValidAddress, splitRecipients } from './composeLib'
 
 const sameAddress = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase()
 
 /** Members first (§9.1 U12), then the server's order (the people the user writes to most). */
 const membersFirst = (contacts: readonly MailContact[]) =>
   [...contacts].sort((a, b) => Number(b.kind === 'member') - Number(a.kind === 'member'))
+
+export interface RecipientFieldHandle {
+  /** Adds the text still typed in the field (as on send) and returns the list it makes. */
+  commit: () => string[]
+  focus: () => void
+}
 
 export interface RecipientFieldProps {
   label: 'To' | 'Cc' | 'Bcc'
@@ -27,19 +34,18 @@ export interface RecipientFieldProps {
   onName: (address: string, name: string) => void
   /** After the field (the Cc and Bcc toggles of the To row). */
   trailing?: ReactNode
-  inputRef?: RefObject<HTMLInputElement | null>
   autoFocus?: boolean
+  ref?: Ref<RecipientFieldHandle>
 }
 
-export function RecipientField({ label, addresses, onChange, names, onName, trailing, inputRef, autoFocus }: RecipientFieldProps) {
-  const ownInput = useRef<HTMLInputElement>(null)
-  const input = inputRef ?? ownInput
+export function RecipientField({ label, addresses, onChange, names, onName, trailing, autoFocus, ref }: RecipientFieldProps) {
+  const input = useRef<HTMLInputElement>(null)
   const box = useRef<HTMLDivElement>(null)
+  const chips = useRef<(HTMLButtonElement | null)[]>([])
   const listId = useId()
   const [text, setText] = useState('')
   const [focused, setFocused] = useState(false)
   const [active, setActive] = useState(0)
-  const [selectedChip, setSelectedChip] = useState<number | null>(null)
   const [dismissed, setDismissed] = useState(false)
   const query = useDebouncedValue(text.trim(), 120)
   const contacts = useContacts(focused && !text.includes(',') ? query : '')
@@ -48,46 +54,50 @@ export function RecipientField({ label, addresses, onChange, names, onName, trai
 
   useEffect(() => {
     if (autoFocus) input.current?.focus()
-  }, [autoFocus, input])
+  }, [autoFocus])
 
-  const add = (entries: readonly string[]) => {
-    const next = [...addresses]
-    for (const entry of entries) {
-      const address = entry.trim()
-      if (address && !next.some((existing) => sameAddress(existing, address))) next.push(address)
-    }
-    if (next.length !== addresses.length) onChange(next)
+  /** Sets the list once, when it changed. */
+  const update = (next: string[]) => {
+    if (next.length !== addresses.length || next.some((address, index) => address !== addresses[index])) onChange(next)
+    return next
   }
   const commitText = () => {
-    const entries = splitRecipients(text)
+    const next = commitTyped(addresses, text)
     setText('')
     setActive(0)
-    if (entries.length > 0) add(entries)
+    return update(next)
   }
+
+  useImperativeHandle(ref, () => ({ commit: commitText, focus: () => input.current?.focus() }))
+
   const pick = (contact: MailContact) => {
     if (contact.name?.trim()) onName(contact.address, contact.name.trim())
-    add([contact.address])
+    update(commitTyped(addresses, contact.address))
     setText('')
     setActive(0)
     input.current?.focus()
   }
-  const remove = (index: number) => {
-    onChange(addresses.filter((_, at) => at !== index))
-    setSelectedChip(null)
+  const focusChip = (index: number) => {
+    if (index >= 0 && index < addresses.length) chips.current[index]?.focus()
+    else input.current?.focus()
   }
-  /** A chip goes back into the field to be fixed. */
+  const remove = (index: number, focusAfter?: number) => {
+    update(addresses.filter((_, at) => at !== index))
+    if (focusAfter === undefined) return
+    // the list renders again first; the chip at `focusAfter` is then the right one
+    requestAnimationFrame(() => focusChip(focusAfter))
+  }
+  /** A chip goes back into the field to be fixed; text typed there is added first. One change of the list. */
   const edit = (index: number) => {
     const address = addresses[index]
     if (address === undefined) return
-    if (text.trim()) commitText()
-    remove(index)
+    update(commitTyped(addresses.filter((_, at) => at !== index), text))
     setText(address)
     input.current?.focus()
   }
 
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     const key = event.key
-    if (selectedChip !== null && key !== 'Backspace' && key !== 'Delete') setSelectedChip(null)
     if (open && (key === 'ArrowDown' || key === 'ArrowUp')) {
       event.preventDefault()
       setActive((index) => (index + (key === 'ArrowDown' ? 1 : -1) + suggestions.length) % suggestions.length)
@@ -119,11 +129,22 @@ export function RecipientField({ label, addresses, onChange, names, onName, trai
       setDismissed(true)
       return
     }
-    if ((key === 'Backspace' || key === 'Delete') && text === '' && addresses.length > 0) {
+    const atStart = event.currentTarget.selectionStart === 0 && event.currentTarget.selectionEnd === 0
+    if (addresses.length > 0 && ((key === 'Backspace' && text === '') || (key === 'ArrowLeft' && atStart && !event.shiftKey))) {
       event.preventDefault()
-      if (selectedChip === null) setSelectedChip(addresses.length - 1)
-      else remove(selectedChip)
+      focusChip(addresses.length - 1)
     }
+  }
+
+  const onChipKeyDown = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
+    const key = event.key
+    if (key === 'ArrowLeft') focusChip(Math.max(0, index - 1))
+    else if (key === 'ArrowRight') focusChip(index + 1)
+    else if (key === 'Backspace') remove(index, index > 0 ? index - 1 : addresses.length - 1)
+    else if (key === 'Delete') remove(index, index < addresses.length - 1 ? index : addresses.length - 1)
+    else if (key === 'Enter' || key === 'F2') edit(index)
+    else return
+    event.preventDefault()
   }
 
   const onPaste = (event: ClipboardEvent<HTMLInputElement>) => {
@@ -131,9 +152,9 @@ export function RecipientField({ label, addresses, onChange, names, onName, trai
     const entries = splitRecipients(pasted)
     // one plain word: let it be typed
     if (entries.length <= 1 && !/[,;\n]/.test(pasted)) return
+    // the pasted addresses become chips; what was typed stays in the field
     event.preventDefault()
-    add(entries)
-    setText('')
+    update(entries.reduce<string[]>((list, entry) => commitTyped(list, entry), [...addresses]))
   }
 
   return (
@@ -155,9 +176,12 @@ export function RecipientField({ label, addresses, onChange, names, onName, trai
         {addresses.map((address, index) => (
           <RecipientChip
             key={`${address}:${index}`}
+            chipRef={(element) => {
+              chips.current[index] = element
+            }}
             address={address}
             name={names.get(address.toLowerCase())}
-            selected={selectedChip === index}
+            onKeyDown={(event) => onChipKeyDown(event, index)}
             onEdit={() => edit(index)}
             onRemove={() => remove(index)}
           />
@@ -170,14 +194,12 @@ export function RecipientField({ label, addresses, onChange, names, onName, trai
             setText(event.target.value)
             setActive(0)
             setDismissed(false)
-            setSelectedChip(null)
           }}
           onKeyDown={onKeyDown}
           onPaste={onPaste}
           onFocus={() => setFocused(true)}
           onBlur={() => {
             setFocused(false)
-            setSelectedChip(null)
             if (text.trim()) commitText()
           }}
           role="combobox"
@@ -196,22 +218,46 @@ export function RecipientField({ label, addresses, onChange, names, onName, trai
   )
 }
 
-function RecipientChip({ address, name, selected, onEdit, onRemove }: { address: string; name: string | undefined; selected: boolean; onEdit: () => void; onRemove: () => void }) {
+function RecipientChip({
+  chipRef,
+  address,
+  name,
+  onKeyDown,
+  onEdit,
+  onRemove,
+}: {
+  chipRef: (element: HTMLButtonElement | null) => void
+  address: string
+  name: string | undefined
+  onKeyDown: (event: KeyboardEvent<HTMLButtonElement>) => void
+  onEdit: () => void
+  onRemove: () => void
+}) {
   const valid = isValidAddress(address)
   return (
-    <Tip label={valid ? (name ? address : '') : 'Not a valid email address. Click to fix it.'}>
+    <Tip label={valid ? (name ? address : '') : 'Not a valid email address. Press Enter or click to fix it.'}>
       <span
         data-slot="recipient-chip"
         data-invalid={!valid || undefined}
-        data-selected={selected || undefined}
         className={cn(
           'group/chip inline-flex h-6 max-w-full items-center gap-0.5 rounded-md border pr-0.5 pl-2 text-[0.8125rem] transition-colors duration-100',
+          'has-[button:first-child:focus-visible]:border-ring has-[button:first-child:focus-visible]:ring-2 has-[button:first-child:focus-visible]:ring-ring/40',
           valid ? 'border-transparent bg-muted text-foreground' : 'border-destructive/30 bg-destructive/10 text-destructive',
-          selected && (valid ? 'border-ring bg-accent' : 'border-destructive'),
         )}
       >
-        <button type="button" tabIndex={-1} className="min-w-0 cursor-text truncate outline-none" onMouseDown={(event) => event.preventDefault()} onClick={onEdit}>
+        <button
+          ref={chipRef}
+          type="button"
+          tabIndex={-1}
+          aria-invalid={!valid || undefined}
+          aria-keyshortcuts="Enter Backspace Delete"
+          className="min-w-0 cursor-text truncate outline-none"
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={onEdit}
+          onKeyDown={onKeyDown}
+        >
           {name ?? address}
+          {!valid ? <span className="sr-only"> (invalid address)</span> : null}
         </button>
         <button
           type="button"
@@ -227,6 +273,7 @@ function RecipientChip({ address, name, selected, onEdit, onRemove }: { address:
     </Tip>
   )
 }
+
 
 /** The autocomplete list, in a portal under the field (a floating composer clips anything inside it). */
 function SuggestionList({

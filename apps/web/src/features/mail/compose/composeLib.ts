@@ -157,7 +157,31 @@ export function likelyLimit(size: number): number {
   return ROUTE_LIMITS.filter((limit) => limit < size).at(-1) ?? ROUTE_LIMITS[0]
 }
 
+/**
+ * The files to offer as links after the server refused the message as too large: enough for the likely limit, and
+ * at least the largest linkable file (the guess can be wrong, and a link always makes the message smaller).
+ */
+export function offerLinks(files: readonly SizedFile[], bodyBytes: number): { size: number; limit: number; suggestion: string[] } {
+  const size = encodedSize(files, bodyBytes)
+  const limit = likelyLimit(size)
+  const suggestion = suggestLinks(files, limit, bodyBytes)
+  if (suggestion.length === 0) {
+    const largest = files.filter((file) => file.linkable && !file.asLink).sort((a, b) => b.size - a.size)[0]
+    if (largest) suggestion.push(largest.id)
+  }
+  return { size, limit, suggestion }
+}
+
 // Recipients
+
+/** A recipient list with the text still typed in its field added (split like a paste, no duplicates). */
+export function commitTyped(addresses: readonly string[], typed: string): string[] {
+  const next = [...addresses]
+  for (const entry of splitRecipients(typed)) {
+    if (!next.some((existing) => lower(existing) === lower(entry))) next.push(entry)
+  }
+  return next
+}
 
 /** The one-line recipients of an inline reply: "To Andras +2". */
 export function recipientSummary(to: readonly Recipient[], cc: readonly Recipient[], bcc: readonly Recipient[]): string {

@@ -1,7 +1,7 @@
 // The mail composer (§9.1): one draft, saved on the server as the user types. `inline` is the reply at the end of a
 // thread (recipients as one line until clicked, U1), `window` the floating composer and `full` its expanded form
 // (U2, both placed by the dock). ⌘Enter sends; the pre-send checks show above Send and ⌘Enter again sends anyway (U5).
-import { lazy, Suspense, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode, type RefObject } from 'react'
 import { ChevronDown, Danger, Paperclip2, Send, TextBlock, Trash, Xmark as X } from 'reicon-react'
 import { toast } from 'sonner'
 import { cn } from 'cn'
@@ -14,24 +14,14 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Spinner } from '@/components/ui/spinner'
 import { ShortcutKeys } from '@/shortcuts/Shortcut'
 import { problemText, type DraftText } from '../mailLib'
-import { useDeleteDraft, useRemoveDraftFile, useSaveDraft, useSendDraft, useSetDraftFileLink, useUploadDraftFile } from '../api/mutations'
-import { useDraft, useFromAddresses, useMailMe, useSnippets, useThread } from '../api/queries'
-import {
-  encodedSize,
-  isValidAddress,
-  likelyLimit,
-  linkRefusal,
-  MESSAGE_OVERHEAD_BYTES,
-  notReadyText,
-  preSendWarnings,
-  recipientSummary,
-  suggestLinks,
-  type Warning,
-} from './composeLib'
-import { ComposerFiles, type PendingUpload, type TooLarge } from './ComposerFiles'
+import { useDeleteDraft, useRemoveDraftFile, useSaveDraft, useSetDraftFileLink, useUploadDraftFile } from '../api/mutations'
+import { useDraft, useFromAddresses, useSnippets, useThread } from '../api/queries'
+import { notReadyText, recipientSummary } from './composeLib'
+import { ComposerFiles, type PendingUpload } from './ComposerFiles'
 import { FromPicker } from './FromPicker'
 import type { MailEditorHandle } from './MailEditor'
-import { RecipientField } from './RecipientField'
+import { RecipientField, type RecipientFieldHandle } from './RecipientField'
+import { useComposerSend } from './useComposerSend'
 
 /** BlockNote is about 1 MB: the editor loads on first use (the app preloads it when idle). */
 const LazyMailEditor = lazy(() => import('./MailEditor').then((module) => ({ default: module.MailEditor })))
@@ -66,7 +56,13 @@ export function Composer(props: ComposerProps) {
   const [generation, setGeneration] = useState(0)
   const [seed, setSeed] = useState<DraftText | null>(null)
   const loadedVersion = useRef<number | null>(null)
+  // set while the body is shown again: the old body must not save its text on the way out
+  const reloading = useRef(false)
   const seenRestore = useRef(saver.restore)
+  const onLoaded = useCallback((version: number) => {
+    loadedVersion.current = version
+    reloading.current = false
+  }, [])
 
   // A save came back 409 with a newer draft: the cache holds the server's copy, the user's text waits in `restore`.
   useEffect(() => {
@@ -75,6 +71,7 @@ export function Composer(props: ComposerProps) {
     seenRestore.current = restore
     if (!restore || saver.problem === 'sending' || !draft) return
     if (loadedVersion.current !== null && draft.version !== loadedVersion.current) {
+      reloading.current = true
       setSeed(null)
       setGeneration((value) => value + 1)
     }
@@ -83,18 +80,26 @@ export function Composer(props: ComposerProps) {
   const restoreText = () => {
     const text = saver.restore
     if (!text) return
+    reloading.current = true
     setSeed(text)
     setGeneration((value) => value + 1)
     saver.applyRestore()
   }
 
   const root = cn('flex flex-col text-foreground', ROOT_CLASS[placement], className)
-  if (draftQuery.isError) {
+  if (draftQuery.isError && !draft) {
+    // only a 404 means the draft is gone; anything else (offline, a server error) can be tried again
+    const gone = draftQuery.error instanceof ApiProblem && draftQuery.error.status === 404
     return (
       <div className={root} data-slot="composer" data-placement={placement}>
-        <div className="flex items-center gap-3 p-4 text-[0.8125rem] text-muted-foreground">
-          <span className="flex-1">This draft is no longer here. It was sent or deleted.</span>
-          <Button size="sm" variant="outline" onClick={onClose}>
+        <div role="alert" className="flex items-center gap-3 p-4 text-[0.8125rem] text-muted-foreground">
+          <span className="flex-1">{gone ? 'This draft is no longer here. It was sent or deleted.' : 'The draft could not be loaded.'}</span>
+          {gone ? null : (
+            <Button size="sm" variant="outline" disabled={draftQuery.isFetching} onClick={() => void draftQuery.refetch()}>
+              Try again
+            </Button>
+          )}
+          <Button size="sm" variant={gone ? 'outline' : 'ghost'} onClick={onClose}>
             Close
           </Button>
         </div>
@@ -121,9 +126,8 @@ export function Composer(props: ComposerProps) {
       seed={seed}
       fromAddresses={fromQuery.data ?? []}
       saver={saver}
-      onLoaded={(version) => {
-        loadedVersion.current = version
-      }}
+      onLoaded={onLoaded}
+      reloading={reloading}
       onRestore={restoreText}
     />
   )
@@ -139,14 +143,18 @@ interface BodyProps extends ComposerProps {
   fromAddresses: readonly MailFromAddress[]
   saver: Saver
   onLoaded: (version: number) => void
+  /** True while this body is replaced by a fresh one (conflict, Restore): it must not save its text. */
+  reloading: RefObject<boolean>
   onRestore: () => void
 }
 
+/** Exporting the body to HTML walks the whole document: it waits for a pause in typing. */
+const BODY_EXPORT_MS = 400
+
 const lower = (address: string) => address.trim().toLowerCase()
-const utf8Length = (text: string) => new TextEncoder().encode(text).length
 const isFileDrag = (event: DragEvent) => event.dataTransfer.types.includes('Files')
 
-function ComposerBody({ draft, seed, fromAddresses, saver, onLoaded, onRestore, draftId, placement, onClose, onSent, headerActions, className }: BodyProps) {
+function ComposerBody({ draft, seed, fromAddresses, saver, onLoaded, reloading, onRestore, draftId, placement, onClose, onSent, headerActions, className }: BodyProps) {
   const [initial] = useState(() => ({ ...draft, ...seed }))
   const [to, setTo] = useState<string[]>(initial.to)
   const [cc, setCc] = useState<string[]>(initial.cc)
@@ -159,16 +167,14 @@ function ComposerBody({ draft, seed, fromAddresses, saver, onLoaded, onRestore, 
   // inline: one recipients line until clicked (U1); open at once when there is nobody to send to (a forward)
   const [fieldsOpen, setFieldsOpen] = useState(placement !== 'inline' || noRecipients)
   const [learnedNames, setLearnedNames] = useState<ReadonlyMap<string, string>>(new Map())
-  const [warnings, setWarnings] = useState<Warning[]>([])
-  const [notice, setNotice] = useState<string | null>(null)
-  const [tooLarge, setTooLarge] = useState<TooLarge | null>(null)
   const [pending, setPending] = useState<PendingUpload[]>([])
   const [busy, setBusy] = useState<ReadonlySet<string>>(new Set())
-  const [sending, setSending] = useState(false)
   const [dragging, setDragging] = useState(false)
   const dragDepth = useRef(0)
   const editor = useRef<MailEditorHandle | null>(null)
-  const toInput = useRef<HTMLInputElement>(null)
+  const toField = useRef<RecipientFieldHandle>(null)
+  const ccField = useRef<RecipientFieldHandle>(null)
+  const bccField = useRef<RecipientFieldHandle>(null)
   const fileInput = useRef<HTMLInputElement>(null)
   const mounted = useRef(true)
 
@@ -183,10 +189,7 @@ function ComposerBody({ draft, seed, fromAddresses, saver, onLoaded, onRestore, 
   }, [])
 
   const thread = useThread(draft.thread_id ?? null)
-  const allFrom = useFromAddresses()
-  const me = useMailMe()
   const snippets = useSnippets()
-  const sendDraft = useSendDraft()
   const deleteDraft = useDeleteDraft()
   const upload = useUploadDraftFile(draftId)
   const removeFile = useRemoveDraftFile(draftId)
@@ -209,7 +212,7 @@ function ComposerBody({ draft, seed, fromAddresses, saver, onLoaded, onRestore, 
   const fromAddress = fromAddresses.find((address) => address.address_id === fromId)
   const signatureOf = (addressId: string) => fromAddresses.find((address) => address.address_id === addressId)?.signature_html?.trim() || null
   const files = draft.files
-  const hardBlock =
+  const blocked =
     saver.problem === 'sending'
       ? 'This draft is being sent.'
       : fromAddress && fromAddress.ready !== 'ready'
@@ -218,12 +221,65 @@ function ComposerBody({ draft, seed, fromAddresses, saver, onLoaded, onRestore, 
           ? 'Wait for the files to finish uploading.'
           : null
 
+  // The body's HTML, exported when typing pauses (or at once to send, or when the composer closes).
+  const bodyExport = useRef<(() => string) | null>(null)
+  const bodyTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const takeBody = () => {
+    clearTimeout(bodyTimer.current)
+    const exportHtml = bodyExport.current
+    bodyExport.current = null
+    return exportHtml
+  }
+  const saveBody = () => {
+    const exportHtml = takeBody()
+    if (exportHtml) saver.save({ body_html: exportHtml() })
+  }
+  const saveBodyRef = useRef(saveBody)
+  useEffect(() => {
+    saveBodyRef.current = saveBody
+  })
+  // Layout cleanup: before the saver's last flush (a passive cleanup of the parent) runs.
+  useLayoutEffect(
+    () => () => {
+      if (!reloading.current) saveBodyRef.current()
+    },
+    [reloading],
+  )
+  const onBodyChange = (exportHtml: () => string) => {
+    bodyExport.current = exportHtml
+    clearTimeout(bodyTimer.current)
+    bodyTimer.current = setTimeout(saveBody, BODY_EXPORT_MS)
+  }
+
+  const composer = useComposerSend({
+    draft,
+    saver,
+    blocked,
+    fromAddresses,
+    // typed recipients become chips first (I1), so the send uses what the user sees
+    collect: () => {
+      takeBody()
+      const lists = { to: toField.current?.commit() ?? to, cc: ccField.current?.commit() ?? cc, bcc: bccField.current?.commit() ?? bcc }
+      return {
+        ...lists,
+        recipientsChanged: lists.to.length !== to.length || lists.cc.length !== cc.length || lists.bcc.length !== bcc.length,
+        subject,
+        fromId,
+        html: editor.current?.html() ?? initial.body_html,
+        text: editor.current?.text() ?? '',
+      }
+    },
+    onRecipientProblem: () => {
+      setFieldsOpen(true)
+      requestAnimationFrame(() => toField.current?.focus())
+    },
+    onSent,
+    onClose,
+  })
+  const { send, sending, warnings, notice, tooLarge, clearTooLarge: dismissTooLarge, recheck } = composer
+
   // Every change goes to the saver (2 s after the last one). A change to the fields or files checks again on the next
   // send; typing in the text does not (the warnings stay, and Send sends anyway).
-  const recheck = () => {
-    setWarnings([])
-    setNotice(null)
-  }
   const changeTo = (next: string[]) => {
     setTo(next)
     recheck()
@@ -250,18 +306,15 @@ function ComposerBody({ draft, seed, fromAddresses, saver, onLoaded, onRestore, 
     // the signature follows the address (U7), unless the user changed it
     const swapped = editor.current?.swapSignature(signatureOf(fromId), signatureOf(next)) ?? false
     setFromId(next)
+    if (swapped) takeBody()
     saver.save(swapped ? { from_address_id: next, body_html: editor.current?.html() ?? '' } : { from_address_id: next })
-  }
-  const onBodyChange = () => {
-    const html = editor.current?.html()
-    if (html !== undefined) saver.save({ body_html: html })
   }
 
   // Files
 
   const addFiles = (list: readonly File[]) => {
     if (list.length === 0) return
-    setTooLarge(null)
+    dismissTooLarge()
     recheck()
     for (const file of list) {
       const key = crypto.randomUUID()
@@ -288,97 +341,23 @@ function ComposerBody({ draft, seed, fromAddresses, saver, onLoaded, onRestore, 
       })
   }
   const toggleLink = (file: MailDraftFile) => {
-    setTooLarge(null)
+    dismissTooLarge()
     withBusy(file.id, setLink.mutateAsync({ fileId: file.id, asLink: !file.as_link }), 'The file could not be changed.')
   }
   const dropFile = (file: MailDraftFile) => {
-    setTooLarge(null)
+    dismissTooLarge()
     withBusy(file.id, removeFile.mutateAsync(file.id), 'The file could not be removed.')
   }
   const linkSuggested = () => {
     const ids = tooLarge?.suggestion ?? []
-    setTooLarge(null)
+    dismissTooLarge()
     for (const id of ids) withBusy(id, setLink.mutateAsync({ fileId: id, asLink: true }), 'The file could not be changed.')
   }
 
-  // Send
-
-  const send = async (scheduledAt?: Date) => {
-    if (sending) return
-    if (hardBlock) {
-      setNotice(hardBlock)
-      return
-    }
-    const recipients = [...to, ...cc, ...bcc]
-    if (recipients.length === 0 || recipients.some((address) => !isValidAddress(address))) {
-      setNotice(recipients.length === 0 ? 'Add a recipient.' : 'Fix the address marked in red.')
-      setFieldsOpen(true)
-      requestAnimationFrame(() => toInput.current?.focus())
-      return
-    }
-    const html = editor.current?.html() ?? initial.body_html
-    // U5: the first ⌘Enter shows the checks, the next one sends anyway
-    if (warnings.length === 0) {
-      const found = preSendWarnings({
-        text: editor.current?.text() ?? '',
-        subject,
-        fileCount: files.length,
-        mode: draft.mode,
-        to,
-        cc,
-        bcc,
-        threadAddresses: messages ? messages.flatMap((message) => [message.from, ...message.to, ...message.cc]).flatMap((person) => (person ? [person.address] : [])) : null,
-        workspaceDomains: workspaceDomains(allFrom.data ?? fromAddresses, me.data?.mailboxes.map((mailbox) => mailbox.primary_address ?? '') ?? [], messages),
-        // members cannot read the suppression list; the server skips those recipients when sending
-        suppressed: [],
-      })
-      if (found.length > 0) {
-        setWarnings(found)
-        setNotice(null)
-        return
-      }
-    }
-    setSending(true)
-    setNotice(null)
-    setTooLarge(null)
-    try {
-      const before = saver.current().restore
-      saver.save({ to, cc, bcc, subject, from_address_id: fromId, body_html: html })
-      await saver.flush()
-      const after = saver.current()
-      if (after.problem || after.restore !== before) {
-        setNotice(
-          after.problem === 'sending'
-            ? 'This draft is being sent.'
-            : after.problem === 'error'
-              ? 'The draft could not be saved. Try again.'
-              : 'This draft changed on another device. Check it, then send again.',
-        )
-        return
-      }
-      const outbound = await sendDraft.mutateAsync({ draftId, body: scheduledAt ? { scheduled_at: scheduledAt.toISOString() } : undefined })
-      saver.stop()
-      const sent: MailDraft = { ...draft, to, cc, bcc, subject, from_address_id: fromId, body_html: html }
-      if (onSent) onSent(outbound, sent)
-      else toast.success(outbound.scheduled ? 'Message scheduled' : 'Message sent')
-      onClose()
-    } catch (error) {
-      if (error instanceof ApiProblem && error.code === 'message_too_large') {
-        const sized = files.map((file) => ({ id: file.id, size: file.size, asLink: file.as_link, linkable: linkRefusal(file) === null }))
-        const bodyBytes = MESSAGE_OVERHEAD_BYTES + utf8Length(subject) + utf8Length(html)
-        const size = encodedSize(sized, bodyBytes)
-        const limit = likelyLimit(size)
-        setTooLarge({ size, limit, suggestion: suggestLinks(sized, limit, bodyBytes) })
-      } else {
-        setNotice(problemText(error, 'The message could not be sent. Try again.'))
-      }
-    } finally {
-      if (mounted.current) setSending(false)
-    }
-  }
-
   const discard = async () => {
-    const written = (editor.current?.text().trim() ?? '') !== '' || subject.trim() !== '' || files.length > 0
+    // the signature put in at the start, a subject the server filled in (Re:, Fwd:) are not the user's writing
+    const subjectWritten = draft.mode === 'new' ? subject.trim() !== '' : subject !== initial.subject
+    const written = (editor.current?.hasWriting(signatureOf(fromId)) ?? initial.body_html.trim() !== '') || subjectWritten || files.length > 0
     if (written && !(await confirmAction({ title: 'Delete this draft?', description: 'Its text and files are deleted.', confirmLabel: 'Delete', danger: true }))) return
     saver.stop()
     deleteDraft.mutate(draftId, {
@@ -487,12 +466,12 @@ function ComposerBody({ draft, seed, fromAddresses, saver, onLoaded, onRestore, 
             onChange={changeTo}
             names={names}
             onName={learnName}
-            inputRef={toInput}
+            ref={toField}
             autoFocus={noRecipients}
             trailing={!showCc || !showBcc ? ccToggles : null}
           />
-          {showCc ? <RecipientField label="Cc" addresses={cc} onChange={changeCc} names={names} onName={learnName} /> : null}
-          {showBcc ? <RecipientField label="Bcc" addresses={bcc} onChange={changeBcc} names={names} onName={learnName} /> : null}
+          {showCc ? <RecipientField ref={ccField} label="Cc" addresses={cc} onChange={changeCc} names={names} onName={learnName} /> : null}
+          {showBcc ? <RecipientField ref={bccField} label="Bcc" addresses={bcc} onChange={changeBcc} names={names} onName={learnName} /> : null}
           <div className="flex min-h-9 items-center border-b border-border/60 px-3">
             <input
               value={subject}
@@ -558,7 +537,7 @@ function ComposerBody({ draft, seed, fromAddresses, saver, onLoaded, onRestore, 
       <footer className="flex shrink-0 items-center gap-1 px-3 pb-3">
         <Tip
           label={
-            hardBlock ?? (
+            blocked ?? (
               <span className="flex items-center gap-2">
                 Send <ShortcutKeys keys="Mod+Enter" />
               </span>
@@ -568,8 +547,8 @@ function ComposerBody({ draft, seed, fromAddresses, saver, onLoaded, onRestore, 
           {/* aria-disabled keeps the reason reachable by hover and focus */}
           <Button
             data-slot="composer-send"
-            aria-disabled={hardBlock ? true : undefined}
-            className={cn('min-w-20 active:not-aria-[haspopup]:scale-[0.97]', hardBlock && 'cursor-not-allowed opacity-50 hover:translate-y-0 hover:bg-primary')}
+            aria-disabled={blocked ? true : undefined}
+            className={cn('min-w-20 active:not-aria-[haspopup]:scale-[0.97]', blocked && 'cursor-not-allowed opacity-50 hover:translate-y-0 hover:bg-primary')}
             onClick={() => void send()}
           >
             {sending ? <Spinner className="size-3.5" /> : <Send />}
@@ -607,7 +586,10 @@ function ComposerBody({ draft, seed, fromAddresses, saver, onLoaded, onRestore, 
         <p role="alert" className="min-w-0 flex-1 truncate px-1.5 text-xs text-destructive">
           {notice}
         </p>
-        <SaveState saving={saver.saving} failed={saver.problem === 'error'} onRetry={() => void saver.flush()} />
+        <SaveState saving={saver.saving} failed={saver.problem === 'error'} onRetry={() => {
+            saveBody()
+            void saver.flush()
+          }} />
         <Tip label="Delete draft">
           <Button variant="ghost" size="icon-sm" className="text-muted-foreground hover:text-destructive" aria-label="Delete draft" onClick={() => void discard()}>
             <Trash />
@@ -625,23 +607,6 @@ function ComposerBody({ draft, seed, fromAddresses, saver, onLoaded, onRestore, 
 }
 
 const NO_SNIPPETS: MailSnippet[] = []
-
-/** The workspace's mail domains as the composer knows them: its own addresses, the mailboxes, inside senders. */
-function workspaceDomains(
-  addresses: readonly MailFromAddress[],
-  mailboxAddresses: readonly string[],
-  messages: readonly { from?: { address: string } | null; from_external: boolean }[] | undefined,
-): string[] {
-  const domains = new Set<string>()
-  const add = (address: string) => {
-    const domain = lower(address).split('@')[1]
-    if (domain) domains.add(domain)
-  }
-  for (const address of addresses) add(address.address)
-  for (const address of mailboxAddresses) add(address)
-  for (const message of messages ?? []) if (message.from && !message.from_external) add(message.from.address)
-  return [...domains]
-}
 
 function Banner({ children, actions }: { children: ReactNode; actions?: ReactNode }) {
   return (

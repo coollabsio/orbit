@@ -1,9 +1,11 @@
 import { expect, test } from 'bun:test'
 import {
+  commitTyped,
   encodedSize,
   isValidAddress,
   likelyLimit,
   linkRefusal,
+  offerLinks,
   preSendWarnings,
   recipientSummary,
   sendLaterPresets,
@@ -113,6 +115,34 @@ test('forwarded files and images in the text cannot be links', () => {
   expect(linkRefusal({ source_attachment_id: 'att1', content_id: null })).toContain('forwarded')
   expect(linkRefusal({ content_id: 'img1@orbit' })).toContain('image')
   expect(linkRefusal({ source_attachment_id: null, content_id: '  ' })).toBeNull()
+})
+
+test('a refused message always offers at least its largest linkable file', () => {
+  const MB = 1_000_000
+  // about 8 MB encoded: below every route limit, so the guess says nothing helps; the largest is offered anyway
+  const files = [
+    { id: 'small', size: 1 * MB, asLink: false, linkable: true },
+    { id: 'big', size: 3 * MB, asLink: false, linkable: true },
+    { id: 'inline', size: 2 * MB, asLink: false, linkable: false },
+  ]
+  expect(offerLinks(files, 0).suggestion).toEqual(['big'])
+  // over a limit: enough to fit under it
+  const large = [
+    { id: 'a', size: 20 * MB, asLink: false, linkable: true },
+    { id: 'b', size: 2 * MB, asLink: false, linkable: true },
+  ]
+  const offer = offerLinks(large, 0)
+  expect(offer.limit).toBe(26_214_400)
+  expect(offer.suggestion).toEqual(['a'])
+  // nothing linkable
+  expect(offerLinks([files[2]!], 0).suggestion).toEqual([])
+})
+
+test('typed text is committed into the recipient list, without duplicates', () => {
+  expect(commitTyped(['ann@acme.io'], ' bob@acme.io, ANN@acme.io ')).toEqual(['ann@acme.io', 'bob@acme.io'])
+  expect(commitTyped(['ann@acme.io'], '   ')).toEqual(['ann@acme.io'])
+  // a chip being fixed: removed, then the fixed text appended
+  expect(commitTyped(['ann@acme.io'], 'carl@acme')).toEqual(['ann@acme.io', 'carl@acme'])
 })
 
 test('the limit a refused message was over is the largest route limit below its size', () => {

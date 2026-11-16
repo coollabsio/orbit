@@ -18,8 +18,10 @@ import { blockText, htmlToMailBlocks, isBlankDocument, mailEditorSchema, mailTex
 export interface MailEditorHandle {
   /** The body as HTML; `''` while it is blank. */
   html: () => string
-  /** The body as plain text (for the pre-send checks). */
+  /** The body as plain text without code blocks (for the pre-send checks). */
   text: () => string
+  /** Whether the user wrote anything: text other than this signature at the end. */
+  hasWriting: (signatureHtml: string | null) => boolean
   focus: () => void
   /** Opens the snippet menu at the cursor (the toolbar button). */
   openSnippets: () => void
@@ -38,7 +40,8 @@ export interface MailEditorProps {
   /** Put under two empty lines when the body is blank (a new draft). */
   signatureHtml: string | null
   snippets: readonly MailSnippet[]
-  onChange: () => void
+  /** The text changed; `html` exports it (the caller decides when: export is not free). */
+  onChange: (html: () => string) => void
   /** Files pasted into the text (screenshots): the composer attaches them. */
   onFiles: (files: File[]) => void
   autoFocus: boolean
@@ -63,6 +66,9 @@ function initialBlocks(html: string, signatureHtml: string | null): MailBlock[] 
   if (signature.length === 0) return undefined
   return [{ type: 'paragraph' }, { type: 'paragraph' }, ...signature] as MailBlock[]
 }
+
+/** The body as HTML; `''` while it is blank. */
+const exportHtml = (editor: MailEditorInstance) => (isBlankDocument(editor.document) ? '' : editor.blocksToHTMLLossy(editor.document))
 
 const snippetPreview = new Map<string, string>()
 /** The first line of a snippet, for the menu (cached by id and change time). */
@@ -150,8 +156,14 @@ export function MailEditor({ initialHtml, signatureHtml, snippets, onChange, onF
   useImperativeHandle(
     ref,
     () => ({
-      html: () => (isBlankDocument(editor.document) ? '' : editor.blocksToHTMLLossy(editor.document)),
-      text: () => mailText(editor.document),
+      html: () => exportHtml(editor),
+      text: () => mailText(editor.document, { skipCode: true }),
+      hasWriting: (signatureHtml) => {
+        const document = editor.document
+        const lines = document.map(blockText)
+        const start = signatureHtml ? signatureStart(lines, htmlToMailBlocks(signatureHtml).map(blockText)) : null
+        return !isBlankDocument(start === null ? document : document.slice(0, start))
+      },
       focus: () => editor.focus(),
       openSnippets: () => editor.getExtension(SuggestionMenu)?.openSuggestionMenu(';', { deleteTriggerCharacter: true, ignoreQueryLength: true }),
       menuOpen: () => editor.getExtension(SuggestionMenu)?.shown() ?? false,
@@ -209,7 +221,7 @@ export function MailEditor({ initialHtml, signatureHtml, snippets, onChange, onF
       filePanel={false}
       tableHandles={false}
       emojiPicker={false}
-      onChange={() => onChangeRef.current()}
+      onChange={() => onChangeRef.current(() => exportHtml(editor))}
     >
       <FormattingToolbarController formattingToolbar={MailFormattingToolbar} />
       {editable ? <TabCompletesSuggestion /> : null}
