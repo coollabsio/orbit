@@ -18,6 +18,7 @@ use super::routes::{RouteSettings, SendRouteKind};
 use super::search::people;
 use super::signatures::check_sendable;
 use super::{MailError, MailRepository, SendReadiness};
+use crate::live::{LiveHub, NewEvent, Recipients};
 
 /// The job that releases and delivers an outbound message.
 pub const SEND_JOB: &str = "mail.send";
@@ -506,12 +507,57 @@ pub const RETRY_STEPS_MS: [i64; 12] = [
 ];
 /// A deferred recipient whose first attempt (`released_at`) is older than this shows **Delayed**.
 pub const DELAYED_AFTER_MS: i64 = 4 * 3_600_000;
+/// The longest one adapter call (or one local intake call) may take; after it, its recipients
+/// are deferred with "Timed out".
+pub const SEND_TIMEOUT_MS: i64 = 20 * 60_000;
 /// A recipient that stays `sending` longer than this was left by a worker that stopped between
 /// the claim and the result: it is deferred and sent again (at least once, spec §5.4). Longer
-/// than the slowest adapter (SMTP: 60 s to connect, 5 min a command, 15 min for the data).
+/// than [`SEND_TIMEOUT_MS`], so an attempt that is still running is never handed to another;
+/// the late result of an attempt that was handed on is ignored ([`MailRepository::record_outcomes`]).
 pub const SENDING_LEASE_MS: i64 = 30 * 60_000;
 /// The response of a recipient that was still deferred after the last retry step.
 pub const GAVE_UP: &str = "Gave up after 5 days";
+/// How the response of a recipient starts when the sent message could not be read.
+pub const UNREADABLE: &str = "The message could not be read";
+/// The start of a response that blames the route, not the recipient (Task 8 adapters).
+pub const ROUTE_ERROR: &str = "Route error:";
+
+/// Why a bounced recipient bounced (`mail_outbound_recipients.bounce_kind`). Only [`Self::Hard`]
+/// (and complaints) count toward the bounce rate and the suppression list.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BounceKind {
+    /// A 5xx refusal of the recipient (SMTP, a provider's API, or this instance's intake).
+    Hard,
+    /// Still deferred after the last retry step.
+    GaveUp,
+    /// Gave up, and the last attempt failed on the route (`Route error: …`).
+    Route,
+    /// The sent message could not be read.
+    Unreadable,
+}
+
+impl BounceKind {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Hard => "hard",
+            Self::GaveUp => "gave_up",
+            Self::Route => "route",
+            Self::Unreadable => "unreadable",
+        }
+    }
+
+    #[must_use]
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "hard" => Some(Self::Hard),
+            "gave_up" => Some(Self::GaveUp),
+            "route" => Some(Self::Route),
+            "unreadable" => Some(Self::Unreadable),
+            _ => None,
+        }
+    }
+}
 
 /// A recipient claimed for one attempt.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -584,6 +630,8 @@ pub struct RecipientStatus {
     pub provider_message_id: Option<String>,
     /// Deferred, and the first attempt is more than [`DELAYED_AFTER_MS`] ago.
     pub delayed: bool,
+    /// Why it bounced, for a `bounced` recipient.
+    pub bounce_kind: Option<BounceKind>,
 }
 
 /// The readers of an outbound message's thread, for `thread.updated`.
@@ -636,7 +684,7 @@ async fn finish_if_done(
         return Ok(false);
     }
     let rows = sqlx::query(
-        "SELECT address, kind, status, last_response FROM mail_outbound_recipients \
+        "SELECT address, kind, status, last_response, bounce_kind FROM mail_outbound_recipients \
          WHERE outbound_id = $1 ORDER BY created_at, id",
     )
     .bind(outbound_id.to_string())
@@ -649,6 +697,7 @@ async fn finish_if_done(
             "kind": row.try_get::<String, _>("kind")?,
             "status": row.try_get::<String, _>("status")?,
             "response": row.try_get::<Option<String>, _>("last_response")?,
+            "bounce_kind": row.try_get::<Option<String>, _>("bounce_kind")?,
         }));
     }
     let done = sqlx::query(
@@ -749,13 +798,46 @@ impl MailRepository {
         .await?;
         finish_if_done(&mut transaction, outbound_id, now).await?;
         transaction.commit().await?;
+        self.announce_outbounds(&[outbound_id]).await;
         Ok(())
+    }
+
+    /// `thread.updated` to the readers of each message's thread (the delivery status changed);
+    /// the change is stored either way.
+    pub async fn announce_outbounds(&self, outbound_ids: &[Id]) {
+        for outbound_id in outbound_ids {
+            let audience = match self.outbound_audience(*outbound_id).await {
+                Ok(Some(audience)) if !audience.users.is_empty() => audience,
+                Ok(_) => continue,
+                Err(error) => {
+                    tracing::warn!(error = %error, outbound_id = %outbound_id, "mail delivery audience");
+                    continue;
+                }
+            };
+            let events = [NewEvent {
+                recipients: Recipients::Users(audience.users),
+                topic: super::MAIL_TOPIC,
+                event: json!({
+                    "type": "thread.updated",
+                    "mailbox_id": audience.mailbox_id.to_string(),
+                    "thread_id": audience.thread_id.to_string(),
+                }),
+            }];
+            if let Err(error) = LiveHub::of(&self.database)
+                .publish(audience.workspace_id, &events)
+                .await
+            {
+                tracing::warn!(error = %error, "mail events for the live socket");
+            }
+        }
     }
 
     /// One attempt's claim (spec §5.4), in one writer transaction: a paused workspace holds the
     /// message (`paused`); recipients on the workspace's suppression list become `suppressed`;
     /// recipients never tried yet are checked against the send limits (without the message's own
-    /// rows) and hold it (`limit`, their `released_at` cleared so they do not count) when over;
+    /// rows) and hold it (`limit`) when over: their `released_at` is set to now, so they keep
+    /// their room against messages that come later (first come, first served), and set again
+    /// when they go;
     /// then every queued recipient and every deferred one that is due becomes `sending` with
     /// `attempt_id`, and is returned. The caller sends to them after this commit.
     pub async fn claim_recipients(
@@ -828,7 +910,7 @@ impl MailRepository {
                 .await?
         {
             sqlx::query(
-                "UPDATE mail_outbound_recipients SET released_at = NULL, updated_at = $1 \
+                "UPDATE mail_outbound_recipients SET released_at = $1, updated_at = $1 \
                  WHERE outbound_id = $2 AND status = 'queued' AND attempts = 0",
             )
             .bind(now.as_millis())
@@ -845,10 +927,10 @@ impl MailRepository {
             transaction.commit().await?;
             return Ok(Claim::Limited(room));
         }
-        // They count against the limits from now (a row held for a limit has none).
+        // They count against the limits from the time they go.
         sqlx::query(
             "UPDATE mail_outbound_recipients SET released_at = $1 \
-             WHERE outbound_id = $2 AND status = 'queued' AND released_at IS NULL",
+             WHERE outbound_id = $2 AND status = 'queued' AND attempts = 0",
         )
         .bind(now.as_millis())
         .bind(outbound_id.to_string())
@@ -907,8 +989,12 @@ impl MailRepository {
 
     /// The results of attempt `attempt_id`, in one writer transaction. Only recipients still
     /// `sending` with that attempt change (one that a lease end handed to another attempt is
-    /// left to it). Accepted → `delivered`; bounced → `bounced`; deferred → `deferred` until the
-    /// next step of [`RETRY_STEPS_MS`], or `bounced` with [`GAVE_UP`] after the last one. A
+    /// left to it, and a late result of this attempt changes nothing). Accepted → `delivered`;
+    /// bounced → `bounced` ([`BounceKind::Hard`], or [`BounceKind::Unreadable`] for a response
+    /// starting with [`UNREADABLE`]); deferred → `deferred` until the next step of
+    /// [`RETRY_STEPS_MS`], or `bounced` with [`GAVE_UP`] after the last one
+    /// ([`BounceKind::Route`] when the last response was a [`ROUTE_ERROR`],
+    /// [`BounceKind::Unreadable`], else [`BounceKind::GaveUp`]). A
     /// bounce moves the thread back to the Inbox (from the archive), unread for its readers.
     /// The message is `done` with its summary once every recipient is final.
     pub async fn record_outcomes(
@@ -934,12 +1020,23 @@ impl MailRepository {
             let Some(attempts) = attempts else {
                 continue;
             };
-            let (status, response, next, provider_id) = match outcome {
+            let (status, response, next, provider_id, kind) = match outcome {
                 RecipientOutcome::Accepted {
                     provider_message_id,
-                } => ("delivered", None, None, provider_message_id.clone()),
+                } => ("delivered", None, None, provider_message_id.clone(), None),
                 RecipientOutcome::Bounced { response } => {
-                    ("bounced", Some(plain_line(response)), None, None)
+                    let kind = if response.starts_with(UNREADABLE) {
+                        BounceKind::Unreadable
+                    } else {
+                        BounceKind::Hard
+                    };
+                    (
+                        "bounced",
+                        Some(plain_line(response)),
+                        None,
+                        None,
+                        Some(kind),
+                    )
                 }
                 RecipientOutcome::Deferred { response } => {
                     let step = usize::try_from(attempts - 1).ok();
@@ -949,13 +1046,24 @@ impl MailRepository {
                             Some(plain_line(response)),
                             Some(now.as_millis() + wait),
                             None,
-                        ),
-                        None => (
-                            "bounced",
-                            Some(plain_line(&format!("{GAVE_UP}: {response}"))),
-                            None,
                             None,
                         ),
+                        None => {
+                            let kind = if response.starts_with(ROUTE_ERROR) {
+                                BounceKind::Route
+                            } else if response.starts_with(UNREADABLE) {
+                                BounceKind::Unreadable
+                            } else {
+                                BounceKind::GaveUp
+                            };
+                            (
+                                "bounced",
+                                Some(plain_line(&format!("{GAVE_UP}: {response}"))),
+                                None,
+                                None,
+                                Some(kind),
+                            )
+                        }
                     }
                 }
             };
@@ -963,12 +1071,13 @@ impl MailRepository {
             sqlx::query(
                 "UPDATE mail_outbound_recipients SET status = $1, last_response = $2, \
                  next_attempt_at = $3, provider_message_id = COALESCE($4, provider_message_id), \
-                 updated_at = $5 WHERE id = $6",
+                 bounce_kind = $5, updated_at = $6 WHERE id = $7",
             )
             .bind(status)
             .bind(response)
             .bind(next)
             .bind(provider_id)
+            .bind(kind.map(BounceKind::as_str))
             .bind(now.as_millis())
             .bind(recipient_id.to_string())
             .execute(&mut *transaction)
@@ -1024,12 +1133,23 @@ impl MailRepository {
 
     /// Recipients left `sending` for longer than `lease_ms` (a worker stopped between the claim
     /// and the result) become `deferred` and due now: sent again, at least once (spec §5.4).
+    /// Their threads' readers get `thread.updated`. Returns how many changed.
     pub async fn requeue_stale_sending(
         &self,
         lease_ms: i64,
         now: TimestampMillis,
     ) -> Result<u64, MailError> {
         let mut transaction = self.database.immediate_transaction().await?;
+        let outbounds: Vec<String> = sqlx::query_scalar(
+            "SELECT DISTINCT outbound_id FROM mail_outbound_recipients \
+             WHERE status = 'sending' AND updated_at <= $1",
+        )
+        .bind(now.as_millis() - lease_ms)
+        .fetch_all(&mut *transaction)
+        .await?;
+        if outbounds.is_empty() {
+            return Ok(0);
+        }
         let changed = sqlx::query(
             "UPDATE mail_outbound_recipients SET status = 'deferred', next_attempt_at = $1, \
              last_response = 'The attempt was interrupted.', updated_at = $1 \
@@ -1041,6 +1161,11 @@ impl MailRepository {
         .await?
         .rows_affected();
         transaction.commit().await?;
+        let ids = outbounds
+            .iter()
+            .map(|id| parse_id(id))
+            .collect::<Result<Vec<_>, _>>()?;
+        self.announce_outbounds(&ids).await;
         Ok(changed)
     }
 
@@ -1086,7 +1211,7 @@ impl MailRepository {
     ) -> Result<Vec<RecipientStatus>, MailError> {
         let rows = sqlx::query(
             "SELECT id, address, kind, status, attempts, next_attempt_at, last_response, \
-             provider_message_id, released_at FROM mail_outbound_recipients \
+             provider_message_id, released_at, bounce_kind FROM mail_outbound_recipients \
              WHERE outbound_id = $1 ORDER BY created_at, id",
         )
         .bind(outbound_id.to_string())
@@ -1109,6 +1234,10 @@ impl MailRepository {
                         .map(TimestampMillis::from_millis),
                     last_response: row.try_get("last_response")?,
                     provider_message_id: row.try_get("provider_message_id")?,
+                    bounce_kind: row
+                        .try_get::<Option<String>, _>("bounce_kind")?
+                        .as_deref()
+                        .and_then(BounceKind::parse),
                 })
             })
             .collect()
@@ -1143,12 +1272,14 @@ impl MailRepository {
         Ok(Some(audience))
     }
 
-    /// Whether mail to `domain` stays on this instance (spec D11): a verified domain whose MX
-    /// record pointed here at its last DNS check. A verified domain whose MX is elsewhere goes
-    /// out by the route.
+    /// Whether mail to `domain` stays on this instance (spec D11): a domain of this instance,
+    /// `verified` or `suspended`, whose last DNS check found its MX record right (the stored MX
+    /// status is OK). Intake's recipient lookup then decides the rest: a suspended domain still
+    /// takes mail during its grace period and refuses it after (a 5xx, recorded as such). A
+    /// domain whose MX check is not OK goes out by the route.
     pub async fn is_local_domain(&self, domain: &str) -> Result<bool, MailError> {
         let id: Option<String> = sqlx::query_scalar(
-            "SELECT id FROM mail_domains WHERE name = $1 AND status = 'verified'",
+            "SELECT id FROM mail_domains WHERE name = $1 AND status IN ('verified', 'suspended')",
         )
         .bind(domain)
         .fetch_optional(self.database.pool())

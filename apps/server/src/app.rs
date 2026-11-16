@@ -410,6 +410,9 @@ impl App {
                 config.mail.max_message_bytes + TRACE_HEADROOM,
             ),
             live: crate::live::LiveHub::of(&database),
+            send_timeout: std::time::Duration::from_millis(
+                crate::mail_send::SEND_TIMEOUT_MS.unsigned_abs(),
+            ),
         };
 
         let linear_imports = LinearImportService::new(

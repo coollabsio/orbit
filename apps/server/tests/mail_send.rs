@@ -1280,6 +1280,7 @@ impl Fixture {
             ),
             intake: self.intake.clone(),
             live: LiveHub::of(&self.database),
+            send_timeout: std::time::Duration::from_secs(1200),
         }
     }
 }

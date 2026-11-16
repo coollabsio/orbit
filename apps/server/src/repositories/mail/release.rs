@@ -783,15 +783,17 @@ impl MailRepository {
     /// `mail.send_sweep`, delivery side: recipients left `sending` past
     /// [`super::SENDING_LEASE_MS`] are deferred ([`Self::requeue_stale_sending`]), then
     /// `mail.send` is queued again for released messages with a due recipient (queued, or
-    /// deferred and due) and no queued or running job (the job store gave up on a crash). A
-    /// paused message waits for the resume. Returns how many were queued.
+    /// deferred and due) and no queued or running job (the job store gave up on a crash). The
+    /// messages of a paused workspace (`mail_send_policies.paused_at`) wait for the resume.
+    /// Returns how many were queued.
     pub async fn sweep_deliveries(&self, now: TimestampMillis) -> Result<u64, MailError> {
         self.requeue_stale_sending(super::SENDING_LEASE_MS, now)
             .await?;
         let mut transaction = self.database.immediate_transaction().await?;
         let rows = sqlx::query(
             "SELECT o.id, o.workspace_id FROM mail_outbound o WHERE o.status = 'released' \
-             AND (o.hold_reason IS NULL OR o.hold_reason <> 'paused') \
+             AND NOT EXISTS (SELECT 1 FROM mail_send_policies p \
+             WHERE p.workspace_id = o.workspace_id AND p.paused_at IS NOT NULL) \
              AND EXISTS (SELECT 1 FROM mail_outbound_recipients r WHERE r.outbound_id = o.id \
              AND (r.status = 'queued' OR (r.status = 'deferred' AND r.next_attempt_at <= $1))) \
              AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.kind = 'mail.send' \

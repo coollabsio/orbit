@@ -896,6 +896,20 @@ async fn send_tables_exist() {
     .await
     .unwrap();
     f.exec(
+        "UPDATE mail_outbound_recipients SET status = 'bounced', bounce_kind = 'hard'",
+        &[],
+    )
+    .await
+    .unwrap();
+    assert!(
+        f.exec(
+            "UPDATE mail_outbound_recipients SET bounce_kind = 'soft'",
+            &[],
+        )
+        .await
+        .is_err()
+    );
+    f.exec(
         "INSERT INTO mail_suppressions (workspace_id, address, reason, created_at) \
          VALUES ($1, 'bob@example.net', 'hard_bounce', $2)",
         &[&w, &now],

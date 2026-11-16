@@ -158,6 +158,11 @@ CREATE TABLE mail_outbound_recipients (
     next_attempt_at INTEGER,
     last_response TEXT,
     provider_message_id TEXT,
+    -- Why a bounced recipient bounced: `hard` (a 5xx refusal of the recipient), `gave_up` (still
+    -- deferred after the last retry), `route` (gave up on route errors), `unreadable` (the sent
+    -- message could not be read). Only `hard` counts toward the bounce rate and suppressions.
+    bounce_kind TEXT CHECK (bounce_kind IS NULL OR bounce_kind IN ('hard', 'gave_up', 'route',
+        'unreadable')),
     -- When the send counted against the limits.
     released_at INTEGER,
     created_at INTEGER NOT NULL,

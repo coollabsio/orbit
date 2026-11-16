@@ -1,28 +1,36 @@
 //! Delivery of a released message (spec §5.3 steps 5–7, §5.4): each run of `mail.send` claims
 //! the due recipients, sends to them and records each result, then says when to run again.
 //!
-//! - **No double send.** The recipients are `sending` with the attempt's ID and committed before
-//!   anything is sent ([`MailRepository::claim_recipients`]); only then do they go out, and the
-//!   results are recorded for that attempt only. A worker that stops in between leaves them
-//!   `sending` until [`SENDING_LEASE_MS`] ends; they are then deferred and sent again (at least
-//!   once).
-//! - **Local recipients** (D11): an address of a verified domain of this instance whose MX
-//!   points here goes straight to intake ([`MailIntake::accept`], `Source::Local`) with the same
-//!   signed bytes, so a copy to the sender's own mailbox is deduped like any other (`mailbox_id`,
-//!   `raw_sha256`). A verified domain whose MX is elsewhere goes by the route.
-//! - **Routes.** The From domain's route ([`MailRepository::route_for_domain`]). `direct` and
-//!   `smtp` send one envelope per recipient, with the VERP sender `bounce+{token}@{from domain}`
-//!   (the token holds the recipient's ID, [`MailRepository::bounce_key`]) and the recipient's ID as
-//!   correlation; `resend` one per recipient with the From address and the correlation
-//!   `{outbound id}:{recipient id}` (its idempotency key); the other kinds one call for all
-//!   recipients with the From address and the outbound's ID as correlation (their events name
-//!   the address). Provider headers are put in front of the signed bytes. A `direct` route and a
-//!   workspace's route never reach a private address; an instance route of another kind may (a
-//!   relay on the instance's network).
-//! - **Results.** Accepted → `delivered`; 5xx → `bounced` (the thread goes back to the Inbox,
-//!   unread); 4xx, a network error or a route error (`Route error: …`) → `deferred` until the next
-//!   step of [`RETRY_STEPS_MS`], then `bounced` with [`GAVE_UP`]. A route error is never a bounce
-//!   of the recipient. Each change sends `thread.updated` on the `mail` topic.
+//! - **No double send.** The recipients are `sending` with the attempt's ID and committed
+//!   before anything is sent (`MailRepository::claim_recipients`); only then do they go out,
+//!   and the results are recorded for that attempt only. Each adapter call and each intake call
+//!   is cut off after `SendJobState::send_timeout` (20 min, [`super::SEND_TIMEOUT_MS`]): its
+//!   recipients are deferred with "Timed out". A worker that stops in between leaves them
+//!   `sending` until [`SENDING_LEASE_MS`] (30 min, longer than the timeout) ends; they are then
+//!   deferred and sent again (at least once), and a late result of the old attempt is ignored.
+//! - **Local recipients** (D11): an address of a domain of this instance (verified, or
+//!   suspended) whose stored MX status is OK (its last DNS check found the MX record right)
+//!   goes straight to intake (`MailIntake::accept`, `Source::Local`) with the same signed bytes,
+//!   so a copy to the sender's own mailbox is deduped like any other (`mailbox_id`,
+//!   `raw_sha256`). Intake's recipient lookup decides as for mail from outside: a suspended
+//!   domain takes mail in its grace period, and a refusal is recorded as the 5xx it is. A domain
+//!   whose MX status is not OK goes by the route.
+//! - **Routes.** The From domain's route (`MailRepository::route_for_domain`). `direct` and
+//!   `smtp` send one envelope per recipient, with the VERP sender
+//!   `bounce+{token}@{from domain}` (the token holds the recipient's ID,
+//!   `MailRepository::bounce_key`) and the recipient's ID as correlation; `resend` one per
+//!   recipient with the From address and the correlation `{outbound id}:{recipient id}` (its
+//!   idempotency key); the other kinds one call for all recipients with the From address and
+//!   the outbound's ID as correlation (their events name the address). Provider headers are put
+//!   in front of the signed bytes. A `direct` route and a workspace's route never reach a
+//!   private address; an instance route of another kind may (a relay on the instance's
+//!   network).
+//! - **Results.** Accepted → `delivered`; 5xx → `bounced` with `bounce_kind = 'hard'` (the
+//!   thread goes back to the Inbox, unread); 4xx, a network error, a timeout or a route error
+//!   (`Route error: …`) → `deferred` until the next retry step, then `bounced` with "Gave up
+//!   after 5 days" (`gave_up`, or `route` after a route error). A sent message that cannot be
+//!   read bounces as `unreadable` (it is deferred while the store may recover). Only `hard`
+//!   counts as a bounce of the recipient. Each change sends `thread.updated` on the `mail` topic.
 
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr};
@@ -31,18 +39,19 @@ use futures_util::StreamExt;
 use futures_util::future::BoxFuture;
 use orbit_mail::{AuthOutcome, DmarcVerdict, Verdict, bounce_local_part};
 use orbit_platform::{Id, JobError, TimestampMillis};
-use serde_json::json;
 
 use super::release::SendJobState;
 use super::{
-    Outgoing, RecipientOutcome, SENDING_LEASE_MS, adapter_for, domain_of, provider_headers,
-    with_provider_headers,
+    Outgoing, RecipientOutcome, SENDING_LEASE_MS, UNREADABLE, adapter_for, domain_of,
+    provider_headers, with_provider_headers,
 };
-use crate::live::{NewEvent, Recipients};
 use crate::mail_intake::{InboundMessage, IntakeError, Recipient, Source};
 use crate::repositories::mail::{
-    Claim, MAIL_TOPIC, MailError, OutboundDelivery, RecipientLookup, RecipientRow, SendRouteKind,
+    Claim, MailError, OutboundDelivery, RecipientLookup, RecipientRow, SendRouteKind,
 };
+
+/// The response of the recipients of a call that took longer than the send timeout.
+const TIMED_OUT: &str = "Timed out";
 
 /// At most this many single-recipient sends of one run go at the same time.
 const PARALLEL_SENDS: usize = 8;
@@ -114,10 +123,19 @@ pub async fn deliver_due(
             return Err(JobError::Retryable(error.to_string()));
         }
         Err(error) => {
-            let response = format!("The message could not be read: {error}");
+            // Gone or not decryptable stays so; another store error may pass.
+            let lasting = matches!(error, MailError::NotFound | MailError::Crypto);
+            let response = format!("{UNREADABLE}: {error}");
             recipients
                 .iter()
-                .map(|recipient| (recipient.id, RecipientOutcome::deferred(&*response)))
+                .map(|recipient| {
+                    let outcome = if lasting {
+                        RecipientOutcome::bounced(&*response)
+                    } else {
+                        RecipientOutcome::deferred(&*response)
+                    };
+                    (recipient.id, outcome)
+                })
                 .collect()
         }
     };
@@ -252,17 +270,19 @@ async fn deliver_local<'r>(
             from_domain: Some(outbound.from_domain.clone()),
         },
     };
-    let outcome = match state.intake.accept(message).await {
-        Ok(_) => RecipientOutcome::Accepted {
+    let outcome = match tokio::time::timeout(state.send_timeout, state.intake.accept(message)).await
+    {
+        Err(_) => RecipientOutcome::deferred(TIMED_OUT),
+        Ok(Ok(_)) => RecipientOutcome::Accepted {
             provider_message_id: None,
         },
-        Err(IntakeError::TooLarge) => {
+        Ok(Err(IntakeError::TooLarge)) => {
             RecipientOutcome::bounced("552 5.3.4 The message is larger than this server accepts")
         }
-        Err(IntakeError::QuotaExceeded) => RecipientOutcome::deferred(
+        Ok(Err(IntakeError::QuotaExceeded)) => RecipientOutcome::deferred(
             "452 4.2.2 The recipient's workspace is over its storage quota",
         ),
-        Err(IntakeError::Temporary(error)) => RecipientOutcome::deferred(format!(
+        Ok(Err(IntakeError::Temporary(error))) => RecipientOutcome::deferred(format!(
             "451 4.3.0 The message could not be stored: {error}"
         )),
     };
@@ -304,6 +324,7 @@ async fn deliver_by_route(
         &state.delivery
     };
     let adapter = adapter_for(&route, &secrets, ctx);
+    let timeout = state.send_timeout;
     let bounce_key = state.mail.bounce_key();
     let one_by_one = matches!(
         route.kind,
@@ -345,7 +366,10 @@ async fn deliver_by_route(
                     recipients: &address,
                     correlation: &correlation,
                 };
-                adapter.deliver(&outgoing).await
+                match tokio::time::timeout(timeout, adapter.deliver(&outgoing)).await {
+                    Ok(results) => results,
+                    Err(_) => vec![(address[0].clone(), RecipientOutcome::deferred(TIMED_OUT))],
+                }
             }));
         }
         let mut stream = futures_util::stream::iter(sends).buffer_unordered(PARALLEL_SENDS);
@@ -367,7 +391,14 @@ async fn deliver_by_route(
             recipients: &addresses,
             correlation: &correlation,
         };
-        by_address.extend(adapter.deliver(&outgoing).await);
+        match tokio::time::timeout(timeout, adapter.deliver(&outgoing)).await {
+            Ok(results) => by_address.extend(results),
+            Err(_) => by_address.extend(
+                addresses
+                    .iter()
+                    .map(|address| (address.clone(), RecipientOutcome::deferred(TIMED_OUT))),
+            ),
+        }
     }
 
     let mut outcomes = Vec::with_capacity(recipients.len());
@@ -399,25 +430,6 @@ async fn deliver_by_route(
 }
 
 /// `thread.updated` to the readers of the message's thread; the change is stored either way.
-pub(super) async fn announce(state: &SendJobState, outbound_id: Id) {
-    let audience = match state.mail.outbound_audience(outbound_id).await {
-        Ok(Some(audience)) if !audience.users.is_empty() => audience,
-        Ok(_) => return,
-        Err(error) => {
-            tracing::warn!(error = %error, outbound_id = %outbound_id, "mail delivery audience");
-            return;
-        }
-    };
-    let events = [NewEvent {
-        recipients: Recipients::Users(audience.users),
-        topic: MAIL_TOPIC,
-        event: json!({
-            "type": "thread.updated",
-            "mailbox_id": audience.mailbox_id.to_string(),
-            "thread_id": audience.thread_id.to_string(),
-        }),
-    }];
-    if let Err(error) = state.live.publish(audience.workspace_id, &events).await {
-        tracing::warn!(error = %error, "mail events for the live socket");
-    }
+async fn announce(state: &SendJobState, outbound_id: Id) {
+    state.mail.announce_outbounds(&[outbound_id]).await;
 }

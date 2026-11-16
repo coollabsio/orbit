@@ -4,6 +4,7 @@
 #![allow(dead_code)]
 use std::collections::{BTreeSet, HashMap};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use futures_util::future::BoxFuture;
 use orbit_platform::{
@@ -14,14 +15,15 @@ use orbit_server::live::LiveHub;
 use orbit_server::mail_dns::FakeDns;
 use orbit_server::mail_intake::MailIntake;
 use orbit_server::mail_send::{
-    Delivery, DeliveryContext, NextRun, Outgoing, RETRY_STEPS_MS, RecipientOutcome,
+    BounceKind, Delivery, DeliveryContext, NextRun, Outgoing, RETRY_STEPS_MS, RecipientOutcome,
     SENDING_LEASE_MS, SendJobState, deliver_due, run_send_job,
 };
 use orbit_server::repositories::identity::{IdentityRepository, SetupRequest};
 use orbit_server::repositories::instance_settings::InstanceSettingsRepository;
 use orbit_server::repositories::mail::{
-    DraftMode, IngestOutcome, MailAuthResult, MailRepository, MailboxKind, NewDraft, NewMailbox,
-    NewRoute, ProviderScope, RouteSecrets, RouteSettings, SendRouteKind,
+    Claim, DraftMode, IngestOutcome, MailAuthResult, MailRepository, MailboxKind, NewDraft,
+    NewMailbox, NewRoute, ProviderScope, RouteSecrets, RouteSettings, SUSPENDED_GRACE_MS,
+    SendRouteKind,
 };
 use orbit_server::repositories::workspaces::WorkspaceRepository;
 use serde_json::{Value, json};
@@ -45,6 +47,8 @@ struct Call {
 struct Fake {
     calls: Mutex<Vec<Call>>,
     outcomes: Mutex<HashMap<String, RecipientOutcome>>,
+    /// How long each call takes.
+    delay: Mutex<Option<Duration>>,
 }
 
 impl Fake {
@@ -80,6 +84,10 @@ impl Delivery for Fake {
                 correlation: outgoing.correlation.to_owned(),
                 from_domain: outgoing.from_domain.to_owned(),
             });
+            let delay = *self.delay.lock().unwrap();
+            if let Some(delay) = delay {
+                tokio::time::sleep(delay).await;
+            }
             let table = self.outcomes.lock().unwrap();
             outgoing
                 .recipients
@@ -259,6 +267,10 @@ impl Fixture {
     }
 
     fn state(&self) -> SendJobState {
+        self.state_with(Duration::from_secs(20 * 60))
+    }
+
+    fn state_with(&self, send_timeout: Duration) -> SendJobState {
         SendJobState {
             mail: Arc::clone(&self.mail),
             delivery: DeliveryContext::new(
@@ -275,6 +287,7 @@ impl Fixture {
             .with_adapter(Arc::clone(&self.instance_fake) as Arc<dyn Delivery>),
             intake: self.intake.clone(),
             live: LiveHub::of(&self.database),
+            send_timeout,
         }
     }
 
@@ -372,6 +385,18 @@ impl Fixture {
     async fn status_of(&self, id: Id, address: &str) -> String {
         sqlx::query_scalar(
             "SELECT status FROM mail_outbound_recipients WHERE outbound_id = $1 AND address = $2",
+        )
+        .bind(id.to_string())
+        .bind(address)
+        .fetch_one(self.database.pool())
+        .await
+        .unwrap()
+    }
+
+    async fn bounce_kind(&self, id: Id, address: &str) -> Option<String> {
+        sqlx::query_scalar(
+            "SELECT bounce_kind FROM mail_outbound_recipients WHERE outbound_id = $1 \
+             AND address = $2",
         )
         .bind(id.to_string())
         .bind(address)
@@ -682,6 +707,33 @@ async fn gives_up_after_last_step_and_moves_thread_to_inbox() {
     assert_eq!(f.outbound(id).await.0, "done");
     assert!(f.runs(id).await.is_empty());
     assert_eq!(f.thread_state(&thread).await, ("inbox".to_owned(), false));
+    assert_eq!(
+        f.bounce_kind(id, "a@out.test").await.as_deref(),
+        Some("gave_up")
+    );
+
+    // Giving up on route errors is the route's fault, not the recipient's.
+    f.fake.answer(
+        "r@out.test",
+        deferred("Route error: Mailgun refused the route's credentials"),
+    );
+    let (id, t2) = f.send(&["r@out.test"], &[], &[]).await;
+    f.run(id, t2).await;
+    f.sql(
+        &format!(
+            "UPDATE mail_outbound_recipients SET attempts = {}, next_attempt_at = {t2} \
+             WHERE outbound_id = $1",
+            RETRY_STEPS_MS.len()
+        ),
+        &[&id.to_string()],
+    )
+    .await;
+    f.run(id, t2 + 1).await;
+    assert_eq!(f.status_of(id, "r@out.test").await, "bounced");
+    assert_eq!(
+        f.bounce_kind(id, "r@out.test").await.as_deref(),
+        Some("route")
+    );
 }
 
 #[tokio::test]
@@ -696,7 +748,18 @@ async fn smtp_bounce_moves_thread_to_inbox() {
     let (id, t0) = f.send(&["gone@out.test", "a@out.test"], &[], &[]).await;
     f.run(id, t0).await;
     assert_eq!(f.status_of(id, "gone@out.test").await, "bounced");
+    assert_eq!(
+        f.bounce_kind(id, "gone@out.test").await.as_deref(),
+        Some("hard")
+    );
+    assert_eq!(f.bounce_kind(id, "a@out.test").await, None);
     assert_eq!(f.status_of(id, "a@out.test").await, "delivered");
+    let statuses = f.mail.outbound_recipients(id, at(t0)).await.unwrap();
+    let gone = statuses
+        .iter()
+        .find(|status| status.address == "gone@out.test")
+        .unwrap();
+    assert_eq!(gone.bounce_kind, Some(BounceKind::Hard));
     let (status, _, summary) = f.outbound(id).await;
     assert_eq!(status, "done");
     assert!(summary.unwrap().contains("5.1.1 No such user"));
@@ -794,6 +857,10 @@ async fn local_recipient_goes_to_intake() {
         .unwrap();
     assert_eq!(unknown.1, "bounced");
     assert!(unknown.4.unwrap().contains("5.1.1"));
+    assert_eq!(
+        f.bounce_kind(id, "nobody@two.test").await.as_deref(),
+        Some("hard")
+    );
 
     let row = sqlx::query(
         "SELECT id, source, auth, raw_sha256, mail_from FROM mail_receipts WHERE workspace_id = $1",
@@ -951,7 +1018,21 @@ async fn limit_hold_then_release() {
     let (second, due_too) = f.send_at(&["b1@out.test"], &[], &[], now).await;
     assert_eq!(due, due_too);
 
-    // The first finds the second's recipient in the window: over the hour limit, it waits.
+    let released_at = |id: Id| {
+        let pool = f.database.pool().clone();
+        async move {
+            sqlx::query_scalar::<_, Option<i64>>(
+                "SELECT released_at FROM mail_outbound_recipients WHERE outbound_id = $1",
+            )
+            .bind(id.to_string())
+            .fetch_all(&pool)
+            .await
+            .unwrap()
+        }
+    };
+
+    // The first finds the second's recipient in the window: over the hour limit, it waits, and
+    // its recipients keep their room from now.
     f.run(first, due).await;
     let (status, hold, _) = f.outbound(first).await;
     assert_eq!(
@@ -961,18 +1042,13 @@ async fn limit_hold_then_release() {
     assert!(f.fake.calls().is_empty());
     let room = due + HOUR;
     assert_eq!(f.runs(first).await, vec![room]);
-    let released: Vec<Option<i64>> = sqlx::query_scalar(
-        "SELECT released_at FROM mail_outbound_recipients WHERE outbound_id = $1",
-    )
-    .bind(first.to_string())
-    .fetch_all(f.database.pool())
-    .await
-    .unwrap();
-    assert_eq!(released, vec![None, None], "a held message does not count");
+    assert_eq!(released_at(first).await, vec![Some(due), Some(due)]);
 
-    // The second goes: the held one does not take its room.
+    // The second comes after the hold: it waits behind the first instead of taking its room.
     f.run(second, due).await;
-    assert_eq!(f.status_of(second, "b1@out.test").await, "delivered");
+    assert_eq!(f.status_of(second, "b1@out.test").await, "queued");
+    assert_eq!(f.outbound(second).await.1.as_deref(), Some("limit"));
+    assert_eq!(f.runs(second).await, vec![room]);
 
     // At its time the first goes, and counts from then.
     f.run(first, room).await;
@@ -980,14 +1056,23 @@ async fn limit_hold_then_release() {
     assert_eq!(f.status_of(first, "a2@out.test").await, "delivered");
     let (status, hold, _) = f.outbound(first).await;
     assert_eq!((status.as_str(), hold), ("done", None));
-    let released: Vec<Option<i64>> = sqlx::query_scalar(
-        "SELECT released_at FROM mail_outbound_recipients WHERE outbound_id = $1",
-    )
-    .bind(first.to_string())
-    .fetch_all(f.database.pool())
-    .await
-    .unwrap();
-    assert_eq!(released, vec![Some(room), Some(room)]);
+    assert_eq!(released_at(first).await, vec![Some(room), Some(room)]);
+
+    // The second still waits for the first's hour, then goes.
+    f.clear_runs().await;
+    f.run(second, room).await;
+    assert_eq!(f.status_of(second, "b1@out.test").await, "queued");
+    assert_eq!(f.runs(second).await, vec![room + HOUR]);
+    f.run(second, room + HOUR).await;
+    assert_eq!(f.status_of(second, "b1@out.test").await, "delivered");
+    let order: Vec<String> = f
+        .fake
+        .calls()
+        .into_iter()
+        .flat_map(|call| call.recipients)
+        .collect();
+    assert_eq!(order.last().map(String::as_str), Some("b1@out.test"));
+    assert_eq!(order.len(), 3);
 }
 
 #[tokio::test]
@@ -1140,4 +1225,157 @@ async fn sweep_requeues_stranded_delivery() {
     assert_eq!(f.mail.sweep_deliveries(at(t0 + 2)).await.unwrap(), 0);
     // The held-release sweep is unchanged by it.
     assert_eq!(f.mail.sweep_releases(at(t0 + 2)).await.unwrap(), 0);
+}
+
+#[tokio::test]
+async fn slow_send_times_out_and_late_result_is_ignored() {
+    let f = Fixture::new().await;
+    *f.fake.delay.lock().unwrap() = Some(Duration::from_secs(5));
+    let (id, t0) = f.send(&["slow@out.test"], &[], &[]).await;
+    f.mail
+        .release(id, Some("mx.orbit.test"), at(t0))
+        .await
+        .unwrap()
+        .expect("released");
+    let next = deliver_due(&f.state_with(Duration::from_millis(100)), id, at(t0))
+        .await
+        .unwrap();
+    assert_eq!(next, NextRun::At(at(t0 + RETRY_STEPS_MS[0])));
+    let recipient = f.recipients(id).await.remove(0);
+    assert_eq!(recipient.1, "deferred");
+    assert_eq!(recipient.4.as_deref(), Some("Timed out"));
+
+    // An attempt handed on after its lease: the old attempt's late result changes nothing.
+    *f.fake.delay.lock().unwrap() = None;
+    let t1 = t0 + RETRY_STEPS_MS[0];
+    let old = Id::new_v7();
+    let claimed = f.mail.claim_recipients(id, old, at(t1)).await.unwrap();
+    let Claim::Claimed { recipients, .. } = claimed else {
+        panic!("{claimed:?}");
+    };
+    assert_eq!(recipients.len(), 1);
+    let recipient_id = recipients[0].id;
+    f.mail
+        .requeue_stale_sending(SENDING_LEASE_MS, at(t1 + SENDING_LEASE_MS))
+        .await
+        .unwrap();
+    let new = Id::new_v7();
+    let t2 = t1 + SENDING_LEASE_MS;
+    let Claim::Claimed { recipients, .. } = f.mail.claim_recipients(id, new, at(t2)).await.unwrap()
+    else {
+        panic!("not claimed");
+    };
+    assert_eq!(recipients.len(), 1);
+    let late = f
+        .mail
+        .record_outcomes(
+            id,
+            old,
+            &[(
+                recipient_id,
+                RecipientOutcome::Bounced {
+                    response: "550 5.1.1 late".to_owned(),
+                },
+            )],
+            at(t2 + 1),
+        )
+        .await
+        .unwrap();
+    assert!(!late.done);
+    let recipient = f.recipients(id).await.remove(0);
+    assert_eq!(recipient.1, "sending", "still the new attempt's");
+    assert_eq!(f.bounce_kind(id, "slow@out.test").await, None);
+    f.mail
+        .record_outcomes(
+            id,
+            new,
+            &[(
+                recipient_id,
+                RecipientOutcome::Accepted {
+                    provider_message_id: None,
+                },
+            )],
+            at(t2 + 2),
+        )
+        .await
+        .unwrap();
+    assert_eq!(f.status_of(id, "slow@out.test").await, "delivered");
+}
+
+#[tokio::test]
+async fn suspended_domain_is_local_in_grace_and_refused_after() {
+    let f = Fixture::new().await;
+    let (second, _) = f.second_workspace("ok").await;
+    let now = TimestampMillis::now().as_millis();
+    f.sql(
+        &format!("UPDATE mail_domains SET status = 'suspended', suspended_at = {now} WHERE name = 'two.test'"),
+        &[],
+    )
+    .await;
+    let (id, t0) = f.send(&["carl@two.test"], &[], &[]).await;
+    f.run(id, t0).await;
+    assert!(f.fake.calls().is_empty());
+    assert_eq!(f.status_of(id, "carl@two.test").await, "delivered");
+    let receipts: i64 = sqlx::query_scalar(
+        "SELECT CAST(COUNT(*) AS BIGINT) FROM mail_receipts WHERE workspace_id = $1",
+    )
+    .bind(second.to_string())
+    .fetch_one(f.database.pool())
+    .await
+    .unwrap();
+    assert_eq!(receipts, 1);
+
+    // Past the grace period intake refuses it: recorded as that refusal, not sent by the route.
+    f.sql(
+        &format!(
+            "UPDATE mail_domains SET suspended_at = {} WHERE name = 'two.test'",
+            now - SUSPENDED_GRACE_MS - 1
+        ),
+        &[],
+    )
+    .await;
+    let (id, t1) = f.send(&["carl@two.test"], &[], &[]).await;
+    f.run(id, t1).await;
+    assert!(f.fake.calls().is_empty());
+    let recipient = f.recipients(id).await.remove(0);
+    assert_eq!(recipient.1, "bounced");
+    assert!(recipient.4.unwrap().contains("5.7.1"));
+    assert_eq!(
+        f.bounce_kind(id, "carl@two.test").await.as_deref(),
+        Some("hard")
+    );
+}
+
+#[tokio::test]
+async fn unreadable_message_bounces_as_unreadable() {
+    let f = Fixture::new().await;
+    let (id, t0) = f.send(&["a@out.test"], &[], &[]).await;
+    f.mail
+        .release(id, Some("mx.orbit.test"), at(t0))
+        .await
+        .unwrap()
+        .expect("released");
+    // Its data key is gone.
+    f.sql(
+        "UPDATE mail_receipts SET key_version = 99 WHERE source = 'sent'",
+        &[],
+    )
+    .await;
+    f.run(id, t0).await;
+    assert!(f.fake.calls().is_empty());
+    let recipient = f.recipients(id).await.remove(0);
+    assert_eq!(recipient.1, "bounced");
+    assert!(
+        recipient
+            .4
+            .as_deref()
+            .unwrap()
+            .starts_with("The message could not be read"),
+        "{recipient:?}"
+    );
+    assert_eq!(
+        f.bounce_kind(id, "a@out.test").await.as_deref(),
+        Some("unreadable")
+    );
+    assert_eq!(f.outbound(id).await.0, "done");
 }

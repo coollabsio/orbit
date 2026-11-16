@@ -24,7 +24,10 @@ use crate::repositories::mail::{
     HostClass, RouteSecrets, RouteSettings, SendRoute, SendRouteKind, classify_ip,
 };
 
-pub use crate::repositories::mail::{DELAYED_AFTER_MS, GAVE_UP, RETRY_STEPS_MS, SENDING_LEASE_MS};
+pub use crate::repositories::mail::{
+    BounceKind, DELAYED_AFTER_MS, GAVE_UP, RETRY_STEPS_MS, ROUTE_ERROR, SEND_TIMEOUT_MS,
+    SENDING_LEASE_MS, UNREADABLE,
+};
 pub use deliver::{NextRun, deliver_due};
 pub use http::{api_base, delivery_http_client};
 pub use release::{SendJobState, release_failure, run_send_job, send_job_outbound};
