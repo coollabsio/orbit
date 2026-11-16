@@ -10,13 +10,17 @@ import { Button } from '@/components/ui/button'
 import type { CommandId } from '@/shortcuts/commands'
 import { Shortcut } from '@/shortcuts/Shortcut'
 import { useCancelOutbound, useCreateDraft } from '../api/mutations'
-import { useDrafts } from '../api/queries'
+import { mailKeys } from '../api/keys'
+import { useDrafts, useOutbound } from '../api/queries'
+import { heldReplyState } from '../mailStatus'
+import { useQueryClient } from '@tanstack/react-query'
 import { ApiProblem } from '@orbit/api/problem'
+import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { problemText, sendingOutboundId } from '../mailLib'
 import { Composer, type ComposerHandle } from './Composer'
 import { reopenDraft, useArchiveAfterSend, useComposerDock, useInlineReplyHost } from './useComposerDock'
 import { draftText, recipientSummary } from './composeLib'
-import { dismissUndoToast, useAnnounceSent } from './undoSend'
+import { endPendingSend, useAnnounceSent } from './undoSend'
 import type { SentHandler } from './useComposerSend'
 
 export type ReplyMode = 'reply' | 'reply_all' | 'forward'
@@ -47,12 +51,21 @@ export function ThreadReply({ threadId, last, ref }: ThreadReplyProps) {
   const box = useRef<HTMLDivElement>(null)
   const actions = useRef<HTMLDivElement>(null)
   // the reply of this thread is held for sending (undo time, scheduled, a hold): no draft opens until it is undone
-  const [sendingId, setSendingId] = useState<string | null>(null)
+  // (`since`: when the server said so; lists read before that say nothing about it)
+  const [sending, setSending] = useState<{ id: string; since: number } | null>(null)
+  const sendingId = sending?.id ?? null
+  const queryClient = useQueryClient()
+  const workspaceId = useWorkspace().workspace.id
+  // the reply leaves the Outbox and Scheduled lists once it went or was undone (they follow `thread.updated`)
+  const scheduledList = useOutbound('scheduled', undefined, sending !== null)
+  const outboxList = useOutbound('outbox', undefined, sending !== null)
+  const lists = [scheduledList, outboxList].map((list) => ({ items: list.data ?? [], updatedAt: list.data ? list.dataUpdatedAt : 0 }))
+  if (sending && heldReplyState(sending.id, sending.since, lists) === 'gone') setSending(null)
   const cancel = useCancelOutbound()
   const undoButton = useRef<HTMLButtonElement>(null)
   // Undo of a reply sent from here brings it back here
   useInlineReplyHost(threadId, (draftId) => {
-    setSendingId(null)
+    setSending(null)
     setOpenId(draftId)
   })
 
@@ -76,12 +89,15 @@ export function ThreadReply({ threadId, last, ref }: ThreadReplyProps) {
       { mode, thread_id: threadId },
       {
         onSuccess: (draft) => {
-          setSendingId(null)
+          setSending(null)
           show(draft.id, click)
         },
         onError: (error) => {
           const held = sendingOutboundId(error)
-          if (held) setSendingId(held)
+          if (held) {
+            setSending({ id: held, since: Date.now() })
+            void queryClient.invalidateQueries({ queryKey: mailKeys.outboundAll(workspaceId) })
+          }
           else toast.error(problemText(error, 'The reply could not be started.'))
         },
       },
@@ -99,13 +115,13 @@ export function ThreadReply({ threadId, last, ref }: ThreadReplyProps) {
     const outboundId = sendingId
     cancel.mutate(outboundId, {
       onSuccess: (draft) => {
-        dismissUndoToast(outboundId)
-        setSendingId(null)
+        endPendingSend(outboundId)
+        setSending(null)
         reopenDraft(draft, store, 'inline')
       },
       onError: (error) => {
         if (error instanceof ApiProblem && error.code === 'already_sent') {
-          setSendingId(null)
+          setSending(null)
           toast.error('Too late: the message was already sent.')
         } else toast.error(problemText(error, 'The message could not be stopped. Check Sent.'))
       },

@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import { ApiProblem } from '@orbit/api/problem'
-import { bounceReason, deliverySummary, mayChangeVacation, outboxStatus, recipientState, recipientTag, retryErrorText, vacationState } from './mailStatus'
+import { bounceReason, deliverySummary, heldReplyState, mayChangeVacation, outboxStatus, recipientState, recipientTag, retryErrorText, vacationState } from './mailStatus'
 
 const recipient = (address: string, status: string, delayed = false) => ({ address, status, delayed })
 
@@ -97,4 +97,17 @@ test('Turn off: the owner of a personal mailbox, or a mail manager for a shared 
   expect(mayChangeVacation('personal', { owner: false, canManage: true })).toBe(false)
   expect(mayChangeVacation('shared', { owner: false, canManage: true })).toBe(true)
   expect(mayChangeVacation('shared', { owner: false, canManage: false })).toBe(false)
+})
+
+test('a held reply stops showing once lists read after it no longer hold it', () => {
+  const held = { id: 'ob1', status: 'held' }
+  const since = 1000
+  // a list read before the reply was found held says nothing
+  expect(heldReplyState('ob1', since, [{ items: [], updatedAt: 900 }])).toBe('unknown')
+  expect(heldReplyState('ob1', since, [{ items: [held], updatedAt: 1100 }, { items: [], updatedAt: 1100 }])).toBe('held')
+  // released (going) or gone from both lists: no longer held
+  expect(heldReplyState('ob1', since, [{ items: [{ id: 'ob1', status: 'released' }], updatedAt: 1100 }, { items: [], updatedAt: 1100 }])).toBe('gone')
+  expect(heldReplyState('ob1', since, [{ items: [], updatedAt: 1100 }, { items: [], updatedAt: 1200 }])).toBe('gone')
+  // one list still old: wait for it
+  expect(heldReplyState('ob1', since, [{ items: [], updatedAt: 1100 }, { items: [], updatedAt: 0 }])).toBe('unknown')
 })

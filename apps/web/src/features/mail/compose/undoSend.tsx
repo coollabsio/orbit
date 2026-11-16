@@ -22,7 +22,10 @@ const SCHEDULED_TOAST_MS = 6000
 // The sends that can be undone right now, newest last: what `Z` acts on.
 interface PendingUndo {
   id: string
+  outboundId: string
   undo: () => void
+  /** Ends it without undoing: the toast leaves, `Z` no longer acts on it. */
+  finish: () => void
 }
 let pending: readonly PendingUndo[] = []
 const listeners = new Set<() => void>()
@@ -36,15 +39,18 @@ const subscribe = (listener: () => void) => {
 }
 const snapshot = () => pending
 
-/** `Z` undoes the newest send while its toast shows; the command (and its ⌘K entry) exists only then. */
 /** The Undo toast of a sent message. */
 const undoToastId = (outboundId: string) => `mail-sent-${outboundId}`
 
-/** The message was undone elsewhere (the thread's "Undo to edit"): its Undo toast leaves, so it is not undone twice. */
-export function dismissUndoToast(outboundId: string) {
-  toast.dismiss(undoToastId(outboundId))
+/**
+ * The message was undone elsewhere (the thread's "Undo to edit"): its pending send ends like one that went (toast,
+ * timer, `Z`), so it is not undone twice.
+ */
+export function endPendingSend(outboundId: string) {
+  pending.find((entry) => entry.outboundId === outboundId)?.finish()
 }
 
+/** `Z` undoes the newest send while its toast shows; the command (and its ⌘K entry) exists only then. */
 export function useUndoSendShortcut() {
   const entries = useSyncExternalStore(subscribe, snapshot)
   useCommand('mail.undoSend', () => entries.at(-1)?.undo(), { enabled: entries.length > 0 })
@@ -96,7 +102,7 @@ export function useAnnounceSent() {
         )
       }
       timer = setTimeout(finish, outbound.scheduled ? SCHEDULED_TOAST_MS : left)
-      setPending([...pending, { id, undo }])
+      setPending([...pending, { id, outboundId: outbound.id, undo, finish }])
       const title = outbound.scheduled ? `Scheduled for ${sendTimeLabel(new Date(outbound.release_at), new Date(), timeZone, true)}` : 'Message sent'
       toast.custom(() => <UndoSendToast title={title} countdownMs={outbound.scheduled ? null : left} onUndo={undo} />, {
         id,

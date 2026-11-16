@@ -135,3 +135,17 @@ export const recipientTag = (kind: string): 'Bcc' | null => (kind === 'bcc' ? 'B
 export function mayChangeVacation(kind: MailboxKind, viewer: { owner: boolean; canManage: boolean }): boolean {
   return kind === 'personal' ? viewer.owner : viewer.canManage
 }
+
+/**
+ * Whether a reply found held (409 `draft_sending`, at `since`) still is, from the Outbox and Scheduled lists:
+ * `unknown` until every list was read after `since`, then `held` while one lists it as `held`, else `gone` (sent or
+ * undone).
+ */
+export function heldReplyState(
+  outboundId: string,
+  since: number,
+  lists: ReadonlyArray<{ items: ReadonlyArray<{ id: string; status: string }>; updatedAt: number }>,
+): 'held' | 'gone' | 'unknown' {
+  if (lists.some((list) => list.updatedAt < since)) return 'unknown'
+  return lists.some((list) => list.items.some((item) => item.id === outboundId && item.status === 'held')) ? 'held' : 'gone'
+}
