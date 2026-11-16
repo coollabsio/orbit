@@ -135,6 +135,21 @@ impl MailRepository {
         scheduled_at: Option<TimestampMillis>,
         now: TimestampMillis,
     ) -> Result<Outbound, MailError> {
+        self.send_draft_between(membership_id, draft_id, scheduled_at, now, async {})
+            .await
+    }
+
+    /// [`Self::send_draft`], awaiting `between` after the checks and before the hold. For tests
+    /// of a change that lands in between (file changes do not bump the draft's version).
+    #[doc(hidden)]
+    pub async fn send_draft_between(
+        &self,
+        membership_id: Id,
+        draft_id: Id,
+        scheduled_at: Option<TimestampMillis>,
+        now: TimestampMillis,
+        between: impl std::future::Future<Output = ()>,
+    ) -> Result<Outbound, MailError> {
         if let Some(at) = scheduled_at
             && (at <= now || at.as_millis() > now.as_millis() + SCHEDULE_MAX_MS)
         {
@@ -244,18 +259,20 @@ impl MailRepository {
             return Err(MailError::Unprocessable("message_too_large"));
         }
 
+        between.await;
         let mut transaction = self.database.immediate_transaction().await?;
         let limits = load_limits(&mut transaction, workspace_id).await?;
         if all.len() as i64 > limits.max_recipients {
             return Err(MailError::Unprocessable("too_many_recipients"));
         }
-        // The draft must be the one that was checked.
-        if load_draft(&mut transaction, membership_id, draft_id)
-            .await?
-            .version
-            != draft.version
-        {
+        // The draft must be the one that was checked. File changes do not bump the version, so the
+        // size is checked again on the files as they are now.
+        let current = load_draft(&mut transaction, membership_id, draft_id).await?;
+        if current.version != draft.version {
             return Err(MailError::Conflict("draft_conflict"));
+        }
+        if max_bytes > 0 && encoded_size(&current) > max_bytes {
+            return Err(MailError::Unprocessable("message_too_large"));
         }
         let existing = sqlx::query(sqlx::AssertSqlSafe(format!(
             "SELECT {COLUMNS} FROM mail_outbound WHERE draft_id = $1"

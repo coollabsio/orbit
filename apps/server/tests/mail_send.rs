@@ -1054,3 +1054,74 @@ impl Fixture {
         .await
     }
 }
+
+#[tokio::test]
+async fn files_added_after_the_checks_are_sized_when_holding() {
+    let f = Fixture::new().await;
+    f.sql("UPDATE mail_send_routes SET settings = '{\"max_message_bytes\": 10000}'")
+        .await;
+    let draft = f.draft(&["x@out.test"]).await;
+    let sent = f
+        .mail
+        .send_draft_between(
+            f.ann.membership,
+            draft.parse().unwrap(),
+            None,
+            at(TimestampMillis::now().as_millis()),
+            async {
+                // Lands after the read checks; the draft's version does not change.
+                let (status, body) = f.upload(&f.ann, &draft, "big.bin", &[7u8; 20_000]).await;
+                assert_eq!(status, StatusCode::CREATED, "{body}");
+            },
+        )
+        .await;
+    assert!(matches!(
+        sent,
+        Err(orbit_server::repositories::mail::MailError::Unprocessable(
+            "message_too_large"
+        ))
+    ));
+    let held: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM mail_outbound")
+        .fetch_one(f.database.pool())
+        .await
+        .unwrap();
+    assert_eq!(held, 0);
+}
+
+#[tokio::test]
+async fn another_members_held_draft_is_not_found() {
+    let f = Fixture::new().await;
+    let draft = f.draft(&["x@out.test"]).await;
+    f.send(&draft, json!({})).await;
+    let (status, _) = f
+        .call(&f.bob, "DELETE", &format!("/drafts/{draft}"), None)
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _) = f
+        .call(
+            &f.bob,
+            "PATCH",
+            &format!("/drafts/{draft}"),
+            Some(json!({"version": 1})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _) = f
+        .call(
+            &f.bob,
+            "PATCH",
+            &format!("/drafts/{draft}/files/{}", Id::new_v7()),
+            Some(json!({"as_link": true})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _) = f
+        .call(
+            &f.bob,
+            "DELETE",
+            &format!("/drafts/{draft}/files/{}", Id::new_v7()),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
