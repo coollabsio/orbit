@@ -993,3 +993,191 @@ impl Fixture {
         detail["thread"]["unread"].as_bool().unwrap()
     }
 }
+
+impl Fixture {
+    async fn replies_recorded(&self) -> i64 {
+        sqlx::query_scalar("SELECT COUNT(*) FROM mail_vacation_replies")
+            .fetch_one(self.database.pool())
+            .await
+            .unwrap()
+    }
+
+    /// Asks for a reply as ingest would, with the vacation on for the call only.
+    async fn asked(&self, thread: Id, message: Id) -> bool {
+        self.sql("UPDATE mail_vacations SET enabled = 1").await;
+        let sent = self
+            .mail
+            .maybe_vacation_reply(self.ann_personal, thread, message, TimestampMillis::now())
+            .await
+            .unwrap();
+        self.sql("UPDATE mail_vacations SET enabled = 0").await;
+        sent
+    }
+
+    async fn on_message(&self, id: &str, sql: &str) {
+        let receipt: String = sqlx::query_scalar(
+            "SELECT m.receipt_id FROM mail_messages m WHERE m.message_id_header = $1",
+        )
+        .bind(format!("{id}@sender.test"))
+        .fetch_one(self.database.pool())
+        .await
+        .unwrap();
+        sqlx::query(sqlx::AssertSqlSafe(sql.to_owned()))
+            .bind(receipt)
+            .execute(self.database.pool())
+            .await
+            .unwrap();
+    }
+}
+
+#[tokio::test]
+async fn guards_give_no_reply_and_no_record() {
+    let f = Fixture::new().await;
+    f.signing().await;
+    f.away(&f.ann, f.ann_personal, json!({})).await;
+    f.sql("UPDATE mail_vacations SET enabled = 0").await;
+
+    // Spam folder.
+    let (m, t) = f.mail("g1", "ann@one.test", f.ann_primary, "").await;
+    f.sql(&format!(
+        "UPDATE mail_threads SET folder = 'spam' WHERE id = '{t}'"
+    ))
+    .await;
+    assert!(!f.asked(t, m).await);
+
+    // DMARC fail.
+    let (m, t) = f.mail("g2", "ann@one.test", f.ann_primary, "").await;
+    let auth = serde_json::to_string(&AuthOutcome {
+        spf: Verdict::Pass,
+        dkim: Verdict::Pass,
+        dmarc: DmarcVerdict::Fail {
+            policy: orbit_mail::DmarcPolicy::None,
+        },
+        aligned_domain: None,
+        temp_error: false,
+        spf_domain: None,
+        dkim_domain: None,
+        from_domain: None,
+    })
+    .unwrap();
+    f.on_message(
+        "g2",
+        &format!("UPDATE mail_receipts SET auth = '{auth}' WHERE id = $1"),
+    )
+    .await;
+    assert!(!f.asked(t, m).await);
+
+    // An auth value that does not parse: no reply (fails closed).
+    let (m, t) = f.mail("g3", "ann@one.test", f.ann_primary, "").await;
+    f.on_message(
+        "g3",
+        "UPDATE mail_receipts SET auth = '{\"unexpected\": 1}' WHERE id = $1",
+    )
+    .await;
+    assert!(!f.asked(t, m).await);
+
+    // No envelope sender, and the null sender.
+    let (m, t) = f.mail("g4", "ann@one.test", f.ann_primary, "").await;
+    f.on_message(
+        "g4",
+        "UPDATE mail_receipts SET mail_from = NULL WHERE id = $1",
+    )
+    .await;
+    assert!(!f.asked(t, m).await);
+    let (m, t) = f.mail("g5", "ann@one.test", f.ann_primary, "").await;
+    f.on_message(
+        "g5",
+        "UPDATE mail_receipts SET mail_from = '<>' WHERE id = $1",
+    )
+    .await;
+    assert!(!f.asked(t, m).await);
+
+    // A paused workspace.
+    let (m, t) = f.mail("g6", "ann@one.test", f.ann_primary, "").await;
+    f.sql(&format!(
+        "INSERT INTO mail_send_policies (workspace_id, tier, paused_at, created_at, updated_at) \
+         VALUES ('{}', 'standard', 5, 1, 1)",
+        f.workspace
+    ))
+    .await;
+    assert!(!f.asked(t, m).await);
+    f.sql("DELETE FROM mail_send_policies").await;
+
+    // Over a limit: Ann already sent one message this hour and her limit is one.
+    let (m, t) = f.mail("g7", "ann@one.test", f.ann_primary, "").await;
+    f.sql(&format!(
+        "INSERT INTO mail_send_policies (workspace_id, tier, custom_limits, first_release_at, created_at, updated_at) \
+         VALUES ('{}', 'custom', '{{\"per_user_hour\":1,\"per_user_day\":1,\"per_ws_hour\":1,\"per_ws_day\":1,\"max_recipients\":3}}', 1, 1, 1)",
+        f.workspace
+    ))
+    .await;
+    let recent = TimestampMillis::now().as_millis() - 60_000;
+    let outbound = Id::new_v7();
+    f.sql(&format!(
+        "INSERT INTO mail_outbound (id, workspace_id, membership_id, mailbox_id, status, release_at, created_at, updated_at) \
+         VALUES ('{outbound}', '{}', '{}', '{}', 'done', {recent}, {recent}, {recent})",
+        f.workspace, f.ann.membership, f.ann_personal
+    ))
+    .await;
+    f.sql(&format!(
+        "INSERT INTO mail_outbound_recipients (id, outbound_id, workspace_id, membership_id, address, kind, status, released_at, created_at, updated_at) \
+         VALUES ('{}', '{outbound}', '{}', '{}', 'x@out.test', 'to', 'delivered', {recent}, {recent}, {recent})",
+        Id::new_v7(), f.workspace, f.ann.membership
+    ))
+    .await;
+    assert!(!f.asked(t, m).await);
+    f.sql("DELETE FROM mail_send_policies").await;
+    f.sql("DELETE FROM mail_outbound").await;
+
+    assert_eq!(
+        f.replies_recorded().await,
+        0,
+        "a refused reply is not recorded"
+    );
+    assert!(f.auto_outbound(f.ann_personal).await.is_empty());
+    // The same sender still gets a reply once the guards are gone.
+    let (m, t) = f.mail("g8", "ann@one.test", f.ann_primary, "").await;
+    assert!(f.asked(t, m).await);
+    assert_eq!(f.replies_recorded().await, 1);
+}
+
+#[tokio::test]
+async fn multi_byte_subjects_do_not_panic() {
+    let f = Fixture::new().await;
+    f.away(&f.ann, f.ann_personal, json!({})).await;
+    for (index, subject) in ["\u{1F389} Party", "\u{DC}\u{DC}ber", "RE: kept", "\u{DC}"]
+        .iter()
+        .enumerate()
+    {
+        let raw = format!(
+            "From: Carl <carl{index}@sender.test>\r\nTo: ann@one.test\r\nSubject: {subject}\r\n\
+             Message-ID: <u{index}@sender.test>\r\n\r\nHi\r\n"
+        );
+        f.deliver_as(
+            &raw,
+            &format!("carl{index}@sender.test"),
+            "ann@one.test",
+            f.ann_primary,
+            TimestampMillis::now(),
+        )
+        .await;
+    }
+    let subjects: Vec<String> = sqlx::query_scalar(
+        "SELECT auto_reply FROM mail_outbound WHERE auto_reply IS NOT NULL ORDER BY created_at, id",
+    )
+    .fetch_all(f.database.pool())
+    .await
+    .unwrap()
+    .into_iter()
+    .map(|json: String| {
+        serde_json::from_str::<Value>(&json).unwrap()["subject"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    })
+    .collect();
+    assert_eq!(subjects.len(), 4);
+    assert!(subjects[0].starts_with("Re: ") && subjects[0].contains("Party"));
+    assert!(subjects[1].starts_with("Re: ") && subjects[1].contains("ber"));
+    assert_eq!(subjects[2], "RE: kept");
+}

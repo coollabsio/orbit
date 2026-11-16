@@ -882,3 +882,23 @@ impl Fixture {
         detail["thread"]["unread"].as_bool().unwrap()
     }
 }
+
+#[tokio::test]
+async fn seen_addresses_skip_spam_and_trash() {
+    let f = Fixture::new().await;
+    let (_, thread) = f.mail("sp1", "ann@one.test", f.ann_primary, "").await;
+    assert_eq!(
+        f.search(&f.ann, "carl").await,
+        vec![pair("carl@sender.test", "seen")]
+    );
+    f.sql(&format!(
+        "UPDATE mail_threads SET folder = 'spam' WHERE id = '{thread}'"
+    ))
+    .await;
+    assert!(f.search(&f.ann, "carl").await.is_empty());
+    f.sql(&format!(
+        "UPDATE mail_threads SET folder = 'trash', trashed_at = 1 WHERE id = '{thread}'"
+    ))
+    .await;
+    assert!(f.search(&f.ann, "carl").await.is_empty());
+}

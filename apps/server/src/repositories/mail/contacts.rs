@@ -211,6 +211,7 @@ impl MailRepository {
                  FROM mail_thread_messages tm \
                  JOIN mailbox_members mm ON mm.mailbox_id = tm.mailbox_id AND mm.membership_id = $1 \
                  JOIN mail_messages m ON m.id = tm.message_id \
+                 JOIN mail_threads t ON t.id = tm.thread_id AND t.folder NOT IN ('spam', 'trash') \
                  WHERE tm.outgoing = 0 AND m.workspace_id = $2 AND m.from_addr IS NOT NULL \
                  AND (lower(m.from_addr) LIKE $3 ESCAPE '\\' OR lower(COALESCE(m.from_name, '')) LIKE $3 ESCAPE '\\') \
                  GROUP BY lower(m.from_addr) ORDER BY last_at DESC, address LIMIT $4",

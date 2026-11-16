@@ -267,22 +267,35 @@ fn auto_draft(auto: &AutoReply, mailbox_id: Id, now: TimestampMillis) -> Result<
     })
 }
 
-/// The display name a recipient is known by in mail the mailbox received, newest first.
-async fn known_name(
-    connection: &mut sqlx::Transaction<'_, sqlx::Any>,
+/// The display names the recipients are known by in mail the mailbox received (the newest name
+/// of each address), in one query.
+async fn known_names(
+    pool: &sqlx::Pool<sqlx::Any>,
     mailbox_id: Id,
-    address: &str,
-) -> Result<Option<String>, MailError> {
-    let name: Option<Option<String>> = sqlx::query_scalar(
-        "SELECT m.from_name FROM mail_thread_messages tm JOIN mail_messages m ON m.id = tm.message_id \
-         WHERE tm.mailbox_id = $1 AND tm.outgoing = 0 AND lower(m.from_addr) = $2 \
-         AND m.from_name IS NOT NULL AND m.from_name <> '' ORDER BY m.received_at DESC LIMIT 1",
-    )
-    .bind(mailbox_id.to_string())
-    .bind(address)
-    .fetch_optional(&mut **connection)
-    .await?;
-    Ok(name.flatten())
+    addresses: &[String],
+) -> Result<HashMap<String, String>, MailError> {
+    if addresses.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let mut sql = orbit_platform::SqlBuilder::new(
+        "SELECT lower(m.from_addr) AS address, m.from_name FROM mail_thread_messages tm \
+         JOIN mail_messages m ON m.id = tm.message_id WHERE tm.mailbox_id = ",
+    );
+    sql.push_bind(mailbox_id.to_string()).push(
+        " AND tm.outgoing = 0 AND m.from_name IS NOT NULL AND m.from_name <> '' \
+                AND lower(m.from_addr) IN (",
+    );
+    let mut list = sql.separated(", ");
+    for address in addresses {
+        list.push_bind(address.clone());
+    }
+    sql.push(") ORDER BY m.received_at ASC");
+    let mut names = HashMap::new();
+    // Oldest first, so the newest name replaces the older ones.
+    for row in sql.build().fetch_all(pool).await? {
+        names.insert(row.try_get("address")?, row.try_get("from_name")?);
+    }
+    Ok(names)
 }
 
 async fn load_sender(
@@ -436,9 +449,16 @@ impl MailRepository {
         let read_release: i64 = row.try_get("release_at")?;
         // A vacation reply has no draft: it is built from its `auto_reply` (module docs of
         // `vacation`), as a reply to the message it answers, without a quote.
-        let auto: Option<AutoReply> = row
-            .try_get::<Option<String>, _>("auto_reply")?
-            .and_then(|json| serde_json::from_str(&json).ok());
+        let auto: Option<AutoReply> = match row.try_get::<Option<String>, _>("auto_reply")? {
+            Some(json) => match serde_json::from_str(&json) {
+                Ok(auto) => Some(auto),
+                Err(error) => {
+                    tracing::warn!(%outbound_id, error = %error, "mail vacation reply with bad auto_reply");
+                    None
+                }
+            },
+            None => None,
+        };
         let draft = match (draft_id.map(|id| parse_id(&id)).transpose()?, &auto) {
             (Some(draft_id), _) => match load_draft(&mut read, membership_id, draft_id).await {
                 Ok(draft) => Some(draft),
@@ -652,6 +672,13 @@ impl MailRepository {
         drop(raws);
 
         let recipients = recipient_rows(&draft)?;
+        // Names for the contacts, read before the write transaction.
+        let names = if is_auto {
+            HashMap::new()
+        } else {
+            let addresses: Vec<String> = recipients.iter().map(|(a, _)| a.clone()).collect();
+            known_names(self.database.pool(), mailbox_id, &addresses).await?
+        };
         let from = ComposedAddress {
             name: sender.name.clone(),
             address: sender.address.clone(),
@@ -843,26 +870,15 @@ impl MailRepository {
             .await?;
         }
         if !is_auto {
-            let recipients: Vec<(String, Option<String>)> = {
-                let mut named = Vec::new();
-                for (address, _) in &recipients {
-                    named.push((
-                        address.clone(),
-                        known_name(&mut transaction, mailbox_id, address).await?,
-                    ));
-                }
-                named
-            };
-            upsert_contacts(
-                &mut transaction,
-                workspace_id,
-                membership_id,
-                &recipients,
-                now,
-            )
-            .await?;
+            let named: Vec<(String, Option<String>)> = recipients
+                .iter()
+                .map(|(address, _)| (address.clone(), names.get(address).cloned()))
+                .collect();
+            upsert_contacts(&mut transaction, workspace_id, membership_id, &named, now).await?;
         }
-        sqlx::query("UPDATE mail_outbound SET message_id = $1, draft_id = NULL WHERE id = $2")
+        sqlx::query(
+            "UPDATE mail_outbound SET message_id = $1, draft_id = NULL, auto_reply = NULL WHERE id = $2",
+        )
             .bind(message_id.to_string())
             .bind(outbound_id.to_string())
             .execute(&mut *transaction)

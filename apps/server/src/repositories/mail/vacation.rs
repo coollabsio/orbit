@@ -368,10 +368,6 @@ impl MailRepository {
         };
         let starts_at: Option<i64> = settings.try_get("starts_at")?;
         let ends_at: Option<i64> = settings.try_get("ends_at")?;
-        if starts_at.is_some_and(|start| now_ms < start) || ends_at.is_some_and(|end| now_ms >= end)
-        {
-            return Ok(false);
-        }
         let workspace_id = parse_id(&settings.try_get::<String, _>("workspace_id")?)?;
         let personal = settings.try_get::<String, _>("kind")? == "personal";
         let owner = settings
@@ -393,7 +389,7 @@ impl MailRepository {
             return Ok(false);
         }
         let Some(message) = sqlx::query(
-            "SELECT m.receipt_id, m.subject, m.to_addrs, m.cc_addrs, r.mail_from, r.auth \
+            "SELECT m.receipt_id, m.subject, m.to_addrs, m.cc_addrs, r.mail_from, r.auth, r.received_at \
              FROM mail_messages m JOIN mail_receipts r ON r.id = m.receipt_id WHERE m.id = $1",
         )
         .bind(message_id.to_string())
@@ -402,6 +398,13 @@ impl MailRepository {
         else {
             return Ok(false);
         };
+        // The window is the day the mail arrived, not the day the ingest ran.
+        let received_at: i64 = message.try_get("received_at")?;
+        if starts_at.is_some_and(|start| received_at < start)
+            || ends_at.is_some_and(|end| received_at >= end)
+        {
+            return Ok(false);
+        }
         let mail_from: Option<String> = message.try_get("mail_from")?;
         let Some(sender) = mail_from
             .as_deref()
@@ -409,9 +412,12 @@ impl MailRepository {
         else {
             return Ok(false);
         };
-        let dmarc_failed =
-            serde_json::from_str::<AuthOutcome>(&message.try_get::<String, _>("auth")?)
-                .is_ok_and(|auth| matches!(auth.dmarc, DmarcVerdict::Fail { .. }));
+        // An `auth` that does not parse is no reason to reply: it means no reply.
+        let Ok(auth) = serde_json::from_str::<AuthOutcome>(&message.try_get::<String, _>("auth")?)
+        else {
+            return Ok(false);
+        };
+        let dmarc_failed = matches!(auth.dmarc, DmarcVerdict::Fail { .. });
         let sender_text = sender.to_string();
         let own: Vec<(String, String, String, String)> = sqlx::query(
             "SELECT a.id, a.kind, d.id AS domain_id, a.local_part || '@' || d.name AS address \
@@ -524,7 +530,10 @@ impl MailRepository {
         let original_subject: String = message.try_get("subject")?;
         let subject = if configured_subject.trim().is_empty() {
             let trimmed = original_subject.trim();
-            if trimmed.len() >= 3 && trimmed[..3].eq_ignore_ascii_case("re:") {
+            if trimmed
+                .get(..3)
+                .is_some_and(|prefix| prefix.eq_ignore_ascii_case("re:"))
+            {
                 trimmed.to_owned()
             } else {
                 format!("Re: {trimmed}").trim_end().to_owned()
