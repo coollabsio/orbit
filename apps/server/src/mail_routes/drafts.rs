@@ -72,7 +72,7 @@ pub(crate) struct MailDraft {
     updated_at: TimestampMillis,
 }
 
-fn view(draft: Draft) -> MailDraft {
+pub(super) fn view(draft: Draft) -> MailDraft {
     MailDraft {
         id: draft.id,
         mailbox_id: draft.mailbox_id,

@@ -12,7 +12,9 @@ mod health;
 mod ingest;
 mod keys;
 mod labels;
+mod limits;
 mod mailboxes;
+mod outbound;
 mod providers;
 mod reading;
 mod receipts;
@@ -40,6 +42,8 @@ pub use ingest::{
 };
 pub use keys::{MailKeys, open_blob, receipt_aad, seal_blob};
 pub use labels::Label;
+pub use limits::Limits;
+pub use outbound::{Outbound, OutboundItem, OutboundView, SEND_JOB, mail_send_kind};
 pub(crate) use mailboxes::suspend_owned_mailboxes;
 pub use mailboxes::{
     AddressKind, BulkResult, MailAddress, Mailbox, MailboxKind, MailboxStatus, NamePattern,
@@ -84,6 +88,9 @@ pub enum MailError {
     /// Valid input that Orbit refuses, with a stable code (a 422).
     #[error("{0}")]
     Unprocessable(&'static str),
+    /// The domain or mailbox cannot send yet (a 409 `send_not_ready`).
+    #[error("the domain cannot send yet")]
+    NotReady(NotReadyReason),
     #[error("the workspace is over its storage quota")]
     QuotaExceeded,
     /// A sealed value did not open: another app key, other associated data or altered bytes.

@@ -308,7 +308,7 @@ const FILE_COLUMNS: &str = "id, filename, content_type, size, content_id, as_lin
      source_attachment_id";
 
 /// The author's draft with its files; `NotFound` for another member's.
-async fn load_draft(
+pub(super) async fn load_draft(
     transaction: &mut Transaction<'_, Any>,
     membership_id: Id,
     draft_id: Id,

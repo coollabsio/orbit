@@ -11,6 +11,7 @@ pub(crate) mod inbound;
 pub(crate) mod labels;
 pub(crate) mod mailboxes;
 pub(crate) mod providers;
+pub(crate) mod send;
 pub(crate) mod send_routes;
 pub(crate) mod threads;
 
@@ -31,7 +32,7 @@ use crate::mail_image_proxy::ImageProxy;
 use crate::mail_listener::MailListenerStatus;
 use crate::repositories::identity::IdentityRepository;
 use crate::repositories::instance_settings::InstanceSettingsRepository;
-use crate::repositories::mail::{MailError, MailRepository};
+use crate::repositories::mail::{MailError, MailRepository, NotReadyReason};
 use crate::task_routes::{ApiError, authenticate_session, request_id_value, validation};
 
 /// What the setup page needs from the mail configuration.
@@ -318,6 +319,18 @@ pub fn mail_router(state: MailState) -> Router {
             )),
         )
         .route(
+            "/api/v1/workspaces/{workspace_id}/mail/drafts/{draft_id}/send",
+            post(send::send_mail_draft),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/outbound/{outbound_id}/cancel",
+            post(send::cancel_mail_outbound),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/outbound",
+            get(send::list_mail_outbound),
+        )
+        .route(
             "/api/v1/workspaces/{workspace_id}/mail/drafts/{draft_id}/files/{file_id}",
             patch(drafts::update_mail_draft_file).delete(drafts::delete_mail_draft_file),
         )
@@ -541,8 +554,30 @@ fn detail(code: &'static str) -> &'static str {
         }
         "draft_conflict" => "The draft changed after it was read. Refresh and try again.",
         "draft_files_limit" => "A draft can have up to 50 files.",
+        "sending_paused" => {
+            "Sending is paused for this workspace because of bounces or complaints. The root user can resume it."
+        }
+        "already_sent" => "This message has been sent already, so it cannot be undone.",
+        "invalid_address" => "A recipient is not a valid email address.",
+        "no_recipients" => "Add at least one recipient.",
+        "too_many_recipients" => "This message has more recipients than the workspace may send to at once.",
+        "message_too_large" => {
+            "This message is too large for the send route. Send big files as a link."
+        }
         "provider_in_use" => "Route the domains that use this provider elsewhere first.",
         _ => "This action is not possible.",
+    }
+}
+
+fn not_ready_detail(reason: NotReadyReason) -> &'static str {
+    match reason {
+        NotReadyReason::DomainUnverified => "The domain is not verified yet.",
+        NotReadyReason::InboundNotLive => {
+            "The domain's MX record is not set up yet, so replies could not arrive."
+        }
+        NotReadyReason::DkimInactive => "The domain's DKIM record is not published yet.",
+        NotReadyReason::NoRoute => "The domain has no send route.",
+        NotReadyReason::MailboxSuspended => "The mailbox is suspended.",
     }
 }
 
@@ -573,6 +608,14 @@ pub(crate) fn problem(
             code,
             "Conflict",
             detail(code),
+            instance,
+            request_id,
+        ),
+        MailError::NotReady(reason) => ApiError::new(
+            StatusCode::CONFLICT,
+            "send_not_ready",
+            "Conflict",
+            not_ready_detail(reason),
             instance,
             request_id,
         ),
