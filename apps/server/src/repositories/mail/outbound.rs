@@ -701,6 +701,9 @@ pub struct RecipientStatus {
     pub delayed: bool,
     /// Why it bounced, for a `bounced` recipient.
     pub bounce_kind: Option<BounceKind>,
+    /// **Retry** works: the recipient bounced or was suppressed and its row still exists. False
+    /// for a recipient read from `delivery_summary` (its row was purged).
+    pub retryable: bool,
 }
 
 /// The readers of an outbound message's thread, for `thread.updated`.
@@ -737,6 +740,16 @@ async fn next_due(
     .fetch_one(&mut **transaction)
     .await?;
     Ok(next.map(TimestampMillis::from_millis))
+}
+
+/// The ID of the `index`-th recipient of a summary that has no IDs: the message's ID with the
+/// position folded into its low bytes.
+fn legacy_recipient_id(outbound_id: Id, index: usize) -> Id {
+    let mut bytes = outbound_id.to_bytes();
+    for (slot, byte) in bytes[12..].iter_mut().zip((index as u32).to_be_bytes()) {
+        *slot ^= byte;
+    }
+    Id::from_bytes(bytes).unwrap_or(outbound_id)
 }
 
 /// Kept of a recipient's last response in `delivery_summary`.
@@ -1370,6 +1383,7 @@ impl MailRepository {
                     kind: row.try_get("kind")?,
                     delayed: status == "deferred"
                         && released.is_some_and(|at| now.as_millis() - at > DELAYED_AFTER_MS),
+                    retryable: matches!(status.as_str(), "bounced" | "suppressed"),
                     status,
                     attempts: row.try_get("attempts")?,
                     next_attempt_at: row
@@ -1409,10 +1423,13 @@ impl MailRepository {
         };
         Ok(entries
             .iter()
-            .map(|entry| RecipientStatus {
+            .enumerate()
+            .map(|(index, entry)| RecipientStatus {
+                // A summary written before it held IDs has none: a stable ID from the message's
+                // ID and the position, so two reads answer the same. It is never retryable.
                 id: text(entry, "id")
                     .and_then(|id| id.parse().ok())
-                    .unwrap_or_else(Id::new_v7),
+                    .unwrap_or_else(|| legacy_recipient_id(outbound_id, index)),
                 address: text(entry, "address").unwrap_or_default(),
                 kind: text(entry, "kind").unwrap_or_else(|| "to".to_owned()),
                 status: text(entry, "status").unwrap_or_else(|| "delivered".to_owned()),
@@ -1424,6 +1441,7 @@ impl MailRepository {
                 bounce_kind: text(entry, "bounce_kind")
                     .as_deref()
                     .and_then(BounceKind::parse),
+                retryable: false,
             })
             .collect())
     }

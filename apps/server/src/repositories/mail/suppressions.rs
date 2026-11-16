@@ -451,7 +451,8 @@ impl MailRepository {
             .await?;
         }
         if hard {
-            self.check_pause(&mut transaction, workspace_id, now).await?;
+            self.check_pause(&mut transaction, workspace_id, now)
+                .await?;
         }
         bounced_thread_to_inbox(&mut transaction, outbound_id, now).await?;
         update_summary(&mut transaction, outbound_id, now).await?;
@@ -489,7 +490,23 @@ impl MailRepository {
         .fetch_optional(&mut *transaction)
         .await?
         else {
-            return Err(MailError::NotFound);
+            // the recipient row was purged after 90 days: only the summary is left
+            let summarized: Option<String> = sqlx::query_scalar(
+                "SELECT delivery_summary FROM mail_outbound WHERE id = $1 AND workspace_id = $2 \
+                 AND (membership_id = $3 OR EXISTS (SELECT 1 FROM mailbox_members mm \
+                 WHERE mm.mailbox_id = mail_outbound.mailbox_id AND mm.membership_id = $3))",
+            )
+            .bind(outbound_id.to_string())
+            .bind(workspace_id.to_string())
+            .bind(membership_id.to_string())
+            .fetch_optional(&mut *transaction)
+            .await?
+            .flatten();
+            return Err(if summarized.is_some() {
+                MailError::Conflict("recipient_expired")
+            } else {
+                MailError::NotFound
+            });
         };
         let outbound_status: String = row.try_get("outbound_status")?;
         let status: String = row.try_get("status")?;

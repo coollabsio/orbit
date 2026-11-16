@@ -912,8 +912,22 @@ async fn app_origin_404_with_content_origin() {
     assert_eq!(f.get_link(&linked).await.status, StatusCode::OK);
 }
 
+/// Waits for the start of the next minute when the current one is nearly over: the per-minute
+/// limit counts in wall-clock minutes, and a test that crosses the boundary sees a fresh budget.
+async fn steady_minute() {
+    let into = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64
+        % 60_000;
+    if into > 40_000 {
+        tokio::time::sleep(std::time::Duration::from_millis(60_100 - into)).await;
+    }
+}
+
 #[tokio::test]
 async fn rate_limited() {
+    steady_minute().await;
     let f = Fixture::new().await;
     let linked = f.linked("a.bin", b"data").await;
     let path = format!("/mail/f/{}", linked.token);
@@ -1113,6 +1127,7 @@ async fn without_an_origin_the_message_is_held() {
 
 #[tokio::test]
 async fn ipv6_clients_share_a_bucket_per_64() {
+    steady_minute().await;
     let f = Fixture::new().await;
     let linked = f.linked("a.bin", b"data").await;
     let path = format!("/mail/f/{}", linked.token);

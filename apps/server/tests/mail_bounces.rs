@@ -1174,6 +1174,44 @@ async fn retry_removes_suppression_and_requeues() {
 }
 
 #[tokio::test]
+async fn purged_recipient_is_not_retryable() {
+    let f = Fixture::new().await;
+    f.fake.answer(
+        "gone@out.test",
+        RecipientOutcome::bounced("permanent error (550): 5.1.1 No such user"),
+    );
+    let id = f.send(&["gone@out.test"]).await;
+    let gone = f.recipient(id, "gone@out.test").await;
+    let live = f.mail.outbound_recipients(id, at(1)).await.unwrap();
+    assert!(live[0].retryable);
+    // The 90-day purge keeps the summary and removes the rows.
+    sqlx::query("DELETE FROM mail_outbound_recipients WHERE outbound_id = $1")
+        .bind(id.to_string())
+        .execute(f.database.pool())
+        .await
+        .unwrap();
+    let summarized = f.mail.outbound_recipients(id, at(1)).await.unwrap();
+    assert_eq!(summarized.len(), 1);
+    assert_eq!(summarized[0].status, "bounced");
+    assert_eq!(summarized[0].id, gone);
+    assert!(!summarized[0].retryable);
+    let path = format!("/outbound/{id}/recipients/{gone}/retry");
+    let (status, body) = f.call(&f.owner, "POST", &path).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert!(body.to_string().contains("recipient_expired"), "{body}");
+    // An unknown recipient of a message without a summary stays a 404.
+    let other = Id::new_v7();
+    let (status, _) = f
+        .call(
+            &f.owner,
+            "POST",
+            &format!("/outbound/{other}/recipients/{gone}/retry"),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
 async fn member_cannot_list_suppressions() {
     let f = Fixture::new().await;
     let mut transaction = f.database.immediate_transaction().await.unwrap();

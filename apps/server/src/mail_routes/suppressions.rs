@@ -71,6 +71,8 @@ pub(crate) struct MailOutboundRecipient {
     delayed: bool,
     /// Why a bounced recipient bounced: `hard`, `rejected`, `gave_up`, `route` or `unreadable`.
     bounce_kind: Option<String>,
+    /// **Retry** is possible. False once the recipient row is purged (after 90 days).
+    retryable: bool,
 }
 
 fn recipient_view(status: RecipientStatus) -> MailOutboundRecipient {
@@ -83,6 +85,7 @@ fn recipient_view(status: RecipientStatus) -> MailOutboundRecipient {
         next_attempt_at: status.next_attempt_at,
         last_response: status.last_response,
         delayed: status.delayed,
+        retryable: status.retryable,
         bounce_kind: status
             .bounce_kind
             .map(|kind| BounceKind::as_str(kind).to_owned()),
