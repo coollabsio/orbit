@@ -15,8 +15,10 @@ import { Spinner } from '@/components/ui/spinner'
 import { ShortcutKeys } from '@/shortcuts/Shortcut'
 import { problemText, type DraftText } from '../mailLib'
 import { useDeleteDraft, useRemoveDraftFile, useSaveDraft, useSetDraftFileLink, useUploadDraftFile } from '../api/mutations'
-import { useDraft, useFromAddresses, useSnippets, useThread } from '../api/queries'
-import { notReadyText, recipientSummary } from './composeLib'
+import { fetchDraftFile, useDraft, useDraftCheck, useFromAddresses, useSnippets, useThread } from '../api/queries'
+import { useWorkspace } from '@/features/workspaces/workspaceContext'
+import { notReadyText, recipientSummary, recipientsKey, type SuppressedRecipient } from './composeLib'
+import { createInlineImages } from './inlineImages'
 import { ComposerFiles, type PendingUpload } from './ComposerFiles'
 import { FromPicker } from './FromPicker'
 import type { MailEditorHandle } from './MailEditor'
@@ -178,6 +180,11 @@ function ComposerBody({ draft, seed, fromAddresses, saver, onLoaded, isReloading
   const bccField = useRef<RecipientFieldHandle>(null)
   const fileInput = useRef<HTMLInputElement>(null)
   const mounted = useRef(true)
+  const workspaceId = useWorkspace().workspace.id
+  // previews of the images in the text; the object URLs go when the composer closes
+  const [inlineImages] = useState(() => createInlineImages((fileId) => fetchDraftFile(workspaceId, draftId, fileId), draft.files))
+  useEffect(() => inlineImages.setFiles(draft.files), [inlineImages, draft.files])
+  useEffect(() => () => inlineImages.dispose(), [inlineImages])
 
   // the version this body started from: a later 409 with another version shows the server's copy
   const [startVersion] = useState(draft.version)
@@ -195,6 +202,12 @@ function ComposerBody({ draft, seed, fromAddresses, saver, onLoaded, isReloading
   const upload = useUploadDraftFile(draftId)
   const removeFile = useRemoveDraftFile(draftId)
   const setLink = useSetDraftFileLink(draftId)
+  // which saved recipients are suppressed: amber chips now, a warning before sending (U5)
+  const check = useDraftCheck(draftId, recipientsKey(draft.to, draft.cc, draft.bcc))
+  const suppressed = useMemo(
+    () => new Map<string, SuppressedRecipient>((check.data?.suppressed ?? []).map((entry) => [lower(entry.address), entry])),
+    [check.data],
+  )
 
   const messages = thread.data?.messages
   /** Names of the thread's people and of picked contacts, by lower-case address. */
@@ -276,6 +289,7 @@ function ComposerBody({ draft, seed, fromAddresses, saver, onLoaded, isReloading
         text: editor.current?.text() ?? '',
       }
     },
+    removeFiles: (ids) => Promise.all(ids.map((id) => removeFile.mutateAsync(id))),
     onRecipientProblem: () => {
       setFieldsOpen(true)
       requestAnimationFrame(() => toField.current?.focus())
@@ -327,8 +341,37 @@ function ComposerBody({ draft, seed, fromAddresses, saver, onLoaded, isReloading
       const key = crypto.randomUUID()
       setPending((current) => [...current, { key, name: file.name, size: file.size }])
       upload
-        .mutateAsync(file)
+        .mutateAsync({ file })
         .catch((error: unknown) => toast.error(`${file.name}: ${problemText(error, 'The file could not be attached.')}`))
+        .finally(() => {
+          if (mounted.current) setPending((current) => current.filter((entry) => entry.key !== key))
+        })
+    }
+  }
+  /** Images put into the text go in it (after `blockId`); other files, and an image the server cannot show, are attached. */
+  const addToText = (list: readonly File[], blockId: string | null) => {
+    const images = list.filter((file) => file.type.startsWith('image/'))
+    addFiles(list.filter((file) => !file.type.startsWith('image/')))
+    if (images.length === 0) return
+    recheck()
+    for (const file of images) {
+      const key = crypto.randomUUID()
+      setPending((current) => [...current, { key, name: file.name, size: file.size }])
+      upload
+        .mutateAsync({ file, inline: true })
+        .then((uploaded) => {
+          if (!uploaded?.content_id || !mounted.current) return
+          inlineImages.put(uploaded.content_id, file)
+          editor.current?.insertImage(uploaded.content_id, file.name, blockId)
+        })
+        .catch((error: unknown) => {
+          if (error instanceof ApiProblem && error.code === 'inline_not_image') {
+            toast(`${file.name} is attached: only a PNG, JPEG, GIF or WebP image can go in the text.`)
+            addFiles([file])
+          } else {
+            toast.error(`${file.name}: ${problemText(error, 'The image could not be added.')}`)
+          }
+        })
         .finally(() => {
           if (mounted.current) setPending((current) => current.filter((entry) => entry.key !== key))
         })
@@ -408,7 +451,11 @@ function ComposerBody({ draft, seed, fromAddresses, saver, onLoaded, isReloading
       event.stopPropagation()
       dragDepth.current = 0
       setDragging(false)
-      addFiles([...event.dataTransfer.files])
+      const dropped = [...event.dataTransfer.files]
+      // onto the text: images go in it where they were dropped; anywhere else every file is attached
+      const onText = event.target instanceof Element && event.target.closest('[data-slot=mail-editor]')
+      if (onText && editor.current) addToText(dropped, editor.current.blockAt({ x: event.clientX, y: event.clientY }))
+      else addFiles(dropped)
     },
   }
 
@@ -472,13 +519,14 @@ function ComposerBody({ draft, seed, fromAddresses, saver, onLoaded, isReloading
             addresses={to}
             onChange={changeTo}
             names={names}
+            suppressed={suppressed}
             onName={learnName}
             ref={toField}
             autoFocus={noRecipients}
             trailing={!showCc || !showBcc ? ccToggles : null}
           />
-          {showCc ? <RecipientField ref={ccField} label="Cc" addresses={cc} onChange={changeCc} names={names} onName={learnName} /> : null}
-          {showBcc ? <RecipientField ref={bccField} label="Bcc" addresses={bcc} onChange={changeBcc} names={names} onName={learnName} /> : null}
+          {showCc ? <RecipientField ref={ccField} label="Cc" addresses={cc} onChange={changeCc} names={names} suppressed={suppressed} onName={learnName} /> : null}
+          {showBcc ? <RecipientField ref={bccField} label="Bcc" addresses={bcc} onChange={changeBcc} names={names} suppressed={suppressed} onName={learnName} /> : null}
           <div className="flex min-h-9 items-center border-b border-border/60 px-3">
             <input
               value={subject}
@@ -517,7 +565,8 @@ function ComposerBody({ draft, seed, fromAddresses, saver, onLoaded, isReloading
             signatureHtml={signatureOf(initial.from_address_id)}
             snippets={snippets.data ?? NO_SNIPPETS}
             onChange={onBodyChange}
-            onFiles={addFiles}
+            onPasteFiles={addToText}
+            resolveImage={inlineImages.resolve}
             autoFocus={!noRecipients}
             editable={!sending}
             className={inline ? 'min-h-24' : 'min-h-full'}
@@ -532,7 +581,16 @@ function ComposerBody({ draft, seed, fromAddresses, saver, onLoaded, isReloading
           {warnings.map((warning) => (
             <p key={warning.kind} className="flex items-start gap-2">
               <Danger className="mt-0.5 size-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
-              <span className="min-w-0">{warning.message}</span>
+              <span className="min-w-0">
+                {warning.message}
+                {warning.details ? (
+                  <span className="mt-0.5 flex flex-col text-xs text-muted-foreground">
+                    {warning.details.map((line) => (
+                      <span key={line}>{line}</span>
+                    ))}
+                  </span>
+                ) : null}
+              </span>
             </p>
           ))}
           <p className="flex items-center gap-1.5 pl-5.5 text-xs text-muted-foreground">

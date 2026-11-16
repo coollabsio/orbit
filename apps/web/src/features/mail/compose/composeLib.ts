@@ -16,6 +16,16 @@ export interface Warning {
   message: string
   /** The recipients it is about (outside or suppressed ones). */
   addresses?: string[]
+  /** One line for each of them, when the message sums them up. */
+  details?: string[]
+}
+
+/** A recipient on the suppression list (`POST drafts/{id}/check`). */
+export interface SuppressedRecipient {
+  address: string
+  /** `hard_bounce`, `complaint` or `manual`. */
+  reason: string
+  since: string
 }
 
 export interface PreSendInput {
@@ -32,8 +42,10 @@ export interface PreSendInput {
   threadAddresses: readonly string[] | null
   /** The workspace's mail domains. */
   workspaceDomains: readonly string[]
-  /** Recipients known to be on the suppression list (lower case). */
-  suppressed: Iterable<string>
+  /** Recipients on the suppression list, as the server's check names them. */
+  suppressed: readonly SuppressedRecipient[]
+  /** For the dates in the messages; the user's own when absent. */
+  timeZone?: string
 }
 
 const ATTACHMENT_WORD = /\battach(ed|ment|ments)?\b/i
@@ -87,16 +99,39 @@ export function preSendWarnings(input: PreSendInput): Warning[] {
   if (input.mode === 'reply_all' && recipients.length > REPLY_ALL_LIMIT) {
     warnings.push({ kind: 'reply_all_over_10', message: `Reply all goes to ${recipients.length} people.` })
   }
-  const suppressedSet = new Set([...input.suppressed].map(lower))
-  const suppressed = recipients.filter((address) => suppressedSet.has(lower(address)))
+  const entries = new Map(input.suppressed.map((entry) => [lower(entry.address), entry]))
+  const suppressed = recipients.filter((address) => entries.has(lower(address)))
   if (suppressed.length > 0) {
+    const details = suppressed.map((address) => {
+      const text = suppressionText(entries.get(lower(address))!, input.timeZone)
+      return `${address}: ${text.charAt(0).toLowerCase()}${text.slice(1)}`
+    })
     warnings.push({
       kind: 'suppressed',
-      message: `Mail to ${people(suppressed)} bounced before. Orbit will skip ${suppressed.length === 1 ? 'it' : 'them'}.`,
+      message:
+        suppressed.length === 1
+          ? `${details[0]}. Orbit will skip it.`
+          : `${suppressed.length} recipients are on the suppression list. Orbit will skip them.`,
       addresses: suppressed,
+      details: suppressed.length === 1 ? undefined : details,
     })
   }
   return warnings
+}
+
+const SUPPRESSION_REASONS: Record<string, string> = {
+  hard_bounce: 'the address does not take mail',
+  complaint: 'marked the mail as spam',
+  manual: 'added by an admin',
+}
+
+/** Why and since when an address is suppressed: "Bounced on Nov 3, 2026: the address does not take mail". */
+export function suppressionText(entry: Pick<SuppressedRecipient, 'reason' | 'since'>, timeZone?: string): string {
+  const since = new Date(entry.since)
+  const reason = SUPPRESSION_REASONS[entry.reason]
+  if (Number.isNaN(since.getTime()) || !reason) return 'Bounced before'
+  const date = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone }).format(since)
+  return `Bounced on ${date}: ${reason}`
 }
 
 // Size and file links
@@ -157,13 +192,20 @@ export function likelyLimit(size: number): number {
   return ROUTE_LIMITS.filter((limit) => limit < size).at(-1) ?? ROUTE_LIMITS[0]
 }
 
+/** The message is too large: its size, the limit, and the files to send as links. */
+export interface TooLarge {
+  size: number
+  limit: number
+  suggestion: string[]
+}
+
 /**
- * The files to offer as links after the server refused the message as too large: enough for the likely limit, and
- * at least the largest linkable file (the guess can be wrong, and a link always makes the message smaller).
+ * The files to offer as links when the message is too large: enough for `limit` (the route's, else the likely one),
+ * and at least the largest linkable file (an estimate can be off, and a link always makes the message smaller).
  */
-export function offerLinks(files: readonly SizedFile[], bodyBytes: number): { size: number; limit: number; suggestion: string[] } {
+export function offerLinks(files: readonly SizedFile[], bodyBytes: number, knownLimit?: number | null): TooLarge {
   const size = encodedSize(files, bodyBytes)
-  const limit = likelyLimit(size)
+  const limit = knownLimit || likelyLimit(size)
   const suggestion = suggestLinks(files, limit, bodyBytes)
   if (suggestion.length === 0) {
     const largest = files.filter((file) => file.linkable && !file.asLink).sort((a, b) => b.size - a.size)[0]
@@ -172,7 +214,28 @@ export function offerLinks(files: readonly SizedFile[], bodyBytes: number): { si
   return { size, limit, suggestion }
 }
 
+/** Before sending: the message is over the route's limit of the From address (`null` without a limit or when it fits). */
+export function sizeCheck(files: readonly SizedFile[], bodyBytes: number, limit: number | null | undefined): TooLarge | null {
+  if (!limit || encodedSize(files, bodyBytes) <= limit) return null
+  return offerLinks(files, bodyBytes, limit)
+}
+
+/** An image uploaded into the text (not a forwarded one): it shows in the text, not as a file. */
+export const isInlineUpload = (file: { content_id?: string | null; source_attachment_id?: string | null }) =>
+  Boolean(file.content_id?.trim()) && !file.source_attachment_id
+
+/**
+ * Inline images uploaded into the text that the text no longer shows (the block was deleted): the server sends every
+ * inline file, so they are removed before sending. Forwarded inline images belong to the original and stay.
+ */
+export function unusedInlineFiles(files: readonly { id: string; content_id?: string | null; source_attachment_id?: string | null }[], html: string): string[] {
+  return files.filter((file) => isInlineUpload(file) && !html.includes(`cid:${file.content_id!.trim()}`)).map((file) => file.id)
+}
+
 // Recipients
+
+/** The recipients of a draft as one stable key (lower case, sorted), e.g. for the suppression check. */
+export const recipientsKey = (...lists: readonly (readonly string[])[]) => [...new Set(lists.flat().map(lower))].sort().join(',')
 
 /** A recipient list with the text still typed in its field added (split like a paste, no duplicates). */
 export function commitTyped(addresses: readonly string[], typed: string): string[] {

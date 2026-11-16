@@ -7,6 +7,9 @@ import {
   linkRefusal,
   offerLinks,
   preSendWarnings,
+  sizeCheck,
+  suppressionText,
+  unusedInlineFiles,
   recipientSummary,
   sendLaterPresets,
   signatureStart,
@@ -79,10 +82,60 @@ test('reply_all_over_10: reply all to more than 10 people', () => {
   expect(kinds({ mode: 'new', to: people(11) })).toEqual([])
 })
 
-test('suppressed: a recipient on the suppression list', () => {
-  const [warning] = preSendWarnings({ ...base, to: ['ann@acme.io'], bcc: ['Gone@Old.com'], suppressed: ['gone@old.com'] })
+test('suppressed: a recipient on the suppression list, with when and why', () => {
+  const [warning] = preSendWarnings({
+    ...base,
+    to: ['ann@acme.io'],
+    bcc: ['Gone@Old.com'],
+    suppressed: [{ address: 'gone@old.com', reason: 'hard_bounce', since: '2026-11-03T10:00:00Z' }],
+    timeZone: 'UTC',
+  })
   expect(warning?.kind).toBe('suppressed')
   expect(warning?.addresses).toEqual(['Gone@Old.com'])
+  expect(warning?.message).toBe('Gone@Old.com: bounced on Nov 3, 2026: the address does not take mail. Orbit will skip it.')
+  // several
+  const [many] = preSendWarnings({
+    ...base,
+    to: ['a@old.com', 'b@old.com'],
+    suppressed: [
+      { address: 'a@old.com', reason: 'complaint', since: '2026-11-01T00:00:00Z' },
+      { address: 'b@old.com', reason: 'manual', since: '2026-11-02T00:00:00Z' },
+    ],
+    timeZone: 'UTC',
+  })
+  expect(many?.message).toBe('2 recipients are on the suppression list. Orbit will skip them.')
+  expect(many?.details).toEqual(['a@old.com: bounced on Nov 1, 2026: marked the mail as spam', 'b@old.com: bounced on Nov 2, 2026: added by an admin'])
+})
+
+test('a suppressed recipient reads as when and why', () => {
+  expect(suppressionText({ reason: 'hard_bounce', since: '2026-11-03T10:00:00Z' }, 'UTC')).toBe('Bounced on Nov 3, 2026: the address does not take mail')
+  expect(suppressionText({ reason: 'other', since: 'not a date' }, 'UTC')).toBe('Bounced before')
+})
+
+test('size_check_uses_the_route_limit', () => {
+  const MB = 1_000_000
+  const files = [
+    { id: 'a', size: 6 * MB, asLink: false, linkable: true },
+    { id: 'b', size: 2 * MB, asLink: false, linkable: true },
+  ]
+  // about 10.9 MB encoded: over a 10 MB route, under a 25 MB one, no check without a limit
+  expect(sizeCheck(files, 0, 10_000_000)).toEqual({ size: encodedSize(files, 0), limit: 10_000_000, suggestion: ['a'] })
+  expect(sizeCheck(files, 0, 25_000_000)).toBeNull()
+  expect(sizeCheck(files, 0, null)).toBeNull()
+  // the server's answer: its limit is used instead of a guess
+  expect(offerLinks(files, 0, 25_000_000).limit).toBe(25_000_000)
+})
+
+test('inline images the text no longer shows are not sent', () => {
+  const files = [
+    { id: 'kept', content_id: 'img-1@orbit', source_attachment_id: null },
+    { id: 'gone', content_id: 'img-2@orbit', source_attachment_id: null },
+    // a forwarded inline image belongs to the forwarded original
+    { id: 'forwarded', content_id: 'logo@x', source_attachment_id: 'att' },
+    { id: 'attachment', content_id: null, source_attachment_id: null },
+  ]
+  expect(unusedInlineFiles(files, '<p>Hi</p><img src="cid:img-1@orbit" alt="">')).toEqual(['gone'])
+  expect(unusedInlineFiles(files, '')).toEqual(['kept', 'gone'])
 })
 
 test('encoded_size_counts_base64', () => {

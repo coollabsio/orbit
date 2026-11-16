@@ -2,14 +2,27 @@
 // them, the next one sends anyway), saving the draft as it is, the send itself, and the offer to send large files as
 // links when the server refuses the size (§5.9).
 import { useEffect, useRef, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import type { MailDraft, MailFromAddress, MailOutbound } from '@orbit/api/generated/types.gen'
 import { ApiProblem } from '@orbit/api/problem'
 import { problemText } from '../mailLib'
 import { useSaveDraft, useSendDraft } from '../api/mutations'
-import { useFromAddresses, useMailMe, useThread } from '../api/queries'
-import { isValidAddress, linkRefusal, MESSAGE_OVERHEAD_BYTES, offerLinks, preSendWarnings, type Warning } from './composeLib'
-import type { TooLarge } from './ComposerFiles'
+import { draftCheckQuery, useFromAddresses, useMailMe, useThread } from '../api/queries'
+import { useWorkspace } from '@/features/workspaces/workspaceContext'
+import {
+  isValidAddress,
+  linkRefusal,
+  MESSAGE_OVERHEAD_BYTES,
+  offerLinks,
+  preSendWarnings,
+  recipientsKey,
+  sizeCheck,
+  unusedInlineFiles,
+  type SuppressedRecipient,
+  type TooLarge,
+  type Warning,
+} from './composeLib'
 
 /** The composer's fields as they are when Send is pressed (typed recipients committed, the body exported). */
 export interface ComposedMessage {
@@ -32,6 +45,8 @@ export interface ComposerSendOptions {
   blocked: string | null
   fromAddresses: readonly MailFromAddress[]
   collect: () => ComposedMessage
+  /** Removes draft files (inline images no longer in the text). */
+  removeFiles: (ids: string[]) => Promise<unknown>
   /** No recipient, or one is invalid: show the fields. */
   onRecipientProblem: () => void
   onSent?: (outbound: MailOutbound, draft: MailDraft) => void
@@ -39,6 +54,8 @@ export interface ComposerSendOptions {
 }
 
 const utf8Length = (text: string) => new TextEncoder().encode(text).length
+const sizedFiles = (files: MailDraft['files']) =>
+  files.map((file) => ({ id: file.id, size: file.size, asLink: file.as_link, linkable: linkRefusal(file) === null }))
 
 /** The workspace's mail domains as a member can know them: own addresses, the mailboxes, inside senders. */
 function workspaceDomains(addresses: readonly string[], messages: readonly { from?: { address: string } | null; from_external: boolean }[] | undefined) {
@@ -52,7 +69,9 @@ function workspaceDomains(addresses: readonly string[], messages: readonly { fro
   return [...domains]
 }
 
-export function useComposerSend({ draft, saver, blocked, fromAddresses, collect, onRecipientProblem, onSent, onClose }: ComposerSendOptions) {
+export function useComposerSend({ draft, saver, blocked, fromAddresses, collect, removeFiles, onRecipientProblem, onSent, onClose }: ComposerSendOptions) {
+  const queryClient = useQueryClient()
+  const workspaceId = useWorkspace().workspace.id
   const [warnings, setWarnings] = useState<Warning[]>([])
   const [notice, setNotice] = useState<string | null>(null)
   const [tooLarge, setTooLarge] = useState<TooLarge | null>(null)
@@ -75,12 +94,22 @@ export function useComposerSend({ draft, saver, blocked, fromAddresses, collect,
     setNotice(null)
   }
 
-  const warningsFor = (message: ComposedMessage) => {
+  /** The saved draft's suppressed recipients (the check reads the saved draft); none when the check fails. */
+  const suppressedOf = async (message: ComposedMessage): Promise<SuppressedRecipient[]> => {
+    try {
+      const check = await queryClient.fetchQuery(draftCheckQuery(workspaceId, draft.id, recipientsKey(message.to, message.cc, message.bcc)))
+      return check.suppressed
+    } catch {
+      return []
+    }
+  }
+
+  const warningsFor = (message: ComposedMessage, fileCount: number, suppressed: SuppressedRecipient[]) => {
     const messages = thread.data?.messages
     return preSendWarnings({
       text: message.text,
       subject: message.subject,
-      fileCount: draft.files.length,
+      fileCount,
       mode: draft.mode,
       to: message.to,
       cc: message.cc,
@@ -90,8 +119,7 @@ export function useComposerSend({ draft, saver, blocked, fromAddresses, collect,
         [...(allFrom.data ?? fromAddresses).map((address) => address.address), ...(me.data?.mailboxes.map((mailbox) => mailbox.primary_address ?? '') ?? [])],
         messages,
       ),
-      // members cannot read the suppression list yet; the server skips those recipients when sending
-      suppressed: [],
+      suppressed,
     })
   }
 
@@ -108,18 +136,25 @@ export function useComposerSend({ draft, saver, blocked, fromAddresses, collect,
       onRecipientProblem()
       return
     }
-    if (warnings.length === 0 || message.recipientsChanged) {
-      const found = warningsFor(message)
-      if (found.length > 0) {
-        setWarnings(found)
-        setNotice(null)
-        return
-      }
-    }
     setSending(true)
     setNotice(null)
     setTooLarge(null)
+    const bodyBytes = MESSAGE_OVERHEAD_BYTES + utf8Length(message.subject) + utf8Length(message.html)
+    let files = draft.files
     try {
+      // the server sends every inline file: images deleted from the text go first
+      const unused = unusedInlineFiles(files, message.html)
+      if (unused.length > 0) {
+        await removeFiles(unused).catch(() => {})
+        files = files.filter((file) => !unused.includes(file.id))
+      }
+      // over the route's limit: it would be refused, so offer links now
+      const limit = fromAddresses.find((address) => address.address_id === message.fromId)?.max_message_bytes
+      const over = sizeCheck(sizedFiles(files), bodyBytes, limit)
+      if (over) {
+        setTooLarge(over)
+        return
+      }
       const before = saver.current().restore
       saver.save({ to: message.to, cc: message.cc, bcc: message.bcc, subject: message.subject, from_address_id: message.fromId, body_html: message.html })
       await saver.flush()
@@ -134,17 +169,27 @@ export function useComposerSend({ draft, saver, blocked, fromAddresses, collect,
         )
         return
       }
+      // U5: the first try shows the checks, the next one sends anyway (the server still skips suppressed recipients)
+      if (warnings.length === 0 || message.recipientsChanged) {
+        const found = warningsFor(message, files.length, await suppressedOf(message))
+        if (found.length > 0) {
+          if (mounted.current) setWarnings(found)
+          return
+        }
+      }
       const outbound = await sendDraft.mutateAsync({ draftId: draft.id, body: scheduledAt ? { scheduled_at: scheduledAt.toISOString() } : undefined })
       saver.stop()
-      const sent: MailDraft = { ...draft, to: message.to, cc: message.cc, bcc: message.bcc, subject: message.subject, from_address_id: message.fromId, body_html: message.html }
+      const sent: MailDraft = { ...draft, files, to: message.to, cc: message.cc, bcc: message.bcc, subject: message.subject, from_address_id: message.fromId, body_html: message.html }
       if (onSent) onSent(outbound, sent)
       else toast.success(outbound.scheduled ? 'Message scheduled' : 'Message sent')
       onClose()
     } catch (error) {
       if (!mounted.current) return
       if (error instanceof ApiProblem && error.code === 'message_too_large') {
-        const files = draft.files.map((file) => ({ id: file.id, size: file.size, asLink: file.as_link, linkable: linkRefusal(file) === null }))
-        setTooLarge(offerLinks(files, MESSAGE_OVERHEAD_BYTES + utf8Length(message.subject) + utf8Length(message.html)))
+        // the server says its limit and the size it counted
+        const sizes = error.problem as { limit_bytes?: number | null; size_bytes?: number | null }
+        const offer = offerLinks(sizedFiles(files), bodyBytes, sizes.limit_bytes)
+        setTooLarge({ ...offer, size: sizes.size_bytes || offer.size })
       } else {
         setNotice(problemText(error, 'The message could not be sent. Try again.'))
       }

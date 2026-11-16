@@ -11,7 +11,7 @@ import { UserAvatar } from '@/components/common/UserAvatar'
 import { Tip } from '@/components/common/Tip'
 import { useDebouncedValue } from '@/lib/useDebouncedValue'
 import { useContacts } from '../api/queries'
-import { commitTyped, isValidAddress, splitRecipients } from './composeLib'
+import { commitTyped, isValidAddress, splitRecipients, suppressionText, type SuppressedRecipient } from './composeLib'
 
 const sameAddress = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase()
 
@@ -31,6 +31,8 @@ export interface RecipientFieldProps {
   onChange: (addresses: string[]) => void
   /** Names known for addresses (the thread's people, picked contacts), shown on the chips. */
   names: ReadonlyMap<string, string>
+  /** Recipients on the suppression list, by lower-case address: amber chips that say why. */
+  suppressed?: ReadonlyMap<string, SuppressedRecipient>
   onName: (address: string, name: string) => void
   /** After the field (the Cc and Bcc toggles of the To row). */
   trailing?: ReactNode
@@ -38,7 +40,7 @@ export interface RecipientFieldProps {
   ref?: Ref<RecipientFieldHandle>
 }
 
-export function RecipientField({ label, addresses, onChange, names, onName, trailing, autoFocus, ref }: RecipientFieldProps) {
+export function RecipientField({ label, addresses, onChange, names, suppressed, onName, trailing, autoFocus, ref }: RecipientFieldProps) {
   const input = useRef<HTMLInputElement>(null)
   const box = useRef<HTMLDivElement>(null)
   const chips = useRef<(HTMLButtonElement | null)[]>([])
@@ -186,6 +188,7 @@ export function RecipientField({ label, addresses, onChange, names, onName, trai
             }}
             address={address}
             name={names.get(address.toLowerCase())}
+            suppressed={suppressed?.get(address.trim().toLowerCase())}
             onKeyDown={(event) => onChipKeyDown(event, index)}
             onEdit={() => edit(index)}
             onRemove={() => remove(index)}
@@ -227,6 +230,7 @@ function RecipientChip({
   chipRef,
   address,
   name,
+  suppressed,
   onKeyDown,
   onEdit,
   onRemove,
@@ -234,20 +238,35 @@ function RecipientChip({
   chipRef: (element: HTMLButtonElement | null) => void
   address: string
   name: string | undefined
+  suppressed: SuppressedRecipient | undefined
   onKeyDown: (event: KeyboardEvent<HTMLButtonElement>) => void
   onEdit: () => void
   onRemove: () => void
 }) {
   const valid = isValidAddress(address)
   return (
-    <Tip label={valid ? (name ? address : '') : 'Not a valid email address. Press Enter or click to fix it.'}>
+    <Tip
+      label={
+        !valid
+          ? 'Not a valid email address. Press Enter or click to fix it.'
+          : suppressed
+            ? `${name ? `${address}. ` : ''}${suppressionText(suppressed)}. Orbit will skip it.`
+            : name
+              ? address
+              : ''
+      }
+    >
       <span
         data-slot="recipient-chip"
         data-invalid={!valid || undefined}
         className={cn(
           'group/chip inline-flex h-6 max-w-full items-center gap-0.5 rounded-md border pr-0.5 pl-2 text-[0.8125rem] transition-colors duration-100',
           'has-[button:first-child:focus-visible]:border-ring has-[button:first-child:focus-visible]:ring-2 has-[button:first-child:focus-visible]:ring-ring/40',
-          valid ? 'border-transparent bg-muted text-foreground' : 'border-destructive/30 bg-destructive/10 text-destructive',
+          !valid
+            ? 'border-destructive/30 bg-destructive/10 text-destructive'
+            : suppressed
+              ? 'border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300'
+              : 'border-transparent bg-muted text-foreground',
         )}
       >
         <button
@@ -262,7 +281,7 @@ function RecipientChip({
           onKeyDown={onKeyDown}
         >
           {name ?? address}
-          {!valid ? <span className="sr-only"> (invalid address)</span> : null}
+          {!valid ? <span className="sr-only"> (invalid address)</span> : suppressed ? <span className="sr-only"> (suppressed: {suppressionText(suppressed)})</span> : null}
         </button>
         <button
           type="button"

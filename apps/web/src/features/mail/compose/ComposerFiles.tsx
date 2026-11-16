@@ -8,7 +8,7 @@ import { Tip } from '@/components/common/Tip'
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
 import { formatBytes } from '@/lib/formatBytes'
-import { linkRefusal } from './composeLib'
+import { isInlineUpload, linkRefusal, type TooLarge } from './composeLib'
 
 /** A file on its way up. */
 export interface PendingUpload {
@@ -17,12 +17,6 @@ export interface PendingUpload {
   size: number
 }
 
-/** The message was refused as too large: its size, the limit it was likely over, and the files to link. */
-export interface TooLarge {
-  size: number
-  limit: number
-  suggestion: string[]
-}
 
 export function ComposerFiles({
   files,
@@ -44,9 +38,11 @@ export function ComposerFiles({
 }) {
   // files already there when the composer opened show at once; added ones fade in
   const [initial] = useState(() => new Set(files.map((file) => file.id)))
-  if (files.length === 0 && pending.length === 0 && !tooLarge) return null
-  const total = files.reduce((sum, file) => sum + file.size, 0)
-  const links = files.filter((file) => file.as_link).length
+  // images uploaded into the text show there, not as files
+  const shown = files.filter((file) => !isInlineUpload(file))
+  if (shown.length === 0 && pending.length === 0 && !tooLarge) return null
+  const total = shown.reduce((sum, file) => sum + file.size, 0)
+  const links = shown.filter((file) => file.as_link).length
   return (
     <div data-slot="composer-files" className="flex flex-col gap-2 px-3 pb-2">
       {tooLarge ? (
@@ -66,9 +62,9 @@ export function ComposerFiles({
           ) : null}
         </div>
       ) : null}
-      {files.length > 0 || pending.length > 0 ? (
+      {shown.length > 0 || pending.length > 0 ? (
         <ul className="flex flex-wrap gap-1.5" aria-label="Files">
-          {files.map((file) => (
+          {shown.map((file) => (
             <FileChip key={file.id} file={file} fresh={!initial.has(file.id)} busy={busy.has(file.id)} onRemove={() => onRemove(file)} onToggleLink={() => onToggleLink(file)} />
           ))}
           {pending.map((upload) => (
@@ -84,9 +80,9 @@ export function ComposerFiles({
           ))}
         </ul>
       ) : null}
-      {files.length > 1 ? (
+      {shown.length > 1 ? (
         <p className="text-xs text-muted-foreground tabular-nums">
-          {files.length} files · {formatBytes(total)}
+          {shown.length} files · {formatBytes(total)}
           {links > 0 ? ` · ${links} as ${links === 1 ? 'a link' : 'links'}` : ''}
         </p>
       ) : null}

@@ -36,6 +36,8 @@ export const mailKeys = {
   /** Prefix of every draft read. */
   draftsAll: (workspaceId: string) => ['mail', workspaceId, 'drafts'] as const,
   draft: (workspaceId: string, draftId: string) => ['mail', workspaceId, 'draft', draftId] as const,
+  /** The suppressed recipients of a saved draft, for the recipients it had (`recipients`: sorted, joined). */
+  draftCheck: (workspaceId: string, draftId: string, recipients: string) => ['mail', workspaceId, 'draft-check', draftId, recipients] as const,
   /** The addresses the user sends as; of a thread, the one that received it comes first. */
   fromAddresses: (workspaceId: string, threadId?: string) => ['mail', workspaceId, 'from-addresses', threadId ?? null] as const,
   /** Prefix of every outbound view (`sent`, `scheduled`, `outbox`). */

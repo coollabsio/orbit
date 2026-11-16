@@ -32,6 +32,10 @@ export interface MailEditorHandle {
    * changed stays as it is. Returns whether the text changed.
    */
   swapSignature: (previous: string | null, next: string | null) => boolean
+  /** The block at a point of the screen (a drop), else the cursor's block: where dropped images go. */
+  blockAt: (point?: { x: number; y: number }) => string | null
+  /** Puts an uploaded image in the text after `afterBlockId` (or at the end); it is sent as `cid:{contentId}`. */
+  insertImage: (contentId: string, name: string, afterBlockId: string | null) => void
 }
 
 export interface MailEditorProps {
@@ -42,8 +46,10 @@ export interface MailEditorProps {
   snippets: readonly MailSnippet[]
   /** The text changed; `html` exports it (the caller decides when: export is not free). */
   onChange: (html: () => string) => void
-  /** Files pasted into the text (screenshots): the composer attaches them. */
-  onFiles: (files: File[]) => void
+  /** Files pasted into the text (screenshots), with the block they were pasted in: images go inline there. */
+  onPasteFiles: (files: File[], blockId: string | null) => void
+  /** The URL to show for an image's URL (`cid:` previews). Read once. */
+  resolveImage: (url: string) => Promise<string>
   autoFocus: boolean
   editable: boolean
   className?: string
@@ -114,16 +120,16 @@ function insertSnippet(editor: MailEditorInstance, snippet: MailSnippet) {
   selectPlaceholder(editor, from)
 }
 
-export function MailEditor({ initialHtml, signatureHtml, snippets, onChange, onFiles, autoFocus, editable, className, ref }: MailEditorProps) {
+export function MailEditor({ initialHtml, signatureHtml, snippets, onChange, onPasteFiles, resolveImage, autoFocus, editable, className, ref }: MailEditorProps) {
   const { theme } = useTheme()
-  const onFilesRef = useRef(onFiles)
+  const onFilesRef = useRef(onPasteFiles)
   const onChangeRef = useRef(onChange)
   const snippetsRef = useRef(snippets)
   useEffect(() => {
-    onFilesRef.current = onFiles
+    onFilesRef.current = onPasteFiles
     onChangeRef.current = onChange
     snippetsRef.current = snippets
-  }, [onFiles, onChange, snippets])
+  }, [onPasteFiles, onChange, snippets])
   // read once: later draft changes come from this editor
   const [content] = useState(() => initialBlocks(initialHtml, signatureHtml))
 
@@ -131,16 +137,18 @@ export function MailEditor({ initialHtml, signatureHtml, snippets, onChange, onF
     schema: mailEditorSchema,
     initialContent: content as never,
     links: { isValidLink: isSafeLinkHref },
-    // A screenshot (files, no HTML) is attached; copied text and web images go in as text and links.
-    pasteHandler: ({ event, defaultPasteHandler }) => {
+    // Pasted files (a screenshot: files, no HTML) go to the composer; copied text and web images go in as they are.
+    pasteHandler: ({ event, editor: target, defaultPasteHandler }) => {
       const data = event.clipboardData
       const files = data ? [...data.files] : []
       if (files.length > 0 && !data?.types.includes('text/html')) {
-        onFilesRef.current(files)
+        onFilesRef.current(files, target.getTextCursorPosition().block.id)
         return true
       }
       return defaultPasteHandler()
     },
+    // the text keeps `cid:` URLs (what the message sends); the editor shows previews
+    resolveFileUrl: (url: string) => resolveImage(url),
     // the production CSP blocks Tiptap's runtime <style>; index.css has the rules
     _tiptapOptions: { injectCSS: false },
     domAttributes: { editor: { 'aria-label': 'Message' } },
@@ -181,6 +189,26 @@ export function MailEditor({ initialHtml, signatureHtml, snippets, onChange, onF
         if (incoming.length === 0 || !last) return false
         editor.insertBlocks([{ type: 'paragraph' }, ...incoming], last, 'after')
         return true
+      },
+      blockAt: (point) => {
+        const view = editor.prosemirrorView
+        if (point && view) {
+          const found = view.posAtCoords({ left: point.x, top: point.y })
+          if (found) view.dispatch(view.state.tr.setSelection(TextSelection.near(view.state.doc.resolve(found.pos))))
+        }
+        return editor.getTextCursorPosition().block.id ?? null
+      },
+      insertImage: (contentId, name, afterBlockId) => {
+        const anchor = (afterBlockId ? editor.getBlock(afterBlockId) : undefined) ?? editor.document.at(-1)
+        if (!anchor) return
+        const image = { type: 'image', props: { url: `cid:${contentId}`, name, showPreview: true } } as const
+        // an empty line becomes the image; text stays, and the image goes after it
+        const blank = anchor.type === 'paragraph' && blockText(anchor).trim() === ''
+        const [inserted] = blank ? editor.replaceBlocks([anchor], [image]).insertedBlocks : editor.insertBlocks([image], anchor, 'after')
+        if (!inserted) return
+        // a line after the image to go on writing
+        const next = editor.getNextBlock(inserted.id) ?? editor.insertBlocks([{ type: 'paragraph' }], inserted.id, 'after')[0]
+        if (next) editor.setTextCursorPosition(next, 'start')
       },
     }),
     [editor],

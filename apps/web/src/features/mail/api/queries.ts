@@ -1,6 +1,8 @@
 import { keepPreviousData, useInfiniteQuery, useQuery } from '@tanstack/react-query'
 import { apiClient } from '@/api/client'
 import {
+  checkMailDraft,
+  getMailDraftFile,
   createMailViewUrl,
   getMailAdmin,
   getMailboxVacation,
@@ -334,6 +336,34 @@ export function useDraft(draftId: string | null | undefined) {
     enabled: Boolean(draftId),
     staleTime: Infinity,
   })
+}
+
+/** The check of a saved draft: which of its recipients are suppressed. */
+export const draftCheckQuery = (workspaceId: string, draftId: string, recipients: string) => ({
+  queryKey: mailKeys.draftCheck(workspaceId, draftId, recipients),
+  queryFn: async () =>
+    required((await checkMailDraft({ client: apiClient, path: { workspace_id: workspaceId, draft_id: draftId }, throwOnError: true })).data),
+  staleTime: 60_000,
+})
+
+/**
+ * Which recipients of the draft are suppressed, read again when `recipients` (the saved ones, sorted and joined)
+ * change; idle without recipients.
+ */
+export function useDraftCheck(draftId: string, recipients: string) {
+  const workspaceId = useWorkspaceId()
+  return useQuery({ ...draftCheckQuery(workspaceId, draftId, recipients), enabled: recipients !== '', placeholderData: keepPreviousData })
+}
+
+/** The bytes of an uploaded draft file (the preview of an inline image). */
+export async function fetchDraftFile(workspaceId: string, draftId: string, fileId: string): Promise<Blob> {
+  const { data } = await getMailDraftFile({
+    client: apiClient,
+    path: { workspace_id: workspaceId, draft_id: draftId, file_id: fileId },
+    parseAs: 'blob',
+    throwOnError: true,
+  })
+  return data as unknown as Blob
 }
 
 /** Sent, scheduled or waiting (outbox) messages with their delivery state; live through `thread.updated`. */

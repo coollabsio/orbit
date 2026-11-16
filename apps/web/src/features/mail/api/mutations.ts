@@ -570,14 +570,24 @@ function useDraftFilesWrite<Variables>(
   })
 }
 
-/** Attaches one file to a draft (413 `upload_too_large`, 422 `draft_files_limit`). */
+/**
+ * Attaches one file to a draft (413 `upload_too_large`, 422 `draft_files_limit`). `inline`: an image for the text,
+ * which gets a `content_id` (422 `inline_not_image` for anything but PNG, JPEG, GIF or WebP).
+ */
 export function useUploadDraftFile(draftId: string) {
-  return useDraftFilesWrite<File>(
+  return useDraftFilesWrite<{ file: File; inline?: boolean }>(
     draftId,
-    async (workspaceId, file) =>
+    async (workspaceId, { file, inline }) =>
       required(
-        (await uploadMailDraftFile({ client: apiClient, path: { workspace_id: workspaceId, draft_id: draftId }, body: { file }, throwOnError: true }))
-          .data,
+        (
+          await uploadMailDraftFile({
+            client: apiClient,
+            path: { workspace_id: workspaceId, draft_id: draftId },
+            query: inline ? { inline: true } : undefined,
+            body: { file },
+            throwOnError: true,
+          })
+        ).data,
       ),
     (files, file) => (file ? [...files.filter((entry) => entry.id !== file.id), file] : files),
   )
