@@ -57,8 +57,9 @@ use crate::page_routes::PageState;
 use crate::repositories::api_tokens::ApiTokenRepository;
 use crate::repositories::identity::IdentityRepository;
 use crate::repositories::mail::{
-    DNS_CHECK_JOB, MailRepository, PENDING_CHECK_MS, PURGE_JOB, dns_check_kind, mail_ingest_kind,
-    mail_purge_kind, mail_send_kind, run_ingest_job,
+    DNS_CHECK_JOB, MailRepository, PENDING_CHECK_MS, PURGE_JOB, SEND_SWEEP_JOB, SEND_SWEEP_MS,
+    dns_check_kind, mail_ingest_kind, mail_purge_kind, mail_send_kind, mail_send_sweep_kind,
+    run_ingest_job,
 };
 use crate::repositories::page_files::PageFileRepository;
 use crate::repositories::tasks::TaskRepository;
@@ -1380,6 +1381,23 @@ async fn initialize_production_services(
         })
         .and_then(|worker| {
             let mail = Arc::clone(&mail);
+            worker.with_handler(mail_send_sweep_kind(), move |_| {
+                let mail = Arc::clone(&mail);
+                async move {
+                    let now = mail
+                        .database()
+                        .database_now()
+                        .await
+                        .map_err(|error| JobError::Retryable(error.to_string()))?;
+                    mail.sweep_releases(now)
+                        .await
+                        .map(|_| ())
+                        .map_err(|error| JobError::Retryable(error.to_string()))
+                }
+            })
+        })
+        .and_then(|worker| {
+            let mail = Arc::clone(&mail);
             worker.with_handler(mail_purge_kind(), move |_| {
                 let mail = Arc::clone(&mail);
                 async move {
@@ -1448,6 +1466,14 @@ async fn initialize_production_services(
         &scheduler,
         DNS_CHECK_JOB,
         Duration::from_millis(PENDING_CHECK_MS.unsigned_abs()),
+        now,
+    )
+    .await?;
+    // Stranded releases (a failed release, a DKIM key active again) every 5 minutes.
+    ensure_schedule(
+        &scheduler,
+        SEND_SWEEP_JOB,
+        Duration::from_millis(SEND_SWEEP_MS.unsigned_abs()),
         now,
     )
     .await?;

@@ -1896,3 +1896,250 @@ async fn send_job_releases_due_message() {
             .unwrap();
     assert_eq!(sent_receipts, 1);
 }
+
+// ---- Release fix round 1 ----
+
+impl Fixture {
+    async fn outbound_reason(&self, id: Id) -> (String, Option<String>) {
+        let row = sqlx::query("SELECT status, hold_reason FROM mail_outbound WHERE id = $1")
+            .bind(id.to_string())
+            .fetch_one(self.database.pool())
+            .await
+            .unwrap();
+        use sqlx::Row;
+        (row.get("status"), row.get("hold_reason"))
+    }
+
+    async fn queued_send_jobs(&self, id: Id) -> i64 {
+        sqlx::query_scalar(
+            "SELECT COUNT(*) FROM jobs WHERE kind = 'mail.send' AND state = 'queued' \
+             AND payload_json = $1",
+        )
+        .bind(json!({"outbound_id": id.to_string()}).to_string())
+        .fetch_one(self.database.pool())
+        .await
+        .unwrap()
+    }
+
+    async fn external_of(&self, message: Id) -> Option<i64> {
+        self.number(
+            "SELECT external FROM mail_thread_messages WHERE message_id = $1",
+            message,
+        )
+        .await
+    }
+}
+
+#[tokio::test]
+async fn external_rule_in_sent_threads() {
+    let f = Fixture::new().await;
+    f.signing().await;
+    f.no_undo().await;
+    let draft = f
+        .new_draft(f.ann_primary, &["carl@sender.test"], &[], &[])
+        .await;
+    let (_, released, _) = f.send_and_release(&draft).await;
+    let sent_id = parsed(&f.raw_of(released.message_id).await)
+        .message_id
+        .unwrap();
+    let reply = |from: &str, id: &str| {
+        format!(
+            "From: {from}\r\nTo: ann@one.test\r\nSubject: Re: Hello\r\n\
+             Message-ID: <{id}@other.test>\r\nIn-Reply-To: <{sent_id}>\r\n\r\nHi\r\n"
+        )
+    };
+    // An outsider Ann never wrote to: external, also the second time.
+    for id in ["e1", "e2"] {
+        let (message, thread) = f
+            .deliver_raw(reply("eve@evil.test", id), "ann@one.test", f.ann_primary)
+            .await;
+        assert_eq!(thread, released.thread_id);
+        assert_eq!(f.external_of(message).await, Some(1), "{id}");
+    }
+    // The person Ann wrote to is not.
+    let (message, thread) = f
+        .deliver_raw(
+            reply("Carl <carl@sender.test>", "c1"),
+            "ann@one.test",
+            f.ann_primary,
+        )
+        .await;
+    assert_eq!(thread, released.thread_id);
+    assert_eq!(f.external_of(message).await, Some(0));
+}
+
+#[tokio::test]
+async fn sweep_requeues_failed_release() {
+    let f = Fixture::new().await;
+    f.signing().await;
+    let draft = f.new_draft(f.ann_primary, &["x@out.test"], &[], &[]).await;
+    let (_, sent) = f.send(&draft, json!({})).await;
+    let id: Id = sent["id"].as_str().unwrap().parse().unwrap();
+    let (_, release_at, _) = f.outbound_row(&id.to_string()).await;
+    // The job gave up: no job left, the row held with `release_failed`.
+    f.mail
+        .hold_release(id, "release_failed", at(release_at))
+        .await
+        .unwrap();
+    f.sql("DELETE FROM jobs WHERE kind = 'mail.send'").await;
+    // Not before its time.
+    assert_eq!(f.mail.sweep_releases(at(release_at - 1)).await.unwrap(), 0);
+    assert_eq!(f.mail.sweep_releases(at(release_at)).await.unwrap(), 1);
+    assert_eq!(f.queued_send_jobs(id).await, 1);
+    // Its job is queued: the next sweep leaves it alone.
+    assert_eq!(f.mail.sweep_releases(at(release_at + 1)).await.unwrap(), 0);
+    assert_eq!(f.queued_send_jobs(id).await, 1);
+    run_send_job(&f.job_state(), id, at(release_at + 1))
+        .await
+        .unwrap();
+    assert_eq!(f.outbound_reason(id).await, ("released".to_owned(), None));
+}
+
+#[tokio::test]
+async fn dkim_inactive_released_after_key_returns() {
+    let f = Fixture::new().await;
+    let draft = f.new_draft(f.ann_primary, &["x@out.test"], &[], &[]).await;
+    let (_, sent) = f.send(&draft, json!({})).await;
+    let id: Id = sent["id"].as_str().unwrap().parse().unwrap();
+    let (_, release_at, _) = f.outbound_row(&id.to_string()).await;
+    f.sql("DELETE FROM mail_dkim_keys").await;
+    assert!(
+        run_send_job(&f.job_state(), id, at(release_at))
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        f.outbound_reason(id).await,
+        ("held".to_owned(), Some("dkim_inactive".to_owned()))
+    );
+    f.sql("DELETE FROM jobs WHERE kind = 'mail.send'").await;
+    // No key yet: nothing to queue.
+    assert_eq!(f.mail.sweep_releases(at(release_at + 1)).await.unwrap(), 0);
+    f.signing().await;
+    assert_eq!(f.mail.sweep_releases(at(release_at + 2)).await.unwrap(), 1);
+    run_send_job(&f.job_state(), id, at(release_at + 3))
+        .await
+        .unwrap();
+    assert_eq!(f.outbound_reason(id).await, ("released".to_owned(), None));
+}
+
+#[tokio::test]
+async fn missing_file_blob_holds_at_once() {
+    let f = Fixture::new().await;
+    f.signing().await;
+    let draft = f.new_draft(f.ann_primary, &["x@out.test"], &[], &[]).await;
+    let (status, body) = f.upload(&f.ann, &draft, "notes.txt", b"my notes").await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let key: String = sqlx::query_scalar(
+        "SELECT b.storage_key FROM mail_draft_files f \
+         JOIN attachment_blobs b ON b.id = f.blob_id WHERE f.draft_id = $1",
+    )
+    .bind(&draft)
+    .fetch_one(f.database.pool())
+    .await
+    .unwrap();
+    std::fs::remove_file(f._root.path().join("attachments").join(&key)).unwrap();
+    let (_, sent) = f.send(&draft, json!({})).await;
+    let id: Id = sent["id"].as_str().unwrap().parse().unwrap();
+    let (_, release_at, _) = f.outbound_row(&id.to_string()).await;
+    let result = run_send_job(&f.job_state(), id, at(release_at)).await;
+    assert!(
+        matches!(result, Err(orbit_platform::JobError::Permanent(_))),
+        "{result:?}"
+    );
+    assert_eq!(
+        f.outbound_reason(id).await,
+        ("held".to_owned(), Some("file_missing".to_owned()))
+    );
+}
+
+#[tokio::test]
+async fn bcc_only_uses_undisclosed_recipients() {
+    let f = Fixture::new().await;
+    f.signing().await;
+    let draft = f
+        .new_draft(f.ann_primary, &[], &[], &["z@hidden.test"])
+        .await;
+    let (outbound, released, _) = f.send_and_release(&draft).await;
+    let raw = f.raw_of(released.message_id).await;
+    let text = String::from_utf8_lossy(&raw).into_owned();
+    assert!(text.contains("To: undisclosed-recipients:;\r\n"), "{text}");
+    assert!(!text.contains("z@hidden.test"), "{text}");
+    assert!(!text.contains("To: ann@one.test"), "{text}");
+    assert!(parsed(&raw).to.is_empty());
+    let recipients: Vec<String> =
+        sqlx::query_scalar("SELECT address FROM mail_outbound_recipients WHERE outbound_id = $1")
+            .bind(outbound.to_string())
+            .fetch_all(f.database.pool())
+            .await
+            .unwrap();
+    assert_eq!(recipients, vec!["z@hidden.test".to_owned()]);
+}
+
+#[tokio::test]
+async fn references_from_in_reply_to_when_parent_has_none() {
+    let f = Fixture::new().await;
+    f.signing().await;
+    let (_, thread) = f
+        .deliver_raw(
+            "From: Carl <carl@sender.test>\r\nTo: ann@one.test\r\nSubject: Re: Plans\r\n\
+             Message-ID: <m1@sender.test>\r\nIn-Reply-To: <orig@one.test>\r\n\r\nHi\r\n"
+                .to_owned(),
+            "ann@one.test",
+            f.ann_primary,
+        )
+        .await;
+    let draft = f.thread_draft("reply", thread).await;
+    let (_, released, _) = f.send_and_release(&draft).await;
+    let message = parsed(&f.raw_of(released.message_id).await);
+    assert_eq!(message.in_reply_to, vec!["m1@sender.test".to_owned()]);
+    assert_eq!(
+        message.references,
+        vec!["orig@one.test".to_owned(), "m1@sender.test".to_owned()]
+    );
+}
+
+#[tokio::test]
+async fn undo_during_build_releases_nothing() {
+    let f = Fixture::new().await;
+    f.signing().await;
+    let draft = f.new_draft(f.ann_primary, &["x@out.test"], &[], &[]).await;
+    let (_, sent) = f.send(&draft, json!({})).await;
+    let id: Id = sent["id"].as_str().unwrap().parse().unwrap();
+    let (_, release_at, _) = f.outbound_row(&id.to_string()).await;
+    let released = f
+        .mail
+        .release_between(id, None, at(release_at), async {
+            // Undo, then Send again at once, while the message was being built.
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            let (status, back) = f
+                .call(&f.ann, "POST", &format!("/outbound/{id}/cancel"), None)
+                .await;
+            assert_eq!(status, StatusCode::OK, "{back}");
+            f.no_undo().await;
+            let (status, again) = f.send(&draft, json!({})).await;
+            assert_eq!(status, StatusCode::OK, "{again}");
+        })
+        .await
+        .unwrap();
+    assert!(released.is_none());
+    assert_eq!(f.outbound_reason(id).await, ("held".to_owned(), None));
+    let (status, _) = f
+        .call(&f.ann, "GET", &format!("/drafts/{draft}"), None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "The draft is back");
+    let sent_receipts: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM mail_receipts WHERE source = 'sent'")
+            .fetch_one(f.database.pool())
+            .await
+            .unwrap();
+    assert_eq!(sent_receipts, 0);
+    // The new send releases (its own job would).
+    assert!(
+        f.mail
+            .release(id, None, at(release_at))
+            .await
+            .unwrap()
+            .is_some()
+    );
+}

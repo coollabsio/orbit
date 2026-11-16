@@ -64,8 +64,6 @@ pub struct Composed {
 pub enum ComposeError {
     #[error("the {0} header holds a line break or a control character")]
     InvalidHeader(&'static str),
-    #[error("the message has no recipients")]
-    NoRecipients,
     #[error("the message could not be written")]
     Write,
 }
@@ -166,11 +164,9 @@ fn file_part(file: &ComposedFile) -> Result<MimePart<'static>, ComposeError> {
 }
 
 /// Builds the RFC 5322 message with CRLF line endings: `multipart/alternative` text and HTML, wrapped in
-/// `multipart/related` when there are inline files and in `multipart/mixed` when there are attachments.
+/// `multipart/related` when there are inline files and in `multipart/mixed` when there are attachments. Without
+/// `To` and `Cc` (only Bcc recipients) the `To` header is the empty group `undisclosed-recipients:;`.
 pub fn build_message(composed: &Composed) -> Result<Vec<u8>, ComposeError> {
-    if composed.to.is_empty() && composed.cc.is_empty() {
-        return Err(ComposeError::NoRecipients);
-    }
     clean(&composed.subject, "subject")?;
     let message_id = bare_id(&composed.message_id, "message id")?;
 
@@ -181,6 +177,10 @@ pub fn build_message(composed: &Composed) -> Result<Vec<u8>, ComposeError> {
         .subject(composed.subject.clone());
     if !composed.to.is_empty() {
         builder = builder.to(address_list(&composed.to, "to")?);
+    } else if composed.cc.is_empty() {
+        // Only blind recipients (RFC 5322 §3.6.3): an empty group names nobody. Written raw, as
+        // mail-builder would quote the group name.
+        builder = builder.header("To", Raw::new("undisclosed-recipients:;"));
     }
     if !composed.cc.is_empty() {
         builder = builder.cc(address_list(&composed.cc, "cc")?);
@@ -315,8 +315,9 @@ pub fn clean_html(html: &str) -> String {
 }
 
 /// Sanitizes the HTML body of a message to send (a draft, on save and again when the message is built): the
-/// `ammonia` defaults of [`clean_html`] (no `style`, `class`, scripts or event handlers; `http`, `https` and
-/// `mailto` links and images stay) plus `cid:` URLs, which show the message's own inline images.
+/// `ammonia` defaults of [`clean_html`] (no `style`, `class`, scripts or event handlers; links and images keep
+/// only URLs of ammonia's default scheme list, which has `http`, `https`, `mailto`, `tel`, `ftp` and other
+/// non-script schemes, or relative URLs) plus `cid:` URLs, which show the message's own inline images.
 pub fn clean_outgoing_html(html: &str) -> String {
     ammonia::Builder::default()
         .add_url_schemes(&["cid"])

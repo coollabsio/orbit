@@ -71,12 +71,15 @@ pub(super) async fn file(
     let (thread_id, new_thread, external) = match found {
         Some(thread_id) => {
             let external = match first_message(transaction, thread_id).await? {
-                // A thread the mailbox started by sending: an answer of someone it wrote to is
-                // expected, not an outsider joining an inside conversation.
+                // A thread the mailbox started by sending: a message from outside the
+                // workspace's domains is external unless its sender is someone the mailbox
+                // wrote to (`To` or `Cc` of one of its sent messages). Being in the thread
+                // through a received message is not enough, so an outsider who joined once is
+                // marked every time.
                 Some((Some(address), true)) if is_inside(&address, domains) => {
                     !message.sender_inside
                         && match message.sender {
-                            Some(sender) => !is_participant(transaction, thread_id, sender).await?,
+                            Some(sender) => !written_to(transaction, thread_id, sender).await?,
                             None => true,
                         }
                 }
@@ -197,6 +200,32 @@ async fn is_participant(
         for column in ["to_addrs", "cc_addrs"] {
             let list: String = row.try_get(column)?;
             if addresses(&list).any(|found| found == address) {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
+/// Whether `address` is in `To` or `Cc` of a message the mailbox sent in the thread.
+async fn written_to(
+    transaction: &mut Transaction<'_, Any>,
+    thread_id: Id,
+    address: &str,
+) -> Result<bool, MailError> {
+    let rows = sqlx::query(
+        "SELECT m.to_addrs, m.cc_addrs FROM mail_thread_messages tm \
+         JOIN mail_messages m ON m.id = tm.message_id \
+         WHERE tm.thread_id = $1 AND tm.outgoing = 1 LIMIT $2",
+    )
+    .bind(thread_id.to_string())
+    .bind(THREAD_MESSAGES_READ)
+    .fetch_all(&mut **transaction)
+    .await?;
+    for row in rows {
+        for column in ["to_addrs", "cc_addrs"] {
+            let list: String = row.try_get(column)?;
+            if addresses(&list).any(|found| found.eq_ignore_ascii_case(address)) {
                 return Ok(true);
             }
         }

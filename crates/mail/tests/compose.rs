@@ -178,10 +178,12 @@ fn rejects_crlf_in_header_values() {
 }
 
 #[test]
-fn requires_a_recipient() {
+fn bcc_only_names_undisclosed_recipients() {
     let mut c = base();
     c.to.clear();
-    assert!(matches!(build_message(&c), Err(ComposeError::NoRecipients)));
+    c.cc.clear();
+    let raw = String::from_utf8(build_message(&c).unwrap()).unwrap();
+    assert!(raw.contains("To: undisclosed-recipients:;\r\n"), "{raw}");
 }
 
 #[test]

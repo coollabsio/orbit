@@ -44,12 +44,12 @@ pub use ingest::{
 pub use keys::{MailKeys, open_blob, receipt_aad, seal_blob};
 pub use labels::Label;
 pub use limits::Limits;
-pub use outbound::{Outbound, OutboundItem, OutboundView, SEND_JOB, mail_send_kind};
 pub(crate) use mailboxes::suspend_owned_mailboxes;
 pub use mailboxes::{
     AddressKind, BulkResult, MailAddress, Mailbox, MailboxKind, MailboxStatus, NamePattern,
     NewMailbox, Proposal, RecipientLookup, local_part_for, lookup_recipient,
 };
+pub use outbound::{Outbound, OutboundItem, OutboundView, SEND_JOB, mail_send_kind};
 pub use providers::{
     CreatedProvider, MailProvider, NewProvider, NewRejection, ProviderChange, ProviderKind,
     ProviderScope, ProviderSecrets, ProviderSettings, REJECTED_RETENTION_MS, RejectReason,
@@ -64,10 +64,10 @@ pub use receipts::{
     FailedReceipt, FailedReceipts, INGEST_JOB, ReceiptProblem, RejectedDelivery, STUCK_RECEIPT_MS,
     mail_ingest_kind,
 };
-pub use release::Released;
 pub(crate) use receipts::{
     NewReceipt, insert_receipt, insert_receipt_recipient, record_health_test,
 };
+pub use release::{Released, SEND_SWEEP_JOB, SEND_SWEEP_MS, mail_send_sweep_kind};
 pub use routes::{
     HostClass, NewRoute, ProviderRouteInput, RouteChange, RouteSecrets, RouteSettings, RouteStep,
     RouteStepStatus, SendRoute, SendRouteKind, SmtpSecurity, all_private, all_public, classify_ip,

@@ -79,7 +79,7 @@ fn outbound(row: &AnyRow) -> Result<Outbound, MailError> {
     })
 }
 
-fn send_job(outbound_id: Id, workspace_id: Id, release_at: TimestampMillis) -> Job {
+pub(super) fn send_job(outbound_id: Id, workspace_id: Id, release_at: TimestampMillis) -> Job {
     Job::new(
         mail_send_kind(),
         json!({ "outbound_id": outbound_id.to_string() }),
@@ -88,7 +88,10 @@ fn send_job(outbound_id: Id, workspace_id: Id, release_at: TimestampMillis) -> J
     .with_workspace(workspace_id.to_string())
 }
 
-async fn enqueue(transaction: &mut Transaction<'_, Any>, job: &Job) -> Result<(), MailError> {
+pub(super) async fn enqueue(
+    transaction: &mut Transaction<'_, Any>,
+    job: &Job,
+) -> Result<(), MailError> {
     JobStore::enqueue_in(transaction, job)
         .await
         .map_err(|error| match error {

@@ -5,22 +5,29 @@
 //! The reads, the MIME build and the signature happen before the writer transaction. The
 //! transaction then claims the row with the same conditional `UPDATE` as
 //! [`MailRepository::claim_release`] (`held` → `released` when due), also requiring the row's
-//! `updated_at` that was read, so an Undo, an edit and a new Send in between make the claim fail
-//! and the newer job releases the newer draft. The sealed blob, the receipt (`source = 'sent'`),
+//! `release_at` and `updated_at` as they were read, so an Undo, an edit and a new Send in between
+//! make the claim fail and the newer job releases the newer draft. The sealed blob, the receipt (`source = 'sent'`),
 //! the message, the thread, the recipient rows, the sender's read state and the deletion of the
 //! draft are written in that transaction: a failure leaves the row `held` and nothing else.
 //!
 //! **HTML policy.** The draft's HTML is sanitized again here with
 //! [`orbit_mail::clean_outgoing_html`]: the `ammonia` defaults (no `style`, `class`, scripts or
-//! event handlers; `http`, `https` and `mailto` links and remote images stay, as the author wrote
-//! them) plus `cid:` URLs for the message's own inline images. The quoted original of a reply and
+//! event handlers; link and image URLs keep only ammonia's default schemes, which include
+//! `http`, `https`, `mailto`, `tel` and `ftp` but no script schemes, so remote images stay as the
+//! author wrote them) plus `cid:` URLs for the message's own inline images. The quoted original of a reply and
 //! the original of an inline forward are sanitized by `orbit_mail` (`quote_reply`, `clean_html`).
 //!
 //! **Failures.** Without an active DKIM key at release the message is not sent unsigned: the row
 //! stays `held` with `hold_reason = 'dkim_inactive'` (the Outbox shows it; Undo brings the draft
 //! back). Other lasting problems hold it the same way (`send_as_denied`, `build_failed`,
-//! `file_missing`, `storage_quota`). A draft that is gone (its address or thread was deleted)
-//! cancels the row. Files sent as links (`as_link`) are left out of the message here.
+//! `file_missing` — a file's blob is gone —, `storage_quota`); a database or blob store error holds
+//! it with `release_failed` while the job retries. A draft that is gone (its address or thread
+//! was deleted) cancels the row. Files sent as links (`as_link`) are left out of the message here.
+//!
+//! **Sweep.** `mail.send_sweep` ([`SEND_SWEEP_JOB`], every [`SEND_SWEEP_MS`]) queues `mail.send`
+//! again for held, due rows that are stranded: `release_failed` (the job gave up after its
+//! retries) and `dkim_inactive` once the domain has an active key again. A row whose `mail.send`
+//! job is still queued or running is left alone.
 
 use std::collections::{BTreeSet, HashMap};
 
@@ -29,17 +36,57 @@ use orbit_mail::{
     clean_outgoing_html, forward_block, new_message_id, normalize_address, part_bytes, quote_reply,
     sign_message, trim_references,
 };
-use orbit_platform::{Id, Row, TimestampMillis};
+use orbit_platform::{BlobStoreError, Id, JobKind, Row, S3Error, TimestampMillis, UploadError};
 use sha2::{Digest, Sha256};
 
 use super::domains::parse_id;
 use super::drafts::{Draft, DraftMode, load_draft};
 use super::ingest::{Content, Stored, clean, insert_message};
+use super::outbound::{enqueue, send_job};
 use super::receipts::{NewReceipt, insert_receipt};
 use super::search::people;
 use super::signatures::check_sendable;
 use super::threads::{Incoming, file_outgoing};
 use super::{MailError, MailRepository, receipt_aad, seal_blob};
+
+/// The recurring job that queues stranded releases again (see the module docs).
+pub const SEND_SWEEP_JOB: &str = "mail.send_sweep";
+/// How often [`SEND_SWEEP_JOB`] runs.
+pub const SEND_SWEEP_MS: i64 = 5 * 60 * 1000;
+/// Rows queued again by one sweep.
+const SWEEP_BATCH: i64 = 500;
+
+/// `mail.send_sweep`: one at a time on the cluster.
+#[must_use]
+pub fn mail_send_sweep_kind() -> JobKind {
+    JobKind::new(SEND_SWEEP_JOB).with_concurrency_limit(1)
+}
+
+/// A blob that is gone from the store (not a passing store error).
+fn blob_missing(error: &UploadError) -> bool {
+    match error {
+        UploadError::BlobStore(BlobStoreError::Io { source, .. }) => {
+            source.kind() == std::io::ErrorKind::NotFound
+        }
+        UploadError::BlobStore(BlobStoreError::ObjectStorage(S3Error::Status {
+            status,
+            code,
+            ..
+        })) => *status == 404 || code == "NoSuchKey",
+        _ => false,
+    }
+}
+
+/// A file's bytes that are gone hold the message at once (`file_missing`); other store errors
+/// are retried.
+fn file_error(error: MailError) -> MailError {
+    match error {
+        MailError::Upload(upload) if blob_missing(&upload) => {
+            MailError::Unprocessable("file_missing")
+        }
+        other => other,
+    }
+}
 
 /// The longest name of a forwarded message's `.eml` file, in characters.
 const EML_NAME_CHARS: usize = 100;
@@ -68,6 +115,7 @@ struct Sender {
 /// The message a reply or forward answers.
 struct Parent {
     message_id_header: Option<String>,
+    in_reply_to: Option<String>,
     references: Vec<String>,
     from_name: Option<String>,
     from_addr: Option<String>,
@@ -207,7 +255,7 @@ async fn load_parent(
     message_id: Id,
 ) -> Result<Option<Parent>, MailError> {
     let Some(row) = sqlx::query(
-        "SELECT message_id_header, reference_ids, from_name, from_addr, to_addrs, subject, \
+        "SELECT message_id_header, in_reply_to, reference_ids, from_name, from_addr, to_addrs, subject, \
          sent_at, received_at, body_text, html_part, receipt_id FROM mail_messages WHERE id = $1",
     )
     .bind(message_id.to_string())
@@ -222,6 +270,7 @@ async fn load_parent(
     let html_part: Option<i64> = row.try_get("html_part")?;
     Ok(Some(Parent {
         message_id_header: row.try_get("message_id_header")?,
+        in_reply_to: row.try_get("in_reply_to")?,
         references: serde_json::from_str(&references).unwrap_or_default(),
         from_name: row.try_get("from_name")?,
         from_addr: row.try_get("from_addr")?,
@@ -283,10 +332,24 @@ impl MailRepository {
         hostname: Option<&str>,
         now: TimestampMillis,
     ) -> Result<Option<Released>, MailError> {
+        self.release_between(outbound_id, hostname, now, async {})
+            .await
+    }
+
+    /// [`Self::release`], awaiting `between` after the build and before the claim. For tests of
+    /// a change that lands in between (an Undo and a new Send).
+    #[doc(hidden)]
+    pub async fn release_between(
+        &self,
+        outbound_id: Id,
+        hostname: Option<&str>,
+        now: TimestampMillis,
+        between: impl std::future::Future<Output = ()>,
+    ) -> Result<Option<Released>, MailError> {
         let mut read = self.database.pool().begin().await?;
         let Some(row) = sqlx::query(
-            "SELECT workspace_id, membership_id, mailbox_id, draft_id, updated_at FROM mail_outbound \
-             WHERE id = $1 AND status = 'held' AND release_at <= $2",
+            "SELECT workspace_id, membership_id, mailbox_id, draft_id, release_at, updated_at \
+             FROM mail_outbound WHERE id = $1 AND status = 'held' AND release_at <= $2",
         )
         .bind(outbound_id.to_string())
         .bind(now.as_millis())
@@ -300,6 +363,7 @@ impl MailRepository {
         let mailbox_id = parse_id(&row.try_get::<String, _>("mailbox_id")?)?;
         let draft_id: Option<String> = row.try_get("draft_id")?;
         let read_at: i64 = row.try_get("updated_at")?;
+        let read_release: i64 = row.try_get("release_at")?;
         let draft = match draft_id.map(|id| parse_id(&id)).transpose()? {
             Some(draft_id) => match load_draft(&mut read, membership_id, draft_id).await {
                 Ok(draft) => Some(draft),
@@ -357,7 +421,7 @@ impl MailRepository {
                 };
                 let receipt = parse_id(receipt)?;
                 if let std::collections::hash_map::Entry::Vacant(entry) = raws.entry(receipt) {
-                    entry.insert(self.read_raw(receipt).await?);
+                    entry.insert(self.read_raw(receipt).await.map_err(file_error)?);
                 }
                 let part =
                     u32::try_from(part).map_err(|_| MailError::Unprocessable("file_missing"))?;
@@ -369,7 +433,7 @@ impl MailRepository {
                 self.uploads
                     .read_blob(&file.storage_key)
                     .await
-                    .map_err(MailError::Upload)?
+                    .map_err(|error| file_error(MailError::Upload(error)))?
             };
             composed_files.push(ComposedFile {
                 filename: plain(&file.filename),
@@ -393,10 +457,14 @@ impl MailRepository {
         if let Some(parent) = &parent {
             let parent_html = || async {
                 match parent.html_part {
-                    Some(part) => self.read_raw(parent.receipt_id).await.map(|raw| {
-                        part_bytes(&raw, part)
-                            .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
-                    }),
+                    Some(part) => self
+                        .read_raw(parent.receipt_id)
+                        .await
+                        .map_err(file_error)
+                        .map(|raw| {
+                            part_bytes(&raw, part)
+                                .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+                        }),
                     None => Ok(None),
                 }
             };
@@ -408,8 +476,12 @@ impl MailRepository {
                         .filter(|id| !id.is_empty())
                     {
                         let id = bracketed(id);
-                        let refs: Vec<String> =
-                            parent.references.iter().map(|id| bracketed(id)).collect();
+                        // A parent without References: its In-Reply-To (RFC 5322 §3.6.4).
+                        let refs: Vec<String> = if parent.references.is_empty() {
+                            parent.in_reply_to.iter().map(|id| bracketed(id)).collect()
+                        } else {
+                            parent.references.iter().map(|id| bracketed(id)).collect()
+                        };
                         references = trim_references(&refs, &id);
                         in_reply_to = Some(id);
                     }
@@ -443,7 +515,7 @@ impl MailRepository {
                 DraftMode::ForwardAttached => {
                     let raw = match raws.remove(&parent.receipt_id) {
                         Some(raw) => raw,
-                        None => self.read_raw(parent.receipt_id).await?,
+                        None => self.read_raw(parent.receipt_id).await.map_err(file_error)?,
                     };
                     let name: String = plain(&parent.subject)
                         .chars()
@@ -473,15 +545,9 @@ impl MailRepository {
             name: sender.name.clone(),
             address: sender.address.clone(),
         };
-        let mut to = header_list(&draft.to)?;
+        // Only Bcc: `build_message` writes `To: undisclosed-recipients:;`.
+        let to = header_list(&draft.to)?;
         let cc = header_list(&draft.cc)?;
-        if to.is_empty() && cc.is_empty() {
-            // Only Bcc: the header names the sender; the recipients are in the envelope.
-            to.push(ComposedAddress {
-                name: None,
-                address: sender.address.clone(),
-            });
-        }
         let composed = Composed {
             message_id: new_message_id(&sender.domain),
             date: now.as_millis().div_euclid(1000),
@@ -508,15 +574,16 @@ impl MailRepository {
             i64::try_from(signed.len()).map_err(|_| MailError::Unprocessable("build_failed"))?;
         let content = Content::of(&signed);
 
+        between.await;
         let finalization = self.uploads.begin_finalization().await;
         let mut transaction = self.database.immediate_transaction().await?;
         let claimed = sqlx::query(
             "UPDATE mail_outbound SET status = 'released', hold_reason = NULL, updated_at = $1 \
-             WHERE id = $2 AND status = 'held' AND release_at <= $3 AND updated_at = $4",
+             WHERE id = $2 AND status = 'held' AND release_at = $3 AND updated_at = $4",
         )
         .bind(now.as_millis())
         .bind(outbound_id.to_string())
-        .bind(now.as_millis())
+        .bind(read_release)
         .bind(read_at)
         .execute(&mut *transaction)
         .await?
@@ -680,6 +747,36 @@ impl MailRepository {
             new_thread: filed.new_thread,
             users: filed.users,
         }))
+    }
+
+    /// `mail.send_sweep`: queues `mail.send` again for held, due rows stranded by a failed
+    /// release (see the module docs). Returns how many were queued.
+    pub async fn sweep_releases(&self, now: TimestampMillis) -> Result<u64, MailError> {
+        let mut transaction = self.database.immediate_transaction().await?;
+        let rows = sqlx::query(
+            "SELECT o.id, o.workspace_id FROM mail_outbound o WHERE o.status = 'held' \
+             AND o.release_at <= $1 \
+             AND (o.hold_reason = 'release_failed' OR (o.hold_reason = 'dkim_inactive' \
+             AND EXISTS (SELECT 1 FROM mail_drafts d \
+             JOIN mail_addresses a ON a.id = d.from_address_id \
+             JOIN mail_dkim_keys k ON k.domain_id = a.domain_id AND k.status = 'active' \
+             WHERE d.id = o.draft_id))) \
+             AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.kind = 'mail.send' \
+             AND j.state IN ('queued', 'running') \
+             AND j.payload_json = '{\"outbound_id\":\"' || o.id || '\"}') \
+             ORDER BY o.release_at, o.id LIMIT $2",
+        )
+        .bind(now.as_millis())
+        .bind(SWEEP_BATCH)
+        .fetch_all(&mut *transaction)
+        .await?;
+        for row in &rows {
+            let id = parse_id(&row.try_get::<String, _>("id")?)?;
+            let workspace_id = parse_id(&row.try_get::<String, _>("workspace_id")?)?;
+            enqueue(&mut transaction, &send_job(id, workspace_id, now)).await?;
+        }
+        transaction.commit().await?;
+        Ok(rows.len() as u64)
     }
 
     /// Keeps a held message waiting with `reason` (shown in the Outbox) after a release failed.
