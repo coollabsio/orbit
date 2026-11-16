@@ -370,7 +370,9 @@ fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
-fn rate_limit_ip(ip: IpAddr) -> IpAddr {
+/// The address a rate limit counts for `ip`: IPv4 as is, IPv6 by its /64 network.
+#[must_use]
+pub fn rate_limit_ip(ip: IpAddr) -> IpAddr {
     match ip {
         IpAddr::V4(_) => ip,
         IpAddr::V6(ip) => IpAddr::V6(Ipv6Addr::from(u128::from(ip) & (u128::MAX << 64))),

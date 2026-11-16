@@ -69,7 +69,7 @@ pub fn mail_send_sweep_kind() -> JobKind {
 }
 
 /// A blob that is gone from the store (not a passing store error).
-fn blob_missing(error: &UploadError) -> bool {
+pub(super) fn blob_missing(error: &UploadError) -> bool {
     match error {
         UploadError::BlobStore(BlobStoreError::Io { source, .. }) => {
             source.kind() == std::io::ErrorKind::NotFound
@@ -451,6 +451,9 @@ impl MailRepository {
             if file.forwarded {
                 return Err(MailError::Unprocessable("link_forwarded"));
             }
+            if file.content_id.as_ref().is_some_and(|id| !id.trim().is_empty()) {
+                return Err(MailError::Unprocessable("link_inline"));
+            }
             if raw_refs.get(&file.blob_id).copied().unwrap_or(false) {
                 return Err(MailError::Unprocessable("file_missing"));
             }
@@ -626,7 +629,13 @@ impl MailRepository {
         let raw_sha256 = format!("{:x}", Sha256::digest(&signed));
         let size =
             i64::try_from(signed.len()).map_err(|_| MailError::Unprocessable("build_failed"))?;
-        let content = Content::of(&signed);
+        let mut content = Content::of(&signed);
+        // The stored text, snippet and search row never hold a link's token: only the sealed raw
+        // message has the URL (the database keeps the token's hash only).
+        for link in &planned {
+            content.parsed.body_text = content.parsed.body_text.replace(&link.url, "[link]");
+            content.parsed.snippet = content.parsed.snippet.replace(&link.url, "[link]");
+        }
 
         between.await;
         let finalization = self.uploads.begin_finalization().await;

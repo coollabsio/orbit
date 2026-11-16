@@ -6,10 +6,15 @@
 //! The download (`GET {content origin}/mail/f/{token}`) is public. [`MailRepository::open_link`]
 //! answers `NotFound` for an unknown, expired or revoked token alike, counts every try per client
 //! address and every download per link (the `rate_limit_windows` table, so every server of a
-//! database shares the counts), and counts the download. The bytes are the uploaded file's: upload
-//! blobs are stored as they came (only mail's raw messages are sealed).
+//! database shares the counts), and counts the download once the file is open. The bytes are the
+//! uploaded file's: upload blobs are stored as they came (only mail's raw messages are sealed), so
+//! the route streams the blob's reader as it is. The Sent copy of the message keeps no token in its
+//! text or search row (the release masks the URLs): the stored hash is the only trace of a token
+//! outside the sealed raw message.
 
-use orbit_platform::{Id, Row, TimestampMillis, generate_opaque_token};
+use std::net::IpAddr;
+
+use orbit_platform::{BlobReader, Id, Row, TimestampMillis, generate_opaque_token, rate_limit_ip};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use sqlx::{Any, Transaction};
@@ -199,13 +204,16 @@ impl MailRepository {
 
     /// Opens a link for a download: the link and the file's bytes. `NotFound` for an unknown,
     /// expired or revoked token (the same answer for all), `RateLimited` over the limits.
-    /// `client` is the requester's address (any text; its rate bucket).
+    /// `client` is the requester's address; its rate bucket is its IPv4 address or IPv6 /64.
+    /// The download is counted once the file is open.
     pub async fn open_link(
         &self,
         token: &str,
-        client: &str,
+        client: Option<IpAddr>,
         now: TimestampMillis,
-    ) -> Result<(FileLink, Vec<u8>), MailError> {
+    ) -> Result<(FileLink, BlobReader), MailError> {
+        let client =
+            client.map_or_else(|| "unknown".to_owned(), |ip| rate_limit_ip(ip).to_string());
         let minute = now.as_millis().div_euclid(60_000);
         if !self
             .link_hit(
@@ -225,7 +233,7 @@ impl MailRepository {
         let row = sqlx::query(
             "SELECT l.id, l.filename, l.size, l.expires_at, l.revoked_at, b.storage_key \
              FROM mail_file_links l JOIN attachment_blobs b ON b.id = l.blob_id \
-             WHERE l.token_sha256 = $1",
+             WHERE l.token_sha256 = $1 AND b.deleted_at IS NULL",
         )
         .bind(token_hash(token))
         .fetch_optional(self.database.pool())
@@ -248,6 +256,15 @@ impl MailRepository {
         {
             return Err(MailError::RateLimited);
         }
+        let reader = match self
+            .uploads
+            .open_blob(&row.try_get::<String, _>("storage_key")?)
+            .await
+        {
+            Ok(reader) => reader,
+            Err(error) if super::release::blob_missing(&error) => return Err(MailError::NotFound),
+            Err(error) => return Err(error.into()),
+        };
         let counted = sqlx::query(
             "UPDATE mail_file_links SET downloads = downloads + 1 \
              WHERE id = $1 AND revoked_at IS NULL AND expires_at > $2",
@@ -260,10 +277,6 @@ impl MailRepository {
         if counted != 1 {
             return Err(MailError::NotFound);
         }
-        let bytes = self
-            .uploads
-            .read_blob(&row.try_get::<String, _>("storage_key")?)
-            .await?;
         Ok((
             FileLink {
                 id,
@@ -272,7 +285,7 @@ impl MailRepository {
                 expires_at: TimestampMillis::from_millis(expires_at),
                 url: String::new(),
             },
-            bytes,
+            reader,
         ))
     }
 
@@ -284,8 +297,8 @@ impl MailRepository {
         thread_id: Id,
         message_id: Id,
         link_id: Id,
-        now: TimestampMillis,
     ) -> Result<MailFileLinkView, MailError> {
+        let now = self.database.database_now().await?;
         let mut transaction = self.database.immediate_transaction().await?;
         let row = sqlx::query(
             "SELECT l.id FROM mail_file_links l JOIN mail_outbound o ON o.id = l.outbound_id \

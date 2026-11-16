@@ -1001,15 +1001,21 @@ impl MailRepository {
         if as_link {
             // A forwarded file is a part of a received message, not an Orbit upload: it has no
             // file of its own to link to (it stays an attachment).
-            let source: Option<Option<String>> = sqlx::query_scalar(
-                "SELECT source_attachment_id FROM mail_draft_files WHERE id = $1 AND draft_id = $2",
+            let found: Option<(Option<String>, Option<String>)> = sqlx::query_as(
+                "SELECT source_attachment_id, content_id FROM mail_draft_files \
+                 WHERE id = $1 AND draft_id = $2",
             )
             .bind(file_id.to_string())
             .bind(draft_id.to_string())
             .fetch_optional(&mut *transaction)
             .await?;
-            if matches!(source, Some(Some(_))) {
-                return Err(MailError::Unprocessable("link_forwarded"));
+            match found {
+                Some((Some(_), _)) => return Err(MailError::Unprocessable("link_forwarded")),
+                // An inline image is part of the body: it must travel with the message.
+                Some((None, Some(id))) if !id.trim().is_empty() => {
+                    return Err(MailError::Unprocessable("link_inline"));
+                }
+                _ => {}
             }
         }
         let result = sqlx::query(

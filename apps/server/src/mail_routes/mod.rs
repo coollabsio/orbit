@@ -613,6 +613,7 @@ fn detail(code: &'static str) -> &'static str {
         "provider_in_use" => "Route the domains that use this provider elsewhere first.",
         "recipient_not_failed" => "Only a recipient that was not delivered can be retried.",
         "link_forwarded" => "A forwarded file cannot be sent as a link. Remove it or attach it.",
+        "link_inline" => "An image in the message body cannot be sent as a link.",
         "link_origin_missing" => {
             "File links need a public address for this Orbit server (ORBIT_PUBLIC_ORIGIN or ORBIT_MAIL_CONTENT_ORIGIN)."
         }

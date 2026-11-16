@@ -53,7 +53,7 @@ pub use files::{
 pub use health::{HealthCheck, HealthCheckResult, HealthRegistry, ReadinessReport};
 pub use http::{
     ClientIp, ErrorCause, HttpLimits, HttpPlatformLayer, LargeUpload, OriginPolicy, RequestId,
-    RequestTransport, bearer_token,
+    RequestTransport, bearer_token, rate_limit_ip,
 };
 pub use id::{Id, ParseIdError};
 pub use integrity::{IntegrityError, IntegrityService};

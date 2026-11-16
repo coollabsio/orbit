@@ -707,17 +707,21 @@ impl Fixture {
             .await;
         assert_eq!(status, StatusCode::OK, "{set}");
         let (outbound, released, _) = self.send_and_release(&draft).await;
-        let text = self
-            .text(
-                "SELECT body_text FROM mail_messages WHERE id = $1",
-                released.message_id,
-            )
-            .await
-            .unwrap();
-        let start = text.find(&format!("{CONTENT}/mail/f/")).expect(&text);
-        let link: String = text[start..]
+        let html_part: Option<i64> =
+            sqlx::query_scalar("SELECT html_part FROM mail_messages WHERE id = $1")
+                .bind(released.message_id.to_string())
+                .fetch_one(self.database.pool())
+                .await
+                .unwrap();
+        let raw = self.raw_of(released.message_id).await;
+        let html = String::from_utf8(
+            orbit_mail::part_bytes(&raw, u32::try_from(html_part.unwrap()).unwrap()).unwrap(),
+        )
+        .unwrap();
+        let start = html.find(&format!("{CONTENT}/mail/f/")).expect(&html);
+        let link: String = html[start..]
             .chars()
-            .take_while(|c| !c.is_whitespace())
+            .take_while(|c| !c.is_whitespace() && *c != '"' && *c != '<')
             .collect();
         Linked {
             thread: released.thread_id,
@@ -946,7 +950,26 @@ async fn link_block_in_sent_message() {
     };
     assert!(text.contains("big report.bin"), "{text}");
     assert!(text.contains("2 KB") || text.contains("3 KB"), "{text}");
-    assert!(text.contains(&linked.link), "{text}");
+    // The stored text never holds the token (only the sealed raw message does).
+    assert!(text.contains("[link]"), "{text}");
+    assert!(!text.contains(&linked.token), "{text}");
+    let snippet: String = sqlx::query_scalar("SELECT snippet FROM mail_messages WHERE id = $1")
+        .bind(linked.message.to_string())
+        .fetch_one(f.database.pool())
+        .await
+        .unwrap();
+    assert!(!snippet.contains(&linked.token), "{snippet}");
+    let search = |q: &str| {
+        let q: String = url::form_urlencoded::byte_serialize(q.as_bytes()).collect();
+        format!("/search?q={q}")
+    };
+    let (status, found) = f.call(&f.ann, "GET", &search("report"), None).await;
+    assert_eq!(status, StatusCode::OK, "{found}");
+    assert_eq!(found["items"].as_array().unwrap().len(), 1, "{found}");
+    for query in [linked.token.as_str(), linked.link.as_str()] {
+        let (_, found) = f.call(&f.ann, "GET", &search(query), None).await;
+        assert!(found["items"].as_array().unwrap().is_empty(), "{found}");
+    }
     assert!(text.contains("link works until 20"), "{text}");
     let raw = f.raw_of(linked.message).await;
     let html = String::from_utf8(
@@ -1046,6 +1069,26 @@ async fn without_an_origin_the_message_is_held() {
     let id: Id = sent["id"].as_str().unwrap().parse().unwrap();
     let (_, release_at, _) = f.outbound_row(&id.to_string()).await;
     let error = bare.release(id, None, at(release_at)).await.unwrap_err();
+    // The row stays held with its reason (the job records it); nothing is sent unsigned.
+    f.mail
+        .hold_release(id, "link_origin_missing", at(release_at))
+        .await
+        .unwrap();
+    let held: (String, Option<String>) =
+        sqlx::query_as("SELECT status, hold_reason FROM mail_outbound WHERE id = $1")
+            .bind(id.to_string())
+            .fetch_one(f.database.pool())
+            .await
+            .unwrap();
+    assert_eq!(
+        held,
+        ("held".to_owned(), Some("link_origin_missing".to_owned()))
+    );
+    let links: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM mail_file_links")
+        .fetch_one(f.database.pool())
+        .await
+        .unwrap();
+    assert_eq!(links, 0);
     assert!(
         matches!(
             error,
@@ -1053,4 +1096,93 @@ async fn without_an_origin_the_message_is_held() {
         ),
         "{error:?}"
     );
+}
+
+#[tokio::test]
+async fn ipv6_clients_share_a_bucket_per_64() {
+    let f = Fixture::new().await;
+    let linked = f.linked("a.bin", b"data").await;
+    let path = format!("/mail/f/{}", linked.token);
+    for _ in 0..60 {
+        let reply = f
+            .download("content.orbit.test", &path, Some("2001:db8:0:5::1"))
+            .await;
+        assert_eq!(reply.status, StatusCode::OK);
+    }
+    // Another address of the same /64 shares the budget; another /64 does not.
+    let same = f
+        .download("content.orbit.test", &path, Some("2001:db8:0:5:ffff::9"))
+        .await;
+    assert_eq!(same.status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(same.headers["retry-after"], "60");
+    let other = f
+        .download("content.orbit.test", &path, Some("2001:db8:0:6::1"))
+        .await;
+    assert_eq!(other.status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn a_deleted_blob_is_not_found_and_not_counted() {
+    let f = Fixture::new().await;
+    let linked = f.linked("a.bin", b"data").await;
+    f.sql("UPDATE attachment_blobs SET deleted_at = 1 WHERE id IN (SELECT blob_id FROM mail_file_links)")
+        .await;
+    assert_eq!(f.get_link(&linked).await.status, StatusCode::NOT_FOUND);
+    let downloads: i64 = sqlx::query_scalar("SELECT downloads FROM mail_file_links")
+        .fetch_one(f.database.pool())
+        .await
+        .unwrap();
+    assert_eq!(downloads, 0);
+}
+
+#[tokio::test]
+async fn inline_and_forwarded_files_cannot_be_links() {
+    let f = Fixture::new().await;
+    let draft = f.draft(&["x@out.test"]).await;
+    let (_, uploaded) = f.upload(&f.ann, &draft, "logo.png", b"png").await;
+    let file = uploaded["id"].as_str().unwrap();
+    f.sql("UPDATE mail_draft_files SET content_id = 'logo@one.test'")
+        .await;
+    let (status, body) = f
+        .call(
+            &f.ann,
+            "PATCH",
+            &format!("/drafts/{draft}/files/{file}"),
+            Some(json!({"as_link": true})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["code"], "link_inline");
+
+    let raw = "From: Carl <carl@sender.test>\r\nTo: team@one.test\r\nSubject: Report\r\n\
+         Message-ID: <m3@sender.test>\r\nMIME-Version: 1.0\r\n\
+         Content-Type: multipart/mixed; boundary=\"b\"\r\n\r\n\
+         --b\r\nContent-Type: text/plain\r\n\r\nSee attached\r\n\
+         --b\r\nContent-Type: application/pdf; name=\"report.pdf\"\r\n\
+         Content-Disposition: attachment; filename=\"report.pdf\"\r\n\
+         Content-Transfer-Encoding: base64\r\n\r\nJVBERi0xLjQK\r\n--b--\r\n";
+    let (_, thread) = f
+        .deliver_raw(raw.to_owned(), "team@one.test", f.team_primary)
+        .await;
+    let (status, forward) = f
+        .call(
+            &f.ann,
+            "POST",
+            "/drafts",
+            Some(json!({"mode": "forward", "thread_id": thread.to_string()})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{forward}");
+    let forward_id = forward["id"].as_str().unwrap();
+    let forwarded = forward["files"][0]["id"].as_str().unwrap();
+    let (status, body) = f
+        .call(
+            &f.ann,
+            "PATCH",
+            &format!("/drafts/{forward_id}/files/{forwarded}"),
+            Some(json!({"as_link": true})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["code"], "link_forwarded");
 }

@@ -21,10 +21,10 @@ use axum::body::Body;
 use axum::extract::{Path, State};
 use axum::http::header::{
     CACHE_CONTROL, CONTENT_DISPOSITION, CONTENT_SECURITY_POLICY, CONTENT_TYPE, REFERRER_POLICY,
-    X_CONTENT_TYPE_OPTIONS,
+    RETRY_AFTER, X_CONTENT_TYPE_OPTIONS,
 };
 use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri};
-use axum::response::Response;
+use axum::response::{IntoResponse, Response};
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use hkdf::Hkdf;
@@ -610,37 +610,53 @@ pub(crate) async fn set_mail_sender_pref(
 
 /// A file sent as a link (spec §5.9): public, on the content origin, never rendered. Anything
 /// that is not a live link (unknown, expired, revoked) is the same 404. Tries are counted per
-/// client address and downloads per link; over the limit is a 429.
-#[utoipa::path(get, path = "/mail/f/{token}", params(("token" = String, Path, description = "From the link in the message")), responses((status = 200, body = MailBytes, content_type = "application/octet-stream")))]
+/// client address (IPv6 by /64) and downloads per link; over the limit is a 429 with
+/// `Retry-After`. The file is streamed from its blob.
+#[utoipa::path(get, path = "/mail/f/{token}", params(("token" = String, Path, description = "From the link in the message")), responses((status = 200, body = MailBytes, content_type = "application/octet-stream"), (status = 404, description = "Unknown, expired or revoked link"), (status = 429, description = "Too many downloads; see Retry-After", headers(("Retry-After" = String, description = "Seconds to wait")))))]
 pub(crate) async fn download_mail_file(
     State(state): State<MailState>,
     Path(token): Path<String>,
     headers: HeaderMap,
     client_ip: Option<Extension<ClientIp>>,
     request_id: RequestIdExtension,
-) -> Result<Response, ApiError> {
+) -> Result<Response, Response> {
     let instance = "/mail/f";
     if !state.serves_content(&headers) {
-        return Err(not_found(instance, &request_id));
+        return Err(not_found(instance, &request_id).into_response());
     }
-    let client = client_ip.map_or_else(|| "unknown".to_owned(), |Extension(ip)| ip.0.to_string());
-    let (link, bytes) = state
+    let (link, reader) = state
         .mail
-        .open_link(&token, &client, TimestampMillis::now())
+        .open_link(
+            &token,
+            client_ip.map(|Extension(ip)| ip.0),
+            TimestampMillis::now(),
+        )
         .await
         .map_err(|error| match error {
-            MailError::NotFound => not_found(instance, &request_id),
-            other => problem(other, instance, request_id.as_ref()),
+            MailError::NotFound => not_found(instance, &request_id).into_response(),
+            MailError::RateLimited => {
+                let mut response =
+                    problem(MailError::RateLimited, instance, request_id.as_ref()).into_response();
+                response
+                    .headers_mut()
+                    .insert(RETRY_AFTER, HeaderValue::from_static("60"));
+                response
+            }
+            other => problem(other, instance, request_id.as_ref()).into_response(),
         })?;
     // Never the uploaded type: the bytes download, they are not shown.
-    let mut response = bytes_response(
-        bytes,
-        "application/octet-stream",
-        Some(&disposition("attachment", &link.filename)),
+    let mut response = Response::new(Body::from_stream(tokio_util::io::ReaderStream::new(reader)));
+    let headers = response.headers_mut();
+    headers.insert(
+        CONTENT_TYPE,
+        HeaderValue::from_static("application/octet-stream"),
     );
-    response
-        .headers_mut()
-        .insert(REFERRER_POLICY, HeaderValue::from_static("no-referrer"));
+    if let Some(value) = header(&disposition("attachment", &link.filename)) {
+        headers.insert(CONTENT_DISPOSITION, value);
+    }
+    headers.insert(X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
+    headers.insert(CACHE_CONTROL, HeaderValue::from_static("private, no-store"));
+    headers.insert(REFERRER_POLICY, HeaderValue::from_static("no-referrer"));
     Ok(response)
 }
 
@@ -660,15 +676,9 @@ pub(crate) async fn revoke_mail_file_link(
         .mail_membership(call.workspace_id, call.actor_id)
         .await
         .map_err(|error| call.problem(error))?;
-    let now = state
-        .mail
-        .database()
-        .database_now()
-        .await
-        .map_err(|error| call.problem(error.into()))?;
     state
         .mail
-        .revoke_link(membership, thread_id, message_id, link_id, now)
+        .revoke_link(membership, thread_id, message_id, link_id)
         .await
         .map(Json)
         .map_err(|error| call.problem(error))

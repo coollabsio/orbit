@@ -730,6 +730,11 @@ impl UploadService {
         Ok(deleted == 1)
     }
 
+    /// A reader of a blob's stored bytes (stream them; do not buffer a big file).
+    pub async fn open_blob(&self, storage_key: &str) -> Result<BlobReader, UploadError> {
+        Ok(self.store.open(storage_key).await?)
+    }
+
     /// The stored bytes of a blob, from the local disk or S3.
     pub async fn read_blob(&self, storage_key: &str) -> Result<Vec<u8>, UploadError> {
         let mut reader = self.store.open(storage_key).await?;
