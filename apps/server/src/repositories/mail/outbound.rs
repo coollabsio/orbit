@@ -481,8 +481,7 @@ impl MailRepository {
              FROM mail_outbound o \
              LEFT JOIN mail_drafts d ON d.id = o.draft_id \
              LEFT JOIN mail_messages m ON m.id = o.message_id \
-             WHERE EXISTS (SELECT 1 FROM mailbox_members mm WHERE mm.mailbox_id = o.mailbox_id \
-             AND mm.membership_id = o.membership_id) AND {condition} AND o.membership_id = "
+             WHERE {condition} AND o.membership_id = "
         ));
         sql.push_bind(membership_id.to_string());
         if let Some(mailbox_id) = mailbox_id {

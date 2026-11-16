@@ -787,6 +787,13 @@ async fn delayed_flag_after_4h() {
     let soon = f.mail.outbound_recipients(id, at(t0 + HOUR)).await.unwrap();
     assert_eq!(soon[0].status, "deferred");
     assert!(!soon[0].delayed);
+    // Exactly 4 h is not yet delayed; one millisecond more is.
+    let edge = f
+        .mail
+        .outbound_recipients(id, at(t0 + 4 * HOUR))
+        .await
+        .unwrap();
+    assert!(!edge[0].delayed);
     let late = f
         .mail
         .outbound_recipients(id, at(t0 + 4 * HOUR + 1))

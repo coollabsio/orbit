@@ -2633,3 +2633,77 @@ async fn sent_summary_has_recipients() {
     );
     assert_eq!(item["sent_to_more"], 1);
 }
+
+// ---- Held drafts are not drafts; own outbound rows survive leaving the mailbox (G2 fix) ----
+
+impl Fixture {
+    async fn draft_ids(&self) -> Vec<String> {
+        let (status, list) = self.call(&self.ann, "GET", "/drafts", None).await;
+        assert_eq!(status, StatusCode::OK, "{list}");
+        list.as_array()
+            .unwrap()
+            .iter()
+            .map(|draft| draft["id"].as_str().unwrap().to_owned())
+            .collect()
+    }
+}
+
+#[tokio::test]
+async fn held_drafts_are_not_listed() {
+    let f = Fixture::new().await;
+    let draft = f.new_draft(f.ann_primary, &["x@out.test"], &[], &[]).await;
+    assert_eq!(f.draft_ids().await, vec![draft.clone()]);
+    // In the undo window: not a draft.
+    let (status, sent) = f.send(&draft, json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{sent}");
+    assert!(f.draft_ids().await.is_empty());
+    // Cancelled: back.
+    let outbound = sent["id"].as_str().unwrap();
+    let (status, body) = f
+        .call(
+            &f.ann,
+            "POST",
+            &format!("/outbound/{outbound}/cancel"),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(f.draft_ids().await, vec![draft.clone()]);
+    // Scheduled: not a draft either.
+    let when = TimestampMillis::now().as_millis() + 3_600_000;
+    let (status, sent) = f.send(&draft, json!({"scheduled_at": at(when)})).await;
+    assert_eq!(status, StatusCode::OK, "{sent}");
+    assert!(f.draft_ids().await.is_empty());
+}
+
+#[tokio::test]
+async fn own_outbound_stays_after_leaving_the_mailbox() {
+    let f = Fixture::new().await;
+    let draft = f.new_draft(f.team_primary, &["x@out.test"], &[], &[]).await;
+    let when = TimestampMillis::now().as_millis() + 3_600_000;
+    let (status, sent) = f.send(&draft, json!({"scheduled_at": at(when)})).await;
+    assert_eq!(status, StatusCode::OK, "{sent}");
+    f.sql(&format!(
+        "DELETE FROM mailbox_members WHERE mailbox_id = '{}' AND membership_id = '{}'",
+        f.team, f.ann.membership
+    ))
+    .await;
+    let (_, list) = f
+        .call(&f.ann, "GET", "/outbound?view=scheduled", None)
+        .await;
+    assert_eq!(list.as_array().unwrap().len(), 1, "{list}");
+    let (_, filtered) = f
+        .call(
+            &f.ann,
+            "GET",
+            &format!("/outbound?view=scheduled&mailbox_id={}", f.ann_personal),
+            None,
+        )
+        .await;
+    assert_eq!(filtered, json!([]));
+    let id = sent["id"].as_str().unwrap();
+    let (status, body) = f
+        .call(&f.ann, "POST", &format!("/outbound/{id}/cancel"), None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+}

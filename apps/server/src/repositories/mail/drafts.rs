@@ -710,7 +710,8 @@ impl MailRepository {
     ) -> Result<Vec<Draft>, MailError> {
         let mut transaction = self.database.pool().begin().await?;
         let mut sql = orbit_platform::SqlBuilder::new(format!(
-            "SELECT {DRAFT_COLUMNS} FROM mail_drafts WHERE membership_id = "
+            "SELECT {DRAFT_COLUMNS} FROM mail_drafts WHERE NOT EXISTS (SELECT 1 FROM mail_outbound o \
+             WHERE o.draft_id = mail_drafts.id AND o.status = 'held') AND membership_id = "
         ));
         sql.push_bind(membership_id.to_string());
         if let Some(mailbox) = mailbox {
