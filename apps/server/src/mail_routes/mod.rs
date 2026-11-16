@@ -723,6 +723,15 @@ pub(crate) fn problem(
             request_id,
         )
         .with_sizes(limit, size),
+        MailError::DraftSending { outbound_id } => ApiError::new(
+            StatusCode::CONFLICT,
+            "draft_sending",
+            "Conflict",
+            "This reply is being sent. Undo the send to edit it.",
+            instance,
+            request_id,
+        )
+        .with_outbound_id(outbound_id.to_string()),
         MailError::QuotaExceeded => ApiError::new(
             StatusCode::PAYLOAD_TOO_LARGE,
             "storage_quota_exceeded",

@@ -93693,6 +93693,13 @@
             "format": "int64",
             "description": "The size limit, for `message_too_large`."
           },
+          "outbound_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The message that is being sent, for `draft_sending`."
+          },
           "path": {
             "type": [
               "string",

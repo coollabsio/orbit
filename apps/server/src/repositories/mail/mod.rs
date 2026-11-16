@@ -115,6 +115,9 @@ pub enum MailError {
     /// The domain or mailbox cannot send yet (a 409 `send_not_ready`).
     #[error("the domain cannot send yet")]
     NotReady(NotReadyReason),
+    /// The member's draft of the thread is being sent (a 409 `draft_sending`); Undo opens it.
+    #[error("the draft is being sent")]
+    DraftSending { outbound_id: Id },
     #[error("the workspace is over its storage quota")]
     QuotaExceeded,
     /// Too many downloads of a file link (a 429).

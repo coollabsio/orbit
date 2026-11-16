@@ -530,6 +530,17 @@ impl MailRepository {
         .fetch_optional(&mut *read)
         .await?;
         if let Some(existing) = existing {
+            let sending: Option<String> = sqlx::query_scalar(
+                "SELECT id FROM mail_outbound WHERE draft_id = $1 AND status = 'held'",
+            )
+            .bind(&existing)
+            .fetch_optional(&mut *read)
+            .await?;
+            if let Some(outbound_id) = sending {
+                return Err(MailError::DraftSending {
+                    outbound_id: parse_id(&outbound_id)?,
+                });
+            }
             read.commit().await?;
             let existing = parse_id(&existing)?;
             let current = self.get_draft(membership_id, existing).await?;

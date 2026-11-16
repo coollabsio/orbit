@@ -8721,6 +8721,10 @@ export type TaskProblem = {
      */
     limit_bytes?: number | null;
     /**
+     * The message that is being sent, for `draft_sending`.
+     */
+    outbound_id?: string | null;
+    /**
      * JSON path of the first invalid filter node, e.g. `filter.children[2].value`. Only set
      * for `invalid_filter`.
      */

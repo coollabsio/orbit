@@ -3263,6 +3263,9 @@ pub(crate) struct ProblemBody {
     /// The size of the message, for `message_too_large`.
     #[serde(skip_serializing_if = "Option::is_none")]
     size_bytes: Option<i64>,
+    /// The message that is being sent, for `draft_sending`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    outbound_id: Option<String>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -3323,6 +3326,7 @@ impl ApiError {
                 reason: None,
                 limit_bytes: None,
                 size_bytes: None,
+                outbound_id: None,
             }),
             cause: None,
         }
@@ -3331,6 +3335,12 @@ impl ApiError {
     /// The same problem with a machine-readable `reason`.
     pub(crate) fn with_reason(mut self, reason: &'static str) -> Self {
         self.body.reason = Some(reason);
+        self
+    }
+
+    /// The same problem with the ID of the message that is being sent.
+    pub(crate) fn with_outbound_id(mut self, outbound_id: String) -> Self {
+        self.body.outbound_id = Some(outbound_id);
         self
     }
 

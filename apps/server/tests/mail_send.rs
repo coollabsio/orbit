@@ -2707,3 +2707,31 @@ async fn own_outbound_stays_after_leaving_the_mailbox() {
         .await;
     assert_eq!(status, StatusCode::OK, "{body}");
 }
+
+#[tokio::test]
+async fn no_reply_draft_while_it_is_being_sent() {
+    let f = Fixture::new().await;
+    f.signing().await;
+    let (_, thread) = f.deliver("ann@one.test", f.ann_primary).await;
+    let draft = f.thread_draft("reply", thread).await;
+    let (status, sent) = f.send(&draft, json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{sent}");
+    let outbound = sent["id"].as_str().unwrap();
+    let body = json!({"mode": "reply", "thread_id": thread.to_string(), "body_html": "<p>x</p>"});
+    let (status, problem) = f.call(&f.ann, "POST", "/drafts", Some(body.clone())).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{problem}");
+    assert_eq!(problem["code"], "draft_sending");
+    assert_eq!(problem["outbound_id"], outbound);
+    let (status, cancelled) = f
+        .call(
+            &f.ann,
+            "POST",
+            &format!("/outbound/{outbound}/cancel"),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{cancelled}");
+    let (status, again) = f.call(&f.ann, "POST", "/drafts", Some(body)).await;
+    assert_eq!(status, StatusCode::OK, "{again}");
+    assert_eq!(again["id"], draft);
+}
