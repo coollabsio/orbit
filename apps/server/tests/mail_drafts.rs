@@ -412,11 +412,23 @@ impl Fixture {
         name: &str,
         bytes: &[u8],
     ) -> (StatusCode, Value) {
+        self.upload_with(member, draft, name, bytes, "").await
+    }
+
+    /// An upload with a query string such as `?inline=true`.
+    async fn upload_with(
+        &self,
+        member: &Member,
+        draft: &str,
+        name: &str,
+        bytes: &[u8],
+        query: &str,
+    ) -> (StatusCode, Value) {
         let (content_type, body) = multipart(name, bytes);
         let request = Request::builder()
             .method("POST")
             .uri(format!(
-                "/api/v1/workspaces/{}/mail/drafts/{draft}/files",
+                "/api/v1/workspaces/{}/mail/drafts/{draft}/files{query}",
                 self.workspace
             ))
             .header(header::COOKIE, &member.cookie)
@@ -949,4 +961,174 @@ async fn a_draft_without_its_parent_keeps_its_files_on_a_mode_change() {
         .await;
     assert_eq!(status, StatusCode::OK, "{changed}");
     assert_eq!(changed["files"].as_array().unwrap().len(), 1);
+}
+
+const PNG: &[u8] = b"\x89PNG\r\n\x1a\n0000000000";
+
+impl Fixture {
+    /// A GET with the response headers and raw bytes.
+    async fn get_bytes(
+        &self,
+        member: &Member,
+        path: &str,
+    ) -> (StatusCode, axum::http::HeaderMap, Vec<u8>) {
+        let request = Request::builder()
+            .method("GET")
+            .uri(format!("/api/v1/workspaces/{}/mail{path}", self.workspace))
+            .header(header::COOKIE, &member.cookie)
+            .body(Body::empty())
+            .unwrap();
+        let response = self.app().oneshot(request).await.unwrap();
+        let status = response.status();
+        let headers = response.headers().clone();
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        (status, headers, bytes.to_vec())
+    }
+
+    async fn new_draft(&self, member: &Member, from: Id) -> String {
+        let (status, draft) = self
+            .call(
+                member,
+                "POST",
+                "/drafts",
+                Some(json!({"mode": "new", "from_address_id": from.to_string()})),
+            )
+            .await;
+        assert_eq!(status, StatusCode::CREATED, "{draft}");
+        draft["id"].as_str().unwrap().to_owned()
+    }
+}
+
+#[tokio::test]
+async fn inline_image_upload_and_preview() {
+    let f = Fixture::new().await;
+    let id = f.new_draft(&f.ann, f.ann_primary).await;
+    let (status, file) = f
+        .upload_with(&f.ann, &id, "pic.png", PNG, "?inline=true")
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{file}");
+    let content_id = file["content_id"].as_str().unwrap();
+    assert!(
+        content_id.starts_with("img-") && content_id.contains('@'),
+        "{content_id}"
+    );
+    assert!(!content_id.contains(char::is_whitespace));
+    assert_eq!(file["content_type"], "image/png");
+    // Two uploads never share a Content-ID.
+    let (_, second) = f
+        .upload_with(&f.ann, &id, "pic.png", PNG, "?inline=true")
+        .await;
+    assert_ne!(second["content_id"], file["content_id"]);
+
+    let file_id = file["id"].as_str().unwrap();
+    let path = format!("/drafts/{id}/files/{file_id}");
+    let (status, headers, bytes) = f.get_bytes(&f.ann, &path).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(bytes, PNG);
+    assert_eq!(headers[header::CONTENT_TYPE], "image/png");
+    assert_eq!(headers[header::X_CONTENT_TYPE_OPTIONS], "nosniff");
+    assert_eq!(headers[header::CACHE_CONTROL], "private, no-store");
+    // Another member of the mailbox reads nothing of it.
+    let (status, _, _) = f.get_bytes(&f.owner, &path).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _, _) = f
+        .get_bytes(&f.ann, &format!("/drafts/{id}/files/{}", Id::new_v7()))
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // An ordinary file downloads, whatever its bytes are.
+    let (_, plain) = f
+        .upload(&f.ann, &id, "a b.html", b"<html><script>1</script>")
+        .await;
+    assert_eq!(plain["content_id"], Value::Null);
+    let (status, headers, _) = f
+        .get_bytes(
+            &f.ann,
+            &format!("/drafts/{id}/files/{}", plain["id"].as_str().unwrap()),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(headers[header::CONTENT_TYPE], "application/octet-stream");
+    assert!(
+        headers[header::CONTENT_DISPOSITION]
+            .to_str()
+            .unwrap()
+            .starts_with("attachment;")
+    );
+    assert_eq!(headers[header::X_CONTENT_TYPE_OPTIONS], "nosniff");
+}
+
+#[tokio::test]
+async fn inline_upload_refuses_non_images() {
+    let f = Fixture::new().await;
+    let id = f.new_draft(&f.ann, f.ann_primary).await;
+    // The name says image; the bytes decide. SVG is not allowed either.
+    for bytes in [&b"hello"[..], b"<svg xmlns='x'></svg>", b"%PDF-1.4"] {
+        let (status, body) = f
+            .upload_with(&f.ann, &id, "pic.png", bytes, "?inline=true")
+            .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+        assert_eq!(body["code"], "inline_not_image");
+    }
+    let (_, got) = f.call(&f.ann, "GET", &format!("/drafts/{id}"), None).await;
+    assert_eq!(got["files"], json!([]));
+    // Not inline, it is fine.
+    let (status, _) = f.upload(&f.ann, &id, "pic.png", b"hello").await;
+    assert_eq!(status, StatusCode::CREATED);
+}
+
+#[tokio::test]
+async fn check_lists_only_suppressed_recipients_of_the_draft() {
+    let f = Fixture::new().await;
+    for (address, reason) in [
+        ("bad@out.test", "hard_bounce"),
+        ("angry@out.test", "complaint"),
+        ("elsewhere@out.test", "manual"),
+    ] {
+        sqlx::query(
+            "INSERT INTO mail_suppressions (workspace_id, address, reason, created_at) \
+             VALUES ($1, $2, $3, 1000)",
+        )
+        .bind(f.workspace.to_string())
+        .bind(address)
+        .bind(reason)
+        .execute(f.database.pool())
+        .await
+        .unwrap();
+    }
+    let id = f.new_draft(&f.ann, f.ann_primary).await;
+    let (status, clean) = f
+        .call(&f.ann, "POST", &format!("/drafts/{id}/check"), None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{clean}");
+    assert_eq!(clean, json!({"suppressed": []}));
+    let (status, body) = f
+        .call(
+            &f.ann,
+            "PATCH",
+            &format!("/drafts/{id}"),
+            Some(
+                json!({"version": 1, "to": ["Bad@Out.test", "fine@out.test"],
+                        "bcc": ["angry@out.test"]}),
+            ),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, checked) = f
+        .call(&f.ann, "POST", &format!("/drafts/{id}/check"), None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{checked}");
+    let found = checked["suppressed"].as_array().unwrap();
+    assert_eq!(found.len(), 2, "{checked}");
+    assert_eq!(found[0]["address"], "bad@out.test");
+    assert_eq!(found[0]["reason"], "hard_bounce");
+    assert!(found[0]["since"].is_string());
+    assert_eq!(found[1]["address"], "angry@out.test");
+    assert_eq!(found[1]["reason"], "complaint");
+    assert!(!checked.to_string().contains("elsewhere"));
+    // Another member's draft is not found.
+    let (status, _) = f
+        .call(&f.owner, "POST", &format!("/drafts/{id}/check"), None)
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
 }

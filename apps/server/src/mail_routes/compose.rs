@@ -27,6 +27,9 @@ pub(crate) struct MailFromAddress {
     /// Why it is `not_ready`: `domain_unverified`, `inbound_not_live`, `dkim_inactive`,
     /// `no_route` or `mailbox_suspended`.
     not_ready_reason: Option<String>,
+    /// The largest message, in bytes as sent, the route of this address's domain takes; `null`
+    /// without a route.
+    max_message_bytes: Option<i64>,
 }
 
 fn from_view(address: FromAddress) -> MailFromAddress {
@@ -47,6 +50,7 @@ fn from_view(address: FromAddress) -> MailFromAddress {
         signature_html: address.signature_html,
         ready,
         not_ready_reason: reason,
+        max_message_bytes: address.max_message_bytes,
     }
 }
 

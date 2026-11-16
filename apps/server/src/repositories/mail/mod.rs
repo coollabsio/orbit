@@ -109,6 +109,9 @@ pub enum MailError {
     /// Valid input that Orbit refuses, with a stable code (a 422).
     #[error("{0}")]
     Unprocessable(&'static str),
+    /// The message is over the send route's size limit (a 422 `message_too_large`).
+    #[error("the message is over the size limit")]
+    MessageTooLarge { limit: i64, size: i64 },
     /// The domain or mailbox cannot send yet (a 409 `send_not_ready`).
     #[error("the domain cannot send yet")]
     NotReady(NotReadyReason),

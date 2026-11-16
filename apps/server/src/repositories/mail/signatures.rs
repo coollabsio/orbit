@@ -29,6 +29,8 @@ pub struct FromAddress {
     pub display_name: String,
     pub signature_html: Option<String>,
     pub ready: SendReadiness,
+    /// The largest message the route of the address's domain takes; `None` without a route.
+    pub max_message_bytes: Option<i64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -164,6 +166,7 @@ impl MailRepository {
         .map(|row| Ok((row.try_get("address_id")?, row.try_get("body_html")?)))
         .collect::<Result<_, MailError>>()?;
         let mut readiness: HashMap<(Id, Id), SendReadiness> = HashMap::new();
+        let mut limits: HashMap<Id, Option<i64>> = HashMap::new();
         let mut addresses = Vec::with_capacity(rows.len());
         for row in &rows {
             let address_id = row.try_get::<String, _>("id")?;
@@ -175,6 +178,14 @@ impl MailRepository {
                     let ready = self.send_readiness(domain_id, Some(mailbox_id)).await?;
                     readiness.insert((domain_id, mailbox_id), ready);
                     ready
+                }
+            };
+            let max_message_bytes = match limits.get(&domain_id) {
+                Some(limit) => *limit,
+                None => {
+                    let limit = self.domain_max_message_bytes(domain_id).await?;
+                    limits.insert(domain_id, limit);
+                    limit
                 }
             };
             let personal = row.try_get::<String, _>("mailbox_kind")? == "personal";
@@ -196,6 +207,7 @@ impl MailRepository {
                     .cloned(),
                 address_id: parse_id(&address_id)?,
                 ready,
+                max_message_bytes,
             });
         }
         Ok(addresses)

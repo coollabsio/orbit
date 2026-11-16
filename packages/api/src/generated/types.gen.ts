@@ -3821,6 +3821,13 @@ export type MailDraft = {
     version: number;
 };
 
+export type MailDraftCheck = {
+    /**
+     * The recipients of this draft that are on the workspace's suppression list.
+     */
+    suppressed: Array<MailSuppressedRecipient>;
+};
+
 export type MailDraftFile = {
     /**
      * Sent as a download link instead of an attachment.
@@ -3836,6 +3843,8 @@ export type MailDraftFile = {
      */
     source_attachment_id?: string | null;
 };
+
+export type MailDraftFileBytes = Array<number>;
 
 export type MailDraftFileUpload = {
     file: Blob | File;
@@ -3898,6 +3907,11 @@ export type MailFromAddress = {
      */
     display_name: string;
     mailbox_id: string;
+    /**
+     * The largest message, in bytes as sent, the route of this address's domain takes; `null`
+     * without a route.
+     */
+    max_message_bytes?: number | null;
     /**
      * Why it is `not_ready`: `domain_unverified`, `inbound_not_live`, `dkim_inactive`,
      * `no_route` or `mailbox_suspended`.
@@ -4392,6 +4406,15 @@ export type MailSnippet = {
     id: string;
     name: string;
     updated_at: string;
+};
+
+export type MailSuppressedRecipient = {
+    address: string;
+    /**
+     * `hard_bounce`, `complaint` or `manual`.
+     */
+    reason: string;
+    since: string;
 };
 
 export type MailSuppression = {
@@ -8676,6 +8699,10 @@ export type TaskProblem = {
     formula?: null | DatabaseFormulaProblem;
     instance: string;
     /**
+     * The size limit, for `message_too_large`.
+     */
+    limit_bytes?: number | null;
+    /**
      * JSON path of the first invalid filter node, e.g. `filter.children[2].value`. Only set
      * for `invalid_filter`.
      */
@@ -8685,6 +8712,10 @@ export type TaskProblem = {
      */
     reason?: string | null;
     request_id: string;
+    /**
+     * The size of the message, for `message_too_large`.
+     */
+    size_bytes?: number | null;
     status: number;
     title: string;
     type: string;
@@ -29829,6 +29860,65 @@ export type UpdateMailDraftResponses = {
 
 export type UpdateMailDraftResponse = UpdateMailDraftResponses[keyof UpdateMailDraftResponses];
 
+export type CheckMailDraftData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        draft_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/mail/drafts/{draft_id}/check';
+};
+
+export type CheckMailDraftErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, mail_disabled
+     */
+    403: TaskProblem;
+    /**
+     * mail_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type CheckMailDraftError = CheckMailDraftErrors[keyof CheckMailDraftErrors];
+
+export type CheckMailDraftResponses = {
+    200: MailDraftCheck;
+};
+
+export type CheckMailDraftResponse = CheckMailDraftResponses[keyof CheckMailDraftResponses];
+
 export type UploadMailDraftFileData = {
     body: MailDraftFileUpload;
     headers?: {
@@ -29841,7 +29931,13 @@ export type UploadMailDraftFileData = {
         workspace_id: string;
         draft_id: string;
     };
-    query?: never;
+    query?: {
+        /**
+         * Put the image in the message body: the file gets a `content_id` to use as
+         * `<img src="cid:...">`. Only a PNG, JPEG, GIF or WebP image (by its bytes) can.
+         */
+        inline?: boolean;
+    };
     url: '/api/v1/workspaces/{workspace_id}/mail/drafts/{draft_id}/files';
 };
 
@@ -29871,7 +29967,7 @@ export type UploadMailDraftFileErrors = {
      */
     413: TaskProblem;
     /**
-     * validation_failed, draft_files_limit
+     * validation_failed, draft_files_limit, inline_not_image
      */
     422: TaskProblem;
     /**
@@ -29951,6 +30047,66 @@ export type DeleteMailDraftFileResponses = {
 };
 
 export type DeleteMailDraftFileResponse = DeleteMailDraftFileResponses[keyof DeleteMailDraftFileResponses];
+
+export type GetMailDraftFileData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        draft_id: string;
+        file_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/mail/drafts/{draft_id}/files/{file_id}';
+};
+
+export type GetMailDraftFileErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * mail_disabled
+     */
+    403: TaskProblem;
+    /**
+     * mail_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type GetMailDraftFileError = GetMailDraftFileErrors[keyof GetMailDraftFileErrors];
+
+export type GetMailDraftFileResponses = {
+    200: MailDraftFileBytes;
+};
+
+export type GetMailDraftFileResponse = GetMailDraftFileResponses[keyof GetMailDraftFileResponses];
 
 export type UpdateMailDraftFileData = {
     body: UpdateMailDraftFileBody;

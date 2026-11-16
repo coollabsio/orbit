@@ -5,12 +5,18 @@
 use std::io;
 
 use axum::Json;
+use axum::body::Body;
 use axum::extract::{Path, Request, State};
-use axum::http::{HeaderMap, StatusCode, Uri};
+use axum::http::header::{
+    CACHE_CONTROL, CONTENT_DISPOSITION, CONTENT_TYPE, X_CONTENT_TYPE_OPTIONS,
+};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri};
+use axum::response::Response;
 use orbit_platform::{BlobStoreError, Id, TimestampMillis, UploadError};
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
+use super::content::disposition;
 use super::{Call, MailState, RequestIdExtension};
 use crate::attachment_routes::{StageFailure, stage_single_file, storage_quota_exceeded};
 use crate::repositories::mail::{Draft, DraftChange, DraftFile, DraftMode, MailError, NewDraft};
@@ -343,15 +349,28 @@ pub(crate) struct MailDraftFileUpload {
     file: Vec<u8>,
 }
 
+#[derive(Deserialize, IntoParams)]
+#[serde(deny_unknown_fields)]
+#[into_params(parameter_in = Query)]
+pub(crate) struct UploadMailDraftFileQuery {
+    /// Put the image in the message body: the file gets a `content_id` to use as
+    /// `<img src="cid:...">`. Only a PNG, JPEG, GIF or WebP image (by its bytes) can.
+    inline: Option<bool>,
+}
+
+/// The image types an inline file may have (by the bytes, not the name).
+const INLINE_TYPES: [&str; 4] = ["image/png", "image/jpeg", "image/gif", "image/webp"];
+
 /// Attaches one file (multipart, one `file` field) to a draft of the caller, up to the upload
-/// size limit.
-#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/mail/drafts/{draft_id}/files", params(("workspace_id" = String, Path), ("draft_id" = String, Path)), request_body(content = MailDraftFileUpload, content_type = "multipart/form-data"), responses((status = 201, body = MailDraftFile)))]
+/// size limit. With `inline=true` the file must be an image; it gets a `content_id`.
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/mail/drafts/{draft_id}/files", params(("workspace_id" = String, Path), ("draft_id" = String, Path), UploadMailDraftFileQuery), request_body(content = MailDraftFileUpload, content_type = "multipart/form-data"), responses((status = 201, body = MailDraftFile)))]
 pub(crate) async fn upload_mail_draft_file(
     State(state): State<MailState>,
     Path((workspace, draft)): Path<(String, String)>,
     headers: HeaderMap,
     uri: Uri,
     request_id: RequestIdExtension,
+    ApiQuery(query): ApiQuery<UploadMailDraftFileQuery>,
     request: Request,
 ) -> Result<(StatusCode, Json<MailDraftFile>), ApiError> {
     let call = Call::enter(&state, &headers, &uri, &workspace, &request_id).await?;
@@ -383,9 +402,25 @@ pub(crate) async fn upload_mail_draft_file(
         StageFailure::Upload(error) => upload_problem(&call, error),
     })?;
     let upload = staged.upload().clone();
+    let content_id = if query.inline.unwrap_or(false) {
+        if !INLINE_TYPES.contains(&upload.detected_media_type.as_str()) {
+            staged.discard().await;
+            return Err(call.problem(MailError::Unprocessable("inline_not_image")));
+        }
+        // No user text: a random token.
+        Some(format!("img-{}@orbit", Id::new_v7()))
+    } else {
+        None
+    };
     match state
         .mail
-        .add_draft_file(membership, call.workspace_id, draft_id, &upload)
+        .add_draft_file(
+            membership,
+            call.workspace_id,
+            draft_id,
+            &upload,
+            content_id.as_deref(),
+        )
         .await
     {
         Ok(file) => {
@@ -480,4 +515,97 @@ pub(crate) async fn delete_mail_draft_file(
         .await
         .map_err(|error| call.problem(error))?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(ToSchema)]
+#[allow(dead_code)]
+pub(crate) struct MailDraftFileBytes(Vec<u8>);
+
+/// The bytes of an uploaded file of the caller's draft, for the editor preview. An inline image
+/// is served with its image type; any other file as a download. A file a forward copied from the
+/// received message is `mail_not_found`: its bytes are part of the sealed message, and it is not
+/// the author's upload.
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/mail/drafts/{draft_id}/files/{file_id}", params(("workspace_id" = String, Path), ("draft_id" = String, Path), ("file_id" = String, Path)), responses((status = 200, body = MailDraftFileBytes, content_type = "application/octet-stream")))]
+pub(crate) async fn get_mail_draft_file(
+    State(state): State<MailState>,
+    Path((workspace, draft, file)): Path<(String, String, String)>,
+    headers: HeaderMap,
+    uri: Uri,
+    request_id: RequestIdExtension,
+) -> Result<Response, ApiError> {
+    let call = Call::enter(&state, &headers, &uri, &workspace, &request_id).await?;
+    let draft_id = call.id(&draft)?;
+    let file_id = call.id(&file)?;
+    let membership = membership(&state, &call).await?;
+    let (file, reader) = state
+        .mail
+        .open_draft_file(membership, draft_id, file_id)
+        .await
+        .map_err(|error| call.problem(error))?;
+    let mut response = Response::new(Body::from_stream(tokio_util::io::ReaderStream::new(reader)));
+    let headers = response.headers_mut();
+    // The type was sniffed from the bytes at upload; only an inline image is shown as an image.
+    let inline_image =
+        file.content_id.is_some() && INLINE_TYPES.contains(&file.content_type.as_str());
+    if inline_image {
+        if let Ok(value) = HeaderValue::from_str(&file.content_type) {
+            headers.insert(CONTENT_TYPE, value);
+        }
+    } else {
+        headers.insert(
+            CONTENT_TYPE,
+            HeaderValue::from_static("application/octet-stream"),
+        );
+        if let Ok(value) = HeaderValue::from_str(&disposition("attachment", &file.filename)) {
+            headers.insert(CONTENT_DISPOSITION, value);
+        }
+    }
+    headers.insert(X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
+    headers.insert(CACHE_CONTROL, HeaderValue::from_static("private, no-store"));
+    Ok(response)
+}
+
+#[derive(Serialize, ToSchema)]
+pub(crate) struct MailSuppressedRecipient {
+    address: String,
+    /// `hard_bounce`, `complaint` or `manual`.
+    reason: String,
+    #[schema(value_type = String, format = DateTime)]
+    since: TimestampMillis,
+}
+
+#[derive(Serialize, ToSchema)]
+pub(crate) struct MailDraftCheck {
+    /// The recipients of this draft that are on the workspace's suppression list.
+    suppressed: Vec<MailSuppressedRecipient>,
+}
+
+/// Which recipients of the caller's draft are suppressed (a send to them is skipped), before the
+/// send. It tells nothing of the rest of the suppression list.
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/mail/drafts/{draft_id}/check", params(("workspace_id" = String, Path), ("draft_id" = String, Path)), responses((status = 200, body = MailDraftCheck)))]
+pub(crate) async fn check_mail_draft(
+    State(state): State<MailState>,
+    Path((workspace, draft)): Path<(String, String)>,
+    headers: HeaderMap,
+    uri: Uri,
+    request_id: RequestIdExtension,
+) -> Result<Json<MailDraftCheck>, ApiError> {
+    let call = Call::enter(&state, &headers, &uri, &workspace, &request_id).await?;
+    let draft_id = call.id(&draft)?;
+    let membership = membership(&state, &call).await?;
+    let found = state
+        .mail
+        .draft_suppressions(membership, call.workspace_id, draft_id)
+        .await
+        .map_err(|error| call.problem(error))?;
+    Ok(Json(MailDraftCheck {
+        suppressed: found
+            .into_iter()
+            .map(|entry| MailSuppressedRecipient {
+                address: entry.address,
+                reason: entry.reason.as_str().to_owned(),
+                since: entry.created_at,
+            })
+            .collect(),
+    }))
 }

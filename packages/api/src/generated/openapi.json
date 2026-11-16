@@ -44431,12 +44431,145 @@
         ]
       }
     },
+    "/api/v1/workspaces/{workspace_id}/mail/drafts/{draft_id}/check": {
+      "post": {
+        "tags": [
+          "crate::mail_routes::drafts"
+        ],
+        "summary": "Which recipients of the caller's draft are suppressed (a send to them is skipped), before the\nsend. It tells nothing of the rest of the suppression list.",
+        "operationId": "check_mail_draft",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "draft_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MailDraftCheck"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden, mail_disabled",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "mail_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/workspaces/{workspace_id}/mail/drafts/{draft_id}/files": {
       "post": {
         "tags": [
           "crate::mail_routes::drafts"
         ],
-        "summary": "Attaches one file (multipart, one `file` field) to a draft of the caller, up to the upload\nsize limit.",
+        "summary": "Attaches one file (multipart, one `file` field) to a draft of the caller, up to the upload\nsize limit. With `inline=true` the file must be an image; it gets a `content_id`.",
         "operationId": "upload_mail_draft_file",
         "parameters": [
           {
@@ -44453,6 +44586,15 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "inline",
+            "in": "query",
+            "description": "Put the image in the message body: the file gets a `content_id` to use as\n`<img src=\"cid:...\">`. Only a PNG, JPEG, GIF or WebP image (by its bytes) can.",
+            "required": false,
+            "schema": {
+              "type": "boolean"
             }
           },
           {
@@ -44547,7 +44689,7 @@
             }
           },
           "422": {
-            "description": "validation_failed, draft_files_limit",
+            "description": "validation_failed, draft_files_limit, inline_not_image",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -44585,6 +44727,145 @@
       }
     },
     "/api/v1/workspaces/{workspace_id}/mail/drafts/{draft_id}/files/{file_id}": {
+      "get": {
+        "tags": [
+          "crate::mail_routes::drafts"
+        ],
+        "summary": "The bytes of an uploaded file of the caller's draft, for the editor preview. An inline image\nis served with its image type; any other file as a download. A file a forward copied from the\nreceived message is `mail_not_found`: its bytes are part of the sealed message, and it is not\nthe author's upload.",
+        "operationId": "get_mail_draft_file",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "draft_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "file_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/MailDraftFileBytes"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "mail_disabled",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "mail_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      },
       "delete": {
         "tags": [
           "crate::mail_routes::drafts"
@@ -81668,6 +81949,21 @@
           }
         }
       },
+      "MailDraftCheck": {
+        "type": "object",
+        "required": [
+          "suppressed"
+        ],
+        "properties": {
+          "suppressed": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MailSuppressedRecipient"
+            },
+            "description": "The recipients of this draft that are on the workspace's suppression list."
+          }
+        }
+      },
       "MailDraftFile": {
         "type": "object",
         "required": [
@@ -81708,6 +82004,14 @@
             ],
             "description": "The received attachment a forward copied this file from."
           }
+        }
+      },
+      "MailDraftFileBytes": {
+        "type": "array",
+        "items": {
+          "type": "integer",
+          "format": "int32",
+          "minimum": 0
         }
       },
       "MailDraftFileUpload": {
@@ -81867,6 +82171,14 @@
           },
           "mailbox_id": {
             "type": "string"
+          },
+          "max_message_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The largest message, in bytes as sent, the route of this address's domain takes; `null`\nwithout a route."
           },
           "not_ready_reason": {
             "type": [
@@ -83015,6 +83327,27 @@
             "type": "string"
           },
           "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "MailSuppressedRecipient": {
+        "type": "object",
+        "required": [
+          "address",
+          "reason",
+          "since"
+        ],
+        "properties": {
+          "address": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string",
+            "description": "`hard_bounce`, `complaint` or `manual`."
+          },
+          "since": {
             "type": "string",
             "format": "date-time"
           }
@@ -93295,6 +93628,14 @@
           "instance": {
             "type": "string"
           },
+          "limit_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The size limit, for `message_too_large`."
+          },
           "path": {
             "type": [
               "string",
@@ -93311,6 +93652,14 @@
           },
           "request_id": {
             "type": "string"
+          },
+          "size_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The size of the message, for `message_too_large`."
           },
           "status": {
             "type": "integer",

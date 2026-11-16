@@ -117,6 +117,23 @@ fn recipients(draft: &Draft) -> Result<BTreeSet<String>, MailError> {
     Ok(all)
 }
 
+/// The id, kind and settings of the route a domain sends through (its own, else the instance
+/// default), without the route's secrets.
+const ROUTE_SETTINGS_SQL: &str = "SELECT r.id, r.kind, r.settings FROM mail_domains d \
+     JOIN mail_send_routes r ON r.id = COALESCE(d.send_route_id, \
+     (SELECT s.mail_send_route_id FROM instance_settings s WHERE s.id = 1)) \
+     WHERE d.id = $1";
+
+/// The largest encoded message a route takes: its own setting, else the default of its kind.
+fn route_max_bytes(kind: &str, settings: &str) -> Result<i64, MailError> {
+    let kind: SendRouteKind = kind.parse().map_err(|()| MailError::NotFound)?;
+    let settings: RouteSettings = serde_json::from_str(settings).unwrap_or_default();
+    Ok(match settings.max_message_bytes {
+        0 => kind.default_max_bytes(),
+        bytes => bytes,
+    })
+}
+
 /// The size of the message as it is sent: the text and base64 for each file that is not a link.
 fn encoded_size(draft: &Draft) -> i64 {
     let files: i64 = draft
@@ -131,6 +148,21 @@ fn encoded_size(draft: &Draft) -> i64 {
 }
 
 impl MailRepository {
+    /// The largest message the route of a domain takes; `None` without a route.
+    pub async fn domain_max_message_bytes(&self, domain_id: Id) -> Result<Option<i64>, MailError> {
+        let row = sqlx::query(ROUTE_SETTINGS_SQL)
+            .bind(domain_id.to_string())
+            .fetch_optional(self.database.pool())
+            .await?;
+        row.map(|row| {
+            route_max_bytes(
+                &row.try_get::<String, _>("kind")?,
+                &row.try_get::<String, _>("settings")?,
+            )
+        })
+        .transpose()
+    }
+
     /// Sends the member's draft (spec §5.3): checks, then holds it for the undo time (or until
     /// `scheduled_at`) and queues the job. A second call for the same draft returns the same row;
     /// the row of an undone send is held again. `NotFound` for a draft that is not the member's.
@@ -220,15 +252,10 @@ impl MailRepository {
                 .await?
                 .flatten();
         let route: Option<(String, String, String)> = {
-            let row = sqlx::query(
-                "SELECT r.id, r.kind, r.settings FROM mail_domains d \
-                 JOIN mail_send_routes r ON r.id = COALESCE(d.send_route_id, \
-                 (SELECT s.mail_send_route_id FROM instance_settings s WHERE s.id = 1)) \
-                 WHERE d.id = $1",
-            )
-            .bind(domain_id.to_string())
-            .fetch_optional(&mut *read)
-            .await?;
+            let row = sqlx::query(ROUTE_SETTINGS_SQL)
+                .bind(domain_id.to_string())
+                .fetch_optional(&mut *read)
+                .await?;
             row.map(|row| {
                 Ok::<_, MailError>((
                     row.try_get("id")?,
@@ -251,18 +278,15 @@ impl MailRepository {
         let all = recipients(&draft)?;
         let route_id = route.as_ref().map(|(id, _, _)| parse_id(id)).transpose()?;
         let max_bytes = route
-            .map(|(_, kind, settings)| {
-                let kind: SendRouteKind = kind.parse().map_err(|()| MailError::NotFound)?;
-                let settings: RouteSettings = serde_json::from_str(&settings).unwrap_or_default();
-                Ok::<_, MailError>(match settings.max_message_bytes {
-                    0 => kind.default_max_bytes(),
-                    bytes => bytes,
-                })
-            })
+            .map(|(_, kind, settings)| route_max_bytes(&kind, &settings))
             .transpose()?
             .unwrap_or(0);
-        if max_bytes > 0 && encoded_size(&draft) > max_bytes {
-            return Err(MailError::Unprocessable("message_too_large"));
+        let size = encoded_size(&draft);
+        if max_bytes > 0 && size > max_bytes {
+            return Err(MailError::MessageTooLarge {
+                limit: max_bytes,
+                size,
+            });
         }
 
         between.await;
@@ -277,8 +301,12 @@ impl MailRepository {
         if current.version != draft.version {
             return Err(MailError::Conflict("draft_conflict"));
         }
-        if max_bytes > 0 && encoded_size(&current) > max_bytes {
-            return Err(MailError::Unprocessable("message_too_large"));
+        let size = encoded_size(&current);
+        if max_bytes > 0 && size > max_bytes {
+            return Err(MailError::MessageTooLarge {
+                limit: max_bytes,
+                size,
+            });
         }
         let existing = sqlx::query(sqlx::AssertSqlSafe(format!(
             "SELECT {COLUMNS} FROM mail_outbound WHERE draft_id = $1"

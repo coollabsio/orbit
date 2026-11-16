@@ -368,7 +368,13 @@ pub fn mail_router(state: MailState) -> Router {
         )
         .route(
             "/api/v1/workspaces/{workspace_id}/mail/drafts/{draft_id}/files/{file_id}",
-            patch(drafts::update_mail_draft_file).delete(drafts::delete_mail_draft_file),
+            get(drafts::get_mail_draft_file)
+                .patch(drafts::update_mail_draft_file)
+                .delete(drafts::delete_mail_draft_file),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/drafts/{draft_id}/check",
+            post(drafts::check_mail_draft),
         )
         .route(
             "/api/v1/workspaces/{workspace_id}/mail/labels",
@@ -629,6 +635,9 @@ fn detail(code: &'static str) -> &'static str {
         "link_origin_missing" => {
             "File links need a public address for this Orbit server (ORBIT_PUBLIC_ORIGIN or ORBIT_MAIL_CONTENT_ORIGIN)."
         }
+        "inline_not_image" => {
+            "Only a PNG, JPEG, GIF or WebP image can go in the message body."
+        }
         "reserved_address" => "This address is reserved for bounces. Choose another one.",
         _ => "This action is not possible.",
     }
@@ -705,6 +714,15 @@ pub(crate) fn problem(
             instance,
             request_id,
         ),
+        MailError::MessageTooLarge { limit, size } => ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "message_too_large",
+            "Unprocessable",
+            detail("message_too_large"),
+            instance,
+            request_id,
+        )
+        .with_sizes(limit, size),
         MailError::QuotaExceeded => ApiError::new(
             StatusCode::PAYLOAD_TOO_LARGE,
             "storage_quota_exceeded",

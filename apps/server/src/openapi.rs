@@ -483,6 +483,8 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::mail_routes::drafts::update_mail_draft,
         crate::mail_routes::drafts::delete_mail_draft,
         crate::mail_routes::drafts::upload_mail_draft_file,
+        crate::mail_routes::drafts::get_mail_draft_file,
+        crate::mail_routes::drafts::check_mail_draft,
         crate::mail_routes::drafts::update_mail_draft_file,
         crate::mail_routes::drafts::delete_mail_draft_file,
         crate::mail_routes::send::send_mail_draft,
@@ -2546,6 +2548,7 @@ fn mail_draft_errors(
             add_code(responses, "413", "storage_quota_exceeded");
             add_code(responses, "422", "validation_failed");
             add_code(responses, "422", "draft_files_limit");
+            add_code(responses, "422", "inline_not_image");
         }
         _ => {}
     }

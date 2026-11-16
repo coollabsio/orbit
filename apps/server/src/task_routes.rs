@@ -3257,6 +3257,12 @@ pub(crate) struct ProblemBody {
     /// A machine-readable reason, such as why a domain cannot send (`send_not_ready`).
     #[serde(skip_serializing_if = "Option::is_none")]
     reason: Option<&'static str>,
+    /// The size limit, for `message_too_large`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    limit_bytes: Option<i64>,
+    /// The size of the message, for `message_too_large`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    size_bytes: Option<i64>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -3315,6 +3321,8 @@ impl ApiError {
                 path: None,
                 formula: None,
                 reason: None,
+                limit_bytes: None,
+                size_bytes: None,
             }),
             cause: None,
         }
@@ -3323,6 +3331,13 @@ impl ApiError {
     /// The same problem with a machine-readable `reason`.
     pub(crate) fn with_reason(mut self, reason: &'static str) -> Self {
         self.body.reason = Some(reason);
+        self
+    }
+
+    /// The same problem with the limit and the size of what was refused.
+    pub(crate) fn with_sizes(mut self, limit_bytes: i64, size_bytes: i64) -> Self {
+        self.body.limit_bytes = Some(limit_bytes);
+        self.body.size_bytes = Some(size_bytes);
         self
     }
 

@@ -289,7 +289,7 @@ fn bytes_response(bytes: Vec<u8>, content_type: &str, disposition: Option<&str>)
     response
 }
 
-fn disposition(kind: &str, name: &str) -> String {
+pub(super) fn disposition(kind: &str, name: &str) -> String {
     format!(
         "{kind}; filename=\"{}\"; filename*={}",
         ascii_file_name(name),

@@ -12,7 +12,7 @@
 
 use std::collections::{BTreeSet, HashMap};
 
-use orbit_platform::{Id, Row, StagedUpload, TimestampMillis};
+use orbit_platform::{BlobReader, Id, Row, StagedUpload, TimestampMillis};
 use serde::{Deserialize, Serialize};
 use sqlx::any::AnyRow;
 use sqlx::{Any, Transaction};
@@ -905,6 +905,7 @@ impl MailRepository {
         workspace_id: Id,
         draft_id: Id,
         upload: &StagedUpload,
+        content_id: Option<&str>,
     ) -> Result<DraftFile, MailError> {
         let finalization = self.uploads.begin_finalization().await;
         let now = self.database.database_now().await?;
@@ -935,8 +936,8 @@ impl MailRepository {
             i64::try_from(upload.size_bytes).map_err(|_| MailError::Invalid { field: "file" })?;
         sqlx::query(
             "INSERT INTO mail_draft_files \
-             (id, draft_id, workspace_id, blob_id, filename, content_type, size, as_link, \
-              created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, 0, $8)",
+             (id, draft_id, workspace_id, blob_id, filename, content_type, size, content_id, \
+              as_link, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 0, $9)",
         )
         .bind(id.to_string())
         .bind(draft_id.to_string())
@@ -945,6 +946,7 @@ impl MailRepository {
         .bind(&upload.display_name)
         .bind(&upload.detected_media_type)
         .bind(size)
+        .bind(content_id)
         .bind(now.as_millis())
         .execute(&mut *transaction)
         .await?;
@@ -955,10 +957,46 @@ impl MailRepository {
             filename: upload.display_name.clone(),
             content_type: upload.detected_media_type.clone(),
             size,
-            content_id: None,
+            content_id: content_id.map(str::to_owned),
             as_link: false,
             source_attachment_id: None,
         })
+    }
+
+    /// The stored bytes of an uploaded file of the member's draft, for the editor preview.
+    /// `NotFound` for another member's draft, a file that is not on it and a forwarded file: that
+    /// one points at the received message's sealed raw blob, which is never served as it is.
+    pub async fn open_draft_file(
+        &self,
+        membership_id: Id,
+        draft_id: Id,
+        file_id: Id,
+    ) -> Result<(DraftFile, BlobReader), MailError> {
+        let row = sqlx::query(
+            "SELECT f.id, f.filename, f.content_type, f.size, f.content_id, f.as_link, \
+             f.source_attachment_id, b.storage_key \
+             FROM mail_draft_files f \
+             JOIN mail_drafts d ON d.id = f.draft_id \
+             JOIN attachment_blobs b ON b.id = f.blob_id \
+             WHERE f.id = $1 AND f.draft_id = $2 AND d.membership_id = $3 \
+             AND f.source_attachment_id IS NULL AND b.deleted_at IS NULL",
+        )
+        .bind(file_id.to_string())
+        .bind(draft_id.to_string())
+        .bind(membership_id.to_string())
+        .fetch_optional(self.database.pool())
+        .await?
+        .ok_or(MailError::NotFound)?;
+        let reader = match self
+            .uploads
+            .open_blob(&row.try_get::<String, _>("storage_key")?)
+            .await
+        {
+            Ok(reader) => reader,
+            Err(error) if super::release::blob_missing(&error) => return Err(MailError::NotFound),
+            Err(error) => return Err(error.into()),
+        };
+        Ok((file(&row)?, reader))
     }
 
     pub async fn remove_draft_file(
@@ -1058,12 +1096,11 @@ async fn ensure_editable(
             .fetch_optional(&mut **transaction)
             .await?;
     owned.ok_or(MailError::NotFound)?;
-    let held: Option<String> = sqlx::query_scalar(
-        "SELECT id FROM mail_outbound WHERE draft_id = $1 AND status = 'held'",
-    )
-    .bind(draft_id.to_string())
-    .fetch_optional(&mut **transaction)
-    .await?;
+    let held: Option<String> =
+        sqlx::query_scalar("SELECT id FROM mail_outbound WHERE draft_id = $1 AND status = 'held'")
+            .bind(draft_id.to_string())
+            .fetch_optional(&mut **transaction)
+            .await?;
     if held.is_some() {
         return Err(MailError::Conflict("draft_sending"));
     }

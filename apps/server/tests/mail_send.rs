@@ -825,6 +825,68 @@ async fn size_over_route_limit_refused() {
     let (status, body) = f.send(draft["id"].as_str().unwrap(), json!({})).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
     assert_eq!(body["code"], "message_too_large");
+    assert_eq!(body["limit_bytes"], 10_000);
+    assert!(body["size_bytes"].as_i64().unwrap() > 20_000, "{body}");
+}
+
+#[tokio::test]
+async fn from_addresses_carry_the_route_size_limit() {
+    let f = Fixture::new().await;
+    let (status, list) = f.call(&f.ann, "GET", "/from-addresses", None).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert_eq!(list[0]["max_message_bytes"], 25_000_000, "smtp default");
+    f.sql("UPDATE mail_send_routes SET settings = '{\"max_message_bytes\": 10000}'")
+        .await;
+    let (_, list) = f.call(&f.ann, "GET", "/from-addresses", None).await;
+    assert_eq!(list[0]["max_message_bytes"], 10_000);
+    f.sql("UPDATE mail_domains SET send_route_id = NULL").await;
+    let (_, list) = f.call(&f.ann, "GET", "/from-addresses", None).await;
+    assert_eq!(list[0]["max_message_bytes"], Value::Null);
+}
+
+#[tokio::test]
+async fn inline_image_is_sent_as_multipart_related() {
+    let f = Fixture::new().await;
+    f.signing().await;
+    let (status, draft) = f
+        .call(
+            &f.ann,
+            "POST",
+            "/drafts",
+            Some(
+                json!({"mode": "new", "from_address_id": f.ann_primary.to_string(),
+                        "to": ["x@out.test"], "subject": "Pic"}),
+            ),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{draft}");
+    let id = draft["id"].as_str().unwrap();
+    let png = b"\x89PNG\r\n\x1a\n0000000000";
+    let (status, file) = f
+        .upload_with(&f.ann, id, "pic.png", png, "?inline=true")
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{file}");
+    let content_id = file["content_id"].as_str().unwrap().to_owned();
+    let (status, body) = f
+        .call(
+            &f.ann,
+            "PATCH",
+            &format!("/drafts/{id}"),
+            Some(json!({"version": 1,
+                        "body_html": format!("<p>Look <img src=\"cid:{content_id}\"></p>")})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (_, released, _) = f.send_and_release(id).await;
+    let raw = f.raw_of(released.message_id).await;
+    let text = String::from_utf8_lossy(&raw).into_owned();
+    assert!(text.contains("multipart/related"), "{text}");
+    assert!(
+        text.contains(&format!("Content-ID: <{content_id}>")),
+        "{text}"
+    );
+    assert!(text.contains(&format!("cid:{content_id}")), "{text}");
+    assert!(text.contains("Content-Disposition: inline"), "{text}");
 }
 
 #[tokio::test]
@@ -1032,11 +1094,23 @@ impl Fixture {
         name: &str,
         bytes: &[u8],
     ) -> (StatusCode, Value) {
+        self.upload_with(member, draft, name, bytes, "").await
+    }
+
+    /// An upload with a query string such as `?inline=true`.
+    async fn upload_with(
+        &self,
+        member: &Member,
+        draft: &str,
+        name: &str,
+        bytes: &[u8],
+        query: &str,
+    ) -> (StatusCode, Value) {
         let (content_type, body) = multipart(name, bytes);
         let request = Request::builder()
             .method("POST")
             .uri(format!(
-                "/api/v1/workspaces/{}/mail/drafts/{draft}/files",
+                "/api/v1/workspaces/{}/mail/drafts/{draft}/files{query}",
                 self.workspace
             ))
             .header(header::COOKIE, &member.cookie)
@@ -1085,9 +1159,7 @@ async fn files_added_after_the_checks_are_sized_when_holding() {
         .await;
     assert!(matches!(
         sent,
-        Err(orbit_server::repositories::mail::MailError::Unprocessable(
-            "message_too_large"
-        ))
+        Err(orbit_server::repositories::mail::MailError::MessageTooLarge { .. })
     ));
     let held: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM mail_outbound")
         .fetch_one(f.database.pool())

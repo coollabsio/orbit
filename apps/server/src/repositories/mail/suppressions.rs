@@ -315,6 +315,33 @@ impl MailRepository {
         row.as_ref().map(suppression).transpose()
     }
 
+    /// The entries of the workspace's suppression list that are among the member's own draft's
+    /// recipients (To, Cc and Bcc), and nothing else of the list. `NotFound` for a draft that is
+    /// not the member's. An address that is not valid is skipped: sending refuses it.
+    pub async fn draft_suppressions(
+        &self,
+        membership_id: Id,
+        workspace_id: Id,
+        draft_id: Id,
+    ) -> Result<Vec<Suppression>, MailError> {
+        let draft = self.get_draft(membership_id, draft_id).await?;
+        let mut seen = std::collections::BTreeSet::new();
+        let mut found = Vec::new();
+        for address in draft.to.iter().chain(&draft.cc).chain(&draft.bcc) {
+            let Ok(address) = orbit_mail::normalize_address(address.trim()) else {
+                continue;
+            };
+            let address = address.to_string();
+            if !seen.insert(address.clone()) {
+                continue;
+            }
+            if let Some(entry) = self.suppression(workspace_id, &address).await? {
+                found.push(entry);
+            }
+        }
+        Ok(found)
+    }
+
     /// Whether `address` is on the workspace's list.
     pub async fn is_suppressed(&self, workspace_id: Id, address: &str) -> Result<bool, MailError> {
         Ok(self.suppression(workspace_id, address).await?.is_some())
