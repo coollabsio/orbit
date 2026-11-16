@@ -50,7 +50,8 @@ struct Tiers {
 }
 
 /// The limits of the workspace: its tier's numbers from the instance settings, or its own when the
-/// tier is `custom`. A workspace without a policy row is `standard`.
+/// tier is `custom`. A workspace without a policy row is `standard`. Numbers that cannot be read
+/// fail closed to the `new` tier.
 pub(super) async fn load_limits(
     connection: &mut AnyConnection,
     workspace_id: Id,
@@ -67,57 +68,44 @@ pub(super) async fn load_limits(
         ),
         None => ("standard".to_owned(), None),
     };
+    if tier == "custom" {
+        return Ok(
+            match custom.as_deref().map(serde_json::from_str::<Limits>) {
+                Some(Ok(limits)) => limits,
+                _ => {
+                    tracing::warn!(%workspace_id, "custom mail send limits are missing or malformed");
+                    Limits::NEW
+                }
+            },
+        );
+    }
     let tiers: Option<String> =
         sqlx::query_scalar("SELECT mail_send_tiers FROM instance_settings WHERE id = 1")
             .fetch_optional(&mut *connection)
             .await?;
-    let tiers: Option<Tiers> = tiers.and_then(|json| serde_json::from_str(&json).ok());
-    let standard = tiers
-        .as_ref()
-        .and_then(|tiers| tiers.standard)
-        .unwrap_or(Limits::STANDARD);
-    Ok(match tier.as_str() {
-        "new" => tiers
-            .as_ref()
-            .and_then(|tiers| tiers.new)
-            .unwrap_or(Limits::NEW),
-        "custom" => custom
-            .and_then(|json| serde_json::from_str(&json).ok())
-            .unwrap_or(standard),
-        _ => standard,
+    let Some(Ok(tiers)) = tiers.as_deref().map(serde_json::from_str::<Tiers>) else {
+        tracing::warn!("mail_send_tiers is missing or malformed");
+        return Ok(Limits::NEW);
+    };
+    Ok(if tier == "new" {
+        tiers.new.unwrap_or(Limits::NEW)
+    } else {
+        tiers.standard.unwrap_or(Limits::NEW)
     })
 }
 
-/// `(time, recipients)` of what counts in a window, oldest first.
-async fn entries(
+/// The recipients of due, unreleased messages in the window (they have no recipient rows yet),
+/// counted like Send: distinct normalized addresses of each message.
+async fn due_held(
     transaction: &mut Transaction<'_, Any>,
     workspace_id: Id,
     membership_id: Option<Id>,
+    since: i64,
     now: i64,
     exclude: Option<Id>,
 ) -> Result<Vec<(i64, i64)>, MailError> {
-    let since = now - DAY_MS;
-    let mut released = orbit_platform::SqlBuilder::new(
-        "SELECT released_at FROM mail_outbound_recipients WHERE released_at > ",
-    );
-    released.push_bind(since);
-    released.push(" AND released_at <= ");
-    released.push_bind(now);
-    released.push(" AND workspace_id = ");
-    released.push_bind(workspace_id.to_string());
-    if let Some(membership_id) = membership_id {
-        released.push(" AND membership_id = ");
-        released.push_bind(membership_id.to_string());
-    }
-    let mut list: Vec<(i64, i64)> = released
-        .build()
-        .fetch_all(&mut **transaction)
-        .await?
-        .iter()
-        .map(|row| Ok((row.try_get::<i64, _>("released_at")?, 1)))
-        .collect::<Result<_, MailError>>()?;
     let mut due = orbit_platform::SqlBuilder::new(
-        "SELECT o.id, o.release_at, d.to_addrs, d.cc_addrs, d.bcc_addrs FROM mail_outbound o \
+        "SELECT o.release_at, d.to_addrs, d.cc_addrs, d.bcc_addrs FROM mail_outbound o \
          JOIN mail_drafts d ON d.id = o.draft_id WHERE o.status = 'held' AND o.release_at > ",
     );
     due.push_bind(since);
@@ -133,18 +121,98 @@ async fn entries(
         due.push(" AND o.id <> ");
         due.push_bind(exclude.to_string());
     }
+    let mut list = Vec::new();
     for row in due.build().fetch_all(&mut **transaction).await? {
-        let count: i64 = ["to_addrs", "cc_addrs", "bcc_addrs"]
-            .iter()
-            .map(|column| {
-                let json: String = row.try_get(column)?;
-                Ok(serde_json::from_str::<Vec<String>>(&json).map_or(0, |list| list.len() as i64))
-            })
-            .sum::<Result<i64, MailError>>()?;
-        list.push((row.try_get::<i64, _>("release_at")?, count));
+        let mut distinct = std::collections::BTreeSet::new();
+        for column in ["to_addrs", "cc_addrs", "bcc_addrs"] {
+            let json: String = row.try_get(column)?;
+            for address in serde_json::from_str::<Vec<String>>(&json).unwrap_or_default() {
+                match orbit_mail::normalize_address(address.trim()) {
+                    Ok(address) => distinct.insert(address.to_string()),
+                    Err(_) => distinct.insert(address),
+                };
+            }
+        }
+        list.push((row.try_get::<i64, _>("release_at")?, distinct.len() as i64));
+    }
+    Ok(list)
+}
+
+/// The filter of the released recipients of a scope in a window.
+fn released_filter(
+    head: &str,
+    workspace_id: Id,
+    membership_id: Option<Id>,
+    since: i64,
+    now: i64,
+) -> orbit_platform::SqlBuilder {
+    let mut sql = orbit_platform::SqlBuilder::new(head);
+    sql.push_bind(since);
+    sql.push(" AND released_at <= ");
+    sql.push_bind(now);
+    sql.push(" AND workspace_id = ");
+    sql.push_bind(workspace_id.to_string());
+    if let Some(membership_id) = membership_id {
+        sql.push(" AND membership_id = ");
+        sql.push_bind(membership_id.to_string());
+    }
+    sql
+}
+
+/// The first time `count` more recipients fit in one window of one scope: `None` when they fit
+/// now. The count is aggregated in SQL; the individual times are only read when the window is
+/// over its limit.
+#[allow(clippy::too_many_arguments)]
+async fn scope_allows(
+    transaction: &mut Transaction<'_, Any>,
+    workspace_id: Id,
+    membership_id: Option<Id>,
+    window: i64,
+    limit: i64,
+    count: i64,
+    now: i64,
+    exclude: Option<Id>,
+) -> Result<Option<i64>, MailError> {
+    let since = now - window;
+    let held = due_held(
+        transaction,
+        workspace_id,
+        membership_id,
+        since,
+        now,
+        exclude,
+    )
+    .await?;
+    let mut counted = released_filter(
+        "SELECT COUNT(*) AS n FROM mail_outbound_recipients WHERE released_at > ",
+        workspace_id,
+        membership_id,
+        since,
+        now,
+    );
+    let released: i64 = counted
+        .build()
+        .fetch_one(&mut **transaction)
+        .await?
+        .try_get("n")?;
+    let used = released + held.iter().map(|(_, n)| n).sum::<i64>();
+    if used == 0 || used + count <= limit {
+        return Ok(None);
+    }
+    let mut list = held;
+    let mut times = released_filter(
+        "SELECT released_at FROM mail_outbound_recipients WHERE released_at > ",
+        workspace_id,
+        membership_id,
+        since,
+        now,
+    );
+    let rows = times.build().fetch_all(&mut **transaction).await?;
+    for row in rows {
+        list.push((row.try_get::<i64, _>("released_at")?, 1));
     }
     list.sort_unstable();
-    Ok(list)
+    Ok(next_ok(&list, now, window, limit, count))
 }
 
 /// When `count` more recipients fit under `limit` in a window of `window` ms: `None` now, else
@@ -188,17 +256,26 @@ impl MailRepository {
     ) -> Result<Option<TimestampMillis>, MailError> {
         let limits = load_limits(transaction, workspace_id).await?;
         let now = now.as_millis();
-        let user = entries(transaction, workspace_id, Some(membership_id), now, exclude).await?;
-        let workspace = entries(transaction, workspace_id, None, now, exclude).await?;
-        let later = [
-            next_ok(&user, now, HOUR_MS, limits.per_user_hour, count),
-            next_ok(&user, now, DAY_MS, limits.per_user_day, count),
-            next_ok(&workspace, now, HOUR_MS, limits.per_ws_hour, count),
-            next_ok(&workspace, now, DAY_MS, limits.per_ws_day, count),
-        ]
-        .into_iter()
-        .flatten()
-        .max();
+        let mut later = None;
+        for (scope, window, limit) in [
+            (Some(membership_id), HOUR_MS, limits.per_user_hour),
+            (Some(membership_id), DAY_MS, limits.per_user_day),
+            (None, HOUR_MS, limits.per_ws_hour),
+            (None, DAY_MS, limits.per_ws_day),
+        ] {
+            let next = scope_allows(
+                transaction,
+                workspace_id,
+                scope,
+                window,
+                limit,
+                count,
+                now,
+                exclude,
+            )
+            .await?;
+            later = later.max(next);
+        }
         Ok(later.map(TimestampMillis::from_millis))
     }
 }

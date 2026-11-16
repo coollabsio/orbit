@@ -119,7 +119,9 @@ fn encoded_size(draft: &Draft) -> i64 {
         .filter(|file| !file.as_link)
         .map(|file| (file.size.max(0) + 2) / 3 * 4)
         .sum();
-    HEADER_BYTES + draft.subject.len() as i64 + draft.body_html.len() as i64 + files
+    // The body goes as HTML and as a text alternative, each as base64 (4/3).
+    let body = (draft.body_html.len() + orbit_mail::html_to_text(&draft.body_html).len()) as i64;
+    HEADER_BYTES + draft.subject.len() as i64 + (body + 2) / 3 * 4 + files
 }
 
 impl MailRepository {
@@ -165,7 +167,11 @@ impl MailRepository {
             membership_id,
             draft.from_address_id,
         )
-        .await?;
+        .await
+        .map_err(|error| match error {
+            MailError::NotFound => MailError::Forbidden("send_as_denied"),
+            other => other,
+        })?;
         let (address_mailbox, domain): (String, String) = {
             let row = sqlx::query("SELECT mailbox_id, domain_id FROM mail_addresses WHERE id = $1")
                 .bind(draft.from_address_id.to_string())
@@ -183,7 +189,7 @@ impl MailRepository {
                     .fetch_optional(&mut *read)
                     .await?;
             if thread_mailbox.as_deref() != Some(address_mailbox.as_str()) {
-                return Err(MailError::NotFound);
+                return Err(MailError::Forbidden("send_as_denied"));
             }
         }
         let paused: Option<i64> =
@@ -283,8 +289,9 @@ impl MailRepository {
                 None,
             )
             .await?
+            && room.as_millis() > release_at
         {
-            release_at = release_at.max(room.as_millis());
+            release_at = room.as_millis();
             hold_reason = Some("rate_limit");
         }
         let release = TimestampMillis::from_millis(release_at);

@@ -585,7 +585,11 @@ async fn cancel_after_release_conflicts() {
 async fn cancel_races_release_one_outcome() {
     let f = Fixture::new().await;
     let (membership, now) = (f.ann.membership, at(TimestampMillis::now().as_millis()));
-    for _ in 0..50 {
+    let (mut cancels, mut claims) = (0, 0);
+    let mut rounds = 0;
+    // 50 rounds, and more (up to 400) until each side has won once.
+    while rounds < 50 || ((cancels == 0 || claims == 0) && rounds < 400) {
+        rounds += 1;
         let draft = f.draft(&["x@out.test"]).await;
         let sent = f
             .mail
@@ -596,11 +600,24 @@ async fn cancel_races_release_one_outcome() {
             let (a, b) = (Arc::clone(&f.mail), Arc::clone(&f.mail));
             let id = sent.id;
             let due = sent.release_at;
-            let cancel = tokio::spawn(async move { a.cancel_outbound(membership, id, due).await });
-            let claim = tokio::spawn(async move { b.claim_release(id, due).await });
+            let gate = Arc::new(tokio::sync::Barrier::new(2));
+            let (g1, g2) = (Arc::clone(&gate), gate);
+            let cancel = tokio::spawn(async move {
+                g1.wait().await;
+                a.cancel_outbound(membership, id, due).await
+            });
+            let claim = tokio::spawn(async move {
+                g2.wait().await;
+                b.claim_release(id, due).await
+            });
             (cancel.await.unwrap(), claim.await.unwrap().unwrap())
         };
         let cancelled = cancel.is_ok();
+        if cancelled {
+            cancels += 1;
+        } else {
+            claims += 1;
+        }
         assert_ne!(cancelled, claim, "Exactly one of cancel and release wins");
         if !cancelled {
             assert!(matches!(
@@ -613,6 +630,10 @@ async fn cancel_races_release_one_outcome() {
         let (status, ..) = f.outbound_row(&sent.id.to_string()).await;
         assert_eq!(status, if cancelled { "cancelled" } else { "released" });
     }
+    assert!(
+        cancels > 0 && claims > 0,
+        "cancels {cancels}, releases {claims}"
+    );
 }
 
 #[tokio::test]
@@ -660,27 +681,27 @@ async fn refused_when_not_ready() {
         (
             "UPDATE mail_domains SET status = 'pending'",
             "UPDATE mail_domains SET status = 'verified'",
-            "not verified",
+            "domain_unverified",
         ),
         (
             "UPDATE mail_domains SET dns_report = '{\"verify\":{\"status\":\"ok\"},\"mx\":{\"status\":\"missing\"},\"dkim\":{\"status\":\"ok\"},\"spf\":{\"status\":\"ok\"},\"dmarc\":{\"status\":\"ok\"}}'",
             "UPDATE mail_domains SET dns_report = '{\"verify\":{\"status\":\"ok\"},\"mx\":{\"status\":\"ok\"},\"dkim\":{\"status\":\"ok\"},\"spf\":{\"status\":\"ok\"},\"dmarc\":{\"status\":\"ok\"}}'",
-            "MX record",
+            "inbound_not_live",
         ),
         (
             "UPDATE mail_dkim_keys SET status = 'pending'",
             "UPDATE mail_dkim_keys SET status = 'active'",
-            "DKIM",
+            "dkim_inactive",
         ),
         (
             "UPDATE mail_domains SET send_route_id = NULL",
             "UPDATE mail_domains SET send_route_id = (SELECT id FROM mail_send_routes LIMIT 1)",
-            "no send route",
+            "no_route",
         ),
         (
             "UPDATE mailboxes SET status = 'suspended'",
             "UPDATE mailboxes SET status = 'active'",
-            "suspended",
+            "mailbox_suspended",
         ),
     ];
     for (break_it, fix_it, reason) in cases {
@@ -688,10 +709,7 @@ async fn refused_when_not_ready() {
         let (status, body) = f.send(&draft, json!({})).await;
         assert_eq!(status, StatusCode::CONFLICT, "{reason}: {body}");
         assert_eq!(body["code"], "send_not_ready");
-        assert!(
-            body["detail"].as_str().unwrap().contains(reason),
-            "{reason}: {body}"
-        );
+        assert_eq!(body["reason"], reason, "{body}");
         f.sql(fix_it).await;
     }
     let (status, body) = f.send(&draft, json!({})).await;
@@ -828,25 +846,211 @@ async fn outsider_cannot_send() {
         )
         .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
-    // A member who left the mailbox cannot send from it any more.
-    f.sql(&format!(
-        "DELETE FROM mailbox_members WHERE membership_id = '{}'",
-        f.ann.membership
-    ))
-    .await;
-    let (status, _) = f.send(&draft, json!({})).await;
-    assert_eq!(status, StatusCode::NOT_FOUND);
-    // Another workspace: the path names a workspace the caller is not in.
+    // The draft id of another workspace: the owner is in both, the draft is in one.
+    let second =
+        orbit_server::repositories::workspaces::WorkspaceRepository::new((*f.database).clone())
+            .create(
+                user_of(&f, &f.owner).await,
+                "Second".to_owned(),
+                "request",
+                TimestampMillis::now(),
+            )
+            .await
+            .unwrap()
+            .id;
     let request = Request::builder()
         .method("POST")
         .uri(format!(
-            "/api/v1/workspaces/{}/mail/drafts/{draft}/send",
-            Id::new_v7()
+            "/api/v1/workspaces/{second}/mail/drafts/{draft}/send"
         ))
-        .header(header::COOKIE, &f.ann.cookie)
+        .header(header::COOKIE, &f.owner.cookie)
         .header(header::CONTENT_TYPE, "application/json")
         .body(Body::from("{}"))
         .unwrap();
     let response = f.app().oneshot(request).await.unwrap();
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    // A member who left the mailbox cannot send from it any more: 403, the draft is still theirs.
+    f.sql(&format!(
+        "DELETE FROM mailbox_members WHERE membership_id = '{}'",
+        f.ann.membership
+    ))
+    .await;
+    let (status, body) = f.send(&draft, json!({})).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(body["code"], "send_as_denied");
+}
+
+#[tokio::test]
+async fn reply_from_another_mailbox_is_denied() {
+    let f = Fixture::new().await;
+    let (_, thread) = f.deliver("team@one.test", f.team_primary).await;
+    let (status, draft) = f
+        .call(
+            &f.ann,
+            "POST",
+            "/drafts",
+            Some(json!({"mode": "reply", "thread_id": thread.to_string(), "to": ["x@out.test"]})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{draft}");
+    let id = draft["id"].as_str().unwrap();
+    // The From moves to another mailbox behind the API's back (D13).
+    f.sql(&format!(
+        "UPDATE mail_drafts SET from_address_id = '{}', mailbox_id = '{}' WHERE id = '{id}'",
+        f.ann_primary, f.ann_personal
+    ))
+    .await;
+    let (status, body) = f.send(id, json!({})).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(body["code"], "send_as_denied");
+}
+
+#[tokio::test]
+async fn a_held_draft_cannot_be_changed() {
+    let f = Fixture::new().await;
+    let draft = f.draft(&["x@out.test"]).await;
+    let (_, sent) = f.send(&draft, json!({})).await;
+    let outbound = sent["id"].as_str().unwrap();
+    let path = format!("/drafts/{draft}");
+    let (status, body) = f
+        .call(
+            &f.ann,
+            "PATCH",
+            &path,
+            Some(json!({"version": 1, "subject": "Changed"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["code"], "draft_sending");
+    let (status, body) = f.call(&f.ann, "DELETE", &path, None).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["code"], "draft_sending");
+    let (status, body) = f.upload(&f.ann, &draft, "a.txt", b"hello").await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["code"], "draft_sending");
+    // After Cancel the draft is editable again, files included.
+    let (status, _) = f
+        .call(
+            &f.ann,
+            "POST",
+            &format!("/outbound/{outbound}/cancel"),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, body) = f.upload(&f.ann, &draft, "a.txt", b"hello").await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let file = body["id"].as_str().unwrap().to_owned();
+    let (status, _) = f
+        .call(
+            &f.ann,
+            "PATCH",
+            &format!("{path}/files/{file}"),
+            Some(json!({"as_link": true})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, body) = f
+        .call(
+            &f.ann,
+            "PATCH",
+            &path,
+            Some(json!({"version": 1, "subject": "Changed"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    // Held again: removing the file is refused too.
+    let (_, again) = f.send(&draft, json!({})).await;
+    assert_eq!(again["status"], "held");
+    let (status, body) = f
+        .call(&f.ann, "DELETE", &format!("{path}/files/{file}"), None)
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    let (status, _) = f
+        .call(
+            &f.ann,
+            "PATCH",
+            &format!("{path}/files/{file}"),
+            Some(json!({"as_link": false})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+}
+
+#[tokio::test]
+async fn malformed_tiers_fail_closed_to_new() {
+    let f = Fixture::new().await;
+    f.sql("UPDATE instance_settings SET mail_send_tiers = '{\"new\": 1}'")
+        .await;
+    assert_eq!(
+        f.mail.limits_for(f.workspace).await.unwrap().max_recipients,
+        50
+    );
+    f.sql("UPDATE instance_settings SET mail_send_tiers = '[]'")
+        .await;
+    assert_eq!(
+        f.mail.limits_for(f.workspace).await.unwrap().per_user_hour,
+        30
+    );
+    f.sql(&format!(
+        "INSERT INTO mail_send_policies (workspace_id, tier, custom_limits, created_at, updated_at) \
+         VALUES ('{}', 'custom', '{{\"x\": 1}}', 1, 1)",
+        f.workspace
+    ))
+    .await;
+    assert_eq!(
+        f.mail.limits_for(f.workspace).await.unwrap().max_recipients,
+        50
+    );
+}
+
+fn multipart(name: &str, bytes: &[u8]) -> (String, Vec<u8>) {
+    let boundary = "orbit-test-boundary";
+    let mut body = format!(
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{name}\"\r\n\
+         Content-Type: application/octet-stream\r\n\r\n"
+    )
+    .into_bytes();
+    body.extend_from_slice(bytes);
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    (format!("multipart/form-data; boundary={boundary}"), body)
+}
+
+impl Fixture {
+    async fn upload(
+        &self,
+        member: &Member,
+        draft: &str,
+        name: &str,
+        bytes: &[u8],
+    ) -> (StatusCode, Value) {
+        let (content_type, body) = multipart(name, bytes);
+        let request = Request::builder()
+            .method("POST")
+            .uri(format!(
+                "/api/v1/workspaces/{}/mail/drafts/{draft}/files",
+                self.workspace
+            ))
+            .header(header::COOKIE, &member.cookie)
+            .header(header::CONTENT_TYPE, content_type)
+            .body(Body::from(body))
+            .unwrap();
+        let response = self.app().oneshot(request).await.unwrap();
+        let status = response.status();
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        (
+            status,
+            serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+        )
+    }
+
+    async fn reply(&self, member: &Member, mode: &str, thread: Id) -> (StatusCode, Value) {
+        self.call(
+            member,
+            "POST",
+            "/drafts",
+            Some(json!({"mode": mode, "thread_id": thread.to_string()})),
+        )
+        .await
+    }
 }

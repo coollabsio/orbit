@@ -777,6 +777,7 @@ impl MailRepository {
         let now = self.database.database_now().await?;
         let mut transaction = self.database.immediate_transaction().await?;
         let current = load_draft(&mut transaction, membership_id, draft_id).await?;
+        ensure_editable(&mut transaction, draft_id).await?;
         if current.version != change.version {
             return Err(MailError::Conflict("draft_conflict"));
         }
@@ -873,6 +874,8 @@ impl MailRepository {
 
     pub async fn delete_draft(&self, membership_id: Id, draft_id: Id) -> Result<(), MailError> {
         let mut transaction = self.database.immediate_transaction().await?;
+        load_draft(&mut transaction, membership_id, draft_id).await?;
+        ensure_editable(&mut transaction, draft_id).await?;
         let result = sqlx::query("DELETE FROM mail_drafts WHERE id = $1 AND membership_id = $2")
             .bind(draft_id.to_string())
             .bind(membership_id.to_string())
@@ -915,6 +918,7 @@ impl MailRepository {
         .fetch_optional(&mut *transaction)
         .await?;
         found.ok_or(MailError::NotFound)?;
+        ensure_editable(&mut transaction, draft_id).await?;
         let count: i64 =
             sqlx::query_scalar("SELECT COUNT(*) FROM mail_draft_files WHERE draft_id = $1")
                 .bind(draft_id.to_string())
@@ -965,6 +969,7 @@ impl MailRepository {
     ) -> Result<(), MailError> {
         let now = self.database.database_now().await?;
         let mut transaction = self.database.immediate_transaction().await?;
+        ensure_editable(&mut transaction, draft_id).await?;
         let result = sqlx::query(
             "DELETE FROM mail_draft_files WHERE id = $1 AND draft_id = $2 \
              AND draft_id IN (SELECT id FROM mail_drafts WHERE id = $2 AND membership_id = $3)",
@@ -992,6 +997,7 @@ impl MailRepository {
     ) -> Result<DraftFile, MailError> {
         let now = self.database.database_now().await?;
         let mut transaction = self.database.immediate_transaction().await?;
+        ensure_editable(&mut transaction, draft_id).await?;
         let result = sqlx::query(
             "UPDATE mail_draft_files SET as_link = $1 WHERE id = $2 AND draft_id = $3 \
              AND draft_id IN (SELECT id FROM mail_drafts WHERE id = $3 AND membership_id = $4)",
@@ -1015,6 +1021,24 @@ impl MailRepository {
         transaction.commit().await?;
         file(&row)
     }
+}
+
+/// `Conflict("draft_sending")` while the draft is held for sending: it must be cancelled (undone)
+/// first, so a held message cannot skip the checks of the send.
+async fn ensure_editable(
+    transaction: &mut Transaction<'_, Any>,
+    draft_id: Id,
+) -> Result<(), MailError> {
+    let held: Option<String> = sqlx::query_scalar(
+        "SELECT id FROM mail_outbound WHERE draft_id = $1 AND status = 'held'",
+    )
+    .bind(draft_id.to_string())
+    .fetch_optional(&mut **transaction)
+    .await?;
+    if held.is_some() {
+        return Err(MailError::Conflict("draft_sending"));
+    }
+    Ok(())
 }
 
 /// A change of the files moves the draft up the list without a new version (the editor's text

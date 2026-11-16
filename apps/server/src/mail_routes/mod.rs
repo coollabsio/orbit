@@ -557,6 +557,10 @@ fn detail(code: &'static str) -> &'static str {
         "sending_paused" => {
             "Sending is paused for this workspace because of bounces or complaints. The root user can resume it."
         }
+        "draft_sending" => {
+            "This message is waiting to be sent. Undo or cancel the send to change the draft."
+        }
+        "send_as_denied" => "You cannot send as this address.",
         "already_sent" => "This message has been sent already, so it cannot be undone.",
         "invalid_address" => "A recipient is not a valid email address.",
         "no_recipients" => "Add at least one recipient.",
@@ -566,6 +570,17 @@ fn detail(code: &'static str) -> &'static str {
         }
         "provider_in_use" => "Route the domains that use this provider elsewhere first.",
         _ => "This action is not possible.",
+    }
+}
+
+/// The snake_case name of a reason, as in the `not_ready_reason` of a From address.
+fn not_ready_code(reason: NotReadyReason) -> &'static str {
+    match reason {
+        NotReadyReason::DomainUnverified => "domain_unverified",
+        NotReadyReason::InboundNotLive => "inbound_not_live",
+        NotReadyReason::DkimInactive => "dkim_inactive",
+        NotReadyReason::NoRoute => "no_route",
+        NotReadyReason::MailboxSuspended => "mailbox_suspended",
     }
 }
 
@@ -618,7 +633,8 @@ pub(crate) fn problem(
             not_ready_detail(reason),
             instance,
             request_id,
-        ),
+        )
+        .with_reason(not_ready_code(reason)),
         MailError::Invalid { field } => validation(field, instance, request_id),
         MailError::Unprocessable(code) => ApiError::new(
             StatusCode::UNPROCESSABLE_ENTITY,

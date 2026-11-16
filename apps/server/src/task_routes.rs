@@ -3254,6 +3254,9 @@ pub(crate) struct ProblemBody {
     /// for `formula_invalid`.
     #[serde(skip_serializing_if = "Option::is_none")]
     formula: Option<crate::repositories::databases::FormulaProblem>,
+    /// A machine-readable reason, such as why a domain cannot send (`send_not_ready`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reason: Option<&'static str>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -3311,9 +3314,16 @@ impl ApiError {
                 conflict: None,
                 path: None,
                 formula: None,
+                reason: None,
             }),
             cause: None,
         }
+    }
+
+    /// The same problem with a machine-readable `reason`.
+    pub(crate) fn with_reason(mut self, reason: &'static str) -> Self {
+        self.body.reason = Some(reason);
+        self
     }
 
     /// 422 `formula_invalid`: a database formula that does not parse or type check.
