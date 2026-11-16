@@ -329,6 +329,11 @@ pub fn mail_router(state: MailState) -> Router {
             "/api/v1/workspaces/{workspace_id}/mail/drafts/{draft_id}/send",
             post(send::send_mail_draft),
         )
+        .route("/mail/f/{token}", get(content::download_mail_file))
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/threads/{thread_id}/messages/{message_id}/file-links/{link_id}/revoke",
+            post(content::revoke_mail_file_link),
+        )
         .route(
             "/api/v1/workspaces/{workspace_id}/mail/outbound/{outbound_id}/cancel",
             post(send::cancel_mail_outbound),
@@ -599,12 +604,18 @@ fn detail(code: &'static str) -> &'static str {
         "already_sent" => "This message has been sent already, so it cannot be undone.",
         "invalid_address" => "A recipient is not a valid email address.",
         "no_recipients" => "Add at least one recipient.",
-        "too_many_recipients" => "This message has more recipients than the workspace may send to at once.",
+        "too_many_recipients" => {
+            "This message has more recipients than the workspace may send to at once."
+        }
         "message_too_large" => {
             "This message is too large for the send route. Send big files as a link."
         }
         "provider_in_use" => "Route the domains that use this provider elsewhere first.",
         "recipient_not_failed" => "Only a recipient that was not delivered can be retried.",
+        "link_forwarded" => "A forwarded file cannot be sent as a link. Remove it or attach it.",
+        "link_origin_missing" => {
+            "File links need a public address for this Orbit server (ORBIT_PUBLIC_ORIGIN or ORBIT_MAIL_CONTENT_ORIGIN)."
+        }
         "reserved_address" => "This address is reserved for bounces. Choose another one.",
         _ => "This action is not possible.",
     }
@@ -686,6 +697,14 @@ pub(crate) fn problem(
             "storage_quota_exceeded",
             "Storage quota exceeded",
             "The workspace is over its storage quota.",
+            instance,
+            request_id,
+        ),
+        MailError::RateLimited => ApiError::new(
+            StatusCode::TOO_MANY_REQUESTS,
+            "rate_limited",
+            "Too many requests",
+            "Too many downloads. Try again later.",
             instance,
             request_id,
         ),

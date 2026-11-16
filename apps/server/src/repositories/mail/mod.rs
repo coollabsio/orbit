@@ -13,6 +13,7 @@ mod health;
 mod ingest;
 mod keys;
 mod labels;
+mod links;
 mod limits;
 mod mailboxes;
 mod outbound;
@@ -46,6 +47,7 @@ pub use ingest::{
 };
 pub use keys::{MailKeys, open_blob, receipt_aad, seal_blob};
 pub use labels::Label;
+pub use links::{FileLink, MailFileLinkView};
 pub use limits::{Limits, SEND_POLICY_JOB, SendPolicyView, SendTier, send_policy_kind};
 pub(crate) use mailboxes::suspend_owned_mailboxes;
 pub use mailboxes::{
@@ -108,6 +110,9 @@ pub enum MailError {
     NotReady(NotReadyReason),
     #[error("the workspace is over its storage quota")]
     QuotaExceeded,
+    /// Too many downloads of a file link (a 429).
+    #[error("too many requests")]
+    RateLimited,
     /// A sealed value did not open: another app key, other associated data or altered bytes.
     #[error("mail data could not be decrypted")]
     Crypto,
@@ -134,6 +139,9 @@ pub struct MailRepository {
     app_key: [u8; 32],
     /// Orbit Cloud (`ORBIT_CLOUD=true`): a workspace starts on the `new` tier.
     cloud: bool,
+    /// Where file links point (`{origin}/mail/f/{token}`): the content origin, else the public
+    /// origin. Empty: a message with a link file is held (`link_origin_missing`).
+    link_origin: String,
 }
 
 impl MailRepository {
@@ -145,7 +153,15 @@ impl MailRepository {
             uploads,
             app_key,
             cloud: false,
+            link_origin: String::new(),
         }
+    }
+
+    /// Sets the origin of file links.
+    #[must_use]
+    pub fn with_link_origin(mut self, origin: impl Into<String>) -> Self {
+        self.link_origin = origin.into().trim_end_matches('/').to_owned();
+        self
     }
 
     /// Sets whether this is Orbit Cloud: a workspace without a send policy is then `new`, else

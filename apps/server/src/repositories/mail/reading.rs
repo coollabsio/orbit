@@ -241,6 +241,8 @@ pub struct MailMessageView {
     pub lookalike_member: Option<String>,
     /// Why the message shows as plain text only (`parse_failed`, `limit`).
     pub warning: Option<String>,
+    /// The files this message sends as links: only for the member who sent it.
+    pub file_links: Vec<super::MailFileLinkView>,
 }
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
@@ -617,6 +619,12 @@ impl MailRepository {
         .map(|(id, name, email)| Ok((parse_id(&id)?, name, email)))
         .collect::<Result<_, MailError>>()?;
 
+        let mut file_links: HashMap<String, Vec<super::MailFileLinkView>> = HashMap::new();
+        for (message, link) in
+            super::links::sender_links(&mut transaction, reader.membership_id, thread_id).await?
+        {
+            file_links.entry(message).or_default().push(link);
+        }
         let mut messages = Vec::with_capacity(rows.len());
         for row in &rows {
             let id: String = row.try_get("id")?;
@@ -655,6 +663,7 @@ impl MailRepository {
                 external: row.try_get("external")?,
                 lookalike_member,
                 warning: row.try_get("warning")?,
+                file_links: file_links.remove(&id).unwrap_or_default(),
                 id: parse_id(&id)?,
             });
         }

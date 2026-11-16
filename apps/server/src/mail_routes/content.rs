@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use axum::Extension;
 use axum::Json;
 use axum::body::Body;
 use axum::extract::{Path, State};
@@ -29,14 +30,14 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use hkdf::Hkdf;
 use hmac::{Hmac, Mac};
 use orbit_mail::{RenderOptions, csp_header, new_nonce, render_document, render_text_document};
-use orbit_platform::{Id, TimestampMillis};
+use orbit_platform::{ClientIp, Id, TimestampMillis};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use utoipa::{IntoParams, ToSchema};
 
 use super::{Call, MailState, RequestIdExtension, problem};
 use crate::export::names::{ascii_file_name, rfc5987};
-use crate::repositories::mail::MailError;
+use crate::repositories::mail::{MailError, MailFileLinkView};
 use crate::task_routes::{ApiError, ApiJson, ApiQuery};
 
 /// How long a view URL may be opened.
@@ -605,4 +606,70 @@ pub(crate) async fn set_mail_sender_pref(
         address,
         load_images: body.load_images,
     }))
+}
+
+/// A file sent as a link (spec §5.9): public, on the content origin, never rendered. Anything
+/// that is not a live link (unknown, expired, revoked) is the same 404. Tries are counted per
+/// client address and downloads per link; over the limit is a 429.
+#[utoipa::path(get, path = "/mail/f/{token}", params(("token" = String, Path, description = "From the link in the message")), responses((status = 200, body = MailBytes, content_type = "application/octet-stream")))]
+pub(crate) async fn download_mail_file(
+    State(state): State<MailState>,
+    Path(token): Path<String>,
+    headers: HeaderMap,
+    client_ip: Option<Extension<ClientIp>>,
+    request_id: RequestIdExtension,
+) -> Result<Response, ApiError> {
+    let instance = "/mail/f";
+    if !state.serves_content(&headers) {
+        return Err(not_found(instance, &request_id));
+    }
+    let client = client_ip.map_or_else(|| "unknown".to_owned(), |Extension(ip)| ip.0.to_string());
+    let (link, bytes) = state
+        .mail
+        .open_link(&token, &client, TimestampMillis::now())
+        .await
+        .map_err(|error| match error {
+            MailError::NotFound => not_found(instance, &request_id),
+            other => problem(other, instance, request_id.as_ref()),
+        })?;
+    // Never the uploaded type: the bytes download, they are not shown.
+    let mut response = bytes_response(
+        bytes,
+        "application/octet-stream",
+        Some(&disposition("attachment", &link.filename)),
+    );
+    response
+        .headers_mut()
+        .insert(REFERRER_POLICY, HeaderValue::from_static("no-referrer"));
+    Ok(response)
+}
+
+/// Revokes a file link of a message the caller sent. Another member's message is `mail_not_found`.
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/mail/threads/{thread_id}/messages/{message_id}/file-links/{link_id}/revoke", params(("workspace_id" = String, Path), ("thread_id" = String, Path), ("message_id" = String, Path), ("link_id" = String, Path)), responses((status = 200, body = MailFileLinkView)))]
+pub(crate) async fn revoke_mail_file_link(
+    State(state): State<MailState>,
+    Path((workspace, thread, message, link)): Path<(String, String, String, String)>,
+    headers: HeaderMap,
+    uri: Uri,
+    request_id: RequestIdExtension,
+) -> Result<Json<MailFileLinkView>, ApiError> {
+    let call = Call::enter(&state, &headers, &uri, &workspace, &request_id).await?;
+    let (thread_id, message_id, link_id) = (call.id(&thread)?, call.id(&message)?, call.id(&link)?);
+    let membership = state
+        .mail
+        .mail_membership(call.workspace_id, call.actor_id)
+        .await
+        .map_err(|error| call.problem(error))?;
+    let now = state
+        .mail
+        .database()
+        .database_now()
+        .await
+        .map_err(|error| call.problem(error.into()))?;
+    state
+        .mail
+        .revoke_link(membership, thread_id, message_id, link_id, now)
+        .await
+        .map(Json)
+        .map_err(|error| call.problem(error))
 }

@@ -998,6 +998,20 @@ impl MailRepository {
         let now = self.database.database_now().await?;
         let mut transaction = self.database.immediate_transaction().await?;
         ensure_editable(&mut transaction, membership_id, draft_id).await?;
+        if as_link {
+            // A forwarded file is a part of a received message, not an Orbit upload: it has no
+            // file of its own to link to (it stays an attachment).
+            let source: Option<Option<String>> = sqlx::query_scalar(
+                "SELECT source_attachment_id FROM mail_draft_files WHERE id = $1 AND draft_id = $2",
+            )
+            .bind(file_id.to_string())
+            .bind(draft_id.to_string())
+            .fetch_optional(&mut *transaction)
+            .await?;
+            if matches!(source, Some(Some(_))) {
+                return Err(MailError::Unprocessable("link_forwarded"));
+            }
+        }
         let result = sqlx::query(
             "UPDATE mail_draft_files SET as_link = $1 WHERE id = $2 AND draft_id = $3 \
              AND draft_id IN (SELECT id FROM mail_drafts WHERE id = $3 AND membership_id = $4)",

@@ -483,6 +483,8 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::mail_routes::drafts::delete_mail_draft_file,
         crate::mail_routes::send::send_mail_draft,
         crate::mail_routes::send::cancel_mail_outbound,
+        crate::mail_routes::content::revoke_mail_file_link,
+        crate::mail_routes::content::download_mail_file,
         crate::mail_routes::send::list_mail_outbound,
         crate::mail_routes::admin::list_mail_send_policies,
         crate::mail_routes::admin::get_mail_send_policy_admin,

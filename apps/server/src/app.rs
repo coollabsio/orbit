@@ -338,7 +338,15 @@ impl App {
             app_key.ok_or_else(|| AppError::Config("ORBIT_APP_KEY is required".to_owned()))?;
         let mail = Arc::new(
             MailRepository::new(database.clone(), attachment_state.uploads.clone(), mail_key)
-                .with_cloud(config.billing.is_some()),
+                .with_cloud(config.billing.is_some())
+                .with_link_origin(
+                    config
+                        .mail
+                        .content_origin
+                        .clone()
+                        .filter(|origin| !origin.trim().is_empty())
+                        .unwrap_or_else(|| config.http.public_origin.clone()),
+                ),
         );
         let mail_listener = if config.mail.enabled {
             let intake = MailIntake::new(

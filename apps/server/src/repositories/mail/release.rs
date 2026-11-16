@@ -22,7 +22,11 @@
 //! back). Other lasting problems hold it the same way (`send_as_denied`, `build_failed`,
 //! `file_missing` — a file's blob is gone —, `storage_quota`); a database or blob store error holds
 //! it with `release_failed` while the job retries. A draft that is gone (its address or thread
-//! was deleted) cancels the row. Files sent as links (`as_link`) are left out of the message here.
+//! was deleted) cancels the row. Files sent as links (`as_link`) are left out of the message
+//! and get a link each ([`super::links`]): the tokens are made before the build, so that the
+//! signed message has the URLs, and the rows are written in the release transaction. A forwarded
+//! file cannot be a link (`link_forwarded`; the draft refuses it too), and without an origin for
+//! the URLs the message is held (`link_origin_missing`).
 //!
 //! **Sweep.** `mail.send_sweep` ([`SEND_SWEEP_JOB`], every [`SEND_SWEEP_MS`]) queues `mail.send`
 //! again for held, due rows that are stranded: `release_failed` (the job gave up after its
@@ -43,6 +47,7 @@ use sha2::{Digest, Sha256};
 use super::domains::parse_id;
 use super::drafts::{Draft, DraftMode, load_draft};
 use super::ingest::{Content, Stored, clean, insert_message};
+use super::links::{PlannedLink, create_links_for, human_size, link_expiry};
 use super::outbound::{enqueue, send_job};
 use super::receipts::{NewReceipt, insert_receipt};
 use super::search::people;
@@ -149,6 +154,7 @@ struct FileRow {
     content_type: String,
     content_id: Option<String>,
     as_link: bool,
+    size: i64,
     blob_id: String,
     storage_key: String,
     /// For a forwarded attachment: its part in the raw message of `receipt_id`.
@@ -209,6 +215,27 @@ fn escape_html(text: &str) -> String {
         .replace('<', "&lt;")
         .replace('>', "&gt;")
         .replace('"', "&quot;")
+}
+
+/// The block of the links of the files sent as links: name, size, expiry day and URL. Every
+/// value is escaped; the URL is shown as text too, so the text alternative has it.
+fn link_block(links: &[PlannedLink]) -> String {
+    if links.is_empty() {
+        return String::new();
+    }
+    let mut html = String::from("<p><strong>Files sent as links</strong></p>");
+    for link in links {
+        let expires = chrono::DateTime::from_timestamp_millis(link.expires_at.as_millis())
+            .map(|at| at.format("%Y-%m-%d").to_string())
+            .unwrap_or_default();
+        let url = escape_html(&link.url);
+        html.push_str(&format!(
+            "<p>{} ({}), link works until {expires} (UTC)<br><a href=\"{url}\">{url}</a></p>",
+            escape_html(&link.filename),
+            human_size(link.size),
+        ));
+    }
+    html
 }
 
 /// The message-id as stored, with angle brackets.
@@ -292,7 +319,7 @@ async fn load_files(
     draft_id: Id,
 ) -> Result<Vec<FileRow>, MailError> {
     let rows = sqlx::query(
-        "SELECT f.filename, f.content_type, f.content_id, f.as_link, f.blob_id, \
+        "SELECT f.filename, f.content_type, f.content_id, f.as_link, f.size, f.blob_id, \
          f.source_attachment_id, b.storage_key, a.part_id, m.receipt_id \
          FROM mail_draft_files f JOIN attachment_blobs b ON b.id = f.blob_id \
          LEFT JOIN mail_attachments a ON a.id = f.source_attachment_id \
@@ -310,6 +337,7 @@ async fn load_files(
                 content_type: row.try_get("content_type")?,
                 content_id: row.try_get("content_id")?,
                 as_link: row.try_get::<i64, _>("as_link")? != 0,
+                size: row.try_get("size")?,
                 blob_id: row.try_get("blob_id")?,
                 storage_key: row.try_get("storage_key")?,
                 part_id: row.try_get("part_id")?,
@@ -397,6 +425,11 @@ impl MailRepository {
             None => None,
         };
         let files = load_files(&mut read, draft.id).await?;
+        let link_days: Option<i64> =
+            sqlx::query_scalar("SELECT link_days FROM mail_send_policies WHERE workspace_id = $1")
+                .bind(workspace_id.to_string())
+                .fetch_optional(&mut *read)
+                .await?;
         let mut raw_refs = HashMap::new();
         for file in files.iter().filter(|file| !file.forwarded) {
             // A forwarded file whose attachment is gone still points at a sealed raw message.
@@ -413,6 +446,25 @@ impl MailRepository {
             .active_signing_key(sender.domain_id)
             .await?
             .ok_or(MailError::Unprocessable("dkim_inactive"))?;
+        let mut planned = Vec::new();
+        for file in files.iter().filter(|file| file.as_link) {
+            if file.forwarded {
+                return Err(MailError::Unprocessable("link_forwarded"));
+            }
+            if raw_refs.get(&file.blob_id).copied().unwrap_or(false) {
+                return Err(MailError::Unprocessable("file_missing"));
+            }
+            if self.link_origin.is_empty() {
+                return Err(MailError::Unprocessable("link_origin_missing"));
+            }
+            planned.push(PlannedLink::new(
+                &self.link_origin,
+                file.blob_id.clone(),
+                plain(&file.filename),
+                file.size,
+                link_expiry(now, link_days.unwrap_or(30)),
+            ));
+        }
         let mut raws: HashMap<Id, Vec<u8>> = HashMap::new();
         let mut composed_files = Vec::new();
         for file in files.iter().filter(|file| !file.as_link) {
@@ -453,6 +505,7 @@ impl MailRepository {
         }
 
         let mut html = clean_outgoing_html(&draft.body_html);
+        html.push_str(&link_block(&planned));
         let mut in_reply_to = None;
         let mut references = Vec::new();
         if let Some(parent) = &parent {
@@ -743,6 +796,7 @@ impl MailRepository {
         .bind(workspace_id.to_string())
         .execute(&mut *transaction)
         .await?;
+        create_links_for(&mut transaction, workspace_id, outbound_id, &planned, now).await?;
         sqlx::query("DELETE FROM mail_drafts WHERE id = $1")
             .bind(draft.id.to_string())
             .execute(&mut *transaction)
