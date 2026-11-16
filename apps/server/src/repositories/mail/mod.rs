@@ -8,6 +8,7 @@
 mod content;
 mod domains;
 mod drafts;
+mod events;
 mod health;
 mod ingest;
 mod keys;
@@ -37,6 +38,7 @@ pub use domains::{
     dns_check_kind,
 };
 pub use drafts::{Draft, DraftChange, DraftFile, DraftMode, NewDraft};
+pub use events::EventOutcome;
 pub use health::{HEALTH_TEST_TTL_MS, HealthTest, HealthTestResult, HealthTestStatus, TestDomain};
 pub use ingest::{
     Delivery, IngestOutcome, MAIL_TOPIC, PURGE_JOB, PurgeResult, TRASH_RETENTION_MS,

@@ -7,6 +7,7 @@ pub(crate) mod compose;
 pub(crate) mod content;
 pub(crate) mod domains;
 pub(crate) mod drafts;
+pub(crate) mod events;
 pub(crate) mod inbound;
 pub(crate) mod labels;
 pub(crate) mod mailboxes;
@@ -170,6 +171,11 @@ pub fn mail_router(state: MailState) -> Router {
         .route(
             "/api/v1/mail/inbound/{kind}/{provider_id}/mime",
             post(inbound::post_inbound),
+        )
+        // the handler reads the body itself, with a limit for each provider kind
+        .route(
+            "/api/v1/mail/events/{kind}/{route_id}",
+            post(events::post_mail_events),
         )
         .route(
             "/api/v1/workspaces/{workspace_id}/mail/domains",

@@ -502,6 +502,7 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::mail_routes::content::get_mail_content,
         crate::mail_routes::content::get_mail_part,
         crate::mail_routes::inbound::post_inbound,
+        crate::mail_routes::events::post_mail_events,
         crate::mail_routes::content::get_mail_image,
         crate::mail_routes::content::download_mail_attachment,
         crate::mail_routes::content::download_mail_message,
@@ -702,6 +703,7 @@ fn public_operation(operation_id: &str) -> bool {
             | "get_mail_part"
             | "get_mail_image"
             | "post_inbound"
+            | "post_mail_events"
             | "stripe_webhook"
             | "provider_callback"
             | "link_provider_sign_in"

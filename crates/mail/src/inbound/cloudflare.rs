@@ -13,9 +13,17 @@ use sha2::{Digest, Sha256};
 use super::{Delivery, InboundError, SpfHeaderOwned, SpfSource, address, fresh, verify_hex_hmac};
 
 /// The Email Worker the admin pastes into Cloudflare, with the Worker variables
-/// `ORBIT_WEBHOOK_URL` and `ORBIT_SIGNING_SECRET` (a secret).
-pub const WORKER_SCRIPT: &str = r#"// Orbit mail: forwards each message to Orbit.
+/// `ORBIT_WEBHOOK_URL` and `ORBIT_SIGNING_SECRET` (a secret). As the consumer of the queue of an
+/// Email Sending event subscription, its `queue` handler posts each batch of events (a JSON array
+/// of the messages' bodies) to `ORBIT_EVENTS_URL` (`/api/v1/mail/events/cloudflare/{route_id}`),
+/// with `x-orbit-signature` = hex HMAC-SHA256 of `"<x-orbit-timestamp>.<body>"` keyed with the
+/// route's event secret `ORBIT_EVENT_SECRET` ([`crate::events`]); any answer but 2xx retries the
+/// batch.
+/// <https://developers.cloudflare.com/email-service/reference/event-subscriptions/>
+/// <https://developers.cloudflare.com/queues/configuration/javascript-apis/#consumer>
+pub const WORKER_SCRIPT: &str = r#"// Orbit mail: forwards each message to Orbit, and the events of the mail Orbit sends.
 // Variables: ORBIT_WEBHOOK_URL, and the secret ORBIT_SIGNING_SECRET.
+// For sending events: ORBIT_EVENTS_URL, and the secret ORBIT_EVENT_SECRET.
 const hex = (bytes) => [...new Uint8Array(bytes)].map((b) => b.toString(16).padStart(2, "0")).join("");
 
 export default {
@@ -52,6 +60,27 @@ export default {
     }
     // Anything else (Orbit down, a storage error): a temporary failure, so the sender retries.
     throw new Error("Orbit answered " + response.status);
+  },
+
+  async queue(batch, env) {
+    const body = JSON.stringify(batch.messages.map((message) => message.body));
+    const timestamp = Math.floor(Date.now() / 1000).toString();
+    const key = await crypto.subtle.importKey(
+      "raw", new TextEncoder().encode(env.ORBIT_EVENT_SECRET),
+      { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+    const signature = hex(await crypto.subtle.sign(
+      "HMAC", key, new TextEncoder().encode(timestamp + "." + body)));
+    const response = await fetch(env.ORBIT_EVENTS_URL, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-orbit-timestamp": timestamp,
+        "x-orbit-signature": signature,
+      },
+      body,
+    });
+    // Anything but 2xx: the whole batch is delivered again later.
+    if (!response.ok) throw new Error("Orbit answered " + response.status);
   },
 };
 "#;

@@ -301,3 +301,8 @@ ALTER TABLE mail_threads ADD COLUMN last_sent_at BIGINT;
 ALTER TABLE mail_threads ADD COLUMN last_incoming_at BIGINT;
 UPDATE mail_threads SET last_incoming_at = last_message_at;
 CREATE INDEX mail_threads_sent ON mail_threads (mailbox_id, last_sent_at);
+
+-- A provider's event may name a sent message only by its Message-ID header (Resend sent over
+-- SMTP): find it without the workspace.
+CREATE INDEX mail_messages_message_id_header ON mail_messages (message_id_header)
+    WHERE message_id_header IS NOT NULL;

@@ -32,7 +32,7 @@ struct Data {
 }
 
 /// Checks the Svix headers (`svix-id`, `svix-timestamp`, `svix-signature`) with the endpoint secret
-/// (`whsec_…`), then reads the event. Other event types are `Malformed("event_type")`.
+/// (`whsec_…`) ([`verify_svix`]), then reads the event. Other event types are `Malformed("event_type")`.
 pub fn verify_webhook(
     id: Option<&str>,
     timestamp: Option<&str>,
@@ -41,6 +41,43 @@ pub fn verify_webhook(
     secret: &str,
     now: i64,
 ) -> Result<ResendEvent, InboundError> {
+    verify_svix(id, timestamp, signature, body, secret, now)?;
+    // the type first: events of other types have other data
+    #[derive(Deserialize)]
+    struct Kind {
+        #[serde(rename = "type")]
+        kind: String,
+    }
+    let kind: Kind = serde_json::from_slice(body).map_err(|_| InboundError::Malformed("json"))?;
+    if kind.kind != "email.received" {
+        return Err(InboundError::Malformed("event_type"));
+    }
+    let event: Event = serde_json::from_slice(body).map_err(|_| InboundError::Malformed("json"))?;
+    let data = event.data;
+    // the headers' To and Cc are not the envelope (a Bcc copy, a mailing list): without
+    // `received_for` there is nothing to deliver to
+    if data.received_for.is_empty() {
+        return Err(InboundError::Malformed("no_envelope"));
+    }
+    let envelope: Vec<&str> = data.received_for.iter().map(String::as_str).collect();
+    Ok(ResendEvent {
+        email_id: data.email_id,
+        recipients: recipients(&envelope),
+        mail_from: address(data.from.as_deref()),
+    })
+}
+
+/// Checks the Svix headers: `svix-signature` holds one or more `v1,<base64>` HMAC-SHA256 values of
+/// `{svix-id}.{svix-timestamp}.{body}`, keyed with the base64 part of the secret (`whsec_…`); the
+/// timestamp must be within [`super::REPLAY_WINDOW_SECS`]. Svix signs each attempt anew.
+pub(crate) fn verify_svix(
+    id: Option<&str>,
+    timestamp: Option<&str>,
+    signature: Option<&str>,
+    body: &[u8],
+    secret: &str,
+    now: i64,
+) -> Result<(), InboundError> {
     let (Some(id), Some(timestamp), Some(signature)) = (id, timestamp, signature) else {
         return Err(InboundError::Unauthorized);
     };
@@ -70,28 +107,5 @@ pub fn verify_webhook(
     if !valid {
         return Err(InboundError::Unauthorized);
     }
-    fresh(timestamp, now)?;
-    // the type first: events of other types have other data
-    #[derive(Deserialize)]
-    struct Kind {
-        #[serde(rename = "type")]
-        kind: String,
-    }
-    let kind: Kind = serde_json::from_slice(body).map_err(|_| InboundError::Malformed("json"))?;
-    if kind.kind != "email.received" {
-        return Err(InboundError::Malformed("event_type"));
-    }
-    let event: Event = serde_json::from_slice(body).map_err(|_| InboundError::Malformed("json"))?;
-    let data = event.data;
-    // the headers' To and Cc are not the envelope (a Bcc copy, a mailing list): without
-    // `received_for` there is nothing to deliver to
-    if data.received_for.is_empty() {
-        return Err(InboundError::Malformed("no_envelope"));
-    }
-    let envelope: Vec<&str> = data.received_for.iter().map(String::as_str).collect();
-    Ok(ResendEvent {
-        email_id: data.email_id,
-        recipients: recipients(&envelope),
-        mail_from: address(data.from.as_deref()),
-    })
+    fresh(timestamp, now)
 }

@@ -7,6 +7,7 @@ mod auth;
 mod bounce;
 mod compose;
 mod dkim;
+pub mod events;
 mod html;
 pub mod inbound;
 mod parse;

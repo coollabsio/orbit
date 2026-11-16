@@ -712,8 +712,11 @@ pub struct ThreadAudience {
     pub users: Vec<Id>,
 }
 
-/// Statuses a recipient leaves only by an attempt.
-const OPEN: &str = "('queued', 'sending', 'deferred')";
+/// Recipients Orbit still has to send: queued, sending, or deferred to a next attempt. A
+/// recipient that a provider's event deferred has no next attempt (the provider retries, Orbit
+/// does not: `super::events`), so it does not keep the message open.
+const OPEN: &str = "(status IN ('queued', 'sending') \
+    OR (status = 'deferred' AND next_attempt_at IS NOT NULL))";
 
 /// When a recipient of the message is due again: a queued one now, a deferred one at its next
 /// attempt, one that another attempt is sending when its lease ends.
@@ -769,7 +772,7 @@ pub(super) async fn finish_if_done(
 ) -> Result<bool, MailError> {
     let open: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         "SELECT CAST(COUNT(*) AS BIGINT) FROM mail_outbound_recipients \
-         WHERE outbound_id = $1 AND status IN {OPEN}"
+         WHERE outbound_id = $1 AND {OPEN}"
     )))
     .bind(outbound_id.to_string())
     .fetch_one(&mut **transaction)

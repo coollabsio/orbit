@@ -392,8 +392,25 @@ impl ProviderIntake {
         Ok(result)
     }
 
-    /// The PEM certificate at `url`, cached for an hour.
-    async fn cert(&self, url: &str) -> Result<Vec<u8>, FetchError> {
+    /// Confirms an SNS subscription (send route events): fetches its `SubscribeURL`, which the
+    /// caller checked is an SNS URL, after the message's signature.
+    pub async fn confirm_sns(&self, subscribe_url: &str) -> Result<(), FetchError> {
+        self.fetch
+            .get(
+                subscribe_url,
+                SMALL_BYTES,
+                "*/*",
+                None,
+                API_TIMEOUT,
+                Fetching::Provider,
+            )
+            .await
+            .map(|_| ())
+    }
+
+    /// The PEM certificate at `url`, cached for an hour. The caller checked `url`
+    /// (`ses::cert_url_ok`).
+    pub async fn cert(&self, url: &str) -> Result<Vec<u8>, FetchError> {
         let cached = self
             .certs
             .lock()

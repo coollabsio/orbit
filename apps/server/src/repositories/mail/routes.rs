@@ -364,6 +364,10 @@ pub struct RouteSettings {
     pub stream: Option<String>,
     /// The SPF include (`include:…`, or a whole `v=spf1 …` record) the domain's SPF record shows.
     pub spf: Option<String>,
+    /// SES: the SNS topic (`arn:aws:sns:…`) the configuration set publishes bounces, complaints
+    /// and deliveries to. Orbit takes events of this topic only (SNS signs every topic's
+    /// messages); without it, SES events are refused.
+    pub topic_arn: Option<String>,
     /// The size limit of a sent message in bytes; `0` or absent: the default of the kind.
     pub max_message_bytes: i64,
 }
@@ -668,6 +672,14 @@ async fn clean_settings(
                 .filter(|region| valid_aws_region(region))
                 .ok_or(MailError::Invalid { field: "region" })?;
             clean.region = Some(region);
+            clean.topic_arn = clean_text(settings.topic_arn, "topic_arn")?;
+            if clean
+                .topic_arn
+                .as_deref()
+                .is_some_and(|arn| !arn.starts_with("arn:aws:sns:"))
+            {
+                return Err(MailError::Invalid { field: "topic_arn" });
+            }
         }
         SendRouteKind::Cloudflare => {
             let account_id = clean_text(settings.account_id, "account_id")?
