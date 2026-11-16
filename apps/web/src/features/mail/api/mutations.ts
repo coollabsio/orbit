@@ -1,8 +1,15 @@
 import { type QueryClient, type QueryKey, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { apiClient } from '@/api/client'
 import {
   addMailboxAlias,
   addMailboxMember,
+  cancelMailOutbound,
+  createMailDraft,
+  deleteMailDraft,
+  retryMailRecipient,
+  sendMailDraft,
+  updateMailDraft,
   checkMailDomain,
   createMailbox,
   createMailDomain,
@@ -34,6 +41,11 @@ import {
 } from '@orbit/api/generated/sdk.gen'
 import type {
   CreateMailboxBody,
+  CreateMailDraftBody,
+  MailDraft,
+  MailOutbound,
+  SendMailDraftBody,
+  UpdateMailDraftBody,
   CreateMailLabelBody,
   CreateMailProviderBody,
   CreatePersonalMailboxesBody,
@@ -48,6 +60,8 @@ import type {
 import { queryKeys } from '@/api/queryKeys'
 import { useContext } from 'react'
 import { useWorkspace, WorkspaceContext } from '@/features/workspaces/workspaceContext'
+import { ApiProblem } from '@orbit/api/problem'
+import { applyDraftConflict, conflictDraft, type DraftText } from '../mailLib'
 import { mailKeys } from './keys'
 import type { ProviderScope } from './queries'
 import { applyThreadChange, type MailSnapshot, reconcileThreads, restoreMailSnapshot, type ThreadChange } from './optimistic'
@@ -495,5 +509,184 @@ export function useCreateTestAddress() {
   return useMutation({
     mutationFn: async (domainId: string) =>
       required((await createMailTestAddress({ client: apiClient, body: { domain_id: domainId }, throwOnError: true })).data),
+  })
+}
+
+/** A draft changed, was sent or was deleted: the draft lists, the outbound views and the counts are read again. */
+const invalidateSendViews = (queryClient: QueryClient, workspaceId: string) =>
+  invalidate(queryClient, [mailKeys.draftsAll(workspaceId), mailKeys.outboundAll(workspaceId), mailKeys.counts(workspaceId)])
+
+/** Starts a draft (`new`, `reply`, `reply_all`, `forward`, `forward_attached`). The server answers 200 with the existing one when the thread has a draft already. */
+export function useCreateDraft() {
+  const queryClient = useQueryClient()
+  const workspaceId = useWorkspaceId()
+  return useMutation({
+    mutationKey: [...mailKeys.all(workspaceId), 'draft'],
+    mutationFn: async (body: CreateMailDraftBody) =>
+      required((await createMailDraft({ client: apiClient, path: { workspace_id: workspaceId }, body, throwOnError: true })).data),
+    onSuccess: (draft) => {
+      queryClient.setQueryData(mailKeys.draft(workspaceId, draft.id), draft)
+      void queryClient.invalidateQueries({ queryKey: mailKeys.draftsAll(workspaceId) })
+    },
+  })
+}
+
+export function useDeleteDraft() {
+  const queryClient = useQueryClient()
+  const workspaceId = useWorkspaceId()
+  return useMutation({
+    mutationKey: [...mailKeys.all(workspaceId), 'draft'],
+    mutationFn: async (draftId: string) => {
+      await deleteMailDraft({ client: apiClient, path: { workspace_id: workspaceId, draft_id: draftId }, throwOnError: true })
+      return draftId
+    },
+    onSuccess: (draftId) => {
+      queryClient.removeQueries({ queryKey: mailKeys.draft(workspaceId, draftId) })
+      void invalidateSendViews(queryClient, workspaceId)
+    },
+  })
+}
+
+/** The wait before a change is saved: typing makes one save, not one per key. */
+export const DRAFT_SAVE_DELAY_MS = 2000
+
+type DraftChange = DraftText & Pick<UpdateMailDraftBody, 'from_address_id' | 'mode'>
+
+/** What a save ended with, when it did not save. */
+export type DraftSaveProblem = 'sending' | 'error'
+
+/**
+ * Debounced autosave of one draft (`save(change)` waits 2 s after the last call; `flush()` saves at once, as on
+ * close). Every save sends the `version` it was made from. On 409 `draft_conflict` the server copy replaces the
+ * cached draft and the text the user typed waits in `restore` (the "Restore my text" banner: `applyRestore()` puts it
+ * back as a new change, `dismissRestore()` drops it). On 409 `draft_sending` (the draft was sent) saving stops.
+ */
+export function useSaveDraft(draftId: string | null | undefined) {
+  const queryClient = useQueryClient()
+  const workspaceId = useWorkspaceId()
+  const pending = useRef<DraftChange>({})
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const running = useRef(false)
+  const stopped = useRef(false)
+  const [saving, setSaving] = useState(false)
+  const [restore, setRestore] = useState<DraftText | null>(null)
+  const [problem, setProblem] = useState<DraftSaveProblem | null>(null)
+
+  const run = useCallback(async () => {
+    if (!draftId || running.current || stopped.current || Object.keys(pending.current).length === 0) return
+    running.current = true
+    setSaving(true)
+    const change = pending.current
+    pending.current = {}
+    const key = mailKeys.draft(workspaceId, draftId)
+    const cached = queryClient.getQueryData<MailDraft>(key)
+    let failed = false
+    try {
+      if (!cached) throw new Error('The draft is not loaded.')
+      const body: UpdateMailDraftBody = { ...change, version: cached.version }
+      const draft = required((await updateMailDraft({ client: apiClient, path: { workspace_id: workspaceId, draft_id: draftId }, body, throwOnError: true })).data)
+      queryClient.setQueryData(key, draft)
+      setProblem(null)
+    } catch (error) {
+      const current = conflictDraft<MailDraft>(error)
+      if (current) {
+        const result = applyDraftConflict(change, current)
+        queryClient.setQueryData(key, result.draft)
+        // changes typed during the save are unsaved too: they are part of the text to restore
+        const unsaved = { ...change, ...pending.current }
+        pending.current = {}
+        setRestore(applyDraftConflict(unsaved, current).restore)
+      } else if (error instanceof ApiProblem && error.status === 409 && error.code === 'draft_sending') {
+        stopped.current = true
+        pending.current = {}
+        setProblem('sending')
+      } else {
+        // keep the text for the next try; newer changes win
+        pending.current = { ...change, ...pending.current }
+        failed = true
+        setProblem('error')
+      }
+    } finally {
+      running.current = false
+      setSaving(false)
+    }
+    if (Object.keys(pending.current).length > 0 && !stopped.current && !failed) timer.current = setTimeout(() => void run(), DRAFT_SAVE_DELAY_MS)
+  }, [draftId, queryClient, workspaceId])
+
+  const flush = useCallback(async () => {
+    clearTimeout(timer.current)
+    timer.current = undefined
+    await run()
+  }, [run])
+
+  const save = useCallback(
+    (change: DraftChange) => {
+      pending.current = { ...pending.current, ...change }
+      clearTimeout(timer.current)
+      timer.current = setTimeout(() => void run(), DRAFT_SAVE_DELAY_MS)
+    },
+    [run],
+  )
+
+  // a draft that was closed saves what is left (the timer must not outlive the editor silently)
+  useEffect(() => () => clearTimeout(timer.current), [])
+
+  const applyRestore = useCallback(() => {
+    if (!restore) return
+    setRestore(null)
+    save(restore)
+  }, [restore, save])
+
+  return { save, flush, saving, problem, restore, applyRestore, dismissRestore: () => setRestore(null) }
+}
+
+/** Sends a draft: after the undo time, or at `scheduled_at`. The answer says when it goes. */
+export function useSendDraft() {
+  const queryClient = useQueryClient()
+  const workspaceId = useWorkspaceId()
+  return useMutation<MailOutbound, Error, { draftId: string; body?: SendMailDraftBody }>({
+    mutationKey: [...mailKeys.all(workspaceId), 'send'],
+    mutationFn: async ({ draftId, body }) =>
+      required(
+        (await sendMailDraft({ client: apiClient, path: { workspace_id: workspaceId, draft_id: draftId }, body: body ?? {}, throwOnError: true })).data,
+      ),
+    onSuccess: (_outbound, { draftId }) => {
+      queryClient.removeQueries({ queryKey: mailKeys.draft(workspaceId, draftId) })
+      void invalidateSendViews(queryClient, workspaceId)
+    },
+  })
+}
+
+/** **Undo**: stops a message that is held and answers its draft. After its release the server answers 409 `already_sent`. */
+export function useCancelOutbound() {
+  const queryClient = useQueryClient()
+  const workspaceId = useWorkspaceId()
+  return useMutation({
+    mutationKey: [...mailKeys.all(workspaceId), 'send'],
+    mutationFn: async (outboundId: string) =>
+      required((await cancelMailOutbound({ client: apiClient, path: { workspace_id: workspaceId, outbound_id: outboundId }, throwOnError: true })).data),
+    // the cancelled message is a draft again
+    onSuccess: (draft) => queryClient.setQueryData(mailKeys.draft(workspaceId, draft.id), draft),
+    onSettled: () => invalidateSendViews(queryClient, workspaceId),
+  })
+}
+
+/** **Retry** one bounced recipient. A purged recipient answers 409 `recipient_expired`. */
+export function useRetryRecipient() {
+  const queryClient = useQueryClient()
+  const workspaceId = useWorkspaceId()
+  return useMutation({
+    mutationKey: [...mailKeys.all(workspaceId), 'send'],
+    mutationFn: async ({ outboundId, recipientId }: { outboundId: string; recipientId: string }) =>
+      required(
+        (
+          await retryMailRecipient({
+            client: apiClient,
+            path: { workspace_id: workspaceId, outbound_id: outboundId, recipient_id: recipientId },
+            throwOnError: true,
+          })
+        ).data,
+      ),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: mailKeys.outboundAll(workspaceId) }),
   })
 }

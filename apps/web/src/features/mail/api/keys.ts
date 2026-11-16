@@ -11,6 +11,9 @@ export interface ThreadFilter {
   starred?: boolean
 }
 
+/** The outbound queue views the server lists (`GET mail/outbound?view=`). */
+export type OutboundView = 'sent' | 'scheduled' | 'outbox'
+
 /**
  * Deliberately outside the `['workspace', id]` prefix (like `chatKeys`): workspace events invalidate that whole
  * prefix, and mail has its own live topic (`emitMailEvent`), so a task or page change must not read the mail again.
@@ -28,6 +31,24 @@ export const mailKeys = {
   /** Prefix of every open thread. */
   threadDetails: (workspaceId: string) => ['mail', workspaceId, 'thread'] as const,
   thread: (workspaceId: string, threadId: string) => ['mail', workspaceId, 'thread', threadId] as const,
+  /** The user's drafts (all mailboxes, or one). Not under `list`: they are not thread lists. */
+  drafts: (workspaceId: string, mailboxId?: string) => ['mail', workspaceId, 'drafts', mailboxId ?? null] as const,
+  /** Prefix of every draft read. */
+  draftsAll: (workspaceId: string) => ['mail', workspaceId, 'drafts'] as const,
+  draft: (workspaceId: string, draftId: string) => ['mail', workspaceId, 'draft', draftId] as const,
+  /** The addresses the user sends as; of a thread, the one that received it comes first. */
+  fromAddresses: (workspaceId: string, threadId?: string) => ['mail', workspaceId, 'from-addresses', threadId ?? null] as const,
+  /** Prefix of every outbound view (`sent`, `scheduled`, `outbox`). */
+  outboundAll: (workspaceId: string) => ['mail', workspaceId, 'outbound'] as const,
+  outbound: (workspaceId: string, view: OutboundView) => ['mail', workspaceId, 'outbound', view] as const,
+  contacts: (workspaceId: string, query: string) => ['mail', workspaceId, 'contacts', query] as const,
+  signatures: (workspaceId: string) => ['mail', workspaceId, 'signatures'] as const,
+  snippets: (workspaceId: string) => ['mail', workspaceId, 'snippets'] as const,
+  settingsMe: (workspaceId: string) => ['mail', workspaceId, 'settings-me'] as const,
+  vacation: (workspaceId: string, mailboxId: string) => ['mail', workspaceId, 'vacation', mailboxId] as const,
+  suppressions: (workspaceId: string) => ['mail', workspaceId, 'suppressions'] as const,
+  sendRoutes: (workspaceId: string) => ['mail', workspaceId, 'send-routes'] as const,
+  sendPolicy: (workspaceId: string) => ['mail', workspaceId, 'send-policy'] as const,
   domains: (workspaceId: string) => ['mail', workspaceId, 'domains'] as const,
   domain: (workspaceId: string, domainId: string) => ['mail', workspaceId, 'domains', domainId] as const,
   mailboxes: (workspaceId: string) => ['mail', workspaceId, 'mailboxes'] as const,

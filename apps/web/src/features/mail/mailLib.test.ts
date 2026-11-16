@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { frameHeight, mailThreadPath, mailViewPath, parseMailPath, searchSuggestions, threadFilterOf, type MailView } from './mailLib'
+import { applyDraftConflict, frameHeight, mailThreadPath, mailViewPath, parseMailPath, searchSuggestions, threadFilterOf, type MailView } from './mailLib'
 
 test('a message frame takes only a finite height from its own window, clamped to 80–20,000 px', () => {
   const frame = { name: 'frame' }
@@ -32,7 +32,7 @@ test('mail paths name a view and an open thread, both ways', () => {
   }
   expect(mailViewPath({ kind: 'folder', folder: 'inbox' })).toBe('/mail')
   expect(mailThreadPath({ kind: 'folder', folder: 'inbox' }, 'th1')).toBe('/mail/t/th1')
-  for (const bad of ['sent', 'mb1/sent', 'label', 'starred/extra', 'a/b/c', 't']) expect(parseMailPath(bad)).toBeNull()
+  for (const bad of ['outgoing', 'mb1/outgoing', 'label', 'starred/extra', 'a/b/c', 't']) expect(parseMailPath(bad)).toBeNull()
 
   expect(threadFilterOf({ kind: 'folder', folder: 'spam', mailboxId: 'mb1' })).toEqual({ mailboxId: 'mb1', folder: 'spam' })
   expect(threadFilterOf({ kind: 'label', labelId: 'lb1' })).toEqual({ labelId: 'lb1' })
@@ -58,4 +58,28 @@ test('search completes the word being typed and keeps the rest of the query', ()
   expect(queries('before:2026')).toEqual([])
   // a quoted phrase is one word
   expect(queries('subject:"big news" i')).toEqual(['subject:"big news" in:', 'subject:"big news" is:'])
+})
+
+test('parses_new_folders', () => {
+  for (const folder of ['drafts', 'sent', 'scheduled', 'outbox'] as const) {
+    expect(parseMailPath(folder)).toEqual({ view: { kind: 'folder', folder }, threadId: null })
+    expect(parseMailPath(`${folder}/t/th1`)).toEqual({ view: { kind: 'folder', folder }, threadId: 'th1' })
+    expect(parseMailPath(`mb1/${folder}`)).toEqual({ view: { kind: 'folder', folder, mailboxId: 'mb1' }, threadId: null })
+    expect(parseMailPath(`mb1/${folder}/t/th1`)).toEqual({ view: { kind: 'folder', folder, mailboxId: 'mb1' }, threadId: 'th1' })
+    expect(mailViewPath({ kind: 'folder', folder })).toBe(`/mail/${folder}`)
+    expect(mailViewPath({ kind: 'folder', folder, mailboxId: 'mb1' })).toBe(`/mail/mb1/${folder}`)
+    // these folders are not thread lists
+    expect(threadFilterOf({ kind: 'folder', folder })).toBeNull()
+  }
+})
+
+test('draft_conflict_keeps_local_text', () => {
+  const server = { subject: 'Server subject', body_html: '<p>server</p>', to: ['a@x.test'], version: 5 }
+  const local = { subject: 'Mine', body_html: '<p>mine</p>', to: ['b@x.test'], version: 3 }
+  const result = applyDraftConflict(local, server)
+  // the server copy replaces the draft, the unsaved text waits in the banner
+  expect(result.draft).toEqual(server)
+  expect(result.restore).toEqual({ subject: 'Mine', body_html: '<p>mine</p>', to: ['b@x.test'] })
+  // nothing differs: no banner
+  expect(applyDraftConflict({ ...server, version: 4 }, server).restore).toBeNull()
 })

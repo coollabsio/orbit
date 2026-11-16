@@ -1,25 +1,36 @@
 import type { IconComponent } from 'reicon-react'
-import { Archive, DirectInbox, ShieldCross, Trash } from 'reicon-react'
+import { Archive, Clock, DirectboxSend, DirectInbox, Edit, Send, ShieldCross, Trash } from 'reicon-react'
 import type { MailAttachmentView, MailFolder, MailPerson, MailThreadSummary } from '@orbit/api/generated/types.gen'
 import { ApiProblem } from '@orbit/api/problem'
 import type { Attachment } from '@/lib/attachmentLib'
 import type { ThreadFilter } from './api/keys'
 
-export const FOLDERS: ReadonlyArray<{ folder: MailFolder; label: string; icon: IconComponent }> = [
+/** The folders that are not thread lists: they read the drafts or the outbound queue. */
+export type SendFolder = 'drafts' | 'sent' | 'scheduled' | 'outbox'
+/** Every folder of the rail. */
+export type ListFolder = MailFolder | SendFolder
+
+export const FOLDERS: ReadonlyArray<{ folder: ListFolder; label: string; icon: IconComponent }> = [
   { folder: 'inbox', label: 'Inbox', icon: DirectInbox },
+  { folder: 'drafts', label: 'Drafts', icon: Edit },
+  { folder: 'sent', label: 'Sent', icon: Send },
+  { folder: 'scheduled', label: 'Scheduled', icon: Clock },
+  { folder: 'outbox', label: 'Outbox', icon: DirectboxSend },
   { folder: 'archive', label: 'Archive', icon: Archive },
   { folder: 'spam', label: 'Spam', icon: ShieldCross },
   { folder: 'trash', label: 'Trash', icon: Trash },
 ]
 
 const FOLDER_NAMES = new Set<string>(FOLDERS.map(({ folder }) => folder))
-const isFolder = (value: string | undefined): value is MailFolder => value !== undefined && FOLDER_NAMES.has(value)
+const SEND_FOLDERS = new Set<string>(['drafts', 'sent', 'scheduled', 'outbox'])
+export const isSendFolder = (folder: ListFolder): folder is SendFolder => SEND_FOLDERS.has(folder)
+const isFolder = (value: string | undefined): value is ListFolder => value !== undefined && FOLDER_NAMES.has(value)
 
-export const folderLabel = (folder: MailFolder) => FOLDERS.find((entry) => entry.folder === folder)?.label ?? folder
+export const folderLabel = (folder: ListFolder) => FOLDERS.find((entry) => entry.folder === folder)?.label ?? folder
 
 /** What the thread list shows. A folder without `mailboxId` is the folder of every mailbox the user reads. */
 export type MailView =
-  | { kind: 'folder'; folder: MailFolder; mailboxId?: string }
+  | { kind: 'folder'; folder: ListFolder; mailboxId?: string }
   | { kind: 'label'; labelId: string }
   | { kind: 'starred' }
   | { kind: 'search' }
@@ -73,10 +84,11 @@ export const mailThreadPath = (view: MailView, threadId: string) => `${mailViewP
 /** A key per view, so the page state (selection, focus) starts over in another view. */
 export const mailViewKey = (view: MailView) => mailViewPath(view)
 
-/** The thread list query of a view; `null` for a search, which has its own query. */
+/** The thread list query of a view; `null` for a search or a drafts/sent/scheduled/outbox folder, which have their own queries. */
 export function threadFilterOf(view: MailView): ThreadFilter | null {
   switch (view.kind) {
     case 'folder':
+      if (isSendFolder(view.folder)) return null
       return view.mailboxId ? { mailboxId: view.mailboxId, folder: view.folder } : { folder: view.folder }
     case 'label':
       return { labelId: view.labelId }
@@ -188,3 +200,36 @@ export const rawMessageUrl = (workspaceId: string, messageId: string) =>
 
 /** The server's explanation of a failed request, else `fallback`. */
 export const problemText = (error: unknown, fallback: string) => (error instanceof ApiProblem && error.detail ? error.detail : fallback)
+
+/** The fields of a draft the user edits. */
+const DRAFT_TEXT_FIELDS = ['subject', 'body_html', 'to', 'cc', 'bcc'] as const
+export interface DraftText {
+  subject?: string
+  body_html?: string
+  to?: string[]
+  cc?: string[]
+  bcc?: string[]
+}
+
+/**
+ * A save came back 409 `draft_conflict`: someone saved a newer version. The server copy replaces the draft, and the
+ * text the user had not saved waits in `restore` (the "Restore my text" banner), `null` when it equals the server's.
+ */
+export function applyDraftConflict<T extends DraftText>(local: DraftText & { version?: number }, server: T): { draft: T; restore: DraftText | null } {
+  const restore: DraftText = {}
+  let differs = false
+  for (const field of DRAFT_TEXT_FIELDS) {
+    const mine = local[field]
+    if (mine === undefined) continue
+    ;(restore as Record<string, unknown>)[field] = mine
+    if (JSON.stringify(mine) !== JSON.stringify(server[field])) differs = true
+  }
+  return { draft: server, restore: differs ? restore : null }
+}
+
+/** The current draft a 409 `draft_conflict` carries in `conflict.current`, else `null`. */
+export function conflictDraft<T>(error: unknown): T | null {
+  if (!(error instanceof ApiProblem) || error.status !== 409 || error.code !== 'draft_conflict') return null
+  const current = (error.problem.conflict as { current?: unknown } | null | undefined)?.current
+  return current && typeof current === 'object' ? (current as T) : null
+}

@@ -39,6 +39,8 @@ test('thread.updated invalidates exactly the thread, the thread lists and the co
   expect(invalidate.mock.calls.map(([filters]) => filters?.queryKey)).toEqual([
     mailKeys.lists(W),
     mailKeys.counts(W),
+    mailKeys.outboundAll(W),
+    mailKeys.draftsAll(W),
     mailKeys.thread(W, 't1'),
   ])
 })
@@ -61,16 +63,18 @@ test('events that arrive during a refresh wait for it and then go out together',
   const keys = () => invalidate.mock.calls.map(([filters]) => filters?.queryKey)
   emitMailEvent(client, W, { type: 'thread.updated', mailbox_id: 'mb1', thread_id: 't1' })
   await settle()
-  expect(keys()).toHaveLength(3)
+  expect(keys()).toHaveLength(5)
   emitMailEvent(client, W, { type: 'thread.updated', mailbox_id: 'mb1', thread_id: 't2' })
   emitMailEvent(client, W, { type: 'thread.updated', mailbox_id: 'mb2', thread_id: 't3' })
   await settle()
-  expect(keys()).toHaveLength(3)
+  expect(keys()).toHaveLength(5)
   for (const resolve of pending.splice(0)) resolve()
   await settle()
-  expect(keys().slice(3)).toEqual([
+  expect(keys().slice(5)).toEqual([
     mailKeys.lists(W),
     mailKeys.counts(W),
+    mailKeys.outboundAll(W),
+    mailKeys.draftsAll(W),
     mailKeys.thread(W, 't2'),
     mailKeys.thread(W, 't3'),
   ])

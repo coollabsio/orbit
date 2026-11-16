@@ -59,6 +59,9 @@ async function run(queryClient: QueryClient, workspaceId: string, refresh: Refre
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: mailKeys.lists(workspaceId) }, { throwOnError: true }),
       queryClient.invalidateQueries({ queryKey: mailKeys.counts(workspaceId) }, { throwOnError: true }),
+      // the Sent, Scheduled and Outbox views and the drafts follow the same event (a send, a bounce, a held release)
+      queryClient.invalidateQueries({ queryKey: mailKeys.outboundAll(workspaceId) }, { throwOnError: true }),
+      queryClient.invalidateQueries({ queryKey: mailKeys.draftsAll(workspaceId) }, { throwOnError: true }),
       ...threads.map((threadId) =>
         queryClient.invalidateQueries({ queryKey: mailKeys.thread(workspaceId, threadId) }, { throwOnError: true }),
       ),

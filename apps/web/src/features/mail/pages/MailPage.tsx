@@ -17,6 +17,7 @@ import { LabelMenu, ThreadView, type LabelState } from '@/features/mail/componen
 import {
   FOLDERS,
   folderLabel,
+  type ListFolder,
   mailThreadPath,
   mailViewKey,
   mailViewPath,
@@ -30,11 +31,15 @@ import { useCommand } from '@/shortcuts/useCommand'
 /** `POST threads/bulk` takes at most this many ids. */
 const BULK_LIMIT = 100
 
-const EMPTY_FOLDER: Record<MailFolder, { title: string; description: string }> = {
+const EMPTY_FOLDER: Record<ListFolder, { title: string; description: string }> = {
   inbox: { title: 'Your inbox is empty', description: 'New mail shows up here.' },
   archive: { title: 'Nothing archived', description: 'Archived conversations show up here. Press E to archive one.' },
   spam: { title: 'No spam', description: 'Mail that fails authentication lands here.' },
   trash: { title: 'Trash is empty', description: 'Conversations in the trash are deleted for good after 30 days.' },
+  drafts: { title: 'No drafts', description: 'Drafts you start show up here.' },
+  sent: { title: 'Nothing sent', description: 'Mail you send shows up here.' },
+  scheduled: { title: 'Nothing scheduled', description: 'Mail you schedule shows up here until it goes.' },
+  outbox: { title: 'Outbox is empty', description: 'Mail that is waiting to go shows up here.' },
 }
 
 /** `/mail/*`: the read-only mail client (spec §8.3). */

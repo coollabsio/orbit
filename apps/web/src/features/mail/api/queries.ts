@@ -3,6 +3,11 @@ import { apiClient } from '@/api/client'
 import {
   createMailViewUrl,
   getMailAdmin,
+  getMailboxVacation,
+  getMailDraft,
+  getMailSendPolicy,
+  getMailSettings,
+  getMailSignature,
   getMailCounts,
   getMailDomain,
   getMailMe,
@@ -10,7 +15,15 @@ import {
   downloadMailMessage,
   getMailThread,
   listFailedMailReceipts,
+  listFromAddresses,
   listInstanceMailProviders,
+  listInstanceMailSendRoutes,
+  listMailDrafts,
+  listMailOutbound,
+  listMailSnippets,
+  listMailSuppressions,
+  listWorkspaceMailSendRoutes,
+  searchMailContacts,
   listWorkspaceMailProviders,
   listMailboxes,
   listMailDomains,
@@ -19,11 +32,11 @@ import {
   previewPersonalMailboxes,
   searchMail,
 } from '@orbit/api/generated/sdk.gen'
-import type { MailDomain, MailNamePattern, MailThreadPage } from '@orbit/api/generated/types.gen'
+import type { MailDomain, MailNamePattern, MailSuppressionPage, MailThreadPage } from '@orbit/api/generated/types.gen'
 import { queryKeys } from '@/api/queryKeys'
 import { useContext } from 'react'
 import { useWorkspace, WorkspaceContext } from '@/features/workspaces/workspaceContext'
-import { mailKeys, type ThreadFilter } from './keys'
+import { mailKeys, type OutboundView, type ThreadFilter } from './keys'
 import { useMailEnabled } from '@/features/mail/enabled'
 
 /** Lists, threads and counts stay current through the `mail` live topic (`emitMailEvent`). */
@@ -285,5 +298,147 @@ export function useTestAddress(testId: string | null | undefined) {
     queryFn: async () => required((await getMailTestAddress({ client: apiClient, path: { test_id: testId! }, throwOnError: true })).data),
     enabled: Boolean(testId),
     refetchInterval: (query) => (query.state.data?.status === 'waiting' ? TEST_POLL_MS : false),
+  })
+}
+
+/** The addresses the user can send as; with a thread, the one that received it first. Not-ready ones say why. */
+export function useFromAddresses(threadId?: string) {
+  const workspaceId = useWorkspaceId()
+  return useQuery({
+    queryKey: mailKeys.fromAddresses(workspaceId, threadId),
+    queryFn: async () =>
+      required(
+        (await listFromAddresses({ client: apiClient, path: { workspace_id: workspaceId }, query: { thread_id: threadId }, throwOnError: true })).data,
+      ),
+  })
+}
+
+/** The user's drafts, all mailboxes or one. */
+export function useDrafts(mailboxId?: string) {
+  const workspaceId = useWorkspaceId()
+  return useQuery({
+    queryKey: mailKeys.drafts(workspaceId, mailboxId),
+    queryFn: async () =>
+      required((await listMailDrafts({ client: apiClient, path: { workspace_id: workspaceId }, query: { mailbox_id: mailboxId }, throwOnError: true })).data),
+    staleTime: LIVE_STALE_MS,
+  })
+}
+
+/** One draft. The editor owns the text while it is open: a read does not replace it, a 409 does (`useSaveDraft`). */
+export function useDraft(draftId: string | null | undefined) {
+  const workspaceId = useWorkspaceId()
+  return useQuery({
+    queryKey: mailKeys.draft(workspaceId, draftId ?? ''),
+    queryFn: async () =>
+      required((await getMailDraft({ client: apiClient, path: { workspace_id: workspaceId, draft_id: draftId! }, throwOnError: true })).data),
+    enabled: Boolean(draftId),
+    staleTime: Infinity,
+  })
+}
+
+/** Sent, scheduled or waiting (outbox) messages with their delivery state; live through `thread.updated`. */
+export function useOutbound(view: OutboundView) {
+  const workspaceId = useWorkspaceId()
+  return useQuery({
+    queryKey: mailKeys.outbound(workspaceId, view),
+    queryFn: async () =>
+      required((await listMailOutbound({ client: apiClient, path: { workspace_id: workspaceId }, query: { view }, throwOnError: true })).data),
+    staleTime: LIVE_STALE_MS,
+  })
+}
+
+/** People the user mailed or got mail from, for the recipient fields; idle while `q` is blank. */
+export function useContacts(q: string) {
+  const workspaceId = useWorkspaceId()
+  const query = q.trim()
+  return useQuery({
+    queryKey: mailKeys.contacts(workspaceId, query),
+    queryFn: async () =>
+      required((await searchMailContacts({ client: apiClient, path: { workspace_id: workspaceId }, query: { q: query }, throwOnError: true })).data),
+    enabled: query !== '',
+    placeholderData: keepPreviousData,
+    staleTime: LIVE_STALE_MS,
+  })
+}
+
+/** The signature of each address the user sends as (`null` body when none). */
+export function useSignatures(addressIds: readonly string[]) {
+  const workspaceId = useWorkspaceId()
+  return useQuery({
+    queryKey: [...mailKeys.signatures(workspaceId), ...addressIds],
+    queryFn: async () =>
+      Promise.all(
+        addressIds.map(async (addressId) =>
+          required((await getMailSignature({ client: apiClient, path: { workspace_id: workspaceId, address_id: addressId }, throwOnError: true })).data),
+        ),
+      ),
+    enabled: addressIds.length > 0,
+  })
+}
+
+export function useSnippets() {
+  const workspaceId = useWorkspaceId()
+  return useQuery({
+    queryKey: mailKeys.snippets(workspaceId),
+    queryFn: async () => required((await listMailSnippets({ client: apiClient, path: { workspace_id: workspaceId }, throwOnError: true })).data),
+  })
+}
+
+/** The member's own mail settings (the undo time). */
+export function useMailSettingsMe() {
+  const workspaceId = useWorkspaceId()
+  return useQuery({
+    queryKey: mailKeys.settingsMe(workspaceId),
+    queryFn: async () => required((await getMailSettings({ client: apiClient, path: { workspace_id: workspaceId }, throwOnError: true })).data),
+  })
+}
+
+export function useVacation(mailboxId: string | null | undefined) {
+  const workspaceId = useWorkspaceId()
+  return useQuery({
+    queryKey: mailKeys.vacation(workspaceId, mailboxId ?? ''),
+    queryFn: async () =>
+      required((await getMailboxVacation({ client: apiClient, path: { workspace_id: workspaceId, mailbox_id: mailboxId! }, throwOnError: true })).data),
+    enabled: Boolean(mailboxId),
+  })
+}
+
+/** Addresses that bounced or complained, in cursor pages (`data` is the rows of every loaded page). */
+export function useSuppressions(q?: string) {
+  const workspaceId = useWorkspaceId()
+  const query = q?.trim() || undefined
+  return useInfiniteQuery({
+    queryKey: [...mailKeys.suppressions(workspaceId), query ?? null],
+    initialPageParam: undefined as string | undefined,
+    queryFn: async ({ pageParam }) =>
+      required(
+        (await listMailSuppressions({ client: apiClient, path: { workspace_id: workspaceId }, query: { q: query, cursor: pageParam }, throwOnError: true }))
+          .data,
+      ),
+    getNextPageParam: (last: MailSuppressionPage) => last.cursor ?? undefined,
+    select: (data) => data.pages.flatMap((page) => page.items),
+  })
+}
+
+/** The send routes of the root user (`instance`, Admin → Mail) or of the workspace. */
+export function useSendRoutes(scope: ProviderScope) {
+  const workspaceId = useOptionalWorkspaceId()
+  return useQuery({
+    queryKey: scope === 'instance' ? queryKeys.adminMailSendRoutes : mailKeys.sendRoutes(workspaceId),
+    queryFn: async () =>
+      required(
+        scope === 'instance'
+          ? (await listInstanceMailSendRoutes({ client: apiClient, throwOnError: true })).data
+          : (await listWorkspaceMailSendRoutes({ client: apiClient, path: { workspace_id: workspaceId }, throwOnError: true })).data,
+      ),
+  })
+}
+
+/** The workspace's send limits, tier and whether it is paused. */
+export function useSendPolicy() {
+  const workspaceId = useWorkspaceId()
+  return useQuery({
+    queryKey: mailKeys.sendPolicy(workspaceId),
+    queryFn: async () => required((await getMailSendPolicy({ client: apiClient, path: { workspace_id: workspaceId }, throwOnError: true })).data),
   })
 }
