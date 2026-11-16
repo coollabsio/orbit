@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { useState, type ReactNode, type Ref } from 'react'
 import { Archive, ArrowLeft, DirectInbox, ShieldCross, Sms as Mail, Star, Tag, Trash, Undo } from 'reicon-react'
 import { Link } from 'react-router'
 import { cn } from 'cn'
@@ -21,6 +21,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton'
 import { printPage } from '@/lib/print'
 import { folderLabel } from '@/features/mail/mailLib'
+import { ThreadReply, type ThreadReplyHandle } from '@/features/mail/compose/ThreadReply'
 import { MailEmptyState } from './MailEmptyState'
 import { MessageItem } from './MessageItem'
 
@@ -101,6 +102,10 @@ interface ThreadViewProps {
   actions: ThreadActions
   labelMenuOpen: boolean
   onLabelMenuOpenChange: (open: boolean) => void
+  /** R / A / F act on the reply at the end of the thread. */
+  replyRef?: Ref<ThreadReplyHandle>
+  /** A reply went with ⌘⇧Enter: archive the thread and open the next one. */
+  onSentArchive: () => void
 }
 
 function HeaderButton({ label, onClick, children, pressed }: { label: string; onClick: () => void; children: ReactNode; pressed?: boolean }) {
@@ -114,7 +119,7 @@ function HeaderButton({ label, onClick, children, pressed }: { label: string; on
 }
 
 /** The reading pane: the thread's actions, then its messages, oldest first; only the newest is open at first. */
-export function ThreadView({ detail, status, onRetry, labels, labelsById, canManage, onBack, actions, labelMenuOpen, onLabelMenuOpenChange }: ThreadViewProps) {
+export function ThreadView({ detail, status, onRetry, labels, labelsById, canManage, onBack, actions, labelMenuOpen, onLabelMenuOpenChange, replyRef, onSentArchive }: ThreadViewProps) {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   if (!detail) {
     return (
@@ -248,6 +253,7 @@ export function ThreadView({ detail, status, onRetry, labels, labelsById, canMan
               />
             )
           })}
+          <ThreadReply ref={replyRef} threadId={thread.id} last={messages.at(-1)} onSentArchive={onSentArchive} />
         </div>
       </div>
     </>

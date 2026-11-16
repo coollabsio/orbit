@@ -38,6 +38,15 @@ export interface ComposedMessage {
   recipientsChanged?: boolean
 }
 
+/** How a send goes: later (`scheduledAt`), or with the thread archived after it (⌘⇧Enter). */
+export interface SendOptions {
+  scheduledAt?: Date
+  archive?: boolean
+}
+
+/** What the host learns after the server took the message. */
+export type SentHandler = (outbound: MailOutbound, draft: MailDraft, options: { archive: boolean }) => void
+
 export interface ComposerSendOptions {
   draft: MailDraft
   saver: ReturnType<typeof useSaveDraft>
@@ -51,7 +60,7 @@ export interface ComposerSendOptions {
   draftFiles: () => MailDraft['files']
   /** No recipient, or one is invalid: show the fields. */
   onRecipientProblem: () => void
-  onSent?: (outbound: MailOutbound, draft: MailDraft) => void
+  onSent?: SentHandler
   onClose: () => void
 }
 
@@ -125,7 +134,7 @@ export function useComposerSend({ draft, saver, blocked, fromAddresses, collect,
     })
   }
 
-  const send = async (scheduledAt?: Date) => {
+  const send = async ({ scheduledAt, archive = false }: SendOptions = {}) => {
     if (sending) return
     if (blocked) {
       setNotice(blocked)
@@ -187,7 +196,7 @@ export function useComposerSend({ draft, saver, blocked, fromAddresses, collect,
       const outbound = await sendDraft.mutateAsync({ draftId: draft.id, body: scheduledAt ? { scheduled_at: scheduledAt.toISOString() } : undefined })
       saver.stop()
       const sent: MailDraft = { ...draft, files, to: message.to, cc: message.cc, bcc: message.bcc, subject: message.subject, from_address_id: message.fromId, body_html: message.html }
-      if (onSent) onSent(outbound, sent)
+      if (onSent) onSent(outbound, sent, { archive })
       else toast.success(outbound.scheduled ? 'Message scheduled' : 'Message sent')
       onClose()
     } catch (error) {

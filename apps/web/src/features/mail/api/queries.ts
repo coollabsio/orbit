@@ -304,26 +304,28 @@ export function useTestAddress(testId: string | null | undefined) {
 }
 
 /** The addresses the user can send as; with a thread, the one that received it first. Not-ready ones say why. */
+export const fromAddressesQuery = (workspaceId: string, threadId?: string) => ({
+  queryKey: mailKeys.fromAddresses(workspaceId, threadId),
+  queryFn: async () =>
+    required((await listFromAddresses({ client: apiClient, path: { workspace_id: workspaceId }, query: { thread_id: threadId }, throwOnError: true })).data),
+})
+
 export function useFromAddresses(threadId?: string) {
   const workspaceId = useWorkspaceId()
-  return useQuery({
-    queryKey: mailKeys.fromAddresses(workspaceId, threadId),
-    queryFn: async () =>
-      required(
-        (await listFromAddresses({ client: apiClient, path: { workspace_id: workspaceId }, query: { thread_id: threadId }, throwOnError: true })).data,
-      ),
-  })
+  return useQuery(fromAddressesQuery(workspaceId, threadId))
 }
 
 /** The user's drafts, all mailboxes or one. */
-export function useDrafts(mailboxId?: string) {
+export const draftsQuery = (workspaceId: string, mailboxId?: string) => ({
+  queryKey: mailKeys.drafts(workspaceId, mailboxId),
+  queryFn: async () =>
+    required((await listMailDrafts({ client: apiClient, path: { workspace_id: workspaceId }, query: { mailbox_id: mailboxId }, throwOnError: true })).data),
+  staleTime: LIVE_STALE_MS,
+})
+
+export function useDrafts(mailboxId?: string, enabled = true) {
   const workspaceId = useWorkspaceId()
-  return useQuery({
-    queryKey: mailKeys.drafts(workspaceId, mailboxId),
-    queryFn: async () =>
-      required((await listMailDrafts({ client: apiClient, path: { workspace_id: workspaceId }, query: { mailbox_id: mailboxId }, throwOnError: true })).data),
-    staleTime: LIVE_STALE_MS,
-  })
+  return useQuery({ ...draftsQuery(workspaceId, mailboxId), enabled })
 }
 
 /** One draft. The editor owns the text while it is open: a read does not replace it, a 409 does (`useSaveDraft`). */

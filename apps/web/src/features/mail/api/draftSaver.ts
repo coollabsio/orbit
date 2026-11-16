@@ -45,6 +45,8 @@ export function createDraftSaver<D extends DraftText & { version: number }>(deps
   let pending: DraftChange = {}
   let timer: unknown
   let running = false
+  /** The save in flight, so `flush()` can wait for it. */
+  let inflight: Promise<void> | null = null
   let held = false
   let halted = false
   let disposed = false
@@ -82,8 +84,16 @@ export function createDraftSaver<D extends DraftText & { version: number }>(deps
     )
   }
 
-  async function run(): Promise<void> {
-    if (blocked() || running || isEmpty(pending)) return
+  function run(): Promise<void> {
+    if (blocked() || running || isEmpty(pending)) return Promise.resolve()
+    const save = runOnce().finally(() => {
+      if (inflight === save) inflight = null
+    })
+    inflight = save
+    return save
+  }
+
+  async function runOnce(): Promise<void> {
     const cached = deps.read()
     if (!cached) {
       // the draft is gone (sent or deleted): nothing to save, and not a failure
@@ -142,8 +152,10 @@ export function createDraftSaver<D extends DraftText & { version: number }>(deps
 
   return {
     save,
-    /** Saves at once (as on close). */
+    /** Saves at once (as on close). A save in flight is waited for, then what was typed meanwhile is saved. */
     async flush() {
+      clear()
+      if (inflight) await inflight
       clear()
       await run()
     },

@@ -14,6 +14,8 @@ import { MailboxNotice } from '@/features/mail/components/MailboxNotice'
 import { MailSearch } from '@/features/mail/components/MailSearch'
 import { ThreadList } from '@/features/mail/components/ThreadList'
 import { LabelMenu, ThreadView, type LabelState } from '@/features/mail/components/ThreadView'
+import { useNewEmail } from '@/features/mail/compose/useComposerDock'
+import type { ReplyMode, ThreadReplyHandle } from '@/features/mail/compose/ThreadReply'
 import {
   FOLDERS,
   folderLabel,
@@ -68,6 +70,10 @@ function MailApp({ view, threadId }: { view: MailView; threadId: string | null }
   const [focusedId, setFocusedId] = useState<string | null>(threadId)
   const [labelMenu, setLabelMenu] = useState<'thread' | 'bulk' | null>(null)
   const searchInput = useRef<HTMLInputElement>(null)
+  const replyRef = useRef<ThreadReplyHandle>(null)
+  // R / A / F on a row of the list: the thread opens, then its reply
+  const [pendingReply, setPendingReply] = useState<{ threadId: string; mode: ReplyMode } | null>(null)
+  const newEmail = useNewEmail()
 
   const labels = me.data?.labels ?? []
   const labelsById = new Map(labels.map((label) => [label.id, label]))
@@ -189,6 +195,35 @@ function MailApp({ view, threadId }: { view: MailView; threadId: string | null }
     if (id) toggleSelect(id)
   }, { available: () => (focusedId ?? threadId) !== null })
   useCommand('mail.search', () => searchInput.current?.focus())
+  useCommand('mail.compose', () => void newEmail(), { enabled: mailboxes.length > 0 })
+  const reply = (mode: ReplyMode) => {
+    if (threadId) {
+      replyRef.current?.reply(mode)
+    } else if (focusedId) {
+      setPendingReply({ threadId: focusedId, mode })
+      open(focusedId)
+    }
+  }
+  // with a thread open its messages must be there; in the list, a row must have the focus
+  const canReply = () => (threadId ? detail.data !== undefined : focusedId !== null)
+  useCommand('mail.reply', () => reply('reply'), { available: canReply })
+  useCommand('mail.replyAll', () => reply('reply_all'), { available: canReply })
+  useCommand('mail.forward', () => reply('forward'), { available: canReply })
+  useEffect(() => {
+    if (!pendingReply || pendingReply.threadId !== threadId || !detail.data || !replyRef.current) return
+    replyRef.current.reply(pendingReply.mode)
+    setPendingReply(null)
+  }, [pendingReply, threadId, detail.data])
+
+  // ⌘⇧Enter in the reply: the thread is archived and the next one opens (the one below, else above; else the list)
+  const archiveAndNext = () => {
+    if (!threadId) return
+    const index = threads.findIndex((thread) => thread.id === threadId)
+    const next = index < 0 ? undefined : (threads[index + 1] ?? threads[index - 1])
+    if (openThread) apply([openThread], { folder: 'archive' }, false)
+    if (next) open(next.id)
+    else close()
+  }
   useCommand('mail.starred', () => navigate(mailViewPath({ kind: 'starred' })))
   useCommand('mail.trashFolder', () => navigate(mailViewPath({ kind: 'folder', folder: 'trash' })))
 
@@ -339,6 +374,8 @@ function MailApp({ view, threadId }: { view: MailView; threadId: string | null }
             actions={threadActions}
             labelMenuOpen={labelMenu === 'thread'}
             onLabelMenuOpenChange={(next) => setLabelMenu(next ? 'thread' : null)}
+            replyRef={replyRef}
+            onSentArchive={archiveAndNext}
           />
         ) : (
           <div className="flex min-h-0 flex-1 flex-col">

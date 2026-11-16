@@ -266,3 +266,27 @@ test('text held at dispose is handed to the owner, not dropped', async () => {
   expect(t.left()).toEqual({ subject: 'late' })
   expect(t.sends).toHaveLength(1)
 })
+
+test('flush during a save waits for it, then saves the text typed meanwhile', async () => {
+  const t = setup()
+  t.saver.save({ subject: 'a' })
+  await t.advance(2000)
+  expect(t.sends).toHaveLength(1)
+  t.saver.save({ body_html: 'more' })
+  let flushed = false
+  void t.saver.flush().then(() => void (flushed = true))
+  await t.settle()
+  // the first save is still out: no second save yet, and the flush has not ended
+  expect(t.sends).toHaveLength(1)
+  expect(flushed).toBe(false)
+  t.sends[0].resolve({ version: 2, subject: 'a' })
+  await t.settle()
+  expect(t.sends).toHaveLength(2)
+  expect(t.sends[1]).toMatchObject({ change: { body_html: 'more' }, version: 2 })
+  expect(flushed).toBe(false)
+  t.sends[1].resolve({ version: 3, subject: 'a', body_html: 'more' })
+  await t.settle()
+  expect(flushed).toBe(true)
+  expect(t.cached()).toEqual({ version: 3, subject: 'a', body_html: 'more' })
+  expect(t.timers()).toBe(0)
+})

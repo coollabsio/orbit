@@ -12,10 +12,12 @@ import {
   unusedInlineFiles,
   recipientSummary,
   sendLaterPresets,
+  sendTimeLabel,
   signatureStart,
   splitRecipients,
   suggestLinks,
   type PreSendInput,
+  zonedDateTime,
 } from './composeLib'
 
 const base: PreSendInput = {
@@ -255,4 +257,23 @@ test('the signature is found at the end of the text, empty lines after it ignore
   expect(signatureStart(['Hi', '', 'Ann', 'Acme Inc', ''], signature)).toBe(2)
   expect(signatureStart(['Hi', 'Ann', 'Acme Inc changed'], signature)).toBeNull()
   expect(signatureStart(['Hi'], [])).toBeNull()
+})
+
+test('a picked date and time is read in the user\'s time zone', () => {
+  const tz = 'Europe/Budapest'
+  expect(zonedDateTime({ year: 2026, month: 11, day: 17 }, '08:30', tz)?.toISOString()).toBe('2026-11-17T07:30:00.000Z')
+  // summer time (UTC+2)
+  expect(zonedDateTime({ year: 2026, month: 7, day: 1 }, '23:15', tz)?.toISOString()).toBe('2026-07-01T21:15:00.000Z')
+  expect(zonedDateTime({ year: 2026, month: 11, day: 17 }, '24:00', tz)).toBeNull()
+  expect(zonedDateTime({ year: 2026, month: 11, day: 17 }, '', tz)).toBeNull()
+})
+
+test('send time label: today, tomorrow, this week, later', () => {
+  const tz = 'Europe/Budapest'
+  const now = new Date('2026-11-16T08:00:00Z') // Monday 09:00 local
+  expect(sendTimeLabel(new Date('2026-11-16T15:30:00Z'), now, tz)).toBe('Today 16:30')
+  expect(sendTimeLabel(new Date('2026-11-17T07:00:00Z'), now, tz)).toBe('Tomorrow 8:00')
+  expect(sendTimeLabel(new Date('2026-11-17T07:00:00Z'), now, tz, true)).toBe('tomorrow 8:00')
+  expect(sendTimeLabel(new Date('2026-11-19T07:00:00Z'), now, tz)).toBe('Thu, Nov 19, 8:00')
+  expect(sendTimeLabel(new Date('2027-01-04T07:00:00Z'), now, tz)).toBe('Mon, Jan 4, 2027, 8:00')
 })

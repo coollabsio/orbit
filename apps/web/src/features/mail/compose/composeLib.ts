@@ -355,6 +355,48 @@ export function sendLaterPresets(now: Date, timeZone: string): { label: string; 
   ]
 }
 
+/** A calendar day (month 1–12). */
+export interface CalendarDay {
+  year: number
+  month: number
+  day: number
+}
+
+/** Today's date in `timeZone`. */
+export function dayIn(at: Date, timeZone: string): CalendarDay {
+  const { year, month, day } = wallClock(at, timeZone)
+  return { year, month, day }
+}
+
+/** The instant of a day and an `HH:MM` time in `timeZone` ("Pick date and time"); `null` for a time that is not one. */
+export function zonedDateTime(date: CalendarDay, time: string, timeZone: string): Date | null {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(time.trim())
+  if (!match) return null
+  const hour = Number(match[1])
+  const minute = Number(match[2])
+  if (hour > 23 || minute > 59) return null
+  return new Date(zonedTime(date.year, date.month, date.day, hour, timeZone).getTime() + minute * 60_000)
+}
+
+/**
+ * When a scheduled message goes, for people: "Today 16:30", "Tomorrow 8:00", "Thu, Nov 19, 8:00" (a year when not this
+ * one). `midSentence`: "today" and "tomorrow" in lower case ("Scheduled for tomorrow 8:00").
+ */
+export function sendTimeLabel(at: Date, now: Date, timeZone: string, midSentence = false): string {
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone, hour: 'numeric', minute: '2-digit', hourCycle: 'h23' }).formatToParts(at)
+  const part = (type: string) => parts.find((entry) => entry.type === type)?.value ?? '0'
+  // like the presets: 8:00, 16:30
+  const time = `${Number(part('hour'))}:${part('minute')}`
+  const day = dayIn(at, timeZone)
+  const today = dayIn(now, timeZone)
+  const dayNumber = (value: CalendarDay) => Date.UTC(value.year, value.month - 1, value.day) / 86_400_000
+  const days = dayNumber(day) - dayNumber(today)
+  if (days === 0) return `${midSentence ? 'today' : 'Today'} ${time}`
+  if (days === 1) return `${midSentence ? 'tomorrow' : 'Tomorrow'} ${time}`
+  const date = new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short', month: 'short', day: 'numeric', year: day.year === today.year ? undefined : 'numeric' }).format(at)
+  return `${date}, ${time}`
+}
+
 // Signature
 
 const normalized = (text: string) => text.replace(/\s+/g, ' ').trim()

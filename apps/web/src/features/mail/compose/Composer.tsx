@@ -1,11 +1,27 @@
 // The mail composer (§9.1): one draft, saved on the server as the user types. `inline` is the reply at the end of a
 // thread (recipients as one line until clicked, U1), `window` the floating composer and `full` its expanded form
 // (U2, both placed by the dock). ⌘Enter sends; the pre-send checks show above Send and ⌘Enter again sends anyway (U5).
-import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode } from 'react'
-import { ChevronDown, Danger, Paperclip2, Send, TextBlock, Trash, Xmark as X } from 'reicon-react'
+// ⌘⇧Enter sends and archives the thread, ⌘⇧E pops out (or expands), Esc closes the inline reply or minimizes a window;
+// the draft is kept, unless nothing was written in it.
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type DragEvent,
+  type KeyboardEvent,
+  type ReactNode,
+  type Ref,
+} from 'react'
+import { ChevronDown, Danger, Export, Paperclip2, TextBlock, Trash, Xmark as X } from 'reicon-react'
 import { toast } from 'sonner'
 import { cn } from 'cn'
-import type { MailDraft, MailDraftFile, MailFromAddress, MailOutbound, MailSnippet } from '@orbit/api/generated/types.gen'
+import type { MailDraft, MailDraftFile, MailFromAddress, MailSnippet } from '@orbit/api/generated/types.gen'
 import { ApiProblem } from '@orbit/api/problem'
 import { confirmAction } from '@/components/common/confirmAction'
 import { Tip } from '@/components/common/Tip'
@@ -25,20 +41,39 @@ import { ComposerFiles, type PendingUpload } from './ComposerFiles'
 import { FromPicker } from './FromPicker'
 import type { MailEditorHandle } from './MailEditor'
 import { RecipientField, type RecipientFieldHandle } from './RecipientField'
-import { useComposerSend } from './useComposerSend'
+import { SendButton } from './SendButton'
+import { useComposerSend, type SentHandler } from './useComposerSend'
 
 /** BlockNote is about 1 MB: the editor loads on first use (the app preloads it when idle). */
 const LazyMailEditor = lazy(() => import('./MailEditor').then((module) => ({ default: module.MailEditor })))
 
 export type ComposerPlacement = 'inline' | 'window' | 'full'
 
+/** What a host can ask of an open composer. */
+export interface ComposerHandle {
+  /** Puts the focus back in the composer (the text, or To when there is nobody to send to). */
+  focus: () => void
+  /** Saves everything typed so far and waits for it: another composer of this draft can start from the server copy. */
+  handOff: () => Promise<void>
+}
+
 export interface ComposerProps {
   draftId: string
   placement: ComposerPlacement
-  /** Close the composer; the draft stays (what is not saved yet is saved on the way out). */
+  /**
+   * Close the composer; the draft stays (what is not saved yet is saved on the way out). A draft with nothing written
+   * in it is deleted first: a reply opened by mistake leaves no "Draft" behind.
+   */
   onClose: () => void
   /** The server took the message (it waits for the undo time or its scheduled time). Without it a toast says so. */
-  onSent?: (outbound: MailOutbound, draft: MailDraft) => void
+  onSent?: SentHandler
+  /** Esc (when no menu in the composer takes it). Without it, Esc closes the composer like `onClose`. */
+  onEscape?: () => void
+  /** ⌘⇧E: pop the inline reply out to a window, or expand / shrink a window. Without it the key does nothing. */
+  onPopOut?: () => void
+  /** Focus the text (or To) when the composer opens. Off for windows brought back by a reload. */
+  autoFocus?: boolean
+  handleRef?: Ref<ComposerHandle>
   /** Window controls of the dock (minimize, expand), in the header of `window` and `full`. */
   headerActions?: ReactNode
   className?: string
@@ -159,7 +194,25 @@ const BODY_EXPORT_MS = 400
 const lower = (address: string) => address.trim().toLowerCase()
 const isFileDrag = (event: DragEvent) => event.dataTransfer.types.includes('Files')
 
-function ComposerBody({ draft, seed, fromAddresses, saver, onLoaded, isReloading, onRestore, draftId, placement, onClose, onSent, headerActions, className }: BodyProps) {
+function ComposerBody({
+  draft,
+  seed,
+  fromAddresses,
+  saver,
+  onLoaded,
+  isReloading,
+  onRestore,
+  draftId,
+  placement,
+  onClose,
+  onSent,
+  onEscape,
+  onPopOut,
+  autoFocus = true,
+  handleRef,
+  headerActions,
+  className,
+}: BodyProps) {
   const [initial] = useState(() => ({ ...draft, ...seed }))
   const [to, setTo] = useState<string[]>(initial.to)
   const [cc, setCc] = useState<string[]>(initial.cc)
@@ -408,11 +461,14 @@ function ComposerBody({ draft, seed, fromAddresses, saver, onLoaded, isReloading
     for (const id of ids) withBusy(id, setLink.mutateAsync({ fileId: id, asLink: true }), 'The file could not be changed.')
   }
 
-  const discard = async () => {
-    // the signature put in at the start, a subject the server filled in (Re:, Fwd:) are not the user's writing
+  /** The user wrote something: the signature put in at the start and a subject the server filled in (Re:, Fwd:) do not count. */
+  const written = () => {
     const subjectWritten = draft.mode === 'new' ? subject.trim() !== '' : subject !== initial.subject
-    const written = (editor.current?.hasWriting(signatureOf(fromId)) ?? initial.body_html.trim() !== '') || subjectWritten || files.length > 0
-    if (written && !(await confirmAction({ title: 'Delete this draft?', description: 'Its text and files are deleted.', confirmLabel: 'Delete', danger: true }))) return
+    return (editor.current?.hasWriting(signatureOf(fromId)) ?? initial.body_html.trim() !== '') || subjectWritten || draft.files.length > 0 || pending.length > 0
+  }
+
+  const discard = async () => {
+    if (written() && !(await confirmAction({ title: 'Delete this draft?', description: 'Its text and files are deleted.', confirmLabel: 'Delete', danger: true }))) return
     saver.stop()
     deleteDraft.mutate(draftId, {
       onSuccess: () => {
@@ -423,12 +479,54 @@ function ComposerBody({ draft, seed, fromAddresses, saver, onLoaded, isReloading
     })
   }
 
+  /** Closes the composer. A draft with nothing written in it is deleted on the way (a new one: nobody to send to either). */
+  const close = () => {
+    const untouched = !written() && (draft.mode !== 'new' || to.length + cc.length + bcc.length === 0) && saver.problem !== 'sending' && !saver.restore
+    if (untouched) {
+      saver.stop()
+      // tidying up, not something the user asked for: a failure leaves an empty draft in Drafts and says nothing
+      deleteDraft.mutate(draftId, { onError: (error) => console.warn('An empty draft could not be deleted.', error) })
+    }
+    onClose()
+  }
+
+  useImperativeHandle(handleRef, () => ({
+    focus: () => {
+      if (fieldsOpen && to.length + cc.length + bcc.length === 0) toField.current?.focus()
+      else editor.current?.focus()
+    },
+    handOff: async () => {
+      // typed recipients become chips (their change is saved), then the text, then everything at once
+      toField.current?.commit()
+      ccField.current?.commit()
+      bccField.current?.commit()
+      saveBody()
+      await saver.flush()
+    },
+  }))
+
+  // The composer's keys work while typing (they have modifiers, or Esc); they act on this composer only.
   const onKeyDownCapture = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey) {
+    const mod = (event.metaKey || event.ctrlKey) && !event.altKey
+    if (mod && event.key === 'Enter') {
       event.preventDefault()
       event.stopPropagation()
-      void send()
+      // ⌘⇧Enter: send, then archive the thread and open the next one (a new message has no thread: it only sends)
+      void send({ archive: event.shiftKey && Boolean(draft.thread_id) })
+    } else if (mod && event.shiftKey && event.code === 'KeyE') {
+      event.preventDefault()
+      event.stopPropagation()
+      onPopOut?.()
     }
+  }
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    // a menu inside (suggestions, the snippet list, a chip being edited) takes Esc first; menus in portals are not ours
+    if (event.key !== 'Escape' || event.defaultPrevented || !(event.target instanceof Node) || !event.currentTarget.contains(event.target)) return
+    if (editor.current?.menuOpen()) return
+    event.preventDefault()
+    event.stopPropagation()
+    if (onEscape) onEscape()
+    else close()
   }
 
   // Files dropped anywhere on the composer are attached (U8).
@@ -483,13 +581,13 @@ function ComposerBody({ draft, seed, fromAddresses, saver, onLoaded, isReloading
   const named = (address: string) => ({ address, name: names.get(lower(address)) })
 
   return (
-    <div data-slot="composer" data-placement={placement} className={cn('relative', className)} onKeyDownCapture={onKeyDownCapture} {...drag}>
+    <div data-slot="composer" data-placement={placement} className={cn('relative', className)} onKeyDownCapture={onKeyDownCapture} onKeyDown={onKeyDown} {...drag}>
       {!inline ? (
         <header className="flex h-10 shrink-0 items-center gap-1 border-b border-border/60 pr-1.5 pl-3">
           <h2 className="min-w-0 flex-1 truncate text-[0.8125rem] font-semibold">{title}</h2>
           {headerActions}
-          <Tip label="Close">
-            <Button variant="ghost" size="icon-sm" className="text-muted-foreground" aria-label="Close" onClick={onClose}>
+          <Tip label="Close (the draft is kept)">
+            <Button variant="ghost" size="icon-sm" className="text-muted-foreground" aria-label="Close" onClick={close}>
               <X />
             </Button>
           </Tip>
@@ -526,7 +624,7 @@ function ComposerBody({ draft, seed, fromAddresses, saver, onLoaded, isReloading
             suppressed={suppressed}
             onName={learnName}
             ref={toField}
-            autoFocus={noRecipients}
+            autoFocus={autoFocus && noRecipients}
             trailing={!showCc || !showBcc ? ccToggles : null}
           />
           {showCc ? <RecipientField ref={ccField} label="Cc" addresses={cc} onChange={changeCc} names={names} suppressed={suppressed} onName={learnName} /> : null}
@@ -571,7 +669,7 @@ function ComposerBody({ draft, seed, fromAddresses, saver, onLoaded, isReloading
             onChange={onBodyChange}
             onPasteFiles={addToText}
             resolveImage={inlineImages.resolve}
-            autoFocus={!noRecipients}
+            autoFocus={autoFocus && !noRecipients}
             editable={!sending}
             className={inline ? 'min-h-24' : 'min-h-full'}
           />
@@ -604,26 +702,7 @@ function ComposerBody({ draft, seed, fromAddresses, saver, onLoaded, isReloading
       ) : null}
 
       <footer className="flex shrink-0 items-center gap-1 px-3 pb-3">
-        <Tip
-          label={
-            blocked ?? (
-              <span className="flex items-center gap-2">
-                Send <ShortcutKeys keys="Mod+Enter" />
-              </span>
-            )
-          }
-        >
-          {/* aria-disabled keeps the reason reachable by hover and focus */}
-          <Button
-            data-slot="composer-send"
-            aria-disabled={blocked ? true : undefined}
-            className={cn('min-w-20 active:not-aria-[haspopup]:scale-[0.97]', blocked && 'cursor-not-allowed opacity-50 hover:translate-y-0 hover:bg-primary')}
-            onClick={() => void send()}
-          >
-            {sending ? <Spinner className="size-3.5" /> : <Send />}
-            {warnings.length > 0 ? 'Send anyway' : 'Send'}
-          </Button>
-        </Tip>
+        <SendButton blocked={blocked} sending={sending} anyway={warnings.length > 0} inThread={Boolean(draft.thread_id)} onSend={(options) => void send(options)} />
         <Tip label="Attach files">
           <Button variant="ghost" size="icon-sm" className="text-muted-foreground" aria-label="Attach files" onClick={() => fileInput.current?.click()}>
             <Paperclip2 />
@@ -659,6 +738,19 @@ function ComposerBody({ draft, seed, fromAddresses, saver, onLoaded, isReloading
             saveBody()
             void saver.flush()
           }} />
+        {inline && onPopOut ? (
+          <Tip
+            label={
+              <span className="flex items-center gap-2">
+                Pop out <ShortcutKeys keys="Mod+Shift+E" />
+              </span>
+            }
+          >
+            <Button variant="ghost" size="icon-sm" className="text-muted-foreground" aria-label="Pop out" onClick={onPopOut}>
+              <Export />
+            </Button>
+          </Tip>
+        ) : null}
         <Tip label="Delete draft">
           <Button variant="ghost" size="icon-sm" className="text-muted-foreground hover:text-destructive" aria-label="Delete draft" onClick={() => void discard()}>
             <Trash />
