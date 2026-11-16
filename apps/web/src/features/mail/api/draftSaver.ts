@@ -23,6 +23,10 @@ export interface DraftSaverDeps<D extends DraftText & { version: number }> {
   classify: (error: unknown) => DraftSaveFailure<D>
   onState: (state: DraftSaverState) => void
   onSaved?: () => void
+  /** Text still in `restore` when the saver is disposed: the owner keeps it for the next editor. */
+  onDispose?: (restore: DraftText | null) => void
+  /** Text kept by a saver of the same draft that was disposed. */
+  initialRestore?: DraftText | null
   setTimer: (run: () => void, ms: number) => unknown
   clearTimer: (handle: unknown) => void
   delayMs: number
@@ -44,7 +48,7 @@ export function createDraftSaver<D extends DraftText & { version: number }>(deps
   let held = false
   let halted = false
   let disposed = false
-  const state: DraftSaverState = { saving: false, problem: null, restore: null }
+  const state: DraftSaverState = { saving: false, problem: null, restore: deps.initialRestore ?? null }
 
   const emit = () => deps.onState({ ...state })
   const clear = () => {
@@ -69,7 +73,13 @@ export function createDraftSaver<D extends DraftText & { version: number }>(deps
     pending = {}
     const cached = deps.read()
     if (isEmpty(change) || !cached) return
-    deps.send(change, cached.version).then(deps.write, () => {})
+    deps.send(change, cached.version).then(
+      (draft) => {
+        deps.write(draft)
+        deps.onSaved?.()
+      },
+      () => {},
+    )
   }
 
   async function run(): Promise<void> {
@@ -143,7 +153,10 @@ export function createDraftSaver<D extends DraftText & { version: number }>(deps
       pending = {}
       clear()
     },
-    /** The cached draft was replaced from outside (Undo after a send): saving may go on. */
+    /**
+     * Saving may go on: Undo returned the draft. Call it for that and nothing else (not for the saver's own writes
+     * or a refetch of the draft).
+     */
     reset() {
       if (disposed) return
       held = false
@@ -169,8 +182,33 @@ export function createDraftSaver<D extends DraftText & { version: number }>(deps
       disposed = true
       clear()
       if (!running && !held && !halted) flushOnce()
+      deps.onDispose?.(state.restore)
     },
   }
 }
 
 export type DraftSaver = ReturnType<typeof createDraftSaver>
+
+const undoListeners = new Map<string, Set<() => void>>()
+
+/** Listens for the Undo of the draft with this key hash; returns the unsubscribe. */
+export function onDraftUndone(hash: string, listener: () => void): () => void {
+  let listeners = undoListeners.get(hash)
+  if (!listeners) undoListeners.set(hash, (listeners = new Set()))
+  listeners.add(listener)
+  return () => void listeners.delete(listener)
+}
+
+/** Undo returned the draft: the savers of it go on. */
+export function notifyDraftUndone(hash: string): void {
+  for (const listener of undoListeners.get(hash) ?? []) listener()
+}
+
+const keptRestore = new Map<string, DraftText>()
+/** Text a closed editor left in the "Restore my text" banner, until the next editor of that draft takes it. */
+export const keepRestore = (hash: string, text: DraftText | null) => void (text ? keptRestore.set(hash, text) : keptRestore.delete(hash))
+export const takeRestore = (hash: string): DraftText | null => {
+  const text = keptRestore.get(hash) ?? null
+  keptRestore.delete(hash)
+  return text
+}

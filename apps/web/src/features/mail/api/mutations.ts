@@ -61,7 +61,7 @@ import { useContext } from 'react'
 import { useWorkspace, WorkspaceContext } from '@/features/workspaces/workspaceContext'
 import { ApiProblem } from '@orbit/api/problem'
 import { conflictDraft, type DraftText } from '../mailLib'
-import { createDraftSaver, type DraftSaver, type DraftSaverState } from './draftSaver'
+import { createDraftSaver, type DraftSaver, type DraftSaverState, keepRestore, notifyDraftUndone, onDraftUndone, takeRestore } from './draftSaver'
 import { mailKeys } from './keys'
 import type { ProviderScope } from './queries'
 import { applyThreadChange, type MailSnapshot, reconcileThreads, restoreMailSnapshot, type ThreadChange } from './optimistic'
@@ -570,6 +570,8 @@ export function useSaveDraft(draftId: string | null | undefined) {
     if (!draftId) return
     const key = mailKeys.draft(workspaceId, draftId)
     const hash = hashKey(key)
+    const kept = takeRestore(hash)
+    setState({ ...INITIAL_SAVE_STATE, restore: kept })
     const instance = createDraftSaver<MailDraft>({
       read: () => queryClient.getQueryData<MailDraft>(key),
       write: (draft) => queryClient.setQueryData(key, draft),
@@ -594,13 +596,13 @@ export function useSaveDraft(draftId: string | null | undefined) {
       onSaved: () => void queryClient.invalidateQueries({ queryKey: mailKeys.draftsAll(workspaceId) }),
       setTimer: (run, ms) => setTimeout(run, ms),
       clearTimer: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+      onDispose: (restore) => keepRestore(hash, restore),
+      initialRestore: kept,
       delayMs: DRAFT_SAVE_DELAY_MS,
     })
     saver.current = instance
-    // the cached draft was replaced (Undo seeds it again): a held or stopped saver goes on
-    const unsubscribe = queryClient.getQueryCache().subscribe((event) => {
-      if (event.type === 'updated' && event.action.type === 'success' && event.query.queryHash === hash) instance.reset()
-    })
+    // Undo returns the draft: a held or stopped saver goes on (nothing else resets it)
+    const unsubscribe = onDraftUndone(hash, () => instance.reset())
     return () => {
       unsubscribe()
       instance.dispose()
@@ -644,7 +646,11 @@ export function useCancelOutbound() {
     mutationFn: async (outboundId: string) =>
       required((await cancelMailOutbound({ client: apiClient, path: { workspace_id: workspaceId, outbound_id: outboundId }, throwOnError: true })).data),
     // the cancelled message is a draft again
-    onSuccess: (draft) => queryClient.setQueryData(mailKeys.draft(workspaceId, draft.id), draft),
+    onSuccess: (draft) => {
+      const key = mailKeys.draft(workspaceId, draft.id)
+      queryClient.setQueryData(key, draft)
+      notifyDraftUndone(hashKey(key))
+    },
     onSettled: () => invalidateSendViews(queryClient, workspaceId),
   })
 }

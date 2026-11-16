@@ -15,6 +15,7 @@ function setup(initial: Draft | null = { version: 1, subject: '', body_html: '' 
   let now = 0
   let state: DraftSaverState = { saving: false, problem: null, restore: null }
   let saved = 0
+  let left: unknown = 'unset'
   let failure: DraftSaveFailure<Draft> = { kind: 'other' }
   const saver = createDraftSaver<Draft>({
     read: () => cached,
@@ -23,6 +24,7 @@ function setup(initial: Draft | null = { version: 1, subject: '', body_html: '' 
     classify: () => failure,
     onState: (next) => void (state = next),
     onSaved: () => void (saved += 1),
+    onDispose: (restore) => void (left = restore),
     setTimer: (run, ms) => {
       timers.set(nextTimer, { run, at: now + ms })
       return nextTimer++
@@ -52,6 +54,7 @@ function setup(initial: Draft | null = { version: 1, subject: '', body_html: '' 
     cached: () => cached,
     setCached: (draft: Draft | undefined) => void (cached = draft),
     saved: () => saved,
+    left: () => left,
     timers: () => timers.size,
     fail: (next: DraftSaveFailure<Draft>) => void (failure = next),
   }
@@ -206,4 +209,60 @@ test('stop after a send drops pending text without an error; a gone draft is not
   await gone.advance(2000)
   expect(gone.sends).toHaveLength(0)
   expect(gone.state().problem).toBeNull()
+})
+
+test('only an explicit reset resumes: the saver\'s own write and a refetch do not', async () => {
+  const t = setup()
+  // own write after a save does not clear a stop
+  t.saver.save({ subject: 'a' })
+  await t.advance(2000)
+  t.saver.stop()
+  t.sends[0].resolve({ version: 2 })
+  await t.settle()
+  t.setCached({ version: 3 })
+  t.saver.save({ subject: 'b' })
+  await t.advance(5000)
+  expect(t.sends).toHaveLength(1)
+  // Undo does
+  t.saver.reset()
+  t.saver.save({ subject: 'c' })
+  await t.advance(2000)
+  expect(t.sends).toHaveLength(2)
+  expect(t.sends[1]).toMatchObject({ change: { subject: 'c' }, version: 3 })
+})
+
+test('a held saver stays held through cache writes until reset', async () => {
+  const t = setup()
+  t.fail({ kind: 'sending' })
+  t.saver.save({ subject: 'late' })
+  await t.advance(2000)
+  t.sends[0].reject(new Error('409'))
+  await t.settle()
+  t.setCached({ version: 4 })
+  t.saver.save({ subject: 'more' })
+  await t.advance(5000)
+  expect(t.sends).toHaveLength(1)
+  expect(t.state().problem).toBe('sending')
+})
+
+test('the unmount flush reports a save', async () => {
+  const t = setup()
+  t.saver.save({ subject: 'a' })
+  t.saver.dispose()
+  t.sends[0].resolve({ version: 2 })
+  await t.settle()
+  expect(t.saved()).toBe(1)
+  expect(t.left()).toBeNull()
+})
+
+test('text held at dispose is handed to the owner, not dropped', async () => {
+  const t = setup()
+  t.fail({ kind: 'sending' })
+  t.saver.save({ subject: 'late' })
+  await t.advance(2000)
+  t.sends[0].reject(new Error('409'))
+  await t.settle()
+  t.saver.dispose()
+  expect(t.left()).toEqual({ subject: 'late' })
+  expect(t.sends).toHaveLength(1)
 })
