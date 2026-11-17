@@ -73,6 +73,8 @@ pub const SEND_SWEEP_JOB: &str = "mail.send_sweep";
 pub const SEND_SWEEP_MS: i64 = 5 * 60 * 1000;
 /// Rows queued again by one sweep.
 const SWEEP_BATCH: i64 = 500;
+/// At most this many pages of held rows are read for the readiness check in one sweep.
+const READINESS_SWEEP_PAGES: usize = 20;
 /// A release that keeps failing with `release_failed` this long after its first failure is
 /// held as `release_error` and no longer swept.
 pub const RELEASE_FAILED_GIVE_UP_MS: i64 = 24 * 3_600_000;
@@ -965,64 +967,53 @@ impl MailRepository {
     /// [`super::NotReadyReason`] once the domain and the mailbox are ready again. Returns how
     /// many were queued.
     pub async fn sweep_releases(&self, now: TimestampMillis) -> Result<u64, MailError> {
-        // Ready again: checked before the writer transaction (the check reads the pool).
-        let mut ready_again = Vec::new();
-        let waiting = sqlx::query(sqlx::AssertSqlSafe(format!(
-            "SELECT o.id, o.workspace_id, o.mailbox_id, d.from_address_id, o.auto_reply \
-             FROM mail_outbound o LEFT JOIN mail_drafts d ON d.id = o.draft_id \
-             WHERE o.status = 'held' AND o.release_at <= $1 \
-             AND o.hold_reason IN ('domain_unverified', 'inbound_not_live', 'no_route', \
-             'mailbox_suspended') AND {NO_SEND_JOB} ORDER BY o.release_at, o.id LIMIT $2"
-        )))
-        .bind(now.as_millis())
-        .bind(SWEEP_BATCH)
-        .fetch_all(self.database.pool())
-        .await?;
+        self.sweep_releases_with_batch(now, SWEEP_BATCH).await
+    }
+
+    /// [`Self::sweep_releases`] with `batch` rows a page (tests use small pages).
+    #[doc(hidden)]
+    pub async fn sweep_releases_with_batch(
+        &self,
+        now: TimestampMillis,
+        batch: i64,
+    ) -> Result<u64, MailError> {
+        // Ready again: checked before the writer transaction (the check reads the pool). The rows
+        // are read a page at a time, oldest first, until a batch is ready: many rows of a domain or
+        // mailbox that is still not ready must not hide the ready rows behind them.
+        let mut ready_again: Vec<(String, String)> = Vec::new();
         let mut checked: HashMap<(String, String), bool> = HashMap::new();
-        for row in &waiting {
-            let address_id = match row.try_get::<Option<String>, _>("from_address_id")? {
-                Some(id) => Some(id),
-                None => row
-                    .try_get::<Option<String>, _>("auto_reply")?
-                    .and_then(|json| serde_json::from_str::<AutoReply>(&json).ok())
-                    .map(|auto| auto.from_address_id),
-            };
-            // No draft and no reply to build: the release cancels it.
-            let Some(address_id) = address_id else {
-                ready_again.push(row);
-                continue;
-            };
-            let mailbox: String = row.try_get("mailbox_id")?;
-            let key = (address_id.clone(), mailbox.clone());
-            let ready = match checked.get(&key) {
-                Some(ready) => *ready,
-                None => {
-                    let domain: Option<String> =
-                        sqlx::query_scalar("SELECT domain_id FROM mail_addresses WHERE id = $1")
-                            .bind(&address_id)
-                            .fetch_optional(self.database.pool())
-                            .await?;
-                    let ready = match domain {
-                        // The address is gone: the release holds it with the lasting reason.
-                        None => true,
-                        Some(domain) => match self
-                            .send_readiness(parse_id(&domain)?, Some(parse_id(&mailbox)?))
-                            .await
-                        {
-                            Ok(readiness) => readiness == SendReadiness::Ready,
-                            // Gone: the release decides what becomes of it.
-                            Err(MailError::NotFound) => true,
-                            Err(error) => return Err(error),
-                        },
-                    };
-                    checked.insert(key, ready);
-                    ready
+        let mut after: Option<(i64, String)> = None;
+        for _ in 0..READINESS_SWEEP_PAGES {
+            let (after_at, after_id) = after.clone().unwrap_or((i64::MIN, String::new()));
+            let waiting = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "SELECT o.id, o.workspace_id, o.mailbox_id, o.release_at, d.from_address_id, \
+                 o.auto_reply FROM mail_outbound o LEFT JOIN mail_drafts d ON d.id = o.draft_id \
+                 WHERE o.status = 'held' AND o.release_at <= $1 \
+                 AND o.hold_reason IN ('domain_unverified', 'inbound_not_live', 'no_route', \
+                 'mailbox_suspended') AND {NO_SEND_JOB} \
+                 AND (o.release_at > $3 OR (o.release_at = $3 AND o.id > $4)) \
+                 ORDER BY o.release_at, o.id LIMIT $2"
+            )))
+            .bind(now.as_millis())
+            .bind(batch)
+            .bind(after_at)
+            .bind(&after_id)
+            .fetch_all(self.database.pool())
+            .await?;
+            let full_page = i64::try_from(waiting.len()).unwrap_or(i64::MAX) >= batch;
+            if let Some(last) = waiting.last() {
+                after = Some((last.try_get("release_at")?, last.try_get("id")?));
+            }
+            for row in &waiting {
+                if self.ready_again(row, &mut checked).await? {
+                    ready_again.push((row.try_get("id")?, row.try_get("workspace_id")?));
                 }
-            };
-            if ready {
-                ready_again.push(row);
+            }
+            if !full_page || i64::try_from(ready_again.len()).unwrap_or(i64::MAX) >= batch {
+                break;
             }
         }
+        ready_again.truncate(usize::try_from(batch).unwrap_or(usize::MAX));
 
         let mut transaction = self.database.immediate_transaction().await?;
         // `release_failed` for a day: the problem is not passing, it stops being retried.
@@ -1047,17 +1038,67 @@ impl MailRepository {
              AND {NO_SEND_JOB} ORDER BY o.release_at, o.id LIMIT $2"
         )))
         .bind(now.as_millis())
-        .bind(SWEEP_BATCH)
+        .bind(batch)
         .fetch_all(&mut *transaction)
         .await?;
-        let queued = rows.len() + ready_again.len();
-        for row in rows.iter().chain(ready_again) {
-            let id = parse_id(&row.try_get::<String, _>("id")?)?;
-            let workspace_id = parse_id(&row.try_get::<String, _>("workspace_id")?)?;
-            enqueue(&mut transaction, &send_job(id, workspace_id, now)).await?;
+        let mut due: Vec<(String, String)> = Vec::with_capacity(rows.len() + ready_again.len());
+        for row in &rows {
+            due.push((row.try_get("id")?, row.try_get("workspace_id")?));
+        }
+        due.extend(ready_again);
+        let queued = due.len();
+        for (id, workspace_id) in due {
+            enqueue(
+                &mut transaction,
+                &send_job(parse_id(&id)?, parse_id(&workspace_id)?, now),
+            )
+            .await?;
         }
         transaction.commit().await?;
         Ok(queued as u64)
+    }
+
+    /// Whether a message held for readiness may be released now. `checked` remembers each
+    /// (address, mailbox) pair of this sweep. A message with no draft and no reply to build, or
+    /// whose address or domain is gone, counts as ready: its release decides what becomes of it.
+    async fn ready_again(
+        &self,
+        row: &sqlx::any::AnyRow,
+        checked: &mut HashMap<(String, String), bool>,
+    ) -> Result<bool, MailError> {
+        let address_id = match row.try_get::<Option<String>, _>("from_address_id")? {
+            Some(id) => Some(id),
+            None => row
+                .try_get::<Option<String>, _>("auto_reply")?
+                .and_then(|json| serde_json::from_str::<AutoReply>(&json).ok())
+                .map(|auto| auto.from_address_id),
+        };
+        let Some(address_id) = address_id else {
+            return Ok(true);
+        };
+        let mailbox: String = row.try_get("mailbox_id")?;
+        let key = (address_id.clone(), mailbox.clone());
+        if let Some(ready) = checked.get(&key) {
+            return Ok(*ready);
+        }
+        let domain: Option<String> =
+            sqlx::query_scalar("SELECT domain_id FROM mail_addresses WHERE id = $1")
+                .bind(&address_id)
+                .fetch_optional(self.database.pool())
+                .await?;
+        let ready = match domain {
+            None => true,
+            Some(domain) => match self
+                .send_readiness(parse_id(&domain)?, Some(parse_id(&mailbox)?))
+                .await
+            {
+                Ok(readiness) => readiness == SendReadiness::Ready,
+                Err(MailError::NotFound) => true,
+                Err(error) => return Err(error),
+            },
+        };
+        checked.insert(key, ready);
+        Ok(ready)
     }
 
     /// `mail.send_sweep`, delivery side: recipients left `sending` past

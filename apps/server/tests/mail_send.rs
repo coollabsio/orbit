@@ -2944,3 +2944,36 @@ async fn held_message_of_a_removed_member_is_cancelled_at_release() {
         ("cancelled".to_owned(), Some("draft_missing".to_owned()))
     );
 }
+
+#[tokio::test]
+async fn readiness_sweep_is_not_starved_by_rows_still_not_ready() {
+    let f = Fixture::new().await;
+    f.signing().await;
+    // Three held messages of a mailbox that is still suspended: oldest first.
+    let mut last = 0;
+    for _ in 0..3 {
+        let (_, release_at) = f.held_without_job().await;
+        last = last.max(release_at);
+    }
+    f.sql(&format!(
+        "UPDATE mailboxes SET status = 'suspended' WHERE id = '{}'",
+        f.ann_personal
+    ))
+    .await;
+    // A newer message of another mailbox, held while it was not ready and ready again now.
+    let draft = f.new_draft(f.team_primary, &["x@out.test"], &[], &[]).await;
+    let (status, sent) = f.send(&draft, json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{sent}");
+    let ready: Id = sent["id"].as_str().unwrap().parse().unwrap();
+    let (_, release_at, _) = f.outbound_row(&ready.to_string()).await;
+    last = last.max(release_at);
+    f.sql("DELETE FROM jobs WHERE kind = 'mail.send'").await;
+    f.sql("UPDATE mail_outbound SET hold_reason = 'mailbox_suspended' WHERE status = 'held'")
+        .await;
+    // With pages of two rows, the two oldest are not ready: the sweep reads on and finds the ready one.
+    assert_eq!(
+        f.mail.sweep_releases_with_batch(at(last), 2).await.unwrap(),
+        1
+    );
+    assert_eq!(f.queued_send_jobs(ready).await, 1);
+}
