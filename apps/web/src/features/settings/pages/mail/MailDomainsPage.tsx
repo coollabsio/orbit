@@ -278,7 +278,7 @@ function DomainCard({
             </SettingsRow>
             <DomainSendRecords domain={domain} />
             <div className="px-2 py-1">
-              <MailDomainRecords records={domain.records} checked={Boolean(domain.checked_at)} />
+              <MailDomainRecords records={domain.records} checked={Boolean(domain.checked_at)} dkimRotating={domain.dkim_rotating} />
             </div>
           </div>
         </div>

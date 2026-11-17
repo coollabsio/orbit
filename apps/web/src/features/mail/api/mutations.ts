@@ -60,6 +60,7 @@ import {
   setMailDomainSendRoute,
   setMailSendDefault,
   setMailSendPolicy,
+  setMailSendTiers,
   testInstanceMailSendRoute,
   testWorkspaceMailSendRoute,
   updateInstanceMailSendRoute,
@@ -88,6 +89,7 @@ import type {
   CreateMailSnippetBody,
   CreateProviderSendRouteBody,
   SetMailSendPolicyBody,
+  TierLimits,
   UpdateMailSendRouteBody,
   UpdateMailSnippetBody,
 } from '@orbit/api/generated/types.gen'
@@ -823,13 +825,19 @@ export function useSetVacation() {
 
 // Sending settings (slice 2)
 
-/** Send routes of the root user (`instance`) or of the workspace: the list and the domains that show their route. */
+/**
+ * After a route changes: the route list, and in the current workspace the domains (their route, its SPF) and the From
+ * addresses (whether they can send, the size limit).
+ */
 function useSendRouteInvalidation(scope: ProviderScope) {
   const queryClient = useQueryClient()
   const workspaceId = useOptionalWorkspaceId()
   return () => {
     void queryClient.invalidateQueries({ queryKey: scope === 'instance' ? queryKeys.adminMailSendRoutes : mailKeys.sendRoutes(workspaceId) })
-    if (workspaceId) void queryClient.invalidateQueries({ queryKey: mailKeys.all(workspaceId) })
+    if (!workspaceId) return
+    if (scope === 'instance') void queryClient.invalidateQueries({ queryKey: mailKeys.sendRoutes(workspaceId) })
+    void queryClient.invalidateQueries({ queryKey: mailKeys.domains(workspaceId) })
+    void queryClient.invalidateQueries({ queryKey: mailKeys.fromAddresses(workspaceId).slice(0, 3) })
   }
 }
 
@@ -880,8 +888,8 @@ export function useDeleteSendRoute(scope: ProviderScope) {
 
 /** **Send test**: a message to `to` through the route, with the result of each step. */
 export function useTestSendRoute(scope: ProviderScope) {
+  const queryClient = useQueryClient()
   const workspaceId = useOptionalWorkspaceId()
-  const invalidate = useSendRouteInvalidation(scope)
   return useMutation({
     mutationFn: async ({ routeId, to }: { routeId: string; to: string }) =>
       required(
@@ -890,7 +898,7 @@ export function useTestSendRoute(scope: ProviderScope) {
           : (await testWorkspaceMailSendRoute({ client: apiClient, path: { workspace_id: workspaceId, route_id: routeId }, body: { to }, throwOnError: true })).data,
       ),
     // the route's last send or error changed
-    onSettled: invalidate,
+    onSettled: () => queryClient.invalidateQueries({ queryKey: scope === 'instance' ? queryKeys.adminMailSendRoutes : mailKeys.sendRoutes(workspaceId) }),
   })
 }
 
@@ -919,10 +927,19 @@ export function useCreateProviderSendRoute(scope: ProviderScope) {
 /** The instance route that domains without one use; `null` clears it (root user). */
 export function useSetSendDefault() {
   const queryClient = useQueryClient()
+  const workspaceId = useOptionalWorkspaceId()
+  // the domains of the current workspace that follow the default now send through another route
+  const invalidate = () => {
+    if (!workspaceId) return
+    void queryClient.invalidateQueries({ queryKey: mailKeys.sendRoutes(workspaceId) })
+    void queryClient.invalidateQueries({ queryKey: mailKeys.domains(workspaceId) })
+    void queryClient.invalidateQueries({ queryKey: mailKeys.fromAddresses(workspaceId).slice(0, 3) })
+  }
   return useMutation({
     mutationFn: async (routeId: string | null) =>
       required((await setMailSendDefault({ client: apiClient, body: { route_id: routeId }, throwOnError: true })).data),
     onSuccess: (list) => queryClient.setQueryData(queryKeys.adminMailSendRoutes, list),
+    onSettled: invalidate,
   })
 }
 
@@ -1043,6 +1060,16 @@ export function useDeleteSnippet() {
 // Send policies (root user)
 
 const invalidatePolicies = (queryClient: QueryClient) => queryClient.invalidateQueries({ queryKey: queryKeys.adminMailSendPolicies })
+
+/** The limits of the New and Standard tiers; workspaces on those tiers use them at once. */
+export function useSetSendTiers() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (body: TierLimits) => required((await setMailSendTiers({ client: apiClient, body, throwOnError: true })).data),
+    onSuccess: (tiers) => queryClient.setQueryData(queryKeys.adminMailSendTiers, tiers),
+    onSettled: () => invalidatePolicies(queryClient),
+  })
+}
 
 /** A workspace's tier, and for `custom` its limits. */
 export function useSetSendPolicy() {

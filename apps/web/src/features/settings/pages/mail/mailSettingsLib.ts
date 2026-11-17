@@ -74,7 +74,7 @@ export interface DomainHealth {
 }
 
 /** One badge for a domain: its status, and for a verified domain whether its DNS records are all in place. */
-export function domainHealth(domain: Pick<MailDomain, 'status' | 'records'>): DomainHealth {
+export function domainHealth(domain: Pick<MailDomain, 'status' | 'records'> & { dkim_rotating?: boolean }): DomainHealth {
   switch (domain.status) {
     case 'pending':
       return { label: 'Pending', variant: 'outline', hint: 'Publish the verification record, then click Check now.' }
@@ -83,7 +83,8 @@ export function domainHealth(domain: Pick<MailDomain, 'status' | 'records'>): Do
     case 'disabled':
       return { label: 'Disabled', variant: 'outline', hint: 'Mail for this domain is refused.' }
     case 'verified': {
-      const bad = domain.records.filter((record) => record.status.status === 'missing' || record.status.status === 'wrong')
+      // during a rotation the DKIM record shown is the new key's: the old one still signs
+      const bad = domain.records.filter((record) => (record.status.status === 'missing' || record.status.status === 'wrong') && !(record.kind === 'dkim' && domain.dkim_rotating))
       const names = (keep: (kind: MailDnsRecordKind) => boolean) => bad.filter((record) => keep(record.kind)).map((record) => KIND_LABELS[record.kind])
       const required = names((kind) => REQUIRED.has(kind))
       const sending = names((kind) => SEND_REQUIRED.has(kind))
@@ -138,6 +139,8 @@ export interface FieldSpec {
   /** Help text for the label's info tip. */
   help?: string
   options?: { value: string; label: string }[]
+  /** A select's value when the route sets none: what the server uses then. */
+  defaultValue?: string
   /** Only on a route of the root user (Admin → Mail). */
   instanceOnly?: boolean
 }
@@ -166,6 +169,7 @@ export function routeFields(kind: SendRouteKind): FieldSpec[] {
             { value: 'tls', label: 'TLS (port 465)' },
             { value: 'none', label: 'None (private network only)' },
           ],
+          defaultValue: 'starttls',
           help: 'Without TLS, only a route of the server admin to a private address is allowed.',
         }),
         SMTP_PORT,
@@ -201,6 +205,7 @@ export function routeFields(kind: SendRouteKind): FieldSpec[] {
             { value: 'eu', label: 'EU' },
             { value: 'au', label: 'AU' },
           ],
+          defaultValue: 'us',
         }),
         secret('api_key', 'API key', 'A sending key of the domain, or an account API key.'),
         secret('webhook_signing_key', 'HTTP webhook signing key'),
@@ -232,18 +237,98 @@ const PROVIDER_PREFILLED: Partial<Record<SendRouteKind, readonly string[]>> = {
   resend: ['api_key'],
 }
 
+/** The select value that leaves a setting to the receiving provider (the server copies the provider's). */
+export const PROVIDER_SETTING = 'provider'
+
 /**
- * The inputs of a route made from a receiving provider: only what the provider lacks. The region comes from the
- * provider when left empty; Postmark's and Cloudflare's webhook secrets are the provider's.
+ * The inputs of the route form. A workspace route has no instance-only inputs and no plain SMTP (`none` is only for
+ * a route of the root user to a private address). `fromProvider`: **Also send through this provider**, which asks
+ * only for what the provider lacks; the region is the provider's unless the admin picks one.
  */
-export function providerRouteFields(kind: SendRouteKind): FieldSpec[] {
-  const prefilled = PROVIDER_PREFILLED[kind] ?? []
+export function routeFormFields(kind: SendRouteKind, scope: 'instance' | 'workspace', fromProvider = false): FieldSpec[] {
+  const prefilled = fromProvider ? (PROVIDER_PREFILLED[kind] ?? []) : []
   return routeFields(kind)
+    .filter((field) => scope === 'instance' || !field.instanceOnly)
     .filter((field) => !(field.group === 'secrets' && prefilled.includes(field.name)))
-    .map((field) => (field.name === 'region' ? { ...field, required: false, placeholder: 'The provider’s region' } : field))
+    .map((field) => {
+      if (field.name === 'security' && scope === 'workspace') return { ...field, options: field.options?.filter((option) => option.value !== 'none') }
+      if (field.name === 'region' && fromProvider) {
+        return field.options
+          ? { ...field, required: false, options: [{ value: PROVIDER_SETTING, label: 'The provider’s region' }, ...field.options], defaultValue: PROVIDER_SETTING }
+          : { ...field, required: false, placeholder: 'The provider’s region' }
+      }
+      return field
+    })
 }
 
-/** Secrets Orbit makes for a new route (it checks them on the events it receives) and shows once. */
+export type FormValues = Record<string, string>
+
+/** The form's starting text of each setting: the saved value, else the select's default. */
+export function initialSettingValues(fields: FieldSpec[], settings: RouteSettings | null | undefined): FormValues {
+  const values: FormValues = {}
+  for (const field of fields.filter((spec) => spec.group === 'settings')) {
+    const saved = (settings as Record<string, unknown> | null | undefined)?.[field.name]
+    if (saved !== null && saved !== undefined && saved !== '') values[field.name] = String(saved)
+    else if (field.defaultValue) values[field.name] = field.defaultValue
+  }
+  return values
+}
+
+/** "Largest message (MB)": empty (the kind's limit) or a positive number of megabytes. */
+export function maxBytesValid(text: string): boolean {
+  const value = text.trim()
+  if (value === '') return true
+  const number = Number(value)
+  return Number.isFinite(number) && number > 0
+}
+
+/**
+ * The settings the server gets: `base` (what the form does not show) with the form's values over it. PATCH replaces
+ * the settings, so a change sends them all.
+ */
+export function settingsBody(fields: FieldSpec[], values: FormValues, maxBytes: string, base: RouteSettings | null | undefined): RouteSettings {
+  const settings: Record<string, unknown> = { ...(base ?? {}) }
+  for (const field of fields.filter((spec) => spec.group === 'settings')) {
+    const value = (values[field.name] ?? '').trim()
+    if (field.input === 'number') settings[field.name] = value === '' ? null : Number(value)
+    else if (field.name === 'security') settings.security = value || 'starttls'
+    else settings[field.name] = value === '' || value === PROVIDER_SETTING ? null : value
+  }
+  const bytes = maxBytes.trim()
+  settings.max_message_bytes = bytes === '' ? 0 : Math.round(Number(bytes) * 1_000_000)
+  return settings as RouteSettings
+}
+
+/** The secrets typed in: empty ones are left out (a change keeps them; the server makes the generated ones). */
+export function secretsBody(fields: FieldSpec[], values: FormValues): Record<string, string> {
+  const secrets: Record<string, string> = {}
+  for (const field of fields.filter((spec) => spec.group === 'secrets')) {
+    const value = (values[field.name] ?? '').trim()
+    if (value !== '') secrets[field.name] = value
+  }
+  return secrets
+}
+
+/**
+ * Whether the route form can be sent: required settings set, required secrets set on a new route, an SMTP login
+ * whole on a new route, a port that is a number, and a valid size.
+ */
+export function routeFormReady(fields: FieldSpec[], form: { settings: FormValues; secrets: FormValues; maxBytes: string; editing: boolean }): boolean {
+  const filled = (values: FormValues, name: string) => (values[name] ?? '').trim() !== ''
+  for (const field of fields.filter((spec) => spec.required)) {
+    if (field.group === 'secrets' && form.editing) continue
+    if (!filled(field.group === 'settings' ? form.settings : form.secrets, field.name)) return false
+  }
+  for (const field of fields.filter((spec) => spec.input === 'number' && filled(form.settings, spec.name))) {
+    const number = Number(form.settings[field.name]!.trim())
+    if (!Number.isInteger(number) || number < 1 || number > 65_535) return false
+  }
+  const login = fields.some((field) => field.name === 'username') && fields.some((field) => field.name === 'password')
+  if (login && !form.editing && filled(form.secrets, 'username') !== filled(form.secrets, 'password')) return false
+  return maxBytesValid(form.maxBytes)
+}
+
+/** Secrets the server makes for a new route when none are given (it checks them on the events it receives), shown once. */
 export function generatedSecrets(kind: SendRouteKind): string[] {
   if (kind === 'postmark') return ['webhook_user', 'webhook_password']
   if (kind === 'cloudflare') return ['event_secret']
@@ -292,19 +377,10 @@ export function spfHint(kind: SendRouteKind, settings: Pick<RouteSettings, 'spf'
   return settings?.spf?.trim() || null
 }
 
-/** The URL a route's provider posts bounces, complaints and deliveries to. */
-export const eventsUrl = (origin: string, kind: SendRouteKind, routeId: string) => `${origin}/api/v1/mail/events/${kind}/${routeId}`
-
 /** "10 MB", "26.2 MB". */
 export function megabytes(bytes: number): string {
   const value = bytes / 1_000_000
   return `${Number.isInteger(value) ? value : value.toFixed(1)} MB`
-}
-
-/** The tier limits (spec §5.8): the instance defaults a workspace gets. */
-export const TIER_LIMITS: Record<'new' | 'standard', Limits> = {
-  new: { per_user_hour: 30, per_user_day: 100, per_ws_hour: 60, per_ws_day: 200, max_recipients: 50 },
-  standard: { per_user_hour: 500, per_user_day: 2000, per_ws_hour: 2000, per_ws_day: 10_000, max_recipients: 100 },
 }
 
 export const TIER_LABELS: Record<SendTier, string> = { new: 'New', standard: 'Standard', custom: 'Custom' }
@@ -312,11 +388,11 @@ export const TIER_LABELS: Record<SendTier, string> = { new: 'New', standard: 'St
 /** The choices of the undo send delay, in seconds. */
 export const UNDO_SECONDS = [0, 5, 10, 20, 30] as const
 
-/** Whether the kind's provider posts bounce, complaint and delivery events to Orbit (the others bounce by mail). */
-export const hasEvents = (kind: SendRouteKind) => kind !== 'direct' && kind !== 'smtp'
-
-/** What to set up at the provider for a route: its events webhook and the domain's records there. */
-export function routeSetupSteps(kind: SendRouteKind): string[] {
+/**
+ * What to set up at the provider for a route: its events webhook and the domain's records there. `eventSecretFromProvider`:
+ * a Cloudflare route made from a receiving provider, whose Email Worker already has the queue handler and the secret.
+ */
+export function routeSetupSteps(kind: SendRouteKind, eventSecretFromProvider = false): string[] {
   switch (kind) {
     case 'direct':
       return [
@@ -360,6 +436,14 @@ export function routeSetupSteps(kind: SendRouteKind): string[] {
         'Put the topic’s ARN on the route.',
       ]
     case 'cloudflare':
+      if (eventSecretFromProvider) {
+        return [
+          'Onboard each domain in Cloudflare Email Sending and publish its records (cf-bounce.<domain> and DKIM).',
+          'Make a queue, and an event subscription that sends the domains’ sending events to it.',
+          'Your Email Worker already has the queue handler: bind the queue to it as a consumer.',
+          'In the Worker’s settings, add the variable ORBIT_EVENTS_URL with the URL above, and the secret ORBIT_EVENT_SECRET with the provider’s signing secret (the value of ORBIT_SIGNING_SECRET).',
+        ]
+      }
       return [
         'Onboard each domain in Cloudflare Email Sending and publish its records (cf-bounce.<domain> and DKIM).',
         'Make a queue, and an event subscription that sends the domains’ sending events to it.',
@@ -390,7 +474,11 @@ export function routeRecordsNote(kind: SendRouteKind, domain: string): string | 
   }
 }
 
-/** The Cloudflare Worker that reads the event queue and posts each batch to Orbit, signed with the event secret. */
+/**
+ * The Cloudflare Worker that reads the event queue and posts each batch to Orbit, signed with the event secret. The
+ * same `queue` handler as the Email Worker of a Cloudflare provider (`crates/mail/src/inbound/cloudflare.rs`); the
+ * route view does not carry a script, so a route without that Worker gets this one.
+ */
 export const CLOUDFLARE_EVENTS_WORKER = `export default {
   async queue(batch, env) {
     const body = JSON.stringify(batch.messages.map((message) => message.body))

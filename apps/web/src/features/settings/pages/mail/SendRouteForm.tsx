@@ -1,6 +1,8 @@
 import { useId, useState, type FormEvent } from 'react'
+import { toast } from 'sonner'
 import { Danger } from 'reicon-react'
-import type { MailProviderView, MailSendRouteView, RouteSettings, SmtpSecurity } from '@orbit/api/generated/types.gen'
+import type { MailProviderView, MailSendRouteView } from '@orbit/api/generated/types.gen'
+import { confirmAction } from '@/components/common/confirmAction'
 import { InfoTip } from '@/components/common/InfoTip'
 import { Modal } from '@/components/common/Modal'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
@@ -16,84 +18,38 @@ import { CopyButton } from './MailDomainRecords'
 import {
   CLOUDFLARE_EVENTS_WORKER,
   defaultMaxBytes,
-  eventsUrl,
   eventsUrlWithLogin,
-  generatedSecrets,
-  hasEvents,
+  initialSettingValues,
   isSendRouteKind,
   mailProblem,
+  maxBytesValid,
   megabytes,
-  providerRouteFields,
   ROUTE_LABELS,
-  routeFields,
+  routeFormFields,
+  routeFormReady,
   routeKindOfProvider,
   routeSetupSteps,
   SECRET_LABELS,
+  secretsBody,
   SEND_ROUTE_KINDS,
+  settingsBody,
   type FieldSpec,
+  type FormValues,
   type SendRouteKind,
 } from './mailSettingsLib'
 
-/** Random hex of `size` bytes, for a secret Orbit makes for a route: the provider sends it back with each event. */
-function randomHex(size: number): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(size))
-  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
-}
-
-/** A value for each secret Orbit makes: a short user name, else 32 random bytes. */
-const newSecret = (name: string) => (name === 'webhook_user' ? `orbit-${randomHex(6)}` : randomHex(32))
-
-/** A new route and the secrets Orbit made for it (shown once). */
-export interface CreatedRoute {
-  route: MailSendRouteView
-  generated: Record<string, string>
-}
-
-type Values = Record<string, string>
-
-/** The form's text of each setting of a saved route. */
-function settingValues(settings: RouteSettings | null | undefined): Values {
-  const values: Values = {}
-  for (const [name, value] of Object.entries(settings ?? {})) {
-    if (value !== null && value !== undefined && name !== 'max_message_bytes') values[name] = String(value)
+/** The help of the Kind field for the chosen kind. */
+function kindHelp(kind: SendRouteKind): string | null {
+  switch (kind) {
+    case 'direct':
+      return 'Orbit delivers to each recipient’s mail server on port 25. This server must be allowed to send on port 25, with a PTR record for its address.'
+    case 'postmark':
+      return 'Orbit makes the webhook user name and password and shows them once, after you add the route.'
+    case 'cloudflare':
+      return 'Orbit makes the event secret and shows it once, after you add the route.'
+    default:
+      return null
   }
-  return values
-}
-
-/** The settings the server gets: `base` (what the form does not show) with the form's values over it. */
-function settingsBody(fields: FieldSpec[], values: Values, maxBytes: string, base: RouteSettings | null | undefined): RouteSettings {
-  const settings: Record<string, unknown> = { ...(base ?? {}) }
-  for (const field of fields.filter((spec) => spec.group === 'settings')) {
-    const value = (values[field.name] ?? '').trim()
-    if (field.input === 'number') settings[field.name] = value === '' ? null : Number(value)
-    else if (field.name === 'security') settings.security = (value || 'starttls') as SmtpSecurity
-    else settings[field.name] = value === '' ? null : value
-  }
-  const bytes = maxBytes.trim()
-  settings.max_message_bytes = bytes === '' ? 0 : Math.round(Number(bytes) * 1_000_000)
-  return settings as RouteSettings
-}
-
-function secretsBody(fields: FieldSpec[], values: Values): Record<string, string> {
-  const secrets: Record<string, string> = {}
-  for (const field of fields.filter((spec) => spec.group === 'secrets')) {
-    const value = (values[field.name] ?? '').trim()
-    if (value !== '') secrets[field.name] = value
-  }
-  return secrets
-}
-
-/** Whether the form can be sent: required settings set, required secrets set on a new route, an SMTP login whole. */
-function ready(fields: FieldSpec[], settings: Values, secrets: Values, editing: boolean): boolean {
-  const filled = (values: Values, name: string) => (values[name] ?? '').trim() !== ''
-  for (const field of fields.filter((spec) => spec.required)) {
-    const values = field.group === 'settings' ? settings : secrets
-    if (field.group === 'secrets' && editing) continue
-    if (!filled(values, field.name)) return false
-  }
-  const login = ['username', 'password'].filter((name) => fields.some((field) => field.name === name))
-  if (login.length === 2 && !editing && filled(secrets, 'username') !== filled(secrets, 'password')) return false
-  return true
 }
 
 /** The inputs of `fields`; secret inputs stay empty, and a set secret says so. */
@@ -108,8 +64,8 @@ function RouteFields({
 }: {
   ids: string
   fields: FieldSpec[]
-  settings: Values
-  secrets: Values
+  settings: FormValues
+  secrets: FormValues
   secretsSet: string[]
   onSetting: (name: string, value: string) => void
   onSecret: (name: string, value: string) => void
@@ -132,7 +88,7 @@ function RouteFields({
           return (
             <Field key={id}>
               {label}
-              <Select items={options} value={values[field.name] || options[0]!.value} onValueChange={(value) => set(field.name, value as string)}>
+              <Select items={options} value={values[field.name] || field.defaultValue || null} onValueChange={(value) => set(field.name, value as string)}>
                 <SelectTrigger id={id}><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {options.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
@@ -167,7 +123,17 @@ function MaxBytesField({ id, kind, value, onChange }: { id: string; kind: SendRo
         Largest message (MB)
         <InfoTip text={`Messages are refused above this size, as sent (attachments grow by a third). Empty: ${megabytes(defaultMaxBytes(kind))}, the most this kind takes.`} />
       </FieldLabel>
-      <Input id={id} className="w-40" inputMode="decimal" autoComplete="off" placeholder={String(defaultMaxBytes(kind) / 1_000_000)} value={value} onChange={(event) => onChange(event.target.value)} />
+      <Input
+        id={id}
+        className="w-40"
+        inputMode="decimal"
+        autoComplete="off"
+        aria-invalid={!maxBytesValid(value) || undefined}
+        placeholder={String(defaultMaxBytes(kind) / 1_000_000)}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+      />
+      {!maxBytesValid(value) ? <p className="m-0 text-xs text-destructive">Enter a size in MB above 0, or leave it empty.</p> : null}
     </Field>
   )
 }
@@ -184,42 +150,65 @@ export function SendRouteForm({
   route?: MailSendRouteView
   directAvailable: boolean
   onClose: () => void
-  onCreated?: (created: CreatedRoute) => void
+  /** The new route, with the secrets the server made (`generated`, shown once). */
+  onCreated?: (created: MailSendRouteView) => void
 }) {
   const ids = useId()
   const create = useCreateSendRoute(scope)
   const update = useUpdateSendRoute(scope)
   const firstKind: SendRouteKind = route && isSendRouteKind(route.kind) ? route.kind : directAvailable ? 'direct' : 'smtp'
   const [kind, setKind] = useState<SendRouteKind>(firstKind)
+  const fields = routeFormFields(kind, scope)
   const [name, setName] = useState(route?.name ?? '')
-  const [settings, setSettings] = useState<Values>(() => settingValues(route?.settings))
-  const [secrets, setSecrets] = useState<Values>({})
+  const [settings, setSettings] = useState<FormValues>(() => initialSettingValues(fields, route?.settings))
+  const [secrets, setSecrets] = useState<FormValues>({})
   const [maxBytes, setMaxBytes] = useState(() => {
     const bytes = route?.settings?.max_message_bytes ?? 0
     return bytes > 0 && bytes !== defaultMaxBytes(firstKind) ? String(bytes / 1_000_000) : ''
   })
-  const fields = routeFields(kind).filter((field) => !field.instanceOnly || scope === 'instance')
   const saving = create.isPending || update.isPending
   const error = create.error ?? update.error
+  const ready = routeFormReady(fields, { settings, secrets, maxBytes, editing: Boolean(route) })
+  const hasLogin = kind === 'smtp' && route?.secrets_set.includes('username') === true
+  const help = kindHelp(kind)
   const kindOptions = SEND_ROUTE_KINDS.map((value) => ({
     value,
     label: value === 'direct' && !directAvailable ? `${ROUTE_LABELS[value]} (needs ORBIT_MAIL_HOSTNAME)` : ROUTE_LABELS[value],
   }))
 
+  function chooseKind(next: SendRouteKind) {
+    setKind(next)
+    setSecrets({})
+    setSettings(initialSettingValues(routeFormFields(next, scope), null))
+    setMaxBytes('')
+  }
+
   function submit(event: FormEvent) {
     event.preventDefault()
-    if (saving || !ready(fields, settings, secrets, Boolean(route))) return
+    if (saving || !ready) return
     const body = { name: name.trim() || ROUTE_LABELS[kind], settings: settingsBody(fields, settings, maxBytes, route?.settings) }
     const given = secretsBody(fields, secrets)
     if (route) {
       update.mutate({ routeId: route.id, body: { ...body, secrets: Object.keys(given).length > 0 ? given : null } }, { onSuccess: onClose })
       return
     }
-    const generated = Object.fromEntries(generatedSecrets(kind).map((secret) => [secret, newSecret(secret)]))
-    create.mutate(
-      { kind, ...body, secrets: { ...given, ...generated } },
-      { onSuccess: (created) => { onCreated?.({ route: created, generated }); onClose() } },
-    )
+    // the server makes the webhook secrets it checks (Postmark, Cloudflare) and answers with them once
+    create.mutate({ kind, ...body, secrets: given }, { onSuccess: (created) => { onCreated?.(created); onClose() } })
+  }
+
+  async function removeLogin() {
+    if (!route) return
+    const confirmed = await confirmAction({
+      title: `Remove the login of ${route.name}?`,
+      description: 'Orbit connects to the relay without a user name and password.',
+      confirmLabel: 'Remove login',
+      danger: true,
+    })
+    if (!confirmed) return
+    update.mutate({ routeId: route.id, body: { clear_login: true } }, {
+      onSuccess: () => { toast('Login removed'); onClose() },
+      onError: (failure) => toast.error(mailProblem(failure, 'The login could not be removed.')),
+    })
   }
 
   return (
@@ -232,13 +221,11 @@ export function SendRouteForm({
       <form className="grid gap-4" onSubmit={submit}>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <Field>
-            <FieldLabel htmlFor={`${ids}-kind`}>Kind</FieldLabel>
-            <Select
-              items={kindOptions}
-              value={kind}
-              disabled={Boolean(route)}
-              onValueChange={(value) => { setKind(value as SendRouteKind); setSecrets({}); setSettings({}); setMaxBytes('') }}
-            >
+            <FieldLabel htmlFor={`${ids}-kind`}>
+              Kind
+              {help && !route ? <InfoTip text={help} /> : null}
+            </FieldLabel>
+            <Select items={kindOptions} value={kind} disabled={Boolean(route)} onValueChange={(value) => chooseKind(value as SendRouteKind)}>
               <SelectTrigger id={`${ids}-kind`}><SelectValue /></SelectTrigger>
               <SelectContent>
                 {kindOptions.map((option) => (
@@ -252,12 +239,6 @@ export function SendRouteForm({
             <Input id={`${ids}-name`} autoComplete="off" maxLength={80} placeholder={ROUTE_LABELS[kind]} value={name} onChange={(event) => setName(event.target.value)} />
           </Field>
         </div>
-        {kind === 'direct' ? (
-          <p className="m-0 text-[0.8125rem] text-muted-foreground">Orbit delivers to each recipient’s mail server on port 25. The server must be allowed to send on port 25, with a PTR record for its address.</p>
-        ) : null}
-        {!route && generatedSecrets(kind).length > 0 ? (
-          <p className="m-0 text-[0.8125rem] text-muted-foreground">Orbit makes the {kind === 'postmark' ? 'webhook user name and password' : 'event secret'} and shows {kind === 'postmark' ? 'them' : 'it'} once, after you add the route.</p>
-        ) : null}
         <RouteFields
           ids={ids}
           fields={fields}
@@ -267,11 +248,16 @@ export function SendRouteForm({
           onSetting={(field, value) => setSettings((current) => ({ ...current, [field]: value }))}
           onSecret={(field, value) => setSecrets((current) => ({ ...current, [field]: value }))}
         />
+        {hasLogin ? (
+          <div>
+            <Button type="button" variant="ghost" size="sm" className="text-destructive" disabled={saving} onClick={() => void removeLogin()}>Remove login</Button>
+          </div>
+        ) : null}
         <MaxBytesField id={`${ids}-max`} kind={kind} value={maxBytes} onChange={setMaxBytes} />
         {error ? <p role="alert" className="text-sm text-destructive">{mailProblem(error, 'The route was not saved.')}</p> : null}
         <DialogFooter>
           <DialogClose render={<Button type="button" variant="outline" />}>Cancel</DialogClose>
-          <Button type="submit" disabled={saving || !ready(fields, settings, secrets, Boolean(route))}>{saving ? 'Saving…' : route ? 'Save' : 'Add route'}</Button>
+          <Button type="submit" disabled={saving || !ready}>{saving ? 'Saving…' : route ? 'Save' : 'Add route'}</Button>
         </DialogFooter>
       </form>
     </Modal>
@@ -288,22 +274,23 @@ export function ProviderSendRouteForm({
   scope: ProviderScope
   provider: MailProviderView
   onClose: () => void
-  onCreated?: (created: CreatedRoute) => void
+  onCreated?: (created: MailSendRouteView) => void
 }) {
   const ids = useId()
   const create = useCreateProviderSendRoute(scope)
   const kind = routeKindOfProvider(provider.kind)
-  const fields = providerRouteFields(kind).filter((field) => !field.instanceOnly || scope === 'instance')
-  const [settings, setSettings] = useState<Values>({})
-  const [secrets, setSecrets] = useState<Values>({})
+  const fields = routeFormFields(kind, scope, true)
+  const [settings, setSettings] = useState<FormValues>(() => initialSettingValues(fields, null))
+  const [secrets, setSecrets] = useState<FormValues>({})
   const [maxBytes, setMaxBytes] = useState('')
+  const ready = routeFormReady(fields, { settings, secrets, maxBytes, editing: false })
 
   function submit(event: FormEvent) {
     event.preventDefault()
-    if (create.isPending || !ready(fields, settings, secrets, false)) return
+    if (create.isPending || !ready) return
     create.mutate(
       { providerId: provider.id, body: { secrets: secretsBody(fields, secrets), settings: settingsBody(fields, settings, maxBytes, null) } },
-      { onSuccess: (route) => { onCreated?.({ route, generated: {} }); onClose() } },
+      { onSuccess: (route) => { onCreated?.(route); onClose() } },
     )
   }
 
@@ -315,7 +302,6 @@ export function ProviderSendRouteForm({
       dismissible={!create.isPending}
     >
       <form className="grid gap-4" onSubmit={submit}>
-        {fields.length === 0 ? <p className="m-0 text-[0.8125rem] text-muted-foreground">Nothing else is needed.</p> : null}
         <RouteFields
           ids={ids}
           fields={fields}
@@ -329,7 +315,7 @@ export function ProviderSendRouteForm({
         {create.error ? <p role="alert" className="text-sm text-destructive">{mailProblem(create.error, 'The route was not added.')}</p> : null}
         <DialogFooter>
           <DialogClose render={<Button type="button" variant="outline" />}>Cancel</DialogClose>
-          <Button type="submit" disabled={create.isPending || !ready(fields, settings, secrets, false)}>{create.isPending ? 'Adding…' : 'Add route'}</Button>
+          <Button type="submit" disabled={create.isPending || !ready}>{create.isPending ? 'Adding…' : 'Add route'}</Button>
         </DialogFooter>
       </form>
     </Modal>
@@ -350,15 +336,16 @@ function CopyRow({ label, value }: { label: string; value: string }) {
 }
 
 /**
- * What to set up at the provider for a route: the events URL, the steps and (Cloudflare) the queue Worker. `generated`
- * holds the secrets Orbit made, which only the moment of creation has.
+ * What to set up at the provider for a route: the events URL (from the server), the steps and (Cloudflare) the queue
+ * Worker. The secrets the server made (`route.generated`) are only in the answer that created the route.
  */
-export function RouteSetup({ route, generated }: { route: MailSendRouteView; generated?: Record<string, string> }) {
+export function RouteSetup({ route }: { route: MailSendRouteView }) {
   if (!isSendRouteKind(route.kind)) return null
   const kind = route.kind
-  const secrets = Object.entries(generated ?? {})
-  const url = eventsUrl(window.location.origin, kind, route.id)
-  const login = generated?.webhook_user && generated.webhook_password ? { user: generated.webhook_user, password: generated.webhook_password } : null
+  const secrets = Object.entries(route.generated ?? {})
+  const generated = route.generated ?? {}
+  const login = generated.webhook_user && generated.webhook_password ? { user: generated.webhook_user, password: generated.webhook_password } : null
+  const fromProvider = route.event_secret_from_provider
   return (
     <div className="flex flex-col gap-4">
       {secrets.length > 0 ? (
@@ -368,7 +355,7 @@ export function RouteSetup({ route, generated }: { route: MailSendRouteView; gen
           <AlertDescription>If you lose them, remove the route and add it again.</AlertDescription>
         </Alert>
       ) : null}
-      {hasEvents(kind) ? <CopyRow label="Events URL" value={eventsUrlWithLogin(url, login)} /> : null}
+      {route.events_url ? <CopyRow label="Events URL" value={eventsUrlWithLogin(route.events_url, login)} /> : null}
       {kind === 'postmark' && !login ? (
         <p className="m-0 text-xs text-muted-foreground">
           {route.provider_id
@@ -378,9 +365,9 @@ export function RouteSetup({ route, generated }: { route: MailSendRouteView; gen
       ) : null}
       {secrets.map(([name, value]) => <CopyRow key={name} label={SECRET_LABELS[name] ?? name} value={value} />)}
       <ol className="m-0 flex list-decimal flex-col gap-1.5 pl-5 text-[0.8125rem]">
-        {routeSetupSteps(kind).map((step) => <li key={step}>{step}</li>)}
+        {routeSetupSteps(kind, fromProvider).map((step) => <li key={step}>{step}</li>)}
       </ol>
-      {kind === 'cloudflare' ? (
+      {kind === 'cloudflare' && !fromProvider ? (
         <div className="flex flex-col gap-1">
           <div className="flex items-center justify-between gap-2">
             <span className="text-xs font-medium text-muted-foreground">Queue Worker script</span>

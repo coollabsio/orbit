@@ -14,10 +14,11 @@ import { Input } from '@/components/ui/input'
 import { useDeleteSendRoute, useTestSendRoute } from '@/features/mail/api/mutations'
 import { useSendPolicy, useSendRoutes, type ProviderScope } from '@/features/mail/api/queries'
 import { SettingsRow } from '@/features/settings/components/SettingsParts'
+import { useBillingEnabled } from '@/features/workspaces/billing'
 import { useCan } from '@/features/workspaces/permissions'
 import { MailManagersOnly } from './MailDomainsPage'
 import { count, dateTime, defaultMaxBytes, isSendRouteKind, limitRows, mailProblem, megabytes, percent, routeLabel, since, spfHint, TIER_LABELS } from './mailSettingsLib'
-import { RouteSetup, SendRouteForm, type CreatedRoute } from './SendRouteForm'
+import { RouteSetup, SendRouteForm } from './SendRouteForm'
 
 /** Settings → Mail → Sending: the workspace's routes (when allowed), its tier and limits, and a paused banner. */
 export function MailSendingPage() {
@@ -48,10 +49,15 @@ function PausedAlert() {
 
 function SendLimitsCard() {
   const policy = useSendPolicy()
+  const cloud = useBillingEnabled()
   return (
     <SettingsCard
       title="Limits"
-      description="Recipients are counted, not messages. A new workspace starts with low limits and gets higher ones after two weeks of good sending. Your server admin sets them."
+      description={
+        cloud
+          ? 'Recipients are counted, not messages. A new workspace starts on New and moves to Standard after two weeks of good sending.'
+          : 'Recipients are counted, not messages. Your server admin sets the limits of each workspace.'
+      }
       flush
     >
       {policy.isPending ? <p role="status" className="m-0 p-4 text-sm text-muted-foreground">Loading limits…</p> : null}
@@ -103,7 +109,7 @@ export function SendRoutes({ scope, hostname }: { scope: ProviderScope; hostname
   const routes = useSendRoutes(scope)
   const [adding, setAdding] = useState(false)
   const [editing, setEditing] = useState<MailSendRouteView | null>(null)
-  const [created, setCreated] = useState<CreatedRoute | null>(null)
+  const [created, setCreated] = useState<MailSendRouteView | null>(null)
   const canAdd = scope === 'instance' || routes.data?.workspace_providers_enabled === true
   const directAvailable = routes.data?.direct_available ?? false
 
@@ -149,11 +155,11 @@ export function SendRoutes({ scope, hostname }: { scope: ProviderScope; hostname
   )
 }
 
-/** After a route is added: what to set up at the provider, with the secrets Orbit made (shown once). */
-export function RouteCreatedModal({ created, onClose }: { created: CreatedRoute; onClose: () => void }) {
+/** After a route is added: what to set up at the provider, with the secrets the server made (shown once). */
+export function RouteCreatedModal({ created, onClose }: { created: MailSendRouteView; onClose: () => void }) {
   return (
-    <Modal title={`Set up ${created.route.name}`} description={`Do these steps for ${routeLabel(created.route.kind)}.`} onClose={onClose}>
-      <RouteSetup route={created.route} generated={created.generated} />
+    <Modal title={`Set up ${created.name}`} description={`Do these steps for ${routeLabel(created.kind)}.`} onClose={onClose}>
+      <RouteSetup route={created} />
     </Modal>
   )
 }

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { MailProviderSetup, MailProviderView } from '@orbit/api/generated/types.gen'
+import type { MailProviderSetup, MailProviderView, MailSendRouteView } from '@orbit/api/generated/types.gen'
 import { InfoTip } from '@/components/common/InfoTip'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -7,7 +7,7 @@ import { Danger } from 'reicon-react'
 import { useSendRoutes, type ProviderScope } from '@/features/mail/api/queries'
 import { CopyButton } from './MailDomainRecords'
 import { RouteCreatedModal } from './MailSendingPage'
-import { ProviderSendRouteForm, type CreatedRoute } from './SendRouteForm'
+import { ProviderSendRouteForm } from './SendRouteForm'
 
 const SECRET_LABELS: Record<string, string> = {
   signing_secret: 'Signing secret',
@@ -76,7 +76,7 @@ export function ProviderSetup({
 function ProviderSendRoute({ provider, scope }: { provider: MailProviderView; scope: ProviderScope }) {
   const routes = useSendRoutes(scope)
   const [adding, setAdding] = useState(false)
-  const [created, setCreated] = useState<CreatedRoute | null>(null)
+  const [created, setCreated] = useState<MailSendRouteView | null>(null)
   if (!routes.data) return null
   const route = routes.data.routes.find((entry) => entry.provider_id === provider.id)
   const allowed = scope === 'instance' || routes.data.workspace_providers_enabled

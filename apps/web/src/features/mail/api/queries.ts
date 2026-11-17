@@ -24,6 +24,7 @@ import {
   listMailOutbound,
   listMailSnippets,
   listMailSendPolicies,
+  getMailSendTiers,
   listMailSuppressions,
   listWorkspaceMailSendRoutes,
   searchMailContacts,
@@ -486,5 +487,13 @@ export function useSendPolicies() {
   return useQuery({
     queryKey: queryKeys.adminMailSendPolicies,
     queryFn: async () => required((await listMailSendPolicies({ client: apiClient, throwOnError: true })).data),
+  })
+}
+
+/** The limits of the New and Standard tiers (root user). */
+export function useSendTiers() {
+  return useQuery({
+    queryKey: queryKeys.adminMailSendTiers,
+    queryFn: async () => required((await getMailSendTiers({ client: apiClient, throwOnError: true })).data),
   })
 }

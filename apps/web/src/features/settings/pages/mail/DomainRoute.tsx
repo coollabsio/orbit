@@ -64,12 +64,11 @@ export function DomainSendRouteRow({ domain, routes }: { domain: MailDomain; rou
   const setRoute = useSetDomainSendRoute()
   const fallback = routes.routes.find((route) => route.id === routes.default_route_id)
   const options = [
-    { value: DEFAULT_ROUTE, label: fallback ? `Server default: ${fallback.name}` : 'Server default (none set)' },
+    { value: DEFAULT_ROUTE, label: fallback ? `Server default (${fallback.name})` : 'Server default (none set)' },
     ...routes.routes.map((route) => ({ value: route.id, label: `${route.name} (${routeLabel(route.kind)})` })),
   ]
-  // `send_route` is the route in use: the domain's own, else the default one
-  const current = domain.send_route?.id
-  const value = !current || current === routes.default_route_id ? DEFAULT_ROUTE : current
+  // the domain's own route; without one it follows the server's default, whatever that becomes
+  const value = domain.own_send_route_id ?? DEFAULT_ROUTE
   return (
     <SettingsRow className="flex-nowrap">
       <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[0.8125rem] font-medium text-foreground">

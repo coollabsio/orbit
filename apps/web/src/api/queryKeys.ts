@@ -28,6 +28,7 @@ export const queryKeys = {
   adminMailProviders: ['admin', 'mail', 'providers'] as const,
   adminMailSendRoutes: ['admin', 'mail', 'send-routes'] as const,
   adminMailSendPolicies: ['admin', 'mail', 'send-policies'] as const,
+  adminMailSendTiers: ['admin', 'mail', 'send-tiers'] as const,
   adminMailTest: (testId: string) => ['admin', 'mail', 'test', testId] as const,
   /** Public: what the sign-in pages offer (open registration, email). */
   authOptions: ['auth-options'] as const,

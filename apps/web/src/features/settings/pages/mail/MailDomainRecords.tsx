@@ -12,10 +12,18 @@ import { SettingsRow } from '@/features/settings/components/SettingsParts'
 import { copyText, isSendRouteKind, KIND_LABELS, mailProblem, REQUIRED, routeLabel, routeRecordsNote, SEND_REQUIRED, spfHint } from './mailSettingsLib'
 
 /** The badge of a record from the last check: OK, or what is missing and how much it matters. */
-function recordBadge(record: MailDnsRecord, checked: boolean): { label: string; variant: 'secondary' | 'destructive' | 'outline'; hint: string } {
+function recordBadge(record: MailDnsRecord, checked: boolean, dkimRotating: boolean): { label: string; variant: 'secondary' | 'destructive' | 'outline'; hint: string } {
   const required = REQUIRED.has(record.kind)
   const sending = SEND_REQUIRED.has(record.kind)
-  if (sending && (record.status.status === 'missing' || record.status.status === 'wrong')) {
+  const notFound = record.status.status === 'missing' || record.status.status === 'wrong'
+  if (record.kind === 'dkim' && dkimRotating && notFound) {
+    return {
+      label: 'New key: publish it',
+      variant: 'outline',
+      hint: 'Orbit still signs with the old key until this new record is published and found by the DNS check. Keep the old record until then.',
+    }
+  }
+  if (sending && notFound) {
     return {
       label: 'Required for sending',
       variant: 'destructive',
@@ -52,8 +60,11 @@ export function CopyButton({ text, label }: { text: string; label: string }) {
   )
 }
 
-/** The records to publish for a domain, each with copy buttons and its status at the last check (`checked`). */
-export function MailDomainRecords({ records, checked }: { records: MailDnsRecord[]; checked: boolean }) {
+/**
+ * The records to publish for a domain, each with copy buttons and its status at the last check (`checked`).
+ * `dkimRotating`: the DKIM record is a new key, and the old one still signs.
+ */
+export function MailDomainRecords({ records, checked, dkimRotating = false }: { records: MailDnsRecord[]; checked: boolean; dkimRotating?: boolean }) {
   return (
     <Table aria-label="DNS records">
       <TableHeader>
@@ -66,7 +77,7 @@ export function MailDomainRecords({ records, checked }: { records: MailDnsRecord
       </TableHeader>
       <TableBody>
         {records.map((record) => {
-          const badge = recordBadge(record, checked)
+          const badge = recordBadge(record, checked, dkimRotating)
           const found = record.status.status === 'wrong' ? record.status.found : null
           return (
             <TableRow key={`${record.kind}:${record.value}`}>
@@ -152,8 +163,8 @@ export function DomainSendRecords({ domain }: { domain: MailDomain }) {
         </span>
       </div>
       {dkim ? (
-        <Tip label={`Make a new key for selector ${selectorOf(dkim)}`}>
-          <Button type="button" variant="outline" disabled={rotate.isPending} onClick={() => void rotateKey()}>
+        <Tip label={domain.dkim_rotating ? 'A new key waits for its DNS record. Publish it, then click Check now.' : `Make a new key for selector ${selectorOf(dkim)}`}>
+          <Button type="button" variant="outline" disabled={rotate.isPending || domain.dkim_rotating} onClick={() => void rotateKey()}>
             <Refresh2 />
             {rotate.isPending ? 'Making key…' : 'Rotate key'}
           </Button>

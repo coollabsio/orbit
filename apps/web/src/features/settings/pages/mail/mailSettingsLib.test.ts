@@ -1,6 +1,25 @@
 import { expect, test } from 'bun:test'
 import type { MailDnsRecord, MailDnsRecordKind } from '@orbit/api/generated/types.gen'
-import { defaultMaxBytes, domainHealth, generatedSecrets, limitRows, localInputValue, percent, providerRouteFields, TIER_LIMITS, routeFields, SEND_ROUTE_KINDS, type SendRouteKind, spfHint } from './mailSettingsLib'
+import {
+  defaultMaxBytes,
+  domainHealth,
+  generatedSecrets,
+  initialSettingValues,
+  limitRows,
+  localInputValue,
+  maxBytesValid,
+  percent,
+  PROVIDER_SETTING,
+  routeFields,
+  routeFormFields,
+  routeFormReady,
+  routeSetupSteps,
+  secretsBody,
+  SEND_ROUTE_KINDS,
+  type SendRouteKind,
+  settingsBody,
+  spfHint,
+} from './mailSettingsLib'
 
 const record = (kind: MailDnsRecordKind, status: 'ok' | 'missing' | 'unknown'): MailDnsRecord =>
   ({ kind, type: 'TXT', name: kind, value: kind, txt_strings: [], priority: null, status: { status } }) as MailDnsRecord
@@ -18,6 +37,8 @@ test('a verified domain without DKIM or recommended records is incomplete: it re
   expect(health.label).toBe('Incomplete')
   expect(health.hint).toBe('Verified. Mail cannot be sent until DKIM is in place. Recommended records missing or wrong: SPF, DMARC.')
   expect(domainHealth({ status: 'verified', records: records({ spf: 'missing' }) }).hint).toBe('Verified. Recommended records missing or wrong: SPF.')
+  // a new key waiting for its record does not stop sending: the old key still signs
+  expect(domainHealth({ status: 'verified', records: records({ dkim: 'missing' }), dkim_rotating: true }).label).toBe('Healthy')
 })
 
 test('a verified domain is healthy when every record is OK; an unanswered lookup is not a failure', () => {
@@ -56,7 +77,7 @@ test('route_fields_per_kind: each kind asks for its own secrets and settings', (
   expect(routeFields('smtp').find((field) => field.name === 'security')?.options?.map((option) => option.value)).toEqual(['starttls', 'tls', 'none'])
 })
 
-test('route_fields_per_kind: Orbit makes the webhook secrets that it checks itself', () => {
+test('route_fields_per_kind: the server makes the webhook secrets that it checks itself', () => {
   expect(generatedSecrets('postmark')).toEqual(['webhook_user', 'webhook_password'])
   expect(generatedSecrets('cloudflare')).toEqual(['event_secret'])
   for (const kind of ['direct', 'smtp', 'postshiba', 'resend', 'mailgun', 'ses'] as const) expect(generatedSecrets(kind)).toEqual([])
@@ -86,14 +107,82 @@ test('spf_hint_per_kind: what the route adds to the domain SPF record', () => {
 })
 
 test('route_fields_per_kind: a route made from a provider asks only for what the provider lacks', () => {
-  const names = (kind: SendRouteKind) => providerRouteFields(kind).map((field) => field.name)
+  const names = (kind: SendRouteKind) => routeFormFields(kind, 'instance', true).map((field) => field.name)
   expect(names('mailgun')).toEqual(['region', 'api_key', 'base_url'])
   expect(names('ses')).toEqual(['region', 'topic_arn'])
   expect(names('resend')).toEqual(['webhook_secret'])
   expect(names('postmark')).toEqual(['server_token', 'stream'])
+  expect(names('cloudflare')).toEqual(['account_id', 'api_token', 'spf'])
   expect(names('postshiba')).toEqual(['host', 'port', 'smtp_username', 'smtp_password', 'webhook_secret', 'spf'])
-  // the region comes from the provider when left empty
-  expect(providerRouteFields('ses').find((field) => field.name === 'region')?.required).toBe(false)
+  // the region is the provider's unless the admin picks one: the select says so, and sends nothing for it
+  const region = routeFormFields('mailgun', 'instance', true).find((field) => field.name === 'region')!
+  expect(region.required).toBe(false)
+  expect(region.options?.[0]).toEqual({ value: PROVIDER_SETTING, label: 'The provider’s region' })
+  expect(region.defaultValue).toBe(PROVIDER_SETTING)
+  expect(settingsBody([region], { region: PROVIDER_SETTING }, '', null).region).toBeNull()
+  expect(routeFormFields('ses', 'workspace', true).find((field) => field.name === 'region')?.required).toBe(false)
+})
+
+test('route_fields_per_kind: a workspace route has no instance-only inputs and no plain SMTP', () => {
+  expect(routeFormFields('mailgun', 'workspace').map((field) => field.name)).toEqual(['region', 'api_key', 'webhook_signing_key'])
+  const security = (scope: 'instance' | 'workspace') => routeFormFields('smtp', scope).find((field) => field.name === 'security')?.options?.map((option) => option.value)
+  expect(security('workspace')).toEqual(['starttls', 'tls'])
+  expect(security('instance')).toEqual(['starttls', 'tls', 'none'])
+})
+
+test('a select shows the value the server uses: the saved one, else the default', () => {
+  const smtp = routeFormFields('smtp', 'instance')
+  expect(initialSettingValues(smtp, null)).toEqual({ security: 'starttls' })
+  expect(initialSettingValues(smtp, { host: 'relay.example', port: 465, security: 'tls', spf: null })).toEqual({ host: 'relay.example', port: '465', security: 'tls' })
+  expect(initialSettingValues(routeFormFields('mailgun', 'workspace'), { region: 'eu' })).toEqual({ region: 'eu' })
+  expect(initialSettingValues(routeFormFields('mailgun', 'workspace'), null)).toEqual({ region: 'us' })
+})
+
+test('the route form sends typed settings over the saved ones, and only the secrets typed in', () => {
+  const smtp = routeFormFields('smtp', 'instance')
+  expect(settingsBody(smtp, { host: ' relay.example ', port: '2525', security: 'tls', spf: '' }, '', { host: 'old', max_message_bytes: 0, region: 'kept' })).toEqual({
+    host: 'relay.example',
+    port: 2525,
+    security: 'tls',
+    spf: null,
+    region: 'kept',
+    max_message_bytes: 0,
+  })
+  expect(settingsBody(smtp, { host: 'relay.example' }, '12.5', null).max_message_bytes).toBe(12_500_000)
+  expect(settingsBody(smtp, { host: 'relay.example' }, '', null).security).toBe('starttls')
+  expect(secretsBody(smtp, { username: ' me ', password: '' })).toEqual({ username: 'me' })
+  expect(secretsBody(routeFormFields('postmark', 'instance'), {})).toEqual({})
+})
+
+test('the route form is ready only with what the server needs', () => {
+  const smtp = routeFormFields('smtp', 'instance')
+  const ready = (settings: Record<string, string>, secrets: Record<string, string> = {}, maxBytes = '', editing = false) =>
+    routeFormReady(smtp, { settings, secrets, maxBytes, editing })
+  expect(ready({})).toBe(false)
+  expect(ready({ host: 'relay.example' })).toBe(true)
+  // a login is both or neither on a new route; a change may set one
+  expect(ready({ host: 'relay.example' }, { username: 'me' })).toBe(false)
+  expect(ready({ host: 'relay.example' }, { username: 'me', password: 'secret' })).toBe(true)
+  expect(ready({ host: 'relay.example' }, { password: 'new' }, '', true)).toBe(true)
+  expect(ready({ host: 'relay.example', port: '0' })).toBe(false)
+  expect(ready({ host: 'relay.example', port: 'abc' })).toBe(false)
+  expect(ready({ host: 'relay.example' }, {}, '-1')).toBe(false)
+  expect(ready({ host: 'relay.example' }, {}, 'ten')).toBe(false)
+  expect(ready({ host: 'relay.example' }, {}, '10')).toBe(true)
+  // a change needs no secret again
+  const resend = routeFormFields('resend', 'workspace')
+  expect(routeFormReady(resend, { settings: {}, secrets: {}, maxBytes: '', editing: true })).toBe(true)
+  expect(routeFormReady(resend, { settings: {}, secrets: {}, maxBytes: '', editing: false })).toBe(false)
+  expect(maxBytesValid('')).toBe(true)
+  expect(maxBytesValid('0')).toBe(false)
+  expect(maxBytesValid('0.5')).toBe(true)
+})
+
+test('a Cloudflare route made from a provider reuses its Email Worker and signing secret', () => {
+  const steps = routeSetupSteps('cloudflare', true).join(' ')
+  expect(steps).toContain('already has the queue handler')
+  expect(steps).toContain('ORBIT_SIGNING_SECRET')
+  expect(routeSetupSteps('cloudflare').join(' ')).toContain('queue handler below')
 })
 
 test('a vacation time shows in the time zone the server reads it in', () => {
@@ -105,12 +194,12 @@ test('a vacation time shows in the time zone the server reads it in', () => {
 })
 
 test('tier limits and rates read plainly', () => {
-  expect(limitRows(TIER_LIMITS.new)).toEqual([
+  expect(limitRows({ per_user_hour: 30, per_user_day: 100, per_ws_hour: 60, per_ws_day: 200, max_recipients: 50 })).toEqual([
     { label: 'Each member', value: '30 an hour, 100 a day' },
     { label: 'The workspace', value: '60 an hour, 200 a day' },
     { label: 'Recipients of one message', value: '50' },
   ])
-  expect(limitRows(TIER_LIMITS.standard)[1]!.value).toBe('2,000 an hour, 10,000 a day')
+  expect(limitRows({ per_user_hour: 500, per_user_day: 2000, per_ws_hour: 2000, per_ws_day: 10_000, max_recipients: 100 })[1]!.value).toBe('2,000 an hour, 10,000 a day')
   expect(percent(0)).toBe('0 %')
   expect(percent(5.25)).toBe('5.3 %')
   expect(percent(0.25)).toBe('0.25 %')
