@@ -1,12 +1,12 @@
 import { useQueryClient } from '@tanstack/react-query'
 import * as Clipboard from 'expo-clipboard'
 import { type ReactNode, useState } from 'react'
-import { Image, Linking, Share, View } from 'react-native'
+import { Image, Linking, Platform, Share, View } from 'react-native'
 
 import { ConfirmDialog, type ConfirmRequest, Dialog, PromptDialog, type PromptRequest } from '../../../components/settings/Dialog'
 import { ACCOUNT_NAV, Badge, Note, RowIcon, RowText, SettingsCard, SettingsRow, SettingsShell } from '../../../components/settings/Shell'
 import { accountKeys, type PasskeyRecord, passkeyAgo, type TotpSetup, twoFactorSummary } from '../../../data/account-api'
-import { type Provider, type ProviderOutcome, providerErrorMessage, providerLabel, providerRows, startProviderSignIn, withReauthentication } from '../../../data/sign-in-provider'
+import { type Provider, type ProviderOutcome, offeredProviders, providerErrorMessage, providerLabel, providerRows, startProviderSignIn, withReauthentication } from '../../../data/sign-in-provider'
 import { useAuthOptions, useConfirmIdentity, useConnectedAccounts, useDeletePasskey, useDisconnectAccount, usePasskeys, useTwoFactor, useTwoFactorWrites } from '../../../hooks/account'
 import { useOrbit } from '../../../orbit-context'
 import { errorMessage } from '../../../session-context'
@@ -37,7 +37,7 @@ export default function SecurityScreen() {
   const passkeys = usePasskeys()
   const removePasskey = useDeletePasskey()
   const enabled = status.data?.totp_enabled === true
-  const rows = providerRows(options.data?.providers ?? [], accounts.data ?? [])
+  const rows = providerRows(offeredProviders(options.data?.providers ?? [], Platform.OS), accounts.data ?? [])
 
   const confirmIdentity = useConfirmIdentity()
 

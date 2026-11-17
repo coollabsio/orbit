@@ -1,11 +1,11 @@
 import { useQuery } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
-import { Linking, ScrollView, View } from 'react-native'
+import { Linking, Platform, ScrollView, View } from 'react-native'
 
 import { Select } from '../components/settings/Shell'
 import { accountKeys, authOptions } from '../data/account-api'
 import { createClient, normalizeServer, type SignIn, signIn as signInWithPassword, signInSecondFactor } from '../data/orbit'
-import { isPasswordTokenSpent, linkProviderAccount, looksLikeServer, type PasswordStep, type Provider, providerErrorMessage, providerLabel, startProviderSignIn } from '../data/sign-in-provider'
+import { isPasswordTokenSpent, linkProviderAccount, looksLikeServer, offeredProviders, type PasswordStep, type Provider, providerErrorMessage, providerLabel, startProviderSignIn } from '../data/sign-in-provider'
 import { useSession } from '../session-context'
 import { providerDevice } from '../sign-in-provider'
 import { alpha, useTheme } from '../theme'
@@ -48,7 +48,7 @@ export default function SignInScreen() {
     retry: false,
     staleTime: 60_000,
   })
-  const providers = current !== null && current === typedServer ? (options.data?.providers ?? []) : []
+  const providers = current !== null && current === typedServer ? offeredProviders(options.data?.providers ?? [], Platform.OS) : []
 
   const run = async (kind: 'password' | Provider, action: () => Promise<void>) => {
     setBusy(kind)
