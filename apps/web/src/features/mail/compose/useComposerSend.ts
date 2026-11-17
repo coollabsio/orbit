@@ -164,7 +164,13 @@ export function useComposerSend({ draft, saver, blocked, fromAddresses, collect,
         return
       }
       const before = saver.current().restore
-      saver.save({ to: message.to, cc: message.cc, bcc: message.bcc, subject: message.subject, from_address_id: message.fromId, body_html: message.html })
+      // The text must reach the server before Send: a saver that does not take it (stopped, held) would send the
+      // server copy without what was typed.
+      const taken = saver.save({ to: message.to, cc: message.cc, bcc: message.bcc, subject: message.subject, from_address_id: message.fromId, body_html: message.html })
+      if (!taken) {
+        setNotice(saver.current().problem === 'sending' ? 'This draft is being sent.' : 'The draft could not be saved. Close it and open it again.')
+        return
+      }
       await saver.flush()
       const after = saver.current()
       if (after.problem || after.restore !== before) {

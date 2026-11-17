@@ -65,6 +65,7 @@ function SignatureRow({ address, saved }: { address: MailFromAddress; saved: str
       <MailBodyField
         key={saved}
         label={`Signature for ${address.address}`}
+        placeholder="Write your signature…"
         initialHtml={saved}
         onChange={(next) => { html.current = next; setChanged(next !== saved) }}
       />
@@ -189,7 +190,7 @@ function SnippetForm({ snippet, onClose }: { snippet?: MailSnippet; onClose: () 
         </Field>
         <Field>
           <span className="text-sm font-medium">Text</span>
-          <MailBodyField label="Snippet text" initialHtml={snippet?.body_html ?? ''} onChange={(html) => { body.current = html }} />
+          <MailBodyField label="Snippet text" placeholder="Write the snippet…" initialHtml={snippet?.body_html ?? ''} onChange={(html) => { body.current = html }} />
         </Field>
         {error ? <p role="alert" className="text-sm text-destructive">{mailProblem(error, 'The snippet was not saved.')}</p> : null}
         <DialogFooter>

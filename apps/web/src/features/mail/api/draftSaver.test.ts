@@ -313,3 +313,27 @@ test('flush during a save that fails: it waits, tries the unsaved text once more
   expect(t.timers()).toBe(0)
   expect(t.sends).toHaveLength(2)
 })
+
+test('save reports whether the change was taken: a stopped or disposed saver takes nothing', () => {
+  const t = setup()
+  expect(t.saver.save({ body_html: '<p>a</p>' })).toBe(true)
+  t.saver.stop()
+  expect(t.saver.save({ body_html: '<p>b</p>' })).toBe(false)
+  t.saver.reset()
+  expect(t.saver.save({ body_html: '<p>c</p>' })).toBe(true)
+  t.saver.dispose()
+  expect(t.saver.save({ body_html: '<p>d</p>' })).toBe(false)
+})
+
+test('a held saver keeps the text for Restore but does not take it as saved', async () => {
+  const t = setup()
+  t.fail({ kind: 'sending' })
+  t.saver.save({ body_html: '<p>a</p>' })
+  const flushed = t.saver.flush()
+  await t.settle()
+  t.sends[0]?.reject(new Error('draft_sending'))
+  await flushed
+  await t.settle()
+  expect(t.saver.save({ body_html: '<p>b</p>' })).toBe(false)
+  expect(t.state().restore?.body_html).toBe('<p>b</p>')
+})

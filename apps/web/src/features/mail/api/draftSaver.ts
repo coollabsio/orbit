@@ -139,15 +139,20 @@ export function createDraftSaver<D extends DraftText & { version: number }>(deps
     if (!isEmpty(pending) && !failed && !blocked()) arm()
   }
 
-  function save(change: DraftChange) {
-    if (disposed || halted) return
+  /**
+   * Takes a change for the next save. `false`: it will not be saved (the saver is stopped, disposed, or held after
+   * `draft_sending`, where the text goes to `restore`); a caller about to send must not send then.
+   */
+  function save(change: DraftChange): boolean {
+    if (disposed || halted) return false
     if (held) {
       keep(change)
       emit()
-      return
+      return false
     }
     pending = { ...pending, ...change }
     arm()
+    return true
   }
 
   return {

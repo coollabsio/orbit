@@ -21,7 +21,7 @@ const resolveImage = (url: string) => Promise.resolve(url)
  * A rich text body (signature, snippet, vacation reply) in the mail editor. `initialHtml` is read once: give the field
  * a new `key` to load another body. `onChange` gets the HTML (`''` when blank).
  */
-export function MailBodyField({ label, initialHtml, onChange, className }: { label: string; initialHtml: string; onChange: (html: string) => void; className?: string }) {
+export function MailBodyField({ label, initialHtml, onChange, className, placeholder }: { label: string; initialHtml: string; onChange: (html: string) => void; className?: string; placeholder: string }) {
   return (
     <div role="group" aria-label={label} className={className ?? 'min-h-24 rounded-md border bg-background px-2 py-2'}>
       <Suspense fallback={<div className="flex min-h-20 items-start py-1" aria-busy="true"><Spinner className="size-4 text-muted-foreground" /></div>}>
@@ -35,6 +35,7 @@ export function MailBodyField({ label, initialHtml, onChange, className }: { lab
           autoFocus={false}
           editable
           className="min-h-20"
+          placeholder={placeholder}
         />
       </Suspense>
     </div>
@@ -133,6 +134,7 @@ function VacationFields({ mailboxId, mailboxName, saved }: { mailboxId: string; 
         <span className="text-sm font-medium">Reply</span>
         <MailBodyField
           label={`Vacation reply of ${mailboxName}`}
+          placeholder="Write the reply…"
           initialHtml={saved.body_html}
           onChange={(html) => { body.current = html; setHasBody(html.trim() !== '') }}
         />

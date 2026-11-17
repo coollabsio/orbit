@@ -1,7 +1,7 @@
 // The mail body editor (§9.1 U8): BlockNote with the mail schema, Markdown shortcuts, `;` for snippets, pasted
 // files handed to the composer. Loaded on demand (`LazyMailEditor` in Composer.tsx): BlockNote is about 1 MB.
 import '@blocknote/shadcn/style.css'
-import { useEffect, useImperativeHandle, useRef, useState, type Ref } from 'react'
+import { useEffect, useImperativeHandle, useRef, useState, type CSSProperties, type Ref } from 'react'
 import { SuggestionMenu } from '@blocknote/core'
 import { FormattingToolbar, FormattingToolbarController, getFormattingToolbarItems, SuggestionMenuController, useCreateBlockNote, type DefaultReactSuggestionItem } from '@blocknote/react'
 import { TextSelection } from '@tiptap/pm/state'
@@ -53,6 +53,8 @@ export interface MailEditorProps {
   autoFocus: boolean
   editable: boolean
   className?: string
+  /** Shown in an empty editor. */
+  placeholder?: string
   ref?: Ref<MailEditorHandle>
 }
 
@@ -120,7 +122,7 @@ function insertSnippet(editor: MailEditorInstance, snippet: MailSnippet) {
   selectPlaceholder(editor, from)
 }
 
-export function MailEditor({ initialHtml, signatureHtml, snippets, onChange, onPasteFiles, resolveImage, autoFocus, editable, className, ref }: MailEditorProps) {
+export function MailEditor({ initialHtml, signatureHtml, snippets, onChange, onPasteFiles, resolveImage, autoFocus, editable, className, placeholder = 'Write your message… Type ; for snippets', ref }: MailEditorProps) {
   const { theme } = useTheme()
   const onFilesRef = useRef(onPasteFiles)
   const onChangeRef = useRef(onChange)
@@ -229,6 +231,7 @@ export function MailEditor({ initialHtml, signatureHtml, snippets, onChange, onP
   return (
     <ThemedBlockNoteView
       editor={editor}
+      style={{ '--mail-editor-placeholder': JSON.stringify(placeholder) } as CSSProperties}
       editable={editable}
       theme={theme}
       data-slot="mail-editor"
@@ -240,7 +243,8 @@ export function MailEditor({ initialHtml, signatureHtml, snippets, onChange, onP
         // Static placeholders (BlockNote's come through a runtime <style>, which the production CSP blocks).
         '[&_.bn-editor[contenteditable=true]_.bn-block-content[data-is-empty-and-focused]:not([data-is-only-empty-block]):has(.ProseMirror-trailingBreak:only-child)]:after:content-none!',
         '[&_.bn-editor[contenteditable=true]_.bn-block-content[data-is-only-empty-block]:has(.ProseMirror-trailingBreak:only-child)]:after:text-muted-foreground/70! [&_.bn-editor[contenteditable=true]_.bn-block-content[data-is-only-empty-block]:has(.ProseMirror-trailingBreak:only-child)]:after:not-italic!',
-        "[&_.bn-editor[contenteditable=true]_.bn-block-content[data-is-only-empty-block]:has(.ProseMirror-trailingBreak:only-child)]:after:content-['Write_your_message…_Type_;_for_snippets']!",
+        // the text comes from a CSS variable set through the DOM (allowed by the CSP, unlike a <style>)
+        '[&_.bn-editor[contenteditable=true]_.bn-block-content[data-is-only-empty-block]:has(.ProseMirror-trailingBreak:only-child)]:after:content-[var(--mail-editor-placeholder)]!',
         className,
       )}
       sideMenu={false}

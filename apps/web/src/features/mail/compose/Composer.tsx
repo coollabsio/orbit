@@ -527,9 +527,11 @@ function ComposerBody({
   useEffect(() => {
     onUnmount.current = () => {
       if (placement !== 'inline' || leaving.current || isReloading() || !untouched()) return
-      saver.stop()
+      // The saver stops only when the delete really runs: a body that mounts again at once (React's StrictMode
+      // check, a remount while the composer stays) cancels the delete in `keepDraft` and must still save and send.
       pendingDeletes.set(draftId, setTimeout(() => {
         pendingDeletes.delete(draftId)
+        saver.stop()
         deleteUntouched()
       }, 0))
     }

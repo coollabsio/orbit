@@ -729,7 +729,8 @@ export function useSaveDraft(draftId: string | null | undefined) {
     ...state,
     /** The state as it is now (after an awaited `flush()`, before React shows it). */
     current: useCallback(() => latest.current, []),
-    save: useCallback((change: DraftText) => saver.current?.save(change), []),
+    /** `false`: the change will not be saved (no saver, or it is stopped or held); see `DraftSaver.save`. */
+    save: useCallback((change: DraftText) => saver.current?.save(change) ?? false, []),
     flush: useCallback(async () => saver.current?.flush(), []),
     stop: useCallback(() => saver.current?.stop(), []),
     applyRestore: useCallback(() => saver.current?.applyRestore(), []),
