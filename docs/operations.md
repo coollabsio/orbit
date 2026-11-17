@@ -541,7 +541,7 @@ Direct delivery refuses recipient servers with a private, loopback, link-local o
 
 #### Undo send and scheduled send
 
-**Send** does not send at once. The server holds the message for the **undo delay** of the member (0, 5, 10, 20 or 30 seconds; the default is 10) and shows **Undo**. The member can also pick a send time. The hold lives on the server: closing the browser or the computer does not stop the send. During the hold, the draft is locked (`409 draft_sending`) until the member clicks **Undo**. A message that is held or scheduled shows in **Outbox** and **Scheduled**.
+**Send** does not send at once. The server holds the message for the **undo delay** of the member (0, 5, 10, 20 or 30 seconds; the default is 10) and shows **Undo**. The member can also pick a send time. The hold lives on the server: closing the browser or the computer does not stop the send. During the hold, the draft is locked (`409 draft_sending`) until the member clicks **Undo**. A message that is held or scheduled shows in **Outbox** and **Scheduled**. At its time, Orbit checks the domain and the mailbox again: a message whose domain or mailbox is no longer ready (for example suspended since a scheduled send) waits in **Outbox** with the reason and goes once they are ready again. When a member leaves the workspace, their held and scheduled messages are not sent (their drafts go with them); messages already released are still delivered, and their delivery status stays visible to the mailbox's members.
 
 #### Retries
 
@@ -552,7 +552,7 @@ Orbit tries each recipient again after a temporary failure (a 4xx reply or a net
 - **Direct and smtp routes:** Orbit uses the envelope sender `bounce+<token>@<domain>`. The token names one recipient and is valid for 7 days. A returned message (DSN) goes to this address: the SMTP listener or the provider intake accepts it only with a valid token, parses it (RFC 3464) and does not file it into a mailbox. `bounce` is a reserved local part: nobody can make a mailbox or alias with it. For this, the MX of the domain must reach Orbit.
 - **Provider routes:** the provider sends bounce, complaint and delivery events to Orbit (see below).
 - A bounce marks the recipient **not delivered**. The thread moves to the Inbox as unread, and the message shows "Not delivered to <address>" with the reason and **Retry**. After a Retry, older DSNs and provider events for that recipient are ignored.
-- **Suppression:** Orbit adds an address to the suppression list of the workspace after a hard bounce that means the address is bad (`5.1.x`, `5.2.1`, or a `550`, `551` or `553` reply without an enhanced status) and after a spam complaint. It does not suppress for blocks that are not about the address (`5.7.x` policy or spam, `5.3.x`, `5.6.x`, a message too large) or for temporary failures. A suppressed address is skipped at the next send, and the composer warns first. **Send anyway** removes the entry. Managers see and remove entries in **Settings → Mail → Suppressions**.
+- **Suppression:** Orbit adds an address to the suppression list of the workspace after a hard bounce that means the address is bad (`5.1.x`, `5.2.1`, or a `550`, `551` or `553` reply without an enhanced status) and after a spam complaint. It does not suppress for blocks that are not about the address (`5.7.x` policy or spam, `5.3.x`, `5.6.x`, a message too large) or for temporary failures. The composer warns before the send; **Send anyway** sends to the other recipients, and the server skips the suppressed address (it shows **Suppressed**). Only **Retry** on that recipient removes the entry and sends again. Managers see and remove entries in **Settings → Mail → Suppressions**.
 - Orbit never sends a bounce message of its own to a remote sender. Bounces show in Orbit only.
 
 #### Provider events
@@ -562,7 +562,7 @@ Each provider route has an events URL, shown on the route page: `https://<public
 | Kind | What to set at the provider | How Orbit checks it |
 |---|---|---|
 | PostShiba | The events webhook URL and its signing secret. | HMAC-SHA256 over `<timestamp>.<body>`. |
-| Mailgun | A webhook for bounces, complaints and delivered with the URL; the HTTP webhook signing key. | HMAC-SHA256 over `<timestamp><token>`; Orbit remembers tokens. |
+| Mailgun | A webhook for bounces, complaints and delivered with the URL; the HTTP webhook signing key. | HMAC-SHA256 over `<timestamp><token>`, within 5 minutes. Orbit does not remember the tokens of events (it does for inbound mail), so a captured event can be sent again within those 5 minutes; applying an event twice changes nothing. |
 | Resend | A webhook for `email.delivered`, `email.bounced`, `email.complained` and `email.delivery_delayed`; its signing secret. | Svix signature (`svix-id`, `svix-timestamp`, `svix-signature`). |
 | Amazon SES | A configuration set with an SNS topic for bounce, complaint and delivery, and an HTTPS subscription to the URL. Enter the topic ARN on the route. | SNS signature (version 2), and the topic must be the ARN on the route. Until the ARN is set, events answer `401`. |
 | Postmark | A bounce and a spam complaint webhook with the URL. Orbit makes a login and a password and shows them once; use them as the webhook's HTTP Basic auth. | HTTP Basic auth. Postmark does not sign. |
@@ -580,7 +580,7 @@ Orbit counts each recipient (Bcc too) when the message is released, in a sliding
 
 - **Orbit Cloud** starts every workspace at `new`. **Self-hosted** starts at `standard`. The root user changes the numbers of `new` and `standard` in **Admin → Mail → Tier limits**.
 - A daily job moves a `new` workspace to `standard` when its first release was at least 14 days ago, it was never paused, its hard bounce rate is under 2 % and its complaint rate is under 0.1 %.
-- **Pause:** after each bounce or complaint, Orbit looks at the last 7 days. With at least 100 recipients and a hard bounce rate over 5 % or a complaint rate over 0.3 %, Orbit pauses the sending of the workspace. A new Send answers `409 sending_paused`, and messages already released wait in **Outbox** as **Paused**. Owners and admins see a banner. Only the root user resumes sending, in **Admin → Mail** (**Workspaces**, **Resume**). A resumed workspace is not promoted.
+- **Pause:** after each bounce or complaint, Orbit looks at the last 7 days. With at least 100 recipients and a hard bounce rate over 5 % or a complaint rate over 0.3 %, Orbit pauses the sending of the workspace. A new Send answers `409 sending_paused`, and messages already released wait in **Outbox** as **Paused**. Owners and admins see a banner. Only the root user resumes sending, in **Admin → Mail** (**Workspaces**, **Resume**). After a resume, the rates count only recipients released after it, so the bounces that paused the workspace do not pause it again at once. A resumed workspace is not promoted. Vacation replies never count toward the rates, and their bounces do not move the thread to the Inbox.
 - A message has a size limit that depends on the route (encoded size): Postmark 10 MB, Mailgun 25 MB, Cloudflare 25 MiB, SES 40 MB, direct, smtp and PostShiba 25 MB. A route page can set a lower number.
 
 #### Large files as links
@@ -589,7 +589,7 @@ When the files make a message too large, the composer offers **Send as a link** 
 
 #### Vacation reply
 
-A mailbox can have a vacation reply (**Settings → Mail → My mail**: dates, subject, text, and optionally only for contacts). Orbit replies only when all are true: the message is in the Inbox (not Spam), DMARC did not fail, the sender is not empty (`<>`), the message has no `Auto-Submitted` header other than `no`, no `Precedence: bulk`, `list` or `junk`, and no `List-Id` or `List-Unsubscribe`, the mailbox address is in To or Cc, the sender is not a mailbox of the same workspace, and the mailbox did not reply to this sender in the last 7 days. The reply has `Auto-Submitted: auto-replied` and goes through the normal send path, so it is signed and counted in the limits.
+A mailbox can have a vacation reply (**Settings → Mail → My mail**: dates, subject, text, and optionally only for contacts). Orbit replies only when all are true: the message is in the Inbox (not Spam), DMARC did not fail, the envelope sender is authenticated (SPF passed for its domain, or DMARC passed for a From domain aligned with it, or it was sent from a mailbox of this Orbit), the sender is not empty (`<>`), the message has no `Auto-Submitted` header other than `no`, no `Precedence: bulk`, `list` or `junk`, and no `List-Id` or `List-Unsubscribe`, the mailbox address is in To or Cc, the sender is not a mailbox of the same workspace, and the mailbox did not reply to this sender in the last 7 days. The reply has `Auto-Submitted: auto-replied` and goes through the normal send path, so it is signed and counted in the limits.
 
 #### Purge
 

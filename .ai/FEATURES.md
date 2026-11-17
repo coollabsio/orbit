@@ -680,7 +680,7 @@ Web client (`/mail`, sidebar entry with a **Beta** tag):
 Slice 2 sends mail (migration `20261115110945_mail_send`; design `docs/superpowers/specs/2026-11-14-mail-slice-2-send-design.md`,
 local file; operator guide `docs/operations.md#mail`, section Sending). Server:
 
-- `crates/mail`: MIME build (`compose.rs`, `mail-builder`), DKIM signing (`dkim.rs`), DSN and provider event parsing
+- `crates/mail`: MIME build (`compose.rs`, `mail-builder`), DKIM signing (`sign.rs`; keys in `dkim.rs`), DSN and provider event parsing
   (`events.rs`), route adapters: direct MX delivery, SMTP relay, PostShiba, Postmark, Resend (SMTP), Mailgun, SES,
   Cloudflare (HTTP; Beta). Sending routes (`mail_send_routes`, instance and workspace, secrets sealed), a route per
   domain, **Send test**, SSRF checks (resolve, classify, connect to the checked IP).
