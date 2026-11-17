@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import { ApiProblem } from '@orbit/api/problem'
-import { bounceReason, deliverySummary, heldReplyState, mayChangeVacation, outboxStatus, recipientState, recipientTag, retryErrorText, vacationState } from './mailStatus'
+import { HOLD_REASONS, bounceReason, deliverySummary, heldReplyState, mayChangeVacation, outboxStatus, recipientState, recipientTag, retryErrorText, vacationState } from './mailStatus'
 
 const recipient = (address: string, status: string, delayed = false) => ({ address, status, delayed })
 
@@ -110,4 +110,24 @@ test('a held reply stops showing once lists read after it no longer hold it', ()
   expect(heldReplyState('ob1', since, [{ items: [], updatedAt: 1100 }, { items: [], updatedAt: 1200 }])).toBe('gone')
   // one list still old: wait for it
   expect(heldReplyState('ob1', since, [{ items: [], updatedAt: 1100 }, { items: [], updatedAt: 0 }])).toBe('unknown')
+})
+
+test('every hold reason the server writes has its own text', () => {
+  const server = [
+    'rate_limit', 'limit', 'paused', 'dkim_inactive', 'domain_unverified', 'inbound_not_live', 'no_route',
+    'mailbox_suspended', 'file_missing', 'link_origin_missing', 'link_forwarded', 'link_inline', 'send_as_denied',
+    'invalid_address', 'no_recipients', 'draft_missing', 'build_failed', 'decrypt_failed', 'storage_quota',
+    'release_failed', 'release_error',
+  ]
+  const now = new Date('2026-11-16T10:00:00Z')
+  for (const reason of server) {
+    expect(HOLD_REASONS[reason]?.text).toBeTruthy()
+    const status = outboxStatus({ status: 'held', hold_reason: reason, release_at: '2026-11-16T10:00:00Z' }, now)
+    expect(status.text).not.toBe('Waiting: something went wrong')
+  }
+  expect(outboxStatus({ status: 'held', hold_reason: 'mailbox_suspended', release_at: '2026-11-16T10:00:00Z' }, now)).toEqual({
+    text: 'The mailbox is suspended. It goes once it is active again',
+    problem: true,
+    canCancel: true,
+  })
 })

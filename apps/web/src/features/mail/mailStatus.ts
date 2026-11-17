@@ -71,17 +71,30 @@ export function bounceReason(kind: string | null | undefined, lastResponse: stri
 
 export const SUPPRESSED_REASON = 'Not sent: the address bounced or complained before, so it is on the suppression list'
 
-/** Why a message waits in the Outbox (`hold_reason`). `limit`: delivery waits for the send limit. */
-const HOLD_REASONS: Record<string, { text: string; problem: boolean }> = {
+/**
+ * Why a message waits in the Outbox (`hold_reason`): every reason the server writes. `limit`: delivery waits for the
+ * send limit. The readiness reasons (`domain_unverified` … `mailbox_suspended`) hold a message whose domain or mailbox
+ * stopped being ready before its time; it goes once they are ready again.
+ */
+export const HOLD_REASONS: Record<string, { text: string; problem: boolean }> = {
   rate_limit: { text: 'Over the send limit: it goes when the limit allows', problem: false },
   limit: { text: 'Over the send limit: it goes when the limit allows', problem: false },
   paused: { text: 'Sending is paused for this workspace', problem: true },
   dkim_inactive: { text: 'Waiting for the domain’s DKIM record to be active', problem: true },
+  domain_unverified: { text: 'The domain is not verified. It goes once it is', problem: true },
+  inbound_not_live: { text: 'The domain’s MX record is not right. It goes once it is', problem: true },
+  no_route: { text: 'The domain has no send route. Ask an admin', problem: true },
+  mailbox_suspended: { text: 'The mailbox is suspended. It goes once it is active again', problem: true },
   file_missing: { text: 'A file of the message is gone. Undo it and attach the file again', problem: true },
   link_origin_missing: { text: 'Orbit has no public address for file links. Ask an admin', problem: true },
   link_forwarded: { text: 'A forwarded file cannot be sent as a link', problem: true },
+  link_inline: { text: 'An image in the text cannot be sent as a link. Undo it and attach it instead', problem: true },
   send_as_denied: { text: 'You can no longer send from this address', problem: true },
+  invalid_address: { text: 'An address is not valid. Undo it and fix the address', problem: true },
+  no_recipients: { text: 'It has no recipients. Undo it and add one', problem: true },
+  draft_missing: { text: 'Its draft is gone, so it was not sent', problem: true },
   build_failed: { text: 'The message could not be built', problem: true },
+  decrypt_failed: { text: 'A file or the original message could not be read', problem: true },
   storage_quota: { text: 'The workspace storage is full', problem: true },
   release_failed: { text: 'It could not be prepared. Orbit tries again', problem: true },
   release_error: { text: 'Something went wrong while preparing it', problem: true },
