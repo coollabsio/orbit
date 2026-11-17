@@ -81,7 +81,9 @@ pub use receipts::{
 pub(crate) use receipts::{
     NewReceipt, insert_receipt, insert_receipt_recipient, record_health_test,
 };
-pub use release::{Released, SEND_SWEEP_JOB, SEND_SWEEP_MS, mail_send_sweep_kind};
+pub use release::{
+    RELEASE_FAILED_GIVE_UP_MS, Released, SEND_SWEEP_JOB, SEND_SWEEP_MS, mail_send_sweep_kind,
+};
 pub use routes::{
     HostClass, NewRoute, ProviderRouteInput, RouteChange, RouteSecrets, RouteSettings, RouteStep,
     RouteStepStatus, SendRoute, SendRouteKind, SmtpSecurity, all_private, all_public, classify_ip,

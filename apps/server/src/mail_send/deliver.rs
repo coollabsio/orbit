@@ -359,6 +359,16 @@ async fn deliver_by_route(
             )));
         }
     };
+    // The route that sends these recipients, before the send: a provider's event can come
+    // back before the outcomes are recorded. A failure here only costs the event matching.
+    let ids: Vec<Id> = recipients.iter().map(|recipient| recipient.id).collect();
+    if let Err(error) = state
+        .mail
+        .record_attempt_route(outbound.outbound_id, &ids, route.id)
+        .await
+    {
+        tracing::warn!(error = %error, route_id = %route.id, "recording the route of a mail attempt");
+    }
     // A relay of the instance may be on its own network; direct sending never is.
     let ctx = if route.workspace_id.is_none() && route.kind != SendRouteKind::Direct {
         &state.instance_delivery

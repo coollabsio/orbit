@@ -23,8 +23,8 @@ use sqlx::{Any, Transaction};
 
 use super::domains::{manager, parse_id};
 use super::outbound::{
-    BounceKind, RecipientStatus, bounced_thread_to_inbox, enqueue, plain_line, send_job,
-    update_summary,
+    BounceKind, RecipientStatus, bounced_thread_to_inbox, enqueue, is_automatic, plain_line,
+    send_job, update_summary,
 };
 use super::{MailError, MailRepository};
 
@@ -477,7 +477,7 @@ impl MailRepository {
             )
             .await?;
         }
-        if hard {
+        if hard && !is_automatic(&mut transaction, outbound_id).await? {
             self.check_pause(&mut transaction, workspace_id, now)
                 .await?;
         }

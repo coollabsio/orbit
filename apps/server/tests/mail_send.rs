@@ -2735,3 +2735,212 @@ async fn no_reply_draft_while_it_is_being_sent() {
     assert_eq!(status, StatusCode::OK, "{again}");
     assert_eq!(again["id"], draft);
 }
+
+// ---- Final review fixes ----
+
+const HOUR_MS: i64 = 3_600_000;
+const DAY_MS: i64 = 24 * HOUR_MS;
+
+impl Fixture {
+    /// Ann sends a new message; its job is dropped (the job store lost it). Returns its id and
+    /// release time.
+    async fn held_without_job(&self) -> (Id, i64) {
+        let draft = self
+            .new_draft(self.ann_primary, &["x@out.test"], &[], &[])
+            .await;
+        let (status, sent) = self.send(&draft, json!({})).await;
+        assert_eq!(status, StatusCode::OK, "{sent}");
+        let id: Id = sent["id"].as_str().unwrap().parse().unwrap();
+        let (_, release_at, _) = self.outbound_row(&id.to_string()).await;
+        self.sql("DELETE FROM jobs WHERE kind = 'mail.send'").await;
+        (id, release_at)
+    }
+}
+
+#[tokio::test]
+async fn sweep_requeues_never_released_rows() {
+    let f = Fixture::new().await;
+    f.signing().await;
+    // No reason: the job of a due message was lost.
+    let (id, release_at) = f.held_without_job().await;
+    assert_eq!(f.mail.sweep_releases(at(release_at - 1)).await.unwrap(), 0);
+    assert_eq!(f.mail.sweep_releases(at(release_at)).await.unwrap(), 1);
+    assert_eq!(f.queued_send_jobs(id).await, 1);
+    assert_eq!(f.mail.sweep_releases(at(release_at + 1)).await.unwrap(), 0);
+    // Waiting for the limits (`rate_limit`), its job lost too.
+    f.sql("DELETE FROM jobs WHERE kind = 'mail.send'").await;
+    f.sql(&format!(
+        "UPDATE mail_outbound SET hold_reason = 'rate_limit' WHERE id = '{id}'"
+    ))
+    .await;
+    assert_eq!(f.mail.sweep_releases(at(release_at + 2)).await.unwrap(), 1);
+    run_send_job(&f.job_state(), id, at(release_at + 3))
+        .await
+        .unwrap();
+    assert_eq!(f.outbound_reason(id).await.0, "released");
+}
+
+#[tokio::test]
+async fn release_failed_is_swept_for_a_day_then_given_up() {
+    let f = Fixture::new().await;
+    f.signing().await;
+    let (id, release_at) = f.held_without_job().await;
+    f.mail
+        .hold_release(id, "release_failed", at(release_at))
+        .await
+        .unwrap();
+    // A later failure keeps the time of the first.
+    f.mail
+        .hold_release(id, "release_failed", at(release_at + HOUR_MS))
+        .await
+        .unwrap();
+    assert_eq!(
+        f.number(
+            "SELECT release_failed_at FROM mail_outbound WHERE id = $1",
+            id
+        )
+        .await,
+        Some(release_at)
+    );
+    assert_eq!(
+        f.mail
+            .sweep_releases(at(release_at + DAY_MS - 1))
+            .await
+            .unwrap(),
+        1
+    );
+    f.sql("DELETE FROM jobs WHERE kind = 'mail.send'").await;
+    // A day after the first failure: held as `release_error`, never swept again.
+    assert_eq!(
+        f.mail
+            .sweep_releases(at(release_at + DAY_MS))
+            .await
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        f.outbound_reason(id).await,
+        ("held".to_owned(), Some("release_error".to_owned()))
+    );
+    assert_eq!(
+        f.mail
+            .sweep_releases(at(release_at + 2 * DAY_MS))
+            .await
+            .unwrap(),
+        0
+    );
+    assert_eq!(f.queued_send_jobs(id).await, 0);
+    // Another reason clears the time.
+    f.mail
+        .hold_release(id, "build_failed", at(release_at + 2 * DAY_MS))
+        .await
+        .unwrap();
+    assert_eq!(
+        f.number(
+            "SELECT release_failed_at FROM mail_outbound WHERE id = $1",
+            id
+        )
+        .await,
+        None
+    );
+}
+
+#[tokio::test]
+async fn release_holds_when_the_domain_or_mailbox_stopped_being_ready() {
+    let f = Fixture::new().await;
+    f.signing().await;
+    let state = f.job_state();
+    // The domain was suspended after Send.
+    let (id, release_at) = f.held_without_job().await;
+    f.sql(&format!(
+        "UPDATE mail_domains SET status = 'suspended', suspended_at = {release_at} WHERE id = '{}'",
+        f.domain
+    ))
+    .await;
+    assert!(run_send_job(&state, id, at(release_at)).await.is_err());
+    assert_eq!(
+        f.outbound_reason(id).await,
+        ("held".to_owned(), Some("domain_unverified".to_owned()))
+    );
+    let sent: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM mail_receipts WHERE source = 'sent'")
+        .fetch_one(f.database.pool())
+        .await
+        .unwrap();
+    assert_eq!(sent, 0, "nothing was built or sent");
+    f.sql("DELETE FROM jobs WHERE kind = 'mail.send'").await;
+    // Still not ready: the sweep leaves it.
+    assert_eq!(f.mail.sweep_releases(at(release_at + 1)).await.unwrap(), 0);
+    // Verified again: swept and sent.
+    f.sql(&format!(
+        "UPDATE mail_domains SET status = 'verified', suspended_at = NULL WHERE id = '{}'",
+        f.domain
+    ))
+    .await;
+    assert_eq!(f.mail.sweep_releases(at(release_at + 2)).await.unwrap(), 1);
+    run_send_job(&state, id, at(release_at + 3)).await.unwrap();
+    assert_eq!(f.outbound_reason(id).await, ("released".to_owned(), None));
+
+    // The mailbox was suspended after Send.
+    let (id, release_at) = f.held_without_job().await;
+    f.sql(&format!(
+        "UPDATE mailboxes SET status = 'suspended' WHERE id = '{}'",
+        f.ann_personal
+    ))
+    .await;
+    assert!(run_send_job(&state, id, at(release_at)).await.is_err());
+    assert_eq!(
+        f.outbound_reason(id).await,
+        ("held".to_owned(), Some("mailbox_suspended".to_owned()))
+    );
+    f.sql("DELETE FROM jobs WHERE kind = 'mail.send'").await;
+    assert_eq!(f.mail.sweep_releases(at(release_at + 1)).await.unwrap(), 0);
+    f.sql(&format!(
+        "UPDATE mailboxes SET status = 'active' WHERE id = '{}'",
+        f.ann_personal
+    ))
+    .await;
+    assert_eq!(f.mail.sweep_releases(at(release_at + 2)).await.unwrap(), 1);
+}
+
+#[tokio::test]
+async fn held_message_of_a_removed_member_is_cancelled_at_release() {
+    let f = Fixture::new().await;
+    f.signing().await;
+    let (id, release_at) = f.held_without_job().await;
+    let version: i64 = sqlx::query_scalar("SELECT version FROM memberships WHERE id = $1")
+        .bind(f.ann.membership.to_string())
+        .fetch_one(f.database.pool())
+        .await
+        .unwrap();
+    orbit_server::repositories::workspaces::WorkspaceRepository::new((*f.database).clone())
+        .remove_member(
+            f.workspace,
+            f.ann.membership,
+            user_of(&f, &f.owner).await,
+            u64::try_from(version).unwrap(),
+            "request",
+            TimestampMillis::now(),
+        )
+        .await
+        .unwrap();
+    // The row stays (no cascade), without its author and its draft.
+    let row =
+        sqlx::query("SELECT membership_id, draft_id, status FROM mail_outbound WHERE id = $1")
+            .bind(id.to_string())
+            .fetch_one(f.database.pool())
+            .await
+            .unwrap();
+    use sqlx::Row;
+    assert_eq!(row.get::<Option<String>, _>("membership_id"), None);
+    assert_eq!(row.get::<Option<String>, _>("draft_id"), None);
+    assert_eq!(row.get::<String, _>("status"), "held");
+    // The sweep finds it stranded; its release cancels it as `draft_missing`.
+    assert_eq!(f.mail.sweep_releases(at(release_at)).await.unwrap(), 1);
+    run_send_job(&f.job_state(), id, at(release_at))
+        .await
+        .unwrap();
+    assert_eq!(
+        f.outbound_reason(id).await,
+        ("cancelled".to_owned(), Some("draft_missing".to_owned()))
+    );
+}

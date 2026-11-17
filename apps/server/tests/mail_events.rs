@@ -1321,3 +1321,101 @@ async fn ses_route_needs_its_topic_and_refuses_other_topics() {
         "the certificate fetch needs intake"
     );
 }
+
+#[tokio::test]
+async fn event_matches_the_route_that_sent_after_a_route_change() {
+    let f = Fixture::mailgun().await;
+    f.answer_id("ann@out.test", "<moved.1@one.test>");
+    // Held at Send, when the domain used the first route.
+    let (draft, _) = f
+        .mail
+        .create_draft(
+            f.membership,
+            f.workspace,
+            NewDraft {
+                mode: DraftMode::New,
+                thread_id: None,
+                parent_message_id: None,
+                from_address_id: Some(f.address),
+                to: Some(vec!["ann@out.test".to_owned()]),
+                cc: None,
+                bcc: None,
+                subject: Some("Hello".to_owned()),
+                body_html: Some("<p>Hi</p>".to_owned()),
+            },
+        )
+        .await
+        .unwrap();
+    let outbound = f
+        .mail
+        .send_draft(f.membership, draft.id, None, TimestampMillis::now())
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM jobs WHERE kind = 'mail.send'")
+        .execute(f.database.pool())
+        .await
+        .unwrap();
+    // The domain moves to a second route before the delivery.
+    let second = f
+        .mail
+        .create_route(
+            ProviderScope::Instance,
+            f.user,
+            NewRoute {
+                kind: SendRouteKind::Mailgun,
+                name: "Second".to_owned(),
+                provider_id: None,
+                secrets: RouteSecrets::Mailgun {
+                    api_key: "key-second".to_owned(),
+                    webhook_signing_key: "second-signing-key".to_owned(),
+                },
+                settings: RouteSettings::default(),
+            },
+            Some("mx.orbit.test"),
+            "request",
+        )
+        .await
+        .unwrap();
+    sqlx::query("UPDATE mail_domains SET send_route_id = $1 WHERE id = $2")
+        .bind(second.id.to_string())
+        .bind(f.domain.to_string())
+        .execute(f.database.pool())
+        .await
+        .unwrap();
+    run_send_job(&f.state(), outbound.id, outbound.release_at)
+        .await
+        .unwrap();
+    let ann = f.recipient(outbound.id, "ann@out.test").await;
+    assert_eq!(f.state_of(ann).await.0, "delivered");
+    let routes: Vec<Option<String>> = sqlx::query_scalar(
+        "SELECT route_id FROM mail_outbound WHERE id = $1 UNION ALL \
+         SELECT route_id FROM mail_outbound_recipients WHERE outbound_id = $1",
+    )
+    .bind(outbound.id.to_string())
+    .fetch_all(f.database.pool())
+    .await
+    .unwrap();
+    assert_eq!(routes, vec![Some(second.id.to_string()); 2]);
+
+    let event = mailgun_failed(
+        "ann@out.test",
+        "moved.1@one.test",
+        "permanent",
+        "5.1.1 No such user",
+        now_secs(),
+    );
+    // The first route did not send it: its event is ignored.
+    let (status, body) = f.mailgun_post(f.route, MAILGUN_KEY, &event).await;
+    assert_eq!(
+        (status, body["ignored"].clone()),
+        (StatusCode::OK, json!(1))
+    );
+    assert_eq!(f.state_of(ann).await.0, "delivered");
+    // The route that sent it matches.
+    let (status, body) = f
+        .mailgun_post(second.id, "second-signing-key", &event)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["applied"], 1);
+    assert_eq!(f.state_of(ann).await.0, "bounced");
+}

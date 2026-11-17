@@ -231,7 +231,7 @@ impl Fixture {
             .window_allows(
                 &mut transaction,
                 self.workspace,
-                membership,
+                Some(membership),
                 count,
                 TimestampMillis::from_millis(now),
                 None,
@@ -921,4 +921,128 @@ async fn an_outsider_gets_not_found_for_the_workspace_policy() {
         )
         .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn resume_counts_only_recipients_released_after_it() {
+    let f = Fixture::new().await;
+    f.policy("standard", "").await;
+    f.sent(f.owner_membership, 100, 10, now() - HOUR, "done")
+        .await;
+    assert!(f.check_pause(now()).await);
+    let resumed_at = now();
+    f.mail
+        .resume_sending(
+            f.workspace,
+            f.root_user,
+            "request",
+            TimestampMillis::from_millis(resumed_at),
+        )
+        .await
+        .unwrap();
+    let stored: Option<i64> =
+        sqlx::query_scalar("SELECT resumed_at FROM mail_send_policies WHERE workspace_id = $1")
+            .bind(f.workspace.to_string())
+            .fetch_one(f.database.pool())
+            .await
+            .unwrap();
+    assert_eq!(stored, Some(resumed_at));
+    // One more hard bounce right after the resume: the bounces before it no longer count.
+    f.sent(f.owner_membership, 1, 1, resumed_at + 1000, "done")
+        .await;
+    assert!(!f.check_pause(resumed_at + 2000).await);
+    assert_eq!(f.paused_at().await, None);
+    let view = f
+        .mail
+        .send_policy(f.workspace, TimestampMillis::from_millis(resumed_at + 2000))
+        .await
+        .unwrap();
+    assert_eq!(view.recipients_7d, 1);
+    // Enough new recipients over the rate pause it again.
+    f.sent(f.owner_membership, 100, 6, resumed_at + 1500, "done")
+        .await;
+    assert!(f.check_pause(resumed_at + 2000).await);
+}
+
+#[tokio::test]
+async fn vacation_replies_never_count_toward_the_pause() {
+    let f = Fixture::new().await;
+    f.policy("standard", "").await;
+    // 5 of 100 is exactly 5 %: not over.
+    f.sent(f.owner_membership, 100, 5, now() - HOUR, "done")
+        .await;
+    // Vacation replies that bounced hard do not count.
+    let (auto, _) = f
+        .sent(f.owner_membership, 20, 20, now() - HOUR, "done")
+        .await;
+    f.sql(&format!(
+        "UPDATE mail_outbound SET automatic = 1 WHERE id = '{auto}'"
+    ))
+    .await;
+    assert!(!f.check_pause(now()).await);
+    let view = f
+        .mail
+        .send_policy(f.workspace, TimestampMillis::now())
+        .await
+        .unwrap();
+    assert_eq!(view.recipients_7d, 100);
+    // A vacation reply that bounces hard at send time does not pause the workspace (it would
+    // be 6 of 101 if it counted).
+    let (auto, ids) = f
+        .sent(f.owner_membership, 1, 0, now() - HOUR, "released")
+        .await;
+    f.sql(&format!(
+        "UPDATE mail_outbound SET automatic = 1 WHERE id = '{auto}'"
+    ))
+    .await;
+    let attempt = Id::new_v7();
+    f.sql(&format!(
+        "UPDATE mail_outbound_recipients SET status = 'sending', attempt_id = '{attempt}', \
+         attempts = 1 WHERE id = '{}'",
+        ids[0]
+    ))
+    .await;
+    f.mail
+        .record_outcomes(
+            auto,
+            attempt,
+            &[(
+                ids[0],
+                AttemptResult::Bounced {
+                    response: "550 5.1.1 no such user".to_owned(),
+                    kind: BounceKind::Hard,
+                },
+            )],
+            TimestampMillis::now(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(f.paused_at().await, None);
+    // The same bounce of a member's message pauses it.
+    let (mine, ids) = f
+        .sent(f.owner_membership, 1, 0, now() - HOUR, "released")
+        .await;
+    let attempt = Id::new_v7();
+    f.sql(&format!(
+        "UPDATE mail_outbound_recipients SET status = 'sending', attempt_id = '{attempt}', \
+         attempts = 1 WHERE id = '{}'",
+        ids[0]
+    ))
+    .await;
+    f.mail
+        .record_outcomes(
+            mine,
+            attempt,
+            &[(
+                ids[0],
+                AttemptResult::Bounced {
+                    response: "550 5.1.1 no such user".to_owned(),
+                    kind: BounceKind::Hard,
+                },
+            )],
+            TimestampMillis::now(),
+        )
+        .await
+        .unwrap();
+    assert!(f.paused_at().await.is_some());
 }

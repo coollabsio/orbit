@@ -180,6 +180,21 @@ pub enum NotReadyReason {
     MailboxSuspended,
 }
 
+impl NotReadyReason {
+    /// The reason's code (as serialized), also the `hold_reason` of a held message that is
+    /// not ready at its release.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::DomainUnverified => "domain_unverified",
+            Self::InboundNotLive => "inbound_not_live",
+            Self::DkimInactive => "dkim_inactive",
+            Self::NoRoute => "no_route",
+            Self::MailboxSuspended => "mailbox_suspended",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "status", content = "reason", rename_all = "snake_case")]
 pub enum SendReadiness {

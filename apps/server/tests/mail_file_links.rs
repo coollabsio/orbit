@@ -1301,3 +1301,37 @@ async fn release_refuses_inline_and_forwarded_link_files() {
         "{error:?}"
     );
 }
+
+#[tokio::test]
+async fn link_still_downloads_after_its_sender_left() {
+    let f = Fixture::new().await;
+    let linked = f.linked("report.bin", &[3u8; 2000]).await;
+    let version: i64 = sqlx::query_scalar("SELECT version FROM memberships WHERE id = $1")
+        .bind(f.ann.membership.to_string())
+        .fetch_one(f.database.pool())
+        .await
+        .unwrap();
+    orbit_server::repositories::workspaces::WorkspaceRepository::new((*f.database).clone())
+        .remove_member(
+            f.workspace,
+            f.ann.membership,
+            user_of(&f, &f.owner).await,
+            u64::try_from(version).unwrap(),
+            "request",
+            TimestampMillis::now(),
+        )
+        .await
+        .unwrap();
+    // The sent message and its link stay (no cascade from the member).
+    let author: Option<Option<String>> =
+        sqlx::query_scalar("SELECT membership_id FROM mail_outbound WHERE id = $1")
+            .bind(linked.outbound.to_string())
+            .fetch_optional(f.database.pool())
+            .await
+            .unwrap();
+    assert_eq!(author, Some(None), "the row stays, without its author");
+    f.link_id(linked.outbound).await;
+    let reply = f.get_link(&linked).await;
+    assert_eq!(reply.status, StatusCode::OK);
+    assert_eq!(reply.body, linked.file);
+}

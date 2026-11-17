@@ -1534,3 +1534,176 @@ async fn remote_text_never_picks_the_kind() {
         Some("gave_up")
     );
 }
+
+impl Fixture {
+    /// Bea: a second member of the Team mailbox, with no undo time. Returns her membership.
+    async fn bea(&self) -> Id {
+        let user = Id::new_v7();
+        let membership = Id::new_v7();
+        let now = TimestampMillis::now().as_millis();
+        let email = format!("{user}@example.com");
+        self.sql(
+            &format!(
+                "INSERT INTO users (id, email, normalized_email, display_name, password_hash, \
+                 created_at, updated_at) VALUES ($1, $2, $3, 'Bea', 'unused', {now}, {now})"
+            ),
+            &[&user.to_string(), &email, &email],
+        )
+        .await;
+        self.sql(
+            &format!(
+                "INSERT INTO memberships (id, workspace_id, user_id, role, version, created_at, \
+                 updated_at) VALUES ($1, $2, $3, 'member', 0, {now}, {now})"
+            ),
+            &[
+                &membership.to_string(),
+                &self.workspace.to_string(),
+                &user.to_string(),
+            ],
+        )
+        .await;
+        self.sql(
+            &format!(
+                "INSERT INTO mailbox_members (mailbox_id, membership_id, created_at) \
+                 VALUES ($1, $2, {now})"
+            ),
+            &[&self.mailbox.to_string(), &membership.to_string()],
+        )
+        .await;
+        self.sql(
+            "INSERT INTO mail_member_settings (membership_id, undo_send_seconds, updated_at) \
+             VALUES ($1, 0, 0)",
+            &[&membership.to_string()],
+        )
+        .await;
+        membership
+    }
+}
+
+#[tokio::test]
+async fn mail_of_a_removed_member_keeps_delivering() {
+    let f = Fixture::new().await;
+    let bea = f.bea().await;
+    f.fake.answer("a@out.test", deferred("451 4.3.0 Busy"));
+    f.fake.answer(
+        "c@out.test",
+        RecipientOutcome::Bounced {
+            response: "550 5.1.1 No such user".to_owned(),
+            rejected: false,
+        },
+    );
+    let list = |items: &[&str]| Some(items.iter().map(|item| (*item).to_owned()).collect());
+    let (draft, _) = f
+        .mail
+        .create_draft(
+            bea,
+            f.workspace,
+            NewDraft {
+                mode: DraftMode::New,
+                thread_id: None,
+                parent_message_id: None,
+                from_address_id: Some(f.address),
+                to: list(&["a@out.test", "b@out.test", "c@out.test"]),
+                cc: None,
+                bcc: None,
+                subject: Some("Hello".to_owned()),
+                body_html: Some("<p>Hi</p>".to_owned()),
+            },
+        )
+        .await
+        .unwrap();
+    let t0 = TimestampMillis::now().as_millis();
+    let id = f
+        .mail
+        .send_draft(bea, draft.id, None, at(t0))
+        .await
+        .unwrap()
+        .id;
+    f.clear_runs().await;
+    f.run(id, t0).await;
+    assert_eq!(f.status_of(id, "a@out.test").await, "deferred");
+    assert_eq!(f.status_of(id, "b@out.test").await, "delivered");
+    assert_eq!(f.status_of(id, "c@out.test").await, "bounced");
+
+    WorkspaceRepository::new((*f.database).clone())
+        .remove_member(f.workspace, bea, f.user, 0, "request", at(t0))
+        .await
+        .unwrap();
+    // The message and its recipients stay, without their author.
+    let authors: Vec<Option<String>> = sqlx::query_scalar(
+        "SELECT membership_id FROM mail_outbound WHERE id = $1 UNION ALL \
+         SELECT membership_id FROM mail_outbound_recipients WHERE outbound_id = $1",
+    )
+    .bind(id.to_string())
+    .fetch_all(f.database.pool())
+    .await
+    .unwrap();
+    assert_eq!(authors, vec![None; 4]);
+    assert_eq!(f.outbound(id).await.0, "released");
+    // The mailbox's other member still sees each recipient's status.
+    let thread: Id = f.thread_of(id).await.parse().unwrap();
+    let detail = f
+        .mail
+        .get_thread(f.workspace, f.user, thread)
+        .await
+        .unwrap();
+    let delivery = detail
+        .messages
+        .iter()
+        .find_map(|message| message.delivery.clone())
+        .expect("delivery");
+    let mut statuses: Vec<(String, String)> = delivery
+        .recipients
+        .iter()
+        .map(|recipient| (recipient.address.clone(), recipient.status.clone()))
+        .collect();
+    statuses.sort();
+    assert_eq!(
+        statuses,
+        vec![
+            ("a@out.test".to_owned(), "deferred".to_owned()),
+            ("b@out.test".to_owned(), "delivered".to_owned()),
+            ("c@out.test".to_owned(), "bounced".to_owned()),
+        ]
+    );
+
+    // The deferred recipient is still delivered (only the workspace's limits apply).
+    f.fake.answer(
+        "a@out.test",
+        RecipientOutcome::Accepted {
+            provider_message_id: None,
+        },
+    );
+    let t1 = t0 + RETRY_STEPS_MS[0];
+    f.clear_runs().await;
+    f.run(id, t1).await;
+    assert_eq!(f.status_of(id, "a@out.test").await, "delivered");
+    // A member of the mailbox may still retry the bounced one.
+    f.fake.answer(
+        "c@out.test",
+        RecipientOutcome::Accepted {
+            provider_message_id: None,
+        },
+    );
+    let c: String = sqlx::query_scalar(
+        "SELECT id FROM mail_outbound_recipients WHERE outbound_id = $1 AND address = 'c@out.test'",
+    )
+    .bind(id.to_string())
+    .fetch_one(f.database.pool())
+    .await
+    .unwrap();
+    f.mail
+        .retry_recipient(
+            f.workspace,
+            f.membership,
+            id,
+            c.parse().unwrap(),
+            "request",
+            at(t1 + 1),
+        )
+        .await
+        .unwrap();
+    f.run(id, t1 + 2).await;
+    assert_eq!(f.status_of(id, "c@out.test").await, "delivered");
+    assert_eq!(f.outbound(id).await.0, "done");
+}

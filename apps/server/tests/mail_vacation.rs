@@ -16,7 +16,9 @@ use orbit_server::mail_intake::{InboundMessage, MailIntake, Recipient, Source};
 use orbit_server::mail_routes::{MailSettings, MailState, mail_router};
 use orbit_server::repositories::identity::{IdentityRepository, SetupRequest};
 use orbit_server::repositories::instance_settings::InstanceSettingsRepository;
-use orbit_server::repositories::mail::{IngestOutcome, MailRepository, MailboxKind, NewMailbox};
+use orbit_server::repositories::mail::{
+    AttemptResult, BounceKind, IngestOutcome, MailRepository, MailboxKind, NewMailbox,
+};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
@@ -1180,4 +1182,142 @@ async fn multi_byte_subjects_do_not_panic() {
     assert!(subjects[0].starts_with("Re: ") && subjects[0].contains("Party"));
     assert!(subjects[1].starts_with("Re: ") && subjects[1].contains("ber"));
     assert_eq!(subjects[2], "RE: kept");
+}
+
+// ---- Final review fixes: no backscatter ----
+
+impl Fixture {
+    /// Sets the stored authentication of the message `id` to `auth`.
+    async fn auth_of(&self, id: &str, auth: &AuthOutcome) {
+        let json = serde_json::to_string(auth).unwrap();
+        self.on_message(
+            id,
+            &format!("UPDATE mail_receipts SET auth = '{json}' WHERE id = $1"),
+        )
+        .await;
+    }
+}
+
+fn spf_only(spf: Verdict, spf_domain: &str) -> AuthOutcome {
+    AuthOutcome {
+        spf,
+        dkim: Verdict::None,
+        dmarc: DmarcVerdict::None,
+        aligned_domain: None,
+        temp_error: false,
+        spf_domain: Some(spf_domain.to_owned()),
+        dkim_domain: None,
+        from_domain: Some("sender.test".to_owned()),
+    }
+}
+
+#[tokio::test]
+async fn only_an_authenticated_envelope_sender_gets_a_reply() {
+    let f = Fixture::new().await;
+    f.signing().await;
+    f.away(&f.ann, f.ann_personal, json!({})).await;
+    f.sql("UPDATE mail_vacations SET enabled = 0").await;
+
+    // SPF fail or softfail, no DMARC: the envelope sender may be forged.
+    for (id, verdict) in [("b1", Verdict::Fail), ("b2", Verdict::SoftFail)] {
+        let (m, t) = f.mail(id, "ann@one.test", f.ann_primary, "").await;
+        f.auth_of(id, &spf_only(verdict, "sender.test")).await;
+        assert!(!f.asked(t, m).await, "{verdict:?}");
+    }
+    // SPF passed for another domain (the HELO), not the envelope's.
+    let (m, t) = f.mail("b3", "ann@one.test", f.ann_primary, "").await;
+    f.auth_of("b3", &spf_only(Verdict::Pass, "mx.relay.test"))
+        .await;
+    assert!(!f.asked(t, m).await);
+    assert_eq!(f.replies_recorded().await, 0);
+    assert!(f.auto_outbound(f.ann_personal).await.is_empty());
+
+    // SPF passed for the envelope's domain: a reply.
+    let (m, t) = f.mail("b4", "ann@one.test", f.ann_primary, "").await;
+    f.auth_of("b4", &spf_only(Verdict::Pass, "sender.test"))
+        .await;
+    assert!(f.asked(t, m).await);
+}
+
+#[tokio::test]
+async fn a_sender_of_this_instance_gets_a_reply() {
+    let f = Fixture::new().await;
+    f.signing().await;
+    f.away(&f.ann, f.ann_personal, json!({})).await;
+    f.sql("UPDATE mail_vacations SET enabled = 0").await;
+    // Local delivery stores `{"local":true}`: signed here, not checked.
+    let (m, t) = f.mail("l1", "ann@one.test", f.ann_primary, "").await;
+    f.on_message(
+        "l1",
+        "UPDATE mail_receipts SET auth = '{\"local\":true}' WHERE id = $1",
+    )
+    .await;
+    assert!(f.asked(t, m).await);
+}
+
+#[tokio::test]
+async fn bounce_of_a_vacation_reply_leaves_the_thread() {
+    let f = Fixture::new().await;
+    f.signing().await;
+    f.away(&f.ann, f.ann_personal, json!({})).await;
+    let (_, thread) = f.mail("v1", "ann@one.test", f.ann_primary, "").await;
+    let outbound = f.auto_outbound(f.ann_personal).await.remove(0);
+    let released = f
+        .mail
+        .release(outbound, Some("mx.orbit.test"), TimestampMillis::now())
+        .await
+        .unwrap()
+        .expect("released");
+    assert_eq!(released.thread_id, thread);
+    assert_eq!(
+        f.number(
+            "SELECT automatic FROM mail_outbound WHERE id = $1",
+            outbound
+        )
+        .await,
+        Some(1),
+        "still marked after the release"
+    );
+    f.sql(&format!(
+        "UPDATE mail_threads SET folder = 'archive' WHERE id = '{thread}'"
+    ))
+    .await;
+    let recipient: String =
+        sqlx::query_scalar("SELECT id FROM mail_outbound_recipients WHERE outbound_id = $1")
+            .bind(outbound.to_string())
+            .fetch_one(f.database.pool())
+            .await
+            .unwrap();
+    let attempt = Id::new_v7();
+    f.sql(&format!(
+        "UPDATE mail_outbound_recipients SET status = 'sending', attempt_id = '{attempt}', \
+         attempts = 1 WHERE id = '{recipient}'"
+    ))
+    .await;
+    let recorded = f
+        .mail
+        .record_outcomes(
+            outbound,
+            attempt,
+            &[(
+                recipient.parse().unwrap(),
+                AttemptResult::Bounced {
+                    response: "550 5.1.1 no such user".to_owned(),
+                    kind: BounceKind::Hard,
+                },
+            )],
+            TimestampMillis::now(),
+        )
+        .await
+        .unwrap();
+    assert!(recorded.bounced);
+    let folder: String = sqlx::query_scalar("SELECT folder FROM mail_threads WHERE id = $1")
+        .bind(thread.to_string())
+        .fetch_one(f.database.pool())
+        .await
+        .unwrap();
+    assert_eq!(
+        folder, "archive",
+        "the bounce of an automatic reply is no news"
+    );
 }

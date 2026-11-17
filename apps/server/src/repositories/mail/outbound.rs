@@ -337,7 +337,7 @@ impl MailRepository {
             .window_allows(
                 &mut transaction,
                 workspace_id,
-                membership_id,
+                Some(membership_id),
                 all.len() as i64,
                 now,
                 None,
@@ -356,8 +356,8 @@ impl MailRepository {
         if existing.is_some() {
             sqlx::query(
                 "UPDATE mail_outbound SET status = 'held', release_at = $1, scheduled = $2, \
-                 hold_reason = $3, route_id = $4, mailbox_id = $5, updated_at = $6 \
-                 WHERE id = $7 AND status = 'cancelled'",
+                 hold_reason = $3, route_id = $4, mailbox_id = $5, release_failed_at = NULL, \
+                 updated_at = $6 WHERE id = $7 AND status = 'cancelled'",
             )
             .bind(release_at)
             .bind(i64::from(scheduled_at.is_some()))
@@ -875,8 +875,23 @@ pub(super) async fn update_summary(
     Ok(())
 }
 
+/// Whether the message is a vacation reply (`automatic`): its bounces and complaints do not
+/// count toward the pause and do not move its thread.
+pub(super) async fn is_automatic(
+    transaction: &mut Transaction<'_, Any>,
+    outbound_id: Id,
+) -> Result<bool, MailError> {
+    let automatic: Option<i64> =
+        sqlx::query_scalar("SELECT automatic FROM mail_outbound WHERE id = $1")
+            .bind(outbound_id.to_string())
+            .fetch_optional(&mut **transaction)
+            .await?;
+    Ok(automatic.is_some_and(|flag| flag != 0))
+}
+
 /// A recipient of the message bounced: its thread goes back to the Inbox (from the archive), unread
-/// for every reader (spec §5.7).
+/// for every reader (spec §5.7). Not for a vacation reply: the bounce of an automatic answer is
+/// no news for the mailbox.
 pub(super) async fn bounced_thread_to_inbox(
     transaction: &mut Transaction<'_, Any>,
     outbound_id: Id,
@@ -885,7 +900,7 @@ pub(super) async fn bounced_thread_to_inbox(
     let threads: Vec<String> = sqlx::query_scalar(
         "SELECT tm.thread_id FROM mail_outbound o \
          JOIN mail_thread_messages tm ON tm.message_id = o.message_id \
-         AND tm.mailbox_id = o.mailbox_id WHERE o.id = $1",
+         AND tm.mailbox_id = o.mailbox_id WHERE o.id = $1 AND o.automatic = 0",
     )
     .bind(outbound_id.to_string())
     .fetch_all(&mut **transaction)
@@ -1054,7 +1069,11 @@ impl MailRepository {
             return Ok(Claim::NotReleased);
         };
         let workspace_id = parse_id(&row.try_get::<String, _>("workspace_id")?)?;
-        let membership_id = parse_id(&row.try_get::<String, _>("membership_id")?)?;
+        // NULL once the author left the workspace: only the workspace's limits apply.
+        let membership_id = row
+            .try_get::<Option<String>, _>("membership_id")?
+            .map(|id| parse_id(&id))
+            .transpose()?;
         let hold: Option<String> = row.try_get("hold_reason")?;
         let paused: Option<i64> =
             sqlx::query_scalar("SELECT paused_at FROM mail_send_policies WHERE workspace_id = $1")
@@ -1294,7 +1313,9 @@ impl MailRepository {
         if bounced {
             bounced_thread_to_inbox(&mut transaction, outbound_id, now).await?;
         }
-        if let Some(workspace_id) = hard_bounced {
+        if let Some(workspace_id) = hard_bounced
+            && !is_automatic(&mut transaction, outbound_id).await?
+        {
             self.check_pause(&mut transaction, workspace_id, now)
                 .await?;
         }
@@ -1306,6 +1327,39 @@ impl MailRepository {
             next_at,
             bounced,
         })
+    }
+
+    /// Records the route an attempt went through on its recipients and on the message, so a
+    /// provider's events about them match the route that sent them, also after the domain's
+    /// route changed ([`super::events`]).
+    pub async fn record_attempt_route(
+        &self,
+        outbound_id: Id,
+        recipient_ids: &[Id],
+        route_id: Id,
+    ) -> Result<(), MailError> {
+        let mut transaction = self.database.immediate_transaction().await?;
+        sqlx::query(
+            "UPDATE mail_outbound SET route_id = $1 WHERE id = $2 \
+             AND route_id IS DISTINCT FROM $1",
+        )
+        .bind(route_id.to_string())
+        .bind(outbound_id.to_string())
+        .execute(&mut *transaction)
+        .await?;
+        for recipient_id in recipient_ids {
+            sqlx::query(
+                "UPDATE mail_outbound_recipients SET route_id = $1 WHERE id = $2 \
+                 AND outbound_id = $3",
+            )
+            .bind(route_id.to_string())
+            .bind(recipient_id.to_string())
+            .bind(outbound_id.to_string())
+            .execute(&mut *transaction)
+            .await?;
+        }
+        transaction.commit().await?;
+        Ok(())
     }
 
     /// When a recipient of the released message is due again; `None` when none is open.

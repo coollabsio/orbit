@@ -12,13 +12,18 @@
 //! **Reply.** After ingest files a message into a thread in the inbox,
 //! [`MailRepository::maybe_vacation_reply`] decides with [`orbit_mail::vacation_allowed`] (RFC
 //! 3834) and, when allowed, queues a normal outbound without a draft (`draft_id` NULL, no undo
-//! delay) whose `auto_reply` JSON holds what [`MailRepository::release`] builds it from. The
+//! delay) whose `auto_reply` JSON holds what [`MailRepository::release`] builds it from, marked
+//! `automatic` (its bounces and complaints never pause the workspace or move the thread). Only
+//! an authenticated envelope sender gets one ([`orbit_mail::envelope_authenticated`], or a
+//! sender of this instance): no backscatter to forged senders. The
 //! check of the 7-day rule and the record in `mail_vacation_replies` are one writer
 //! transaction, so two messages of one sender that ingest at once get one reply.
 
 use jiff::tz::TimeZone;
 use orbit_domain::Permission;
-use orbit_mail::{AuthOutcome, DmarcVerdict, VacationInput, vacation_allowed};
+use orbit_mail::{
+    AuthOutcome, DmarcVerdict, VacationInput, envelope_authenticated, vacation_allowed,
+};
 use orbit_platform::{Id, Row, TimestampMillis};
 use serde::{Deserialize, Serialize};
 use sqlx::{Any, Transaction};
@@ -412,12 +417,24 @@ impl MailRepository {
         else {
             return Ok(false);
         };
-        // An `auth` that does not parse is no reason to reply: it means no reply.
-        let Ok(auth) = serde_json::from_str::<AuthOutcome>(&message.try_get::<String, _>("auth")?)
-        else {
-            return Ok(false);
+        // Only an authenticated envelope sender gets a reply (no backscatter to a forged
+        // address): SPF passed for its domain or DMARC passed aligned with it, or the message
+        // came from a mailbox of this instance (local delivery, `{"local":true}`: signed here,
+        // not checked). An `auth` that does not parse is no reason to reply: it means no reply.
+        let auth_json: String = message.try_get("auth")?;
+        let local = serde_json::from_str::<serde_json::Value>(&auth_json)
+            .is_ok_and(|value| value["local"] == serde_json::Value::Bool(true));
+        let (dmarc_failed, sender_authenticated) = if local {
+            (false, true)
+        } else {
+            let Ok(auth) = serde_json::from_str::<AuthOutcome>(&auth_json) else {
+                return Ok(false);
+            };
+            (
+                matches!(auth.dmarc, DmarcVerdict::Fail { .. }),
+                envelope_authenticated(&auth, &sender.domain),
+            )
         };
-        let dmarc_failed = matches!(auth.dmarc, DmarcVerdict::Fail { .. });
         let sender_text = sender.to_string();
         let own: Vec<(String, String, String, String)> = sqlx::query(
             "SELECT a.id, a.kind, d.id AS domain_id, a.local_part || '@' || d.name AS address \
@@ -577,6 +594,7 @@ impl MailRepository {
             sender_is_workspace_mailbox: sender_is_workspace_mailbox.is_some(),
             in_inbox: true,
             dmarc_failed,
+            sender_authenticated,
             replied_within_7_days: last.is_some_and(|at| at > now_ms - REPLY_INTERVAL_MS),
         };
         if !vacation_allowed(&input) {
@@ -584,7 +602,14 @@ impl MailRepository {
         }
         // Over a window of the limits: no reply, rather than one held for room.
         if self
-            .window_allows(&mut transaction, workspace_id, membership_id, 1, now, None)
+            .window_allows(
+                &mut transaction,
+                workspace_id,
+                Some(membership_id),
+                1,
+                now,
+                None,
+            )
             .await?
             .is_some()
         {
@@ -614,8 +639,9 @@ impl MailRepository {
         let id = Id::new_v7();
         sqlx::query(
             "INSERT INTO mail_outbound (id, workspace_id, membership_id, mailbox_id, draft_id, \
-             route_id, status, release_at, scheduled, hold_reason, auto_reply, created_at, updated_at) \
-             VALUES ($1, $2, $3, $4, NULL, $5, 'held', $6, 0, NULL, $7, $6, $6)",
+             route_id, status, release_at, scheduled, hold_reason, auto_reply, automatic, \
+             created_at, updated_at) \
+             VALUES ($1, $2, $3, $4, NULL, $5, 'held', $6, 0, NULL, $7, 1, $6, $6)",
         )
         .bind(id.to_string())
         .bind(workspace_id.to_string())

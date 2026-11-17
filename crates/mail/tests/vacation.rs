@@ -1,4 +1,7 @@
-use orbit_mail::{VacationInput, vacation_allowed};
+use orbit_mail::{
+    AuthOutcome, DmarcPolicy, DmarcVerdict, VacationInput, Verdict, envelope_authenticated,
+    vacation_allowed,
+};
 
 fn headers(extra: &[(&str, &str)]) -> Vec<(String, String)> {
     let mut all = vec![
@@ -20,6 +23,7 @@ struct Case {
     workspace: bool,
     inbox: bool,
     dmarc_failed: bool,
+    authenticated: bool,
     replied: bool,
     allowed: bool,
 }
@@ -32,6 +36,7 @@ fn case(name: &'static str, allowed: bool) -> Case {
         workspace: false,
         inbox: true,
         dmarc_failed: false,
+        authenticated: true,
         replied: false,
         allowed,
     }
@@ -118,6 +123,10 @@ fn vacation_rules() {
             ..case("dmarc fail", false)
         },
         Case {
+            authenticated: false,
+            ..case("unauthenticated envelope sender", false)
+        },
+        Case {
             replied: true,
             ..case("replied within 7 days", false)
         },
@@ -131,8 +140,92 @@ fn vacation_rules() {
             sender_is_workspace_mailbox: case.workspace,
             in_inbox: case.inbox,
             dmarc_failed: case.dmarc_failed,
+            sender_authenticated: case.authenticated,
             replied_within_7_days: case.replied,
         };
         assert_eq!(vacation_allowed(&input), case.allowed, "{}", case.name);
     }
+}
+
+fn auth(
+    spf: Verdict,
+    spf_domain: Option<&str>,
+    dmarc: DmarcVerdict,
+    aligned: Option<&str>,
+) -> AuthOutcome {
+    AuthOutcome {
+        spf,
+        dkim: Verdict::None,
+        dmarc,
+        aligned_domain: aligned.map(str::to_owned),
+        temp_error: false,
+        spf_domain: spf_domain.map(str::to_owned),
+        dkim_domain: None,
+        from_domain: aligned.map(str::to_owned),
+    }
+}
+
+#[test]
+fn envelope_authentication() {
+    let none = DmarcVerdict::None;
+    // SPF pass for the envelope's own domain (any case).
+    assert!(envelope_authenticated(
+        &auth(Verdict::Pass, Some("Example.org"), none, None),
+        "example.org"
+    ));
+    // SPF pass for another domain (the HELO), fail and softfail: not proven.
+    assert!(!envelope_authenticated(
+        &auth(Verdict::Pass, Some("mx.other.test"), none, None),
+        "example.org"
+    ));
+    for verdict in [
+        Verdict::Fail,
+        Verdict::SoftFail,
+        Verdict::Neutral,
+        Verdict::None,
+    ] {
+        assert!(
+            !envelope_authenticated(
+                &auth(verdict, Some("example.org"), none, None),
+                "example.org"
+            ),
+            "{verdict:?}"
+        );
+    }
+    // DMARC pass with a From domain aligned with the envelope (same, parent or subdomain).
+    for envelope in ["example.org", "bounces.example.org"] {
+        assert!(
+            envelope_authenticated(
+                &auth(
+                    Verdict::SoftFail,
+                    Some(envelope),
+                    DmarcVerdict::Pass,
+                    Some("example.org")
+                ),
+                envelope
+            ),
+            "{envelope}"
+        );
+    }
+    // DMARC pass for an unrelated From domain proves nothing about the envelope.
+    assert!(!envelope_authenticated(
+        &auth(
+            Verdict::Fail,
+            Some("victim.test"),
+            DmarcVerdict::Pass,
+            Some("attacker.test")
+        ),
+        "victim.test"
+    ));
+    assert!(!envelope_authenticated(
+        &auth(
+            Verdict::Fail,
+            Some("example.org"),
+            DmarcVerdict::Fail {
+                policy: DmarcPolicy::Reject
+            },
+            None
+        ),
+        "example.org"
+    ));
 }

@@ -17,7 +17,7 @@ CREATE TABLE mail_send_routes (
     name TEXT NOT NULL CHECK (length(name) BETWEEN 1 AND 80),
     -- The receiving provider this route belongs to, when there is one.
     provider_id TEXT REFERENCES mail_providers(id) ON DELETE SET NULL,
-    -- JSON of the kind's secrets, sealed with the app key; associated data `mail-send-route:<id>`.
+    -- JSON of the kind's secrets, sealed with the app key; associated data `mail-route:<id>`.
     secrets BYTEA NOT NULL,
     -- Host, port, security, region, base URL, account ID, stream and max bytes (JSON).
     settings TEXT NOT NULL CHECK (orbit_json_valid(settings)),
@@ -73,6 +73,8 @@ CREATE TABLE mail_send_policies (
     -- The first time sending was paused: a workspace that was ever paused is never promoted.
     first_paused_at BIGINT,
     resumed_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+    -- The last resume: the rates that pause a workspace count only recipients released after it.
+    resumed_at BIGINT,
     created_at BIGINT NOT NULL,
     updated_at BIGINT NOT NULL
 );
@@ -128,7 +130,9 @@ CREATE INDEX mail_draft_files_workspace ON mail_draft_files (workspace_id);
 CREATE TABLE mail_outbound (
     id TEXT PRIMARY KEY,
     workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-    membership_id TEXT NOT NULL REFERENCES memberships(id) ON DELETE CASCADE,
+    -- The author. NULL once the member left: the message stays (a held one is cancelled at its
+    -- release, as its draft went with the member; a released one is still delivered).
+    membership_id TEXT REFERENCES memberships(id) ON DELETE SET NULL,
     mailbox_id TEXT NOT NULL REFERENCES mailboxes(id) ON DELETE CASCADE,
     -- NULL for a send without a draft (a vacation reply). Unique: a draft is sent once.
     draft_id TEXT UNIQUE REFERENCES mail_drafts(id) ON DELETE SET NULL,
@@ -142,6 +146,12 @@ CREATE TABLE mail_outbound (
     -- A vacation reply (no draft): the message answered, the address it goes from and to, the
     -- subject and the sanitized body (JSON), read at release.
     auto_reply TEXT CHECK (auto_reply IS NULL OR orbit_json_valid(auto_reply)),
+    -- 1 for a vacation reply, kept after release: its bounces and complaints do not count toward
+    -- the rates that pause the workspace, and do not move its thread back to the Inbox.
+    automatic BIGINT NOT NULL DEFAULT 0 CHECK (automatic IN (0, 1)),
+    -- The first failed release that the job retries (`release_failed`): the sweep gives up a day
+    -- after it.
+    release_failed_at BIGINT,
     -- The final status of each recipient (JSON), kept after the recipient rows are purged.
     delivery_summary TEXT CHECK (delivery_summary IS NULL OR orbit_json_valid(delivery_summary)),
     created_at BIGINT NOT NULL,
@@ -159,7 +169,8 @@ CREATE TABLE mail_outbound_recipients (
     id TEXT PRIMARY KEY,
     outbound_id TEXT NOT NULL REFERENCES mail_outbound(id) ON DELETE CASCADE,
     workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-    membership_id TEXT NOT NULL REFERENCES memberships(id) ON DELETE CASCADE,
+    -- The author, for the per-member limits. NULL once the member left.
+    membership_id TEXT REFERENCES memberships(id) ON DELETE SET NULL,
     address TEXT NOT NULL CHECK (length(address) BETWEEN 3 AND 320),
     kind TEXT NOT NULL CHECK (kind IN ('to', 'cc', 'bcc')),
     status TEXT NOT NULL CHECK (status IN ('queued', 'sending', 'delivered', 'deferred', 'bounced',
@@ -170,6 +181,8 @@ CREATE TABLE mail_outbound_recipients (
     next_attempt_at BIGINT,
     last_response TEXT,
     provider_message_id TEXT,
+    -- The route of the last attempt by a route: a provider's events match it.
+    route_id TEXT REFERENCES mail_send_routes(id) ON DELETE SET NULL,
     -- Why a bounced recipient bounced: `hard` (a 5xx refusal of the address), `rejected` (Orbit
     -- refused the message itself: too large for the route or the server, or the receiving domain
     -- or mailbox of this instance is unavailable), `gave_up` (still deferred after the last
@@ -194,6 +207,8 @@ CREATE INDEX mail_outbound_recipients_workspace_limit ON mail_outbound_recipient
 CREATE INDEX mail_outbound_recipients_member_limit ON mail_outbound_recipients (membership_id, released_at);
 CREATE INDEX mail_outbound_recipients_provider ON mail_outbound_recipients (provider_message_id)
     WHERE provider_message_id IS NOT NULL;
+CREATE INDEX mail_outbound_recipients_route ON mail_outbound_recipients (route_id)
+    WHERE route_id IS NOT NULL;
 
 -- Addresses that bounced hard, complained or were set by an admin: nothing is sent to them.
 CREATE TABLE mail_suppressions (

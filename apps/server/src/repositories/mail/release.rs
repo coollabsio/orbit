@@ -28,10 +28,20 @@
 //! file cannot be a link (`link_forwarded`; the draft refuses it too), and without an origin for
 //! the URLs the message is held (`link_origin_missing`).
 //!
+//! **Readiness.** The release checks the domain and the mailbox again
+//! ([`MailRepository::send_readiness`]): a message that was ready at Send but is not now (a
+//! scheduled message after a suspension) is held with the reason (`domain_unverified`,
+//! `inbound_not_live`, `dkim_inactive`, `no_route`, `mailbox_suspended`). A message whose author
+//! left the workspace (`membership_id` NULL) is cancelled as `draft_missing`: its draft went
+//! with the member.
+//!
 //! **Sweep.** `mail.send_sweep` ([`SEND_SWEEP_JOB`], every [`SEND_SWEEP_MS`]) queues `mail.send`
-//! again for held, due rows that are stranded: `release_failed` (the job gave up after its
-//! retries) and `dkim_inactive` once the domain has an active key again. A row whose `mail.send`
-//! job is still queued or running is left alone. It also queues `mail.send` again for released
+//! again for held, due rows that are stranded: never released (no reason, or `rate_limit`: the
+//! job store lost the job), `release_failed` (the job gave up after its retries) for
+//! [`RELEASE_FAILED_GIVE_UP_MS`] after the first failure (then held as `release_error`),
+//! `dkim_inactive` once the domain has an active key again, and the other readiness reasons once
+//! the domain and the mailbox are ready again. A row whose `mail.send` job is still queued or
+//! running is left alone. It also queues `mail.send` again for released
 //! rows whose delivery was stranded ([`MailRepository::sweep_deliveries`]).
 
 use std::collections::{BTreeSet, HashMap};
@@ -55,7 +65,7 @@ use super::search::people;
 use super::signatures::check_sendable;
 use super::threads::{Incoming, file_outgoing};
 use super::vacation::AutoReply;
-use super::{MailError, MailRepository, receipt_aad, seal_blob};
+use super::{MailError, MailRepository, SendReadiness, receipt_aad, seal_blob};
 
 /// The recurring job that queues stranded releases again (see the module docs).
 pub const SEND_SWEEP_JOB: &str = "mail.send_sweep";
@@ -63,6 +73,13 @@ pub const SEND_SWEEP_JOB: &str = "mail.send_sweep";
 pub const SEND_SWEEP_MS: i64 = 5 * 60 * 1000;
 /// Rows queued again by one sweep.
 const SWEEP_BATCH: i64 = 500;
+/// A release that keeps failing with `release_failed` this long after its first failure is
+/// held as `release_error` and no longer swept.
+pub const RELEASE_FAILED_GIVE_UP_MS: i64 = 24 * 3_600_000;
+/// The outbound row `o` has no `mail.send` job that is queued or running.
+const NO_SEND_JOB: &str = "NOT EXISTS (SELECT 1 FROM jobs j WHERE j.kind = 'mail.send' \
+     AND j.state IN ('queued', 'running') \
+     AND j.payload_json = '{\"outbound_id\":\"' || o.id || '\"}')";
 
 /// `mail.send_sweep`: one at a time on the cluster.
 #[must_use]
@@ -442,11 +459,21 @@ impl MailRepository {
             return Ok(None);
         };
         let workspace_id = parse_id(&row.try_get::<String, _>("workspace_id")?)?;
-        let membership_id = parse_id(&row.try_get::<String, _>("membership_id")?)?;
         let mailbox_id = parse_id(&row.try_get::<String, _>("mailbox_id")?)?;
         let draft_id: Option<String> = row.try_get("draft_id")?;
         let read_at: i64 = row.try_get("updated_at")?;
         let read_release: i64 = row.try_get("release_at")?;
+        // The author left the workspace: their drafts went with them, and a vacation reply has
+        // nobody to go as. Nothing to build: cancelled as `draft_missing`.
+        let Some(membership_id) = row
+            .try_get::<Option<String>, _>("membership_id")?
+            .map(|id| parse_id(&id))
+            .transpose()?
+        else {
+            read.commit().await?;
+            self.cancel_release(outbound_id, read_at, now).await?;
+            return Ok(None);
+        };
         // A vacation reply has no draft: it is built from its `auto_reply` (module docs of
         // `vacation`), as a reply to the message it answers, without a quote.
         let auto: Option<AutoReply> = match row.try_get::<Option<String>, _>("auto_reply")? {
@@ -510,6 +537,14 @@ impl MailRepository {
         }
         read.commit().await?;
 
+        // Ready at Send is not ready now: a scheduled message after the domain or the mailbox
+        // was suspended waits with the reason (the sweep sends it once it is ready again).
+        if let SendReadiness::NotReady(reason) = self
+            .send_readiness(sender.domain_id, Some(mailbox_id))
+            .await?
+        {
+            return Err(MailError::Unprocessable(reason.as_str()));
+        }
         let key = self
             .active_signing_key(sender.domain_id)
             .await?
@@ -922,34 +957,107 @@ impl MailRepository {
         }))
     }
 
-    /// `mail.send_sweep`: queues `mail.send` again for held, due rows stranded by a failed
-    /// release (see the module docs). Returns how many were queued.
+    /// `mail.send_sweep`: queues `mail.send` again for held, due rows without a queued or
+    /// running job (see the module docs): rows stranded before their first release (no reason,
+    /// or `rate_limit`: the job store lost the job), `release_failed` for a day after its first
+    /// failure (then the row is held as `release_error`, which the sweep leaves alone),
+    /// `dkim_inactive` once the domain has an active key again, and the readiness reasons of
+    /// [`super::NotReadyReason`] once the domain and the mailbox are ready again. Returns how
+    /// many were queued.
     pub async fn sweep_releases(&self, now: TimestampMillis) -> Result<u64, MailError> {
+        // Ready again: checked before the writer transaction (the check reads the pool).
+        let mut ready_again = Vec::new();
+        let waiting = sqlx::query(sqlx::AssertSqlSafe(format!(
+            "SELECT o.id, o.workspace_id, o.mailbox_id, d.from_address_id, o.auto_reply \
+             FROM mail_outbound o LEFT JOIN mail_drafts d ON d.id = o.draft_id \
+             WHERE o.status = 'held' AND o.release_at <= $1 \
+             AND o.hold_reason IN ('domain_unverified', 'inbound_not_live', 'no_route', \
+             'mailbox_suspended') AND {NO_SEND_JOB} ORDER BY o.release_at, o.id LIMIT $2"
+        )))
+        .bind(now.as_millis())
+        .bind(SWEEP_BATCH)
+        .fetch_all(self.database.pool())
+        .await?;
+        let mut checked: HashMap<(String, String), bool> = HashMap::new();
+        for row in &waiting {
+            let address_id = match row.try_get::<Option<String>, _>("from_address_id")? {
+                Some(id) => Some(id),
+                None => row
+                    .try_get::<Option<String>, _>("auto_reply")?
+                    .and_then(|json| serde_json::from_str::<AutoReply>(&json).ok())
+                    .map(|auto| auto.from_address_id),
+            };
+            // No draft and no reply to build: the release cancels it.
+            let Some(address_id) = address_id else {
+                ready_again.push(row);
+                continue;
+            };
+            let mailbox: String = row.try_get("mailbox_id")?;
+            let key = (address_id.clone(), mailbox.clone());
+            let ready = match checked.get(&key) {
+                Some(ready) => *ready,
+                None => {
+                    let domain: Option<String> =
+                        sqlx::query_scalar("SELECT domain_id FROM mail_addresses WHERE id = $1")
+                            .bind(&address_id)
+                            .fetch_optional(self.database.pool())
+                            .await?;
+                    let ready = match domain {
+                        // The address is gone: the release holds it with the lasting reason.
+                        None => true,
+                        Some(domain) => match self
+                            .send_readiness(parse_id(&domain)?, Some(parse_id(&mailbox)?))
+                            .await
+                        {
+                            Ok(readiness) => readiness == SendReadiness::Ready,
+                            // Gone: the release decides what becomes of it.
+                            Err(MailError::NotFound) => true,
+                            Err(error) => return Err(error),
+                        },
+                    };
+                    checked.insert(key, ready);
+                    ready
+                }
+            };
+            if ready {
+                ready_again.push(row);
+            }
+        }
+
         let mut transaction = self.database.immediate_transaction().await?;
-        let rows = sqlx::query(
+        // `release_failed` for a day: the problem is not passing, it stops being retried.
+        sqlx::query(
+            "UPDATE mail_outbound SET hold_reason = 'release_error', updated_at = $1 \
+             WHERE status = 'held' AND hold_reason = 'release_failed' \
+             AND release_failed_at IS NOT NULL AND release_failed_at <= $2",
+        )
+        .bind(now.as_millis())
+        .bind(now.as_millis() - RELEASE_FAILED_GIVE_UP_MS)
+        .execute(&mut *transaction)
+        .await?;
+        let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
             "SELECT o.id, o.workspace_id FROM mail_outbound o WHERE o.status = 'held' \
              AND o.release_at <= $1 \
-             AND (o.hold_reason = 'release_failed' OR (o.hold_reason = 'dkim_inactive' \
+             AND (o.hold_reason IS NULL OR o.hold_reason IN ('rate_limit', 'release_failed') \
+             OR (o.hold_reason = 'dkim_inactive' \
              AND EXISTS (SELECT 1 FROM mail_drafts d \
              JOIN mail_addresses a ON a.id = d.from_address_id \
              JOIN mail_dkim_keys k ON k.domain_id = a.domain_id AND k.status = 'active' \
              WHERE d.id = o.draft_id))) \
-             AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.kind = 'mail.send' \
-             AND j.state IN ('queued', 'running') \
-             AND j.payload_json = '{\"outbound_id\":\"' || o.id || '\"}') \
-             ORDER BY o.release_at, o.id LIMIT $2",
-        )
+             AND {NO_SEND_JOB} ORDER BY o.release_at, o.id LIMIT $2"
+        )))
         .bind(now.as_millis())
         .bind(SWEEP_BATCH)
         .fetch_all(&mut *transaction)
         .await?;
-        for row in &rows {
+        let queued = rows.len() + ready_again.len();
+        for row in rows.iter().chain(ready_again) {
             let id = parse_id(&row.try_get::<String, _>("id")?)?;
             let workspace_id = parse_id(&row.try_get::<String, _>("workspace_id")?)?;
             enqueue(&mut transaction, &send_job(id, workspace_id, now)).await?;
         }
         transaction.commit().await?;
-        Ok(rows.len() as u64)
+        Ok(queued as u64)
     }
 
     /// `mail.send_sweep`, delivery side: recipients left `sending` past
@@ -989,7 +1097,8 @@ impl MailRepository {
     }
 
     /// Keeps a held message waiting with `reason` (shown in the Outbox) after a release failed.
-    /// Undo still brings its draft back.
+    /// Undo still brings its draft back. The first `release_failed` is remembered
+    /// (`release_failed_at`): the sweep gives up a day after it.
     pub async fn hold_release(
         &self,
         outbound_id: Id,
@@ -997,7 +1106,9 @@ impl MailRepository {
         now: TimestampMillis,
     ) -> Result<(), MailError> {
         sqlx::query(
-            "UPDATE mail_outbound SET hold_reason = $1, updated_at = $2 \
+            "UPDATE mail_outbound SET hold_reason = $1, updated_at = $2, \
+             release_failed_at = CASE WHEN $1 = 'release_failed' \
+             THEN COALESCE(release_failed_at, $2) ELSE NULL END \
              WHERE id = $3 AND status = 'held'",
         )
         .bind(reason)

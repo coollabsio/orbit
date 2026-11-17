@@ -3,9 +3,11 @@
 //! - **Matching.** An event names a recipient by the provider's message ID, else by the
 //!   correlation value Orbit put on the message (the outbound recipient's ID,
 //!   `{outbound}:{recipient}`, or the outbound's ID with the address), else by the sent
-//!   message's `Message-ID` header with the address. The recipient's message must have gone
-//!   through the route in the event's URL (`mail_outbound.route_id`), so a route's secret only
-//!   reaches the messages of that route. Anything else is ignored.
+//!   message's `Message-ID` header with the address. The recipient must have gone through the
+//!   route in the event's URL (the route of its last attempt, `mail_outbound_recipients.
+//!   route_id`, else the message's `mail_outbound.route_id`), so a route's secret only reaches
+//!   the messages of that route, also after the domain changed its route. Anything else is
+//!   ignored.
 //! - **Retry.** A recipient retried after the event happened (or with no time on the event)
 //!   ignores it: the provider's message ID and the correlation stay the same after **Retry**.
 //! - **Effects.** A bounce of a `delivered` or `deferred` recipient makes it `bounced`: `hard`
@@ -32,7 +34,9 @@ use sqlx::any::AnyRow;
 use sqlx::{Any, Transaction};
 
 use super::domains::parse_id;
-use super::outbound::{BounceKind, GAVE_UP, bounced_thread_to_inbox, plain_line, update_summary};
+use super::outbound::{
+    BounceKind, GAVE_UP, bounced_thread_to_inbox, is_automatic, plain_line, update_summary,
+};
 use super::suppressions::{SuppressionReason, bounce_codes, suppresses};
 use super::{MailError, MailRepository};
 
@@ -105,7 +109,7 @@ async fn match_recipient(
         let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
             "SELECT {RECIPIENT_COLUMNS} FROM mail_outbound_recipients r \
              JOIN mail_outbound o ON o.id = r.outbound_id \
-             WHERE r.provider_message_id IN ($1, $2) AND o.route_id = $3"
+             WHERE r.provider_message_id IN ($1, $2) AND COALESCE(r.route_id, o.route_id) = $3"
         )))
         .bind(id)
         .bind(format!("<{id}>"))
@@ -128,7 +132,7 @@ async fn match_recipient(
                 sqlx::query(sqlx::AssertSqlSafe(format!(
                     "SELECT {RECIPIENT_COLUMNS} FROM mail_outbound_recipients r \
                      JOIN mail_outbound o ON o.id = r.outbound_id \
-                     WHERE r.id = $1 AND r.outbound_id = $2 AND o.route_id = $3"
+                     WHERE r.id = $1 AND r.outbound_id = $2 AND COALESCE(r.route_id, o.route_id) = $3"
                 )))
                 .bind(recipient.to_string())
                 .bind(outbound.to_string())
@@ -144,7 +148,7 @@ async fn match_recipient(
                 sqlx::query(sqlx::AssertSqlSafe(format!(
                     "SELECT {RECIPIENT_COLUMNS} FROM mail_outbound_recipients r \
                      JOIN mail_outbound o ON o.id = r.outbound_id \
-                     WHERE (r.id = $1 OR r.outbound_id = $1) AND o.route_id = $2"
+                     WHERE (r.id = $1 OR r.outbound_id = $1) AND COALESCE(r.route_id, o.route_id) = $2"
                 )))
                 .bind(id.to_string())
                 .bind(&route)
@@ -161,7 +165,7 @@ async fn match_recipient(
             "SELECT {RECIPIENT_COLUMNS} FROM mail_messages m \
              JOIN mail_outbound o ON o.message_id = m.id \
              JOIN mail_outbound_recipients r ON r.outbound_id = o.id \
-             WHERE m.message_id_header = $1 AND o.route_id = $2"
+             WHERE m.message_id_header = $1 AND COALESCE(r.route_id, o.route_id) = $2"
         )))
         .bind(message_id)
         .bind(&route)
@@ -245,7 +249,7 @@ impl MailRepository {
                         )
                         .await?;
                     }
-                    if *hard {
+                    if *hard && !is_automatic(&mut transaction, recipient.outbound_id).await? {
                         self.check_pause(&mut transaction, recipient.workspace_id, now)
                             .await?;
                     }
@@ -273,8 +277,10 @@ impl MailRepository {
                 .bind(recipient.id.to_string())
                 .execute(&mut *transaction)
                 .await?;
-                self.check_pause(&mut transaction, recipient.workspace_id, now)
-                    .await?;
+                if !is_automatic(&mut transaction, recipient.outbound_id).await? {
+                    self.check_pause(&mut transaction, recipient.workspace_id, now)
+                        .await?;
+                }
                 EventOutcome::Applied
             }
             // a deferral only counts when it is newer than the row's last change, so a late or

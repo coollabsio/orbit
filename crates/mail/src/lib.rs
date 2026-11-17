@@ -50,4 +50,4 @@ pub use smtp::{
     StartTls, TARPIT_DELAY, TlsAcceptorHandle, TlsError, TlsInfo, is_docker_bridge, read_proxy_v2,
     run_session,
 };
-pub use vacation::{VacationInput, vacation_allowed};
+pub use vacation::{VacationInput, envelope_authenticated, vacation_allowed};

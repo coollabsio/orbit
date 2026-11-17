@@ -92,31 +92,53 @@ pub struct SendPolicyView {
 }
 
 /// Hard bounces and complaints among the recipients released in the 7 days up to `now`:
-/// (recipients, hard bounces, complaints). A complaint is a `complaint` suppression made in the
-/// window: a recipient a provider reported a complaint about (`complained_at`), also when its
-/// address was on the suppression list already.
+/// (recipients, hard bounces, complaints). A complaint is a recipient a provider reported a
+/// complaint about (`complained_at`) in the window, also when its address was on the
+/// suppression list already. After a resume (`mail_send_policies.resumed_at`) only recipients
+/// released after it count, so the bounces that paused the workspace cannot pause it again at
+/// once. Vacation replies (`mail_outbound.automatic`) never count: their recipients were not
+/// chosen by a member.
 async fn rates(
     connection: &mut AnyConnection,
     workspace_id: Id,
     now: i64,
 ) -> Result<(i64, i64, i64), MailError> {
+    let resumed: Option<i64> =
+        sqlx::query_scalar("SELECT resumed_at FROM mail_send_policies WHERE workspace_id = $1")
+            .bind(workspace_id.to_string())
+            .fetch_optional(&mut *connection)
+            .await?
+            .flatten();
+    let since = (now - WEEK_MS).max(resumed.unwrap_or(i64::MIN));
     let row = sqlx::query(
-        "SELECT COUNT(*) AS total,          CAST(COALESCE(SUM(CASE WHEN bounce_kind = 'hard' THEN 1 ELSE 0 END), 0) AS BIGINT) AS hard          FROM mail_outbound_recipients WHERE workspace_id = $1 AND released_at > $2          AND released_at <= $3",
+        "SELECT COUNT(*) AS total, \
+         CAST(COALESCE(SUM(CASE WHEN r.bounce_kind = 'hard' THEN 1 ELSE 0 END), 0) AS BIGINT) AS hard \
+         FROM mail_outbound_recipients r JOIN mail_outbound o ON o.id = r.outbound_id \
+         WHERE r.workspace_id = $1 AND o.automatic = 0 AND r.released_at > $2 \
+         AND r.released_at <= $3",
     )
     .bind(workspace_id.to_string())
-    .bind(now - WEEK_MS)
+    .bind(since)
     .bind(now)
     .fetch_one(&mut *connection)
     .await?;
-    let complaints: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM mail_outbound_recipients WHERE workspace_id = $1 \
-         AND complained_at > $2 AND complained_at <= $3",
-    )
+    let resumed_filter = if resumed.is_some() {
+        " AND r.released_at > $4"
+    } else {
+        ""
+    };
+    let mut complaints = sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(format!(
+        "SELECT COUNT(*) FROM mail_outbound_recipients r \
+         JOIN mail_outbound o ON o.id = r.outbound_id WHERE r.workspace_id = $1 \
+         AND o.automatic = 0 AND r.complained_at > $2 AND r.complained_at <= $3{resumed_filter}"
+    )))
     .bind(workspace_id.to_string())
     .bind(now - WEEK_MS)
-    .bind(now)
-    .fetch_one(&mut *connection)
-    .await?;
+    .bind(now);
+    if let Some(resumed) = resumed {
+        complaints = complaints.bind(resumed);
+    }
+    let complaints = complaints.fetch_one(&mut *connection).await?;
     Ok((row.try_get("total")?, row.try_get("hard")?, complaints))
 }
 
@@ -444,12 +466,13 @@ impl MailRepository {
     /// Whether `count` more recipients fit in the hour and day windows of the member and of the
     /// workspace at `now`: `None` when they do, else the first time they would (the latest of the
     /// four windows). `exclude` is the outbound row being checked: neither its draft (a held,
-    /// due row) nor its own recipient rows (a released row that delivery checks) count.
+    /// due row) nor its own recipient rows (a released row that delivery checks) count. Without
+    /// a member (`None`: the author left the workspace) only the workspace's windows apply.
     pub async fn window_allows(
         &self,
         transaction: &mut Transaction<'_, Any>,
         workspace_id: Id,
-        membership_id: Id,
+        membership_id: Option<Id>,
         count: i64,
         now: TimestampMillis,
         exclude: Option<Id>,
@@ -457,12 +480,17 @@ impl MailRepository {
         let limits = load_limits(transaction, workspace_id, self.cloud).await?;
         let now = now.as_millis();
         let mut later = None;
-        for (scope, window, limit) in [
-            (Some(membership_id), HOUR_MS, limits.per_user_hour),
-            (Some(membership_id), DAY_MS, limits.per_user_day),
-            (None, HOUR_MS, limits.per_ws_hour),
-            (None, DAY_MS, limits.per_ws_day),
+        for (member, window, limit) in [
+            (true, HOUR_MS, limits.per_user_hour),
+            (true, DAY_MS, limits.per_user_day),
+            (false, HOUR_MS, limits.per_ws_hour),
+            (false, DAY_MS, limits.per_ws_day),
         ] {
+            let scope = match (member, membership_id) {
+                (true, Some(membership_id)) => Some(membership_id),
+                (true, None) => continue,
+                (false, _) => None,
+            };
             let next = scope_allows(
                 transaction,
                 workspace_id,
@@ -756,8 +784,9 @@ impl MailRepository {
         Ok(view)
     }
 
-    /// Resumes a paused workspace (instance admins): clears the pause and records who did it.
-    /// The reason stays, so the workspace is never promoted. The `mail.send_sweep` queues the
+    /// Resumes a paused workspace (instance admins): clears the pause and records who did it
+    /// and when (`resumed_at`: the rates count only recipients released after it). The reason
+    /// stays, so the workspace is never promoted. The `mail.send_sweep` queues the
     /// held `paused` messages again. `NotFound` for a workspace without a policy.
     pub async fn resume_sending(
         &self,
@@ -768,8 +797,8 @@ impl MailRepository {
     ) -> Result<SendPolicyView, MailError> {
         let mut transaction = self.database.immediate_transaction().await?;
         let found = sqlx::query(
-            "UPDATE mail_send_policies SET paused_at = NULL, resumed_by = $1, updated_at = $2 \
-             WHERE workspace_id = $3",
+            "UPDATE mail_send_policies SET paused_at = NULL, resumed_by = $1, resumed_at = $2, \
+             updated_at = $2 WHERE workspace_id = $3",
         )
         .bind(by.to_string())
         .bind(now.as_millis())
