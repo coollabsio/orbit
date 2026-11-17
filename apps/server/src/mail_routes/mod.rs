@@ -639,9 +639,7 @@ fn detail(code: &'static str) -> &'static str {
         "link_origin_missing" => {
             "File links need a public address for this Orbit server (ORBIT_PUBLIC_ORIGIN or ORBIT_MAIL_CONTENT_ORIGIN)."
         }
-        "inline_not_image" => {
-            "Only a PNG, JPEG, GIF or WebP image can go in the message body."
-        }
+        "inline_not_image" => "Only a PNG, JPEG, GIF or WebP image can go in the message body.",
         "reserved_address" => "This address is reserved for bounces. Choose another one.",
         _ => "This action is not possible.",
     }

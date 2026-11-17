@@ -14,8 +14,8 @@ mod health;
 mod ingest;
 mod keys;
 mod labels;
-mod links;
 mod limits;
+mod links;
 mod mailboxes;
 mod outbound;
 mod providers;
@@ -50,10 +50,8 @@ pub use ingest::{
 };
 pub use keys::{MailKeys, open_blob, receipt_aad, seal_blob};
 pub use labels::Label;
+pub use limits::{Limits, SEND_POLICY_JOB, SendPolicyView, SendTier, TierLimits, send_policy_kind};
 pub use links::{FileLink, MailFileLinkView};
-pub use limits::{
-    Limits, SEND_POLICY_JOB, SendPolicyView, SendTier, TierLimits, send_policy_kind,
-};
 pub(crate) use mailboxes::suspend_owned_mailboxes;
 pub use mailboxes::{
     AddressKind, BulkResult, MailAddress, Mailbox, MailboxKind, MailboxStatus, NamePattern,
@@ -61,10 +59,10 @@ pub use mailboxes::{
 };
 pub use outbound::{
     AttemptResult, BounceKind, Claim, DELAYED_AFTER_MS, DeferCause, GAVE_UP,
-    LOCAL_DOMAIN_UNAVAILABLE, LOCAL_MAILBOX_SUSPENDED, LOCAL_TOO_LARGE, Outbound, OutboundDelivery,
-    MailDelivery, MailOutboundRecipient, OutboundItem, OutboundView, RETRY_STEPS_MS, ROUTE_TOO_LARGE, RecipientRow, RecipientStatus,
-    Recorded, SEND_JOB, SEND_TIMEOUT_MS, SENDING_LEASE_MS, ThreadAudience, UNREADABLE,
-    mail_send_kind,
+    LOCAL_DOMAIN_UNAVAILABLE, LOCAL_MAILBOX_SUSPENDED, LOCAL_TOO_LARGE, MailDelivery,
+    MailOutboundRecipient, Outbound, OutboundDelivery, OutboundItem, OutboundView, RETRY_STEPS_MS,
+    ROUTE_TOO_LARGE, RecipientRow, RecipientStatus, Recorded, SEND_JOB, SEND_TIMEOUT_MS,
+    SENDING_LEASE_MS, ThreadAudience, UNREADABLE, mail_send_kind,
 };
 pub use providers::{
     CreatedProvider, MailProvider, NewProvider, NewRejection, ProviderChange, ProviderKind,

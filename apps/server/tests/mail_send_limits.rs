@@ -738,8 +738,7 @@ async fn promotion_after_14_clean_days() {
 #[tokio::test]
 async fn no_promotion_if_ever_paused() {
     let f = Fixture::new().await;
-    f.policy("new", "first_paused_at = 5")
-        .await;
+    f.policy("new", "first_paused_at = 5").await;
     assert_eq!(
         f.mail
             .run_send_policy(TimestampMillis::now())
