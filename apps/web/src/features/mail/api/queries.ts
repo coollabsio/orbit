@@ -23,6 +23,7 @@ import {
   listMailDrafts,
   listMailOutbound,
   listMailSnippets,
+  listMailSendPolicies,
   listMailSuppressions,
   listWorkspaceMailSendRoutes,
   searchMailContacts,
@@ -477,5 +478,13 @@ export function useSendPolicy(enabled = true) {
     enabled,
     queryKey: mailKeys.sendPolicy(workspaceId),
     queryFn: async () => required((await getMailSendPolicy({ client: apiClient, path: { workspace_id: workspaceId }, throwOnError: true })).data),
+  })
+}
+
+/** Every workspace's tier, use, rates and pause, paused ones first (root user). */
+export function useSendPolicies() {
+  return useQuery({
+    queryKey: queryKeys.adminMailSendPolicies,
+    queryFn: async () => required((await listMailSendPolicies({ client: apiClient, throwOnError: true })).data),
   })
 }

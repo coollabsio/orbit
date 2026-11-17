@@ -19,10 +19,11 @@ import {
 import type { User } from '@/features/workspaces/models'
 import { AddressFields } from './MailboxForm'
 import { mailProblem } from './mailSettingsLib'
+import { VacationForm } from './VacationForm'
 
 const failed = (fallback: string) => (error: unknown) => toast.error(mailProblem(error, fallback))
 
-/** One mailbox opened from the list: name, addresses, members, suspend and delete. */
+/** One mailbox opened from the list: name, addresses, members, a shared one's vacation reply, suspend and delete. */
 export function MailboxDetails({ mailbox, domains, members }: { mailbox: MailMailbox; domains: MailDomain[]; members: User[] }) {
   const ids = useId()
   const rename = useUpdateMailbox()
@@ -126,6 +127,12 @@ export function MailboxDetails({ mailbox, domains, members }: { mailbox: MailMai
           </p>
         )}
       </section>
+
+      {mailbox.kind === 'shared' ? (
+        <section aria-label="Vacation reply" className="flex max-w-2xl flex-col gap-2">
+          <VacationForm mailboxId={mailbox.id} mailboxName={mailbox.name} />
+        </section>
+      ) : null}
 
       <div className="flex flex-wrap items-center gap-2">
         {ownerLeft ? null : (

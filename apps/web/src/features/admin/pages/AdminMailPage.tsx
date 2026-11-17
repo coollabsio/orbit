@@ -13,6 +13,8 @@ import { SettingsRow } from '@/features/settings/components/SettingsParts'
 import { dateTime, mailProblem } from '@/features/settings/pages/mail/mailSettingsLib'
 import { MailTestCard } from '@/features/admin/components/MailTestCard'
 import { MailProviders } from '@/features/settings/pages/mail/MailProvidersPage'
+import { SendRoutes } from '@/features/settings/pages/mail/MailSendingPage'
+import { DefaultRouteCard, SendPoliciesCard, TierDefaultsCard } from '@/features/admin/components/MailSendingAdmin'
 
 type HealthState = 'ok' | 'warning' | 'error' | 'info'
 
@@ -27,7 +29,10 @@ interface HealthItem {
 const STATE_ICONS: Record<HealthState, typeof TickCircle> = { ok: TickCircle, warning: Warning, error: CloseCircle, info: InfoCircle }
 const STATE_WORDS: Record<HealthState, string> = { ok: 'OK', warning: 'Warning', error: 'Problem', info: 'Note' }
 
-/** The instance's mail: the Mail switch, the listener's health, and a test message. */
+/**
+ * The instance's mail: the switches, receiving (providers, the listener's health, a test message) and sending (routes,
+ * the default route, the tier limits and each workspace's sending).
+ */
 export function AdminMailPage() {
   const admin = useAdminMail()
   const providers = useMailProviders('instance')
@@ -42,6 +47,10 @@ export function AdminMailPage() {
       <MailProviders scope="instance" />
       <HealthCard admin={admin.data} hasProviders={hasProviders} refreshing={admin.isFetching} onRefresh={() => void admin.refetch()} />
       <MailTestCard admin={admin.data} />
+      <SendRoutes scope="instance" hostname={admin.data.hostname} />
+      <DefaultRouteCard />
+      <TierDefaultsCard />
+      <SendPoliciesCard />
     </>
   )
 }
@@ -49,7 +58,7 @@ export function AdminMailPage() {
 function DomainsCard({ admin }: { admin: MailAdmin }) {
   const save = useSetAdminMail()
   return (
-    <SettingsCard title="Mail" description="Orbit receives mail for the verified domains of each workspace, through its own SMTP listener or through a mail provider." flush>
+    <SettingsCard title="Mail" description="Orbit receives and sends mail for the verified domains of each workspace, through its own SMTP listener or through a mail provider." flush>
       <div className="flex flex-col divide-y">
         <SettingsRow className="flex-nowrap">
           <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[0.8125rem] font-medium text-foreground">
@@ -69,7 +78,7 @@ function DomainsCard({ admin }: { admin: MailAdmin }) {
         <SettingsRow className="flex-nowrap">
           <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[0.8125rem] font-medium text-foreground">
             Workspaces can add their own providers
-            <InfoTip text="Owners and admins connect their own PostShiba, Cloudflare, Postmark, Mailgun, Resend or SES account. Off: no new ones; existing ones keep receiving." />
+            <InfoTip text="Owners and admins connect their own PostShiba, Cloudflare, Postmark, Mailgun, Resend or SES account, and their own send routes. Off: no new ones; existing ones keep working." />
           </span>
           <Switch
             aria-label="Workspaces can add their own providers"
@@ -82,10 +91,10 @@ function DomainsCard({ admin }: { admin: MailAdmin }) {
           />
         </SettingsRow>
         <SettingsRow>
-          <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-[0.8125rem]">
-            <span className="font-medium text-foreground">Mail hostname</span>
-            <span className="text-xs text-muted-foreground">From <code className="font-mono">ORBIT_MAIL_HOSTNAME</code>: the SMTP greeting, the MX target and the name the certificate must cover.</span>
-          </div>
+          <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[0.8125rem] font-medium text-foreground">
+            Mail hostname
+            <InfoTip text="From ORBIT_MAIL_HOSTNAME: the SMTP greeting, the MX target, the name the certificate must cover and, for direct sending, the name of the sending address. Without it, Orbit cannot send directly." />
+          </span>
           <code className="font-mono text-[0.8125rem]">{admin.hostname ?? 'Not set'}</code>
         </SettingsRow>
         <SettingsRow>

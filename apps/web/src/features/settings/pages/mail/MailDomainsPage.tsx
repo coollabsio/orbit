@@ -4,7 +4,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { ChevronRight, Danger, Global, Refresh } from 'reicon-react'
 import { cn } from 'cn'
-import type { MailDomain, MailMailbox, MailProviderView } from '@orbit/api/generated/types.gen'
+import type { MailDomain, MailMailbox, MailProviderView, MailSendRouteList } from '@orbit/api/generated/types.gen'
 import { confirmAction } from '@/components/common/confirmAction'
 import { EmptyState } from '@/components/common/EmptyState'
 import { InfoTip } from '@/components/common/InfoTip'
@@ -18,13 +18,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@/components/ui/switch'
 import { mailKeys } from '@/features/mail/api/keys'
 import { useCheckDomain, useCreateDomain, useDeleteDomain, useSetCatchAll, useSetDomainEnabled } from '@/features/mail/api/mutations'
-import { useMailboxes, useMailDomain, useMailDomains, useMailProviders } from '@/features/mail/api/queries'
+import { useMailboxes, useMailDomain, useMailDomains, useMailProviders, useSendRoutes } from '@/features/mail/api/queries'
 import { SettingsRow } from '@/features/settings/components/SettingsParts'
 import { useCan } from '@/features/workspaces/permissions'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { shortDate } from '@/lib/format'
-import { DomainRouteRow, RouteSelect } from './DomainRoute'
-import { MailDomainRecords } from './MailDomainRecords'
+import { DomainRouteRow, DomainSendRouteRow, RouteSelect } from './DomainRoute'
+import { DomainSendRecords, MailDomainRecords } from './MailDomainRecords'
 import { count, dateTime, DIRECT, domainHealth, isMailDisabled, mailProblem, since } from './mailSettingsLib'
 
 /** **Check now** reads the domain this often until the check job has run, for at most `CHECK_WAIT_MS`. */
@@ -48,6 +48,7 @@ function MailDomains() {
   const mailboxes = useMailboxes()
   const providerList = useMailProviders('workspace')
   const providers = providerList.data?.providers ?? []
+  const sendRoutes = useSendRoutes('workspace')
   const create = useCreateDomain()
   const [name, setName] = useState('')
   const [route, setRoute] = useState(DIRECT)
@@ -70,7 +71,7 @@ function MailDomains() {
         <Alert>
           <Danger />
           <AlertTitle>Mail is off on this Orbit server</AlertTitle>
-          <AlertDescription>An instance administrator can turn it on in Admin → Inbound mail.</AlertDescription>
+          <AlertDescription>An instance administrator can turn it on in Admin → Mail.</AlertDescription>
         </Alert>
       ) : null}
       <SettingsCard title="Add a domain" description="Orbit receives mail for the domain once its verification record is in the DNS.">
@@ -110,12 +111,24 @@ function MailDomains() {
       {domains.data?.length === 0 ? (
         <EmptyState icon={Global} title="No mail domains yet" description="Add a domain above, then publish its DNS records." />
       ) : null}
-      {domains.data?.map((domain) => <DomainCard key={domain.id} listed={domain} mailboxes={mailboxes.data ?? []} providers={providers} />)}
+      {domains.data?.map((domain) => (
+        <DomainCard key={domain.id} listed={domain} mailboxes={mailboxes.data ?? []} providers={providers} sendRoutes={sendRoutes.data ?? null} />
+      ))}
     </>
   )
 }
 
-function DomainCard({ listed, mailboxes, providers }: { listed: MailDomain; mailboxes: MailMailbox[]; providers: MailProviderView[] }) {
+function DomainCard({
+  listed,
+  mailboxes,
+  providers,
+  sendRoutes,
+}: {
+  listed: MailDomain
+  mailboxes: MailMailbox[]
+  providers: MailProviderView[]
+  sendRoutes: MailSendRouteList | null
+}) {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const workspaceId = useWorkspace().workspace.id
@@ -228,6 +241,7 @@ function DomainCard({ listed, mailboxes, providers }: { listed: MailDomain; mail
               </div>
             ) : null}
             {providers.length > 0 || domain.provider ? <DomainRouteRow domain={domain} providers={providers} /> : null}
+            {sendRoutes && sendRoutes.routes.length > 0 ? <DomainSendRouteRow domain={domain} routes={sendRoutes} /> : null}
             <SettingsRow className="flex-nowrap">
               <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[0.8125rem] font-medium text-foreground">
                 Mail on
@@ -262,6 +276,7 @@ function DomainCard({ listed, mailboxes, providers }: { listed: MailDomain; mail
                 </SelectContent>
               </Select>
             </SettingsRow>
+            <DomainSendRecords domain={domain} />
             <div className="px-2 py-1">
               <MailDomainRecords records={domain.records} checked={Boolean(domain.checked_at)} />
             </div>

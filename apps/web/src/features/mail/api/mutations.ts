@@ -43,6 +43,28 @@ import {
   updateMailLabel,
   updateMailThread,
   updateMailThreads,
+  createInstanceMailProviderSendRoute,
+  createInstanceMailSendRoute,
+  createMailSnippet,
+  createWorkspaceMailProviderSendRoute,
+  createWorkspaceMailSendRoute,
+  deleteInstanceMailSendRoute,
+  deleteMailSignature,
+  deleteMailSnippet,
+  deleteMailSuppression,
+  deleteWorkspaceMailSendRoute,
+  putMailSettings,
+  putMailSignature,
+  resumeMailSending,
+  rotateMailDomainDkim,
+  setMailDomainSendRoute,
+  setMailSendDefault,
+  setMailSendPolicy,
+  testInstanceMailSendRoute,
+  testWorkspaceMailSendRoute,
+  updateInstanceMailSendRoute,
+  updateMailSnippet,
+  updateWorkspaceMailSendRoute,
 } from '@orbit/api/generated/sdk.gen'
 import type {
   CreateMailboxBody,
@@ -62,6 +84,12 @@ import type {
   SetMailAdminBody,
   UpdateMailLabelBody,
   UpdateMailProviderBody,
+  CreateMailSendRouteBody,
+  CreateMailSnippetBody,
+  CreateProviderSendRouteBody,
+  SetMailSendPolicyBody,
+  UpdateMailSendRouteBody,
+  UpdateMailSnippetBody,
 } from '@orbit/api/generated/types.gen'
 import { queryKeys } from '@/api/queryKeys'
 import { useContext } from 'react'
@@ -790,5 +818,248 @@ export function useSetVacation() {
     mutationFn: async ({ mailboxId, body }: { mailboxId: string; body: PutMailVacationBody }) =>
       required((await putMailboxVacation({ client: apiClient, path: { workspace_id: workspaceId, mailbox_id: mailboxId }, body, throwOnError: true })).data),
     onSuccess: (vacation, { mailboxId }) => queryClient.setQueryData(mailKeys.vacation(workspaceId, mailboxId), vacation),
+  })
+}
+
+// Sending settings (slice 2)
+
+/** Send routes of the root user (`instance`) or of the workspace: the list and the domains that show their route. */
+function useSendRouteInvalidation(scope: ProviderScope) {
+  const queryClient = useQueryClient()
+  const workspaceId = useOptionalWorkspaceId()
+  return () => {
+    void queryClient.invalidateQueries({ queryKey: scope === 'instance' ? queryKeys.adminMailSendRoutes : mailKeys.sendRoutes(workspaceId) })
+    if (workspaceId) void queryClient.invalidateQueries({ queryKey: mailKeys.all(workspaceId) })
+  }
+}
+
+export function useCreateSendRoute(scope: ProviderScope) {
+  const workspaceId = useOptionalWorkspaceId()
+  const invalidate = useSendRouteInvalidation(scope)
+  return useMutation({
+    mutationFn: async (body: CreateMailSendRouteBody) =>
+      required(
+        scope === 'instance'
+          ? (await createInstanceMailSendRoute({ client: apiClient, body, throwOnError: true })).data
+          : (await createWorkspaceMailSendRoute({ client: apiClient, path: { workspace_id: workspaceId }, body, throwOnError: true })).data,
+      ),
+    onSettled: invalidate,
+  })
+}
+
+/** Secrets left out of `body.secrets` keep their values; `body.settings` replaces the settings. */
+export function useUpdateSendRoute(scope: ProviderScope) {
+  const workspaceId = useOptionalWorkspaceId()
+  const invalidate = useSendRouteInvalidation(scope)
+  return useMutation({
+    mutationFn: async ({ routeId, body }: { routeId: string; body: UpdateMailSendRouteBody }) =>
+      required(
+        scope === 'instance'
+          ? (await updateInstanceMailSendRoute({ client: apiClient, path: { route_id: routeId }, body, throwOnError: true })).data
+          : (await updateWorkspaceMailSendRoute({ client: apiClient, path: { workspace_id: workspaceId, route_id: routeId }, body, throwOnError: true })).data,
+      ),
+    onSettled: invalidate,
+  })
+}
+
+/** Refused while a domain uses the route (`route_in_use`) or while it is the default (`route_is_default`). */
+export function useDeleteSendRoute(scope: ProviderScope) {
+  const workspaceId = useOptionalWorkspaceId()
+  const invalidate = useSendRouteInvalidation(scope)
+  return useMutation({
+    mutationFn: async (routeId: string) => {
+      if (scope === 'instance') {
+        await deleteInstanceMailSendRoute({ client: apiClient, path: { route_id: routeId }, throwOnError: true })
+      } else {
+        await deleteWorkspaceMailSendRoute({ client: apiClient, path: { workspace_id: workspaceId, route_id: routeId }, throwOnError: true })
+      }
+    },
+    onSettled: invalidate,
+  })
+}
+
+/** **Send test**: a message to `to` through the route, with the result of each step. */
+export function useTestSendRoute(scope: ProviderScope) {
+  const workspaceId = useOptionalWorkspaceId()
+  const invalidate = useSendRouteInvalidation(scope)
+  return useMutation({
+    mutationFn: async ({ routeId, to }: { routeId: string; to: string }) =>
+      required(
+        scope === 'instance'
+          ? (await testInstanceMailSendRoute({ client: apiClient, path: { route_id: routeId }, body: { to }, throwOnError: true })).data
+          : (await testWorkspaceMailSendRoute({ client: apiClient, path: { workspace_id: workspaceId, route_id: routeId }, body: { to }, throwOnError: true })).data,
+      ),
+    // the route's last send or error changed
+    onSettled: invalidate,
+  })
+}
+
+/** **Also send through this provider**: a route with the provider's account and only what it lacks. */
+export function useCreateProviderSendRoute(scope: ProviderScope) {
+  const workspaceId = useOptionalWorkspaceId()
+  const invalidate = useSendRouteInvalidation(scope)
+  return useMutation({
+    mutationFn: async ({ providerId, body }: { providerId: string; body: CreateProviderSendRouteBody }) =>
+      required(
+        scope === 'instance'
+          ? (await createInstanceMailProviderSendRoute({ client: apiClient, path: { provider_id: providerId }, body, throwOnError: true })).data
+          : (
+              await createWorkspaceMailProviderSendRoute({
+                client: apiClient,
+                path: { workspace_id: workspaceId, provider_id: providerId },
+                body,
+                throwOnError: true,
+              })
+            ).data,
+      ),
+    onSettled: invalidate,
+  })
+}
+
+/** The instance route that domains without one use; `null` clears it (root user). */
+export function useSetSendDefault() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (routeId: string | null) =>
+      required((await setMailSendDefault({ client: apiClient, body: { route_id: routeId }, throwOnError: true })).data),
+    onSuccess: (list) => queryClient.setQueryData(queryKeys.adminMailSendRoutes, list),
+  })
+}
+
+/** A domain's send route: one of the workspace or an instance route; `null` uses the instance default. */
+export function useSetDomainSendRoute() {
+  const queryClient = useQueryClient()
+  const workspaceId = useWorkspaceId()
+  return useMutation({
+    mutationFn: async ({ domainId, routeId }: { domainId: string; routeId: string | null }) =>
+      required(
+        (
+          await setMailDomainSendRoute({
+            client: apiClient,
+            path: { workspace_id: workspaceId, domain_id: domainId },
+            body: { route_id: routeId },
+            throwOnError: true,
+          })
+        ).data,
+      ),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: mailKeys.domains(workspaceId) })
+      void queryClient.invalidateQueries({ queryKey: mailKeys.sendRoutes(workspaceId) })
+      // the From picker says whether an address can send
+      void queryClient.invalidateQueries({ queryKey: mailKeys.fromAddresses(workspaceId).slice(0, 3) })
+    },
+  })
+}
+
+/** Starts a DKIM key rotation; the domain comes back with the new record to publish (`409 rotation_pending`). */
+export function useRotateDkim() {
+  const queryClient = useQueryClient()
+  const workspaceId = useWorkspaceId()
+  return useMutation({
+    mutationFn: async (domainId: string) =>
+      required((await rotateMailDomainDkim({ client: apiClient, path: { workspace_id: workspaceId, domain_id: domainId }, throwOnError: true })).data),
+    onSuccess: (domain) => queryClient.setQueryData(mailKeys.domain(workspaceId, domain.id), domain),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: mailKeys.domains(workspaceId), exact: true }),
+  })
+}
+
+/** Takes an address off the suppression list: mail to it is sent again. */
+export function useDeleteSuppression() {
+  const queryClient = useQueryClient()
+  const workspaceId = useWorkspaceId()
+  return useMutation({
+    mutationFn: async (address: string) => {
+      await deleteMailSuppression({ client: apiClient, path: { workspace_id: workspaceId, address }, throwOnError: true })
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: mailKeys.suppressions(workspaceId) }),
+  })
+}
+
+/** The signature of one address the user sends as; an empty body removes it. */
+export function useSaveSignature() {
+  const queryClient = useQueryClient()
+  const workspaceId = useWorkspaceId()
+  return useMutation({
+    mutationFn: async ({ addressId, bodyHtml }: { addressId: string; bodyHtml: string }) => {
+      if (bodyHtml.trim() === '') {
+        await deleteMailSignature({ client: apiClient, path: { workspace_id: workspaceId, address_id: addressId }, throwOnError: true })
+        return { address_id: addressId, body_html: null }
+      }
+      return required(
+        (await putMailSignature({ client: apiClient, path: { workspace_id: workspaceId, address_id: addressId }, body: { body_html: bodyHtml }, throwOnError: true }))
+          .data,
+      )
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: mailKeys.signatures(workspaceId) })
+      // the composer reads each address's signature with the From addresses
+      void queryClient.invalidateQueries({ queryKey: mailKeys.fromAddresses(workspaceId).slice(0, 3) })
+    },
+  })
+}
+
+/** The member's undo send delay (0, 5, 10, 20 or 30 s). */
+export function useSaveMailSettings() {
+  const queryClient = useQueryClient()
+  const workspaceId = useWorkspaceId()
+  return useMutation({
+    mutationFn: async (undoSendSeconds: number) =>
+      required((await putMailSettings({ client: apiClient, path: { workspace_id: workspaceId }, body: { undo_send_seconds: undoSendSeconds }, throwOnError: true })).data),
+    onSuccess: (settings) => queryClient.setQueryData(mailKeys.settingsMe(workspaceId), settings),
+  })
+}
+
+export function useCreateSnippet() {
+  const queryClient = useQueryClient()
+  const workspaceId = useWorkspaceId()
+  return useMutation({
+    mutationFn: async (body: CreateMailSnippetBody) =>
+      required((await createMailSnippet({ client: apiClient, path: { workspace_id: workspaceId }, body, throwOnError: true })).data),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: mailKeys.snippets(workspaceId) }),
+  })
+}
+
+export function useUpdateSnippet() {
+  const queryClient = useQueryClient()
+  const workspaceId = useWorkspaceId()
+  return useMutation({
+    mutationFn: async ({ snippetId, body }: { snippetId: string; body: UpdateMailSnippetBody }) =>
+      required((await updateMailSnippet({ client: apiClient, path: { workspace_id: workspaceId, snippet_id: snippetId }, body, throwOnError: true })).data),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: mailKeys.snippets(workspaceId) }),
+  })
+}
+
+export function useDeleteSnippet() {
+  const queryClient = useQueryClient()
+  const workspaceId = useWorkspaceId()
+  return useMutation({
+    mutationFn: async (snippetId: string) => {
+      await deleteMailSnippet({ client: apiClient, path: { workspace_id: workspaceId, snippet_id: snippetId }, throwOnError: true })
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: mailKeys.snippets(workspaceId) }),
+  })
+}
+
+// Send policies (root user)
+
+const invalidatePolicies = (queryClient: QueryClient) => queryClient.invalidateQueries({ queryKey: queryKeys.adminMailSendPolicies })
+
+/** A workspace's tier, and for `custom` its limits. */
+export function useSetSendPolicy() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ workspaceId, body }: { workspaceId: string; body: SetMailSendPolicyBody }) =>
+      required((await setMailSendPolicy({ client: apiClient, path: { workspace_id: workspaceId }, body, throwOnError: true })).data),
+    onSettled: () => invalidatePolicies(queryClient),
+  })
+}
+
+/** **Resume**: a paused workspace sends again; its held messages go at the next sweep. */
+export function useResumeSending() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (workspaceId: string) =>
+      required((await resumeMailSending({ client: apiClient, path: { workspace_id: workspaceId }, throwOnError: true })).data),
+    onSettled: () => invalidatePolicies(queryClient),
   })
 }
