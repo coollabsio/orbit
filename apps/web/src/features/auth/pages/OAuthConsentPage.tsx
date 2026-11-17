@@ -4,7 +4,6 @@ import { Navigate, useSearchParams } from 'react-router'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { InfoTip } from '@/components/common/InfoTip'
 import { LoadingScreen } from '@/components/common/LoadingScreen'
 import { AccessPicker, ProjectPicker, type ScopeResource } from '@/components/common/ScopeAccess'
@@ -17,6 +16,10 @@ import { LoadingText } from '@/components/ui/spinner'
 
 // Anonymous consent sessions must not trigger the app-wide /login redirect.
 const consentClient = createApiClient()
+
+// What the connection may use in one workspace: all projects, or the selected ones.
+type Pick = { selected: string[]; all: boolean }
+const NO_PICK: Pick = { selected: [], all: false }
 
 type Scope = 'tasks:write' | 'docs:read' | 'docs:write' | 'chat:read'
 
@@ -34,9 +37,8 @@ export function OAuthConsentPage() {
   const [remote, setRemote] = useState(false)
   const [callback, setCallback] = useState<{ url: string; approved: boolean } | null>(null)
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
-  const [pickedWorkspace, setWorkspace] = useState('')
-  const [selected, setSelected] = useState<string[]>([])
-  const [allProjects, setAllProjects] = useState(false)
+  // A workspace is in the connection when it has an entry here.
+  const [picks, setPicks] = useState<Record<string, Pick>>({})
   const [scopes, setScopes] = useState<Scope[]>([])
   const consent = useQuery({
     queryKey: ['oauth-consent', request, user.data?.id],
@@ -47,12 +49,18 @@ export function OAuthConsentPage() {
   })
   const workspaces = consent.data?.workspaces ?? []
   // A single workspace needs no picker.
-  const workspace = workspaces.length === 1 ? workspaces[0].id : pickedWorkspace
+  const chosen = workspaces.length === 1 ? workspaces : workspaces.filter(({ id }) => id in picks)
+  const pickOf = (id: string) => picks[id] ?? NO_PICK
+  const setPick = (id: string, change: Partial<Pick>) => setPicks((current) => ({ ...current, [id]: { ...(current[id] ?? NO_PICK), ...change } }))
+  const toggleWorkspace = (id: string, on: boolean) => setPicks((current) => {
+    const { [id]: _removed, ...rest } = current
+    return on ? { ...rest, [id]: NO_PICK } : rest
+  })
   const approve = useMutation({
     mutationFn: async (approved: boolean) => {
       const result = await oauthRequest<{ redirect_uri: string }>(`/api/v1/oauth/consent/${encodeURIComponent(request)}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ csrf_token: consent.data?.csrf_token, approved, workspace_id: workspace || null, project_ids: allProjects ? [] : selected, all_projects: allProjects, scopes }),
+        body: JSON.stringify({ csrf_token: consent.data?.csrf_token, approved, workspaces: approved ? chosen.map(({ id }) => ({ workspace_id: id, project_ids: pickOf(id).all ? [] : pickOf(id).selected, all_projects: pickOf(id).all })) : [], scopes }),
       })
       if (remote) setCallback({ url: result.redirect_uri, approved })
       else window.location.assign(result.redirect_uri)
@@ -79,18 +87,29 @@ export function OAuthConsentPage() {
   </div></AuthCard>
   if (user.isPending) return <LoadingScreen />
   if (user.data === null) return <Navigate to={loginPath(`/oauth/consent?request=${request}`)} replace />
-  const workspaceProjects = consent.data?.projects.filter((project) => project.workspace_id === workspace) ?? []
+  const complete = chosen.length > 0 && chosen.every(({ id }) => pickOf(id).all || (pickOf(id).selected.length > 0 && pickOf(id).selected.length <= 100))
   return <AuthCard><div className="grid gap-5">
     <AuthBrand />
     <h1 className="text-xl font-semibold">Connect to Orbit</h1>
     {user.isError || consent.isError || !/^[A-Za-z0-9_-]{43}$/.test(request) ? <p role="alert">This request is not available. Restart the connection from your MCP client.</p> : consent.data ? <>
-      <p><strong>{consent.data.client_name}</strong> wants to connect to the workspace and projects you select.</p>
+      <p><strong>{consent.data.client_name}</strong> wants to connect to the workspaces and projects you select.</p>
       <p className="text-sm text-muted-foreground">Signed in as {user.data?.display_name}.</p>
-      {workspaces.length > 1 ? <Label>Workspace<Select value={workspace} onValueChange={(value) => { setWorkspace(value ?? ''); setSelected([]) }}>
-        <SelectTrigger><SelectValue placeholder="Select a workspace">{workspaces.find(({ id }) => id === workspace)?.name ?? 'Select a workspace'}</SelectValue></SelectTrigger>
-        <SelectContent>{workspaces.map(({ id, name }) => <SelectItem key={id} value={id}>{name}</SelectItem>)}</SelectContent>
-      </Select></Label> : workspaces.length ? <p className="text-sm">Workspace: <strong>{workspaces[0].name}</strong></p> : <p className="text-sm text-muted-foreground">No workspaces available. Create a workspace in Orbit, then restart the connection.</p>}
-      {workspaces.length ? <AccessPicker id="consent-access" resources={RESOURCES.map((resource) => resource.name === 'Tasks' ? { ...resource, details: <ProjectPicker id="consent-projects" projects={workspaceProjects} selected={selected} onChange={setSelected} all={allProjects} onAllChange={setAllProjects} empty={workspace && !workspaceProjects.length ? 'No projects available.' : undefined} /> } : resource)} scopes={scopes} onChange={setScopes} /> : null}
+      {workspaces.length > 1 ? <div role="group" aria-labelledby="consent-workspaces" className="grid gap-3">
+        <span id="consent-workspaces" className="text-sm font-medium">Workspaces</span>
+        {workspaces.map(({ id, name }) => <Label key={id} className="flex items-center gap-2">
+          <Checkbox checked={id in picks} onCheckedChange={(checked) => toggleWorkspace(id, Boolean(checked))} />
+          {name}
+        </Label>)}
+      </div> : workspaces.length ? <p className="text-sm">Workspace: <strong>{workspaces[0].name}</strong></p> : <p className="text-sm text-muted-foreground">No workspaces available. Create a workspace in Orbit, then restart the connection.</p>}
+      {workspaces.length ? <AccessPicker id="consent-access" resources={RESOURCES.map((resource) => resource.name === 'Tasks' ? { ...resource, details: <div className="grid gap-4">
+        {chosen.length ? chosen.map(({ id, name }) => {
+          const projects = consent.data?.projects.filter((project) => project.workspace_id === id) ?? []
+          return <div key={id} className="grid gap-2">
+            {workspaces.length > 1 ? <p className="text-sm font-medium">{name}</p> : null}
+            <ProjectPicker id={`consent-projects-${id}`} projects={projects} selected={pickOf(id).selected} onChange={(selected) => setPick(id, { selected })} all={pickOf(id).all} onAllChange={(all) => setPick(id, { all })} empty={!projects.length ? 'No projects available.' : undefined} />
+          </div>
+        }) : <p className="text-sm text-muted-foreground">Select a workspace to choose its projects.</p>}
+      </div> } : resource)} scopes={scopes} onChange={setScopes} /> : null}
       {workspaces.length ? <div className="flex items-center gap-1.5">
         <Label className="flex items-center gap-2">
           <Checkbox checked={remote} disabled={approve.isPending} onCheckedChange={(checked) => setRemote(Boolean(checked))} />
@@ -101,7 +120,7 @@ export function OAuthConsentPage() {
       {approve.isError ? <p role="alert" className="text-sm text-destructive">{approve.error.message}</p> : null}
       <div className="flex gap-3">
         <Button variant="outline" disabled={approve.isPending} onClick={() => approve.mutate(false)}>Deny</Button>
-        {workspaces.length ? <Button disabled={!workspace || (!allProjects && (!selected.length || selected.length > 100)) || approve.isPending} onClick={() => approve.mutate(true)}>{scopes.length ? 'Allow selected access' : 'Allow read access'}</Button> : null}
+        {workspaces.length ? <Button disabled={!complete || approve.isPending} onClick={() => approve.mutate(true)}>{scopes.length ? 'Allow selected access' : 'Allow read access'}</Button> : null}
       </div>
       {workspaces.length ? <p className="text-xs text-muted-foreground">Allowing will redirect to <strong className="break-words font-medium text-foreground">{consent.data.redirect_to}</strong>.</p> : null}
     </> : <p><LoadingText>Loading connection…</LoadingText></p>}
