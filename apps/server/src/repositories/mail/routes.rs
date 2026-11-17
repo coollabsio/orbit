@@ -485,9 +485,7 @@ pub fn classify_ip(ip: IpAddr) -> HostClass {
                 HostClass::Unusable
             } else if first & 0xffc0 == 0xfe80 {
                 HostClass::LinkLocal
-            } else if first & 0xffc0 == 0xfec0 {
-                HostClass::Private
-            } else if first & 0xfe00 == 0xfc00 {
+            } else if first & 0xffc0 == 0xfec0 || first & 0xfe00 == 0xfc00 {
                 HostClass::Private
             } else {
                 HostClass::Public
@@ -969,6 +967,15 @@ impl MailRepository {
             .filter(|(provider, _)| provider.workspace_id == workspace_of(scope))
             .ok_or(MailError::NotFound)?;
         let kind = SendRouteKind::for_provider(provider.kind);
+        // A provider-made Cloudflare route signs with the provider's secret.
+        if kind == SendRouteKind::Cloudflare
+            && input
+                .secrets
+                .get("event_secret")
+                .is_some_and(|value| !value.trim().is_empty())
+        {
+            return Err(MailError::Invalid { field: "secrets" });
+        }
         let mut fields: BTreeMap<String, String> = provider_prefill(&provider_secrets)
             .into_iter()
             .map(|(name, value)| (name.to_owned(), value))
@@ -1042,6 +1049,11 @@ impl MailRepository {
                 if given
                     .keys()
                     .any(|name| !route.kind.secret_names().contains(&name.as_str()))
+                    || (route.kind == SendRouteKind::Cloudflare
+                        && route.provider_id.is_some()
+                        && given
+                            .get("event_secret")
+                            .is_some_and(|value| !value.trim().is_empty()))
                 {
                     return Err(MailError::Invalid { field: "secrets" });
                 }
@@ -1084,7 +1096,7 @@ impl MailRepository {
             "mail.send_route_updated",
             route_id,
             request_id,
-            json!({ "name": name }),
+            json!({ "name": name, "login_cleared": change.clear_login }),
             now,
         )
         .await?;

@@ -63,8 +63,8 @@ pub(crate) struct MailSendRouteView {
     events_url: Option<String>,
     /// Secrets Orbit made for this route, shown once (in the answer that created it).
     generated: Option<BTreeMap<String, String>>,
-    /// A Cloudflare route made from a provider keeps the provider's signing secret as its event
-    /// secret; the Worker already has it.
+    /// A Cloudflare route made from a provider signs events with the provider's signing secret
+    /// (`ORBIT_SIGNING_SECRET` in the Worker); it takes no event secret of its own.
     event_secret_from_provider: bool,
 }
 
@@ -155,6 +155,8 @@ fn view(state: &MailState, route: SendRoute, own: bool, default: Option<Id>) -> 
                 route.id
             )
         });
+    let event_secret_from_provider =
+        own && route.kind == SendRouteKind::Cloudflare && route.provider_id.is_some();
     let is_default = default == Some(route.id);
     // an instance route listed to a workspace: its name and kind only
     MailSendRouteView {
@@ -184,7 +186,7 @@ fn view(state: &MailState, route: SendRoute, own: bool, default: Option<Id>) -> 
         created_at: route.created_at,
         events_url,
         generated: None,
-        event_secret_from_provider: false,
+        event_secret_from_provider,
     }
 }
 
@@ -349,10 +351,6 @@ async fn create_for_provider(
 ) -> Result<(StatusCode, Json<MailSendRouteView>), ApiError> {
     let fail = |error| problem(error, instance, request_id);
     let provider_id: Id = provider.parse().map_err(|_| fail(MailError::NotFound))?;
-    let own_event_secret = body
-        .secrets
-        .get("event_secret")
-        .is_some_and(|value| !value.trim().is_empty());
     let route = state
         .mail
         .create_route_for_provider(
@@ -370,10 +368,7 @@ async fn create_for_provider(
         .await
         .map_err(fail)?;
     let default = default_route(state, instance, request_id).await?;
-    let from_provider = route.kind == SendRouteKind::Cloudflare && !own_event_secret;
-    let mut created = view(state, route, true, default);
-    created.event_secret_from_provider = from_provider;
-    Ok((StatusCode::CREATED, Json(created)))
+    Ok((StatusCode::CREATED, Json(view(state, route, true, default))))
 }
 
 async fn update(

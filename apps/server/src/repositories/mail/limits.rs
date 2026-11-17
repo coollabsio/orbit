@@ -698,16 +698,7 @@ impl MailRepository {
     ) -> Result<SendPolicyView, MailError> {
         let custom_json = match (tier, custom) {
             (SendTier::Custom, Some(limits)) => {
-                if [
-                    limits.per_user_hour,
-                    limits.per_user_day,
-                    limits.per_ws_hour,
-                    limits.per_ws_day,
-                    limits.max_recipients,
-                ]
-                .iter()
-                .any(|number| !(1..=10_000_000).contains(number))
-                {
+                if !limits.valid() {
                     return Err(MailError::Invalid {
                         field: "custom_limits",
                     });

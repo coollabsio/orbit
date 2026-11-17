@@ -23,7 +23,8 @@ use super::{Delivery, InboundError, SpfHeaderOwned, SpfSource, address, fresh, v
 /// <https://developers.cloudflare.com/queues/configuration/javascript-apis/#consumer>
 pub const WORKER_SCRIPT: &str = r#"// Orbit mail: forwards each message to Orbit, and the events of the mail Orbit sends.
 // Variables: ORBIT_WEBHOOK_URL, and the secret ORBIT_SIGNING_SECRET.
-// For sending events: ORBIT_EVENTS_URL, and the secret ORBIT_EVENT_SECRET.
+// For sending events: ORBIT_EVENTS_URL, and the secret ORBIT_EVENT_SECRET (ORBIT_SIGNING_SECRET
+// when it is not set: a route made from the provider shares its signing secret).
 const hex = (bytes) => [...new Uint8Array(bytes)].map((b) => b.toString(16).padStart(2, "0")).join("");
 
 export default {
@@ -66,7 +67,7 @@ export default {
     const body = JSON.stringify(batch.messages.map((message) => message.body));
     const timestamp = Math.floor(Date.now() / 1000).toString();
     const key = await crypto.subtle.importKey(
-      "raw", new TextEncoder().encode(env.ORBIT_EVENT_SECRET),
+      "raw", new TextEncoder().encode(env.ORBIT_EVENT_SECRET || env.ORBIT_SIGNING_SECRET),
       { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
     const signature = hex(await crypto.subtle.sign(
       "HMAC", key, new TextEncoder().encode(timestamp + "." + body)));

@@ -4365,8 +4365,8 @@ export type MailSendRouteView = {
      */
     domain_count: number;
     /**
-     * A Cloudflare route made from a provider keeps the provider's signing secret as its event
-     * secret; the Worker already has it.
+     * A Cloudflare route made from a provider signs events with the provider's signing secret
+     * (`ORBIT_SIGNING_SECRET` in the Worker); it takes no event secret of its own.
      */
     event_secret_from_provider: boolean;
     /**

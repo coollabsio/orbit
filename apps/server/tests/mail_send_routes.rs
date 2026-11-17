@@ -1242,6 +1242,43 @@ async fn cloudflare_route_from_provider_keeps_the_signing_secret() {
     assert_eq!(status, StatusCode::CREATED, "{route}");
     assert_eq!(route["event_secret_from_provider"], true);
     assert!(route["generated"].is_null(), "{route}");
+    // The flag is a property of the route: the list and a change answer carry it too.
+    let id = route["id"].as_str().unwrap();
+    let (_, list) = fixture.admin("GET", "/send-routes", None).await;
+    assert_eq!(
+        list["routes"][0]["event_secret_from_provider"], true,
+        "{list}"
+    );
+    let (status, patched) = fixture
+        .admin(
+            "PATCH",
+            &format!("/send-routes/{id}"),
+            Some(json!({ "name": "CF 2" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{patched}");
+    assert_eq!(patched["event_secret_from_provider"], true);
+    assert!(patched["generated"].is_null(), "{patched}");
+    // It takes no event secret of its own, at creation or later.
+    let (status, _) = fixture
+        .admin(
+            "PATCH",
+            &format!("/send-routes/{id}"),
+            Some(json!({ "secrets": { "event_secret": "mine" } })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let (status, _) = fixture
+        .admin(
+            "POST",
+            &format!("/providers/{}/send-route", provider["id"].as_str().unwrap()),
+            Some(
+                json!({ "secrets": { "api_token": "t", "event_secret": "mine" },
+                         "settings": { "account_id": "0123456789abcdef0123456789abcdef" } }),
+            ),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
 }
 
 #[tokio::test]
@@ -1280,6 +1317,15 @@ async fn smtp_login_can_be_cleared() {
         .await;
     assert_eq!(status, StatusCode::OK, "{cleared}");
     assert_eq!(cleared["secrets_set"], json!([]));
+    assert!(cleared["generated"].is_null(), "{cleared}");
+    let audited: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM audit_events WHERE action = 'mail.send_route_updated' \
+         AND CAST(metadata_json AS TEXT) LIKE '%login_cleared%true%'",
+    )
+    .fetch_one(fixture.database.pool())
+    .await
+    .unwrap();
+    assert_eq!(audited, 1);
     let (_, secrets) = fixture.mail.load_route(id).await.unwrap().unwrap();
     assert_eq!(secrets, RouteSecrets::None);
     // Not together with new secrets, and not for other kinds.
@@ -1341,17 +1387,22 @@ async fn admin_tier_defaults() {
     .await
     .unwrap();
     assert_eq!(audited, 1);
-    // Root only.
-    let (status, _) = fixture
-        .raw(
-            &Member {
-                id: fixture.owner.id,
-                cookie: String::new(),
-            },
-            "GET",
-            "/api/v1/admin/mail/send-tiers",
-            None,
-        )
+    // A saved number reaches the limits a workspace has (its tier is standard here).
+    let (_, policy) = fixture
+        .admin("GET", &format!("/send-policies/{}", fixture.first), None)
         .await;
-    assert!(status.is_client_error());
+    assert_eq!(policy["limits"]["per_ws_day"], 20_000, "{policy}");
+    // Root only: an authenticated workspace admin gets nothing, for GET and PUT.
+    let admin = fixture.user("admin", Some((fixture.first, "admin"))).await;
+    for (method, body) in [("GET", None), ("PUT", Some(changed.clone()))] {
+        let (status, value) = fixture
+            .raw(&admin, method, "/api/v1/admin/mail/send-tiers", body)
+            .await;
+        assert!(
+            status == StatusCode::FORBIDDEN || status == StatusCode::NOT_FOUND,
+            "{method} {status} {value}"
+        );
+    }
+    let (_, read) = fixture.admin("GET", "/send-tiers", None).await;
+    assert_eq!(read, changed);
 }

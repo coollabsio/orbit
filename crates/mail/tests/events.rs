@@ -968,7 +968,7 @@ fn cloudflare_worker_script_posts_signed_event_batches() {
     for part in [
         "async queue(batch, env)",
         "env.ORBIT_EVENTS_URL",
-        "env.ORBIT_EVENT_SECRET",
+        "env.ORBIT_EVENT_SECRET || env.ORBIT_SIGNING_SECRET",
         "batch.messages.map((message) => message.body)",
         "timestamp + \".\" + body",
         "x-orbit-timestamp",

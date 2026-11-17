@@ -83463,7 +83463,7 @@
           },
           "event_secret_from_provider": {
             "type": "boolean",
-            "description": "A Cloudflare route made from a provider keeps the provider's signing secret as its event\nsecret; the Worker already has it."
+            "description": "A Cloudflare route made from a provider signs events with the provider's signing secret\n(`ORBIT_SIGNING_SECRET` in the Worker); it takes no event secret of its own."
           },
           "events_url": {
             "type": [
