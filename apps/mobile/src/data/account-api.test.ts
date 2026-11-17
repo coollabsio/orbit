@@ -1,7 +1,7 @@
 import { createOrbitClient } from '@orbit/api/client'
 import { expect, test } from 'bun:test'
 
-import { bucketMovedText, bucketMovingText, bucketPollInterval, confirmsEmail, createWorkspaceRole, deleteAccount, filterMembers, formatBytes, invitationProblem, memberActions, ownedWorkspaces, passwordProblem, pickedImageName, projectGrantLines, requestEmailChange, roleSummary, setCustomRole, sortedSessions, storageUse, twoFactorSummary, updateWorkspaceRole } from './account-api'
+import { bucketMovedText, bucketMovingText, bucketPollInterval, confirmsEmail, createWorkspaceRole, deleteAccount, filterMembers, formatBytes, invitationProblem, memberActions, memberProjectGrants, ownedWorkspaces, passwordProblem, pickedImageName, projectGrantLines, requestEmailChange, revokeMemberProjectGrant, roleSummary, setCustomRole, setMemberProjectGrant, sortedSessions, storageUse, twoFactorSummary, updateWorkspaceRole } from './account-api'
 import type { MemberRecord } from './orbit'
 
 const member = (id: string, fields: Partial<MemberRecord>): MemberRecord => ({
@@ -108,7 +108,8 @@ function server(reply: { status: number; body?: unknown }) {
     baseUrl: 'https://orbit.test',
     token: () => 'session-token',
     fetch: async (request) => {
-      sent.push({ method: request.method, url: request.url, body: JSON.parse(await request.text()) })
+      const text = await request.text()
+      sent.push({ method: request.method, url: request.url, body: text ? JSON.parse(text) : undefined })
       return reply.body === undefined
         ? new Response(null, { status: reply.status })
         : new Response(JSON.stringify(reply.body), { status: reply.status, headers: { 'content-type': 'application/problem+json' } })
@@ -209,4 +210,24 @@ test('a custom role is given and taken away with the membership version; a refus
   ])
   const refused = server({ status: 422, body: problem(422, 'invalid_role') })
   await expect(setCustomRole(refused.client, 'w1', { id: 'm-ada', version: 1 }, 'r1')).rejects.toThrow('The invalid_role detail.')
+})
+
+test("project grants are listed for the workspace, and revoked per project and member; a refusal carries the server detail", async () => {
+  const grant = { project_id: 'p1', project_name: 'Website', user_id: 'ada', display_name: 'Ada', permissions: ['projects.manage' as const] }
+  const listed = server({ status: 200, body: [grant] })
+  expect(await memberProjectGrants(listed.client, 'w1')).toEqual([grant])
+  expect(listed.sent).toEqual([{ method: 'GET', url: 'https://orbit.test/api/v1/workspaces/w1/project-grants', body: undefined }])
+  const revoked = server({ status: 204 })
+  await revokeMemberProjectGrant(revoked.client, 'w1', grant)
+  expect(revoked.sent).toEqual([{ method: 'DELETE', url: 'https://orbit.test/api/v1/workspaces/w1/project-grants/p1/ada', body: undefined }])
+  const refused = server({ status: 403, body: problem(403, 'permission_denied') })
+  await expect(revokeMemberProjectGrant(refused.client, 'w1', grant)).rejects.toThrow('The permission_denied detail.')
+})
+
+test("a member's project grant is set with one PUT for the workspace; a refusal carries the server detail", async () => {
+  const set = server({ status: 204 })
+  await setMemberProjectGrant(set.client, 'w1', { project_id: 'p1', user_id: 'ada', permissions: ['projects.manage', 'tasks.purge'] })
+  expect(set.sent).toEqual([{ method: 'PUT', url: 'https://orbit.test/api/v1/workspaces/w1/project-grants', body: { project_id: 'p1', user_id: 'ada', permissions: ['projects.manage', 'tasks.purge'] } }])
+  const refused = server({ status: 422, body: problem(422, 'not_a_member') })
+  await expect(setMemberProjectGrant(refused.client, 'w1', { project_id: 'p1', user_id: 'bob', permissions: ['projects.manage'] })).rejects.toThrow('The not_a_member detail.')
 })

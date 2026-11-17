@@ -7,7 +7,7 @@ import { filterTrash, trashIdentifier } from '@orbit/api/trash'
 
 import { ConfirmDialog, type ConfirmRequest } from '../../../../components/settings/Dialog'
 import type { ProjectRecord, TaskRecord } from '../../../../data/orbit'
-import { canManageProject, canPurgeTask } from '../../../../data/permissions'
+import { canInProject, canPurgeTask } from '../../../../data/permissions'
 import { useTaskTrash, useTaskTrashWrites } from '../../../../hooks/tasks'
 import { useOrbit } from '../../../../orbit-context'
 import { useProjects } from '../../../../queries'
@@ -21,11 +21,11 @@ const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ?
  * The web's Task trash: trashed projects first, then the trashed tasks of live projects, with a search and Restore.
  * A row opens its read-only preview. A row gets Delete forever when the caller may purge in its project (the server's
  * `can_purge_task`: `pages.purge`, or `tasks.purge` workspace-wide or in that project). Restoring a project needs
- * `projects.manage` in it, or to have created it. Empty trash needs `pages.purge`.
+ * `projects.manage` in it. Empty trash needs `pages.purge`.
  */
 export default function TaskTrashScreen() {
   const { colors } = useTheme()
-  const { user, workspace } = useOrbit()
+  const { workspace } = useOrbit()
   const canEmpty = workspace.permissions.includes('pages.purge')
   const { projects, tasks } = useTaskTrash()
   const liveProjects = useProjects()
@@ -129,7 +129,7 @@ export default function TaskTrashScreen() {
                   {project.name}
                 </Text>
               </Pressable>
-              {canManageProject(workspace, user.id, project) ? (
+              {canInProject(workspace, 'projects.manage', project.id) ? (
                 <Button label="Restore" icon="refresh" size="sm" variant="outline" disabled={busy} onPress={() => writes.restoreProject.mutate(project)} />
               ) : null}
               {canPurgeTask(workspace, project.id) ? (

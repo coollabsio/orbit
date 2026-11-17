@@ -41,7 +41,7 @@ use crate::repositories::instance_settings::{
     adjustable_job_kinds, can_confirm_sign_up,
 };
 use crate::repositories::sign_in_providers::SaveSignInProviderError;
-use crate::repositories::workspace_roles::{ProjectGrant, WorkspaceRoleRecord};
+use crate::repositories::workspace_roles::{MemberProjectGrant, ProjectGrant, WorkspaceRoleRecord};
 use crate::repositories::workspace_storage::{WorkspaceStorageError, WorkspaceStorageRepository};
 use crate::repositories::workspaces::{InvitationDelivery, WorkspaceError, WorkspaceRepository};
 use crate::sign_in_providers::Provider;
@@ -230,6 +230,14 @@ pub fn workspace_router(state: WorkspaceState) -> Router {
         .route(
             "/api/v1/workspaces/{workspace_id}/roles",
             get(list_roles).post(create_role),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/project-grants",
+            get(list_project_grants).put(set_project_grant),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/project-grants/{project_id}/{user_id}",
+            delete(revoke_project_grant),
         )
         .route(
             "/api/v1/workspaces/{workspace_id}/roles/{role_id}",
@@ -978,6 +986,90 @@ async fn delete_role(
             workspace_id,
             session.user.id,
             role_id,
+            request_id_value(request_id.as_ref()),
+            TimestampMillis::now(),
+        )
+        .await
+        .map_err(|error| workspace_problem(error, &instance, request_id.as_ref()))?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/project-grants", params(("workspace_id" = String, Path)), responses((status = 200, body = Vec<MemberProjectGrant>)))]
+async fn list_project_grants(
+    State(state): State<WorkspaceState>,
+    Path(workspace_id): Path<String>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<Json<Vec<MemberProjectGrant>>, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace_id}/project-grants");
+    let session = authenticate(&state, &headers, &instance, request_id.as_ref()).await?;
+    let workspace_id = parse_id(&workspace_id, &instance, request_id.as_ref())?;
+    state
+        .workspaces
+        .list_project_grants(workspace_id, session.user.id)
+        .await
+        .map(Json)
+        .map_err(|error| workspace_problem(error, &instance, request_id.as_ref()))
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+struct ProjectGrantBody {
+    project_id: String,
+    user_id: String,
+    /// Replaces what the member holds directly in the project. Only project-scoped permissions.
+    permissions: Vec<Permission>,
+}
+
+#[utoipa::path(put, path = "/api/v1/workspaces/{workspace_id}/project-grants", params(("workspace_id" = String, Path)), request_body = ProjectGrantBody, responses((status = 204)))]
+async fn set_project_grant(
+    State(state): State<WorkspaceState>,
+    Path(workspace_id): Path<String>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<ProjectGrantBody>,
+) -> Result<StatusCode, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace_id}/project-grants");
+    let session = authenticate(&state, &headers, &instance, request_id.as_ref()).await?;
+    let workspace_id = parse_id(&workspace_id, &instance, request_id.as_ref())?;
+    let project_id = parse_id(&body.project_id, &instance, request_id.as_ref())?;
+    let user_id = parse_id(&body.user_id, &instance, request_id.as_ref())?;
+    state
+        .workspaces
+        .set_project_grant(
+            workspace_id,
+            session.user.id,
+            project_id,
+            user_id,
+            &body.permissions,
+            request_id_value(request_id.as_ref()),
+            TimestampMillis::now(),
+        )
+        .await
+        .map_err(|error| workspace_problem(error, &instance, request_id.as_ref()))?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(delete, path = "/api/v1/workspaces/{workspace_id}/project-grants/{project_id}/{user_id}", params(("workspace_id" = String, Path), ("project_id" = String, Path), ("user_id" = String, Path)), responses((status = 204)))]
+async fn revoke_project_grant(
+    State(state): State<WorkspaceState>,
+    Path((workspace_id, project_id, user_id)): Path<(String, String, String)>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<StatusCode, ApiError> {
+    let instance =
+        format!("/api/v1/workspaces/{workspace_id}/project-grants/{project_id}/{user_id}");
+    let session = authenticate(&state, &headers, &instance, request_id.as_ref()).await?;
+    let workspace_id = parse_id(&workspace_id, &instance, request_id.as_ref())?;
+    let project_id = parse_id(&project_id, &instance, request_id.as_ref())?;
+    let user_id = parse_id(&user_id, &instance, request_id.as_ref())?;
+    state
+        .workspaces
+        .revoke_project_grant(
+            workspace_id,
+            session.user.id,
+            project_id,
+            user_id,
             request_id_value(request_id.as_ref()),
             TimestampMillis::now(),
         )

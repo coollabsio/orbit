@@ -27,14 +27,6 @@ export function canPurgeTask(workspace: WorkspaceRecord, projectId: string | und
   return workspace.permissions.includes('pages.purge') || canIn(workspace, 'tasks.purge', projectId)
 }
 
-/**
- * Whether the caller can manage `project` (settings, members, statuses, labels, delete and restore): `projects.manage`
- * there, or being the project's creator. Mirrors the server's project-manage check.
- */
-export function canManageProject(workspace: WorkspaceRecord, userId: string | undefined, project: { id: string; created_by?: string | null }): boolean {
-  return canIn(workspace, 'projects.manage', project.id) || (!!userId && project.created_by === userId)
-}
-
 export function useCanIn(permission: Permission, projectId: string | undefined): boolean {
   return canIn(useWorkspace().workspace, permission, projectId)
 }

@@ -7,10 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Command, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { useCreateLabel } from '@/features/tasks/api/labels'
-import { canManageProject } from '@/features/workspaces/permissions'
-import { useWorkspace } from '@/features/workspaces/workspaceContext'
-import { useCurrentUser } from '@/features/auth/api'
-import { useProjects } from '@/features/tasks/api/projects'
+import { useCanIn } from '@/features/workspaces/permissions'
 import { labelKeyOf, projectLabels } from '@/features/tasks/taskMeta'
 import { CheckMark } from '@/components/common/CheckMark'
 import { ColorDot } from '@/components/common/ColorDot'
@@ -110,10 +107,7 @@ function nextLabelColor(labels: LabelRecord[]): string {
 export function LabelPicker({ workspaceId, projectId, labelIds, labels: allLabels, onChange, trigger, editLink = false }: { workspaceId: string; projectId: string; labelIds: string[]; labels: LabelRecord[]; onChange: (ids: string[]) => void; trigger: ReactElement; editLink?: boolean }) {
   const navigate = useNavigate()
   const createLabel = useCreateLabel(workspaceId)
-  const { workspace } = useWorkspace()
-  const userId = useCurrentUser().data?.id
-  const project = useProjects(workspaceId).data?.find((p) => p.id === projectId) ?? { id: projectId }
-  const canManage = canManageProject(workspace, userId, project)
+  const canManage = useCanIn('projects.manage', projectId)
   const [query, setQuery] = useState('')
   const [pinned, setPinned] = useState<string[]>([])
   const [pickedColor, setPickedColor] = useState<string>()

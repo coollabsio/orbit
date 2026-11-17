@@ -4268,6 +4268,18 @@ export type MemberProfile = {
     user_id: string;
 };
 
+/**
+ * A project permission that one member holds in one project, apart from any role. A project's
+ * creator holds `projects.manage` this way until an owner or admin revokes it.
+ */
+export type MemberProjectGrant = {
+    display_name: string;
+    permissions: Array<Permission>;
+    project_id: string;
+    project_name: string;
+    user_id: string;
+};
+
 export type MemberRecord = {
     /**
      * The member's profile picture; absent while they have none.
@@ -5730,11 +5742,6 @@ export type PageProjectRecord = {
         auto_close_sub_issues: boolean;
         color: string;
         created_at: string;
-        /**
-         * Who created the project, who manages it without `projects.manage`. Absent for projects
-         * that were made before this was recorded.
-         */
-        created_by?: string | null;
         deleted_at?: string | null;
         id: string;
         key: string;
@@ -6095,6 +6102,15 @@ export type ProjectBody = {
     private?: boolean;
 };
 
+export type ProjectGrantBody = {
+    /**
+     * Replaces what the member holds directly in the project. Only project-scoped permissions.
+     */
+    permissions: Array<Permission>;
+    project_id: string;
+    user_id: string;
+};
+
 export type ProjectMemberBody = {
     /**
      * An active workspace member who is not a guest.
@@ -6137,11 +6153,6 @@ export type ProjectRecord = {
     auto_close_sub_issues: boolean;
     color: string;
     created_at: string;
-    /**
-     * Who created the project, who manages it without `projects.manage`. Absent for projects
-     * that were made before this was recorded.
-     */
-    created_by?: string | null;
     deleted_at?: string | null;
     id: string;
     key: string;
@@ -32676,6 +32687,166 @@ export type PutMemberNoteResponses = {
 };
 
 export type PutMemberNoteResponse = PutMemberNoteResponses[keyof PutMemberNoteResponses];
+
+export type ListProjectGrantsData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/project-grants';
+};
+
+export type ListProjectGrantsErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type ListProjectGrantsError = ListProjectGrantsErrors[keyof ListProjectGrantsErrors];
+
+export type ListProjectGrantsResponses = {
+    200: Array<MemberProjectGrant>;
+};
+
+export type ListProjectGrantsResponse = ListProjectGrantsResponses[keyof ListProjectGrantsResponses];
+
+export type SetProjectGrantData = {
+    body: ProjectGrantBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/project-grants';
+};
+
+export type SetProjectGrantErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type SetProjectGrantError = SetProjectGrantErrors[keyof SetProjectGrantErrors];
+
+export type SetProjectGrantResponses = {
+    204: void;
+};
+
+export type SetProjectGrantResponse = SetProjectGrantResponses[keyof SetProjectGrantResponses];
+
+export type RevokeProjectGrantData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        project_id: string;
+        user_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/project-grants/{project_id}/{user_id}';
+};
+
+export type RevokeProjectGrantErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type RevokeProjectGrantError = RevokeProjectGrantErrors[keyof RevokeProjectGrantErrors];
+
+export type RevokeProjectGrantResponses = {
+    204: void;
+};
+
+export type RevokeProjectGrantResponse = RevokeProjectGrantResponses[keyof RevokeProjectGrantResponses];
 
 export type GetProjectOrderData = {
     body?: never;

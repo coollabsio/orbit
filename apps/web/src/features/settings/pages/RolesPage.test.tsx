@@ -2,7 +2,8 @@ import { afterEach, expect, mock, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import type { ProjectRecord, RolesResponse, WorkspaceRole } from '@orbit/api/generated/types.gen'
+import type { MemberProjectGrant, MemberRecord, ProjectRecord, RolesResponse, WorkspaceRole } from '@orbit/api/generated/types.gen'
+import { registerConfirmationHandler } from '@/components/common/confirmAction'
 import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
 import { testWorkspace } from '@/test/workspace'
 import { RolesPage } from './RolesPage'
@@ -25,12 +26,23 @@ const roles: RolesResponse = {
 const project = (id: string, name: string) => ({ id, name }) as ProjectRecord
 const projects = { items: [project('project-a', 'Apollo'), project('project-b', 'Borealis')], next_cursor: null }
 
-/** Answers the role and project lists; `write` answers POST and PATCH requests. */
-function serve(write: (request: Request) => Promise<Response>) {
+const member = (user_id: string, display_name: string, role: MemberRecord['role']): MemberRecord => ({
+  id: `membership-${user_id}`, user_id, display_name, role, email: `${user_id}@example.com`, version: 1, created_at: '',
+  can_change_role: false, can_remove: false, can_transfer_ownership: false,
+})
+const members = { items: [member('user-1', 'Ada Lovelace', 'admin'), member('user-2', 'Grace Hopper', 'member')], next_cursor: null }
+
+const creatorGrant: MemberProjectGrant = { project_id: 'project-a', project_name: 'Apollo', user_id: 'user-2', display_name: 'Grace Hopper', permissions: ['projects.manage'] }
+
+/** Answers the role, project and project access lists; `write` answers the other requests. */
+function serve(write: (request: Request) => Promise<Response>, grants: MemberProjectGrant[] = []) {
   globalThis.fetch = mock(async (input: RequestInfo | URL, init?: RequestInit) => {
     const request = new Request(input, init)
     if (request.method !== 'GET') return write(request)
-    return Response.json(new URL(request.url).pathname.endsWith('/projects') ? projects : roles)
+    const path = new URL(request.url).pathname
+    if (path.endsWith('/project-grants')) return Response.json(grants)
+    if (path.endsWith('/members')) return Response.json(members)
+    return Response.json(path.endsWith('/projects') ? projects : roles)
   }) as unknown as typeof fetch
 }
 
@@ -106,4 +118,60 @@ test('editing a role prefills its project grants and sends the full list again',
     permissions: ['chat.manage'],
     project_grants: [{ project_id: 'project-a', permissions: ['comments.moderate', 'tasks.purge'] }],
   }])
+})
+
+test('project access lists direct grants and revoking one deletes that member\'s grant in that project', async () => {
+  const deleted: string[] = []
+  serve(async (request) => {
+    deleted.push(`${request.method} ${new URL(request.url).pathname}`)
+    return new Response(null, { status: 204 })
+  }, [creatorGrant])
+  const unregister = registerConfirmationHandler(async () => true)
+  try {
+    const view = renderPage('admin')
+    const row = await view.findByText('Grace Hopper')
+    const accessRow = row.closest('[data-project-access-row]') as HTMLElement
+    expect(within(accessRow).getByText('Apollo')).toBeTruthy()
+    expect(within(accessRow).getByText('Manage project settings, members, statuses and labels')).toBeTruthy()
+
+    fireEvent.click(within(accessRow).getByRole('button', { name: 'Revoke' }))
+    await waitFor(() => expect(deleted).toEqual(['DELETE /api/v1/workspaces/workspace-1/project-grants/project-a/user-2']))
+  } finally {
+    unregister()
+  }
+})
+
+test('project access says so when no member holds a direct grant', async () => {
+  serve(async () => new Response(null, { status: 500 }))
+  const view = renderPage('admin')
+  expect(await view.findByText('No member holds a permission in a single project.')).toBeTruthy()
+})
+
+test('adding project access sends the member, the project and the ticked permissions, and shows a refusal in the dialog', async () => {
+  const put: unknown[] = []
+  serve(async (request) => {
+    put.push(`${request.method} ${new URL(request.url).pathname}`, await request.json())
+    return Response.json(
+      { type: 'about:blank', title: 'Unprocessable', status: 422, detail: 'Only members with the member role can hold project access.', code: 'invalid_role', instance: '', request_id: 'r' },
+      { status: 422, headers: { 'content-type': 'application/problem+json' } },
+    )
+  })
+  const view = renderPage('admin')
+
+  await waitFor(() => expect((view.getByRole('button', { name: 'Add access' }) as HTMLButtonElement).disabled).toBe(false))
+  fireEvent.click(view.getByRole('button', { name: 'Add access' }))
+  const dialog = await view.findByRole('dialog')
+  await userEvent.click(within(dialog).getByRole('combobox', { name: 'Member' }))
+  const grace = await view.findByRole('option', { name: 'Grace Hopper' })
+  // an admin already holds every permission, so only ordinary members are offered
+  expect(view.queryByRole('option', { name: 'Ada Lovelace' })).toBeNull()
+  await userEvent.click(grace)
+  await userEvent.click(within(dialog).getByRole('combobox', { name: 'Project' }))
+  await userEvent.click(await view.findByRole('option', { name: 'Borealis' }))
+  await userEvent.click(within(dialog).getByRole('checkbox', { name: 'Permanently delete tasks' }))
+  await userEvent.click(within(dialog).getByRole('checkbox', { name: 'Moderate comments' }))
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+
+  expect((await within(dialog).findByRole('alert')).textContent).toBe('Only members with the member role can hold project access.')
+  expect(put).toEqual(['PUT /api/v1/workspaces/workspace-1/project-grants', { project_id: 'project-b', user_id: 'user-2', permissions: ['comments.moderate', 'tasks.purge'] }])
 })

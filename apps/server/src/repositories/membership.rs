@@ -59,10 +59,12 @@ where
     // One row per project grant of the member's custom role (one row when it has none).
     let rows: Vec<GrantRow> = sqlx::query_as(
         "SELECT memberships.role, workspace_roles.permissions, \
-         workspace_role_projects.project_id, workspace_role_projects.permission \
+         grants.project_id, grants.permission \
          FROM memberships JOIN workspaces ON workspaces.id = memberships.workspace_id \
          LEFT JOIN workspace_roles ON workspace_roles.id = memberships.custom_role_id \
-         LEFT JOIN workspace_role_projects ON workspace_role_projects.role_id = workspace_roles.id \
+         LEFT JOIN (SELECT role_id, CAST(NULL AS TEXT) AS user_id, project_id, permission FROM workspace_role_projects \
+                    UNION ALL SELECT CAST(NULL AS TEXT), user_id, project_id, permission FROM member_project_grants) AS grants \
+              ON grants.role_id = memberships.custom_role_id OR grants.user_id = memberships.user_id \
          WHERE memberships.workspace_id = $1 AND memberships.user_id = $2 \
          AND (CASE WHEN workspaces.deleted_at IS NULL THEN 0 ELSE 1 END) = $3",
     )

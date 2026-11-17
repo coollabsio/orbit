@@ -14,8 +14,3 @@ export function canInProject(workspace: Grants, permission: Permission, projectI
 export function canPurgeTask(workspace: Grants, projectId: string): boolean {
   return workspace.permissions.includes('pages.purge') || canInProject(workspace, 'tasks.purge', projectId)
 }
-
-/** As on the server: `projects.manage` in the project, or the caller created the project. */
-export function canManageProject(workspace: Grants, userId: string | undefined, project: { id: string; created_by?: string | null }): boolean {
-  return canInProject(workspace, 'projects.manage', project.id) || (!!userId && project.created_by === userId)
-}

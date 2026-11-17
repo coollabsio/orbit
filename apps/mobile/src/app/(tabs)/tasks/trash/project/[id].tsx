@@ -3,7 +3,7 @@ import { router, useLocalSearchParams } from 'expo-router'
 import { Pressable, View } from 'react-native'
 
 import { confirmDeleteForever, TrashBanner, TrashPreview } from '../../../../../components/tasks/TrashPreview'
-import { canManageProject, canPurgeTask } from '../../../../../data/permissions'
+import { canInProject, canPurgeTask } from '../../../../../data/permissions'
 import { useTaskTrashWrites, useTrashedProject } from '../../../../../hooks/tasks'
 import { useOrbit } from '../../../../../orbit-context'
 import { usePeople } from '../../../../../queries'
@@ -13,7 +13,7 @@ import { Button, StatusIcon, Text } from '../../../../../ui'
 /** The web's `/tasks-trash/project/:projectId`: a trashed project and its tasks, read-only. */
 export default function TrashedProjectScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
-  const { user, workspace } = useOrbit()
+  const { workspace } = useOrbit()
   const { project, tasks } = useTrashedProject(id)
   const people = usePeople()
   const writes = useTaskTrashWrites()
@@ -22,7 +22,7 @@ export default function TrashedProjectScreen() {
   const record = project.data
   const statuses = new Map(record.statuses.map((status) => [status.id, status]))
   const canPurge = canPurgeTask(workspace, record.id)
-  const canRestore = canManageProject(workspace, user.id, record)
+  const canRestore = canInProject(workspace, 'projects.manage', record.id)
   const busy = writes.restoreProject.isPending || writes.purgeProject.isPending
   const failure = writes.restoreProject.error ?? writes.purgeProject.error
   const deletedBy = people.find((person) => person.id === record.deleted_by)?.name

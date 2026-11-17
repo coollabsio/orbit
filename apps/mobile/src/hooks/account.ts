@@ -1,4 +1,5 @@
 /** The account and workspace settings queries and writes, over `data/account-api.ts`. */
+import type { ProjectGrantBody } from '@orbit/api/generated/types.gen'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import * as ImagePicker from 'expo-image-picker'
 import { useEffect, useState } from 'react'
@@ -323,6 +324,37 @@ export function useRoleWrites() {
     update: useMutation({ mutationFn: ({ role, draft }: { role: account.WorkspaceRoleRecord; draft: account.RoleDraft }) => account.updateWorkspaceRole(client, workspaceId, role, draft), onSettled }),
     remove: useMutation({ mutationFn: (roleId: string) => account.deleteWorkspaceRole(client, workspaceId, roleId), onSettled }),
   }
+}
+
+export function useMemberProjectGrants(enabled: boolean) {
+  const { client, workspaceId } = useOrbit()
+  return useQuery({ queryKey: account.accountKeys.projectGrants(workspaceId), queryFn: () => account.memberProjectGrants(client, workspaceId), enabled })
+}
+
+/** Sets (replaces) a member's direct project grant. Refreshes the grants, and the workspace, whose permissions change when it was the caller's. */
+export function useSetProjectGrant() {
+  const { client, workspaceId } = useOrbit()
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (grant: ProjectGrantBody) => account.setMemberProjectGrant(client, workspaceId, grant),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: account.accountKeys.projectGrants(workspaceId) })
+      void queryClient.invalidateQueries({ queryKey: keys.workspaces })
+    },
+  })
+}
+
+/** Revokes a member's direct project grant. Refreshes the grants, and the workspace, whose permissions change when it was the caller's. */
+export function useRevokeProjectGrant() {
+  const { client, workspaceId } = useOrbit()
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (grant: account.MemberProjectGrant) => account.revokeMemberProjectGrant(client, workspaceId, grant),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: account.accountKeys.projectGrants(workspaceId) })
+      void queryClient.invalidateQueries({ queryKey: keys.workspaces })
+    },
+  })
 }
 
 /** Member and invitation writes. Each refreshes the members (invitations sit under the same prefix). */

@@ -407,10 +407,14 @@ impl WorkspaceRepository {
         let rows: Vec<(String, String, String)> = sqlx::query_as(
             "SELECT memberships.workspace_id, grants.project_id, grants.permission \
              FROM memberships JOIN workspace_role_projects grants ON grants.role_id = memberships.custom_role_id \
-             JOIN projects ON projects.id = grants.project_id \
              WHERE memberships.user_id = $1 AND memberships.role = 'member' \
-             ORDER BY grants.project_id, grants.permission",
+             UNION SELECT projects.workspace_id, direct.project_id, direct.permission \
+             FROM member_project_grants direct JOIN projects ON projects.id = direct.project_id \
+             JOIN memberships ON memberships.workspace_id = projects.workspace_id AND memberships.user_id = direct.user_id \
+             AND memberships.role = 'member' WHERE direct.user_id = $2 \
+             ORDER BY 2, 3",
         )
+        .bind(user_id.to_string())
         .bind(user_id.to_string())
         .fetch_all(self.database.pool())
         .await?;

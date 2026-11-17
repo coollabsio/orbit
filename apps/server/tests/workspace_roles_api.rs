@@ -1017,7 +1017,7 @@ async fn managing_a_project_takes_projects_manage() {
 }
 
 #[tokio::test]
-async fn the_creator_of_a_project_manages_it() {
+async fn the_creator_manages_a_project_until_the_grant_is_revoked() {
     let world = World::new().await;
     let mine = world
         .server
@@ -1028,11 +1028,6 @@ async fn the_creator_of_a_project_manages_it() {
             json!({"name": "Mine", "key": "MNE", "color": "#336699", "private": false}),
         )
         .await;
-    // The record names the creator, so a client can show the manage controls.
-    assert_eq!(
-        mine["created_by"],
-        world.member(&world.bob_membership).await["user_id"]
-    );
     let theirs = world.project("Theirs", "THR", false).await;
     let review = json!({"name": "Review", "color": "#445566", "category": "started"});
     let path = |project: &str| format!("/projects/{project}/statuses");
@@ -1050,9 +1045,75 @@ async fn the_creator_of_a_project_manages_it() {
     );
     assert_eq!(
         world
-            .status(&world.alice, "POST", &path(&id(&mine)), review)
+            .status(&world.alice, "POST", &path(&id(&mine)), review.clone())
             .await,
         403
+    );
+
+    // The grant shows on the Roles page, and the member's record names the project.
+    let bob_user = world.member(&world.bob_membership).await["user_id"].clone();
+    let record = world.server.get(&world.bob, &world.base).await;
+    assert!(
+        record["project_permissions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| entry["project_id"] == mine["id"])
+    );
+    assert_eq!(
+        world
+            .status(&world.bob, "GET", "/project-grants", Value::Null)
+            .await,
+        403
+    );
+    let grants = world
+        .server
+        .get(&world.owner, &format!("{}/project-grants", world.base))
+        .await;
+    let grant = grants
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|g| g["project_id"] == mine["id"])
+        .unwrap();
+    assert_eq!(grant["user_id"], bob_user);
+    assert_eq!(grant["permissions"], json!(["projects.manage"]));
+
+    // Only roles managers revoke; after that the creator is a plain member.
+    let revoke = format!(
+        "/project-grants/{}/{}",
+        id(&mine),
+        bob_user.as_str().unwrap()
+    );
+    assert_eq!(
+        world
+            .status(&world.bob, "DELETE", &revoke, Value::Null)
+            .await,
+        403
+    );
+    assert_eq!(
+        world
+            .status(&world.admin, "DELETE", &revoke, Value::Null)
+            .await,
+        204
+    );
+    assert_eq!(
+        world
+            .status(&world.admin, "DELETE", &revoke, Value::Null)
+            .await,
+        404
+    );
+    assert_eq!(
+        world
+            .status(&world.bob, "POST", &path(&id(&mine)), review)
+            .await,
+        403
+    );
+    assert!(
+        world.server.get(&world.bob, &world.base).await["project_permissions"]
+            .as_array()
+            .unwrap()
+            .is_empty()
     );
     world.server.stop().await;
 }

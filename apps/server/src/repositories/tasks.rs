@@ -90,10 +90,6 @@ pub struct ProjectRecord {
     /// Only the project's members, and workspace owners and admins, see a private project and
     /// what is in it. Everyone else gets the answers of a missing project.
     pub private: bool,
-    /// Who created the project, who manages it without `projects.manage`. Absent for projects
-    /// that were made before this was recorded.
-    #[schema(value_type = Option<String>)]
-    pub created_by: Option<Id>,
     pub version: u64,
     #[schema(value_type = Option<String>, format = DateTime)]
     pub deleted_at: Option<TimestampMillis>,
@@ -865,7 +861,7 @@ impl TaskRepository {
             return Ok(Vec::new());
         }
         let mut query = SqlBuilder::new(
-            "SELECT id, workspace_id, name, project_key, color, auto_close_parent, auto_close_sub_issues, private, created_by, version, deleted_at, created_at, updated_at FROM projects WHERE deleted_at IS NULL AND workspace_id = ",
+            "SELECT id, workspace_id, name, project_key, color, auto_close_parent, auto_close_sub_issues, private, version, deleted_at, created_at, updated_at FROM projects WHERE deleted_at IS NULL AND workspace_id = ",
         );
         query
             .push_bind(workspace_id.to_string())
@@ -899,7 +895,7 @@ impl TaskRepository {
         let fingerprint = format!("projects:{workspace_id}");
         let after = cursor_pair(cursor, &fingerprint)?;
         let mut query = SqlBuilder::new(
-            "SELECT id, workspace_id, name, project_key, color, auto_close_parent, auto_close_sub_issues, private, created_by, version, deleted_at, created_at, updated_at \
+            "SELECT id, workspace_id, name, project_key, color, auto_close_parent, auto_close_sub_issues, private, version, deleted_at, created_at, updated_at \
              FROM projects WHERE workspace_id = ",
         );
         query
@@ -994,6 +990,15 @@ impl TaskRepository {
             return Err(TaskError::Conflict);
         }
         inserted?;
+        // The creator manages the project until an owner or admin revokes it.
+        sqlx::query(
+            "INSERT INTO member_project_grants (project_id, user_id, permission) VALUES ($1, $2, $3)",
+        )
+        .bind(project_id.to_string())
+        .bind(actor_id.to_string())
+        .bind(Permission::ProjectsManage.as_str())
+        .execute(&mut *tx)
+        .await?;
         if private {
             project_members::insert_in_tx(&mut tx, workspace_id, project_id, actor_id, now).await?;
         }
@@ -1019,7 +1024,6 @@ impl TaskRepository {
             auto_close_parent: true,
             auto_close_sub_issues: true,
             private,
-            created_by: Some(actor_id),
             version: 0,
             deleted_at: None,
             created_at: now,
@@ -1046,7 +1050,7 @@ impl TaskRepository {
         let actor = require_access_tx(&mut tx, workspace_id, actor_id).await?;
         let scope = ProjectScope::of(&actor);
         let current = project_in_tx(&mut tx, scope, workspace_id, project_id, false).await?;
-        require_manager(&mut tx, &actor, project_id).await?;
+        require_manager(&actor, project_id)?;
         check_version(expected_version, current.version, &current)?;
         let updated = sqlx::query(
             "UPDATE projects SET name = $1, project_key = $2, color = $3, \
@@ -1130,7 +1134,7 @@ impl TaskRepository {
         let actor = require_access_tx(&mut tx, workspace_id, actor_id).await?;
         let scope = ProjectScope::of(&actor);
         let current = project_in_tx(&mut tx, scope, workspace_id, project_id, false).await?;
-        require_manager(&mut tx, &actor, project_id).await?;
+        require_manager(&actor, project_id)?;
         check_version(expected_version, current.version, &current)?;
         let tombstone = format!("__deleted__{project_id}");
         sqlx::query(
@@ -1176,7 +1180,7 @@ impl TaskRepository {
         let actor = require_access_tx(&mut tx, workspace_id, actor_id).await?;
         let scope = ProjectScope::of(&actor);
         let current = project_in_tx(&mut tx, scope, workspace_id, project_id, true).await?;
-        require_manager(&mut tx, &actor, project_id).await?;
+        require_manager(&actor, project_id)?;
         if current.deleted_at.is_none_or(|deleted| {
             deleted.as_millis() <= now.as_millis().saturating_sub(TRASH_RETENTION_MILLIS)
         }) {
@@ -1246,7 +1250,7 @@ impl TaskRepository {
         let fingerprint = format!("project-trash:{workspace_id}");
         let after = cursor_i64_pair(cursor, &fingerprint)?;
         let mut query = SqlBuilder::new(
-            "SELECT id, workspace_id, name, COALESCE(restore_project_key, project_key) AS project_key, color, auto_close_parent, auto_close_sub_issues, private, created_by, version, deleted_at, created_at, updated_at \
+            "SELECT id, workspace_id, name, COALESCE(restore_project_key, project_key) AS project_key, color, auto_close_parent, auto_close_sub_issues, private, version, deleted_at, created_at, updated_at \
              FROM projects WHERE workspace_id = ",
         );
         query
@@ -3517,7 +3521,7 @@ impl TaskRepository {
             ProjectScope::of(&require_access(self.database.pool(), workspace_id, actor_id).await?);
         self.require_granted_project(project_id)?;
         let row = sqlx::query(sqlx::AssertSqlSafe(format!(
-            "SELECT id, workspace_id, name, COALESCE(restore_project_key, project_key) AS project_key, color, auto_close_parent, auto_close_sub_issues, private, created_by, version, deleted_at, created_at, updated_at \
+            "SELECT id, workspace_id, name, COALESCE(restore_project_key, project_key) AS project_key, color, auto_close_parent, auto_close_sub_issues, private, version, deleted_at, created_at, updated_at \
              FROM projects WHERE id = $1 AND workspace_id = $2 AND deleted_at > $3 AND {}",
             scope.project("projects.id")
         )))
@@ -4623,24 +4627,10 @@ async fn require_project(
     }
 }
 
-/// `Forbidden` unless the actor manages the project: `projects.manage`, or having created it.
-/// Call it after the project was found, so someone who cannot see the project still gets
-/// `NotFound`.
-pub(super) async fn require_manager(
-    tx: &mut Transaction<'_, Any>,
-    actor: &Actor,
-    project_id: Id,
-) -> Result<(), TaskError> {
+/// `Forbidden` unless the actor manages the project. Call it after the project was found, so
+/// someone who cannot see the project still gets `NotFound`.
+pub(super) fn require_manager(actor: &Actor, project_id: Id) -> Result<(), TaskError> {
     if actor.can_manage_project(project_id) {
-        return Ok(());
-    }
-    let creator: Option<String> =
-        sqlx::query_scalar("SELECT created_by FROM projects WHERE id = $1")
-            .bind(project_id.to_string())
-            .fetch_optional(&mut **tx)
-            .await?
-            .flatten();
-    if creator.is_some_and(|creator| creator == actor.user_id.to_string()) {
         Ok(())
     } else {
         Err(TaskError::Forbidden)
@@ -4656,7 +4646,7 @@ pub(super) async fn require_manager_tx(
 ) -> Result<(), TaskError> {
     require_project_tx(tx, workspace_id, project_id, actor_id).await?;
     let actor = require_access_tx(tx, workspace_id, actor_id).await?;
-    require_manager(tx, &actor, project_id).await
+    require_manager(&actor, project_id)
 }
 
 pub(super) async fn require_project_tx(
@@ -5513,7 +5503,7 @@ pub(super) async fn project_in_tx(
     deleted: bool,
 ) -> Result<ProjectRecord, TaskError> {
     let row = sqlx::query(sqlx::AssertSqlSafe(format!(
-        "SELECT id, workspace_id, name, COALESCE(restore_project_key, project_key) AS project_key, color, auto_close_parent, auto_close_sub_issues, private, created_by, version, deleted_at, created_at, updated_at \
+        "SELECT id, workspace_id, name, COALESCE(restore_project_key, project_key) AS project_key, color, auto_close_parent, auto_close_sub_issues, private, version, deleted_at, created_at, updated_at \
          FROM projects WHERE id = $1 AND workspace_id = $2 AND (($3 = 1 AND deleted_at IS NOT NULL) OR ($4 = 0 AND deleted_at IS NULL)) AND {}",
         scope.project("projects.id")
     )))
@@ -5671,9 +5661,6 @@ fn project_from_row(row: sqlx::any::AnyRow) -> Result<ProjectRecord, TaskError> 
         auto_close_parent: row.get("auto_close_parent"),
         auto_close_sub_issues: row.get("auto_close_sub_issues"),
         private: row.get("private"),
-        created_by: row
-            .get::<Option<String>, _>("created_by")
-            .and_then(|id| id.parse().ok()),
         version: parse_version(row.get("version"))?,
         deleted_at: row
             .get::<Option<i64>, _>("deleted_at")

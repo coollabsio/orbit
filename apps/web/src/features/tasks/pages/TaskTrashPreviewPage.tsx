@@ -7,8 +7,7 @@ import { Pane, PaneHeader, PaneTitle } from '@/components/common/Pane'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import { confirmAction } from '@/components/common/confirmAction'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
-import { useCurrentUser } from '@/features/auth/api'
-import { canManageProject, canPurgeTask } from '@/features/workspaces/permissions'
+import { canIn, canPurgeTask } from '@/features/workspaces/permissions'
 import { useTeamMembers } from '@/features/workspaces/api'
 import { pageMentionCandidates } from '@/features/docs/editor/pageMentions'
 import { statusFromRecord, usePurgeProject, useProjects, useProjectTrash, useRestoreProject, useTrashedProject, useTrashedProjectTasks } from '@/features/tasks/api/projects'
@@ -106,7 +105,6 @@ export function TrashedProjectPage() {
   const { workspace } = useWorkspace()
   const navigate = useNavigate()
   const project = useTrashedProject(workspace.id, projectId)
-  const userId = useCurrentUser().data?.id
   const tasks = useTrashedProjectTasks(workspace.id, projectId)
   const members = useTeamMembers(workspace.id)
   const restore = useRestoreProject(workspace.id)
@@ -132,7 +130,7 @@ export function TrashedProjectPage() {
       title={record.name}
       banner={
         <TrashBanner text={trashedNotice('project', deletedBy, record.deleted_at ?? record.updated_at)}>
-          {canManageProject(workspace, userId, record) ? <Button variant="outline" size="sm" disabled={busy} onClick={() => restore.mutate({ projectId: record.id, version: record.version }, { onSuccess: () => navigate(`/tasks?project=${record.id}`) })}><RotateCcw className="size-3.5" />Restore project</Button> : null}
+          {canIn(workspace, 'projects.manage', record.id) ? <Button variant="outline" size="sm" disabled={busy} onClick={() => restore.mutate({ projectId: record.id, version: record.version }, { onSuccess: () => navigate(`/tasks?project=${record.id}`) })}><RotateCcw className="size-3.5" />Restore project</Button> : null}
           {canPurge ? <Button variant="outline" size="sm" disabled={busy} onClick={() => void requestPurge()}><Trash2 className="size-3.5" />Delete forever</Button> : null}
         </TrashBanner>
       }

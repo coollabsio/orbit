@@ -19,17 +19,20 @@ import {
   saveWorkspaceBucket,
   listInvitations,
   listMembers,
+  listProjectGrants,
   listRoles,
   listWorkspaces,
   removeMember,
   renameWorkspace,
   revokeInvitation,
+  revokeProjectGrant,
   setMemberCustomRole,
+  setProjectGrant,
   transferOwnership,
   updateRole,
 } from '@orbit/api/generated/sdk.gen'
 import { STORAGE_FILES_PAGE } from '@orbit/api/storage'
-import type { AcceptBody, InvitationBody, MemberRecord, RoleBody, RoleCreateBody, RoleUpdateBody, S3Body, WorkspaceBucketView, WorkspaceRecord } from '@orbit/api/generated/types.gen'
+import type { AcceptBody, InvitationBody, MemberRecord, ProjectGrantBody, RoleBody, RoleCreateBody, RoleUpdateBody, S3Body, WorkspaceBucketView, WorkspaceRecord } from '@orbit/api/generated/types.gen'
 import type { User } from './models'
 
 type ApiClient = ReturnType<typeof createApiClient>
@@ -287,6 +290,46 @@ export function useDeleteWorkspaceRole(workspaceId: string) {
       await deleteRole({ client: apiClient, path: { workspace_id: workspaceId, role_id: roleId }, throwOnError: true })
     },
     onSuccess: () => void invalidate(),
+  })
+}
+
+/** Members' direct permissions in single projects, such as a project's creator managing it. Needs `roles.manage`. */
+export function useProjectGrants(workspaceId: string, enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.projectGrants(workspaceId),
+    enabled,
+    queryFn: async () => {
+      const { data } = await listProjectGrants({ client: apiClient, path: { workspace_id: workspaceId }, throwOnError: true })
+      return required(data, 'Project access response was empty.')
+    },
+  })
+}
+
+/** Replaces a member's direct permissions in one project; the workspace refetches so its `project_permissions` follow. */
+export function useSetProjectGrant(workspaceId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (body: ProjectGrantBody) => {
+      await setProjectGrant({ client: apiClient, path: { workspace_id: workspaceId }, body, throwOnError: true })
+    },
+    onSuccess: () => Promise.all([
+      queryClient.invalidateQueries({ queryKey: queryKeys.projectGrants(workspaceId) }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.workspaces }),
+    ]),
+  })
+}
+
+/** Takes all of a member's direct permissions in one project; the workspace refetches so its `project_permissions` follow. */
+export function useRevokeProjectGrant(workspaceId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (input: { projectId: string; userId: string }) => {
+      await revokeProjectGrant({ client: apiClient, path: { workspace_id: workspaceId, project_id: input.projectId, user_id: input.userId }, throwOnError: true })
+    },
+    onSuccess: () => Promise.all([
+      queryClient.invalidateQueries({ queryKey: queryKeys.projectGrants(workspaceId) }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.workspaces }),
+    ]),
   })
 }
 

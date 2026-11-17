@@ -55,6 +55,19 @@ pub struct WorkspaceRoleRecord {
     pub updated_at: TimestampMillis,
 }
 
+/// A project permission that one member holds in one project, apart from any role. A project's
+/// creator holds `projects.manage` this way until an owner or admin revokes it.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct MemberProjectGrant {
+    #[schema(value_type = String)]
+    pub project_id: Id,
+    pub project_name: String,
+    #[schema(value_type = String)]
+    pub user_id: Id,
+    pub display_name: String,
+    pub permissions: Vec<Permission>,
+}
+
 const SELECT_ROLE: &str = "SELECT workspace_roles.id, workspace_roles.name, workspace_roles.permissions, \
      workspace_roles.version, workspace_roles.created_at, workspace_roles.updated_at, \
      CAST((SELECT COUNT(*) FROM memberships WHERE memberships.custom_role_id = workspace_roles.id \
@@ -135,6 +148,171 @@ impl WorkspaceRepository {
         rows.iter()
             .map(|row| role_from_row(row, &mut grants))
             .collect()
+    }
+
+    /// The project permissions that members hold directly, for the Roles page.
+    pub async fn list_project_grants(
+        &self,
+        workspace_id: Id,
+        actor_id: Id,
+    ) -> Result<Vec<MemberProjectGrant>, WorkspaceError> {
+        let actor = require_actor(self.database.pool(), workspace_id, actor_id).await?;
+        if !actor.can(Permission::RolesManage) {
+            return Err(WorkspaceError::Forbidden);
+        }
+        let rows: Vec<(String, String, String, String, String)> = sqlx::query_as(
+            "SELECT g.project_id, projects.name, g.user_id, users.display_name, g.permission \
+             FROM member_project_grants g JOIN projects ON projects.id = g.project_id \
+             JOIN users ON users.id = g.user_id \
+             JOIN memberships ON memberships.workspace_id = projects.workspace_id AND memberships.user_id = g.user_id \
+             WHERE projects.workspace_id = $1 AND projects.deleted_at IS NULL \
+             ORDER BY lower(projects.name), g.project_id, lower(users.display_name), g.user_id",
+        )
+        .bind(workspace_id.to_string())
+        .fetch_all(self.database.pool())
+        .await?;
+        let mut grants: Vec<MemberProjectGrant> = Vec::new();
+        for (project_id, project_name, user_id, display_name, permission) in rows {
+            let (project_id, user_id) = (parse_id(project_id)?, parse_id(user_id)?);
+            let Some(permission) = Permission::parse(&permission) else {
+                continue;
+            };
+            match grants
+                .iter_mut()
+                .find(|grant| grant.project_id == project_id && grant.user_id == user_id)
+            {
+                Some(grant) => grant.permissions.push(permission),
+                None => grants.push(MemberProjectGrant {
+                    project_id,
+                    project_name,
+                    user_id,
+                    display_name,
+                    permissions: vec![permission],
+                }),
+            }
+        }
+        Ok(grants)
+    }
+
+    /// Sets the direct project permissions of `user_id` in `project_id` (replacing what they
+    /// held there). The member must hold the member role: owners and admins hold everything, and
+    /// guests nothing.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn set_project_grant(
+        &self,
+        workspace_id: Id,
+        actor_id: Id,
+        project_id: Id,
+        user_id: Id,
+        permissions: &[Permission],
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<(), WorkspaceError> {
+        let mut transaction = self.database.immediate_transaction().await?;
+        if !may_manage_roles(&mut transaction, workspace_id, actor_id, request_id, now).await? {
+            transaction.commit().await?;
+            return Err(WorkspaceError::Forbidden);
+        }
+        let rows = clean_project_grants(
+            &mut transaction,
+            workspace_id,
+            &[ProjectGrant {
+                project_id,
+                permissions: permissions.to_vec(),
+                project_name: String::new(),
+            }],
+        )
+        .await?;
+        if rows.is_empty() {
+            return Err(WorkspaceError::InvalidRole("Pick at least one permission."));
+        }
+        let member: i64 = sqlx::query_scalar(
+            "SELECT CAST(COUNT(*) AS BIGINT) FROM memberships WHERE workspace_id = $1 \
+             AND user_id = $2 AND role = 'member'",
+        )
+        .bind(workspace_id.to_string())
+        .bind(user_id.to_string())
+        .fetch_one(&mut *transaction)
+        .await?;
+        if member == 0 {
+            return Err(WorkspaceError::InvalidRole(
+                "Only an ordinary member can hold a project permission.",
+            ));
+        }
+        sqlx::query("DELETE FROM member_project_grants WHERE project_id = $1 AND user_id = $2")
+            .bind(project_id.to_string())
+            .bind(user_id.to_string())
+            .execute(&mut *transaction)
+            .await?;
+        for (_, permission) in &rows {
+            sqlx::query(
+                "INSERT INTO member_project_grants (project_id, user_id, permission) VALUES ($1, $2, $3)",
+            )
+            .bind(project_id.to_string())
+            .bind(user_id.to_string())
+            .bind(permission.as_str())
+            .execute(&mut *transaction)
+            .await?;
+        }
+        audit::record(
+            &mut transaction,
+            workspace_id,
+            Some(actor_id),
+            "project_grant.set",
+            AuditOutcome::Success,
+            "project",
+            Some(project_id),
+            request_id,
+            json!({"user_id": user_id.to_string(), "permissions": rows.iter().map(|(_, p)| p.as_str()).collect::<Vec<_>>()}),
+            now,
+        )
+        .await?;
+        transaction.commit().await?;
+        Ok(())
+    }
+
+    /// Takes every direct project permission of `user_id` in `project_id` away.
+    pub async fn revoke_project_grant(
+        &self,
+        workspace_id: Id,
+        actor_id: Id,
+        project_id: Id,
+        user_id: Id,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<(), WorkspaceError> {
+        let mut transaction = self.database.immediate_transaction().await?;
+        if !may_manage_roles(&mut transaction, workspace_id, actor_id, request_id, now).await? {
+            transaction.commit().await?;
+            return Err(WorkspaceError::Forbidden);
+        }
+        let removed = sqlx::query(
+            "DELETE FROM member_project_grants WHERE project_id = $1 AND user_id = $2 \
+             AND EXISTS (SELECT 1 FROM projects WHERE id = $1 AND workspace_id = $3)",
+        )
+        .bind(project_id.to_string())
+        .bind(user_id.to_string())
+        .bind(workspace_id.to_string())
+        .execute(&mut *transaction)
+        .await?;
+        if removed.rows_affected() == 0 {
+            return Err(WorkspaceError::NotFound);
+        }
+        audit::record(
+            &mut transaction,
+            workspace_id,
+            Some(actor_id),
+            "project_grant.revoked",
+            AuditOutcome::Success,
+            "project",
+            Some(project_id),
+            request_id,
+            json!({"user_id": user_id.to_string()}),
+            now,
+        )
+        .await?;
+        transaction.commit().await?;
+        Ok(())
     }
 
     pub async fn create_role(

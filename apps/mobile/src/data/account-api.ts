@@ -10,7 +10,10 @@ import {
   createInvitation,
   createRole,
   deleteRole,
+  listProjectGrants,
   listRoles,
+  revokeProjectGrant,
+  setProjectGrant,
   setMemberCustomRole,
   updateRole,
   deleteAccount as deleteAccountRequest,
@@ -49,9 +52,11 @@ import type {
   AuthProblem,
   OwnedWorkspace,
   InvitationRecord,
+  MemberProjectGrant,
   NotificationPrefs,
   PasskeyRecord,
   Permission,
+  ProjectGrantBody,
   PushSubscriptionRecord,
   RoleProjectGrant,
   RolesResponse,
@@ -73,7 +78,7 @@ import type { OAuthConnection } from '@orbit/api/mcp'
 import { STORAGE_FILES_PAGE } from '@orbit/api/storage'
 import { relativeTime } from './format'
 
-export type { InvitationRecord, NotificationPrefs, OwnedWorkspace, PasskeyRecord, PushSubscriptionRecord, RoleProjectGrant, RolesResponse, SessionRecord, TotpSetup, TwoFactorStatus, WorkspaceBucketView, WorkspaceRoleRecord, WorkspaceStorage }
+export type { InvitationRecord, MemberProjectGrant, NotificationPrefs, OwnedWorkspace, PasskeyRecord, PushSubscriptionRecord, RoleProjectGrant, RolesResponse, SessionRecord, TotpSetup, TwoFactorStatus, WorkspaceBucketView, WorkspaceRoleRecord, WorkspaceStorage }
 
 /** Query keys of the account (not per workspace) and of the workspace settings. */
 export const accountKeys = {
@@ -89,6 +94,8 @@ export const accountKeys = {
   invitations: (workspaceId: string) => ['members', workspaceId, 'invitations'] as const,
   /** Under the `members` prefix too: a member's custom role changes the role's member count. */
   roles: (workspaceId: string) => ['members', workspaceId, 'roles'] as const,
+  /** Under the `members` prefix too: a member who leaves takes their project grants along. */
+  projectGrants: (workspaceId: string) => ['members', workspaceId, 'project-grants'] as const,
   storage: (workspaceId: string) => ['workspace-storage', workspaceId] as const,
   bucket: (workspaceId: string) => ['workspace-bucket', workspaceId] as const,
   authOptions: ['auth-options'] as const,
@@ -467,6 +474,21 @@ export function projectGrantLines(role: Pick<WorkspaceRoleRecord, 'project_grant
 /** Its members become ordinary members. */
 export async function deleteWorkspaceRole(client: OrbitClient, workspaceId: string, roleId: string): Promise<void> {
   await deleteRole({ client, path: { workspace_id: workspaceId, role_id: roleId }, throwOnError: true })
+}
+
+/** The permissions members hold directly in single projects, outside any role: a project's creator manages it this way. */
+export async function memberProjectGrants(client: OrbitClient, workspaceId: string): Promise<MemberProjectGrant[]> {
+  return (await listProjectGrants({ client, path: { workspace_id: workspaceId }, throwOnError: true })).data
+}
+
+/** Replaces what the member holds directly in the project. The server takes project-scoped permissions only, for a member whose base role is Member. */
+export async function setMemberProjectGrant(client: OrbitClient, workspaceId: string, grant: ProjectGrantBody): Promise<void> {
+  await setProjectGrant({ client, path: { workspace_id: workspaceId }, body: { project_id: grant.project_id, user_id: grant.user_id, permissions: grant.permissions }, throwOnError: true })
+}
+
+/** Takes away every permission the member holds directly in the project. */
+export async function revokeMemberProjectGrant(client: OrbitClient, workspaceId: string, grant: Pick<MemberProjectGrant, 'project_id' | 'user_id'>): Promise<void> {
+  await revokeProjectGrant({ client, path: { workspace_id: workspaceId, project_id: grant.project_id, user_id: grant.user_id }, throwOnError: true })
 }
 
 /** What each permission lets a member do, in words; `help` shows behind the info icon. */
