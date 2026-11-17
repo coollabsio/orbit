@@ -19,6 +19,7 @@ import {
   CLOUDFLARE_EVENTS_WORKER,
   defaultMaxBytes,
   eventsUrlWithLogin,
+  generatedSecrets,
   initialSettingValues,
   isSendRouteKind,
   mailProblem,
@@ -43,12 +44,11 @@ function kindHelp(kind: SendRouteKind): string | null {
   switch (kind) {
     case 'direct':
       return 'Orbit delivers to each recipient’s mail server on port 25. This server must be allowed to send on port 25, with a PTR record for its address.'
-    case 'postmark':
-      return 'Orbit makes the webhook user name and password and shows them once, after you add the route.'
-    case 'cloudflare':
-      return 'Orbit makes the event secret and shows it once, after you add the route.'
-    default:
-      return null
+    default: {
+      const made = generatedSecrets(kind).map((name) => (SECRET_LABELS[name] ?? name).toLowerCase())
+      if (made.length === 0) return null
+      return `Orbit makes the ${made.join(' and ')} and shows ${made.length > 1 ? 'them' : 'it'} once, after you add the route.`
+    }
   }
 }
 
@@ -169,7 +169,7 @@ export function SendRouteForm({
   const saving = create.isPending || update.isPending
   const error = create.error ?? update.error
   const ready = routeFormReady(fields, { settings, secrets, maxBytes, editing: Boolean(route) })
-  const hasLogin = kind === 'smtp' && route?.secrets_set.includes('username') === true
+  const hasLogin = kind === 'smtp' && (route?.secrets_set.some((name) => name === 'username' || name === 'password') ?? false)
   const help = kindHelp(kind)
   const kindOptions = SEND_ROUTE_KINDS.map((value) => ({
     value,
@@ -206,8 +206,8 @@ export function SendRouteForm({
     })
     if (!confirmed) return
     update.mutate({ routeId: route.id, body: { clear_login: true } }, {
+      // a failure shows under the form, as for Save
       onSuccess: () => { toast('Login removed'); onClose() },
-      onError: (failure) => toast.error(mailProblem(failure, 'The login could not be removed.')),
     })
   }
 

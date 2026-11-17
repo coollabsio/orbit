@@ -182,6 +182,8 @@ test('a Cloudflare route made from a provider reuses its Email Worker and signin
   const steps = routeSetupSteps('cloudflare', true).join(' ')
   expect(steps).toContain('already has the queue handler')
   expect(steps).toContain('ORBIT_SIGNING_SECRET')
+  expect(steps).toContain('No new secret')
+  expect(steps).not.toContain('ORBIT_EVENT_SECRET')
   expect(routeSetupSteps('cloudflare').join(' ')).toContain('queue handler below')
 })
 

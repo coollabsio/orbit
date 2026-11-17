@@ -440,8 +440,8 @@ export function routeSetupSteps(kind: SendRouteKind, eventSecretFromProvider = f
         return [
           'Onboard each domain in Cloudflare Email Sending and publish its records (cf-bounce.<domain> and DKIM).',
           'Make a queue, and an event subscription that sends the domains’ sending events to it.',
-          'Your Email Worker already has the queue handler: bind the queue to it as a consumer.',
-          'In the Worker’s settings, add the variable ORBIT_EVENTS_URL with the URL above, and the secret ORBIT_EVENT_SECRET with the provider’s signing secret (the value of ORBIT_SIGNING_SECRET).',
+          'Your Email Worker already has the queue handler, and signs events with its ORBIT_SIGNING_SECRET: bind the queue to it as a consumer. No new secret is needed.',
+          'In the Worker’s settings, add the variable ORBIT_EVENTS_URL with the URL above.',
         ]
       }
       return [
@@ -475,16 +475,17 @@ export function routeRecordsNote(kind: SendRouteKind, domain: string): string | 
 }
 
 /**
- * The Cloudflare Worker that reads the event queue and posts each batch to Orbit, signed with the event secret. The
- * same `queue` handler as the Email Worker of a Cloudflare provider (`crates/mail/src/inbound/cloudflare.rs`); the
- * route view does not carry a script, so a route without that Worker gets this one.
+ * The Cloudflare Worker that reads the event queue and posts each batch to Orbit, signed with the event secret (else
+ * the Email Worker's signing secret). The same `queue` handler as the Email Worker of a Cloudflare provider
+ * (`crates/mail/src/inbound/cloudflare.rs`); the route view carries no script, so a route without that Worker gets
+ * this one.
  */
 export const CLOUDFLARE_EVENTS_WORKER = `export default {
   async queue(batch, env) {
     const body = JSON.stringify(batch.messages.map((message) => message.body))
     const timestamp = Math.floor(Date.now() / 1000).toString()
     const encoder = new TextEncoder()
-    const key = await crypto.subtle.importKey('raw', encoder.encode(env.ORBIT_EVENT_SECRET), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
+    const key = await crypto.subtle.importKey('raw', encoder.encode(env.ORBIT_EVENT_SECRET || env.ORBIT_SIGNING_SECRET), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
     const mac = await crypto.subtle.sign('HMAC', key, encoder.encode(\`\${timestamp}.\${body}\`))
     const signature = [...new Uint8Array(mac)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
     const response = await fetch(env.ORBIT_EVENTS_URL, {
