@@ -48,6 +48,11 @@ pub(crate) struct MailDomain {
     provider: Option<MailDomainRoute>,
     /// The send route the domain uses: its own, else the instance default; `null`: none.
     send_route: Option<MailDomainSendRoute>,
+    /// The domain's own send route; `null`: it follows the instance default.
+    #[schema(value_type = Option<String>)]
+    own_send_route_id: Option<Id>,
+    /// A new DKIM key waits for its DNS record while another one is active.
+    dkim_rotating: bool,
     #[schema(value_type = String, format = DateTime)]
     created_at: TimestampMillis,
 }
@@ -153,6 +158,8 @@ fn view(domain: Domain, hostname: Option<&str>) -> MailDomain {
         })
         .collect();
     MailDomain {
+        own_send_route_id: domain.own_send_route_id,
+        dkim_rotating: domain.dkim_rotating,
         send_route: domain.send_route.as_ref().map(|route| MailDomainSendRoute {
             id: route.id,
             kind: route.kind,
@@ -606,6 +613,8 @@ mod tests {
             }),
             address_count: 0,
             send_route: None,
+            own_send_route_id: None,
+            dkim_rotating: false,
         };
         let view = view(domain, Some("mx.orbit.test"));
         let dkim = view

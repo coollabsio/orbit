@@ -256,6 +256,7 @@ async fn rotation_switches_after_new_record() {
     let start = TimestampMillis::now().as_millis() + MINUTE;
     let domain = fixture.active("example.com", start).await;
     let old = domain.dkim.as_ref().unwrap().selector.clone();
+    assert!(!domain.dkim_rotating);
 
     let rotated = fixture
         .mail
@@ -273,6 +274,7 @@ async fn rotation_switches_after_new_record() {
 
     // The old key keeps signing while the new record is not published.
     let domain = fixture.get(&domain).await;
+    assert!(domain.dkim_rotating, "a pending key beside an active one");
     assert_eq!(domain.dkim.as_ref().unwrap().selector, rotated.selector);
     fixture.check(&domain, start + 2).await;
     let signing = fixture
@@ -301,6 +303,7 @@ async fn rotation_switches_after_new_record() {
         fixture.key_status(&domain, &rotated.selector).await,
         "active"
     );
+    assert!(!fixture.get(&domain).await.dkim_rotating);
 }
 
 #[tokio::test]

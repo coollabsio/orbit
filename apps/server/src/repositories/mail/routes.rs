@@ -398,6 +398,8 @@ pub struct RouteChange {
     /// Secrets to change by name: a non-empty value replaces the stored one, the others stay.
     pub secrets: Option<BTreeMap<String, String>>,
     pub settings: Option<RouteSettings>,
+    /// Removes the username and password of an `smtp` route (a relay without login).
+    pub clear_login: bool,
 }
 
 /// What the admin enters for a route made from a provider: only what the provider lacks.
@@ -1024,7 +1026,13 @@ impl MailRepository {
             .map(clean_name)
             .transpose()?
             .unwrap_or(route.name);
+        if change.clear_login && (route.kind != SendRouteKind::Smtp || change.secrets.is_some()) {
+            return Err(MailError::Invalid {
+                field: "clear_login",
+            });
+        }
         let secrets = match change.secrets {
+            _ if change.clear_login => RouteSecrets::None,
             Some(given) => {
                 let mut merged: BTreeMap<String, String> = route_secrets
                     .fields()

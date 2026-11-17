@@ -3727,6 +3727,10 @@ export type MailDomain = {
     checked_at?: string | null;
     created_at: string;
     /**
+     * A new DKIM key waits for its DNS record while another one is active.
+     */
+    dkim_rotating: boolean;
+    /**
      * The `p=` of the domain's DMARC record at the last check.
      */
     dmarc_policy?: string | null;
@@ -3740,6 +3744,10 @@ export type MailDomain = {
      * Normalized: lower case, IDNA A-labels (`xn--…`), no trailing dot.
      */
     name: string;
+    /**
+     * The domain's own send route; `null`: it follows the instance default.
+     */
+    own_send_route_id?: string | null;
     provider?: null | MailDomainRoute;
     /**
      * The records to publish, each with its status at the last check.
@@ -4356,6 +4364,22 @@ export type MailSendRouteView = {
      * Domains that use it as their own route.
      */
     domain_count: number;
+    /**
+     * A Cloudflare route made from a provider keeps the provider's signing secret as its event
+     * secret; the Worker already has it.
+     */
+    event_secret_from_provider: boolean;
+    /**
+     * Where the provider posts bounce, complaint and delivery events; `null` for kinds without
+     * events (`direct`, `smtp`) and for an instance route listed to a workspace.
+     */
+    events_url?: string | null;
+    /**
+     * Secrets Orbit made for this route, shown once (in the answer that created it).
+     */
+    generated?: {
+        [key: string]: string;
+    } | null;
     id: string;
     /**
      * Domains without a route of their own use this route.
@@ -9082,6 +9106,14 @@ export type ThreadStateRecord = {
     unread_replies: number;
 };
 
+/**
+ * The instance's numbers of the `new` and `standard` tiers.
+ */
+export type TierLimits = {
+    new: Limits;
+    standard: Limits;
+};
+
 export type TotpSetup = {
     /**
      * The `otpauth://` URL the QR code holds.
@@ -9467,6 +9499,10 @@ export type UpdateMailProviderBody = {
 };
 
 export type UpdateMailSendRouteBody = {
+    /**
+     * Removes the username and password of an `smtp` route (a relay without login).
+     */
+    clear_login?: boolean;
     name?: string | null;
     /**
      * Changes the named secrets; the ones left out keep their values.
@@ -15565,6 +15601,106 @@ export type TestInstanceMailSendRouteResponses = {
 };
 
 export type TestInstanceMailSendRouteResponse = TestInstanceMailSendRouteResponses[keyof TestInstanceMailSendRouteResponses];
+
+export type GetMailSendTiersData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/admin/mail/send-tiers';
+};
+
+export type GetMailSendTiersErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type GetMailSendTiersError = GetMailSendTiersErrors[keyof GetMailSendTiersErrors];
+
+export type GetMailSendTiersResponses = {
+    200: TierLimits;
+};
+
+export type GetMailSendTiersResponse = GetMailSendTiersResponses[keyof GetMailSendTiersResponses];
+
+export type SetMailSendTiersData = {
+    body: TierLimits;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/admin/mail/send-tiers';
+};
+
+export type SetMailSendTiersErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type SetMailSendTiersError = SetMailSendTiersErrors[keyof SetMailSendTiersErrors];
+
+export type SetMailSendTiersResponses = {
+    200: TierLimits;
+};
+
+export type SetMailSendTiersResponse = SetMailSendTiersResponses[keyof SetMailSendTiersResponses];
 
 export type CreateMailTestAddressData = {
     body: CreateMailTestBody;

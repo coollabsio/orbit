@@ -51,7 +51,9 @@ pub use ingest::{
 pub use keys::{MailKeys, open_blob, receipt_aad, seal_blob};
 pub use labels::Label;
 pub use links::{FileLink, MailFileLinkView};
-pub use limits::{Limits, SEND_POLICY_JOB, SendPolicyView, SendTier, send_policy_kind};
+pub use limits::{
+    Limits, SEND_POLICY_JOB, SendPolicyView, SendTier, TierLimits, send_policy_kind,
+};
 pub(crate) use mailboxes::suspend_owned_mailboxes;
 pub use mailboxes::{
     AddressKind, BulkResult, MailAddress, Mailbox, MailboxKind, MailboxStatus, NamePattern,

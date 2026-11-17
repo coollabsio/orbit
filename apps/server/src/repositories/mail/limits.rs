@@ -162,6 +162,85 @@ struct Tiers {
     standard: Option<Limits>,
 }
 
+/// The instance's numbers of the `new` and `standard` tiers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TierLimits {
+    pub new: Limits,
+    pub standard: Limits,
+}
+
+impl Limits {
+    fn valid(self) -> bool {
+        [
+            self.per_user_hour,
+            self.per_user_day,
+            self.per_ws_hour,
+            self.per_ws_day,
+            self.max_recipients,
+        ]
+        .iter()
+        .all(|number| (1..=10_000_000).contains(number))
+    }
+}
+
+impl MailRepository {
+    /// The instance's tier defaults (root user).
+    pub async fn send_tiers(&self) -> Result<TierLimits, MailError> {
+        let tiers: Option<String> =
+            sqlx::query_scalar("SELECT mail_send_tiers FROM instance_settings WHERE id = 1")
+                .fetch_optional(self.database.pool())
+                .await?;
+        let tiers = tiers
+            .as_deref()
+            .and_then(|json| serde_json::from_str::<Tiers>(json).ok());
+        Ok(TierLimits {
+            new: tiers.as_ref().and_then(|t| t.new).unwrap_or(Limits::NEW),
+            standard: tiers
+                .as_ref()
+                .and_then(|t| t.standard)
+                .unwrap_or(Limits::STANDARD),
+        })
+    }
+
+    /// Sets the instance's tier defaults (root user); every number is 1 to 10,000,000.
+    pub async fn set_send_tiers(
+        &self,
+        actor_id: Id,
+        tiers: TierLimits,
+        request_id: &str,
+    ) -> Result<TierLimits, MailError> {
+        if !tiers.new.valid() || !tiers.standard.valid() {
+            return Err(MailError::Invalid { field: "tiers" });
+        }
+        let json =
+            serde_json::to_string(&tiers).map_err(|_| MailError::Invalid { field: "tiers" })?;
+        let now = self.database.database_now().await?;
+        let mut transaction = self.database.immediate_transaction().await?;
+        sqlx::query(
+            "UPDATE instance_settings SET mail_send_tiers = $1, updated_at = $2 WHERE id = 1",
+        )
+        .bind(json)
+        .bind(now.as_millis())
+        .execute(&mut *transaction)
+        .await?;
+        crate::audit::record_global(
+            &mut transaction,
+            Some(actor_id),
+            "instance.mail_send_tiers_updated",
+            crate::audit::AuditOutcome::Success,
+            "mail_send_tiers",
+            None,
+            request_id,
+            serde_json::json!({ "new": tiers.new, "standard": tiers.standard }),
+            now,
+        )
+        .await?;
+        transaction.commit().await?;
+        Ok(tiers)
+    }
+}
+
 /// The limits of the workspace: its tier's numbers from the instance settings, or its own when the
 /// tier is `custom`. A workspace without a policy row is `new` on Orbit Cloud (`cloud`), else
 /// `standard`. Numbers that cannot be read fail closed to the `new` tier.

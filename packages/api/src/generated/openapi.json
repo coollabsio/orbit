@@ -12230,6 +12230,218 @@
         ]
       }
     },
+    "/api/v1/admin/mail/send-tiers": {
+      "get": {
+        "tags": [
+          "crate::mail_routes::admin"
+        ],
+        "summary": "The tier defaults of the instance (instance admins).",
+        "operationId": "get_mail_send_tiers",
+        "parameters": [
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TierLimits"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "crate::mail_routes::admin"
+        ],
+        "summary": "Sets the numbers of the `new` and `standard` tiers (instance admins; audit\n`instance.mail_send_tiers_updated`).",
+        "operationId": "set_mail_send_tiers",
+        "parameters": [
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TierLimits"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TierLimits"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/mail/test-address": {
       "post": {
         "tags": [
@@ -81683,6 +81895,7 @@
           "status",
           "address_count",
           "records",
+          "dkim_rotating",
           "created_at"
         ],
         "properties": {
@@ -81708,6 +81921,10 @@
           "created_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "dkim_rotating": {
+            "type": "boolean",
+            "description": "A new DKIM key waits for its DNS record while another one is active."
           },
           "dmarc_policy": {
             "type": [
@@ -81737,6 +81954,13 @@
           "name": {
             "type": "string",
             "description": "Normalized: lower case, IDNA A-labels (`xn--…`), no trailing dot."
+          },
+          "own_send_route_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The domain's own send route; `null`: it follows the instance default."
           },
           "provider": {
             "oneOf": [
@@ -83224,7 +83448,8 @@
           "secrets_set",
           "domain_count",
           "is_default",
-          "created_at"
+          "created_at",
+          "event_secret_from_provider"
         ],
         "properties": {
           "created_at": {
@@ -83235,6 +83460,30 @@
             "type": "integer",
             "format": "int64",
             "description": "Domains that use it as their own route."
+          },
+          "event_secret_from_provider": {
+            "type": "boolean",
+            "description": "A Cloudflare route made from a provider keeps the provider's signing secret as its event\nsecret; the Worker already has it."
+          },
+          "events_url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Where the provider posts bounce, complaint and delivery events; `null` for kinds without\nevents (`direct`, `smtp`) and for an instance route listed to a workspace."
+          },
+          "generated": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Secrets Orbit made for this route, shown once (in the answer that created it).",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
           },
           "id": {
             "type": "string"
@@ -94656,6 +94905,23 @@
           }
         }
       },
+      "TierLimits": {
+        "type": "object",
+        "description": "The instance's numbers of the `new` and `standard` tiers.",
+        "required": [
+          "new",
+          "standard"
+        ],
+        "properties": {
+          "new": {
+            "$ref": "#/components/schemas/Limits"
+          },
+          "standard": {
+            "$ref": "#/components/schemas/Limits"
+          }
+        },
+        "additionalProperties": false
+      },
       "TotpSetup": {
         "type": "object",
         "required": [
@@ -95528,6 +95794,10 @@
       "UpdateMailSendRouteBody": {
         "type": "object",
         "properties": {
+          "clear_login": {
+            "type": "boolean",
+            "description": "Removes the username and password of an `smtp` route (a relay without login)."
+          },
           "name": {
             "type": [
               "string",

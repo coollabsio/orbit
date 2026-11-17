@@ -14,7 +14,7 @@ use crate::mail_dns::{PtrStatus, check_ptr};
 use crate::repositories::instance_settings::InstanceSettingsRepository;
 use crate::repositories::mail::{
     FailedReceipt, HealthTest, HealthTestStatus, Limits, MailAuthSummary, MailError,
-    ReceiptProblem, RejectReason, RejectedDelivery, SendPolicyView, SendTier,
+    ReceiptProblem, RejectReason, RejectedDelivery, SendPolicyView, SendTier, TierLimits,
 };
 use crate::task_routes::{ApiError, ApiJson, authenticate_session, request_id_value};
 
@@ -641,6 +641,44 @@ pub(crate) async fn set_mail_send_policy(
         .await
         .map_err(|error| problem(error, &instance, request_id))?;
     Ok(Json(policy_view(view)))
+}
+
+/// The tier defaults of the instance (instance admins).
+#[utoipa::path(get, path = "/api/v1/admin/mail/send-tiers", responses((status = 200, body = TierLimits)))]
+pub(crate) async fn get_mail_send_tiers(
+    State(state): State<MailState>,
+    headers: HeaderMap,
+    uri: Uri,
+    request_id: RequestIdExtension,
+) -> Result<Json<TierLimits>, ApiError> {
+    let request_id = request_id.as_ref();
+    let (_, instance) = require_root(&state, &headers, &uri, request_id).await?;
+    let tiers = state
+        .mail
+        .send_tiers()
+        .await
+        .map_err(|error| problem(error, &instance, request_id))?;
+    Ok(Json(tiers))
+}
+
+/// Sets the numbers of the `new` and `standard` tiers (instance admins; audit
+/// `instance.mail_send_tiers_updated`).
+#[utoipa::path(put, path = "/api/v1/admin/mail/send-tiers", request_body = TierLimits, responses((status = 200, body = TierLimits)))]
+pub(crate) async fn set_mail_send_tiers(
+    State(state): State<MailState>,
+    headers: HeaderMap,
+    uri: Uri,
+    request_id: RequestIdExtension,
+    ApiJson(body): ApiJson<TierLimits>,
+) -> Result<Json<TierLimits>, ApiError> {
+    let request_id = request_id.as_ref();
+    let (actor_id, instance) = require_root(&state, &headers, &uri, request_id).await?;
+    let tiers = state
+        .mail
+        .set_send_tiers(actor_id, body, request_id_value(request_id))
+        .await
+        .map_err(|error| problem(error, &instance, request_id))?;
+    Ok(Json(tiers))
 }
 
 /// Resumes the sending of a paused workspace (instance admins). Its held messages go at the

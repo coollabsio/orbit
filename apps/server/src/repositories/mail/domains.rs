@@ -210,6 +210,10 @@ pub struct Domain {
     pub provider: Option<DomainProvider>,
     /// The route the domain sends through (its own, else the instance default).
     pub send_route: Option<DomainSendRoute>,
+    /// The domain's own route; `None`: it follows the instance default.
+    pub own_send_route_id: Option<Id>,
+    /// A new DKIM key waits for its DNS record while another one is active.
+    pub dkim_rotating: bool,
 }
 
 /// The provider a domain is routed to, with the MX hosts it needs.
@@ -242,7 +246,11 @@ const DOMAIN_COLUMNS: &str = "d.id, d.workspace_id, d.name, d.status, d.verify_t
      k.selector AS dkim_selector, k.public_key AS dkim_public_key, k.status AS dkim_status, \
      d.provider_id, p.kind AS provider_kind, p.name AS provider_name, \
      p.settings AS provider_settings, p.workspace_id AS provider_workspace_id, \
-     r.id AS send_route_id, r.kind AS send_route_kind, r.settings AS send_route_settings";
+     r.id AS send_route_id, r.kind AS send_route_kind, r.settings AS send_route_settings, \
+     d.send_route_id AS own_send_route_id, \
+     (CASE WHEN EXISTS (SELECT 1 FROM mail_dkim_keys x WHERE x.domain_id = d.id \
+     AND x.status = 'pending') AND EXISTS (SELECT 1 FROM mail_dkim_keys y \
+     WHERE y.domain_id = d.id AND y.status = 'active') THEN 1 ELSE 0 END) AS dkim_rotating";
 
 const DOMAIN_FROM: &str = "mail_domains d LEFT JOIN mail_dkim_keys k ON k.id = (\
      SELECT k2.id FROM mail_dkim_keys k2 WHERE k2.domain_id = d.id \
@@ -331,6 +339,12 @@ fn domain(row: &AnyRow) -> Result<Domain, MailError> {
         address_count: row.try_get("address_count")?,
         provider,
         send_route,
+        own_send_route_id: row
+            .try_get::<Option<String>, _>("own_send_route_id")?
+            .as_deref()
+            .map(parse_id)
+            .transpose()?,
+        dkim_rotating: row.try_get::<i64, _>("dkim_rotating")? != 0,
     })
 }
 

@@ -9,6 +9,7 @@ use axum::Json;
 use axum::extract::{Extension, Path, State};
 use axum::http::{HeaderMap, StatusCode, Uri};
 use orbit_platform::{Id, RequestId, TimestampMillis};
+use rand_core::RngCore as _;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -57,6 +58,14 @@ pub(crate) struct MailSendRouteView {
     is_default: bool,
     #[schema(value_type = String, format = DateTime)]
     created_at: TimestampMillis,
+    /// Where the provider posts bounce, complaint and delivery events; `null` for kinds without
+    /// events (`direct`, `smtp`) and for an instance route listed to a workspace.
+    events_url: Option<String>,
+    /// Secrets Orbit made for this route, shown once (in the answer that created it).
+    generated: Option<BTreeMap<String, String>>,
+    /// A Cloudflare route made from a provider keeps the provider's signing secret as its event
+    /// secret; the Worker already has it.
+    event_secret_from_provider: bool,
 }
 
 #[derive(Serialize, ToSchema)]
@@ -97,6 +106,9 @@ pub(crate) struct UpdateMailSendRouteBody {
     secrets: Option<BTreeMap<String, String>>,
     #[serde(default)]
     settings: Option<RouteSettings>,
+    /// Removes the username and password of an `smtp` route (a relay without login).
+    #[serde(default)]
+    clear_login: bool,
 }
 
 /// **Also send through this provider**: only what the provider lacks.
@@ -133,7 +145,16 @@ pub(crate) struct SetMailSendDefaultBody {
     route_id: Option<String>,
 }
 
-fn view(route: SendRoute, own: bool, default: Option<Id>) -> MailSendRouteView {
+fn view(state: &MailState, route: SendRoute, own: bool, default: Option<Id>) -> MailSendRouteView {
+    let events_url = (own && !matches!(route.kind, SendRouteKind::Direct | SendRouteKind::Smtp))
+        .then(|| {
+            format!(
+                "{}/api/v1/mail/events/{}/{}",
+                state.public_origin,
+                route.kind.as_str(),
+                route.id
+            )
+        });
     let is_default = default == Some(route.id);
     // an instance route listed to a workspace: its name and kind only
     MailSendRouteView {
@@ -161,6 +182,9 @@ fn view(route: SendRoute, own: bool, default: Option<Id>) -> MailSendRouteView {
         last_error: route.last_error.filter(|_| own),
         is_default,
         created_at: route.created_at,
+        events_url,
+        generated: None,
+        event_secret_from_provider: false,
     }
 }
 
@@ -192,6 +216,42 @@ fn secrets_of(
     given: &BTreeMap<String, String>,
 ) -> Result<RouteSecrets, MailError> {
     RouteSecrets::from_fields(kind, given).ok_or(MailError::Invalid { field: "secrets" })
+}
+
+fn random_hex(bytes: usize) -> String {
+    let mut buffer = vec![0_u8; bytes];
+    rand_core::OsRng.fill_bytes(&mut buffer);
+    buffer.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+/// Makes the event credentials the body left out: Postmark's `webhook_user` and
+/// `webhook_password`, Cloudflare's `event_secret`. Returns what it made (shown once).
+fn generate_missing(
+    kind: SendRouteKind,
+    given: &mut BTreeMap<String, String>,
+) -> BTreeMap<String, String> {
+    let wanted: &[(&str, bool)] = match kind {
+        SendRouteKind::Postmark => &[("webhook_user", true), ("webhook_password", false)],
+        SendRouteKind::Cloudflare => &[("event_secret", false)],
+        _ => &[],
+    };
+    let mut made = BTreeMap::new();
+    for (name, is_user) in wanted {
+        if given
+            .get(*name)
+            .is_some_and(|value| !value.trim().is_empty())
+        {
+            continue;
+        }
+        let value = if *is_user {
+            format!("orbit-{}", random_hex(6))
+        } else {
+            random_hex(32)
+        };
+        given.insert((*name).to_owned(), value.clone());
+        made.insert((*name).to_owned(), value);
+    }
+    made
 }
 
 fn address(to: &str) -> Result<&str, MailError> {
@@ -230,7 +290,7 @@ async fn list(
                     ProviderScope::Instance => true,
                     ProviderScope::Workspace(_) => route.workspace_id.is_some(),
                 };
-                view(route, own, default)
+                view(state, route, own, default)
             })
             .collect(),
         workspace_providers_enabled: switch_on(state, instance, request_id).await?,
@@ -252,7 +312,9 @@ async fn create(
     request_id: RequestIdRef<'_>,
 ) -> Result<(StatusCode, Json<MailSendRouteView>), ApiError> {
     let fail = |error| problem(error, instance, request_id);
-    let secrets = secrets_of(body.kind, &body.secrets).map_err(fail)?;
+    let mut given = body.secrets;
+    let generated = generate_missing(body.kind, &mut given);
+    let secrets = secrets_of(body.kind, &given).map_err(fail)?;
     let route = state
         .mail
         .create_route(
@@ -271,7 +333,9 @@ async fn create(
         .await
         .map_err(fail)?;
     let default = default_route(state, instance, request_id).await?;
-    Ok((StatusCode::CREATED, Json(view(route, true, default))))
+    let mut created = view(state, route, true, default);
+    created.generated = (!generated.is_empty()).then_some(generated);
+    Ok((StatusCode::CREATED, Json(created)))
 }
 
 async fn create_for_provider(
@@ -285,6 +349,10 @@ async fn create_for_provider(
 ) -> Result<(StatusCode, Json<MailSendRouteView>), ApiError> {
     let fail = |error| problem(error, instance, request_id);
     let provider_id: Id = provider.parse().map_err(|_| fail(MailError::NotFound))?;
+    let own_event_secret = body
+        .secrets
+        .get("event_secret")
+        .is_some_and(|value| !value.trim().is_empty());
     let route = state
         .mail
         .create_route_for_provider(
@@ -302,7 +370,10 @@ async fn create_for_provider(
         .await
         .map_err(fail)?;
     let default = default_route(state, instance, request_id).await?;
-    Ok((StatusCode::CREATED, Json(view(route, true, default))))
+    let from_provider = route.kind == SendRouteKind::Cloudflare && !own_event_secret;
+    let mut created = view(state, route, true, default);
+    created.event_secret_from_provider = from_provider;
+    Ok((StatusCode::CREATED, Json(created)))
 }
 
 async fn update(
@@ -326,6 +397,7 @@ async fn update(
                 name: body.name,
                 secrets: body.secrets,
                 settings: body.settings,
+                clear_login: body.clear_login,
             },
             state.settings.hostname.as_deref(),
             request_id_value(request_id),
@@ -333,7 +405,7 @@ async fn update(
         .await
         .map_err(fail)?;
     let default = default_route(state, instance, request_id).await?;
-    Ok(Json(view(changed, true, default)))
+    Ok(Json(view(state, changed, true, default)))
 }
 
 async fn delete(

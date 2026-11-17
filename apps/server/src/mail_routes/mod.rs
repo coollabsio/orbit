@@ -468,6 +468,10 @@ pub fn mail_router(state: MailState) -> Router {
             get(admin::get_mail_admin).put(admin::set_mail_admin),
         )
         .route(
+            "/api/v1/admin/mail/send-tiers",
+            get(admin::get_mail_send_tiers).put(admin::set_mail_send_tiers),
+        )
+        .route(
             "/api/v1/admin/mail/send-policies",
             get(admin::list_mail_send_policies),
         )

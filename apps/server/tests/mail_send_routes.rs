@@ -1115,3 +1115,243 @@ async fn manager_of_another_workspace_gets_nothing() {
         .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
+
+// ---- Settings fields (Task G3) ----
+
+#[tokio::test]
+async fn domain_view_has_own_route_and_clears_it() {
+    let fixture = Fixture::new().await;
+    let domain = fixture
+        .mail
+        .create_domain(fixture.first, fixture.owner.id, "example.org", "request")
+        .await
+        .unwrap();
+    let (_, shared) = fixture.smtp(true, "smtp.relay.test", "starttls").await;
+    let shared_id = shared["id"].as_str().unwrap().to_owned();
+    fixture
+        .admin(
+            "PUT",
+            "/send-default",
+            Some(json!({ "route_id": shared_id })),
+        )
+        .await;
+    let path = format!("/domains/{}/send-route", domain.id);
+    let (status, view) = fixture
+        .ws("GET", &format!("/domains/{}", domain.id), None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{view}");
+    assert_eq!(view["send_route"]["id"], shared_id.as_str());
+    assert!(view["own_send_route_id"].is_null(), "{view}");
+    assert_eq!(view["dkim_rotating"], false);
+    let (_, own) = fixture.smtp(false, "203.0.113.9", "starttls").await;
+    let own_id = own["id"].as_str().unwrap().to_owned();
+    let (_, view) = fixture
+        .ws("PUT", &path, Some(json!({ "route_id": own_id })))
+        .await;
+    assert_eq!(view["own_send_route_id"], own_id.as_str(), "{view}");
+    assert_eq!(view["send_route"]["id"], own_id.as_str());
+    let (status, view) = fixture
+        .ws("PUT", &path, Some(json!({ "route_id": null })))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{view}");
+    assert!(view["own_send_route_id"].is_null(), "{view}");
+    assert_eq!(view["send_route"]["id"], shared_id.as_str());
+}
+
+#[tokio::test]
+async fn event_credentials_are_generated_once() {
+    let fixture = Fixture::new().await;
+    let (status, route) = fixture
+        .admin(
+            "POST",
+            "/send-routes",
+            Some(json!({ "kind": "postmark", "name": "PM",
+                         "secrets": { "server_token": "tok" } })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{route}");
+    let user = route["generated"]["webhook_user"].as_str().unwrap();
+    let password = route["generated"]["webhook_password"].as_str().unwrap();
+    assert!(user.starts_with("orbit-") && user.len() == 18, "{user}");
+    assert_eq!(password.len(), 64);
+    assert!(route["generated"].get("server_token").is_none());
+    let id: Id = route["id"].as_str().unwrap().parse().unwrap();
+    let (_, secrets) = fixture.mail.load_route(id).await.unwrap().unwrap();
+    assert_eq!(
+        secrets,
+        RouteSecrets::Postmark {
+            server_token: "tok".to_owned(),
+            webhook_user: user.to_owned(),
+            webhook_password: password.to_owned(),
+        }
+    );
+    // Shown once: a list does not carry them.
+    let (_, list) = fixture.admin("GET", "/send-routes", None).await;
+    assert!(list["routes"][0]["generated"].is_null(), "{list}");
+    // Given values are kept and not echoed.
+    let (_, given) = fixture
+        .admin(
+            "POST",
+            "/send-routes",
+            Some(json!({ "kind": "postmark", "name": "PM2",
+                         "secrets": { "server_token": "t", "webhook_user": "me",
+                                      "webhook_password": "pw" } })),
+        )
+        .await;
+    assert!(given["generated"].is_null(), "{given}");
+    // Cloudflare: the event secret.
+    let (status, cloudflare) = fixture
+        .admin(
+            "POST",
+            "/send-routes",
+            Some(json!({ "kind": "cloudflare", "name": "CF",
+                         "secrets": { "api_token": "t" },
+                         "settings": { "account_id": "0123456789abcdef0123456789abcdef" } })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{cloudflare}");
+    assert_eq!(
+        cloudflare["generated"]["event_secret"]
+            .as_str()
+            .unwrap()
+            .len(),
+        64
+    );
+    assert_eq!(cloudflare["event_secret_from_provider"], false);
+}
+
+#[tokio::test]
+async fn cloudflare_route_from_provider_keeps_the_signing_secret() {
+    let fixture = Fixture::new().await;
+    let (status, provider) = fixture
+        .admin(
+            "POST",
+            "/providers",
+            Some(json!({ "kind": "cloudflare", "name": "CF" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{provider}");
+    let (status, route) = fixture
+        .admin(
+            "POST",
+            &format!("/providers/{}/send-route", provider["id"].as_str().unwrap()),
+            Some(json!({ "secrets": { "api_token": "t" },
+                         "settings": { "account_id": "0123456789abcdef0123456789abcdef" } })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{route}");
+    assert_eq!(route["event_secret_from_provider"], true);
+    assert!(route["generated"].is_null(), "{route}");
+}
+
+#[tokio::test]
+async fn route_view_has_events_url() {
+    let fixture = Fixture::new().await;
+    let (_, mailgun) = fixture
+        .admin(
+            "POST",
+            "/send-routes",
+            Some(json!({ "kind": "mailgun", "name": "MG",
+                         "secrets": { "api_key": "k", "webhook_signing_key": "s" },
+                         "settings": {} })),
+        )
+        .await;
+    let id = mailgun["id"].as_str().unwrap();
+    assert_eq!(
+        mailgun["events_url"],
+        format!("https://orbit.test/api/v1/mail/events/mailgun/{id}")
+    );
+    let (_, smtp) = fixture.smtp(true, "smtp.relay.test", "tls").await;
+    assert!(smtp["events_url"].is_null(), "{smtp}");
+}
+
+#[tokio::test]
+async fn smtp_login_can_be_cleared() {
+    let fixture = Fixture::new().await;
+    let (_, route) = fixture.smtp(true, "smtp.relay.test", "tls").await;
+    let id: Id = route["id"].as_str().unwrap().parse().unwrap();
+    assert_eq!(route["secrets_set"], json!(["username", "password"]));
+    let (status, cleared) = fixture
+        .admin(
+            "PATCH",
+            &format!("/send-routes/{id}"),
+            Some(json!({ "clear_login": true })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{cleared}");
+    assert_eq!(cleared["secrets_set"], json!([]));
+    let (_, secrets) = fixture.mail.load_route(id).await.unwrap().unwrap();
+    assert_eq!(secrets, RouteSecrets::None);
+    // Not together with new secrets, and not for other kinds.
+    let (status, _) = fixture
+        .admin(
+            "PATCH",
+            &format!("/send-routes/{id}"),
+            Some(json!({ "clear_login": true, "secrets": { "username": "u", "password": "p" } })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let (_, postmark) = fixture
+        .admin(
+            "POST",
+            "/send-routes",
+            Some(json!({ "kind": "postmark", "name": "PM", "secrets": { "server_token": "t" } })),
+        )
+        .await;
+    let (status, _) = fixture
+        .admin(
+            "PATCH",
+            &format!("/send-routes/{}", postmark["id"].as_str().unwrap()),
+            Some(json!({ "clear_login": true })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn admin_tier_defaults() {
+    let fixture = Fixture::new().await;
+    let (status, tiers) = fixture.admin("GET", "/send-tiers", None).await;
+    assert_eq!(status, StatusCode::OK, "{tiers}");
+    assert_eq!(tiers["new"]["per_user_hour"], 30);
+    assert_eq!(tiers["standard"]["max_recipients"], 100);
+    let mut changed = tiers.clone();
+    changed["new"]["per_user_hour"] = json!(40);
+    changed["standard"]["per_ws_day"] = json!(20_000);
+    let (status, saved) = fixture
+        .admin("PUT", "/send-tiers", Some(changed.clone()))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    let (_, read) = fixture.admin("GET", "/send-tiers", None).await;
+    assert_eq!(read, changed);
+    for bad in [0, 10_000_001] {
+        let mut invalid = changed.clone();
+        invalid["new"]["max_recipients"] = json!(bad);
+        let (status, _) = fixture.admin("PUT", "/send-tiers", Some(invalid)).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{bad}");
+    }
+    let (status, _) = fixture
+        .admin("PUT", "/send-tiers", Some(json!({ "new": changed["new"] })))
+        .await;
+    assert!(status.is_client_error());
+    let audited: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM audit_events WHERE action = 'instance.mail_send_tiers_updated'",
+    )
+    .fetch_one(fixture.database.pool())
+    .await
+    .unwrap();
+    assert_eq!(audited, 1);
+    // Root only.
+    let (status, _) = fixture
+        .raw(
+            &Member {
+                id: fixture.owner.id,
+                cookie: String::new(),
+            },
+            "GET",
+            "/api/v1/admin/mail/send-tiers",
+            None,
+        )
+        .await;
+    assert!(status.is_client_error());
+}
