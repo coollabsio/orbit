@@ -39,7 +39,7 @@ function LabelForm({ initial, submitLabel, pending, onSubmit, onCancel }: { init
 }
 
 /** The project's labels: create, rename, recolor and delete. Other projects keep their own. */
-export function ProjectLabelsCard({ projectId }: { projectId: string }) {
+export function ProjectLabelsCard({ projectId, readOnly }: { projectId: string; readOnly: boolean }) {
   const { workspace } = useWorkspace()
   const labels = useLabels(workspace.id)
   const createLabel = useCreateLabel(workspace.id)
@@ -56,9 +56,9 @@ export function ProjectLabelsCard({ projectId }: { projectId: string }) {
   return (
     <SettingsCard title="Labels" description="Labels for the tasks of this project. Each project has its own." flush>
       <div className="flex flex-col divide-y">
-        <SettingsRow>
+        {readOnly ? null : <SettingsRow>
           <LabelForm submitLabel="Create label" pending={createLabel.isPending} onSubmit={async (name, color) => { await createLabel.mutateAsync({ projectId, name, color }) }} />
-        </SettingsRow>
+        </SettingsRow>}
         {createLabel.isError ? <SettingsRow className="text-xs text-destructive" role="alert">The label could not be created.</SettingsRow> : null}
         {labels.isPending ? <SettingsRow><LoadingText>Loading labels…</LoadingText></SettingsRow> : null}
         {labels.isError ? <SettingsRow role="alert">Labels could not be loaded.</SettingsRow> : null}
@@ -69,8 +69,10 @@ export function ProjectLabelsCard({ projectId }: { projectId: string }) {
             </SettingsRow>
           : <SettingsRow key={label.id}>
               <div className="min-w-0 flex-1"><LabelPill label={label} /></div>
-              <Button variant="ghost" type="button" aria-label={`Edit ${label.name}`} onClick={() => { updateLabel.reset(); setEditingId(label.id) }}>Edit</Button>
-              <Button variant="ghost" type="button" aria-label={`Delete ${label.name}`} disabled={deleteLabel.isPending} onClick={() => void remove(label)}>Delete</Button>
+              {readOnly ? null : <>
+                <Button variant="ghost" type="button" aria-label={`Edit ${label.name}`} onClick={() => { updateLabel.reset(); setEditingId(label.id) }}>Edit</Button>
+                <Button variant="ghost" type="button" aria-label={`Delete ${label.name}`} disabled={deleteLabel.isPending} onClick={() => void remove(label)}>Delete</Button>
+              </>}
             </SettingsRow>)}
         {updateLabel.isError ? <SettingsRow className="text-xs text-destructive" role="alert">The label could not be saved. It may have been changed by someone else; try again.</SettingsRow> : null}
         {deleteLabel.isError ? <SettingsRow className="text-xs text-destructive" role="alert">The label could not be deleted.</SettingsRow> : null}

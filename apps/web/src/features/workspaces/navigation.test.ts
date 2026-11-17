@@ -3,8 +3,8 @@ import type { WorkspaceRecord } from '@orbit/api/generated/types.gen'
 import { selectedWorkspaceId, switchWorkspaceHref } from './navigation'
 
 const workspaces: WorkspaceRecord[] = [
-  { id: 'alpha', name: 'Alpha', role: 'owner', permissions: [], version: 1 },
-  { id: 'beta', name: 'Beta', role: 'member', permissions: [], version: 3 },
+  { id: 'alpha', name: 'Alpha', role: 'owner', permissions: [], project_permissions: [], version: 1 },
+  { id: 'beta', name: 'Beta', role: 'member', permissions: [], project_permissions: [], version: 3 },
 ]
 
 test('route selection wins over the saved navigation preference', () => {

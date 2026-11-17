@@ -3,7 +3,7 @@
 //! project, or anything inside one (tasks, comments, labels, statuses, attachments, relations,
 //! notifications), puts one of these conditions in its `WHERE`.
 
-use orbit_domain::{Actor, Policy, WorkspaceRole};
+use orbit_domain::{Actor, Permission, Policy, WorkspaceRole};
 use orbit_platform::{Flag, Id};
 use sqlx::Any;
 
@@ -18,7 +18,7 @@ pub(crate) enum ProjectScope {
 
 impl ProjectScope {
     #[must_use]
-    pub(crate) fn of(actor: Actor) -> Self {
+    pub(crate) fn of(actor: &Actor) -> Self {
         if actor.sees_all_projects() {
             Self::All
         } else {
@@ -36,7 +36,12 @@ impl ProjectScope {
             Self::Member(user_id) => format!(
                 "EXISTS (SELECT 1 FROM projects AS scope_project WHERE scope_project.id = {project_id_sql} \
                  AND (scope_project.private = 0 OR EXISTS (SELECT 1 FROM project_members AS scope_member \
-                 WHERE scope_member.project_id = scope_project.id AND scope_member.user_id = '{user_id}')))"
+                 WHERE scope_member.project_id = scope_project.id AND scope_member.user_id = '{user_id}') \
+                 OR EXISTS (SELECT 1 FROM workspace_role_projects AS scope_grant \
+                 JOIN memberships AS scope_grantee ON scope_grantee.custom_role_id = scope_grant.role_id \
+                 WHERE scope_grant.project_id = scope_project.id AND scope_grant.permission = '{view_private}' \
+                 AND scope_grantee.user_id = '{user_id}' AND scope_grantee.role = 'member')))",
+                view_private = Permission::ProjectsViewPrivate.as_str(),
             ),
         }
     }
@@ -80,9 +85,15 @@ pub(crate) fn user_sees_project_sql(project_id_sql: &str, user_id_sql: &str) -> 
          WHERE seen_project.id = {project_id_sql} AND seen_membership.user_id = {user_id_sql} \
          AND (seen_membership.role IN ('', {see_all}) OR (seen_membership.role IN ('', {see_open}) \
          AND (seen_project.private = 0 OR EXISTS (SELECT 1 FROM project_members AS seen_member \
-         WHERE seen_member.project_id = seen_project.id AND seen_member.user_id = seen_membership.user_id)))))",
+         WHERE seen_member.project_id = seen_project.id AND seen_member.user_id = seen_membership.user_id) \
+         OR EXISTS (SELECT 1 FROM workspace_roles AS seen_role WHERE seen_role.id = seen_membership.custom_role_id \
+         AND seen_role.permissions LIKE '%\"{view_private}\"%') \
+         OR EXISTS (SELECT 1 FROM workspace_role_projects AS seen_grant \
+         WHERE seen_grant.role_id = seen_membership.custom_role_id AND seen_grant.project_id = seen_project.id \
+         AND seen_grant.permission = '{view_private}')))))",
         see_all = roles(true),
         see_open = roles(false),
+        view_private = Permission::ProjectsViewPrivate.as_str(),
     )
 }
 

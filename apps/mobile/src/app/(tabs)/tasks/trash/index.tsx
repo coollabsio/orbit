@@ -7,6 +7,7 @@ import { filterTrash, trashIdentifier } from '@orbit/api/trash'
 
 import { ConfirmDialog, type ConfirmRequest } from '../../../../components/settings/Dialog'
 import type { ProjectRecord, TaskRecord } from '../../../../data/orbit'
+import { canInProject, canPurgeTask } from '../../../../data/permissions'
 import { useTaskTrash, useTaskTrashWrites } from '../../../../hooks/tasks'
 import { useOrbit } from '../../../../orbit-context'
 import { useProjects } from '../../../../queries'
@@ -18,13 +19,14 @@ const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ?
 
 /**
  * The web's Task trash: trashed projects first, then the trashed tasks of live projects, with a search and Restore.
- * A row opens its read-only preview. Workspace owners and admins (`pages.purge`, the server's `can_purge_task`) also
- * get Delete forever and Empty trash.
+ * A row opens its read-only preview. A row gets Delete forever when the caller may purge in its project (the server's
+ * `can_purge_task`: `pages.purge`, or `tasks.purge` workspace-wide or in that project). Restoring a project needs
+ * `projects.manage` in it. Empty trash needs `pages.purge`.
  */
 export default function TaskTrashScreen() {
   const { colors } = useTheme()
   const { workspace } = useOrbit()
-  const canPurge = workspace.permissions.includes('pages.purge')
+  const canEmpty = workspace.permissions.includes('pages.purge')
   const { projects, tasks } = useTaskTrash()
   const liveProjects = useProjects()
   const writes = useTaskTrashWrites()
@@ -76,7 +78,7 @@ export default function TaskTrashScreen() {
         <Text numberOfLines={1} className="font-noto-semibold text-[13px] flex-1 min-w-0">
           Trash
         </Text>
-        {canPurge && count > 0 ? (
+        {canEmpty && count > 0 ? (
           // the web's ghost `sm` button with `text-destructive`
           <Pressable
             accessibilityRole="button"
@@ -127,8 +129,10 @@ export default function TaskTrashScreen() {
                   {project.name}
                 </Text>
               </Pressable>
-              <Button label="Restore" icon="refresh" size="sm" variant="outline" disabled={busy} onPress={() => writes.restoreProject.mutate(project)} />
-              {canPurge ? (
+              {canInProject(workspace, 'projects.manage', project.id) ? (
+                <Button label="Restore" icon="refresh" size="sm" variant="outline" disabled={busy} onPress={() => writes.restoreProject.mutate(project)} />
+              ) : null}
+              {canPurgeTask(workspace, project.id) ? (
                 <IconButton icon="trash" iconSize={14} label={`Delete ${project.name} forever`} color={colors.destructive} disabled={busy} onPress={() => requestPurge(project)} />
               ) : null}
             </View>
@@ -147,7 +151,7 @@ export default function TaskTrashScreen() {
                 </Pressable>
                 {below > 0 ? <Text className="shrink-0 text-[12px] text-muted-foreground/70">+{plural(below, 'sub-issue')}</Text> : null}
                 <Button label="Restore" icon="refresh" size="sm" variant="outline" disabled={busy} onPress={() => writes.restoreTask.mutate(task)} />
-                {canPurge ? (
+                {canPurgeTask(workspace, task.project_id) ? (
                   <IconButton icon="trash" iconSize={14} label={`Delete ${task.title || 'Untitled task'} forever`} color={colors.destructive} disabled={busy} onPress={() => requestPurgeTask(task)} />
                 ) : null}
               </View>

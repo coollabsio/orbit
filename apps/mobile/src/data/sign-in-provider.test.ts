@@ -15,6 +15,7 @@ import {
   type Provider,
   type ProviderDevice,
   providerErrorMessage,
+  offeredProviders,
   providerRows,
   signInMethods,
   startProviderSignIn,
@@ -222,4 +223,10 @@ test('connected accounts list configured providers, plus a connected one no long
 test('a server field is worth asking once it has a dot, a port, or is localhost', () => {
   expect(['orbit.example.com', 'https://orbit.example.com/', 'http://10.0.0.5:8888', 'localhost', 'devbox:18888'].map(looksLikeServer)).toEqual([true, true, true, true, true])
   expect(['', 'orb', 'https://', 'orbit example.com'].map(looksLikeServer)).toEqual([false, false, false, false])
+})
+
+test('iOS offers only the OpenID Connect provider; other platforms offer all', () => {
+  expect(offeredProviders(['google', 'github', 'oidc'], 'ios')).toEqual(['oidc'])
+  expect(offeredProviders(['github'], 'ios')).toEqual([])
+  expect(offeredProviders(['google', 'github'], 'android')).toEqual(['google', 'github'])
 })

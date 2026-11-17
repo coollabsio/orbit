@@ -45,9 +45,29 @@ pub struct WorkspaceRecord {
     pub role: WorkspaceRole,
     /// What the caller's role may do in this workspace.
     pub permissions: Vec<Permission>,
+    /// What the caller's custom role grants in single projects, beyond `permissions`.
+    pub project_permissions: Vec<ProjectPermissions>,
     pub version: u64,
     #[schema(value_type = Option<String>, format = DateTime)]
     pub deleted_at: Option<TimestampMillis>,
+}
+
+/// The project-scoped permissions a member holds in one project.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct ProjectPermissions {
+    #[schema(value_type = String)]
+    pub project_id: Id,
+    pub permissions: Vec<Permission>,
+}
+
+fn project_permissions(grants: Vec<(Id, Vec<Permission>)>) -> Vec<ProjectPermissions> {
+    grants
+        .into_iter()
+        .map(|(project_id, permissions)| ProjectPermissions {
+            project_id,
+            permissions,
+        })
+        .collect()
 }
 
 /// What a profile popover shows of a member beside the member list's fields.
@@ -66,6 +86,14 @@ pub struct MemberProfile {
     pub note: Option<String>,
 }
 
+/// A custom role, as a member's row names it.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, ToSchema)]
+pub struct CustomRoleRef {
+    #[schema(value_type = String)]
+    pub id: Id,
+    pub name: String,
+}
+
 #[derive(Clone, Debug, Serialize, ToSchema)]
 pub struct MemberRecord {
     #[schema(value_type = String)]
@@ -77,6 +105,8 @@ pub struct MemberRecord {
     /// The member's profile picture; absent while they have none.
     pub avatar_url: Option<String>,
     pub role: WorkspaceRole,
+    /// The custom role that adds permissions to a member's role.
+    pub custom_role: Option<CustomRoleRef>,
     /// Whether the caller may change this member's role.
     pub can_change_role: bool,
     /// Whether the caller may remove this member (for the caller's own row: leave).
@@ -260,6 +290,11 @@ pub enum WorkspaceError {
     RegistrationRequiresSignIn,
     #[error("workspace operation conflicts with current state")]
     Conflict,
+    /// A custom role or its assignment breaks a rule; the text says which.
+    #[error("{0}")]
+    InvalidRole(&'static str),
+    #[error("a role with that name exists")]
+    RoleNameTaken,
     /// A guest invitation needs open private channels that the inviter manages; other roles
     /// take none.
     #[error("the invitation's channels are invalid")]
@@ -303,7 +338,7 @@ pub enum RetentionServiceError {
 
 #[derive(Clone)]
 pub struct WorkspaceRepository {
-    database: Database,
+    pub(super) database: Database,
     blob_store: Arc<dyn BlobStore>,
     attachment_mutations: AttachmentMutationCoordinator,
 }
@@ -343,19 +378,71 @@ impl WorkspaceRepository {
     pub async fn list_for_user(&self, user_id: Id) -> Result<Vec<WorkspaceRecord>, WorkspaceError> {
         let rows = sqlx::query(
             "SELECT workspaces.id, workspaces.name, workspaces.version, workspaces.deleted_at, \
-             memberships.role FROM workspaces JOIN memberships ON memberships.workspace_id = workspaces.id \
+             memberships.role, workspace_roles.permissions AS role_permissions \
+             FROM workspaces JOIN memberships ON memberships.workspace_id = workspaces.id \
+             LEFT JOIN workspace_roles ON workspace_roles.id = memberships.custom_role_id \
              WHERE memberships.user_id = $1 AND workspaces.deleted_at IS NULL ORDER BY workspaces.id",
         )
         .bind(user_id.to_string())
         .fetch_all(self.database.pool())
         .await?;
-        rows.into_iter().map(workspace_from_row).collect()
+        let mut workspaces = rows
+            .into_iter()
+            .map(workspace_from_row)
+            .collect::<Result<Vec<_>, _>>()?;
+        self.add_project_permissions(user_id, &mut workspaces).await?;
+        Ok(workspaces)
+    }
+
+    /// Fills in what the user's custom role grants in single projects (trashed ones too, so a
+    /// project's manager can restore it).
+    async fn add_project_permissions(
+        &self,
+        user_id: Id,
+        workspaces: &mut [WorkspaceRecord],
+    ) -> Result<(), WorkspaceError> {
+        if workspaces.iter().all(|workspace| workspace.role != WorkspaceRole::Member) {
+            return Ok(());
+        }
+        let rows: Vec<(String, String, String)> = sqlx::query_as(
+            "SELECT memberships.workspace_id, grants.project_id, grants.permission \
+             FROM memberships JOIN workspace_role_projects grants ON grants.role_id = memberships.custom_role_id \
+             WHERE memberships.user_id = $1 AND memberships.role = 'member' \
+             UNION SELECT projects.workspace_id, direct.project_id, direct.permission \
+             FROM member_project_grants direct JOIN projects ON projects.id = direct.project_id \
+             JOIN memberships ON memberships.workspace_id = projects.workspace_id AND memberships.user_id = direct.user_id \
+             AND memberships.role = 'member' WHERE direct.user_id = $2 \
+             ORDER BY 2, 3",
+        )
+        .bind(user_id.to_string())
+        .bind(user_id.to_string())
+        .fetch_all(self.database.pool())
+        .await?;
+        for (workspace_id, project_id, permission) in rows {
+            let (Ok(workspace_id), Ok(project_id), Some(permission)) =
+                (workspace_id.parse::<Id>(), project_id.parse::<Id>(), Permission::parse(&permission))
+            else {
+                continue;
+            };
+            let Some(workspace) = workspaces.iter_mut().find(|workspace| workspace.id == workspace_id) else {
+                continue;
+            };
+            match workspace.project_permissions.iter_mut().find(|held| held.project_id == project_id) {
+                Some(held) => held.permissions.push(permission),
+                None => workspace.project_permissions.push(ProjectPermissions {
+                    project_id,
+                    permissions: vec![permission],
+                }),
+            }
+        }
+        Ok(())
     }
 
     pub async fn list_trash(&self, user_id: Id) -> Result<Vec<WorkspaceRecord>, WorkspaceError> {
         let rows = sqlx::query(
             "SELECT workspaces.id, workspaces.name, workspaces.version, workspaces.deleted_at, \
-             memberships.role FROM workspaces JOIN memberships ON memberships.workspace_id = workspaces.id \
+             memberships.role, NULL AS role_permissions \
+             FROM workspaces JOIN memberships ON memberships.workspace_id = workspaces.id \
              WHERE memberships.user_id = $1 AND memberships.role = 'owner' AND workspaces.deleted_at IS NOT NULL \
              AND workspaces.deleted_at > $2 \
              ORDER BY workspaces.id DESC",
@@ -441,6 +528,7 @@ impl WorkspaceRepository {
             name: defaults.workspace.name,
             role: WorkspaceRole::Owner,
             permissions: Policy::permissions(WorkspaceRole::Owner),
+            project_permissions: Vec::new(),
             version: 0,
             deleted_at: None,
         })
@@ -452,8 +540,10 @@ impl WorkspaceRepository {
         actor_id: Id,
     ) -> Result<WorkspaceRecord, WorkspaceError> {
         let row = sqlx::query(
-            "SELECT workspaces.id, workspaces.name, workspaces.version, workspaces.deleted_at, memberships.role \
+            "SELECT workspaces.id, workspaces.name, workspaces.version, workspaces.deleted_at, memberships.role, \
+             workspace_roles.permissions AS role_permissions \
              FROM workspaces JOIN memberships ON memberships.workspace_id = workspaces.id \
+             LEFT JOIN workspace_roles ON workspace_roles.id = memberships.custom_role_id \
              WHERE workspaces.id = $1 AND memberships.user_id = $2 AND workspaces.deleted_at IS NULL",
         )
         .bind(workspace_id.to_string())
@@ -461,7 +551,10 @@ impl WorkspaceRepository {
         .fetch_optional(self.database.pool())
         .await?
         .ok_or(WorkspaceError::NotFound)?;
-        workspace_from_row(row)
+        let mut workspaces = [workspace_from_row(row)?];
+        self.add_project_permissions(actor_id, &mut workspaces).await?;
+        let [workspace] = workspaces;
+        Ok(workspace)
     }
 
     /// Lists `file_limit` of the largest files (at most [`MAX_LARGEST_FILES`]), after skipping `file_offset`.
@@ -669,7 +762,8 @@ impl WorkspaceRepository {
             id: workspace_id,
             name,
             role: actor.role,
-            permissions: Policy::permissions(actor.role),
+            permissions: actor.permissions(),
+            project_permissions: project_permissions(actor.project_permissions()),
             version,
             deleted_at: None,
         })
@@ -688,9 +782,11 @@ impl WorkspaceRepository {
         let rows = sqlx::query(
             "SELECT memberships.id, memberships.user_id, memberships.role, memberships.version, \
              memberships.created_at, users.email, users.display_name, users.suspended_at, \
-             user_avatars.updated_at AS avatar_updated_at \
+             user_avatars.updated_at AS avatar_updated_at, \
+             workspace_roles.id AS custom_role_id, workspace_roles.name AS custom_role_name \
              FROM memberships \
              JOIN users ON users.id = memberships.user_id \
+             LEFT JOIN workspace_roles ON workspace_roles.id = memberships.custom_role_id \
              LEFT JOIN user_avatars ON user_avatars.user_id = memberships.user_id \
              WHERE memberships.workspace_id = $1 \
              AND ($2 IS NULL OR memberships.id > $3) \
@@ -711,7 +807,7 @@ impl WorkspaceRepository {
         .await?;
         let transfer_available = !crate::repositories::billing::enabled(&self.database);
         page(rows, limit, |row| {
-            member_from_row(row, actor, transfer_available)
+            member_from_row(row, &actor, transfer_available)
         })
     }
 
@@ -1563,7 +1659,9 @@ impl WorkspaceRepository {
             .await?;
         }
         sqlx::query(
-            "UPDATE memberships SET role = $1, version = version + 1, updated_at = $2 \
+            "UPDATE memberships SET role = $1, \
+             custom_role_id = CASE WHEN $1 = role THEN custom_role_id ELSE NULL END, \
+             version = version + 1, updated_at = $2 \
              WHERE id = $3 AND workspace_id = $4 AND version = $5",
         )
         .bind(role_name(role))
@@ -1783,6 +1881,11 @@ impl WorkspaceRepository {
             .bind(now.as_millis())
             .bind(workspace_id.to_string())
             .bind(expected_version as i64)
+            .execute(&mut *transaction)
+            .await?;
+        // The owner holds every permission, so a custom role would only linger.
+        sqlx::query("UPDATE memberships SET custom_role_id = NULL WHERE id = $1")
+            .bind(membership_id.to_string())
             .execute(&mut *transaction)
             .await?;
         sqlx::query(
@@ -2506,11 +2609,16 @@ async fn ensure_may_own_another(
 
 fn workspace_from_row(row: sqlx::any::AnyRow) -> Result<WorkspaceRecord, WorkspaceError> {
     let role = parse_role(&row.get::<String, _>("role"))?;
+    let permissions = Policy::permissions_with(
+        role,
+        membership::parse_permissions(row.get::<Option<String>, _>("role_permissions").as_deref()),
+    );
     Ok(WorkspaceRecord {
         id: parse_id(row.get("id"))?,
         name: row.get("name"),
         role,
-        permissions: Policy::permissions(role),
+        permissions,
+        project_permissions: Vec::new(),
         version: u64::try_from(row.get::<i64, _>("version"))
             .map_err(|_| WorkspaceError::Conflict)?,
         deleted_at: row
@@ -2521,7 +2629,7 @@ fn workspace_from_row(row: sqlx::any::AnyRow) -> Result<WorkspaceRecord, Workspa
 
 fn member_from_row(
     row: sqlx::any::AnyRow,
-    actor: Actor,
+    actor: &Actor,
     transfer_available: bool,
 ) -> Result<MemberRecord, WorkspaceError> {
     let user_id = parse_id(row.get("user_id"))?;
@@ -2538,6 +2646,7 @@ fn member_from_row(
         display_name: row.get("display_name"),
         avatar_url: crate::auth_routes::avatar_url(user_id, row.get("avatar_updated_at")),
         role,
+        custom_role: custom_role_ref(&row, role)?,
         can_change_role: actor
             .change_member_role(role, WorkspaceRole::Member)
             .is_ok(),
@@ -2550,6 +2659,22 @@ fn member_from_row(
             .get::<Option<i64>, _>("suspended_at")
             .map(TimestampMillis::from_millis),
     })
+}
+
+/// The custom role of a row that selects `custom_role_id` and `custom_role_name`. Only an
+/// ordinary member holds one.
+fn custom_role_ref(
+    row: &sqlx::any::AnyRow,
+    role: WorkspaceRole,
+) -> Result<Option<CustomRoleRef>, WorkspaceError> {
+    let id = row.get::<Option<String>, _>("custom_role_id");
+    let name = row.get::<Option<String>, _>("custom_role_name");
+    match (id, name) {
+        (Some(id), Some(name)) if role == WorkspaceRole::Member => {
+            Ok(Some(CustomRoleRef { id: parse_id(id)?, name }))
+        }
+        _ => Ok(None),
+    }
 }
 
 fn invitation_from_row(
@@ -2682,13 +2807,13 @@ impl From<MembershipDenied> for WorkspaceError {
     }
 }
 
-struct TargetMembership {
-    user_id: Id,
-    role: WorkspaceRole,
-    version: u64,
+pub(super) struct TargetMembership {
+    pub(super) user_id: Id,
+    pub(super) role: WorkspaceRole,
+    pub(super) version: u64,
 }
 
-async fn target_membership(
+pub(super) async fn target_membership(
     transaction: &mut Transaction<'_, Any>,
     workspace_id: Id,
     membership_id: Id,
@@ -2717,7 +2842,7 @@ fn role_name(role: WorkspaceRole) -> String {
     role.as_str().to_owned()
 }
 
-fn parse_id(value: String) -> Result<Id, WorkspaceError> {
+pub(super) fn parse_id(value: String) -> Result<Id, WorkspaceError> {
     value.parse().map_err(|_| WorkspaceError::Conflict)
 }
 

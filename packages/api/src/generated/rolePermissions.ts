@@ -17,7 +17,11 @@ export const ROLE_PERMISSIONS: Record<WorkspaceRole, Permission[]> = {
     "mail.manage",
     "storage.manage",
     "workspace.export",
-    "workspace.export_personal"
+    "workspace.export_personal",
+    "roles.manage",
+    "projects.view_private",
+    "tasks.purge",
+    "projects.manage"
   ],
   "guest": [],
   "member": [
@@ -40,6 +44,10 @@ export const ROLE_PERMISSIONS: Record<WorkspaceRole, Permission[]> = {
     "billing.manage",
     "storage.manage",
     "workspace.export",
-    "workspace.export_personal"
+    "workspace.export_personal",
+    "roles.manage",
+    "projects.view_private",
+    "tasks.purge",
+    "projects.manage"
   ]
 }

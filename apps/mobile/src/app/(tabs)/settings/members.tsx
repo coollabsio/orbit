@@ -8,7 +8,7 @@ import { Badge, FieldLabel, InitialAvatar, Note, RowText, Select, SettingsCard, 
 import { filterMembers, type InviteRole, invitationProblem, type MemberAction, memberActions, roleLabel } from '../../../data/account-api'
 import { shortDate } from '../../../data/format'
 import type { MemberRecord } from '../../../data/orbit'
-import { useAuthOptions, useInvitations, useMemberWrites } from '../../../hooks/account'
+import { useAuthOptions, useInvitations, useMemberWrites, useWorkspaceRoles } from '../../../hooks/account'
 import { useOrbit } from '../../../orbit-context'
 import { useConversations, useMembers } from '../../../queries'
 import { errorMessage } from '../../../session-context'
@@ -45,29 +45,48 @@ export default function MembersScreen() {
   const { colors } = useTheme()
   const members = useMembers()
   const canManage = workspace.permissions.includes('members.manage')
+  const canManageRoles = workspace.permissions.includes('roles.manage')
+  const roles = useWorkspaceRoles(canManageRoles)
   const writes = useMemberWrites()
   const [search, setSearch] = useState('')
   const [managing, setManaging] = useState<MemberRecord | null>(null)
+  const [assigning, setAssigning] = useState<MemberRecord | null>(null)
   const [confirm, setConfirm] = useState<ConfirmRequest | null>(null)
   const [roleFilter, setRoleFilter] = useState('all')
   const [sort, setSort] = useState<Sort>('name_asc')
   const list = sortedMembers(filterMembers(members.data ?? [], search), roleFilter, sort)
   const { visible, pager, resetPage } = usePagedList(list)
-  const writeError = [writes.changeRole, writes.remove, writes.transfer].find((write) => write.isError)?.error
+  const writeError = [writes.changeRole, writes.setCustomRole, writes.remove, writes.transfer].find((write) => write.isError)?.error
 
   const run = (member: MemberRecord, action: MemberAction) => {
     if (action.kind === 'role') writes.changeRole.mutate({ member, role: action.role })
+    else if (action.kind === 'customRole') setAssigning(member)
     else if (action.kind === 'transfer')
       setConfirm({ title: `Transfer ownership of ${workspace.name} to ${member.display_name}?`, confirmLabel: 'Transfer ownership', danger: true, onConfirm: () => writes.transfer.mutate(member) })
     else setConfirm({ title: `Remove ${member.display_name}?`, description: 'They lose access to this workspace.', confirmLabel: 'Remove member', danger: true, onConfirm: () => writes.remove.mutate(member) })
   }
   const sheet: SheetAction[] = managing
-    ? memberActions(managing, user.id).map((action) => ({
-        label: action.kind === 'role' ? (managing.role === 'guest' ? 'Convert to member' : `Make ${action.role}`) : action.kind === 'transfer' ? 'Transfer ownership' : 'Remove member',
-        icon: action.kind === 'role' ? 'userEdit' : action.kind === 'transfer' ? 'crown' : 'trash',
+    ? memberActions(managing, user.id, canManageRoles).map((action) => ({
+        label: action.kind === 'role' ? (managing.role === 'guest' ? 'Convert to member' : `Make ${action.role}`) : action.kind === 'customRole' ? 'Set custom role' : action.kind === 'transfer' ? 'Transfer ownership' : 'Remove member',
+        icon: action.kind === 'role' ? 'userEdit' : action.kind === 'customRole' ? 'shieldUser' : action.kind === 'transfer' ? 'crown' : 'trash',
         destructive: action.kind === 'remove',
         onPress: () => run(managing, action),
       }))
+    : []
+  // the custom roles to pick from, the current one checked, then taking it away
+  const roleItems = roles.data?.items ?? []
+  const roleSheet: SheetAction[] = assigning
+    ? [
+        ...(roleItems.length === 0
+          ? [{ label: roles.isPending ? 'Loading roles…' : roles.isError ? 'Roles could not be loaded.' : 'No custom roles yet', detail: roles.isPending || roles.isError ? undefined : 'Create one in Roles.', disabled: true, onPress: () => {} }]
+          : []),
+        ...roleItems.map((role): SheetAction => ({
+          label: role.name,
+          icon: assigning.custom_role?.id === role.id ? 'checkCircle' : 'circle',
+          onPress: () => writes.setCustomRole.mutate({ member: assigning, roleId: role.id }),
+        })),
+        ...(assigning.custom_role ? [{ label: 'Remove custom role', icon: 'close', destructive: true, onPress: () => writes.setCustomRole.mutate({ member: assigning, roleId: null }) } satisfies SheetAction] : []),
+      ]
     : []
 
   return (
@@ -106,7 +125,7 @@ export default function MembersScreen() {
           </View>
         ) : null}
         {visible.map((member) => {
-          const actions = memberActions(member, user.id)
+          const actions = memberActions(member, user.id, canManageRoles)
           return (
             <View key={member.id} className="min-h-12 flex-row items-center gap-4 px-4 py-2.5 border-b border-border">
               <View className="flex-1 min-w-0 flex-row items-center gap-2">
@@ -118,7 +137,10 @@ export default function MembersScreen() {
                 {member.user_id === user.id ? <Badge label="You" /> : null}
                 {member.suspended_at ? <Badge label="Suspended" tone="destructive" /> : null}
               </View>
-              <Badge label={roleLabel(member.role)} tone="secondary" />
+              <View className="items-end gap-1">
+                <Badge label={roleLabel(member.role)} tone="secondary" />
+                {member.custom_role ? <Badge label={member.custom_role.name} tone="outline" /> : null}
+              </View>
               {actions.length > 0 ? <SmallOutlineButton label="Manage" accessibilityLabel={`Manage ${member.display_name}`} onPress={() => setManaging(member)} /> : null}
             </View>
           )
@@ -131,6 +153,7 @@ export default function MembersScreen() {
       {canManage ? <PendingInvitations /> : null}
 
       <ActionSheet visible={managing !== null} title={managing?.display_name} actions={sheet} onClose={() => setManaging(null)} />
+      <ActionSheet visible={assigning !== null} title={assigning ? `Custom role of ${assigning.display_name}` : undefined} actions={roleSheet} onClose={() => setAssigning(null)} />
       <ConfirmDialog request={confirm} onClose={() => setConfirm(null)} />
     </SettingsShell>
   )

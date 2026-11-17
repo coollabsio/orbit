@@ -121,6 +121,7 @@ What is configured:
 
 - `app.json`: the iOS bundle identifier and the Android package are `io.coollabs.orbit`. `ios.privacyManifests` declares no tracking, the data the app collects (email, name, photos or videos, and other user content, linked to the user, for app functionality only), and the required-reason APIs that React Native and the Expo modules use (UserDefaults, file timestamps, system boot time, disk space). The reasons are copied from each package's `PrivacyInfo.xcprivacy`. After you add a native module, check its manifest and add its reasons.
 - `eas.json`: the build version numbers live on EAS (`appVersionSource: remote`). The `development` profile makes an internal development build, `preview` an internal build, and `production` a store build that increments the build number.
+- On iOS the sign-in screen and Security → Connected accounts offer only the OpenID Connect provider, not Google or GitHub (`offeredProviders` in `src/data/sign-in-provider.ts`). App Store guideline 4.8 asks an app with a third-party or social login to also offer Sign in with Apple (or an equal private login). Accounts that are already connected stay listed, so they can be disconnected, and they still confirm changes.
 - The billing banner only shows the trial's days left or that the workspace is read-only. It has no link to billing. App Store guideline 3.1.1 and the Google Play payments policy forbid pointing to purchases outside the app.
 
 What you still have to do:

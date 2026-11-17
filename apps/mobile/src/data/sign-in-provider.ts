@@ -17,6 +17,14 @@ export const PROVIDER_LABEL: Record<Provider, string> = { google: 'Google', gith
 /** The order of the providers everywhere they are listed. */
 const PROVIDERS: readonly Provider[] = ['google', 'github', 'oidc']
 
+/**
+ * The providers the app shows for sign-in and connecting. On iOS only OpenID Connect (a company login): App Store
+ * guideline 4.8 asks an app with Google or GitHub sign-in to also offer Sign in with Apple. Connected accounts stay listed.
+ */
+export function offeredProviders(providers: readonly Provider[], os: string): Provider[] {
+  return os === 'ios' ? providers.filter((provider) => provider === 'oidc') : [...providers]
+}
+
 /** A provider's label: the OpenID Connect one is the server's `oidc_name` (`ORBIT_OIDC_DISPLAY_NAME`) from its auth options. */
 export function providerLabel(provider: Provider, oidcName?: string | null): string {
   return (provider === 'oidc' && oidcName) || PROVIDER_LABEL[provider]
