@@ -194,3 +194,6 @@
 - Expo DOM components render in a web view whose `#root` is a flex row: give the component's root `flex: 1`, or it is
   only as wide as its content. The Expo web target renders the component inline, so the preview does not show this;
   check the exported bundle (`expo export --platform ios`, `www.bundle/*.html`) with a fake `window.ReactNativeWebView`.
+
+## Building and testing the server on a small box
+- Compiling `orbit-server` needs about 4.5 GB of free RAM. Use `CARGO_BUILD_JOBS=1 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0`, cap the run (`systemd-run --user --scope -p MemoryMax=5500M`), and always set `TMPDIR` to a directory on disk: `/tmp` can be RAM, and test databases go to `TMPDIR`. Keep the same env each time so the build cache is reused (2026-11-15).

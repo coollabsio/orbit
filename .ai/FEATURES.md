@@ -8,7 +8,7 @@ Docs pages persist too (tree, content, trash, search; see Docs below).
 
 Chat persists too (channels, direct messages, threads, files, search; see Chat below).
 
-Mail persists too (receiving and a read-only web client: domains, mailboxes, threads, search; see Mail below). Sending mail is a follow-up milestone.
+Mail persists too (receiving, sending and a web client: domains, mailboxes, threads, search, compose; see Mail below).
 
 ## Global shell
 
@@ -632,7 +632,7 @@ MessageItem,MailHtmlFrame,SafetyBanner,MailSearch}.tsx`), settings in `features/
 Design: `docs/superpowers/specs/2026-10-23-mail-slice-1-design.md` (local file). Operator guide:
 `docs/operations.md#mail`.
 
-Slice 1 receives and reads mail; it does not send. Server (migration `20261111122204_mail`):
+Slice 1 receives and reads mail (migration `20261111122204_mail`); slice 2 sends it (see Slice 2 below). Server:
 
 - Provider intake (`mail_delivery.rs`, `mail_routes/{inbound,providers}.rs`, `crates/mail/src/inbound/`): PostShiba
   (recommended; signed JSON webhook, then the raw message from its API), Cloudflare, Postmark, Mailgun, Resend and SES post to `/api/v1/mail/inbound/{kind}/{id}`; instance and workspace providers
@@ -640,7 +640,7 @@ Slice 1 receives and reads mail; it does not send. Server (migration `2026111112
 - SMTP listener on port 2525 when `ORBIT_MAIL_ENABLED=true`, relay mode (default, trusts the relay's
   `Authentication-Results`) or direct mode (own SPF/DKIM/DMARC checks, STARTTLS, certificate reload every 60 s).
 - Domains per workspace, verified by `_orbit-verify` TXT (`mail.dns_check` every 10 min while pending, daily after);
-  verified → suspended (7-day grace) when the record goes. Root switch **Mail** in Admin → Inbound mail (`instance_settings.mail_enabled`, off by default): off hides
+  verified → suspended (7-day grace) when the record goes. Root switch **Mail** in Admin → Mail (`instance_settings.mail_enabled`, off by default): off hides
   the app, its menu items, shortcuts and settings (`useMailEnabled`, `MailGate`, from `/api/v1/auth/options`) and the
   workspace mail API answers `403 mail_disabled` (`Call::enter`); mail for existing domains still arrives.
 - Personal and shared mailboxes, aliases, `+tag`, catch-all, labels, bulk personal mailboxes.
@@ -651,7 +651,7 @@ Slice 1 receives and reads mail; it does not send. Server (migration `2026111112
 - Admin health card (listener, certificate, client IP, PTR) and a one-time `check-…@domain` test address.
   Failed messages list with Retry.
 
-Web client (`/mail`, sidebar entry with a **Beta** tag; read-only, no compose or reply yet):
+Web client (`/mail`, sidebar entry with a **Beta** tag):
 
 - Three panes: the folder rail (Inbox of all mailboxes, each mailbox with its unread count from `GET counts`, Starred,
   Archive, Spam, Trash, labels; with a mailbox open the folders are that mailbox's), a virtual thread list with cursor
@@ -677,16 +677,50 @@ Web client (`/mail`, sidebar entry with a **Beta** tag; read-only, no compose or
 - Empty states fill the pane: **Set up mail** for managers without a mailbox, "Ask an admin for a mailbox" for
   members, and one text for each empty folder, label, Starred and search.
 
+Slice 2 sends mail (migration `20261115110945_mail_send`; design `docs/superpowers/specs/2026-11-14-mail-slice-2-send-design.md`,
+local file; operator guide `docs/operations.md#mail`, section Sending). Server:
+
+- `crates/mail`: MIME build (`compose.rs`, `mail-builder`), DKIM signing (`dkim.rs`), DSN and provider event parsing
+  (`events.rs`), route adapters: direct MX delivery, SMTP relay, PostShiba, Postmark, Resend (SMTP), Mailgun, SES,
+  Cloudflare (HTTP; Beta). Sending routes (`mail_send_routes`, instance and workspace, secrets sealed), a route per
+  domain, **Send test**, SSRF checks (resolve, classify, connect to the checked IP).
+- Drafts, send with undo delay (0 to 30 s) and scheduled send held on the server (`mail_outbound`, job `mail.send`),
+  at-least-once delivery with the retry steps 1 m to 24 h over 5 days ("Delayed" after 4 h), `bounce_kind` for each
+  recipient, Sent folder, threading, contacts, signatures and snippets.
+- DKIM per domain: first key active when its TXT matches, rotation with a 7-day retiring period. Send readiness
+  (verified domain, live MX, active DKIM, a route).
+- Bounces: VERP `bounce+<token>@domain` for direct and smtp (reserved `bounce` local part), DSN parsing, provider
+  events at `/api/v1/mail/events/{kind}/{route_id}` (HMAC, Svix, SNS, Basic auth, Cloudflare queue Worker),
+  suppression list (hard bounces that mean a bad address, complaints), retried recipients ignore old events.
+- Limits: tiers `new`, `standard`, `custom` (Cloud starts at `new`), daily promotion, pause on bounce or complaint
+  rate, resume by the root user, tier defaults in Admin. Large files as links (`/mail/f/{token}`, content origin,
+  expiry, revoke, rate limit). Vacation reply (RFC 3834 rules). `mail.purge` also clears cancelled sends, expired
+  links, vacation records and delivery rows after 90 days.
+
+Web: the composer (inline reply, floating windows with a dock, full screen; BlockNote body, inline images, Cc/Bcc,
+send-as, size and suppression warnings, Send as a link), Drafts, Scheduled and Outbox folders, delivery status for each
+recipient with Retry, undo toast, vacation reply, signatures, undo delay in **Settings → Mail → My mail**, sending
+routes, suppressions and tier limits in **Settings → Mail → Sending**, Admin → Mail (default route, tier limits,
+workspaces with Resume). Shortcuts (listed in the shortcut help, from `shortcuts/commands.ts`): `c`, `r`, `a`, `f`,
+`⌘Enter` send, `⌘⇧Enter` send and archive, `⌘⇧E` pop out, `Esc` minimize, global "New email" in ⌘K.
+
 Not done yet (mail stays **Beta** until slices 1 to 5 are done):
 
-- Checked only by automated tests: no real mail from Gmail or Outlook in direct or relay mode, no real PostShiba,
-  Cloudflare, Postmark, Mailgun, Resend or SES account, no click-through of the UI, no `docker build`.
+- Checked only by automated tests: no real mail from Gmail or Outlook in direct, relay or any provider route, no real
+  PostShiba, Cloudflare, Postmark, Mailgun, Resend or SES account (sending or events), no `docker build`, and no
+  click-through of the UI in a browser (the composer, the lists and the settings were not walked through).
+- PostShiba sends through SMTP: its HTTP inject is not used (it may run a template engine over the message).
+  Postmark and Resend raw pass-through (tracking headers) is not verified. Cloudflare Email Sending is Beta.
 - Mobile has no mail screens: the mail app, its settings, the Mail badge and the PDF preview are web only.
+- Known limits: forwarded files cannot be sent as links (a forward over the route limit cannot be sent); a Bcc
+  recipient who replies counts as external; a Bcc-only message shows no recipients in Sent; a late DSN after a Retry
+  is ignored (the retried recipient stays `delivered`); the SES and Mailgun sandbox refusals of an unverified
+  recipient defer instead of bouncing; a draft opened in two tabs keeps only the last save; reload loses the
+  restore after an undo.
 - The Resend download host is not pinned (Resend's docs do not name it); the fetch must be `https`, public and
   without redirects.
 - Rejected deliveries for domains that no workspace has are stored but not listed (Admin has no such list).
-- Next slices: 2 send (compose, reply, forward, DKIM signing, sending through a provider's SMTP, send queue,
-  bounces), 3 spam and safety, 4 client access (IMAP server, SMTP submission, app passwords), 5 migration (import
+- Next slices: 3 spam and safety, 4 client access (IMAP server, SMTP submission, app passwords), 5 migration (import
   from Google Workspace and Fastmail), 6 team inbox, 7 rules and admin.
 
 ## Chat
