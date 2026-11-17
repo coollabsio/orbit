@@ -37,6 +37,7 @@ import { ImportPage } from '@/features/settings/pages/ImportPage'
 import { OrbitImportPage } from '@/features/settings/pages/OrbitImportPage'
 import { BillingPage } from '@/features/settings/pages/BillingPage'
 import { MembersPage } from '@/features/settings/pages/MembersPage'
+import { RolesPage } from '@/features/settings/pages/RolesPage'
 import { SecurityPage } from '@/features/settings/pages/SecurityPage'
 import { SessionsPage } from '@/features/settings/pages/SessionsPage'
 import { AgenticPage } from '@/features/settings/pages/AgenticPage'
@@ -185,6 +186,7 @@ export default function App() {
                   <Route path="export" element={<ExportPage />} />
                   <Route path="danger-zone" element={<DangerZonePage />} />
                   <Route path="members" element={<MembersPage />} />
+                  <Route path="roles" element={<RolesPage />} />
                   <Route path="invitations" element={<Navigate to="/settings/members" replace />} />
                   {/* these moved to the account settings; old links and bookmarks still work */}
                   <Route path="sessions" element={<MovedTo path="/profile/sessions" />} />

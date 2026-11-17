@@ -3,6 +3,7 @@ import { router, useLocalSearchParams } from 'expo-router'
 import { Pressable, View } from 'react-native'
 
 import { confirmDeleteForever, TrashBanner, TrashPreview } from '../../../../../components/tasks/TrashPreview'
+import { canInProject, canPurgeTask } from '../../../../../data/permissions'
 import { useTaskTrashWrites, useTrashedProject } from '../../../../../hooks/tasks'
 import { useOrbit } from '../../../../../orbit-context'
 import { usePeople } from '../../../../../queries'
@@ -13,7 +14,6 @@ import { Button, StatusIcon, Text } from '../../../../../ui'
 export default function TrashedProjectScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
   const { workspace } = useOrbit()
-  const canPurge = workspace.permissions.includes('pages.purge')
   const { project, tasks } = useTrashedProject(id)
   const people = usePeople()
   const writes = useTaskTrashWrites()
@@ -21,6 +21,8 @@ export default function TrashedProjectScreen() {
   if (!project.data || !tasks.data) return <TrashPreview title="" loading />
   const record = project.data
   const statuses = new Map(record.statuses.map((status) => [status.id, status]))
+  const canPurge = canPurgeTask(workspace, record.id)
+  const canRestore = canInProject(workspace, 'projects.manage', record.id)
   const busy = writes.restoreProject.isPending || writes.purgeProject.isPending
   const failure = writes.restoreProject.error ?? writes.purgeProject.error
   const deletedBy = people.find((person) => person.id === record.deleted_by)?.name
@@ -30,7 +32,9 @@ export default function TrashedProjectScreen() {
       error={failure ? errorMessage(failure) : null}
       banner={
         <TrashBanner text={trashedNotice('project', deletedBy, record.deleted_at ?? record.updated_at)}>
-          <Button label="Restore project" icon="refresh" size="sm" variant="outline" disabled={busy} onPress={() => writes.restoreProject.mutate(record, { onSuccess: () => router.replace({ pathname: '/tasks', params: { project: record.id } }) })} />
+          {canRestore ? (
+            <Button label="Restore project" icon="refresh" size="sm" variant="outline" disabled={busy} onPress={() => writes.restoreProject.mutate(record, { onSuccess: () => router.replace({ pathname: '/tasks', params: { project: record.id } }) })} />
+          ) : null}
           {canPurge ? (
             <Button
               label="Delete forever"

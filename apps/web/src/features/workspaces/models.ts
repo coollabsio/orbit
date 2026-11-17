@@ -25,4 +25,6 @@ export interface User {
   can: MemberAbilities
   /** The account is suspended: it cannot sign in, be mentioned or be notified. */
   suspended?: boolean
+  /** The custom role an ordinary member holds on top of the member role. */
+  customRole?: { id: string; name: string } | null
 }

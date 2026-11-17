@@ -1,7 +1,7 @@
 import { createOrbitClient } from '@orbit/api/client'
 import { expect, test } from 'bun:test'
 
-import { bucketMovedText, bucketMovingText, bucketPollInterval, confirmsEmail, deleteAccount, filterMembers, formatBytes, invitationProblem, memberActions, ownedWorkspaces, passwordProblem, pickedImageName, requestEmailChange, sortedSessions, storageUse, twoFactorSummary } from './account-api'
+import { bucketMovedText, bucketMovingText, bucketPollInterval, confirmsEmail, createWorkspaceRole, deleteAccount, filterMembers, formatBytes, invitationProblem, memberActions, memberProjectGrants, ownedWorkspaces, passwordProblem, pickedImageName, projectGrantLines, requestEmailChange, revokeMemberProjectGrant, roleSummary, setCustomRole, setMemberProjectGrant, sortedSessions, storageUse, twoFactorSummary, updateWorkspaceRole } from './account-api'
 import type { MemberRecord } from './orbit'
 
 const member = (id: string, fields: Partial<MemberRecord>): MemberRecord => ({
@@ -108,7 +108,8 @@ function server(reply: { status: number; body?: unknown }) {
     baseUrl: 'https://orbit.test',
     token: () => 'session-token',
     fetch: async (request) => {
-      sent.push({ method: request.method, url: request.url, body: JSON.parse(await request.text()) })
+      const text = await request.text()
+      sent.push({ method: request.method, url: request.url, body: text ? JSON.parse(text) : undefined })
       return reply.body === undefined
         ? new Response(null, { status: reply.status })
         : new Response(JSON.stringify(reply.body), { status: reply.status, headers: { 'content-type': 'application/problem+json' } })
@@ -146,4 +147,87 @@ test('deleting the account sends the typed email and the password; owned workspa
 test('the typed confirmation matches the email regardless of case and spaces', () => {
   expect(confirmsEmail(' Me@Orbit.test ', 'me@orbit.test')).toBe(true)
   expect(confirmsEmail('me@orbit.tes', 'me@orbit.test')).toBe(false)
+})
+
+test('only someone who manages roles may give an ordinary member a custom role', () => {
+  const bob = member('bob', { can_change_role: true, can_remove: true })
+  expect(memberActions(bob, 'me', true)).toEqual([{ kind: 'role', role: 'admin' }, { kind: 'customRole' }, { kind: 'remove' }])
+  expect(memberActions(bob, 'me')).toEqual([{ kind: 'role', role: 'admin' }, { kind: 'remove' }])
+  expect(memberActions(member('ada', { role: 'admin' }), 'me', true)).toEqual([])
+  expect(memberActions(member('gus', { role: 'guest' }), 'me', true)).toEqual([])
+})
+
+test('members are found by their custom role', () => {
+  const list = [member('ada', { custom_role: { id: 'r1', name: 'Moderator' } }), member('bob', { custom_role: null }), member('eve', {})]
+  expect(filterMembers(list, 'moder').map((m) => m.user_id)).toEqual(['ada'])
+})
+
+test('a role reads as its member, permission and project counts', () => {
+  expect(roleSummary({ member_count: 1, permissions: ['chat.manage'], project_grants: [] })).toBe('1 member · 1 permission')
+  expect(roleSummary({ member_count: 3, permissions: [], project_grants: [] })).toBe('3 members · no extra permissions')
+  expect(roleSummary({ member_count: 0, permissions: ['chat.manage', 'audit.view'], project_grants: [] })).toBe('0 members · 2 permissions')
+  expect(roleSummary({ member_count: 2, permissions: [], project_grants: [{ project_id: 'p1', permissions: ['tasks.purge'] }] })).toBe('2 members · 0 permissions · 1 project')
+})
+
+test("a role's project grants read as one line per project, named from the project list or else the grant", () => {
+  const grants = [
+    { project_id: 'p1', permissions: ['comments.moderate' as const, 'tasks.purge' as const] },
+    { project_id: 'p2', permissions: ['projects.view_private' as const], project_name: 'Secret' },
+  ]
+  expect(projectGrantLines({ project_grants: grants }, [{ id: 'p1', name: 'Website' }])).toEqual(['Website: Moderate comments, Permanently delete tasks', 'Secret: See private projects'])
+})
+
+const role = { id: 'r1', name: 'Moderator', permissions: ['chat.manage' as const], project_grants: [], member_count: 2, version: 4, created_at: '2026-11-12T10:00:00Z', updated_at: '2026-11-12T10:00:00Z' }
+
+test('a role is created and edited with its trimmed name, its permissions, its project grants and, on an edit, its version', async () => {
+  const created = server({ status: 201, body: role })
+  const grants = [
+    { project_id: 'p1', permissions: ['tasks.purge' as const] },
+    { project_id: 'p2', permissions: [] },
+  ]
+  expect(await createWorkspaceRole(created.client, 'w1', { name: '  Moderator ', permissions: ['chat.manage'], projectGrants: grants })).toEqual(role)
+  expect(created.sent).toEqual([
+    { method: 'POST', url: 'https://orbit.test/api/v1/workspaces/w1/roles', body: { name: 'Moderator', permissions: ['chat.manage'], project_grants: [{ project_id: 'p1', permissions: ['tasks.purge'] }] } },
+  ])
+  const edited = server({ status: 200, body: role })
+  const prefilled = { project_id: 'p3', permissions: ['comments.moderate' as const], project_name: 'Website' }
+  await updateWorkspaceRole(edited.client, 'w1', role, { name: 'Moderator', permissions: [], projectGrants: [prefilled] })
+  expect(edited.sent).toEqual([
+    { method: 'PATCH', url: 'https://orbit.test/api/v1/workspaces/w1/roles/r1', body: { expected_version: 4, name: 'Moderator', permissions: [], project_grants: [{ project_id: 'p3', permissions: ['comments.moderate'] }] } },
+  ])
+  const cleared = server({ status: 200, body: role })
+  await updateWorkspaceRole(cleared.client, 'w1', role, { name: 'Moderator', permissions: [], projectGrants: [] })
+  expect(cleared.sent[0].body).toEqual({ expected_version: 4, name: 'Moderator', permissions: [], project_grants: [] })
+})
+
+test('a custom role is given and taken away with the membership version; a refusal carries the server detail', async () => {
+  const given = server({ status: 204 })
+  await setCustomRole(given.client, 'w1', { id: 'm-bob', version: 7 }, 'r1')
+  await setCustomRole(given.client, 'w1', { id: 'm-bob', version: 8 }, null)
+  expect(given.sent).toEqual([
+    { method: 'PUT', url: 'https://orbit.test/api/v1/workspaces/w1/members/m-bob/custom-role', body: { role_id: 'r1', expected_version: 7 } },
+    { method: 'PUT', url: 'https://orbit.test/api/v1/workspaces/w1/members/m-bob/custom-role', body: { role_id: null, expected_version: 8 } },
+  ])
+  const refused = server({ status: 422, body: problem(422, 'invalid_role') })
+  await expect(setCustomRole(refused.client, 'w1', { id: 'm-ada', version: 1 }, 'r1')).rejects.toThrow('The invalid_role detail.')
+})
+
+test("project grants are listed for the workspace, and revoked per project and member; a refusal carries the server detail", async () => {
+  const grant = { project_id: 'p1', project_name: 'Website', user_id: 'ada', display_name: 'Ada', permissions: ['projects.manage' as const] }
+  const listed = server({ status: 200, body: [grant] })
+  expect(await memberProjectGrants(listed.client, 'w1')).toEqual([grant])
+  expect(listed.sent).toEqual([{ method: 'GET', url: 'https://orbit.test/api/v1/workspaces/w1/project-grants', body: undefined }])
+  const revoked = server({ status: 204 })
+  await revokeMemberProjectGrant(revoked.client, 'w1', grant)
+  expect(revoked.sent).toEqual([{ method: 'DELETE', url: 'https://orbit.test/api/v1/workspaces/w1/project-grants/p1/ada', body: undefined }])
+  const refused = server({ status: 403, body: problem(403, 'permission_denied') })
+  await expect(revokeMemberProjectGrant(refused.client, 'w1', grant)).rejects.toThrow('The permission_denied detail.')
+})
+
+test("a member's project grant is set with one PUT for the workspace; a refusal carries the server detail", async () => {
+  const set = server({ status: 204 })
+  await setMemberProjectGrant(set.client, 'w1', { project_id: 'p1', user_id: 'ada', permissions: ['projects.manage', 'tasks.purge'] })
+  expect(set.sent).toEqual([{ method: 'PUT', url: 'https://orbit.test/api/v1/workspaces/w1/project-grants', body: { project_id: 'p1', user_id: 'ada', permissions: ['projects.manage', 'tasks.purge'] } }])
+  const refused = server({ status: 422, body: problem(422, 'not_a_member') })
+  await expect(setMemberProjectGrant(refused.client, 'w1', { project_id: 'p1', user_id: 'bob', permissions: ['projects.manage'] })).rejects.toThrow('The not_a_member detail.')
 })

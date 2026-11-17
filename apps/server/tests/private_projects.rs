@@ -236,6 +236,26 @@ impl World {
         let (alice_id, alice) = server.person(&workspace, "alice", Some("member")).await;
         let (bob_id, bob) = server.person(&workspace, "bob", Some("member")).await;
         let (guest_id, _) = server.person(&workspace, "guest", Some("guest")).await;
+        // Managing a project takes `projects.manage`: alice and bob hold it for the workspace.
+        let now = TimestampMillis::now().as_millis();
+        let role = Id::new_v7().to_string();
+        sqlx::query(
+            "INSERT INTO workspace_roles (id, workspace_id, name, permissions, version, created_at, updated_at) \
+             VALUES ($1, $2, 'Project managers', '[\"projects.manage\"]', 0, $3, $3)",
+        )
+        .bind(&role)
+        .bind(&workspace)
+        .bind(now)
+        .execute(server.database.pool())
+        .await
+        .unwrap();
+        sqlx::query("UPDATE memberships SET custom_role_id = $1 WHERE user_id = $2 OR user_id = $3")
+            .bind(&role)
+            .bind(alice_id.to_string())
+            .bind(bob_id.to_string())
+            .execute(server.database.pool())
+            .await
+            .unwrap();
 
         let general =
             column(&server.get(&owner, &format!("{base}/projects")).await, "id").remove(0);

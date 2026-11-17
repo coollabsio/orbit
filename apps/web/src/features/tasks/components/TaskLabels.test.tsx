@@ -5,6 +5,8 @@ import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
 import type { LabelRecord } from '@orbit/api/generated/types.gen'
 import { MemoryRouter } from 'react-router'
+import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
+import { testWorkspace } from '@/test/workspace'
 import { LabelPicker } from './TaskLabels'
 
 const originalFetch = globalThis.fetch
@@ -15,10 +17,10 @@ const labels: LabelRecord[] = [
   { id: 'label-unused', workspace_id: 'workspace-1', project_id: 'project-1', name: 'Needs review', color: '#123456', version: 0 },
 ]
 
-function renderLabels(props: Partial<React.ComponentProps<typeof LabelPicker>> = {}) {
+function renderLabels(props: Partial<React.ComponentProps<typeof LabelPicker>> = {}, workspace = testWorkspace()) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
   const wrapper = ({ children }: { children: ReactNode }) => (
-    <MemoryRouter><QueryClientProvider client={client}>{children}</QueryClientProvider></MemoryRouter>
+    <MemoryRouter><QueryClientProvider client={client}><WorkspaceContext.Provider value={{ workspace, workspaces: [workspace], selectWorkspace: () => {} }}>{children}</WorkspaceContext.Provider></QueryClientProvider></MemoryRouter>
   )
   return render(
     <LabelPicker workspaceId="workspace-1" projectId="project-1" labelIds={['label-used']} labels={labels} onChange={mock(() => {})} trigger={<button type="button">Labels</button>} {...props} />,
@@ -79,6 +81,24 @@ test('a search that matches no label still shows the create row and "Edit labels
   expect(view.getByRole('option', { name: /Create/ }).textContent).toContain('Docs')
   expect(view.getByRole('button', { name: 'Edit labels' })).toBeTruthy()
   expect(view.queryAllByRole('option', { name: 'Bug' })).toHaveLength(0)
+})
+
+test('a member who cannot manage the project only picks existing labels: no create row, no "Edit labels"', async () => {
+  const onChange = mock(() => {})
+  const view = renderLabels({ editLink: true, onChange }, testWorkspace('member'))
+  fireEvent.click(view.getByRole('button', { name: 'Labels' }))
+  await userEvent.click(await view.findByRole('option', { name: 'Needs review' }))
+  expect(onChange).toHaveBeenCalledWith(['label-used', 'label-unused'])
+  await userEvent.type(view.getByRole('combobox', { name: 'Change labels' }), 'Docs')
+  expect(view.queryAllByRole('option', { name: /Create/ })).toHaveLength(0)
+  expect(view.queryByRole('button', { name: 'Edit labels' })).toBeNull()
+})
+
+test('a project grant of projects.manage brings the create row back', async () => {
+  const view = renderLabels({}, testWorkspace('member', { project_permissions: [{ project_id: 'project-1', permissions: ['projects.manage'] }] }))
+  fireEvent.click(view.getByRole('button', { name: 'Labels' }))
+  await userEvent.type(await view.findByRole('combobox', { name: 'Change labels' }), 'Docs')
+  expect(view.getByRole('option', { name: /Create/ })).toBeTruthy()
 })
 
 test('a colour picked under the create row is the new label colour, and Enter still creates', async () => {

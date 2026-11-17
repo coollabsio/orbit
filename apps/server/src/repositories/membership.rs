@@ -2,7 +2,7 @@
 //! permission rule needs. Checks that only ask "is this user a member" together with something
 //! else in one query (a live session, a visible page, an OAuth grant) keep their own SQL.
 
-use orbit_domain::{Actor, WorkspaceRole};
+use orbit_domain::{Actor, Permission, PermissionSet, ProjectGrants, WorkspaceRole};
 use orbit_platform::Id;
 use sqlx::Any;
 
@@ -56,19 +56,50 @@ async fn any_actor<'e, E>(
 where
     E: sqlx::Executor<'e, Database = Any>,
 {
-    let role: Option<String> = sqlx::query_scalar(
-        "SELECT memberships.role FROM memberships JOIN workspaces ON workspaces.id = memberships.workspace_id \
+    // One row per project grant of the member's custom role (one row when it has none).
+    let rows: Vec<GrantRow> = sqlx::query_as(
+        "SELECT memberships.role, workspace_roles.permissions, \
+         grants.project_id, grants.permission \
+         FROM memberships JOIN workspaces ON workspaces.id = memberships.workspace_id \
+         LEFT JOIN workspace_roles ON workspace_roles.id = memberships.custom_role_id \
+         LEFT JOIN (SELECT role_id, CAST(NULL AS TEXT) AS user_id, project_id, permission FROM workspace_role_projects \
+                    UNION ALL SELECT CAST(NULL AS TEXT), user_id, project_id, permission FROM member_project_grants) AS grants \
+              ON grants.role_id = memberships.custom_role_id OR grants.user_id = memberships.user_id \
          WHERE memberships.workspace_id = $1 AND memberships.user_id = $2 \
          AND (CASE WHEN workspaces.deleted_at IS NULL THEN 0 ELSE 1 END) = $3",
     )
     .bind(workspace_id.to_string())
     .bind(user_id.to_string())
     .bind(i64::from(trashed))
-    .fetch_optional(executor)
+    .fetch_all(executor)
     .await?;
-    // The schema only stores known roles; an unknown one grants nothing.
-    Ok(role
-        .as_deref()
-        .and_then(WorkspaceRole::parse)
-        .map(|role| Actor { user_id, role }))
+    Ok(actor_from_rows(user_id, &rows))
+}
+
+type GrantRow = (String, Option<String>, Option<String>, Option<String>);
+
+/// The actor of the rows of `any_actor`'s query. The schema only stores known roles; an unknown
+/// one grants nothing.
+pub(crate) fn actor_from_rows(user_id: Id, rows: &[GrantRow]) -> Option<Actor> {
+    let (role, permissions, _, _) = rows.first()?;
+    let role = WorkspaceRole::parse(role)?;
+    let projects = ProjectGrants::new(rows.iter().filter_map(|(_, _, project_id, permission)| {
+        Some((
+            project_id.as_deref()?.parse().ok()?,
+            Permission::parse(permission.as_deref()?)?,
+        ))
+    }));
+    Some(
+        Actor::new(user_id, role)
+            .with_custom_role(parse_permissions(permissions.as_deref()), projects),
+    )
+}
+
+/// The permissions that a custom role stores (a JSON array of names). Unknown names and names
+/// that a custom role may not carry add nothing.
+pub(crate) fn parse_permissions(stored: Option<&str>) -> PermissionSet {
+    let names: Vec<String> = stored
+        .and_then(|stored| serde_json::from_str(stored).ok())
+        .unwrap_or_default();
+    PermissionSet::of(names.iter().filter_map(|name| Permission::parse(name)))
 }

@@ -501,7 +501,7 @@ async fn members_can_crud_all_task_area_resources_and_unknown_fields_are_rejecte
                 "/api/v1/workspaces/{}/projects/{}/labels",
                 fixture.workspace_id, fixture.project_id
             ),
-            &member_cookie,
+            &fixture.owner_cookie,
             json!({"name":"bug", "color":"#ff0000"}),
         ))
         .await

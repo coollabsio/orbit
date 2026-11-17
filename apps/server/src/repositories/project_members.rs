@@ -10,7 +10,9 @@ use utoipa::ToSchema;
 
 use super::membership;
 use super::project_access::{self, ProjectScope};
-use super::tasks::{TaskError, TaskRepository, parse_id, project_in_tx, require_access_tx};
+use super::tasks::{
+    TaskError, TaskRepository, parse_id, project_in_tx, require_access_tx, require_manager,
+};
 use crate::audit::{self, AuditOutcome};
 use crate::collab::CollabHub;
 
@@ -80,7 +82,7 @@ impl TaskRepository {
         actor_id: Id,
     ) -> Result<Vec<ProjectMemberRecord>, TaskError> {
         let mut tx = self.database().pool().begin().await?;
-        let scope = ProjectScope::of(require_access_tx(&mut tx, workspace_id, actor_id).await?);
+        let scope = ProjectScope::of(&require_access_tx(&mut tx, workspace_id, actor_id).await?);
         project_in_tx(&mut tx, scope, workspace_id, project_id, false).await?;
         sqlx::query(
             "SELECT project_id, user_id, created_at FROM project_members WHERE project_id = $1 \
@@ -106,8 +108,10 @@ impl TaskRepository {
         now: TimestampMillis,
     ) -> Result<ProjectMemberRecord, TaskError> {
         let mut tx = self.database().immediate_transaction().await?;
-        let scope = ProjectScope::of(require_access_tx(&mut tx, workspace_id, actor_id).await?);
+        let actor = require_access_tx(&mut tx, workspace_id, actor_id).await?;
+        let scope = ProjectScope::of(&actor);
         project_in_tx(&mut tx, scope, workspace_id, project_id, false).await?;
+        require_manager(&actor, project_id)?;
         // Guests and people outside the workspace see no project, listed or not.
         if membership::actor(&mut *tx, workspace_id, user_id)
             .await?
@@ -154,8 +158,10 @@ impl TaskRepository {
         now: TimestampMillis,
     ) -> Result<(), TaskError> {
         let mut tx = self.database().immediate_transaction().await?;
-        let scope = ProjectScope::of(require_access_tx(&mut tx, workspace_id, actor_id).await?);
+        let actor = require_access_tx(&mut tx, workspace_id, actor_id).await?;
+        let scope = ProjectScope::of(&actor);
         project_in_tx(&mut tx, scope, workspace_id, project_id, false).await?;
+        require_manager(&actor, project_id)?;
         let removed =
             sqlx::query("DELETE FROM project_members WHERE project_id = $1 AND user_id = $2")
                 .bind(project_id.to_string())

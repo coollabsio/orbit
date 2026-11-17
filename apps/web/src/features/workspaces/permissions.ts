@@ -1,5 +1,5 @@
 import { useContext } from 'react'
-import type { Permission } from '@orbit/api/generated/types.gen'
+import type { Permission, WorkspaceRecord } from '@orbit/api/generated/types.gen'
 import { useCurrentUser } from '@/features/auth/api'
 import { useWorkspace, WorkspaceContext } from './workspaceContext'
 
@@ -10,6 +10,25 @@ import { useWorkspace, WorkspaceContext } from './workspaceContext'
  */
 export function useCan(permission: Permission): boolean {
   return useWorkspace().workspace.permissions.includes(permission)
+}
+
+/**
+ * Whether the caller holds `permission` in one project: workspace-wide, or through a custom role's grant for
+ * that project. Mirrors `can_in` in `crates/orbit/src/policy.rs`.
+ */
+export function canIn(workspace: WorkspaceRecord, permission: Permission, projectId: string | undefined): boolean {
+  if (workspace.permissions.includes(permission)) return true
+  if (projectId === undefined) return false
+  return workspace.project_permissions.some((grant) => grant.project_id === projectId && grant.permissions.includes(permission))
+}
+
+/** Mirrors the server's `can_purge_task`: `pages.purge` anywhere, or `tasks.purge` in the task's project. */
+export function canPurgeTask(workspace: WorkspaceRecord, projectId: string | undefined): boolean {
+  return workspace.permissions.includes('pages.purge') || canIn(workspace, 'tasks.purge', projectId)
+}
+
+export function useCanIn(permission: Permission, projectId: string | undefined): boolean {
+  return canIn(useWorkspace().workspace, permission, projectId)
 }
 
 /**

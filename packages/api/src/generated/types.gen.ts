@@ -1847,6 +1847,22 @@ export type CustomEmojiRecord = {
     url: string;
 };
 
+export type CustomRoleBody = {
+    expected_version: number;
+    /**
+     * The custom role to give, or `null` to take the member's custom role away.
+     */
+    role_id?: string | null;
+};
+
+/**
+ * A custom role, as a member's row names it.
+ */
+export type CustomRoleRef = {
+    id: string;
+    name: string;
+};
+
 export type CustomStickerRecord = {
     /**
      * A GIF.
@@ -4252,6 +4268,18 @@ export type MemberProfile = {
     user_id: string;
 };
 
+/**
+ * A project permission that one member holds in one project, apart from any role. A project's
+ * creator holds `projects.manage` this way until an owner or admin revokes it.
+ */
+export type MemberProjectGrant = {
+    display_name: string;
+    permissions: Array<Permission>;
+    project_id: string;
+    project_name: string;
+    user_id: string;
+};
+
 export type MemberRecord = {
     /**
      * The member's profile picture; absent while they have none.
@@ -4270,6 +4298,7 @@ export type MemberRecord = {
      */
     can_transfer_ownership: boolean;
     created_at: string;
+    custom_role?: null | CustomRoleRef;
     display_name: string;
     email: string;
     id: string;
@@ -5631,6 +5660,7 @@ export type PageMemberRecord = {
          */
         can_transfer_ownership: boolean;
         created_at: string;
+        custom_role?: null | CustomRoleRef;
         display_name: string;
         email: string;
         id: string;
@@ -5958,7 +5988,7 @@ export type PasswordConfirmationBody = {
  * A workspace capability that depends on the member's role. Actions open to
  * every member (tasks, projects, attachments, docs) are not listed here.
  */
-export type Permission = 'workspace.update' | 'workspace.delete' | 'workspace.transfer' | 'members.manage' | 'audit.view' | 'api_tokens.manage' | 'integrations.manage' | 'teamspaces.delete' | 'pages.purge' | 'views.manage_shared' | 'comments.moderate' | 'chat.manage' | 'mail.manage' | 'billing.manage' | 'storage.manage' | 'workspace.export' | 'workspace.export_personal';
+export type Permission = 'workspace.update' | 'workspace.delete' | 'workspace.transfer' | 'members.manage' | 'audit.view' | 'api_tokens.manage' | 'integrations.manage' | 'teamspaces.delete' | 'pages.purge' | 'views.manage_shared' | 'comments.moderate' | 'chat.manage' | 'mail.manage' | 'billing.manage' | 'storage.manage' | 'workspace.export' | 'workspace.export_personal' | 'roles.manage' | 'projects.view_private' | 'tasks.purge' | 'projects.manage';
 
 export type PersonalMailboxOverride = {
     local_part: string;
@@ -6072,6 +6102,15 @@ export type ProjectBody = {
     private?: boolean;
 };
 
+export type ProjectGrantBody = {
+    /**
+     * Replaces what the member holds directly in the project. Only project-scoped permissions.
+     */
+    permissions: Array<Permission>;
+    project_id: string;
+    user_id: string;
+};
+
 export type ProjectMemberBody = {
     /**
      * An active workspace member who is not a guest.
@@ -6093,6 +6132,14 @@ export type ProjectOrder = {
      * Live projects in the caller's order. Projects not listed follow them, by name.
      */
     project_ids: Array<string>;
+};
+
+/**
+ * The project-scoped permissions a member holds in one project.
+ */
+export type ProjectPermissions = {
+    permissions: Array<Permission>;
+    project_id: string;
 };
 
 export type ProjectRecord = {
@@ -7551,6 +7598,58 @@ export type RoleBody = 'owner' | 'admin' | 'member' | 'guest';
 export type RoleChangeBody = {
     expected_version: number;
     role: RoleBody;
+};
+
+export type RoleCreateBody = {
+    /**
+     * 1–40 characters after trimming; not Owner, Admin, Member or Guest.
+     */
+    name: string;
+    /**
+     * What a member with this role may do beyond an ordinary member. Only grantable permissions.
+     */
+    permissions: Array<Permission>;
+    /**
+     * What the role also grants in single projects.
+     */
+    project_grants?: Array<RoleProjectGrant>;
+};
+
+/**
+ * Project-scoped permissions that a role holds in one project.
+ */
+export type RoleProjectGrant = {
+    /**
+     * Only project-scoped permissions (`Permission::is_project_scoped`).
+     */
+    permissions: Array<Permission>;
+    project_id: string;
+    /**
+     * The project's name; ignored in requests.
+     */
+    project_name?: string;
+};
+
+export type RoleUpdateBody = {
+    expected_version: number;
+    name?: string | null;
+    permissions?: Array<Permission> | null;
+    /**
+     * Replaces the role's project grants; absent: unchanged.
+     */
+    project_grants?: Array<RoleProjectGrant> | null;
+};
+
+export type RolesResponse = {
+    /**
+     * The permissions a custom role may carry, in display order.
+     */
+    grantable_permissions: Array<Permission>;
+    items: Array<WorkspaceRoleRecord>;
+    /**
+     * The grantable permissions that a role may also hold for single projects.
+     */
+    project_permissions: Array<Permission>;
 };
 
 export type S3Body = {
@@ -9213,11 +9312,35 @@ export type WorkspaceRecord = {
      * What the caller's role may do in this workspace.
      */
     permissions: Array<Permission>;
+    /**
+     * What the caller's custom role grants in single projects, beyond `permissions`.
+     */
+    project_permissions: Array<ProjectPermissions>;
     role: WorkspaceRole;
     version: number;
 };
 
 export type WorkspaceRole = 'owner' | 'admin' | 'member' | 'guest';
+
+export type WorkspaceRoleRecord = {
+    created_at: string;
+    id: string;
+    /**
+     * How many members hold the role.
+     */
+    member_count: number;
+    name: string;
+    /**
+     * What a member with this role may do beyond an ordinary member.
+     */
+    permissions: Array<Permission>;
+    /**
+     * What the role grants in single projects, beyond its workspace-wide permissions.
+     */
+    project_grants: Array<RoleProjectGrant>;
+    updated_at: string;
+    version: number;
+};
 
 /**
  * How many bytes of files a workspace stores, and its quota.
@@ -30109,6 +30232,61 @@ export type ChangeMemberRoleResponses = {
 
 export type ChangeMemberRoleResponse = ChangeMemberRoleResponses[keyof ChangeMemberRoleResponses];
 
+export type SetMemberCustomRoleData = {
+    body: CustomRoleBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        membership_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/members/{membership_id}/custom-role';
+};
+
+export type SetMemberCustomRoleErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type SetMemberCustomRoleError = SetMemberCustomRoleErrors[keyof SetMemberCustomRoleErrors];
+
+export type SetMemberCustomRoleResponses = {
+    204: void;
+};
+
+export type SetMemberCustomRoleResponse = SetMemberCustomRoleResponses[keyof SetMemberCustomRoleResponses];
+
 export type ListNotificationsData = {
     body?: never;
     headers?: {
@@ -32510,6 +32688,166 @@ export type PutMemberNoteResponses = {
 
 export type PutMemberNoteResponse = PutMemberNoteResponses[keyof PutMemberNoteResponses];
 
+export type ListProjectGrantsData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/project-grants';
+};
+
+export type ListProjectGrantsErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type ListProjectGrantsError = ListProjectGrantsErrors[keyof ListProjectGrantsErrors];
+
+export type ListProjectGrantsResponses = {
+    200: Array<MemberProjectGrant>;
+};
+
+export type ListProjectGrantsResponse = ListProjectGrantsResponses[keyof ListProjectGrantsResponses];
+
+export type SetProjectGrantData = {
+    body: ProjectGrantBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/project-grants';
+};
+
+export type SetProjectGrantErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type SetProjectGrantError = SetProjectGrantErrors[keyof SetProjectGrantErrors];
+
+export type SetProjectGrantResponses = {
+    204: void;
+};
+
+export type SetProjectGrantResponse = SetProjectGrantResponses[keyof SetProjectGrantResponses];
+
+export type RevokeProjectGrantData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        project_id: string;
+        user_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/project-grants/{project_id}/{user_id}';
+};
+
+export type RevokeProjectGrantErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type RevokeProjectGrantError = RevokeProjectGrantErrors[keyof RevokeProjectGrantErrors];
+
+export type RevokeProjectGrantResponses = {
+    204: void;
+};
+
+export type RevokeProjectGrantResponse = RevokeProjectGrantResponses[keyof RevokeProjectGrantResponses];
+
 export type GetProjectOrderData = {
     body?: never;
     headers?: {
@@ -34745,6 +35083,220 @@ export type RestoreWorkspaceResponses = {
 };
 
 export type RestoreWorkspaceResponse = RestoreWorkspaceResponses[keyof RestoreWorkspaceResponses];
+
+export type ListRolesData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/roles';
+};
+
+export type ListRolesErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type ListRolesError = ListRolesErrors[keyof ListRolesErrors];
+
+export type ListRolesResponses = {
+    200: RolesResponse;
+};
+
+export type ListRolesResponse = ListRolesResponses[keyof ListRolesResponses];
+
+export type CreateRoleData = {
+    body: RoleCreateBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/roles';
+};
+
+export type CreateRoleErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type CreateRoleError = CreateRoleErrors[keyof CreateRoleErrors];
+
+export type CreateRoleResponses = {
+    201: WorkspaceRoleRecord;
+};
+
+export type CreateRoleResponse = CreateRoleResponses[keyof CreateRoleResponses];
+
+export type DeleteRoleData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        role_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/roles/{role_id}';
+};
+
+export type DeleteRoleErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type DeleteRoleError = DeleteRoleErrors[keyof DeleteRoleErrors];
+
+export type DeleteRoleResponses = {
+    204: void;
+};
+
+export type DeleteRoleResponse = DeleteRoleResponses[keyof DeleteRoleResponses];
+
+export type UpdateRoleData = {
+    body: RoleUpdateBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        role_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/roles/{role_id}';
+};
+
+export type UpdateRoleErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type UpdateRoleError = UpdateRoleErrors[keyof UpdateRoleErrors];
+
+export type UpdateRoleResponses = {
+    200: WorkspaceRoleRecord;
+};
+
+export type UpdateRoleResponse = UpdateRoleResponses[keyof UpdateRoleResponses];
 
 export type GetWorkspaceStorageData = {
     body?: never;
