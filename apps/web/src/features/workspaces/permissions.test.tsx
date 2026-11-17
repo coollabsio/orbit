@@ -5,7 +5,7 @@ import type { ReactNode } from 'react'
 import type { WorkspaceRecord, WorkspaceRole } from '@orbit/api/generated/types.gen'
 import { queryKeys } from '@/api/queryKeys'
 import { testWorkspace } from '@/test/workspace'
-import { canPurgeTask, useCan, useCanIn, useIsInstallationAdmin } from './permissions'
+import { canManageProject, canPurgeTask, useCan, useCanIn, useIsInstallationAdmin } from './permissions'
 import { WorkspaceContext } from './workspaceContext'
 
 function wrapper(role: WorkspaceRole, installationAdmin: boolean, overrides: Partial<WorkspaceRecord> = {}) {
@@ -49,4 +49,15 @@ test('purging a task needs pages.purge, or tasks.purge in the project of the tas
   expect(canPurgeTask(granted, 'project-b')).toBeFalse()
   const otherGrant = testWorkspace('member', { permissions: [], project_permissions: [{ project_id: 'project-a', permissions: ['comments.moderate'] }] })
   expect(canPurgeTask(otherGrant, 'project-a')).toBeFalse()
+})
+
+test('a project is managed with projects.manage there, or by its creator', () => {
+  const member = testWorkspace('member', { permissions: [], project_permissions: [] })
+  expect(canManageProject(member, 'user-1', { id: 'project-a', created_by: 'user-1' })).toBeTrue()
+  expect(canManageProject(member, 'user-1', { id: 'project-a', created_by: 'user-2' })).toBeFalse()
+  expect(canManageProject(member, 'user-1', { id: 'project-a', created_by: null })).toBeFalse()
+  expect(canManageProject(member, undefined, { id: 'project-a', created_by: null })).toBeFalse()
+  const granted = testWorkspace('member', { permissions: [], project_permissions: [{ project_id: 'project-a', permissions: ['projects.manage'] }] })
+  expect(canManageProject(granted, 'user-1', { id: 'project-a', created_by: 'user-2' })).toBeTrue()
+  expect(canManageProject(granted, 'user-1', { id: 'project-b', created_by: 'user-2' })).toBeFalse()
 })

@@ -21,7 +21,7 @@ import { ProjectMilestonesCard } from '@/features/tasks/components/ProjectMilest
 import { TaskStatusIcon } from '@/features/tasks/components/TaskStatusIcon'
 import { CATEGORY_LABEL, CATEGORY_ORDER, PROJECT_COLORS, STATUS_COLORS, defaultStatusOf, projectStatuses } from '@/features/tasks/taskMeta'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
-import { canIn } from '@/features/workspaces/permissions'
+import { canManageProject } from '@/features/workspaces/permissions'
 import type { Project, StatusCategory, TaskStatusDef } from '@/features/tasks/api/models'
 import { useAddProjectMembers, useCreateStatus, useDeleteProject, useDeleteStatus, useProjectMembers, useProjectStatuses, useProjects, useRemoveProjectMember, useReorderStatuses, useUpdateProject, useUpdateStatus } from '@/features/tasks/api/projects'
 import { ProjectVisibilityChoice } from '@/features/tasks/components/ProjectVisibilityChoice'
@@ -41,7 +41,7 @@ import { loadFailed } from '@/lib/connection'
 import { useIsPhone } from '@/features/chat/pages/useChatViewport'
 import { PROJECT_SETTINGS_GROUPS, projectSettingsItem, projectSettingsPath, type ProjectSettingsSection } from '@/features/tasks/projectSettingsNav'
 
-/** The sections the server changes only for holders of `projects.manage`; milestones, cycles, docs and GitHub stay open. */
+/** The sections the server changes only for holders of `projects.manage` and the project's creator; milestones, cycles, docs and GitHub stay open. */
 const MANAGED_SECTIONS: ReadonlySet<ProjectSettingsSection> = new Set(['general', 'access', 'statuses', 'labels', 'sub-issues', 'danger-zone'])
 
 
@@ -67,7 +67,8 @@ export function ProjectSettingsPage() {
   const statusesSaving = useSlowPending(createStatus.isPending || updateStatus.isPending || deleteStatus.isPending || reorderStatuses.isPending)
   const deleteProject = useDeleteProject(workspace.id)
   const project = projectsQuery.data?.find((p) => p.id === projectId)
-  const canManage = canIn(workspace, 'projects.manage', projectId)
+  const userId = useCurrentUser().data?.id
+  const canManage = !!project && canManageProject(workspace, userId, project)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [editor, setEditor] = useState<Editor | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<TaskStatusDef | null>(null)

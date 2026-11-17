@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
 import type { LabelRecord } from '@orbit/api/generated/types.gen'
 import { MemoryRouter } from 'react-router'
+import { queryKeys } from '@/api/queryKeys'
 import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
 import { testWorkspace } from '@/test/workspace'
 import { LabelPicker } from './TaskLabels'
@@ -18,7 +19,9 @@ const labels: LabelRecord[] = [
 ]
 
 function renderLabels(props: Partial<React.ComponentProps<typeof LabelPicker>> = {}, workspace = testWorkspace()) {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity }, mutations: { retry: false } } })
+  client.setQueryData(queryKeys.currentUser, { id: 'user-1', email: 'a@orbit.test', display_name: 'A' })
+  client.setQueryData(queryKeys.projects('workspace-1'), [])
   const wrapper = ({ children }: { children: ReactNode }) => (
     <MemoryRouter><QueryClientProvider client={client}><WorkspaceContext.Provider value={{ workspace, workspaces: [workspace], selectWorkspace: () => {} }}>{children}</WorkspaceContext.Provider></QueryClientProvider></MemoryRouter>
   )

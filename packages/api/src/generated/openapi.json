@@ -80199,6 +80199,13 @@
                   "type": "string",
                   "format": "date-time"
                 },
+                "created_by": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Who created the project, who manages it without `projects.manage`. Absent for projects\nthat were made before this was recorded."
+                },
                 "deleted_at": {
                   "type": [
                     "string",
@@ -81252,6 +81259,13 @@
           "created_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "created_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Who created the project, who manages it without `projects.manage`. Absent for projects\nthat were made before this was recorded."
           },
           "deleted_at": {
             "type": [

@@ -5730,6 +5730,11 @@ export type PageProjectRecord = {
         auto_close_sub_issues: boolean;
         color: string;
         created_at: string;
+        /**
+         * Who created the project, who manages it without `projects.manage`. Absent for projects
+         * that were made before this was recorded.
+         */
+        created_by?: string | null;
         deleted_at?: string | null;
         id: string;
         key: string;
@@ -6132,6 +6137,11 @@ export type ProjectRecord = {
     auto_close_sub_issues: boolean;
     color: string;
     created_at: string;
+    /**
+     * Who created the project, who manages it without `projects.manage`. Absent for projects
+     * that were made before this was recorded.
+     */
+    created_by?: string | null;
     deleted_at?: string | null;
     id: string;
     key: string;

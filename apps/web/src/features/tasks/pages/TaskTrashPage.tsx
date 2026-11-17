@@ -7,7 +7,8 @@ import { VirtualList } from '@/components/common/VirtualList'
 import { Pane, PaneHeader, PaneTitle } from '@/components/common/Pane'
 import { confirmAction } from '@/components/common/confirmAction'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
-import { canIn, canPurgeTask, useCan } from '@/features/workspaces/permissions'
+import { useCurrentUser } from '@/features/auth/api'
+import { canManageProject, canPurgeTask, useCan } from '@/features/workspaces/permissions'
 import { usePurgeProject, useProjects, useProjectTrash, useRestoreProject } from '@/features/tasks/api/projects'
 import { useEmptyTaskTrash, usePurgeTask, useRestoreTask, useTaskTrash } from '@/features/tasks/api/tasks'
 import { TaskSearchBox } from '@/features/tasks/components/TaskSearchBox'
@@ -27,6 +28,7 @@ export function TaskTrashPage() {
   const purgeTask = usePurgeTask(workspace.id)
   const emptyTrash = useEmptyTaskTrash(workspace.id)
   const liveProjects = useProjects(workspace.id)
+  const userId = useCurrentUser().data?.id
   const [search, setSearch] = useState('')
   // Empty trash: the server requires workspace-wide pages.purge
   const canEmpty = useCan('pages.purge')
@@ -87,7 +89,7 @@ export function TaskTrashPage() {
         <VirtualList className="min-h-0 flex-1" count={count} rowHeight={45} rowKey={(index) => (shown.projects[index] ?? shown.tasks[index - shown.projects.length]).id}>
           {(index) => {
             const project = shown.projects[index]
-            if (project) return <TrashRow><Link to={`/tasks-trash/project/${project.id}`} className="min-w-0 flex-1 truncate hover:underline">Project: {project.name}</Link>{canIn(workspace, 'projects.manage', project.id) ? <Button variant="outline" disabled={busy} onClick={() => restoreProject.mutate({ projectId: project.id, version: project.version })}><RotateCcw className="size-3.5" />Restore project</Button> : null}{canPurgeTask(workspace, project.id) ? <Button variant="outline" className="text-destructive hover:text-destructive" disabled={busy} onClick={() => void requestPurge(project)}><Trash2 className="size-3.5" />Delete forever</Button> : null}</TrashRow>
+            if (project) return <TrashRow><Link to={`/tasks-trash/project/${project.id}`} className="min-w-0 flex-1 truncate hover:underline">Project: {project.name}</Link>{canManageProject(workspace, userId, project) ? <Button variant="outline" disabled={busy} onClick={() => restoreProject.mutate({ projectId: project.id, version: project.version })}><RotateCcw className="size-3.5" />Restore project</Button> : null}{canPurgeTask(workspace, project.id) ? <Button variant="outline" className="text-destructive hover:text-destructive" disabled={busy} onClick={() => void requestPurge(project)}><Trash2 className="size-3.5" />Delete forever</Button> : null}</TrashRow>
             const task = shown.tasks[index - shown.projects.length]
             // read structurally: only trash entries carry it
             const label = trashedSubIssuesLabel((task as { trashed_descendant_count?: number }).trashed_descendant_count ?? 0)

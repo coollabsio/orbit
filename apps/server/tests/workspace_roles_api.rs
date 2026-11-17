@@ -1015,3 +1015,44 @@ async fn managing_a_project_takes_projects_manage() {
     );
     world.server.stop().await;
 }
+
+#[tokio::test]
+async fn the_creator_of_a_project_manages_it() {
+    let world = World::new().await;
+    let mine = world
+        .server
+        .ok(
+            &world.bob,
+            "POST",
+            &format!("{}/projects", world.base),
+            json!({"name": "Mine", "key": "MNE", "color": "#336699", "private": false}),
+        )
+        .await;
+    // The record names the creator, so a client can show the manage controls.
+    assert_eq!(
+        mine["created_by"],
+        world.member(&world.bob_membership).await["user_id"]
+    );
+    let theirs = world.project("Theirs", "THR", false).await;
+    let review = json!({"name": "Review", "color": "#445566", "category": "started"});
+    let path = |project: &str| format!("/projects/{project}/statuses");
+    assert_eq!(
+        world
+            .status(&world.bob, "POST", &path(&id(&mine)), review.clone())
+            .await,
+        201
+    );
+    assert_eq!(
+        world
+            .status(&world.bob, "POST", &path(&theirs.0), review.clone())
+            .await,
+        403
+    );
+    assert_eq!(
+        world
+            .status(&world.alice, "POST", &path(&id(&mine)), review)
+            .await,
+        403
+    );
+    world.server.stop().await;
+}

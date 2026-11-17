@@ -111,7 +111,7 @@ impl TaskRepository {
         let actor = require_access_tx(&mut tx, workspace_id, actor_id).await?;
         let scope = ProjectScope::of(&actor);
         project_in_tx(&mut tx, scope, workspace_id, project_id, false).await?;
-        require_manager(&actor, project_id)?;
+        require_manager(&mut tx, &actor, project_id).await?;
         // Guests and people outside the workspace see no project, listed or not.
         if membership::actor(&mut *tx, workspace_id, user_id)
             .await?
@@ -161,7 +161,7 @@ impl TaskRepository {
         let actor = require_access_tx(&mut tx, workspace_id, actor_id).await?;
         let scope = ProjectScope::of(&actor);
         project_in_tx(&mut tx, scope, workspace_id, project_id, false).await?;
-        require_manager(&actor, project_id)?;
+        require_manager(&mut tx, &actor, project_id).await?;
         let removed =
             sqlx::query("DELETE FROM project_members WHERE project_id = $1 AND user_id = $2")
                 .bind(project_id.to_string())
