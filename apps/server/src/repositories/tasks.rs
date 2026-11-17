@@ -1,4 +1,4 @@
-use orbit_domain::{Actor, DEFAULT_STATUSES, StatusCategory};
+use orbit_domain::{Actor, DEFAULT_STATUSES, Permission, StatusCategory};
 use orbit_platform::SqlBuilder;
 use orbit_platform::{BLOB_REFERENCE_COUNT, Backend, Database, Flag, Id, Row, TimestampMillis};
 use serde::{Deserialize, Serialize};
@@ -844,7 +844,7 @@ impl TaskRepository {
         actor_id: Id,
     ) -> Result<ProjectScope, TaskError> {
         Ok(ProjectScope::of(
-            require_access(self.database.pool(), workspace_id, actor_id).await?,
+            &require_access(self.database.pool(), workspace_id, actor_id).await?,
         ))
     }
 
@@ -856,7 +856,7 @@ impl TaskRepository {
         project_ids: &[Id],
     ) -> Result<Vec<ProjectRecord>, TaskError> {
         let scope =
-            ProjectScope::of(require_access(self.database.pool(), workspace_id, actor_id).await?);
+            ProjectScope::of(&require_access(self.database.pool(), workspace_id, actor_id).await?);
         if project_ids.is_empty() {
             return Ok(Vec::new());
         }
@@ -891,7 +891,7 @@ impl TaskRepository {
         limit: usize,
     ) -> Result<Page<ProjectRecord>, TaskError> {
         let scope =
-            ProjectScope::of(require_access(self.database.pool(), workspace_id, actor_id).await?);
+            ProjectScope::of(&require_access(self.database.pool(), workspace_id, actor_id).await?);
         let fingerprint = format!("projects:{workspace_id}");
         let after = cursor_pair(cursor, &fingerprint)?;
         let mut query = SqlBuilder::new(
@@ -1037,8 +1037,10 @@ impl TaskRepository {
         now: TimestampMillis,
     ) -> Result<ProjectRecord, TaskError> {
         let mut tx = self.database.immediate_transaction().await?;
-        let scope = ProjectScope::of(require_access_tx(&mut tx, workspace_id, actor_id).await?);
+        let actor = require_access_tx(&mut tx, workspace_id, actor_id).await?;
+        let scope = ProjectScope::of(&actor);
         let current = project_in_tx(&mut tx, scope, workspace_id, project_id, false).await?;
+        require_manager(&actor, project_id)?;
         check_version(expected_version, current.version, &current)?;
         let updated = sqlx::query(
             "UPDATE projects SET name = $1, project_key = $2, color = $3, \
@@ -1119,8 +1121,10 @@ impl TaskRepository {
         now: TimestampMillis,
     ) -> Result<(), TaskError> {
         let mut tx = self.database.immediate_transaction().await?;
-        let scope = ProjectScope::of(require_access_tx(&mut tx, workspace_id, actor_id).await?);
+        let actor = require_access_tx(&mut tx, workspace_id, actor_id).await?;
+        let scope = ProjectScope::of(&actor);
         let current = project_in_tx(&mut tx, scope, workspace_id, project_id, false).await?;
+        require_manager(&actor, project_id)?;
         check_version(expected_version, current.version, &current)?;
         let tombstone = format!("__deleted__{project_id}");
         sqlx::query(
@@ -1163,8 +1167,10 @@ impl TaskRepository {
         now: TimestampMillis,
     ) -> Result<ProjectRecord, TaskError> {
         let mut tx = self.database.immediate_transaction().await?;
-        let scope = ProjectScope::of(require_access_tx(&mut tx, workspace_id, actor_id).await?);
+        let actor = require_access_tx(&mut tx, workspace_id, actor_id).await?;
+        let scope = ProjectScope::of(&actor);
         let current = project_in_tx(&mut tx, scope, workspace_id, project_id, true).await?;
+        require_manager(&actor, project_id)?;
         if current.deleted_at.is_none_or(|deleted| {
             deleted.as_millis() <= now.as_millis().saturating_sub(TRASH_RETENTION_MILLIS)
         }) {
@@ -1230,7 +1236,7 @@ impl TaskRepository {
         now: TimestampMillis,
     ) -> Result<Page<ProjectRecord>, TaskError> {
         let scope =
-            ProjectScope::of(require_access(self.database.pool(), workspace_id, actor_id).await?);
+            ProjectScope::of(&require_access(self.database.pool(), workspace_id, actor_id).await?);
         let fingerprint = format!("project-trash:{workspace_id}");
         let after = cursor_i64_pair(cursor, &fingerprint)?;
         let mut query = SqlBuilder::new(
@@ -1287,7 +1293,7 @@ impl TaskRepository {
         now: TimestampMillis,
     ) -> Result<(), TaskError> {
         let actor = require_access(self.database.pool(), workspace_id, actor_id).await?;
-        let scope = ProjectScope::of(actor);
+        let scope = ProjectScope::of(&actor);
         self.require_granted_project(project_id)?;
         let deleted_at: Option<i64> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
             "SELECT deleted_at FROM projects WHERE id = $1 AND workspace_id = $2 AND {}",
@@ -1304,7 +1310,7 @@ impl TaskRepository {
         if deleted_at <= now.as_millis().saturating_sub(TRASH_RETENTION_MILLIS) {
             return Err(TaskError::NotFound);
         }
-        if !actor.can_purge_task() {
+        if !actor.can_purge_task(project_id) {
             return Err(TaskError::Forbidden);
         }
         let purged = self
@@ -1330,7 +1336,7 @@ impl TaskRepository {
     ) -> Result<TaskTrashEmptied, TaskError> {
         let actor = require_access(self.database.pool(), workspace_id, actor_id).await?;
         // A grant names live projects; the trash spans the whole workspace.
-        if self.project_grant.is_some() || !actor.can_purge_task() {
+        if self.project_grant.is_some() || !actor.can(Permission::PagesPurge) {
             return Err(TaskError::Forbidden);
         }
         let result = self
@@ -1547,7 +1553,7 @@ impl TaskRepository {
         }
         let id = Id::new_v7();
         let mut tx = self.database.immediate_transaction().await?;
-        require_project_tx(&mut tx, workspace_id, project_id, actor_id).await?;
+        require_manager_tx(&mut tx, workspace_id, project_id, actor_id).await?;
         let position = match position { Some(value) => value, None => sqlx::query_scalar::<_, i64>("SELECT COALESCE(MAX(position) + 1, 0) FROM task_statuses WHERE workspace_id = $1 AND project_id = $2").bind(workspace_id.to_string()).bind(project_id.to_string()).fetch_one(&mut *tx).await? };
         sqlx::query("INSERT INTO task_statuses (id, workspace_id, project_id, name, description, color, category, position, version, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 0, $9, $10)")
             .bind(id.to_string()).bind(workspace_id.to_string()).bind(project_id.to_string()).bind(&name).bind(&description).bind(&color).bind(&category).bind(position).bind(now.as_millis()).bind(now.as_millis()).execute(&mut *tx).await?;
@@ -1593,7 +1599,7 @@ impl TaskRepository {
         now: TimestampMillis,
     ) -> Result<StatusRecord, TaskError> {
         let mut tx = self.database.immediate_transaction().await?;
-        require_project_tx(&mut tx, workspace_id, project_id, actor_id).await?;
+        require_manager_tx(&mut tx, workspace_id, project_id, actor_id).await?;
         let current = status_in_tx(&mut tx, workspace_id, project_id, status_id).await?;
         check_version(expected_version, current.version, &current)?;
         let duplicate = StatusCategory::Duplicate.as_str();
@@ -1673,7 +1679,7 @@ impl TaskRepository {
         now: TimestampMillis,
     ) -> Result<(), TaskError> {
         let mut tx = self.database.immediate_transaction().await?;
-        require_project_tx(&mut tx, workspace_id, project_id, actor_id).await?;
+        require_manager_tx(&mut tx, workspace_id, project_id, actor_id).await?;
         let current = status_in_tx(&mut tx, workspace_id, project_id, status_id).await?;
         check_version(expected_version, current.version, &current)?;
         if current.category == StatusCategory::Duplicate.as_str() {
@@ -1715,7 +1721,7 @@ impl TaskRepository {
         now: TimestampMillis,
     ) -> Result<Vec<StatusRecord>, TaskError> {
         let mut tx = self.database.immediate_transaction().await?;
-        require_project_tx(&mut tx, workspace_id, project_id, actor_id).await?;
+        require_manager_tx(&mut tx, workspace_id, project_id, actor_id).await?;
         let mut result = Vec::with_capacity(items.len());
         for &(id, expected, position) in items {
             let current = status_in_tx(&mut tx, workspace_id, project_id, id).await?;
@@ -1818,7 +1824,7 @@ impl TaskRepository {
     ) -> Result<LabelRecord, TaskError> {
         let id = Id::new_v7();
         let mut tx = self.database.immediate_transaction().await?;
-        require_project_tx(&mut tx, workspace_id, project_id, actor_id).await?;
+        require_manager_tx(&mut tx, workspace_id, project_id, actor_id).await?;
         let inserted = sqlx::query("INSERT INTO labels (id, workspace_id, project_id, name, color, version, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, 0, $6, $7)").bind(id.to_string()).bind(workspace_id.to_string()).bind(project_id.to_string()).bind(&name).bind(&color).bind(now.as_millis()).bind(now.as_millis()).execute(&mut *tx).await;
         if is_unique_violation(&inserted) {
             return Err(TaskError::Conflict);
@@ -1860,7 +1866,7 @@ impl TaskRepository {
         now: TimestampMillis,
     ) -> Result<LabelRecord, TaskError> {
         let mut tx = self.database.immediate_transaction().await?;
-        require_project_tx(&mut tx, workspace_id, project_id, actor_id).await?;
+        require_manager_tx(&mut tx, workspace_id, project_id, actor_id).await?;
         let current = label_in_tx(&mut tx, workspace_id, project_id, label_id).await?;
         check_version(expected_version, current.version, &current)?;
         let updated = sqlx::query("UPDATE labels SET name = $1, color = $2, version = version + 1, updated_at = $3 WHERE id = $4 AND workspace_id = $5 AND version = $6").bind(&name).bind(&color).bind(now.as_millis()).bind(label_id.to_string()).bind(workspace_id.to_string()).bind(expected_version as i64).execute(&mut *tx).await;
@@ -1900,7 +1906,7 @@ impl TaskRepository {
         now: TimestampMillis,
     ) -> Result<(), TaskError> {
         let mut tx = self.database.immediate_transaction().await?;
-        require_project_tx(&mut tx, workspace_id, project_id, actor_id).await?;
+        require_manager_tx(&mut tx, workspace_id, project_id, actor_id).await?;
         let current = label_in_tx(&mut tx, workspace_id, project_id, label_id).await?;
         check_version(expected_version, current.version, &current)?;
         // task_labels rows go with the label (ON DELETE CASCADE).
@@ -1939,7 +1945,7 @@ impl TaskRepository {
         now: TimestampMillis,
     ) -> Result<Page<TaskRecord>, TaskError> {
         let scope =
-            ProjectScope::of(require_access(self.database.pool(), workspace_id, actor_id).await?);
+            ProjectScope::of(&require_access(self.database.pool(), workspace_id, actor_id).await?);
         task_filter::validate_filter(&filter.tree)?;
         let fingerprint = task_fingerprint(workspace_id, filter);
         let after = cursor_pair(cursor, &fingerprint)?;
@@ -2055,7 +2061,7 @@ impl TaskRepository {
         actor_id: Id,
     ) -> Result<TaskRecord, TaskError> {
         let scope =
-            ProjectScope::of(require_access(self.database.pool(), workspace_id, actor_id).await?);
+            ProjectScope::of(&require_access(self.database.pool(), workspace_id, actor_id).await?);
         // Edits of an open description reach `description_json` within seconds; reads see them now.
         if let Some(hub) = CollabHub::existing(&self.database) {
             hub.flush(DocKey::task(task_id)).await;
@@ -2148,7 +2154,7 @@ impl TaskRepository {
         }
         validate_estimate(input.estimate)?;
         let mut tx = self.database.immediate_transaction().await?;
-        let scope = ProjectScope::of(require_access_tx(&mut tx, workspace_id, actor_id).await?);
+        let scope = ProjectScope::of(&require_access_tx(&mut tx, workspace_id, actor_id).await?);
         if self
             .project_grant
             .as_ref()
@@ -2708,7 +2714,7 @@ impl TaskRepository {
             false => None,
         };
         let mut tx = self.database.immediate_transaction().await?;
-        let scope = ProjectScope::of(require_access_tx(&mut tx, workspace_id, actor_id).await?);
+        let scope = ProjectScope::of(&require_access_tx(&mut tx, workspace_id, actor_id).await?);
         self.check_project_grant(&mut tx, workspace_id, update.id)
             .await?;
         // A new parent joins its tree to the task's tree.
@@ -2914,7 +2920,7 @@ impl TaskRepository {
             );
         }
         let mut tx = self.database.immediate_transaction().await?;
-        let scope = ProjectScope::of(require_access_tx(&mut tx, workspace_id, actor_id).await?);
+        let scope = ProjectScope::of(&require_access_tx(&mut tx, workspace_id, actor_id).await?);
         // Each item's before/after pair brackets its own write only; the automation runs after
         // every write, so its result never depends on the order of the items.
         let mut snapshots = Vec::with_capacity(updates.len());
@@ -3041,7 +3047,7 @@ impl TaskRepository {
         now: TimestampMillis,
     ) -> Result<(), TaskError> {
         let mut tx = self.database.immediate_transaction().await?;
-        let scope = ProjectScope::of(require_access_tx(&mut tx, workspace_id, actor_id).await?);
+        let scope = ProjectScope::of(&require_access_tx(&mut tx, workspace_id, actor_id).await?);
         self.check_project_grant(&mut tx, workspace_id, task_id)
             .await?;
         let current = task_in_tx(&mut tx, scope, workspace_id, task_id, false).await?;
@@ -3079,7 +3085,7 @@ impl TaskRepository {
     ) -> Result<(), TaskError> {
         let mut tx = self.database.immediate_transaction().await?;
         let actor = require_access_tx(&mut tx, workspace_id, actor_id).await?;
-        let scope = ProjectScope::of(actor);
+        let scope = ProjectScope::of(&actor);
         self.check_project_grant(&mut tx, workspace_id, task_id)
             .await?;
         let task = match task_in_tx(&mut tx, scope, workspace_id, task_id, false).await {
@@ -3088,7 +3094,7 @@ impl TaskRepository {
             }
             result => result?,
         };
-        if !actor.can_purge_task() {
+        if !actor.can_purge_task(task.project_id) {
             return Err(TaskError::Forbidden);
         }
         let deleted_at = match (task.deleted_at, expected_version) {
@@ -3193,7 +3199,7 @@ impl TaskRepository {
         now: TimestampMillis,
     ) -> Result<TaskRecord, TaskError> {
         let mut tx = self.database.immediate_transaction().await?;
-        let scope = ProjectScope::of(require_access_tx(&mut tx, workspace_id, actor_id).await?);
+        let scope = ProjectScope::of(&require_access_tx(&mut tx, workspace_id, actor_id).await?);
         let current = task_in_tx(&mut tx, scope, workspace_id, task_id, true).await?;
         if current.deleted_at.is_none_or(|deleted| {
             deleted.as_millis() <= now.as_millis().saturating_sub(TRASH_RETENTION_MILLIS)
@@ -3295,7 +3301,7 @@ impl TaskRepository {
         now: TimestampMillis,
     ) -> Result<Page<TaskRecord>, TaskError> {
         let scope =
-            ProjectScope::of(require_access(self.database.pool(), workspace_id, actor_id).await?);
+            ProjectScope::of(&require_access(self.database.pool(), workspace_id, actor_id).await?);
         let fingerprint = format!("task-trash:{workspace_id}");
         let after = cursor_i64_pair(cursor, &fingerprint)?;
         let mut query = SqlBuilder::new(format!(
@@ -3353,7 +3359,7 @@ impl TaskRepository {
         now: TimestampMillis,
     ) -> Result<TrashedTask, TaskError> {
         let scope =
-            ProjectScope::of(require_access(self.database.pool(), workspace_id, actor_id).await?);
+            ProjectScope::of(&require_access(self.database.pool(), workspace_id, actor_id).await?);
         let cutoff = now.as_millis().saturating_sub(TRASH_RETENTION_MILLIS);
         let sql = format!(
             "SELECT {} FROM tasks JOIN projects ON projects.id = tasks.project_id WHERE tasks.id = $1 AND tasks.workspace_id = $2 \
@@ -3502,7 +3508,7 @@ impl TaskRepository {
         now: TimestampMillis,
     ) -> Result<ProjectRecord, TaskError> {
         let scope =
-            ProjectScope::of(require_access(self.database.pool(), workspace_id, actor_id).await?);
+            ProjectScope::of(&require_access(self.database.pool(), workspace_id, actor_id).await?);
         self.require_granted_project(project_id)?;
         let row = sqlx::query(sqlx::AssertSqlSafe(format!(
             "SELECT id, workspace_id, name, COALESCE(restore_project_key, project_key) AS project_key, color, auto_close_parent, auto_close_sub_issues, private, version, deleted_at, created_at, updated_at \
@@ -3539,7 +3545,7 @@ impl TaskRepository {
     ) -> Result<CommentRecord, TaskError> {
         let mut tx = self.database.pool().begin().await?;
         let actor = require_task_tx(&mut tx, workspace_id, task_id, actor_id).await?;
-        comment_in_tx(&mut tx, workspace_id, task_id, comment_id, actor).await
+        comment_in_tx(&mut tx, workspace_id, task_id, comment_id, &actor).await
     }
 
     pub async fn comments(
@@ -3557,7 +3563,8 @@ impl TaskRepository {
         let mut query = SqlBuilder::new(
             "SELECT task_comments.id, task_comments.workspace_id, task_id, author_id, author_service_account_id, \
              service_accounts.name AS author_service_account_name, parent_id, task_comments.external_id, body, body_json, task_comments.version, \
-             task_comments.created_at, task_comments.updated_at FROM task_comments \
+             task_comments.created_at, task_comments.updated_at, \
+             (SELECT tasks.project_id FROM tasks WHERE tasks.id = task_comments.task_id) AS project_id FROM task_comments \
              LEFT JOIN service_accounts ON service_accounts.id = task_comments.author_service_account_id \
              WHERE task_comments.workspace_id = ",
         );
@@ -3584,7 +3591,7 @@ impl TaskRepository {
             .fetch_all(self.database.pool())
             .await?
             .into_iter()
-            .map(|row| comment_from_row(row, actor))
+            .map(|row| comment_from_row(row, &actor))
             .collect::<Result<Vec<_>, _>>()?;
         finish_page(items, limit, &fingerprint, |comment| {
             vec![
@@ -3653,6 +3660,15 @@ impl TaskRepository {
                 return Err(TaskError::NotFound);
             }
         }
+        let task_project_id = parse_id(
+            sqlx::query_scalar::<_, String>(
+                "SELECT project_id FROM tasks WHERE id = $1 AND workspace_id = $2",
+            )
+            .bind(task_id.to_string())
+            .bind(workspace_id.to_string())
+            .fetch_one(&mut *tx)
+            .await?,
+        )?;
         let (body, blocks) = comment_content(&mut tx, workspace_id, task_id, &content).await?;
         let mentioned_user_ids = match content {
             CommentContent::Blocks(_) => {
@@ -3719,7 +3735,10 @@ impl TaskRepository {
             body,
             body_json: Some(blocks),
             can_edit: actor.can_edit_comment(service_account.is_none().then_some(author_id)),
-            can_delete: actor.can_delete_comment(service_account.is_none().then_some(author_id)),
+            can_delete: actor.can_delete_comment(
+                task_project_id,
+                service_account.is_none().then_some(author_id),
+            ),
             version: 0,
             created_at,
             updated_at,
@@ -3740,7 +3759,7 @@ impl TaskRepository {
     ) -> Result<CommentRecord, TaskError> {
         let mut tx = self.database.immediate_transaction().await?;
         let actor = require_task_tx(&mut tx, workspace_id, task_id, actor_id).await?;
-        let current = comment_in_tx(&mut tx, workspace_id, task_id, comment_id, actor).await?;
+        let current = comment_in_tx(&mut tx, workspace_id, task_id, comment_id, &actor).await?;
         if !current.can_edit {
             return Err(TaskError::Forbidden);
         }
@@ -3806,7 +3825,7 @@ impl TaskRepository {
     ) -> Result<(), TaskError> {
         let mut tx = self.database.immediate_transaction().await?;
         let actor = require_task_tx(&mut tx, workspace_id, task_id, actor_id).await?;
-        let current = comment_in_tx(&mut tx, workspace_id, task_id, comment_id, actor).await?;
+        let current = comment_in_tx(&mut tx, workspace_id, task_id, comment_id, &actor).await?;
         if !current.can_delete {
             return Err(TaskError::Forbidden);
         }
@@ -3836,7 +3855,7 @@ impl TaskRepository {
         limit: usize,
     ) -> Result<Page<NotificationRecord>, TaskError> {
         let scope =
-            ProjectScope::of(require_access(self.database.pool(), workspace_id, actor_id).await?);
+            ProjectScope::of(&require_access(self.database.pool(), workspace_id, actor_id).await?);
         let fingerprint = format!("notifications:{actor_id}:{}", unread_only);
         let after = cursor_i64_pair(cursor, &fingerprint)?;
         let mut query = SqlBuilder::new(
@@ -4582,7 +4601,7 @@ async fn require_project(
     project_id: Id,
     actor_id: Id,
 ) -> Result<(), TaskError> {
-    let scope = ProjectScope::of(require_access(pool, workspace_id, actor_id).await?);
+    let scope = ProjectScope::of(&require_access(pool, workspace_id, actor_id).await?);
     let exists: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         "SELECT COUNT(*) FROM projects WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL AND {}",
         scope.project("projects.id")
@@ -4598,13 +4617,35 @@ async fn require_project(
     }
 }
 
+/// `Forbidden` unless the actor manages the project. Call it after the project was found, so
+/// someone who cannot see the project still gets `NotFound`.
+pub(super) fn require_manager(actor: &Actor, project_id: Id) -> Result<(), TaskError> {
+    if actor.can_manage_project(project_id) {
+        Ok(())
+    } else {
+        Err(TaskError::Forbidden)
+    }
+}
+
+/// As `require_project_tx`, and the actor must manage the project.
+pub(super) async fn require_manager_tx(
+    tx: &mut Transaction<'_, Any>,
+    workspace_id: Id,
+    project_id: Id,
+    actor_id: Id,
+) -> Result<(), TaskError> {
+    require_project_tx(tx, workspace_id, project_id, actor_id).await?;
+    let actor = require_access_tx(tx, workspace_id, actor_id).await?;
+    require_manager(&actor, project_id)
+}
+
 pub(super) async fn require_project_tx(
     tx: &mut Transaction<'_, Any>,
     workspace_id: Id,
     project_id: Id,
     actor_id: Id,
 ) -> Result<(), TaskError> {
-    let scope = ProjectScope::of(require_access_tx(tx, workspace_id, actor_id).await?);
+    let scope = ProjectScope::of(&require_access_tx(tx, workspace_id, actor_id).await?);
     let exists: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         "SELECT COUNT(*) FROM projects WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL AND {}",
         scope.project("projects.id")
@@ -4629,7 +4670,7 @@ async fn require_task_tx(
     let actor = require_access_tx(tx, workspace_id, actor_id).await?;
     let exists: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         "SELECT COUNT(*) FROM tasks JOIN projects ON projects.id = tasks.project_id WHERE tasks.id = $1 AND tasks.workspace_id = $2 AND tasks.deleted_at IS NULL AND projects.deleted_at IS NULL AND {}",
-        ProjectScope::of(actor).project("tasks.project_id")
+        ProjectScope::of(&actor).project("tasks.project_id")
     )))
         .bind(task_id.to_string()).bind(workspace_id.to_string()).fetch_one(&mut **tx).await?;
     if exists == 1 {
@@ -5593,9 +5634,9 @@ async fn comment_in_tx(
     workspace_id: Id,
     task_id: Id,
     comment_id: Id,
-    actor: Actor,
+    actor: &Actor,
 ) -> Result<CommentRecord, TaskError> {
-    let row = sqlx::query("SELECT task_comments.id, task_comments.workspace_id, task_id, author_id, author_service_account_id, service_accounts.name AS author_service_account_name, parent_id, task_comments.external_id, body, body_json, task_comments.version, task_comments.created_at, task_comments.updated_at FROM task_comments LEFT JOIN service_accounts ON service_accounts.id = task_comments.author_service_account_id WHERE task_comments.id = $1 AND task_comments.workspace_id = $2 AND task_id = $3")
+    let row = sqlx::query("SELECT task_comments.id, task_comments.workspace_id, task_id, author_id, author_service_account_id, service_accounts.name AS author_service_account_name, parent_id, task_comments.external_id, body, body_json, task_comments.version, task_comments.created_at, task_comments.updated_at, (SELECT tasks.project_id FROM tasks WHERE tasks.id = task_comments.task_id) AS project_id FROM task_comments LEFT JOIN service_accounts ON service_accounts.id = task_comments.author_service_account_id WHERE task_comments.id = $1 AND task_comments.workspace_id = $2 AND task_id = $3")
         .bind(comment_id.to_string()).bind(workspace_id.to_string()).bind(task_id.to_string()).fetch_optional(&mut **tx).await?.ok_or(TaskError::NotFound)?;
     comment_from_row(row, actor)
 }
@@ -5939,7 +5980,7 @@ fn notification_from_row(row: sqlx::any::AnyRow) -> Result<NotificationRecord, T
     })
 }
 
-fn comment_from_row(row: sqlx::any::AnyRow, actor: Actor) -> Result<CommentRecord, TaskError> {
+fn comment_from_row(row: sqlx::any::AnyRow, actor: &Actor) -> Result<CommentRecord, TaskError> {
     let author_id = parse_id(row.get("author_id"))?;
     let author_service_account_id = row
         .get::<Option<String>, _>("author_service_account_id")
@@ -5954,7 +5995,7 @@ fn comment_from_row(row: sqlx::any::AnyRow, actor: Actor) -> Result<CommentRecor
         author_service_account_id,
         author_service_account_name: row.get("author_service_account_name"),
         can_edit: actor.can_edit_comment(member_author),
-        can_delete: actor.can_delete_comment(member_author),
+        can_delete: actor.can_delete_comment(parse_id(row.get("project_id"))?, member_author),
         parent_id: row
             .get::<Option<String>, _>("parent_id")
             .map(parse_id)

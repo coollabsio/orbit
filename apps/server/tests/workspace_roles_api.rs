@@ -685,3 +685,333 @@ async fn a_member_manager_cannot_make_admins_and_a_role_ends_with_the_member_rol
     );
     world.server.stop().await;
 }
+
+impl World {
+    async fn project(&self, name: &str, key: &str, private: bool) -> (String, String) {
+        let project = self
+            .server
+            .ok(
+                &self.owner,
+                "POST",
+                &format!("{}/projects", self.base),
+                json!({"name": name, "key": key, "color": "#336699", "private": private}),
+            )
+            .await;
+        let project_id = id(&project);
+        let statuses = self
+            .server
+            .get(
+                &self.owner,
+                &format!("{}/projects/{project_id}/statuses", self.base),
+            )
+            .await;
+        let status = id(&statuses
+            .as_array()
+            .unwrap_or(&statuses["items"].as_array().unwrap().clone())[0]);
+        (project_id, status)
+    }
+
+    /// A task in the project, moved to the trash.
+    async fn trashed_task(&self, project: &(String, String)) -> String {
+        let task = self
+            .server
+            .ok(
+                &self.owner,
+                "POST",
+                &format!("{}/tasks", self.base),
+                json!({"project_id": project.0, "status_id": project.1, "title": "Doomed"}),
+            )
+            .await;
+        let task_id = id(&task);
+        self.server
+            .ok(
+                &self.owner,
+                "DELETE",
+                &format!(
+                    "{}/tasks/{task_id}?expected_version={}",
+                    self.base, task["version"]
+                ),
+                Value::Null,
+            )
+            .await;
+        task_id
+    }
+}
+
+#[tokio::test]
+async fn a_role_grants_a_permission_in_one_project_only() {
+    let world = World::new().await;
+    let open_a = world.project("Open A", "OPA", false).await;
+    let open_b = world.project("Open B", "OPB", false).await;
+    let secret_a = world.project("Secret A", "SCA", true).await;
+    let secret_b = world.project("Secret B", "SCB", true).await;
+    let doomed_a = world.trashed_task(&open_a).await;
+    let doomed_b = world.trashed_task(&open_b).await;
+
+    let role = world
+        .server
+        .ok(
+            &world.owner,
+            "POST",
+            &format!("{}/roles", world.base),
+            json!({"name": "Project A lead", "permissions": [], "project_grants": [
+                {"project_id": open_a.0, "permissions": ["tasks.purge"]},
+                {"project_id": secret_a.0, "permissions": ["projects.view_private"]},
+            ]}),
+        )
+        .await;
+    assert_eq!(role["project_grants"].as_array().unwrap().len(), 2);
+    world.assign(&world.bob_membership, &id(&role)).await;
+
+    // The workspace record tells the client where the member holds project permissions.
+    let record = world.server.get(&world.bob, &world.base).await;
+    let held: Vec<(String, Vec<String>)> = record["project_permissions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|entry| {
+            let permissions = entry["permissions"].as_array().unwrap();
+            (
+                entry["project_id"].as_str().unwrap().to_owned(),
+                permissions
+                    .iter()
+                    .map(|p| p.as_str().unwrap().to_owned())
+                    .collect(),
+            )
+        })
+        .collect();
+    assert_eq!(held.len(), 2);
+    assert!(held.contains(&(open_a.0.clone(), vec!["tasks.purge".to_owned()])));
+    assert!(held.contains(&(secret_a.0.clone(), vec!["projects.view_private".to_owned()])));
+    assert!(
+        world.server.get(&world.alice, &world.base).await["project_permissions"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+
+    // Private project A is visible, private project B is not.
+    assert_eq!(
+        world
+            .status(
+                &world.bob,
+                "GET",
+                &format!("/projects/{}/statuses", secret_a.0),
+                Value::Null
+            )
+            .await,
+        200
+    );
+    assert_eq!(
+        world
+            .status(
+                &world.bob,
+                "GET",
+                &format!("/projects/{}/statuses", secret_b.0),
+                Value::Null
+            )
+            .await,
+        404
+    );
+    let projects = world
+        .server
+        .get(&world.bob, &format!("{}/projects", world.base))
+        .await;
+    let listed: Vec<String> = projects
+        .get("items")
+        .unwrap_or(&projects)
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(id)
+        .collect();
+    assert!(listed.contains(&secret_a.0) && !listed.contains(&secret_b.0));
+
+    // The task purge is allowed in project A, refused in project B; Alice has no grant.
+    assert_eq!(
+        world
+            .status(
+                &world.alice,
+                "DELETE",
+                &format!("/tasks/{doomed_a}/permanent"),
+                Value::Null
+            )
+            .await,
+        403
+    );
+    assert_eq!(
+        world
+            .status(
+                &world.bob,
+                "DELETE",
+                &format!("/tasks/{doomed_b}/permanent"),
+                Value::Null
+            )
+            .await,
+        403
+    );
+    assert_eq!(
+        world
+            .status(
+                &world.bob,
+                "DELETE",
+                &format!("/tasks/{doomed_a}/permanent"),
+                Value::Null
+            )
+            .await,
+        204
+    );
+
+    // A workspace-wide grant covers every project; an update replaces the project grants.
+    let version = role["version"].as_u64().unwrap();
+    world
+        .server
+        .ok(
+            &world.owner,
+            "PATCH",
+            &format!("{}/roles/{}", world.base, id(&role)),
+            json!({"expected_version": version, "permissions": ["tasks.purge"], "project_grants": []}),
+        )
+        .await;
+    assert_eq!(
+        world
+            .status(
+                &world.bob,
+                "GET",
+                &format!("/projects/{}/statuses", secret_a.0),
+                Value::Null
+            )
+            .await,
+        404
+    );
+    assert_eq!(
+        world
+            .status(
+                &world.bob,
+                "DELETE",
+                &format!("/tasks/{doomed_b}/permanent"),
+                Value::Null
+            )
+            .await,
+        204
+    );
+    world.server.stop().await;
+}
+
+#[tokio::test]
+async fn project_grants_are_checked() {
+    let world = World::new().await;
+    let open = world.project("Open", "OPN", false).await;
+    let grant = |permission: &str, project: &str| json!({"name": "Bad", "permissions": [], "project_grants": [{"project_id": project, "permissions": [permission]}]});
+    // A workspace-only permission cannot be limited to a project.
+    assert_eq!(
+        world
+            .status(&world.owner, "POST", "/roles", grant("audit.view", &open.0))
+            .await,
+        422
+    );
+    // The project must exist in this workspace.
+    assert_eq!(
+        world
+            .status(
+                &world.owner,
+                "POST",
+                "/roles",
+                grant("tasks.purge", &Id::new_v7().to_string())
+            )
+            .await,
+        422
+    );
+    assert_eq!(
+        world
+            .status(
+                &world.owner,
+                "POST",
+                "/roles",
+                grant("tasks.purge", &open.0)
+            )
+            .await,
+        201
+    );
+    world.server.stop().await;
+}
+
+#[tokio::test]
+async fn managing_a_project_takes_projects_manage() {
+    let world = World::new().await;
+    let open_a = world.project("Open A", "OPA", false).await;
+    let open_b = world.project("Open B", "OPB", false).await;
+    let status = |project: &str| format!("/projects/{project}/statuses");
+    let new_status = json!({"name": "Review", "color": "#445566", "category": "started"});
+    // A plain member works in the project but does not change it.
+    assert_eq!(
+        world
+            .status(&world.bob, "POST", &status(&open_a.0), new_status.clone())
+            .await,
+        403
+    );
+    assert_eq!(
+        world
+            .status(
+                &world.bob,
+                "POST",
+                &format!("/projects/{}/labels", open_a.0),
+                json!({"name": "bug", "color": "#ff0000"})
+            )
+            .await,
+        403
+    );
+    assert_eq!(
+        world
+            .status(
+                &world.bob,
+                "POST",
+                &format!("/projects/{}/members", open_a.0),
+                json!({"user_id": Id::new_v7().to_string()})
+            )
+            .await,
+        403
+    );
+    assert_eq!(
+        world
+            .status(
+                &world.bob,
+                "DELETE",
+                &format!("/projects/{}?expected_version=0", open_a.0),
+                Value::Null
+            )
+            .await,
+        403
+    );
+    assert_eq!(
+        world
+            .status(&world.admin, "POST", &status(&open_a.0), new_status.clone())
+            .await,
+        201
+    );
+
+    let role = world
+        .server
+        .ok(
+            &world.owner,
+            "POST",
+            &format!("{}/roles", world.base),
+            json!({"name": "A manager", "permissions": [], "project_grants": [
+                {"project_id": open_a.0, "permissions": ["projects.manage"]}]}),
+        )
+        .await;
+    world.assign(&world.bob_membership, &id(&role)).await;
+    assert_eq!(
+        world
+            .status(&world.bob, "POST", &status(&open_a.0), new_status.clone())
+            .await,
+        201
+    );
+    assert_eq!(
+        world
+            .status(&world.bob, "POST", &status(&open_b.0), new_status)
+            .await,
+        403
+    );
+    world.server.stop().await;
+}

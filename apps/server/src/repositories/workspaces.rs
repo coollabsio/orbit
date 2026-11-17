@@ -45,9 +45,29 @@ pub struct WorkspaceRecord {
     pub role: WorkspaceRole,
     /// What the caller's role may do in this workspace.
     pub permissions: Vec<Permission>,
+    /// What the caller's custom role grants in single projects, beyond `permissions`.
+    pub project_permissions: Vec<ProjectPermissions>,
     pub version: u64,
     #[schema(value_type = Option<String>, format = DateTime)]
     pub deleted_at: Option<TimestampMillis>,
+}
+
+/// The project-scoped permissions a member holds in one project.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct ProjectPermissions {
+    #[schema(value_type = String)]
+    pub project_id: Id,
+    pub permissions: Vec<Permission>,
+}
+
+fn project_permissions(grants: Vec<(Id, Vec<Permission>)>) -> Vec<ProjectPermissions> {
+    grants
+        .into_iter()
+        .map(|(project_id, permissions)| ProjectPermissions {
+            project_id,
+            permissions,
+        })
+        .collect()
 }
 
 /// What a profile popover shows of a member beside the member list's fields.
@@ -366,7 +386,52 @@ impl WorkspaceRepository {
         .bind(user_id.to_string())
         .fetch_all(self.database.pool())
         .await?;
-        rows.into_iter().map(workspace_from_row).collect()
+        let mut workspaces = rows
+            .into_iter()
+            .map(workspace_from_row)
+            .collect::<Result<Vec<_>, _>>()?;
+        self.add_project_permissions(user_id, &mut workspaces).await?;
+        Ok(workspaces)
+    }
+
+    /// Fills in what the user's custom role grants in single projects (trashed ones too, so a
+    /// project's manager can restore it).
+    async fn add_project_permissions(
+        &self,
+        user_id: Id,
+        workspaces: &mut [WorkspaceRecord],
+    ) -> Result<(), WorkspaceError> {
+        if workspaces.iter().all(|workspace| workspace.role != WorkspaceRole::Member) {
+            return Ok(());
+        }
+        let rows: Vec<(String, String, String)> = sqlx::query_as(
+            "SELECT memberships.workspace_id, grants.project_id, grants.permission \
+             FROM memberships JOIN workspace_role_projects grants ON grants.role_id = memberships.custom_role_id \
+             JOIN projects ON projects.id = grants.project_id \
+             WHERE memberships.user_id = $1 AND memberships.role = 'member' \
+             ORDER BY grants.project_id, grants.permission",
+        )
+        .bind(user_id.to_string())
+        .fetch_all(self.database.pool())
+        .await?;
+        for (workspace_id, project_id, permission) in rows {
+            let (Ok(workspace_id), Ok(project_id), Some(permission)) =
+                (workspace_id.parse::<Id>(), project_id.parse::<Id>(), Permission::parse(&permission))
+            else {
+                continue;
+            };
+            let Some(workspace) = workspaces.iter_mut().find(|workspace| workspace.id == workspace_id) else {
+                continue;
+            };
+            match workspace.project_permissions.iter_mut().find(|held| held.project_id == project_id) {
+                Some(held) => held.permissions.push(permission),
+                None => workspace.project_permissions.push(ProjectPermissions {
+                    project_id,
+                    permissions: vec![permission],
+                }),
+            }
+        }
+        Ok(())
     }
 
     pub async fn list_trash(&self, user_id: Id) -> Result<Vec<WorkspaceRecord>, WorkspaceError> {
@@ -459,6 +524,7 @@ impl WorkspaceRepository {
             name: defaults.workspace.name,
             role: WorkspaceRole::Owner,
             permissions: Policy::permissions(WorkspaceRole::Owner),
+            project_permissions: Vec::new(),
             version: 0,
             deleted_at: None,
         })
@@ -481,7 +547,10 @@ impl WorkspaceRepository {
         .fetch_optional(self.database.pool())
         .await?
         .ok_or(WorkspaceError::NotFound)?;
-        workspace_from_row(row)
+        let mut workspaces = [workspace_from_row(row)?];
+        self.add_project_permissions(actor_id, &mut workspaces).await?;
+        let [workspace] = workspaces;
+        Ok(workspace)
     }
 
     /// Lists `file_limit` of the largest files (at most [`MAX_LARGEST_FILES`]), after skipping `file_offset`.
@@ -690,6 +759,7 @@ impl WorkspaceRepository {
             name,
             role: actor.role,
             permissions: actor.permissions(),
+            project_permissions: project_permissions(actor.project_permissions()),
             version,
             deleted_at: None,
         })
@@ -733,7 +803,7 @@ impl WorkspaceRepository {
         .await?;
         let transfer_available = !crate::repositories::billing::enabled(&self.database);
         page(rows, limit, |row| {
-            member_from_row(row, actor, transfer_available)
+            member_from_row(row, &actor, transfer_available)
         })
     }
 
@@ -2538,6 +2608,7 @@ fn workspace_from_row(row: sqlx::any::AnyRow) -> Result<WorkspaceRecord, Workspa
         name: row.get("name"),
         role,
         permissions,
+        project_permissions: Vec::new(),
         version: u64::try_from(row.get::<i64, _>("version"))
             .map_err(|_| WorkspaceError::Conflict)?,
         deleted_at: row
@@ -2548,7 +2619,7 @@ fn workspace_from_row(row: sqlx::any::AnyRow) -> Result<WorkspaceRecord, Workspa
 
 fn member_from_row(
     row: sqlx::any::AnyRow,
-    actor: Actor,
+    actor: &Actor,
     transfer_available: bool,
 ) -> Result<MemberRecord, WorkspaceError> {
     let user_id = parse_id(row.get("user_id"))?;

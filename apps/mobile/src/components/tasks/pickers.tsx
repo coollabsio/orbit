@@ -11,6 +11,7 @@ import type { TaskRecurrence, TaskRecurrenceBase, TaskRecurrenceFrequency } from
 import { DEFAULT_RECURRENCE, MAX_RECURRENCE_INTERVAL, normalizeRecurrence, RECURRENCE_FREQUENCIES, RECURRENCE_WEEKDAYS, recurrenceUnit } from '@orbit/api/recurrence'
 
 import type { LabelRecord, StatusRecord, TaskRecord } from '../../data/orbit'
+import { canInProject } from '../../data/permissions'
 import {
   cycleDates,
   cycleLabel,
@@ -39,6 +40,7 @@ import {
   toggleId,
 } from '../../data/tasks'
 import { useCreateLabel, useTaskSearch } from '../../hooks/tasks'
+import { useOrbit } from '../../orbit-context'
 import { useCycles, useLabels, useMilestones, useProjects, useStatuses } from '../../queries'
 import { useTheme } from '../../theme'
 import { Avatar, Button, Icon, IconButton, type IconName, Input, LabelTip, PriorityIcon, StatusIcon, Text } from '../../ui'
@@ -178,17 +180,22 @@ export function PeopleChoices({ people, value, onChange }: { people: readonly Pe
 /**
  * The project's labels with a check each, like the web's label picker: the labels the task had when the sheet
  * opened come first, a name no label has becomes a "Create" row with the palette under it (preset to the colour
- * the project uses least), and the new label is added at once.
+ * the project uses least), and the new label is added at once. Creating needs `projects.manage` in the project; without
+ * it the sheet only picks existing labels.
  */
 export function LabelChoices({ projectId, value, onChange }: { projectId: string; value: readonly string[]; onChange: (ids: string[]) => void }) {
   const { colors } = useTheme()
   const labels = useLabels()
   const create = useCreateLabel()
+  const { workspace } = useOrbit()
+  const canCreate = canInProject(workspace, 'projects.manage', projectId)
   const [pinned] = useState(value)
   const [query, setQuery] = useState('')
   const [picked, setPicked] = useState<string>()
   const all = labels.data ?? []
-  const { rows, create: name } = labelChoices(all, projectId, query, pinned)
+  const choices = labelChoices(all, projectId, query, pinned)
+  const rows = choices.rows
+  const name = canCreate ? choices.create : null
   const color = picked ?? nextLabelColor(projectLabels(all, projectId))
   const own = projectLabels(all, projectId)
   const toggle = (id: string) => {
@@ -209,7 +216,7 @@ export function LabelChoices({ projectId, value, onChange }: { projectId: string
   }
   return (
     <>
-      <SheetSearch value={query} onChange={setQuery} placeholder={own.length > 0 ? 'Change labels…' : 'New label name…'} />
+      <SheetSearch value={query} onChange={setQuery} placeholder={own.length > 0 || !canCreate ? 'Change labels…' : 'New label name…'} />
       <SheetList>
         {rows.map((label) => (
           <SheetRow key={label.id} label={label.name} leading={<Dot color={label.color} />} checked={value.includes(label.id)} onPress={() => toggle(label.id)} />
@@ -220,7 +227,7 @@ export function LabelChoices({ projectId, value, onChange }: { projectId: string
             <Swatches value={color} onChange={setPicked} />
           </>
         ) : null}
-        {own.length === 0 && !query.trim() ? <SheetNote>This project has no labels yet. Type a name to create one.</SheetNote> : null}
+        {own.length === 0 && !query.trim() ? <SheetNote>{canCreate ? 'This project has no labels yet. Type a name to create one.' : 'This project has no labels yet.'}</SheetNote> : null}
         {query.trim() && rows.length === 0 && !name ? <SheetNote>No labels match.</SheetNote> : null}
         {create.isError ? <SheetNote tone="destructive">The label could not be created. Try again.</SheetNote> : null}
       </SheetList>

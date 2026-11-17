@@ -6,6 +6,7 @@ import { Attachments, type ShownFile } from '../../../../../components/tasks/Att
 import { LabelPill } from '../../../../../components/tasks/pickers'
 import { confirmDeleteForever, Property, TrashBanner, TrashPreview } from '../../../../../components/tasks/TrashPreview'
 import { markdownToText } from '../../../../../data/markdown'
+import { canPurgeTask } from '../../../../../data/permissions'
 import { dueDateLabel, PRIORITY_LABEL, priorityOf, splitInlineFiles } from '../../../../../data/tasks'
 import { useTaskTrash, useTaskTrashWrites, useTrashedTask } from '../../../../../hooks/tasks'
 import { useOrbit } from '../../../../../orbit-context'
@@ -17,7 +18,6 @@ import { Avatar, Button, PriorityIcon, StatusIcon, Text } from '../../../../../u
 export default function TrashedTaskScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
   const { workspace } = useOrbit()
-  const canPurge = workspace.permissions.includes('pages.purge')
   const task = useTrashedTask(id)
   const liveProjects = useProjects()
   const { projects: trashedProjects } = useTaskTrash()
@@ -29,6 +29,7 @@ export default function TrashedTaskScreen() {
   const trashedProject = trashedProjects.data?.find((project) => project.id === record.project_id)
   const project = trashedProject ?? liveProjects.data?.find((item) => item.id === record.project_id)
   const subject = trashIdentifier(record, () => project?.key)
+  const canPurge = canPurgeTask(workspace, record.project_id)
   const busy = writes.restoreTask.isPending || writes.purgeTask.isPending
   const failure = writes.restoreTask.error ?? writes.purgeTask.error
   const nameOf = (userId: string | null) => people.find((person) => person.id === userId)?.name

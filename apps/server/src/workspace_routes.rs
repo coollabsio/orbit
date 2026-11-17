@@ -41,7 +41,7 @@ use crate::repositories::instance_settings::{
     adjustable_job_kinds, can_confirm_sign_up,
 };
 use crate::repositories::sign_in_providers::SaveSignInProviderError;
-use crate::repositories::workspace_roles::WorkspaceRoleRecord;
+use crate::repositories::workspace_roles::{ProjectGrant, WorkspaceRoleRecord};
 use crate::repositories::workspace_storage::{WorkspaceStorageError, WorkspaceStorageRepository};
 use crate::repositories::workspaces::{InvitationDelivery, WorkspaceError, WorkspaceRepository};
 use crate::sign_in_providers::Provider;
@@ -852,6 +852,8 @@ struct RolesResponse {
     items: Vec<WorkspaceRoleRecord>,
     /// The permissions a custom role may carry, in display order.
     grantable_permissions: Vec<Permission>,
+    /// The grantable permissions that a role may also hold for single projects.
+    project_permissions: Vec<Permission>,
 }
 
 #[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/roles", params(("workspace_id" = String, Path)), responses((status = 200, body = RolesResponse)))]
@@ -872,6 +874,10 @@ async fn list_roles(
     Ok(Json(RolesResponse {
         items,
         grantable_permissions: Permission::grantable(),
+        project_permissions: Permission::grantable()
+            .into_iter()
+            .filter(|permission| permission.is_project_scoped())
+            .collect(),
     }))
 }
 
@@ -882,6 +888,10 @@ struct RoleCreateBody {
     name: String,
     /// What a member with this role may do beyond an ordinary member. Only grantable permissions.
     permissions: Vec<Permission>,
+    /// What the role also grants in single projects.
+    #[serde(default)]
+    #[schema(required = false)]
+    project_grants: Vec<ProjectGrant>,
 }
 
 #[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/roles", params(("workspace_id" = String, Path)), request_body = RoleCreateBody, responses((status = 201, body = WorkspaceRoleRecord)))]
@@ -902,6 +912,7 @@ async fn create_role(
             session.user.id,
             &body.name,
             &body.permissions,
+            &body.project_grants,
             request_id_value(request_id.as_ref()),
             TimestampMillis::now(),
         )
@@ -916,6 +927,8 @@ struct RoleUpdateBody {
     expected_version: u64,
     name: Option<String>,
     permissions: Option<Vec<Permission>>,
+    /// Replaces the role's project grants; absent: unchanged.
+    project_grants: Option<Vec<ProjectGrant>>,
 }
 
 #[utoipa::path(patch, path = "/api/v1/workspaces/{workspace_id}/roles/{role_id}", params(("workspace_id" = String, Path), ("role_id" = String, Path)), request_body = RoleUpdateBody, responses((status = 200, body = WorkspaceRoleRecord)))]
@@ -938,6 +951,7 @@ async fn update_role(
             role_id,
             body.name.as_deref(),
             body.permissions.as_deref(),
+            body.project_grants.as_deref(),
             body.expected_version,
             request_id_value(request_id.as_ref()),
             TimestampMillis::now(),

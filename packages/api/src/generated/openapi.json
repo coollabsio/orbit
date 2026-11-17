@@ -80875,7 +80875,10 @@
           "storage.manage",
           "workspace.export",
           "workspace.export_personal",
-          "roles.manage"
+          "roles.manage",
+          "projects.view_private",
+          "tasks.purge",
+          "projects.manage"
         ]
       },
       "PersonalMailboxOverride": {
@@ -81199,6 +81202,25 @@
           }
         },
         "additionalProperties": false
+      },
+      "ProjectPermissions": {
+        "type": "object",
+        "description": "The project-scoped permissions a member holds in one project.",
+        "required": [
+          "project_id",
+          "permissions"
+        ],
+        "properties": {
+          "permissions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Permission"
+            }
+          },
+          "project_id": {
+            "type": "string"
+          }
+        }
       },
       "ProjectRecord": {
         "type": "object",
@@ -84425,9 +84447,40 @@
               "$ref": "#/components/schemas/Permission"
             },
             "description": "What a member with this role may do beyond an ordinary member. Only grantable permissions."
+          },
+          "project_grants": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RoleProjectGrant"
+            },
+            "description": "What the role also grants in single projects."
           }
         },
         "additionalProperties": false
+      },
+      "RoleProjectGrant": {
+        "type": "object",
+        "description": "Project-scoped permissions that a role holds in one project.",
+        "required": [
+          "project_id",
+          "permissions"
+        ],
+        "properties": {
+          "permissions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Permission"
+            },
+            "description": "Only project-scoped permissions (`Permission::is_project_scoped`)."
+          },
+          "project_id": {
+            "type": "string"
+          },
+          "project_name": {
+            "type": "string",
+            "description": "The project's name; ignored in requests."
+          }
+        }
       },
       "RoleUpdateBody": {
         "type": "object",
@@ -84454,6 +84507,16 @@
             "items": {
               "$ref": "#/components/schemas/Permission"
             }
+          },
+          "project_grants": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/RoleProjectGrant"
+            },
+            "description": "Replaces the role's project grants; absent: unchanged."
           }
         },
         "additionalProperties": false
@@ -84462,7 +84525,8 @@
         "type": "object",
         "required": [
           "items",
-          "grantable_permissions"
+          "grantable_permissions",
+          "project_permissions"
         ],
         "properties": {
           "grantable_permissions": {
@@ -84477,6 +84541,13 @@
             "items": {
               "$ref": "#/components/schemas/WorkspaceRoleRecord"
             }
+          },
+          "project_permissions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Permission"
+            },
+            "description": "The grantable permissions that a role may also hold for single projects."
           }
         }
       },
@@ -88653,6 +88724,7 @@
           "name",
           "role",
           "permissions",
+          "project_permissions",
           "version"
         ],
         "properties": {
@@ -88675,6 +88747,13 @@
               "$ref": "#/components/schemas/Permission"
             },
             "description": "What the caller's role may do in this workspace."
+          },
+          "project_permissions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProjectPermissions"
+            },
+            "description": "What the caller's custom role grants in single projects, beyond `permissions`."
           },
           "role": {
             "$ref": "#/components/schemas/WorkspaceRole"
@@ -88701,6 +88780,7 @@
           "id",
           "name",
           "permissions",
+          "project_grants",
           "member_count",
           "version",
           "created_at",
@@ -88729,6 +88809,13 @@
               "$ref": "#/components/schemas/Permission"
             },
             "description": "What a member with this role may do beyond an ordinary member."
+          },
+          "project_grants": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RoleProjectGrant"
+            },
+            "description": "What the role grants in single projects, beyond its workspace-wide permissions."
           },
           "updated_at": {
             "type": "string",
@@ -88809,7 +88896,10 @@
       "storage.manage",
       "workspace.export",
       "workspace.export_personal",
-      "roles.manage"
+      "roles.manage",
+      "projects.view_private",
+      "tasks.purge",
+      "projects.manage"
     ],
     "guest": [],
     "member": [
@@ -88833,7 +88923,10 @@
       "storage.manage",
       "workspace.export",
       "workspace.export_personal",
-      "roles.manage"
+      "roles.manage",
+      "projects.view_private",
+      "tasks.purge",
+      "projects.manage"
     ]
   }
 }

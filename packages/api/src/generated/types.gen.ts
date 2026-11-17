@@ -5976,7 +5976,7 @@ export type PasswordConfirmationBody = {
  * A workspace capability that depends on the member's role. Actions open to
  * every member (tasks, projects, attachments, docs) are not listed here.
  */
-export type Permission = 'workspace.update' | 'workspace.delete' | 'workspace.transfer' | 'members.manage' | 'audit.view' | 'api_tokens.manage' | 'integrations.manage' | 'teamspaces.delete' | 'pages.purge' | 'views.manage_shared' | 'comments.moderate' | 'chat.manage' | 'mail.manage' | 'billing.manage' | 'storage.manage' | 'workspace.export' | 'workspace.export_personal' | 'roles.manage';
+export type Permission = 'workspace.update' | 'workspace.delete' | 'workspace.transfer' | 'members.manage' | 'audit.view' | 'api_tokens.manage' | 'integrations.manage' | 'teamspaces.delete' | 'pages.purge' | 'views.manage_shared' | 'comments.moderate' | 'chat.manage' | 'mail.manage' | 'billing.manage' | 'storage.manage' | 'workspace.export' | 'workspace.export_personal' | 'roles.manage' | 'projects.view_private' | 'tasks.purge' | 'projects.manage';
 
 export type PersonalMailboxOverride = {
     local_part: string;
@@ -6111,6 +6111,14 @@ export type ProjectOrder = {
      * Live projects in the caller's order. Projects not listed follow them, by name.
      */
     project_ids: Array<string>;
+};
+
+/**
+ * The project-scoped permissions a member holds in one project.
+ */
+export type ProjectPermissions = {
+    permissions: Array<Permission>;
+    project_id: string;
 };
 
 export type ProjectRecord = {
@@ -7580,12 +7588,35 @@ export type RoleCreateBody = {
      * What a member with this role may do beyond an ordinary member. Only grantable permissions.
      */
     permissions: Array<Permission>;
+    /**
+     * What the role also grants in single projects.
+     */
+    project_grants?: Array<RoleProjectGrant>;
+};
+
+/**
+ * Project-scoped permissions that a role holds in one project.
+ */
+export type RoleProjectGrant = {
+    /**
+     * Only project-scoped permissions (`Permission::is_project_scoped`).
+     */
+    permissions: Array<Permission>;
+    project_id: string;
+    /**
+     * The project's name; ignored in requests.
+     */
+    project_name?: string;
 };
 
 export type RoleUpdateBody = {
     expected_version: number;
     name?: string | null;
     permissions?: Array<Permission> | null;
+    /**
+     * Replaces the role's project grants; absent: unchanged.
+     */
+    project_grants?: Array<RoleProjectGrant> | null;
 };
 
 export type RolesResponse = {
@@ -7594,6 +7625,10 @@ export type RolesResponse = {
      */
     grantable_permissions: Array<Permission>;
     items: Array<WorkspaceRoleRecord>;
+    /**
+     * The grantable permissions that a role may also hold for single projects.
+     */
+    project_permissions: Array<Permission>;
 };
 
 export type S3Body = {
@@ -9256,6 +9291,10 @@ export type WorkspaceRecord = {
      * What the caller's role may do in this workspace.
      */
     permissions: Array<Permission>;
+    /**
+     * What the caller's custom role grants in single projects, beyond `permissions`.
+     */
+    project_permissions: Array<ProjectPermissions>;
     role: WorkspaceRole;
     version: number;
 };
@@ -9274,6 +9313,10 @@ export type WorkspaceRoleRecord = {
      * What a member with this role may do beyond an ordinary member.
      */
     permissions: Array<Permission>;
+    /**
+     * What the role grants in single projects, beyond its workspace-wide permissions.
+     */
+    project_grants: Array<RoleProjectGrant>;
     updated_at: string;
     version: number;
 };

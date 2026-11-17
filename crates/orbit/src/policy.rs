@@ -1,5 +1,6 @@
 use std::error::Error;
 use std::fmt;
+use std::sync::Arc;
 
 use orbit_platform::Id;
 use serde::{Deserialize, Serialize};
@@ -62,10 +63,22 @@ pub enum Permission {
     /// grantable by a custom role, so a custom role cannot hand out more than it holds.
     #[serde(rename = "roles.manage")]
     RolesManage,
+    /// See private projects that one does not belong to. A custom role may hold it for the
+    /// whole workspace or for single projects.
+    #[serde(rename = "projects.view_private")]
+    ProjectsViewPrivate,
+    /// Delete the tasks of a project forever. Per project in a custom role; `pages.purge` covers
+    /// every project.
+    #[serde(rename = "tasks.purge")]
+    TasksPurge,
+    /// Change a project's settings and visibility, delete or restore it, and manage its members,
+    /// statuses and labels. Per project in a custom role.
+    #[serde(rename = "projects.manage")]
+    ProjectsManage,
 }
 
 impl Permission {
-    pub const ALL: [Self; 18] = [
+    pub const ALL: [Self; 21] = [
         Self::WorkspaceUpdate,
         Self::WorkspaceDelete,
         Self::WorkspaceTransfer,
@@ -84,6 +97,9 @@ impl Permission {
         Self::WorkspaceExport,
         Self::WorkspaceExportPersonal,
         Self::RolesManage,
+        Self::ProjectsViewPrivate,
+        Self::TasksPurge,
+        Self::ProjectsManage,
     ];
 
     /// The permission's wire name, as in the API.
@@ -108,6 +124,9 @@ impl Permission {
             Self::WorkspaceExport => "workspace.export",
             Self::WorkspaceExportPersonal => "workspace.export_personal",
             Self::RolesManage => "roles.manage",
+            Self::ProjectsViewPrivate => "projects.view_private",
+            Self::TasksPurge => "tasks.purge",
+            Self::ProjectsManage => "projects.manage",
         }
     }
 
@@ -133,6 +152,19 @@ impl Permission {
         )
     }
 
+    /// Whether a custom role may hold the permission for single projects. Every other
+    /// permission is about the workspace and only applies workspace-wide.
+    #[must_use]
+    pub const fn is_project_scoped(self) -> bool {
+        matches!(
+            self,
+            Self::CommentsModerate
+                | Self::TasksPurge
+                | Self::ProjectsViewPrivate
+                | Self::ProjectsManage
+        )
+    }
+
     /// The permissions a custom role may carry, in display order.
     #[must_use]
     pub fn grantable() -> Vec<Self> {
@@ -142,15 +174,15 @@ impl Permission {
             .collect()
     }
 
-    const fn bit(self) -> u32 {
-        1 << self as u32
+    const fn bit(self) -> u64 {
+        1 << self as u64
     }
 }
 
 /// The permissions a custom role adds to an ordinary member. Only grantable permissions are
 /// ever in a set.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct PermissionSet(u32);
+pub struct PermissionSet(u64);
 
 impl PermissionSet {
     pub const EMPTY: Self = Self(0);
@@ -172,6 +204,11 @@ impl PermissionSet {
     }
 
     #[must_use]
+    pub const fn union(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
+
+    #[must_use]
     pub fn to_vec(self) -> Vec<Permission> {
         Permission::ALL
             .into_iter()
@@ -180,14 +217,52 @@ impl PermissionSet {
     }
 }
 
+/// What a custom role grants in single projects: project ids with the project-scoped
+/// permissions held there. Shared cheaply between clones of an [`Actor`].
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ProjectGrants(Arc<[(Id, PermissionSet)]>);
+
+impl ProjectGrants {
+    /// Keeps only project-scoped permissions and merges repeated projects.
+    #[must_use]
+    pub fn new(grants: impl IntoIterator<Item = (Id, Permission)>) -> Self {
+        let mut merged: Vec<(Id, PermissionSet)> = Vec::new();
+        for (project_id, permission) in grants {
+            if !permission.is_project_scoped() || !permission.is_grantable() {
+                continue;
+            }
+            let bit = PermissionSet::of([permission]);
+            match merged.iter_mut().find(|(id, _)| *id == project_id) {
+                Some((_, set)) => *set = set.union(bit),
+                None => merged.push((project_id, bit)),
+            }
+        }
+        Self(merged.into())
+    }
+
+    /// The permissions held in each project, for a client to show what the member may do there.
+    #[must_use]
+    pub fn by_project(&self) -> Vec<(Id, Vec<Permission>)> {
+        self.0.iter().map(|(id, set)| (*id, set.to_vec())).collect()
+    }
+
+    #[must_use]
+    pub fn contains(&self, project_id: Id, permission: Permission) -> bool {
+        self.0
+            .iter()
+            .any(|(id, set)| *id == project_id && set.contains(permission))
+    }
+}
+
 /// A member acting in one workspace. Every rule about what a member may do is a method here:
 /// `can` for rules that depend only on the role, the rest for rules that also depend on a record.
 /// A member may also hold a custom role, which adds permissions to the member role (`granted`).
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Actor {
     pub user_id: Id,
     pub role: WorkspaceRole,
     granted: PermissionSet,
+    project_grants: ProjectGrants,
 }
 
 /// Why a membership change is refused.
@@ -205,115 +280,139 @@ pub enum MembershipDenied {
 
 impl Actor {
     #[must_use]
-    pub const fn new(user_id: Id, role: WorkspaceRole) -> Self {
+    pub fn new(user_id: Id, role: WorkspaceRole) -> Self {
         Self {
             user_id,
             role,
             granted: PermissionSet::EMPTY,
+            project_grants: ProjectGrants(Arc::from([])),
         }
     }
 
     /// Adds the permissions of the member's custom role. Only an ordinary member holds one:
     /// owners and admins hold every permission already, and guests none.
     #[must_use]
-    pub const fn with_custom_role(mut self, granted: PermissionSet) -> Self {
+    pub fn with_custom_role(mut self, granted: PermissionSet, projects: ProjectGrants) -> Self {
         if matches!(self.role, WorkspaceRole::Member) {
             self.granted = granted;
+            self.project_grants = projects;
         }
         self
     }
 
     #[must_use]
-    pub const fn can(self, permission: Permission) -> bool {
+    pub fn can(&self, permission: Permission) -> bool {
         Policy::can(self.role, permission) || self.granted.contains(permission)
+    }
+
+    /// Change the project's settings, visibility, members, statuses and labels, or delete it.
+    #[must_use]
+    pub fn can_manage_project(&self, project_id: Id) -> bool {
+        self.can_in(project_id, Permission::ProjectsManage)
+    }
+
+    /// As [`Actor::can`], also for a permission that a custom role holds for this project only.
+    #[must_use]
+    pub fn can_in(&self, project_id: Id, permission: Permission) -> bool {
+        self.can(permission)
+            || (permission.is_project_scoped()
+                && self.project_grants.contains(project_id, permission))
+    }
+
+    /// The project-scoped permissions the actor's custom role holds in single projects.
+    #[must_use]
+    pub fn project_permissions(&self) -> Vec<(Id, Vec<Permission>)> {
+        self.project_grants.by_project()
     }
 
     /// Everything the actor may do, from the role and the custom role.
     #[must_use]
-    pub fn permissions(self) -> Vec<Permission> {
+    pub fn permissions(&self) -> Vec<Permission> {
         Policy::permissions_with(self.role, self.granted)
     }
 
     /// Guests only see the private chat channels and DMs they belong to.
     #[must_use]
-    pub const fn is_guest(self) -> bool {
+    pub fn is_guest(&self) -> bool {
         matches!(self.role, WorkspaceRole::Guest)
     }
 
     /// Owners and admins see every project of the workspace, private ones too.
     #[must_use]
-    pub const fn sees_all_projects(self) -> bool {
-        Policy::can_see_project(self.role, true, false)
+    pub fn sees_all_projects(&self) -> bool {
+        Policy::can_see_project(self.role, true, false) || self.can(Permission::ProjectsViewPrivate)
     }
 
     /// See [`Policy::can_see_project`]. Whoever sees a project may do everything in it, also
     /// change who sees it.
     #[must_use]
-    pub const fn can_see_project(self, private: bool, member: bool) -> bool {
+    pub fn can_see_project(&self, private: bool, member: bool) -> bool {
         Policy::can_see_project(self.role, private, member)
+            || (private && self.can(Permission::ProjectsViewPrivate))
     }
 
     /// Only the author rewrites a task comment. `author_id` is `None` for a comment that a
     /// service account wrote: no member is its author.
     #[must_use]
-    pub fn can_edit_comment(self, author_id: Option<Id>) -> bool {
+    pub fn can_edit_comment(&self, author_id: Option<Id>) -> bool {
         author_id == Some(self.user_id)
     }
 
     #[must_use]
-    pub fn can_delete_comment(self, author_id: Option<Id>) -> bool {
-        author_id == Some(self.user_id) || self.can(Permission::CommentsModerate)
+    pub fn can_delete_comment(&self, project_id: Id, author_id: Option<Id>) -> bool {
+        author_id == Some(self.user_id) || self.can_in(project_id, Permission::CommentsModerate)
     }
 
     /// `shared` is workspace visibility; a personal view is only ever its owner's.
     #[must_use]
-    pub fn can_edit_view(self, owner_id: Id, shared: bool) -> bool {
+    pub fn can_edit_view(&self, owner_id: Id, shared: bool) -> bool {
         self.user_id == owner_id || (shared && self.can(Permission::ViewsManageShared))
     }
 
     #[must_use]
-    pub fn can_change_view_visibility(self, owner_id: Id) -> bool {
+    pub fn can_change_view_visibility(&self, owner_id: Id) -> bool {
         self.user_id == owner_id
     }
 
     /// A channel's creator and chat managers edit it, archive it and manage its members.
     #[must_use]
-    pub fn can_manage_chat_channel(self, created_by: Id) -> bool {
+    pub fn can_manage_chat_channel(&self, created_by: Id) -> bool {
         self.user_id == created_by || self.can(Permission::ChatManage)
     }
 
     /// Only the author rewrites a chat message; `can_delete_chat_message` also lets managers in.
     #[must_use]
-    pub fn can_edit_chat_message(self, author_id: Id) -> bool {
+    pub fn can_edit_chat_message(&self, author_id: Id) -> bool {
         self.user_id == author_id
     }
 
     #[must_use]
-    pub fn can_delete_chat_message(self, author_id: Id) -> bool {
+    pub fn can_delete_chat_message(&self, author_id: Id) -> bool {
         self.user_id == author_id || self.can(Permission::ChatManage)
     }
 
     /// A private page is visible to its owner alone, so whoever sees one may delete it forever.
     #[must_use]
-    pub const fn can_purge_page(self, private: bool) -> bool {
+    pub fn can_purge_page(&self, private: bool) -> bool {
         private || self.can(Permission::PagesPurge)
     }
 
-    /// Tasks are shared like teamspace pages, so deleting one forever takes the same role.
+    /// Tasks are shared like teamspace pages, so deleting one forever takes the same role, or
+    /// `tasks.purge` for the task's project.
     #[must_use]
-    pub const fn can_purge_task(self) -> bool {
-        self.can(Permission::PagesPurge)
+    pub fn can_purge_task(&self, project_id: Id) -> bool {
+        self.can(Permission::PagesPurge) || self.can_in(project_id, Permission::TasksPurge)
     }
 
     /// Moving teamspace pages into a private space hides them from everyone else and lets the
     /// new owner delete them forever, so it takes [`Permission::PagesPurge`] unless the actor
     /// created every page that moves.
     #[must_use]
-    pub const fn can_move_pages_to_private(self, created_all: bool) -> bool {
+    pub fn can_move_pages_to_private(&self, created_all: bool) -> bool {
         created_all || self.can(Permission::PagesPurge)
     }
 
-    pub fn invite(self, role: WorkspaceRole) -> Result<(), MembershipDenied> {
+    pub fn invite(&self, role: WorkspaceRole) -> Result<(), MembershipDenied> {
         if !self.can(Permission::MembersManage) {
             return Err(MembershipDenied::RoleForbidden);
         }
@@ -325,7 +424,7 @@ impl Actor {
 
     /// Only owners and admins make admins, so a custom role that manages members cannot lift
     /// anyone, itself included, above its own level.
-    fn may_assign(self, role: WorkspaceRole) -> Result<(), MembershipDenied> {
+    fn may_assign(&self, role: WorkspaceRole) -> Result<(), MembershipDenied> {
         if role == WorkspaceRole::Admin
             && !matches!(self.role, WorkspaceRole::Owner | WorkspaceRole::Admin)
         {
@@ -336,7 +435,7 @@ impl Actor {
     }
 
     pub fn change_member_role(
-        self,
+        &self,
         target_role: WorkspaceRole,
         new_role: WorkspaceRole,
     ) -> Result<(), MembershipDenied> {
@@ -357,7 +456,7 @@ impl Actor {
     /// Any member may remove themselves (leave); removing others needs `MembersManage`, and
     /// removing an admin needs the owner.
     pub fn remove_member(
-        self,
+        &self,
         target_user_id: Id,
         target_role: WorkspaceRole,
     ) -> Result<(), MembershipDenied> {
@@ -372,7 +471,7 @@ impl Actor {
     }
 
     /// Only the owner changes or removes an admin's membership.
-    fn admin_protected(self, target_role: WorkspaceRole) -> Result<(), MembershipDenied> {
+    fn admin_protected(&self, target_role: WorkspaceRole) -> Result<(), MembershipDenied> {
         if target_role == WorkspaceRole::Admin && self.role != WorkspaceRole::Owner {
             Err(MembershipDenied::RoleForbidden)
         } else {
@@ -381,12 +480,12 @@ impl Actor {
     }
 
     #[must_use]
-    pub fn can_transfer_ownership_to(self, target_user_id: Id) -> bool {
+    pub fn can_transfer_ownership_to(&self, target_user_id: Id) -> bool {
         self.can(Permission::WorkspaceTransfer) && self.user_id != target_user_id
     }
 
     /// The owner's membership never changes directly, not even by the owner.
-    fn owner_protected(self, target_role: WorkspaceRole) -> Result<(), MembershipDenied> {
+    fn owner_protected(&self, target_role: WorkspaceRole) -> Result<(), MembershipDenied> {
         if target_role != WorkspaceRole::Owner {
             Ok(())
         } else if self.role == WorkspaceRole::Owner {
@@ -454,7 +553,10 @@ impl Policy {
             | Permission::MailManage
             | Permission::StorageManage
             | Permission::WorkspaceExport
-            | Permission::RolesManage => {
+            | Permission::RolesManage
+            | Permission::ProjectsViewPrivate
+            | Permission::TasksPurge
+            | Permission::ProjectsManage => {
                 matches!(role, WorkspaceRole::Owner | WorkspaceRole::Admin)
             }
             Permission::WorkspaceExportPersonal => !matches!(role, WorkspaceRole::Guest),

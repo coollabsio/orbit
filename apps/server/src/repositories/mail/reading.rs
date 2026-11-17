@@ -318,9 +318,11 @@ pub(super) async fn reader(
             user_id,
             WorkspaceRole::parse(&role).ok_or(MailError::NotFound)?,
         )
-        .with_custom_role(parse_permissions(
-            row.try_get::<Option<String>, _>("permissions")?.as_deref(),
-        )),
+        // Mail has no project: only the workspace-wide permissions count.
+        .with_custom_role(
+            parse_permissions(row.try_get::<Option<String>, _>("permissions")?.as_deref()),
+            orbit_domain::ProjectGrants::default(),
+        ),
     })
     // A guest sees only chat.
     .and_then(|reader| {

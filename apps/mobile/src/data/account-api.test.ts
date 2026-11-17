@@ -1,7 +1,7 @@
 import { createOrbitClient } from '@orbit/api/client'
 import { expect, test } from 'bun:test'
 
-import { bucketMovedText, bucketMovingText, bucketPollInterval, confirmsEmail, createWorkspaceRole, deleteAccount, filterMembers, formatBytes, invitationProblem, memberActions, ownedWorkspaces, passwordProblem, pickedImageName, requestEmailChange, roleSummary, setCustomRole, sortedSessions, storageUse, twoFactorSummary, updateWorkspaceRole } from './account-api'
+import { bucketMovedText, bucketMovingText, bucketPollInterval, confirmsEmail, createWorkspaceRole, deleteAccount, filterMembers, formatBytes, invitationProblem, memberActions, ownedWorkspaces, passwordProblem, pickedImageName, projectGrantLines, requestEmailChange, roleSummary, setCustomRole, sortedSessions, storageUse, twoFactorSummary, updateWorkspaceRole } from './account-api'
 import type { MemberRecord } from './orbit'
 
 const member = (id: string, fields: Partial<MemberRecord>): MemberRecord => ({
@@ -161,21 +161,42 @@ test('members are found by their custom role', () => {
   expect(filterMembers(list, 'moder').map((m) => m.user_id)).toEqual(['ada'])
 })
 
-test('a role reads as its member and permission counts', () => {
-  expect(roleSummary({ member_count: 1, permissions: ['chat.manage'] })).toBe('1 member · 1 permission')
-  expect(roleSummary({ member_count: 3, permissions: [] })).toBe('3 members · no extra permissions')
-  expect(roleSummary({ member_count: 0, permissions: ['chat.manage', 'audit.view'] })).toBe('0 members · 2 permissions')
+test('a role reads as its member, permission and project counts', () => {
+  expect(roleSummary({ member_count: 1, permissions: ['chat.manage'], project_grants: [] })).toBe('1 member · 1 permission')
+  expect(roleSummary({ member_count: 3, permissions: [], project_grants: [] })).toBe('3 members · no extra permissions')
+  expect(roleSummary({ member_count: 0, permissions: ['chat.manage', 'audit.view'], project_grants: [] })).toBe('0 members · 2 permissions')
+  expect(roleSummary({ member_count: 2, permissions: [], project_grants: [{ project_id: 'p1', permissions: ['tasks.purge'] }] })).toBe('2 members · 0 permissions · 1 project')
 })
 
-const role = { id: 'r1', name: 'Moderator', permissions: ['chat.manage' as const], member_count: 2, version: 4, created_at: '2026-11-12T10:00:00Z', updated_at: '2026-11-12T10:00:00Z' }
+test("a role's project grants read as one line per project, named from the project list or else the grant", () => {
+  const grants = [
+    { project_id: 'p1', permissions: ['comments.moderate' as const, 'tasks.purge' as const] },
+    { project_id: 'p2', permissions: ['projects.view_private' as const], project_name: 'Secret' },
+  ]
+  expect(projectGrantLines({ project_grants: grants }, [{ id: 'p1', name: 'Website' }])).toEqual(['Website: Moderate comments, Permanently delete tasks', 'Secret: See private projects'])
+})
 
-test('a role is created and edited with its trimmed name, its permissions and, on an edit, its version', async () => {
+const role = { id: 'r1', name: 'Moderator', permissions: ['chat.manage' as const], project_grants: [], member_count: 2, version: 4, created_at: '2026-11-12T10:00:00Z', updated_at: '2026-11-12T10:00:00Z' }
+
+test('a role is created and edited with its trimmed name, its permissions, its project grants and, on an edit, its version', async () => {
   const created = server({ status: 201, body: role })
-  expect(await createWorkspaceRole(created.client, 'w1', { name: '  Moderator ', permissions: ['chat.manage'] })).toEqual(role)
-  expect(created.sent).toEqual([{ method: 'POST', url: 'https://orbit.test/api/v1/workspaces/w1/roles', body: { name: 'Moderator', permissions: ['chat.manage'] } }])
+  const grants = [
+    { project_id: 'p1', permissions: ['tasks.purge' as const] },
+    { project_id: 'p2', permissions: [] },
+  ]
+  expect(await createWorkspaceRole(created.client, 'w1', { name: '  Moderator ', permissions: ['chat.manage'], projectGrants: grants })).toEqual(role)
+  expect(created.sent).toEqual([
+    { method: 'POST', url: 'https://orbit.test/api/v1/workspaces/w1/roles', body: { name: 'Moderator', permissions: ['chat.manage'], project_grants: [{ project_id: 'p1', permissions: ['tasks.purge'] }] } },
+  ])
   const edited = server({ status: 200, body: role })
-  await updateWorkspaceRole(edited.client, 'w1', role, { name: 'Moderator', permissions: [] })
-  expect(edited.sent).toEqual([{ method: 'PATCH', url: 'https://orbit.test/api/v1/workspaces/w1/roles/r1', body: { expected_version: 4, name: 'Moderator', permissions: [] } }])
+  const prefilled = { project_id: 'p3', permissions: ['comments.moderate' as const], project_name: 'Website' }
+  await updateWorkspaceRole(edited.client, 'w1', role, { name: 'Moderator', permissions: [], projectGrants: [prefilled] })
+  expect(edited.sent).toEqual([
+    { method: 'PATCH', url: 'https://orbit.test/api/v1/workspaces/w1/roles/r1', body: { expected_version: 4, name: 'Moderator', permissions: [], project_grants: [{ project_id: 'p3', permissions: ['comments.moderate'] }] } },
+  ])
+  const cleared = server({ status: 200, body: role })
+  await updateWorkspaceRole(cleared.client, 'w1', role, { name: 'Moderator', permissions: [], projectGrants: [] })
+  expect(cleared.sent[0].body).toEqual({ expected_version: 4, name: 'Moderator', permissions: [], project_grants: [] })
 })
 
 test('a custom role is given and taken away with the membership version; a refusal carries the server detail', async () => {

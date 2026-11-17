@@ -1,6 +1,6 @@
 use orbit_domain::{
     Actor, Membership, MembershipDenied, Permission, PermissionSet, Policy, PolicyError,
-    WorkspaceRole, platform::Id,
+    ProjectGrants, WorkspaceRole, platform::Id,
 };
 
 fn actor(role: WorkspaceRole) -> Actor {
@@ -116,14 +116,14 @@ fn only_the_author_edits_a_comment_and_managers_may_also_delete_it() {
 
     assert!(author.can_edit_comment(Some(author.user_id)));
     assert!(!admin.can_edit_comment(Some(author.user_id)));
-    assert!(author.can_delete_comment(Some(author.user_id)));
-    assert!(admin.can_delete_comment(Some(author.user_id)));
-    assert!(!other.can_delete_comment(Some(author.user_id)));
+    assert!(author.can_delete_comment(Id::new_v7(), Some(author.user_id)));
+    assert!(admin.can_delete_comment(Id::new_v7(), Some(author.user_id)));
+    assert!(!other.can_delete_comment(Id::new_v7(), Some(author.user_id)));
     // A service account's comment: nobody edits it as its author; moderators delete it.
     assert!(!author.can_edit_comment(None));
     assert!(!admin.can_edit_comment(None));
-    assert!(admin.can_delete_comment(None));
-    assert!(!other.can_delete_comment(None));
+    assert!(admin.can_delete_comment(Id::new_v7(), None));
+    assert!(!other.can_delete_comment(Id::new_v7(), None));
 }
 
 #[test]
@@ -320,7 +320,7 @@ fn a_custom_role_never_carries_the_owner_or_role_powers() {
 #[test]
 fn a_custom_role_adds_its_permissions_to_a_member_only() {
     let granted = PermissionSet::of([Permission::AuditView, Permission::ChatManage]);
-    let member = actor(WorkspaceRole::Member).with_custom_role(granted);
+    let member = actor(WorkspaceRole::Member).with_custom_role(granted, ProjectGrants::default());
     assert!(member.can(Permission::AuditView));
     assert!(member.can(Permission::ChatManage));
     assert!(!member.can(Permission::MailManage));
@@ -338,17 +338,24 @@ fn a_custom_role_adds_its_permissions_to_a_member_only() {
     // A guest never gains permissions; an admin already holds them.
     assert!(
         !actor(WorkspaceRole::Guest)
-            .with_custom_role(granted)
+            .with_custom_role(granted, ProjectGrants::default())
             .can(Permission::AuditView)
     );
     let admin = actor(WorkspaceRole::Admin);
-    assert_eq!(admin.with_custom_role(granted), admin);
+    assert_eq!(
+        admin
+            .clone()
+            .with_custom_role(granted, ProjectGrants::default()),
+        admin
+    );
 }
 
 #[test]
 fn a_member_who_manages_members_cannot_make_admins() {
-    let manager = actor(WorkspaceRole::Member)
-        .with_custom_role(PermissionSet::of([Permission::MembersManage]));
+    let manager = actor(WorkspaceRole::Member).with_custom_role(
+        PermissionSet::of([Permission::MembersManage]),
+        ProjectGrants::default(),
+    );
     assert_eq!(manager.invite(WorkspaceRole::Member), Ok(()));
     assert_eq!(
         manager.invite(WorkspaceRole::Admin),
@@ -371,4 +378,65 @@ fn a_member_who_manages_members_cannot_make_admins() {
         actor(WorkspaceRole::Admin).invite(WorkspaceRole::Admin),
         Ok(())
     );
+}
+
+#[test]
+fn a_project_grant_applies_to_that_project_only() {
+    let (alpha, beta) = (Id::new_v7(), Id::new_v7());
+    let lead = actor(WorkspaceRole::Member).with_custom_role(
+        PermissionSet::EMPTY,
+        ProjectGrants::new([
+            (alpha, Permission::TasksPurge),
+            (alpha, Permission::ProjectsViewPrivate),
+            // Workspace-only permissions are dropped from a project grant.
+            (beta, Permission::AuditView),
+        ]),
+    );
+    assert!(lead.can_in(alpha, Permission::TasksPurge));
+    assert!(lead.can_purge_task(alpha));
+    assert!(!lead.can_purge_task(beta));
+    assert!(!lead.can(Permission::TasksPurge));
+    assert!(!lead.can_in(beta, Permission::AuditView));
+    assert!(!lead.can_in(alpha, Permission::AuditView));
+    // A project grant does not show every private project.
+    assert!(!lead.sees_all_projects());
+    assert!(
+        lead.can_delete_comment(alpha, None) == lead.can_in(alpha, Permission::CommentsModerate)
+    );
+}
+
+#[test]
+fn a_workspace_wide_grant_covers_every_project() {
+    let (alpha, beta) = (Id::new_v7(), Id::new_v7());
+    let viewer = actor(WorkspaceRole::Member).with_custom_role(
+        PermissionSet::of([Permission::ProjectsViewPrivate, Permission::TasksPurge]),
+        ProjectGrants::default(),
+    );
+    assert!(viewer.sees_all_projects());
+    assert!(viewer.can_see_project(true, false));
+    assert!(viewer.can_purge_task(alpha) && viewer.can_purge_task(beta));
+    // `pages.purge` covers task purges too.
+    let purger = actor(WorkspaceRole::Member).with_custom_role(
+        PermissionSet::of([Permission::PagesPurge]),
+        ProjectGrants::default(),
+    );
+    assert!(purger.can_purge_task(alpha));
+    // A guest never gains project grants.
+    let guest = actor(WorkspaceRole::Guest).with_custom_role(
+        PermissionSet::EMPTY,
+        ProjectGrants::new([(alpha, Permission::TasksPurge)]),
+    );
+    assert!(!guest.can_purge_task(alpha));
+}
+
+#[test]
+fn managing_a_project_is_per_project_for_a_custom_role() {
+    let (alpha, beta) = (Id::new_v7(), Id::new_v7());
+    let lead = actor(WorkspaceRole::Member).with_custom_role(
+        PermissionSet::EMPTY,
+        ProjectGrants::new([(alpha, Permission::ProjectsManage)]),
+    );
+    assert!(lead.can_manage_project(alpha) && !lead.can_manage_project(beta));
+    assert!(actor(WorkspaceRole::Admin).can_manage_project(beta));
+    assert!(!actor(WorkspaceRole::Member).can_manage_project(alpha));
 }

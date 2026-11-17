@@ -613,7 +613,7 @@ impl TaskRepository {
         now: TimestampMillis,
     ) -> Result<TaskRelationRecord, TaskError> {
         let mut tx = self.database().immediate_transaction().await?;
-        let scope = ProjectScope::of(require_access_tx(&mut tx, workspace_id, actor_id).await?);
+        let scope = ProjectScope::of(&require_access_tx(&mut tx, workspace_id, actor_id).await?);
         if visible_task_title_in_tx(&mut tx, scope, workspace_id, task_id)
             .await?
             .is_none()
@@ -725,7 +725,7 @@ impl TaskRepository {
         now: TimestampMillis,
     ) -> Result<(), TaskError> {
         let mut tx = self.database().immediate_transaction().await?;
-        let scope = ProjectScope::of(require_access_tx(&mut tx, workspace_id, actor_id).await?);
+        let scope = ProjectScope::of(&require_access_tx(&mut tx, workspace_id, actor_id).await?);
         if visible_task_title_in_tx(&mut tx, scope, workspace_id, task_id)
             .await?
             .is_none()

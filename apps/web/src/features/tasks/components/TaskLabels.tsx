@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Command, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { useCreateLabel } from '@/features/tasks/api/labels'
+import { useCanIn } from '@/features/workspaces/permissions'
 import { labelKeyOf, projectLabels } from '@/features/tasks/taskMeta'
 import { CheckMark } from '@/components/common/CheckMark'
 import { ColorDot } from '@/components/common/ColorDot'
@@ -106,13 +107,14 @@ function nextLabelColor(labels: LabelRecord[]): string {
 export function LabelPicker({ workspaceId, projectId, labelIds, labels: allLabels, onChange, trigger, editLink = false }: { workspaceId: string; projectId: string; labelIds: string[]; labels: LabelRecord[]; onChange: (ids: string[]) => void; trigger: ReactElement; editLink?: boolean }) {
   const navigate = useNavigate()
   const createLabel = useCreateLabel(workspaceId)
+  const canManage = useCanIn('projects.manage', projectId)
   const [query, setQuery] = useState('')
   const [pinned, setPinned] = useState<string[]>([])
   const [pickedColor, setPickedColor] = useState<string>()
   const labels = projectLabels(allLabels, projectId).sort((a, b) => Number(pinned.includes(b.id)) - Number(pinned.includes(a.id)) || a.name.localeCompare(b.name))
   const name = query.trim()
   const shown = name ? labels.filter((label) => label.name.toLowerCase().includes(name.toLowerCase())) : labels
-  const creatable = name !== '' && projectId !== '' && !labels.some((label) => labelKeyOf(label) === labelKeyOf({ name }))
+  const creatable = canManage && name !== '' && projectId !== '' && !labels.some((label) => labelKeyOf(label) === labelKeyOf({ name }))
   const color = pickedColor ?? nextLabelColor(labels)
   // toggles wait for a create: its result is added to the ids of the render that started it
   const toggle = (id: string) => {
@@ -137,7 +139,7 @@ export function LabelPicker({ workspaceId, projectId, labelIds, labels: allLabel
       <PopoverTrigger render={trigger} />
       <PopoverContent align="start" className="w-auto gap-0 p-0">
         <Command label="Change labels" shouldFilter={false} className="w-60">
-          <CommandInput autoFocus aria-label="Change labels" placeholder={labels.length > 0 ? 'Change labels…' : 'New label name…'} value={query} onValueChange={setQuery} />
+          <CommandInput autoFocus aria-label="Change labels" placeholder={labels.length > 0 || !canManage ? 'Change labels…' : 'New label name…'} value={query} onValueChange={setQuery} />
           <CommandList>
             {shown.length > 0 ? (
               <CommandGroup>
@@ -165,7 +167,7 @@ export function LabelPicker({ workspaceId, projectId, labelIds, labels: allLabel
             ) : null}
           </CommandList>
           {labels.length === 0 && !name ? (
-            <p className="px-3 pt-2.5 pb-2 text-xs text-muted-foreground">This project has no labels yet. Type a name to create one.</p>
+            <p className="px-3 pt-2.5 pb-2 text-xs text-muted-foreground">{canManage ? 'This project has no labels yet. Type a name to create one.' : 'This project has no labels yet.'}</p>
           ) : null}
           {name && shown.length === 0 && !creatable ? <p className="px-3 py-2.5 text-xs text-muted-foreground">No labels match.</p> : null}
           {creatable ? (
@@ -175,7 +177,7 @@ export function LabelPicker({ workspaceId, projectId, labelIds, labels: allLabel
             </div>
           ) : null}
           {createLabel.isError ? <p className="px-3 pb-2 text-xs text-destructive" role="alert">The label could not be created. Try again.</p> : null}
-          {editLink ? (
+          {editLink && canManage ? (
             <div className="-mx-1 -mb-1 mt-1 border-t p-1">
               <Button type="button" variant="ghost" size="sm" className="w-full justify-start font-normal text-muted-foreground" onClick={() => navigate(projectSettingsPath(projectId, 'labels'))}>
                 <Settings className="size-3.5" />

@@ -3,9 +3,11 @@
 //! (`Permission::RolesManage`), and a role never carries a permission that
 //! `Permission::is_grantable` refuses, so a role cannot give anyone the owner's powers.
 
+use std::collections::HashMap;
+
 use orbit_domain::{Permission, PermissionSet, WorkspaceRole};
 use orbit_platform::{Id, Row, TimestampMillis};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::{Any, Transaction};
 use utoipa::ToSchema;
@@ -18,7 +20,22 @@ use crate::audit::{self, AuditOutcome};
 
 const MAX_ROLES_PER_WORKSPACE: i64 = 50;
 const MAX_NAME_CHARS: usize = 40;
+const MAX_PROJECT_GRANTS: usize = 200;
 const BUILT_IN_NAMES: [&str; 4] = ["owner", "admin", "member", "guest"];
+
+/// Project-scoped permissions that a role holds in one project.
+#[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
+#[schema(as = RoleProjectGrant)]
+pub struct ProjectGrant {
+    #[schema(value_type = String)]
+    pub project_id: Id,
+    /// Only project-scoped permissions (`Permission::is_project_scoped`).
+    pub permissions: Vec<Permission>,
+    /// The project's name; ignored in requests.
+    #[serde(default)]
+    #[schema(required = false)]
+    pub project_name: String,
+}
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
 pub struct WorkspaceRoleRecord {
@@ -27,6 +44,8 @@ pub struct WorkspaceRoleRecord {
     pub name: String,
     /// What a member with this role may do beyond an ordinary member.
     pub permissions: Vec<Permission>,
+    /// What the role grants in single projects, beyond its workspace-wide permissions.
+    pub project_grants: Vec<ProjectGrant>,
     /// How many members hold the role.
     pub member_count: u64,
     pub version: u64,
@@ -42,11 +61,16 @@ const SELECT_ROLE: &str = "SELECT workspace_roles.id, workspace_roles.name, work
      AND memberships.role = 'member') AS BIGINT) AS member_count \
      FROM workspace_roles WHERE workspace_roles.workspace_id = $1";
 
-fn role_from_row(row: &sqlx::any::AnyRow) -> Result<WorkspaceRoleRecord, WorkspaceError> {
+fn role_from_row(
+    row: &sqlx::any::AnyRow,
+    grants: &mut HashMap<String, Vec<ProjectGrant>>,
+) -> Result<WorkspaceRoleRecord, WorkspaceError> {
     let permissions =
         parse_permissions(row.get::<Option<String>, _>("permissions").as_deref()).to_vec();
+    let id: String = row.get("id");
     Ok(WorkspaceRoleRecord {
-        id: parse_id(row.get("id"))?,
+        project_grants: grants.remove(&id).unwrap_or_default(),
+        id: parse_id(id)?,
         name: row.get("name"),
         permissions,
         member_count: u64::try_from(row.get::<i64, _>("member_count")).unwrap_or(0),
@@ -107,7 +131,10 @@ impl WorkspaceRepository {
         .bind(workspace_id.to_string())
         .fetch_all(self.database.pool())
         .await?;
-        rows.iter().map(role_from_row).collect()
+        let mut grants = load_grants(self.database.pool(), workspace_id).await?;
+        rows.iter()
+            .map(|row| role_from_row(row, &mut grants))
+            .collect()
     }
 
     pub async fn create_role(
@@ -116,6 +143,7 @@ impl WorkspaceRepository {
         actor_id: Id,
         name: &str,
         permissions: &[Permission],
+        project_grants: &[ProjectGrant],
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<WorkspaceRoleRecord, WorkspaceError> {
@@ -126,6 +154,7 @@ impl WorkspaceRepository {
         }
         let name = clean_name(name)?;
         let stored = clean_permissions(permissions)?;
+        let rows = clean_project_grants(&mut transaction, workspace_id, project_grants).await?;
         let count: i64 = sqlx::query_scalar(
             "SELECT CAST(COUNT(*) AS BIGINT) FROM workspace_roles WHERE workspace_id = $1",
         )
@@ -150,6 +179,7 @@ impl WorkspaceRepository {
         .bind(now.as_millis())
         .execute(&mut *transaction)
         .await?;
+        store_project_grants(&mut transaction, id, &rows).await?;
         audit::record(
             &mut transaction,
             workspace_id,
@@ -159,7 +189,7 @@ impl WorkspaceRepository {
             "workspace_role",
             Some(id),
             request_id,
-            json!({"name": name, "permissions": stored_names(&stored)}),
+            json!({"name": name, "permissions": stored_names(&stored), "project_grants": rows.len()}),
             now,
         )
         .await?;
@@ -176,6 +206,7 @@ impl WorkspaceRepository {
         role_id: Id,
         name: Option<&str>,
         permissions: Option<&[Permission]>,
+        project_grants: Option<&[ProjectGrant]>,
         expected_version: u64,
         request_id: &str,
         now: TimestampMillis,
@@ -200,6 +231,12 @@ impl WorkspaceRepository {
             None => clean_permissions(&current.permissions)?,
         };
         ensure_name_free(&mut transaction, workspace_id, &name, Some(role_id)).await?;
+        let rows = match project_grants {
+            Some(grants) => {
+                Some(clean_project_grants(&mut transaction, workspace_id, grants).await?)
+            }
+            None => None,
+        };
         sqlx::query(
             "UPDATE workspace_roles SET name = $1, permissions = $2, version = version + 1, updated_at = $3 \
              WHERE id = $4 AND workspace_id = $5",
@@ -211,6 +248,9 @@ impl WorkspaceRepository {
         .bind(workspace_id.to_string())
         .execute(&mut *transaction)
         .await?;
+        if let Some(rows) = &rows {
+            store_project_grants(&mut transaction, role_id, rows).await?;
+        }
         audit::record(
             &mut transaction,
             workspace_id,
@@ -371,7 +411,115 @@ async fn load_role(
     .fetch_optional(&mut **transaction)
     .await?
     .ok_or(WorkspaceError::NotFound)?;
-    role_from_row(&row)
+    let mut grants = load_grants(&mut **transaction, workspace_id).await?;
+    role_from_row(&row, &mut grants)
+}
+
+/// The project grants of every role of the workspace, by role id.
+async fn load_grants<'e, E>(
+    executor: E,
+    workspace_id: Id,
+) -> Result<HashMap<String, Vec<ProjectGrant>>, WorkspaceError>
+where
+    E: sqlx::Executor<'e, Database = Any>,
+{
+    let rows: Vec<(String, String, String, String)> = sqlx::query_as(
+        "SELECT g.role_id, g.project_id, g.permission, projects.name \
+         FROM workspace_role_projects g JOIN workspace_roles r ON r.id = g.role_id \
+         JOIN projects ON projects.id = g.project_id \
+         WHERE r.workspace_id = $1 ORDER BY lower(projects.name), g.project_id",
+    )
+    .bind(workspace_id.to_string())
+    .fetch_all(executor)
+    .await?;
+    let mut grants: HashMap<String, Vec<ProjectGrant>> = HashMap::new();
+    for (role_id, project_id, permission, project_name) in rows {
+        let (project_id, Some(permission)) =
+            (parse_id(project_id)?, Permission::parse(&permission))
+        else {
+            continue;
+        };
+        let list = grants.entry(role_id).or_default();
+        match list.iter_mut().find(|grant| grant.project_id == project_id) {
+            Some(grant) => grant.permissions.push(permission),
+            None => list.push(ProjectGrant {
+                project_id,
+                permissions: vec![permission],
+                project_name,
+            }),
+        }
+    }
+    Ok(grants)
+}
+
+/// The `(project, permission)` rows of the request: projects of this workspace, project-scoped
+/// permissions only, one row each.
+async fn clean_project_grants(
+    transaction: &mut Transaction<'_, Any>,
+    workspace_id: Id,
+    grants: &[ProjectGrant],
+) -> Result<Vec<(Id, Permission)>, WorkspaceError> {
+    let mut rows: Vec<(Id, Permission)> = Vec::new();
+    for grant in grants {
+        for permission in &grant.permissions {
+            if !permission.is_project_scoped() || !permission.is_grantable() {
+                return Err(WorkspaceError::InvalidRole(
+                    "That permission cannot be granted for a single project.",
+                ));
+            }
+            if !rows.contains(&(grant.project_id, *permission)) {
+                rows.push((grant.project_id, *permission));
+            }
+        }
+    }
+    if rows.len() > MAX_PROJECT_GRANTS {
+        return Err(WorkspaceError::InvalidRole(
+            "A role has at most 200 project permissions.",
+        ));
+    }
+    let mut checked: Vec<Id> = Vec::new();
+    for (project_id, _) in &rows {
+        if checked.contains(project_id) {
+            continue;
+        }
+        let found: i64 = sqlx::query_scalar(
+            "SELECT CAST(COUNT(*) AS BIGINT) FROM projects WHERE id = $1 AND workspace_id = $2",
+        )
+        .bind(project_id.to_string())
+        .bind(workspace_id.to_string())
+        .fetch_one(&mut **transaction)
+        .await?;
+        if found == 0 {
+            return Err(WorkspaceError::InvalidRole(
+                "A project of the role was not found in this workspace.",
+            ));
+        }
+        checked.push(*project_id);
+    }
+    Ok(rows)
+}
+
+/// Replaces the role's project grants.
+async fn store_project_grants(
+    transaction: &mut Transaction<'_, Any>,
+    role_id: Id,
+    rows: &[(Id, Permission)],
+) -> Result<(), WorkspaceError> {
+    sqlx::query("DELETE FROM workspace_role_projects WHERE role_id = $1")
+        .bind(role_id.to_string())
+        .execute(&mut **transaction)
+        .await?;
+    for (project_id, permission) in rows {
+        sqlx::query(
+            "INSERT INTO workspace_role_projects (role_id, project_id, permission) VALUES ($1, $2, $3)",
+        )
+        .bind(role_id.to_string())
+        .bind(project_id.to_string())
+        .bind(permission.as_str())
+        .execute(&mut **transaction)
+        .await?;
+    }
+    Ok(())
 }
 
 async fn ensure_name_free(

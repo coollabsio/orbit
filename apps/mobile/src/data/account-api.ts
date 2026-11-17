@@ -53,6 +53,7 @@ import type {
   PasskeyRecord,
   Permission,
   PushSubscriptionRecord,
+  RoleProjectGrant,
   RolesResponse,
   S3Body,
   SessionRecord,
@@ -72,7 +73,7 @@ import type { OAuthConnection } from '@orbit/api/mcp'
 import { STORAGE_FILES_PAGE } from '@orbit/api/storage'
 import { relativeTime } from './format'
 
-export type { InvitationRecord, NotificationPrefs, OwnedWorkspace, PasskeyRecord, PushSubscriptionRecord, RolesResponse, SessionRecord, TotpSetup, TwoFactorStatus, WorkspaceBucketView, WorkspaceRoleRecord, WorkspaceStorage }
+export type { InvitationRecord, NotificationPrefs, OwnedWorkspace, PasskeyRecord, PushSubscriptionRecord, RoleProjectGrant, RolesResponse, SessionRecord, TotpSetup, TwoFactorStatus, WorkspaceBucketView, WorkspaceRoleRecord, WorkspaceStorage }
 
 /** Query keys of the account (not per workspace) and of the workspace settings. */
 export const accountKeys = {
@@ -427,17 +428,40 @@ export async function workspaceRoles(client: OrbitClient, workspaceId: string): 
 
 export interface RoleDraft {
   name: string
+  /** Workspace-wide: they apply in every project too. */
   permissions: Permission[]
+  /** Every project grant the role keeps; an edit replaces the role's grants with these. */
+  projectGrants: RoleProjectGrant[]
+}
+
+/** The body fields of a draft; a grant with no permission on is dropped. */
+function roleBody(draft: RoleDraft) {
+  return {
+    name: draft.name.trim(),
+    permissions: draft.permissions,
+    project_grants: draft.projectGrants.filter((grant) => grant.permissions.length > 0).map(({ project_id, permissions }) => ({ project_id, permissions })),
+  }
 }
 
 export async function createWorkspaceRole(client: OrbitClient, workspaceId: string, draft: RoleDraft): Promise<WorkspaceRoleRecord> {
-  return (await createRole({ client, path: { workspace_id: workspaceId }, body: { name: draft.name.trim(), permissions: draft.permissions }, throwOnError: true })).data
+  return (await createRole({ client, path: { workspace_id: workspaceId }, body: roleBody(draft), throwOnError: true })).data
 }
 
 export async function updateWorkspaceRole(client: OrbitClient, workspaceId: string, role: Pick<WorkspaceRoleRecord, 'id' | 'version'>, draft: RoleDraft): Promise<WorkspaceRoleRecord> {
-  return (
-    await updateRole({ client, path: { workspace_id: workspaceId, role_id: role.id }, body: { expected_version: role.version, name: draft.name.trim(), permissions: draft.permissions }, throwOnError: true })
-  ).data
+  return (await updateRole({ client, path: { workspace_id: workspaceId, role_id: role.id }, body: { expected_version: role.version, ...roleBody(draft) }, throwOnError: true })).data
+}
+
+/** The server sends each grant's project name, which the generated `RoleProjectGrant` does not list yet. */
+type NamedGrant = RoleProjectGrant & { project_name?: string }
+
+/** A granted project's name: the project list's, else the grant's own, for a project the list does not show. */
+export function grantProjectName(grant: NamedGrant, projects: readonly { id: string; name: string }[]): string {
+  return projects.find((project) => project.id === grant.project_id)?.name ?? grant.project_name ?? 'Unknown project'
+}
+
+/** The role list's per-project lines: `Website: Moderate comments, Permanently delete tasks`. */
+export function projectGrantLines(role: Pick<WorkspaceRoleRecord, 'project_grants'>, projects: readonly { id: string; name: string }[]): string[] {
+  return role.project_grants.map((grant) => `${grantProjectName(grant, projects)}: ${grant.permissions.map((permission) => PERMISSION_LABELS[permission].label).join(', ')}`)
 }
 
 /** Its members become ordinary members. */
@@ -455,7 +479,7 @@ export const PERMISSION_LABELS: Record<Permission, { label: string; help: string
   'api_tokens.manage': { label: 'Manage API tokens', help: 'Create and revoke API tokens and service accounts for integrations.' },
   'integrations.manage': { label: 'Manage integrations', help: 'Connect and set up GitHub, webhooks and other integrations.' },
   'teamspaces.delete': { label: 'Delete teamspaces', help: 'Delete teamspaces.' },
-  'pages.purge': { label: 'Delete docs for good', help: 'Permanently delete teamspace docs.' },
+  'pages.purge': { label: 'Permanently delete pages and tasks (all projects)', help: "Permanently delete teamspace docs, and the tasks of every project." },
   'views.manage_shared': { label: 'Manage shared views', help: 'Edit and delete workspace views that other members made.' },
   'comments.moderate': { label: 'Moderate comments', help: 'Delete task comments that other members wrote.' },
   'chat.manage': { label: 'Manage chat', help: "Manage chat categories and channel order, edit and archive other members' channels, delete their messages, and manage emoji and stickers." },
@@ -465,13 +489,18 @@ export const PERMISSION_LABELS: Record<Permission, { label: string; help: string
   'workspace.export': { label: 'Export the workspace', help: 'Export the whole workspace as a ZIP archive and download its exports.' },
   'workspace.export_personal': { label: 'Export personal data', help: 'Export your own private docs, private channels and direct messages, and create a personal export token.' },
   'roles.manage': { label: 'Manage roles', help: "Create, change and delete the workspace's custom roles, and give them to members." },
+  'projects.view_private': { label: 'See private projects', help: 'See private projects that the member does not belong to, with their tasks.' },
+  'tasks.purge': { label: 'Permanently delete tasks', help: "Delete a project's tasks forever, so they cannot be restored." },
+  'projects.manage': { label: 'Manage project settings', help: 'Manage project settings, members, statuses and labels.' },
 }
 
-/** The role list's line: `3 members · 2 permissions`. */
-export function roleSummary(role: Pick<WorkspaceRoleRecord, 'member_count' | 'permissions'>): string {
+/** The role list's line: `3 members · 2 permissions`, and `· 1 project` with project grants. */
+export function roleSummary(role: Pick<WorkspaceRoleRecord, 'member_count' | 'permissions' | 'project_grants'>): string {
   const members = `${role.member_count} ${role.member_count === 1 ? 'member' : 'members'}`
   const count = role.permissions.length
-  return `${members} · ${count === 0 ? 'no extra permissions' : `${count} ${count === 1 ? 'permission' : 'permissions'}`}`
+  const projects = role.project_grants.length
+  const grants = projects === 0 ? '' : ` · ${projects} ${projects === 1 ? 'project' : 'projects'}`
+  return `${members} · ${count === 0 && projects === 0 ? 'no extra permissions' : `${count} ${count === 1 ? 'permission' : 'permissions'}`}${grants}`
 }
 
 export async function changeRole(client: OrbitClient, workspaceId: string, member: MemberRecord, role: 'admin' | 'member'): Promise<void> {
