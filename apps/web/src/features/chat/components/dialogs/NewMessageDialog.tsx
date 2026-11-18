@@ -6,7 +6,7 @@ import { useOpenDm } from '@/features/chat/api/mutations'
 import { useConversations } from '@/features/chat/api/queries'
 import { useChatNavigation } from '@/features/chat/useChatNavigation'
 import { useMembers } from '@/features/workspaces/api'
-import { chatErrorMessage, messageablePeople } from './channelLib'
+import { dmErrorMessage, messageablePeople } from './channelLib'
 import { MemberPicker } from './MemberPicker'
 
 interface NewMessageDialogProps {
@@ -72,7 +72,7 @@ function NewMessageForm({ onDone }: { onDone: () => void }) {
       />
       {openDm.isError ? (
         <p role="alert" className="text-sm text-destructive">
-          {chatErrorMessage(openDm.error, 'The conversation was not opened. Try again.', { not_found: 'One of these people is no longer in the workspace.' })}
+          {dmErrorMessage(openDm.error, 'The conversation was not opened. Try again.', { not_found: 'One of these people is no longer in the workspace.' })}
         </p>
       ) : null}
       <DialogFooter>

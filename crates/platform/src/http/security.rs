@@ -135,12 +135,18 @@ impl OriginPolicy {
     }
 }
 
-/// The sign-in POSTs a native app sends before it has a session: a password, a second factor, or a provider flow
-/// (`/api/v1/auth/providers/{provider}/start` and the exchange, which needs the verifier the app holds).
+/// The sign-in POSTs a native app sends before it has a session: a password, a second factor, a provider flow
+/// (`/api/v1/auth/providers/{provider}/start`, the exchange, which needs the verifier the app holds, and the password
+/// that connects a provider account, which needs the exchange's token), or the start of a passkey sign-in, which ends
+/// at the same exchange.
 fn is_native_sign_in(path: &str) -> bool {
     if matches!(
         path,
-        "/api/v1/auth/login" | "/api/v1/auth/login/two-factor" | "/api/v1/auth/providers/exchange"
+        "/api/v1/auth/login"
+            | "/api/v1/auth/login/two-factor"
+            | "/api/v1/auth/providers/exchange"
+            | "/api/v1/auth/providers/link"
+            | "/api/v1/auth/passkey/app/start"
     ) {
         return true;
     }

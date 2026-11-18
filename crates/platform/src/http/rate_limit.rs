@@ -433,7 +433,7 @@ pub(super) fn endpoint_class(method: &Method, path: &str) -> Option<EndpointClas
         Some(EndpointClass::Upload)
     } else if path.ends_with("/login")
         || path.starts_with("/api/v1/auth/login/")
-        || path.starts_with("/api/v1/auth/passkey/login/")
+        || path.starts_with("/api/v1/auth/passkey/")
         || path == "/api/v1/auth/password"
         || path.contains("/session")
         || path.contains("/setup")
@@ -532,6 +532,8 @@ mod tests {
             "/api/v1/auth/login/two-factor",
             "/api/v1/auth/passkey/login/start",
             "/api/v1/auth/passkey/login/finish",
+            "/api/v1/auth/passkey/app/start",
+            "/api/v1/auth/passkey/app/finish",
             "/api/v1/auth/password",
         ] {
             assert_eq!(

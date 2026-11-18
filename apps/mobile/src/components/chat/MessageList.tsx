@@ -9,7 +9,7 @@ import * as chat from '../../data/chat-api'
 import { dayLabel } from '../../data/format'
 import { markdownToText } from '../../data/markdown'
 import type { MessageRecord } from '../../data/orbit'
-import { confirmAction, showError, useChatWrite, useFollowedThreads, useIsChatAdmin } from '../../hooks/chat'
+import { confirmAction, showError, useChatWrite, useFollowedThreads, useIsBlocked, useIsChatAdmin, useSetBlocked } from '../../hooks/chat'
 
 import { useOrbit } from '../../orbit-context'
 import { useConversations, usePeople } from '../../queries'
@@ -17,6 +17,7 @@ import { type IconName, Spinner, Text } from '../../ui'
 import type { ComposerState, PendingMessage } from './Composer'
 import { Emoji, EmojiPicker } from './EmojiPicker'
 import { type MessageHandlers, MessageItem } from './Message'
+import { PersonSheet, ReportSheet } from './Safety'
 import { ActionSheet, type SheetItem } from './Sheet'
 
 export type ListRow = MessageRow | { type: 'pending'; key: string; pending: PendingMessage }
@@ -65,6 +66,9 @@ const ACTION_LOOK: Record<MessageAction, { label: string; icon: IconName; destru
   pin: { label: 'Pin', icon: 'pin' },
   unpin: { label: 'Unpin', icon: 'pinOff' },
   unread: { label: 'Mark as unread', icon: 'unread' },
+  report: { label: 'Report', icon: 'flag' },
+  block: { label: 'Block', icon: 'shieldCross', destructive: true },
+  unblock: { label: 'Unblock', icon: 'unlock' },
   edit: { label: 'Edit', icon: 'edit' },
   delete: { label: 'Delete', icon: 'trash', destructive: true },
 }
@@ -82,6 +86,10 @@ export function useMessageSheet({ inThread, composer, loaded, onMarkedUnread }: 
   const followed = useFollowedThreads()
   const [selected, setSelected] = useState<MessageRecord | null>(null)
   const [picking, setPicking] = useState<MessageRecord | null>(null)
+  const [reporting, setReporting] = useState<MessageRecord | null>(null)
+  const [person, setPerson] = useState<{ id: string; name: string } | null>(null)
+  const isBlocked = useIsBlocked()
+  const setBlocked = useSetBlocked()
 
   const put = (message: MessageRecord) => {
     applyChatActions(queryClient, workspaceId, [{ kind: 'upsert-message', conversationId: message.conversation_id, message }])
@@ -129,6 +137,11 @@ export function useMessageSheet({ inThread, composer, loaded, onMarkedUnread }: 
       case 'unread':
         onMarkedUnread?.()
         return void run('Could not mark as unread', (client, workspaceId) => chat.markUnread(client, workspaceId, message.id))
+      case 'report':
+        return setReporting(message)
+      case 'block':
+      case 'unblock':
+        return void setBlocked({ id: message.author_id, name: words.nameOf(message.author_id) }, action === 'block')
       case 'edit':
         return composer?.edit(message)
       case 'delete':
@@ -137,7 +150,7 @@ export function useMessageSheet({ inThread, composer, loaded, onMarkedUnread }: 
   }
 
   const items: SheetItem[] = selected
-    ? messageActions(selected, user.id, moderator, { inThread, canWrite: composer !== null }).map((action) => ({ key: action, ...ACTION_LOOK[action], onPress: () => runAction(action, selected) }))
+    ? messageActions(selected, user.id, moderator, { inThread, canWrite: composer !== null, authorBlocked: isBlocked(selected.author_id) }).map((action) => ({ key: action, ...ACTION_LOOK[action], onPress: () => runAction(action, selected) }))
     : []
   const quick = quickReactions(loaded, user.id, 5)
 
@@ -164,6 +177,8 @@ export function useMessageSheet({ inThread, composer, loaded, onMarkedUnread }: 
         }
       />
       <EmojiPicker visible={picking !== null} onPick={(emoji) => picking && react(picking, emoji)} onClose={() => setPicking(null)} />
+      <ReportSheet message={reporting} onClose={() => setReporting(null)} />
+      <PersonSheet person={person} onClose={() => setPerson(null)} />
     </>
   )
 
@@ -176,6 +191,10 @@ export function useMessageSheet({ inThread, composer, loaded, onMarkedUnread }: 
     onAddReaction: setPicking,
     threadUnread: (rootId) => followed.data?.some((thread) => thread.root.id === rootId && thread.state.following && thread.state.unread_replies > 0) ?? false,
     onOpenThread: inThread ? undefined : (message) => router.push(`/chat/thread/${message.id}`),
+    isBlocked,
+    onOpenPerson: (message) => {
+      if (!message.bot && message.author_id !== user.id) setPerson({ id: message.author_id, name: words.nameOf(message.author_id) })
+    },
   }
 
   return { sheet, handlers }

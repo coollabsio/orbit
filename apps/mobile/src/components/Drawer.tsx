@@ -275,7 +275,6 @@ function DrawerPanel({ mounted, width, onClose }: { mounted: boolean; width: num
               ))}
               <NavRow link={{ label: 'Docs', icon: 'docs', href: '/docs', active: pathname.startsWith('/docs') }} onPress={() => go('/docs')} />
               <NavRow link={{ label: 'Chat', icon: 'chat', href: '/chat', active: pathname.startsWith('/chat'), badge: chatBadge.count, dot: chatBadge.unread }} onPress={() => go('/chat')} />
-              <NavRow link={{ label: 'Mail', icon: 'mail', href: '/', active: false }} comingSoon />
               <Section label="Manage" />
               <NavRow link={{ label: 'Settings', icon: 'settings', href: '/settings', active: onSettings && !onAdmin }} onPress={() => setOpenedArea('workspace')} />
               {user.installation_admin ? (
@@ -393,7 +392,7 @@ function BackRow({ label, onPress }: { label: string; onPress: () => void }) {
  * The web `SidebarNavItem`: a 36px row with a 30px icon tile; the current row's tile turns pink. The Flat style has no
  * tile: an 18px icon on a 32px row, and the current row is filled.
  */
-function NavRow({ link, onPress, onLongPress, comingSoon = false, tone = 'brand' }: { link: NavLink; onPress?: () => void; onLongPress?: () => void; comingSoon?: boolean; tone?: TileTone }) {
+function NavRow({ link, onPress, onLongPress, tone = 'brand' }: { link: NavLink; onPress?: () => void; onLongPress?: () => void; tone?: TileTone }) {
   const { colors } = useTheme()
   const flat = useButtonStyle() === 'flat'
   const shape = flat ? `h-8 rounded-md pl-2.5 ${link.active ? 'bg-black/5 dark:bg-white/6' : 'active:bg-black/4 dark:active:bg-white/5'}` : 'h-9 pl-1'
@@ -401,12 +400,12 @@ function NavRow({ link, onPress, onLongPress, comingSoon = false, tone = 'brand'
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={`${link.label}${link.locked ? ', private' : ''}${link.badge ? `, ${link.badge} unread` : link.dot ? ', unread' : ''}`}
-      accessibilityState={{ selected: link.active, disabled: comingSoon }}
-      disabled={comingSoon || !onPress}
+      accessibilityState={{ selected: link.active }}
+      disabled={!onPress}
       onPress={onPress}
       onLongPress={onLongPress}
       accessibilityHint={onLongPress ? 'Long press to move' : undefined}
-      className={`flex-row items-center gap-2.5 pr-2.5 ${shape} ${comingSoon ? 'opacity-[0.48]' : ''}`}
+      className={`flex-row items-center gap-2.5 pr-2.5 ${shape}`}
     >
       {({ pressed }) => (
         <>
@@ -424,7 +423,6 @@ function NavRow({ link, onPress, onLongPress, comingSoon = false, tone = 'brand'
             {link.label}
           </RNText>
           {link.locked ? <Icon name="lock" size={12} color={alpha(colors.sidebarNav, 0.7)} /> : null}
-          {comingSoon ? <RNText className="font-noto-medium text-[10px] text-muted-foreground/70">Coming soon</RNText> : null}
           {link.badge ? <CountBadge count={link.badge} /> : link.dot ? <View className="mr-1 size-2 rounded-full bg-primary" /> : null}
         </>
       )}

@@ -41,6 +41,9 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::auth_routes::push::list_apns_devices,
         crate::auth_routes::push::create_apns_device,
         crate::auth_routes::push::delete_apns_device,
+        crate::auth_routes::push::list_fcm_devices,
+        crate::auth_routes::push::create_fcm_device,
+        crate::auth_routes::push::delete_fcm_device,
         crate::auth_routes::push::send_test_push,
         crate::auth_routes::push::get_notification_preferences,
         crate::auth_routes::push::put_notification_preferences,
@@ -69,6 +72,8 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::auth_routes::passkeys::delete_passkey,
         crate::auth_routes::passkeys::start_passkey_login,
         crate::auth_routes::passkeys::finish_passkey_login,
+        crate::auth_routes::passkeys::start_app_passkey_sign_in,
+        crate::auth_routes::passkeys::finish_app_passkey_sign_in,
         crate::auth_routes::providers::start_provider_sign_in,
         crate::auth_routes::providers::provider_callback,
         crate::auth_routes::providers::exchange_provider_sign_in,
@@ -398,6 +403,12 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::chat_routes::messages::forward_chat_message,
         crate::chat_routes::messages::edit_chat_message,
         crate::chat_routes::messages::delete_chat_message,
+        crate::chat_routes::safety::report_chat_message,
+        crate::chat_routes::safety::list_chat_reports,
+        crate::chat_routes::safety::delete_reported_chat_message,
+        crate::chat_routes::safety::list_chat_blocks,
+        crate::chat_routes::safety::block_chat_user,
+        crate::chat_routes::safety::unblock_chat_user,
         crate::chat_routes::messages::add_chat_reaction,
         crate::chat_routes::messages::remove_chat_reaction,
         crate::chat_routes::messages::pin_chat_message,
@@ -982,7 +993,7 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
         }
         "put_status" => add_code(&mut responses, "422", "invalid_status"),
         "create_push_subscription" => add_code(&mut responses, "422", "invalid_subscription"),
-        "create_apns_device" => {
+        "create_apns_device" | "create_fcm_device" => {
             add_code(&mut responses, "422", "invalid_token");
             add_code(&mut responses, "503", "push_not_configured");
         }
@@ -1458,6 +1469,7 @@ fn invalid_request_operation(operation_id: &str) -> bool {
             | "put_status"
             | "create_push_subscription"
             | "create_apns_device"
+            | "create_fcm_device"
             | "put_notification_preferences"
             | "put_shortcuts"
             | "change_password"

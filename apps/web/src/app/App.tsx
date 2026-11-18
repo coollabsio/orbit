@@ -43,6 +43,8 @@ import { SessionsPage } from '@/features/settings/pages/SessionsPage'
 import { AgenticPage } from '@/features/settings/pages/AgenticPage'
 import { ShortcutsPage } from '@/features/settings/pages/ShortcutsPage'
 import { StickersPage } from '@/features/settings/pages/StickersPage'
+import { BlockedPeoplePage } from '@/features/settings/pages/BlockedPeoplePage'
+import { ReportsPage } from '@/features/settings/pages/ReportsPage'
 import { StoragePage } from '@/features/settings/pages/StoragePage'
 import { NotificationsPage } from '@/features/settings/pages/NotificationsPage'
 import { ApiTokensPage } from '@/features/settings/pages/ApiTokensPage'
@@ -64,6 +66,7 @@ import { InboxPage } from '@/features/inbox/pages/InboxPage'
 import { AuthGate, GuestGate } from '@/features/auth/AuthGate'
 import { AcceptInvitationPage } from '@/features/auth/pages/AcceptInvitationPage'
 import { OAuthConsentPage } from '@/features/auth/pages/OAuthConsentPage'
+import { AppSignInPage } from '@/features/auth/pages/AppSignInPage'
 import { ProviderCallbackPage } from '@/features/auth/pages/ProviderCallbackPage'
 import { LoginPage } from '@/features/auth/pages/LoginPage'
 import { RecoveryPage } from '@/features/auth/pages/RecoveryPage'
@@ -108,6 +111,8 @@ export default function App() {
         <Route path="oauth/consent" element={<OAuthConsentPage />} />
         {/* outside GuestGate: connect and confirm come back here signed in */}
         <Route path="login/callback" element={<ProviderCallbackPage />} />
+        {/* outside GuestGate: the Orbit app's passkey sign-in asks for the passkey whether or not this browser is signed in */}
+        <Route path="login/app" element={<AppSignInPage />} />
         <Route path="accept-invitation" element={<AcceptInvitationPage />} />
         <Route path="confirm-email" element={<ConfirmEmailPage />} />
         <Route element={<AuthGate />}>
@@ -157,6 +162,7 @@ export default function App() {
                   <Route path="notifications" element={<NotificationsPage />} />
                   <Route path="security" element={<SecurityPage />} />
                   <Route path="sessions" element={<SessionsPage />} />
+                  <Route path="blocked" element={<BlockedPeoplePage />} />
                   <Route path="agentic" element={<AgenticPage />} />
                   <Route path="shortcuts" element={<ShortcutsPage />} />
                   <Route path="storage" element={<StoragePage />} />
@@ -181,6 +187,7 @@ export default function App() {
                   <Route path="labels" element={<Navigate to="/tasks" replace />} />
                   <Route path="emoji" element={<EmojiPage />} />
                   <Route path="stickers" element={<StickersPage />} />
+                  <Route path="reports" element={<ReportsPage />} />
                   <Route path="github" element={<GithubPage />} />
                   <Route path="agentic" element={<AgenticPage />} />
                   <Route path="billing" element={<BillingPage />} />

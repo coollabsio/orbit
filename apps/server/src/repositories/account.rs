@@ -141,6 +141,7 @@ impl IdentityRepository {
         for statement in [
             "DELETE FROM push_subscriptions WHERE user_id = $1",
             "DELETE FROM apns_devices WHERE user_id = $1",
+            "DELETE FROM fcm_devices WHERE user_id = $1",
             "DELETE FROM sessions WHERE user_id = $1",
             "DELETE FROM recovery_tokens WHERE user_id = $1",
             "DELETE FROM email_change_tokens WHERE user_id = $1",

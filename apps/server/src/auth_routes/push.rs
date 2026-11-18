@@ -9,6 +9,7 @@ use utoipa::ToSchema;
 
 use super::{ApiError, ApiJson, AuthState, ProblemBody, authenticate};
 use crate::push::apns::{self, ApnsEnvironment};
+use crate::push::fcm::{self, FcmDeviceRecord};
 use crate::push::{
     ApnsDeviceRecord, Notice, NotificationPrefs, PushService, PushSubscriptionRecord,
     allowed_endpoint, webpush,
@@ -197,6 +198,89 @@ pub(super) async fn delete_apns_device(
     let session = authenticate(&state, &headers, instance, request_id.as_ref()).await?;
     PushService::of(state.repository.database())
         .unregister_apns(session.user.id, &id)
+        .await
+        .map_err(|error| ApiError::internal(instance, request_id.as_ref()).cause(error))?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(get, path = "/api/v1/push/fcm", responses((status = 200, body = Vec<FcmDeviceRecord>), (status = 401, description = "authentication_required", body = ProblemBody, content_type = "application/problem+json")))]
+pub(super) async fn list_fcm_devices(
+    State(state): State<AuthState>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<Json<Vec<FcmDeviceRecord>>, ApiError> {
+    let instance = "/api/v1/push/fcm";
+    let session = authenticate(&state, &headers, instance, request_id.as_ref()).await?;
+    PushService::of(state.repository.database())
+        .fcm_devices(session.user.id)
+        .await
+        .map(Json)
+        .map_err(|error| ApiError::internal(instance, request_id.as_ref()).cause(error))
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub(super) struct FcmDeviceBody {
+    /// The FCM registration token of the app.
+    token: String,
+    /// What the list of devices shows, e.g. "Pixel 9 · Android 16".
+    label: String,
+}
+
+#[utoipa::path(post, path = "/api/v1/push/fcm", request_body = FcmDeviceBody, responses((status = 200, body = FcmDeviceRecord), (status = 401, description = "authentication_required", body = ProblemBody, content_type = "application/problem+json"), (status = 422, description = "invalid_token", body = ProblemBody, content_type = "application/problem+json"), (status = 503, description = "push_not_configured", body = ProblemBody, content_type = "application/problem+json")))]
+pub(super) async fn create_fcm_device(
+    State(state): State<AuthState>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<FcmDeviceBody>,
+) -> Result<Json<FcmDeviceRecord>, ApiError> {
+    let instance = "/api/v1/push/fcm";
+    let session = authenticate(&state, &headers, instance, request_id.as_ref()).await?;
+    let push = PushService::of(state.repository.database());
+    if !push.fcm_enabled() {
+        return Err(ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "push_not_configured",
+            "Push not configured",
+            "This server has no FCM service account, so it cannot send notifications to Android phones.",
+            instance,
+            request_id.as_ref(),
+        ));
+    }
+    let Some(token) = fcm::parse_token(&body.token) else {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_token",
+            "Invalid device token",
+            "The device token is not an FCM registration token.",
+            instance,
+            request_id.as_ref(),
+        ));
+    };
+    let label: String = body.label.trim().chars().take(120).collect();
+    push.register_fcm(
+        session.user.id,
+        session.id,
+        &token,
+        &label,
+        TimestampMillis::now(),
+    )
+    .await
+    .map(Json)
+    .map_err(|error| ApiError::internal(instance, request_id.as_ref()).cause(error))
+}
+
+#[utoipa::path(delete, path = "/api/v1/push/fcm/{id}", params(("id" = String, Path)), responses((status = 204), (status = 401, description = "authentication_required", body = ProblemBody, content_type = "application/problem+json")))]
+pub(super) async fn delete_fcm_device(
+    State(state): State<AuthState>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<StatusCode, ApiError> {
+    let instance = "/api/v1/push/fcm/{id}";
+    let session = authenticate(&state, &headers, instance, request_id.as_ref()).await?;
+    PushService::of(state.repository.database())
+        .unregister_fcm(session.user.id, &id)
         .await
         .map_err(|error| ApiError::internal(instance, request_id.as_ref()).cause(error))?;
     Ok(StatusCode::NO_CONTENT)

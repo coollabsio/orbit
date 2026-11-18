@@ -14,6 +14,7 @@ import {
   deleteAccount,
   disconnectConnectedAccount,
   exchangeProviderSignIn,
+  finishAppPasskeySignIn,
   finishPasskeyLogin,
   linkProviderSignIn,
   listConnectedAccounts,
@@ -155,6 +156,25 @@ export function usePasskeyLogin() {
       return required(data, 'Login response was empty.')
     },
     onSuccess: signedIn,
+  })
+}
+
+/**
+ * The browser step of the Orbit app's passkey sign-in (`/login/app`): the same ceremony, but the server signs nobody in
+ * here. It answers with the app's redirect and a one-time handoff, which only the app that started can use.
+ */
+export function useAppPasskeySignIn() {
+  return useMutation({
+    mutationFn: async (flow: string) => {
+      const { data: challenge } = await startPasskeyLogin({ client: apiClient, throwOnError: true })
+      const credential = await getPasskey(required(challenge, 'Passkey challenge was empty.').options)
+      const { data } = await finishAppPasskeySignIn({
+        client: apiClient,
+        body: { flow, challenge_token: challenge.challenge_token, credential },
+        throwOnError: true,
+      })
+      return required(data, 'Sign-in response was empty.').redirect_url
+    },
   })
 }
 

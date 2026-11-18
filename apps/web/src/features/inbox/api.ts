@@ -127,8 +127,9 @@ const IMPORTS: Record<string, { name: string; page: string }> = {
   obsidian: { name: 'Obsidian', page: '/docs/import/obsidian' },
 }
 
-/** Where a notification leads: the task, the page with the comment thread open, the page at the mention, the chat message, or the import. */
+/** Where a notification leads: the task, the page with the comment thread open, the page at the mention, the chat message, the chat reports, or the import. */
 export function notificationTarget(notification: NotificationRecord): string | null {
+  if (notification.kind === 'chat_reported') return '/settings/reports'
   if (notification.kind === 'import_finished') {
     const source = IMPORTS[notification.import_source ?? '']
     return source && notification.import_id ? `${source.page}/${notification.import_id}` : null
@@ -165,6 +166,9 @@ export function notificationCopy(notification: NotificationRecord, pageTitle?: s
   }
   if (notification.kind === 'chat_mentioned') {
     return { title: `${actorName ?? 'Someone'} mentioned you in chat`, body: 'Open the conversation to see the message.' }
+  }
+  if (notification.kind === 'chat_reported') {
+    return { title: `${actorName ?? 'Someone'} reported a chat message`, body: 'Open the reports to see the message.' }
   }
   if (notification.kind === 'page_mentioned') {
     const page = pageTitle === undefined ? 'a page' : `“${pageTitle.trim() || 'Untitled'}”`

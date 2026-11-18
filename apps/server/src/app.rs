@@ -321,6 +321,7 @@ impl App {
         }
 
         let mailer = Mailer::new(database.clone(), app_key, &config.http.public_origin);
+        let chat_mailer = mailer.clone();
         let import_notices =
             crate::import_notice::ImportNotices::new(database.clone(), mailer.clone());
         let notion_imports = NotionImportService::new(
@@ -682,6 +683,7 @@ impl App {
                     cookie_mode,
                 )
                 .with_public_origin(&config.http.public_origin)
+                .with_mailer(chat_mailer)
                 .with_interactivity(
                     app_key,
                     config.environment == orbit_platform::EnvironmentMode::Development,
@@ -885,6 +887,10 @@ impl App {
         if let Some(apns) = &self.config.apns {
             let client = crate::push::apns::ApnsClient::new(apns).map_err(AppError::Background)?;
             push.set_apns_sender(std::sync::Arc::new(client));
+        }
+        if let Some(fcm) = &self.config.fcm {
+            let client = crate::push::fcm::FcmClient::new(fcm).map_err(AppError::Background)?;
+            push.set_fcm_sender(std::sync::Arc::new(client));
         }
         let token = service_shutdown.clone();
         spawn_service(&mut services, "push inbox", async move {

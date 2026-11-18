@@ -1,6 +1,6 @@
 /**
- * Where a tapped push notification leads. The server sends the web app's path (`url` beside `aps`); the app opens the
- * screen that shows the same thing. No React.
+ * Where a tapped push notification leads. The server sends the web app's path (`url` beside `aps` on iOS, in the FCM
+ * `data` on Android); the app opens the screen that shows the same thing. No React.
  */
 
 /** The `/profile/*` pages the app has, under Settings. */
@@ -47,7 +47,7 @@ export function pushRoute(url: string): string | null {
 
 /**
  * The web path a notification carries. On iOS the remote payload is in `trigger.payload` (expo-notifications puts only
- * an Expo-style `body` key in `content.data`); `content.data.url` covers a notification shaped the other way.
+ * an Expo-style `body` key in `content.data`). On Android expo-notifications puts the FCM `data` in `content.data`.
  */
 export function pushUrl(request: { content: { data?: Record<string, unknown> | null }; trigger?: unknown }): string | null {
   const payload = (request.trigger as { payload?: Record<string, unknown> } | null | undefined)?.payload

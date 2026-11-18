@@ -221,6 +221,8 @@ export interface Message {
   blocks?: MessageBlock[] | null
   /** Client only: set on a message that the server has not confirmed. */
   sendState?: 'sending' | 'failed'
+  /** Client only: why the server refused a failed message ("You cannot send direct messages to this person."). */
+  sendError?: string
 }
 
 /** The current user's state in one conversation. Counts come from the client implementation, never from the UI. */

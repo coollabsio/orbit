@@ -102,3 +102,9 @@ export function chatErrorMessage(error: unknown, fallback: string, byCode: Parti
   if (!(error instanceof ChatError)) return fallback
   return byCode[error.code] ?? GENERAL_MESSAGES[error.code] ?? fallback
 }
+
+/** `chatErrorMessage` for opening or writing a direct message: a refusal shows the server's reason (a block). */
+export function dmErrorMessage(error: unknown, fallback: string, byCode: Partial<Record<ChatErrorCode, string>> = {}): string {
+  const refusal = error instanceof ChatError && error.code === 'forbidden' ? error.message : undefined
+  return chatErrorMessage(error, fallback, refusal ? { forbidden: refusal, ...byCode } : byCode)
+}

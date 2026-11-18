@@ -10,6 +10,7 @@ mod images;
 pub(crate) mod interactions;
 pub(crate) mod links;
 pub(crate) mod messages;
+pub(crate) mod safety;
 pub(crate) mod state;
 pub(crate) mod stickers;
 
@@ -29,6 +30,7 @@ use utoipa::ToSchema;
 use crate::auth_routes::CookieMode;
 use crate::link_preview::LinkPreviewer;
 use crate::live::{LiveHub, NewEvent, Recipients};
+use crate::mail::Mailer;
 use crate::repositories::chat::{
     ChatError, ChatEvent, ChatRepository, Emitted, Written, live_event,
 };
@@ -47,6 +49,8 @@ pub struct ChatState {
     /// Encrypts the signing secrets of interactive webhooks; `None` turns interactivity off.
     pub(crate) app_key: Option<[u8; 32]>,
     pub(crate) clicks: Arc<interactions::ClickSender>,
+    /// Emails the installation admins about a reported message; `None` sends nothing.
+    pub(crate) mailer: Option<Mailer>,
 }
 
 impl ChatState {
@@ -65,6 +69,7 @@ impl ChatState {
             public_origin: Arc::from(""),
             app_key: None,
             clicks: Arc::new(interactions::ClickSender::new(false)),
+            mailer: None,
         }
     }
 
@@ -74,6 +79,12 @@ impl ChatState {
     pub fn with_interactivity(mut self, app_key: Option<[u8; 32]>, development: bool) -> Self {
         self.app_key = app_key;
         self.clicks = Arc::new(interactions::ClickSender::new(development));
+        self
+    }
+
+    #[must_use]
+    pub fn with_mailer(mut self, mailer: Mailer) -> Self {
+        self.mailer = Some(mailer);
         self
     }
 
@@ -263,6 +274,23 @@ fn json_router(state: ChatState) -> Router {
         .route(
             "/api/v1/hooks/chat/{webhook_id}/messages",
             get(events::read_hook_messages),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/chat/messages/{message_id}/report",
+            post(safety::report_chat_message),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/chat/reports",
+            get(safety::list_chat_reports),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/chat/reports/{report_id}/message",
+            delete(safety::delete_reported_chat_message),
+        )
+        .route("/api/v1/chat/blocks", get(safety::list_chat_blocks))
+        .route(
+            "/api/v1/chat/blocks/{user_id}",
+            put(safety::block_chat_user).delete(safety::unblock_chat_user),
         )
         .route(
             "/api/v1/workspaces/{workspace_id}/chat/messages/{message_id}/actions",

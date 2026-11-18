@@ -34,7 +34,7 @@ const summary = (id: string, title = id): PageSummary => ({
   updated_at: '2026-09-25T10:00:00Z',
 })
 const teamspaces: Teamspace[] = [{
-  id: 'teamspace-1', workspace_id: 'workspace-1', name: 'General', icon: null, position: 0, version: 1, is_default: true,
+  id: 'teamspace-1', workspace_id: 'workspace-1', project_id: null, name: 'General', icon: null, position: 0, version: 1, is_default: true,
   created_at: '2026-09-25T10:00:00Z', updated_at: '2026-09-25T10:00:00Z',
 }]
 const mia = { id: 'user-2', display_name: 'Mia Member' }

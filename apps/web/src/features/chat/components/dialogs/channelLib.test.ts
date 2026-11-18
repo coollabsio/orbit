@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import { ChatError } from '@/features/chat/api/types'
-import { addablePeople, canAddPeople, canManageChannel, channelNameFinal, channelNameInput, chatErrorMessage, matchPeople, messageablePeople, pickablePeople } from './channelLib'
+import { addablePeople, canAddPeople, canManageChannel, channelNameFinal, channelNameInput, chatErrorMessage, dmErrorMessage, matchPeople, messageablePeople, pickablePeople } from './channelLib'
 
 test('a channel name is lowercase and spaces become hyphens while it is typed', () => {
   expect(channelNameInput('Design Team')).toBe('design-team')
@@ -107,4 +107,12 @@ test('a new message offers a guest only when it shares an open channel with you,
   expect(messageablePeople(people, conversations, 'u1').map((person) => person.id)).toEqual(['u1', 'u5', 'u2'])
   // a guest reaches only the people of its channels, members too
   expect(messageablePeople(people, conversations, 'u2').map((person) => person.id)).toEqual(['u2', 'u1'])
+})
+
+test('a refused direct message shows the reason that the server gave', () => {
+  const fallback = 'The conversation was not opened. Try again.'
+  const blocked = new ChatError('forbidden', 'You cannot send direct messages to this person.')
+  expect(dmErrorMessage(blocked, fallback)).toBe('You cannot send direct messages to this person.')
+  expect(dmErrorMessage(new ChatError('not_found', 'x'), fallback, { not_found: 'Gone.' })).toBe('Gone.')
+  expect(dmErrorMessage(new Error('network'), fallback)).toBe(fallback)
 })

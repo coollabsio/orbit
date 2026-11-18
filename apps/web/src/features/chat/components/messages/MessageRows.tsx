@@ -1,3 +1,4 @@
+import { Button } from '@/components/ui/button'
 import type { Message } from '../../api/types'
 import { dayChip, fullTimestamp, messageTime } from '../../lib/time'
 import { useMessageList } from './messageListContext'
@@ -52,6 +53,28 @@ export function SystemRow({ message }: { message: Message }) {
       <time dateTime={new Date(message.createdAt).toISOString()} title={fullTimestamp(message.createdAt)} className="ml-2">
         {messageTime(message.createdAt)}
       </time>
+    </div>
+  )
+}
+
+/**
+ * A message of a person the user blocked: one muted line in its place, until "Show" asks for it. It keeps the row's
+ * data attributes, so the arrow keys and jumps to the message still find it.
+ */
+export function BlockedMessageRow({ message, active, onShow }: { message: Message; active: boolean; onShow: () => void }) {
+  return (
+    <div
+      role="listitem"
+      tabIndex={active ? 0 : -1}
+      data-slot="blocked-message"
+      data-message-row=""
+      data-message-id={message.id}
+      className="mt-1 flex items-center gap-2 px-4 py-1 text-xs text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset max-[899px]:px-3"
+    >
+      <span>Message from a person you blocked</span>
+      <Button variant="link" size="xs" className="h-6 px-0 text-muted-foreground" onClick={onShow}>
+        Show
+      </Button>
     </div>
   )
 }

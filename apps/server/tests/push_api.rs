@@ -7,6 +7,7 @@ use orbit_platform::{AuthenticatedUser, Id, PasswordService, TestDatabase, Times
 use orbit_server::auth_routes::{AuthState, CookieMode, auth_router};
 use orbit_server::live::LiveHub;
 use orbit_server::push::apns::{ApnsDevice, ApnsMessage, ApnsSender};
+use orbit_server::push::fcm::{FcmDevice, FcmMessage, FcmSender};
 use orbit_server::push::{
     Notice, PushKind, PushSender, PushService, SendError, Subscription, Vapid,
 };
@@ -87,6 +88,43 @@ impl ApnsSender for FakeApns {
 
 impl FakeApns {
     fn sent(&self) -> Vec<(ApnsDevice, ApnsMessage)> {
+        std::mem::take(&mut self.sent.lock().unwrap())
+    }
+}
+
+/// Records the pushes to Android phones. A token that starts with "dead" answers as one FCM no
+/// longer takes (`UNREGISTERED`), one that starts with "busy" is busy the first time.
+#[derive(Default)]
+struct FakeFcm {
+    sent: Mutex<Vec<(FcmDevice, FcmMessage)>>,
+    tried: Mutex<Vec<String>>,
+}
+
+impl FcmSender for FakeFcm {
+    fn send(
+        &self,
+        device: FcmDevice,
+        message: FcmMessage,
+    ) -> BoxFuture<'static, Result<(), SendError>> {
+        let earlier = {
+            let mut tried = self.tried.lock().unwrap();
+            tried.push(device.token.clone());
+            tried.iter().filter(|token| **token == device.token).count() - 1
+        };
+        let result = if device.token.starts_with("dead") {
+            Err(SendError::Gone)
+        } else if device.token.starts_with("busy") && earlier == 0 {
+            Err(SendError::Busy("busy".to_owned()))
+        } else {
+            self.sent.lock().unwrap().push((device, message));
+            Ok(())
+        };
+        Box::pin(async move { result })
+    }
+}
+
+impl FakeFcm {
+    fn sent(&self) -> Vec<(FcmDevice, FcmMessage)> {
         std::mem::take(&mut self.sent.lock().unwrap())
     }
 }
@@ -231,6 +269,12 @@ impl Fixture {
         let body =
             json!({ "token": token, "environment": environment, "label": "iPhone · iOS 26.1" });
         self.send("POST", "/api/v1/push/apns", cookie, Some(body))
+            .await
+    }
+
+    async fn register_fcm(&self, cookie: &str, token: &str) -> (StatusCode, Value) {
+        let body = json!({ "token": token, "label": "Pixel 9 · Android 16" });
+        self.send("POST", "/api/v1/push/fcm", cookie, Some(body))
             .await
     }
 
@@ -752,6 +796,132 @@ async fn phones_register_with_apns_get_pushes_and_go_with_their_token_or_session
         .await
         .unwrap();
     let left: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM apns_devices")
+        .fetch_one(fixture.database.pool())
+        .await
+        .unwrap();
+    assert_eq!(left, 0);
+}
+
+#[tokio::test]
+async fn android_phones_register_with_fcm_get_pushes_and_go_with_their_token_or_session() {
+    let fixture = Fixture::new().await;
+    let (ada, ada_cookie) = fixture.member("ada").await;
+    let owner = &fixture.owner_cookie;
+    let good = format!("cX9good:APA91b{}", "Z-_9".repeat(36));
+    let dead = format!("dead:APA91b{}", "a".repeat(140));
+    let busy = format!("busy:APA91b{}", "b".repeat(140));
+
+    // A server without an FCM service account says so.
+    let (status, problem) = fixture.register_fcm(owner, &good).await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(problem["code"], "push_not_configured");
+
+    let fcm = Arc::new(FakeFcm::default());
+    fixture.push.set_fcm_sender(fcm.clone());
+    for token in [
+        "short".to_owned(),
+        format!("{}/../x", "a".repeat(40)),
+        "a".repeat(1025),
+    ] {
+        let (status, problem) = fixture.register_fcm(owner, &token).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(problem["code"], "invalid_token");
+    }
+    let (status, _) = fixture
+        .send(
+            "POST",
+            "/api/v1/push/fcm",
+            owner,
+            Some(json!({ "token": good, "label": "x", "user_id": ada.to_string() })),
+        )
+        .await;
+    assert_eq!(status.as_u16() / 100, 4);
+
+    let (status, record) = fixture.register_fcm(owner, &good).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(record["label"], "Pixel 9 · Android 16");
+    assert!(record["created_at"].is_string());
+    let (_, again) = fixture.register_fcm(owner, &good).await;
+    assert_eq!(again["id"], record["id"]);
+    fixture.register_fcm(owner, &dead).await;
+    fixture.register_fcm(owner, &busy).await;
+    let (_, list) = fixture.send("GET", "/api/v1/push/fcm", owner, None).await;
+    assert_eq!(list.as_array().unwrap().len(), 3);
+    let (_, list) = fixture
+        .send("GET", "/api/v1/push/fcm", &ada_cookie, None)
+        .await;
+    assert!(list.as_array().unwrap().is_empty());
+
+    // A test push reaches the good phone and, on the second try, the busy one; FCM no longer
+    // takes the dead token, so it goes.
+    let (_, result) = fixture.send("POST", "/api/v1/push/test", owner, None).await;
+    assert_eq!(result["sent"], 2);
+    let mut sent = fcm.sent();
+    sent.sort_by(|a, b| a.0.token.cmp(&b.0.token));
+    assert_eq!(sent.len(), 2);
+    assert_eq!(sent[0].0.token, busy);
+    assert_eq!(sent[1].0.token, good);
+    assert_eq!(
+        sent[1].1.body(&good),
+        json!({ "message": {
+            "token": good,
+            "notification": { "title": "Orbit", "body": "Push notifications work on this device." },
+            "data": { "url": "/profile/notifications" },
+            "android": { "priority": "high", "ttl": "86400s",
+                "notification": { "channel_id": "default", "tag": "test", "sound": "default" } },
+        } })
+    );
+    let (_, list) = fixture.send("GET", "/api/v1/push/fcm", owner, None).await;
+    assert_eq!(list.as_array().unwrap().len(), 2);
+
+    // Somebody else cannot remove a phone; its owner can.
+    let uri = format!("/api/v1/push/fcm/{}", record["id"].as_str().unwrap());
+    let (status, _) = fixture.send("DELETE", &uri, &ada_cookie, None).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (_, list) = fixture.send("GET", "/api/v1/push/fcm", owner, None).await;
+    assert_eq!(list.as_array().unwrap().len(), 2);
+    fixture.send("DELETE", &uri, owner, None).await;
+    let (_, list) = fixture.send("GET", "/api/v1/push/fcm", owner, None).await;
+    assert_eq!(list.as_array().unwrap().len(), 1);
+
+    // A phone signed in to another account: the token moves to that user and session.
+    fixture.register_fcm(&ada_cookie, &busy).await;
+    let (_, list) = fixture.send("GET", "/api/v1/push/fcm", owner, None).await;
+    assert!(list.as_array().unwrap().is_empty());
+
+    // An active live tab gets the signal and no phone gets a push.
+    let hub = LiveHub::of(&fixture.database);
+    let tab = hub.connect(fixture.workspace_id, ada, false, UserStatus::default());
+    fixture
+        .push
+        .notify(ada, PushKind::DirectMessages, &notice())
+        .await
+        .unwrap();
+    assert!(fcm.sent().is_empty());
+    hub.disconnect(fixture.workspace_id, tab.id, ada);
+    fixture
+        .push
+        .notify(ada, PushKind::DirectMessages, &notice())
+        .await
+        .unwrap();
+    let sent = fcm.sent();
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0].1.body(&busy)["message"]["data"]["url"], "/chat/1");
+
+    // A revoked session gets no pushes; a deleted one takes its phone with it.
+    sqlx::query("UPDATE sessions SET revoked_at = 1 WHERE user_id = $1")
+        .bind(ada.to_string())
+        .execute(fixture.database.pool())
+        .await
+        .unwrap();
+    assert_eq!(fixture.push.push(ada, &notice()).await.unwrap(), 0);
+    assert!(fcm.sent().is_empty());
+    sqlx::query("DELETE FROM sessions WHERE user_id = $1")
+        .bind(ada.to_string())
+        .execute(fixture.database.pool())
+        .await
+        .unwrap();
+    let left: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM fcm_devices")
         .fetch_one(fixture.database.pool())
         .await
         .unwrap();

@@ -18,6 +18,7 @@ import { Popover, PopoverContent } from '@/components/ui/popover'
 import { Spinner } from '@/components/ui/spinner'
 import { wordlessPreview } from '@/lib/messagePreview'
 import { useChatContext } from '../../api/chatContext'
+import { useBlockedIds } from '../../api/moderation'
 import { useEditMessage, useSendMessage } from '../../api/mutations'
 import type { Message } from '../../api/types'
 import { canEdit } from '../../lib/forward'
@@ -26,10 +27,11 @@ import { decodeMentions } from '../../lib/mentionTokens'
 import { dayChip, isSameDay } from '../../lib/time'
 import { useDelayed, useIsPhone } from './environment'
 import { ForwardDialog } from '../dialogs/ForwardDialog'
+import { ReportDialog } from '../dialogs/ReportDialog'
 import { MessageItem } from './MessageItem'
 import { MessageListContext, type MessageListContextValue } from './messageListContext'
 import { MessageActionSheet, MessageMenu } from './MessageMenu'
-import { DayChip, NewLine, RepliesDivider, SystemRow } from './MessageRows'
+import { BlockedMessageRow, DayChip, NewLine, RepliesDivider, SystemRow } from './MessageRows'
 import { firstLine, messagesAfter, quickReactions } from './messageText'
 import { authorName, useChatPeople } from './people'
 import { useMessageActions, type MenuAnchor } from './useMessageActions'
@@ -216,6 +218,12 @@ export function MessageList({
   // The message in the forward dialog. It stays while the dialog closes, so its preview does not go blank.
   const [forwarding, setForwarding] = useState<Message | null>(null)
   const [forwardOpen, setForwardOpen] = useState(false)
+  const [reporting, setReporting] = useState<Message | null>(null)
+  const blockedIds = useBlockedIds()
+  // The messages of blocked people that the user asked to see. Here, not in the row: a row that scrolls out unmounts.
+  const [shownIds, setShownIds] = useState<ReadonlySet<string>>(() => new Set())
+  const hidden = (message: Message) => !message.bot && blockedIds.has(message.authorId) && !shownIds.has(message.id)
+  const show = (message: Message) => setShownIds((current) => new Set(current).add(message.id))
 
   const allMessages = root ? [root, ...messages] : messages
   // The first unread message is older than the loaded window: a "New" line at the top of the window would be wrong.
@@ -321,6 +329,7 @@ export function MessageList({
     onForward: forward,
     onEdit: (message) => startEdit(message),
     onMarkUnread,
+    onReport: setReporting,
     onAddReaction: (message) => {
       // The picker takes the menu's place (or the row's, from the sheet). It opens a frame later, so the click that
       // closed the menu is not an outside click for it.
@@ -441,7 +450,8 @@ export function MessageList({
       if (sentNow) virtualizer.scrollToEnd()
       else if (!state.atBottom && arrived.length > 0) setNewCount((count) => count + arrived.length)
       const newest = arrived[arrived.length - 1]
-      if (announce && newest) {
+      if (announce && newest && hidden(newest)) setAnnouncement('Message from a person you blocked')
+      else if (announce && newest) {
         const text = firstLine(decodeMentions(newest.body, people.members, people.channels), 200)
         setAnnouncement(`${authorName(people, newest.authorId, newest.bot?.name, 'Someone')}: ${text || wordlessPreview(Boolean(newest.stickerId)).toLowerCase()}`)
       }
@@ -634,14 +644,18 @@ export function MessageList({
                       start
                     ) : item.type === 'root' && root ? (
                       <>
-                        <MessageItem
-                          message={root}
-                          groupStart
-                          editing={editingId === root.id}
-                          active={activeRowId === root.id}
-                          tone={highlight?.id === root.id ? highlight.phase : undefined}
-                          menuOpen={overlayOpen && overlay?.kind !== 'sheet' && overlay?.messageId === root.id}
-                        />
+                        {hidden(root) ? (
+                          <BlockedMessageRow message={root} active={activeRowId === root.id} onShow={() => show(root)} />
+                        ) : (
+                          <MessageItem
+                            message={root}
+                            groupStart
+                            editing={editingId === root.id}
+                            active={activeRowId === root.id}
+                            tone={highlight?.id === root.id ? highlight.phase : undefined}
+                            menuOpen={overlayOpen && overlay?.kind !== 'sheet' && overlay?.messageId === root.id}
+                          />
+                        )}
                         {root.replyCount > 0 || messages.length > 0 ? <RepliesDivider count={Math.max(root.replyCount, messages.length)} /> : null}
                       </>
                     ) : item.type === 'tail' ? (
@@ -654,10 +668,13 @@ export function MessageList({
                         {item.isNew ? <NewLine /> : null}
                         {item.message.kind !== 'message' ? (
                           <SystemRow message={item.message} />
+                        ) : hidden(item.message) ? (
+                          <BlockedMessageRow message={item.message} active={activeRowId === item.message.id} onShow={() => show(item.message)} />
                         ) : (
                           <MessageItem
                             message={item.message}
-                            groupStart={item.groupStart}
+                            // A shown message of a blocked person has its name: the row above it was the hidden line.
+                            groupStart={item.groupStart || (!item.message.bot && blockedIds.has(item.message.authorId))}
                             editing={editingId === item.message.id}
                             active={activeRowId === item.message.id}
                             tone={highlight?.id === item.message.id ? highlight.phase : undefined}
@@ -710,6 +727,7 @@ export function MessageList({
           finalFocus={() => rowElement(forwarding.id) ?? true}
         />
       ) : null}
+      {reporting ? <ReportDialog message={reporting} onClose={() => setReporting(null)} /> : null}
       <MessageActionSheet
         open={overlayOpen && overlay?.kind === 'sheet'}
         onOpenChange={onOverlayOpenChange}

@@ -155,7 +155,7 @@ export function useDeletePasskey() {
   })
 }
 
-/** The browsers that get push notifications. The iOS devices are in `useApnsDevices`. */
+/** The browsers that get push notifications. The phones are in `useApnsDevices` (iOS) and `useFcmDevices` (Android). */
 export function usePushDevices() {
   const { client } = useOrbit()
   return useQuery({ queryKey: account.accountKeys.pushDevices, queryFn: () => account.pushDevices(client) })
@@ -173,6 +173,11 @@ export function useRemovePushDevice() {
 export function useApnsDevices() {
   const { client } = useOrbit()
   return useQuery({ queryKey: account.accountKeys.apnsDevices, queryFn: () => account.apnsDevices(client) })
+}
+
+export function useFcmDevices() {
+  const { client } = useOrbit()
+  return useQuery({ queryKey: account.accountKeys.fcmDevices, queryFn: () => account.fcmDevices(client) })
 }
 
 /** Resolves to the number of devices the test notification went to. */

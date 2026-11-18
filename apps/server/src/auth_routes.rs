@@ -350,6 +350,14 @@ pub fn auth_router(state: AuthState) -> Router {
             "/api/v1/auth/passkey/login/finish",
             post(passkeys::finish_passkey_login),
         )
+        .route(
+            "/api/v1/auth/passkey/app/start",
+            post(passkeys::start_app_passkey_sign_in),
+        )
+        .route(
+            "/api/v1/auth/passkey/app/finish",
+            post(passkeys::finish_app_passkey_sign_in),
+        )
         .route("/api/v1/auth/two-factor", get(two_factor::get_two_factor))
         .route(
             "/api/v1/auth/two-factor/totp/setup",
@@ -406,6 +414,11 @@ pub fn auth_router(state: AuthState) -> Router {
             get(push::list_apns_devices).post(push::create_apns_device),
         )
         .route("/api/v1/push/apns/{id}", delete(push::delete_apns_device))
+        .route(
+            "/api/v1/push/fcm",
+            get(push::list_fcm_devices).post(push::create_fcm_device),
+        )
+        .route("/api/v1/push/fcm/{id}", delete(push::delete_fcm_device))
         .route("/api/v1/push/test", post(push::send_test_push))
         .route(
             "/api/v1/notification-preferences",

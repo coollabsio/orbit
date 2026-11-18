@@ -18,6 +18,7 @@ import {
   offeredProviders,
   providerRows,
   signInMethods,
+  startPasskeySignIn,
   startProviderSignIn,
   withReauthentication,
 } from './sign-in-provider'
@@ -115,6 +116,30 @@ test('a sign-in starts, opens the auth session, and exchanges the handoff for a 
     },
     { url: 'https://orbit.test/api/v1/auth/providers/exchange', body: { handoff: 'h1', code_verifier: VERIFIER }, origin: null },
   ])
+})
+
+test('a passkey sign-in opens the server page and exchanges the handoff for a session token', async () => {
+  const { client, sent } = server([
+    { status: 200, body: { authorize_url: 'https://orbit.test/login/app#flow=f1' } },
+    { status: 200, body: { session_id: 's1', session_token: 'tok', user } },
+  ])
+  const phone = device({ type: 'success', url: 'orbit://auth/callback?handoff=h1' })
+  expect(await startPasskeySignIn(client, phone)).toEqual({ kind: 'signed_in', token: 'tok', user })
+  expect(phone.opened).toEqual(['https://orbit.test/login/app#flow=f1 -> orbit://auth/callback'])
+  expect(sent).toEqual([
+    { url: 'https://orbit.test/api/v1/auth/passkey/app/start', body: { code_challenge: await codeChallenge(VERIFIER, sha256), redirect: 'orbit://auth/callback' }, origin: null },
+    { url: 'https://orbit.test/api/v1/auth/providers/exchange', body: { handoff: 'h1', code_verifier: VERIFIER }, origin: null },
+  ])
+})
+
+test('a closed passkey page exchanges nothing, and a redirect without a handoff is an error', async () => {
+  const closed = server([{ status: 200, body: { authorize_url: 'https://orbit.test/login/app#flow=f1' } }])
+  expect(await startPasskeySignIn(closed.client, device({ type: 'cancel' }))).toEqual({ kind: 'cancelled' })
+  expect(closed.sent.map((request) => request.url)).toEqual(['https://orbit.test/api/v1/auth/passkey/app/start'])
+
+  const other = server([{ status: 200, body: { authorize_url: 'https://orbit.test/login/app#flow=f1' } }])
+  await expect(startPasskeySignIn(other.client, device({ type: 'success', url: 'orbit://elsewhere?handoff=h1' }))).rejects.toThrow('The passkey sign-in did not finish. Try again.')
+  expect(other.sent.map((request) => request.url)).toEqual(['https://orbit.test/api/v1/auth/passkey/app/start'])
 })
 
 test('a connect sends the current password and is connected on 204', async () => {

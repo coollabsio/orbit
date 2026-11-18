@@ -61,6 +61,39 @@ export function useIsChatAdmin(): boolean {
   return isChatAdmin(members.data?.find((member) => member.user_id === user.id)?.role)
 }
 
+export function useBlocks() {
+  const { client } = useOrbit()
+  return useQuery({ queryKey: chatQueryKeys.blocks, queryFn: () => chat.blocks(client), staleTime: 60_000 })
+}
+
+/** Whether you blocked this person. False while the list loads. */
+export function useIsBlocked(): (userId: string) => boolean {
+  const blocks = useBlocks()
+  const ids = useMemo(() => new Set((blocks.data ?? []).map((block) => block.user_id)), [blocks.data])
+  return (userId) => ids.has(userId)
+}
+
+/** Blocks a person after a confirmation, or unblocks them at once. Resolves when the block list is fresh again. */
+export function useSetBlocked() {
+  const { client } = useOrbit()
+  const queryClient = useQueryClient()
+  return async (person: { id: string; name: string }, blocked: boolean) => {
+    if (blocked && !(await confirmAction(`Block ${person.name}?`, 'Their messages are hidden from you, and they cannot send you direct messages. You can unblock them in Account settings.', 'Block'))) return
+    try {
+      await chat.setBlocked(client, person.id, blocked)
+    } catch (error) {
+      return showError(blocked ? `Could not block ${person.name}` : `Could not unblock ${person.name}`, error)
+    }
+    await queryClient.invalidateQueries({ queryKey: chatQueryKeys.blocks })
+  }
+}
+
+/** The workspace's chat reports, for members with `chat.manage`. */
+export function useChatReports(enabled: boolean) {
+  const { client, workspaceId } = useOrbit()
+  return useQuery({ queryKey: chatQueryKeys.reports(workspaceId), queryFn: () => chat.reports(client, workspaceId), enabled })
+}
+
 export function useFollowedThreads() {
   const { client, workspaceId } = useOrbit()
   return useQuery({ queryKey: chatQueryKeys.followedThreads(workspaceId), queryFn: () => chat.followedThreads(client, workspaceId) })

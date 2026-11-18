@@ -475,6 +475,12 @@ impl ChatRepository {
         let mut tx = self.database.immediate_transaction().await?;
         load_actor(&mut tx, workspace_id, actor_id).await?;
         require_guests_share_a_channel(&mut tx, workspace_id, &members).await?;
+        let others: Vec<Id> = members
+            .iter()
+            .copied()
+            .filter(|id| *id != actor_id)
+            .collect();
+        super::safety::require_not_blocked_by(&mut tx, actor_id, &others).await?;
         let existing: Option<String> = sqlx::query_scalar(
             "SELECT id FROM chat_conversations WHERE workspace_id = $1 AND dm_key = $2",
         )

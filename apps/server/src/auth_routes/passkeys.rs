@@ -20,7 +20,10 @@ use super::{
 };
 use crate::audit::AuditOutcome;
 use crate::repositories::identity::IdentityError;
-use crate::repositories::two_factor::{PasskeyRecord, PasskeyRemoval, PasskeySaveError};
+use crate::repositories::two_factor::{
+    PasskeyRecord, PasskeyRemoval, PasskeySaveError, StoredPasskey,
+};
+use crate::sign_in_providers::is_pkce_challenge;
 
 /// Passkeys for `public_origin`, or `None` when its host is not a domain name (browsers refuse passkeys for IP
 /// addresses).
@@ -374,20 +377,41 @@ pub(super) async fn finish_passkey_login(
     ApiJson(body): ApiJson<FinishPasskeyLoginBody>,
 ) -> Result<Response, ApiError> {
     let instance = "/api/v1/auth/passkey/login/finish";
+    let rid = request_id.as_ref();
+    let stored = verified_passkey(
+        &state,
+        &body.challenge_token,
+        body.credential,
+        instance,
+        rid,
+    )
+    .await?;
+    passkey_session(&state, &headers, &stored, instance, rid).await
+}
+
+fn rejected(instance: &'static str, request_id: Option<&Extension<RequestId>>) -> ApiError {
+    ApiError::new(
+        StatusCode::UNAUTHORIZED,
+        "invalid_passkey",
+        "Authentication failed",
+        "This passkey cannot sign in here. It may have been removed from your account.",
+        instance,
+        request_id,
+    )
+}
+
+/// The stored passkey that signed the challenge, with its use counter moved on. Uses the challenge up.
+async fn verified_passkey(
+    state: &AuthState,
+    challenge_token: &str,
+    credential: Value,
+    instance: &'static str,
+    rid: Option<&Extension<RequestId>>,
+) -> Result<StoredPasskey, ApiError> {
     let webauthn = state
         .webauthn
         .clone()
-        .ok_or_else(|| unavailable(instance, request_id.as_ref()))?;
-    let rejected = || {
-        ApiError::new(
-            StatusCode::UNAUTHORIZED,
-            "invalid_passkey",
-            "Authentication failed",
-            "This passkey cannot sign in here. It may have been removed from your account.",
-            instance,
-            request_id.as_ref(),
-        )
-    };
+        .ok_or_else(|| unavailable(instance, rid))?;
     let Some((
         _,
         Pending::PasskeyLogin {
@@ -395,26 +419,26 @@ pub(super) async fn finish_passkey_login(
         },
     )) = state
         .pending
-        .take(&body.challenge_token)
+        .take(challenge_token)
         .await
-        .map_err(|error| ApiError::internal(instance, request_id.as_ref()).cause(error))?
+        .map_err(|error| ApiError::internal(instance, rid).cause(error))?
     else {
-        return Err(rejected());
+        return Err(rejected(instance, rid));
     };
-    let credential =
-        serde_json::from_value::<PublicKeyCredential>(body.credential).map_err(|_| rejected())?;
+    let credential = serde_json::from_value::<PublicKeyCredential>(credential)
+        .map_err(|_| rejected(instance, rid))?;
     let (handle, credential_id) = webauthn
         .identify_discoverable_authentication(&credential)
-        .map_err(|_| rejected())?;
+        .map_err(|_| rejected(instance, rid))?;
     let stored = state
         .repository
         .passkey_by_credential(credential_id)
         .await
-        .map_err(|error| ApiError::internal(instance, request_id.as_ref()).cause(error))?
+        .map_err(|error| ApiError::internal(instance, rid).cause(error))?
         .filter(|stored| user_handle(stored.user_id) == handle);
     let Some(mut stored) = stored else {
-        record_failure(&state, None, request_id.as_ref()).await;
-        return Err(rejected());
+        record_failure(state, None, rid).await;
+        return Err(rejected(instance, rid));
     };
     let result = webauthn.finish_discoverable_authentication(
         &credential,
@@ -422,33 +446,200 @@ pub(super) async fn finish_passkey_login(
         &[DiscoverableKey::from(&stored.passkey)],
     );
     let Ok(result) = result else {
-        record_failure(&state, Some(stored.user_id), request_id.as_ref()).await;
-        return Err(rejected());
+        record_failure(state, Some(stored.user_id), rid).await;
+        return Err(rejected(instance, rid));
     };
     stored.passkey.update_credential(&result);
+    Ok(stored)
+}
+
+/// The session of a verified passkey: a cookie for browsers, `session_token` for requests without Origin.
+pub(super) async fn passkey_session(
+    state: &AuthState,
+    headers: &HeaderMap,
+    stored: &StoredPasskey,
+    instance: &'static str,
+    rid: Option<&Extension<RequestId>>,
+) -> Result<Response, ApiError> {
     let (user, session) = state
         .repository
-        .create_passkey_session_audited(
-            &stored,
-            request_id_value(request_id.as_ref()),
-            TimestampMillis::now(),
-        )
+        .create_passkey_session_audited(stored, request_id_value(rid), TimestampMillis::now())
         .await
         .map_err(|error| match error {
             // Suspended, or the passkey was removed meanwhile.
-            IdentityError::InvalidCredential => rejected(),
-            IdentityError::Unavailable(error) => {
-                ApiError::internal(instance, request_id.as_ref()).cause(error)
-            }
-            error => ApiError::internal(instance, request_id.as_ref()).cause(error),
+            IdentityError::InvalidCredential => rejected(instance, rid),
+            IdentityError::Unavailable(error) => ApiError::internal(instance, rid).cause(error),
+            error => ApiError::internal(instance, rid).cause(error),
         })?;
-    Ok(signed_in_response(
-        &state,
-        user,
-        &session,
-        SessionDelivery::for_request(&headers),
+    Ok(signed_in_response(state, user, &session, SessionDelivery::for_request(headers)).await)
+}
+
+const APP_START: &str = "/api/v1/auth/passkey/app/start";
+const APP_FINISH: &str = "/api/v1/auth/passkey/app/finish";
+/// The web page that asks for the passkey and sends the browser back to the app.
+const APP_SIGN_IN_PATH: &str = "/login/app";
+/// Opening the browser and choosing a passkey can take longer than five minutes.
+const APP_SIGN_IN_LIFETIME_MILLIS: i64 = 10 * 60 * 1_000;
+
+/// A passkey sign-in the Orbit app started, from start to exchange.
+#[derive(Clone, Serialize, Deserialize)]
+pub(super) struct AppSignIn {
+    /// S256 of the verifier the app keeps; the exchange must bring the verifier.
+    pub(super) client_challenge: String,
+    /// An allowlisted app URI: `{redirect}?handoff=…`
+    redirect: String,
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub(super) struct StartAppPasskeyBody {
+    /// `base64url(sha256(code_verifier))` of a random verifier the app keeps (43 characters). The same verifier goes
+    /// to `/api/v1/auth/providers/exchange`.
+    code_challenge: String,
+    /// The app's redirect URI: `orbit://auth/callback` (development servers can allow more with
+    /// `ORBIT_DEV_NATIVE_REDIRECTS`).
+    redirect: String,
+}
+
+#[derive(Serialize, ToSchema)]
+pub(super) struct StartAppPasskeyResponse {
+    /// Orbit's own sign-in page for this flow. Open it in the system browser's auth session.
+    authorize_url: String,
+}
+
+fn unprocessable(
+    code: &'static str,
+    detail: &'static str,
+    request_id: Option<&Extension<RequestId>>,
+) -> ApiError {
+    ApiError::new(
+        StatusCode::UNPROCESSABLE_ENTITY,
+        code,
+        "Invalid passkey sign-in",
+        detail,
+        APP_START,
+        request_id,
     )
-    .await)
+}
+
+/// Starts a passkey sign-in for the Orbit app. A passkey belongs to the server's web origin, so the app opens the
+/// returned page in the system browser; the page ends at the app's redirect with a one-time handoff code, which the
+/// app trades with its verifier at `/api/v1/auth/providers/exchange`.
+#[utoipa::path(post, path = "/api/v1/auth/passkey/app/start", request_body = StartAppPasskeyBody, responses((status = 200, body = StartAppPasskeyResponse), (status = 409, description = "passkeys_unavailable", body = ProblemBody, content_type = "application/problem+json"), (status = 422, description = "invalid_code_challenge or invalid_redirect", body = ProblemBody, content_type = "application/problem+json"), (status = 503, description = "authentication_busy", body = ProblemBody, content_type = "application/problem+json")))]
+pub(super) async fn start_app_passkey_sign_in(
+    State(state): State<AuthState>,
+    request_id: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<StartAppPasskeyBody>,
+) -> Result<Json<StartAppPasskeyResponse>, ApiError> {
+    let rid = request_id.as_ref();
+    if state.webauthn.is_none() {
+        return Err(unavailable(APP_START, rid));
+    }
+    if !is_pkce_challenge(&body.code_challenge) {
+        return Err(unprocessable(
+            "invalid_code_challenge",
+            "code_challenge must be the base64url SHA-256 of the code verifier.",
+            rid,
+        ));
+    }
+    if !state.native_redirects.allows(&body.redirect) {
+        return Err(unprocessable(
+            "invalid_redirect",
+            "This redirect URI is not allowed.",
+            rid,
+        ));
+    }
+    let flow = state
+        .pending
+        .insert_for(
+            Pending::AppSignIn {
+                flow: AppSignIn {
+                    client_challenge: body.code_challenge,
+                    redirect: body.redirect,
+                },
+            },
+            APP_SIGN_IN_LIFETIME_MILLIS,
+        )
+        .await
+        .map_err(|error| ApiError::internal(APP_START, rid).cause(error))?
+        .ok_or_else(|| busy(APP_START, rid))?;
+    // In the fragment, so the token stays out of server logs and Referer headers.
+    Ok(Json(StartAppPasskeyResponse {
+        authorize_url: format!("{}{APP_SIGN_IN_PATH}#flow={flow}", state.public_origin),
+    }))
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub(super) struct FinishAppPasskeyBody {
+    /// The `flow` of the page's URL fragment.
+    flow: String,
+    /// From `/api/v1/auth/passkey/login/start`.
+    challenge_token: String,
+    /// The browser's `PublicKeyCredential.toJSON()`.
+    #[schema(value_type = Object)]
+    credential: Value,
+}
+
+#[derive(Serialize, ToSchema)]
+pub(super) struct FinishAppPasskeyResponse {
+    /// The app's redirect with the handoff code: `{redirect}?handoff=…`. Send the browser there.
+    redirect_url: String,
+}
+
+/// The sign-in page's answer to [`start_app_passkey_sign_in`]. Checks the passkey and parks the result behind a
+/// one-time handoff code for the app. It makes no session and sets no cookie: the browser stays as it was, and only
+/// the exchange with the app's verifier signs in.
+#[utoipa::path(post, path = "/api/v1/auth/passkey/app/finish", request_body = FinishAppPasskeyBody, responses((status = 200, body = FinishAppPasskeyResponse), (status = 400, description = "invalid_app_sign_in: the flow expired or was used", body = ProblemBody, content_type = "application/problem+json"), (status = 401, description = "invalid_passkey", body = ProblemBody, content_type = "application/problem+json"), (status = 409, description = "passkeys_unavailable", body = ProblemBody, content_type = "application/problem+json"), (status = 503, description = "authentication_busy", body = ProblemBody, content_type = "application/problem+json")))]
+pub(super) async fn finish_app_passkey_sign_in(
+    State(state): State<AuthState>,
+    request_id: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<FinishAppPasskeyBody>,
+) -> Result<Json<FinishAppPasskeyResponse>, ApiError> {
+    let rid = request_id.as_ref();
+    // The passkey first: a wrong one leaves the flow open for another try.
+    let stored = verified_passkey(
+        &state,
+        &body.challenge_token,
+        body.credential,
+        APP_FINISH,
+        rid,
+    )
+    .await?;
+    let Some((_, Pending::AppSignIn { flow })) = state
+        .pending
+        .take(&body.flow)
+        .await
+        .map_err(|error| ApiError::internal(APP_FINISH, rid).cause(error))?
+    else {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_app_sign_in",
+            "Sign-in expired",
+            "This sign-in has expired or was already used. Go back to the Orbit app and start again.",
+            APP_FINISH,
+            rid,
+        ));
+    };
+    let redirect = flow.redirect.clone();
+    let handoff = state
+        .pending
+        .insert(Pending::PasskeyHandoff {
+            flow,
+            passkey_id: stored.id,
+            user_id: stored.user_id,
+            passkey: Box::new(stored.passkey),
+        })
+        .await
+        .map_err(|error| ApiError::internal(APP_FINISH, rid).cause(error))?
+        .ok_or_else(|| busy(APP_FINISH, rid))?;
+    let separator = if redirect.contains('?') { '&' } else { '?' };
+    let parameters = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("handoff", &handoff)
+        .finish();
+    Ok(Json(FinishAppPasskeyResponse {
+        redirect_url: format!("{redirect}{separator}{parameters}"),
+    }))
 }
 
 async fn record_failure(

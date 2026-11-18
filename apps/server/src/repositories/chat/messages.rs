@@ -315,6 +315,9 @@ impl ChatRepository {
         access.require_member()?;
         access.require_open()?;
         let conversation_id = access.conversation.id;
+        if access.conversation.kind == ConversationKind::Dm {
+            super::safety::require_dm_not_blocked(&mut tx, conversation_id, actor_id).await?;
+        }
         let mut events = Events::default();
 
         if let Some(message) = sent_before(&mut tx, conversation_id, actor_id, &input.nonce).await?
@@ -613,6 +616,9 @@ impl ChatRepository {
         access.require_member()?;
         access.require_open()?;
         let conversation_id = access.conversation.id;
+        if access.conversation.kind == ConversationKind::Dm {
+            super::safety::require_dm_not_blocked(&mut tx, conversation_id, actor_id).await?;
+        }
         let mut events = Events::default();
         // The destination and the nonce first: a retry finds its copy after the original is gone.
         let earlier = sent_before(&mut tx, conversation_id, actor_id, &input.nonce).await?;

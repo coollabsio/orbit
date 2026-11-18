@@ -2,6 +2,7 @@ import type { ComponentProps } from 'react'
 import {
   Copy,
   Edit,
+  Flag,
   Forward,
   Link2,
   Message as MessageIcon,
@@ -12,6 +13,7 @@ import {
   TaskSquare,
   Trash,
   Unread,
+  UserBlock,
   type IconComponent,
 } from 'reicon-react'
 import { toast } from 'sonner'
@@ -29,6 +31,7 @@ import { decodeMentions } from '../../lib/mentionTokens'
 import { useChatNavigation } from '../../useChatNavigation'
 import { useChatPeople } from './people'
 import { writeClipboard } from '@/lib/clipboard'
+import { useBlockPerson } from './useBlockPerson'
 
 export type MenuAnchor = NonNullable<ComponentProps<typeof DropdownMenuContent>['anchor']>
 
@@ -56,6 +59,8 @@ interface MessageActionOptions {
   onEdit: (message: Message) => void
   /** Called before "Mark as unread" is sent, so the view stops marking itself read before the new state arrives. */
   onMarkUnread?: (message: Message) => void
+  /** Opens the report dialog for the message. */
+  onReport: (message: Message) => void
 }
 
 const NO_CONVERSATIONS: Conversation[] = []
@@ -64,7 +69,7 @@ const NO_CONVERSATIONS: Conversation[] = []
  * What a member can do with a message. The `…` menu, the right-click menu and the mobile action sheet all show
  * `actionsFor(message)`, so they never differ.
  */
-export function useMessageActions({ inThread, onReply, onForward, onAddReaction, onEdit, onMarkUnread }: MessageActionOptions) {
+export function useMessageActions({ inThread, onReply, onForward, onAddReaction, onEdit, onMarkUnread, onReport }: MessageActionOptions) {
   const { currentUserId } = useChatContext()
   const people = useChatPeople()
   const host = useChatHost()
@@ -76,6 +81,7 @@ export function useMessageActions({ inThread, onReply, onForward, onAddReaction,
   const role = currentUserId ? people.byId.get(currentUserId)?.role : undefined
   const moderator = role === 'Owner' || role === 'Admin'
   const conversations = useConversations().data ?? NO_CONVERSATIONS
+  const blocking = useBlockPerson()
 
   function react(message: Message, emoji: string) {
     toggleReaction({ message, emoji }, { onError: () => toast.error('Could not update the reaction. Try again.') })
@@ -171,6 +177,18 @@ export function useMessageActions({ inThread, onReply, onForward, onAddReaction,
       },
     )
     if (canEdit(message, currentUserId)) actions.push({ key: 'edit', label: 'Edit', icon: Edit, run: () => onEdit(message) })
+    if (!own) {
+      actions.push({ key: 'report', label: 'Report', icon: Flag, run: () => onReport(message) })
+    }
+    // An integration's message is not from the member who set it up: blocking them is not offered there.
+    if (!own && !message.bot) {
+      const name = people.byId.get(message.authorId)?.name ?? 'this person'
+      actions.push(
+        blocking.isBlocked(message.authorId)
+          ? { key: 'block', label: 'Unblock', icon: UserBlock, run: () => blocking.unblock(message.authorId, name) }
+          : { key: 'block', label: 'Block', icon: UserBlock, run: () => void blocking.block(message.authorId, name) },
+      )
+    }
     if (canDelete) {
       actions.push({ key: 'delete', label: 'Delete', icon: Trash, destructive: true, run: () => void remove(message) })
     }

@@ -14,7 +14,7 @@ afterEach(() => {
 })
 
 const teamspace = (id: string, name: string, position: number): Teamspace => ({
-  id, workspace_id: 'workspace-1', name, icon: null, position, version: 1, is_default: position === 0,
+  id, workspace_id: 'workspace-1', project_id: null, name, icon: null, position, version: 1, is_default: position === 0,
   created_at: '2026-09-25T10:00:00Z', updated_at: '2026-09-25T10:00:00Z',
 })
 

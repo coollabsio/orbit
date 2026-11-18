@@ -17,12 +17,14 @@ import {
   listBackupWorkspaces,
   listGlobalAudit,
   removeS3 as removeS3Request,
+  removeSignInProvider as removeSignInProviderRequest,
   removeSmtp as removeSmtpRequest,
   resetTwoFactor,
   restoreBackupItem as restoreBackupItemRequest,
   saveJobLimits as saveJobLimitsRequest,
   saveLimits as saveLimitsRequest,
   saveS3 as saveS3Request,
+  saveSignInProvider as saveSignInProviderRequest,
   saveSmtp as saveSmtpRequest,
   saveStorageOptions as saveStorageOptionsRequest,
   sendTestEmail as sendTestEmailRequest,
@@ -48,11 +50,14 @@ import type {
   JobLimitView,
   LimitsView,
   PageAuditEvent,
+  Provider,
   RecoveryLink,
   RestoreBackupItem,
   RestoredItem,
   S3Body,
   S3View,
+  SignInProviderBody,
+  SignInProviderView,
   SmtpBody,
   SmtpSecurity,
   SmtpView,
@@ -63,7 +68,7 @@ import type {
 import { formatBytes } from './account-api'
 import type { OrbitClient } from './orbit'
 
-export type { AdminUser, AdminUserSummary, BackupItem, BackupItemKind, BackupSchedule, BackupSummary, BackupWorkspace, CompressionStatus, EnvironmentView, InstanceSettingsView, JobLimitView, LimitsView, RecoveryLink, RestoredItem, S3View, SmtpSecurity, SmtpView, StorageView }
+export type { AdminUser, AdminUserSummary, BackupItem, BackupItemKind, BackupSchedule, BackupSummary, BackupWorkspace, CompressionStatus, EnvironmentView, InstanceSettingsView, JobLimitView, LimitsView, RecoveryLink, RestoredItem, S3View, SignInProviderView, SmtpSecurity, SmtpView, StorageView }
 export type AuditEvent = PageAuditEvent['items'][number]
 
 export interface Page<T> {
@@ -188,6 +193,15 @@ export async function saveSmtp(client: OrbitClient, body: SmtpBody): Promise<Ins
 
 export async function removeSmtp(client: OrbitClient): Promise<InstanceSettingsView> {
   return (await removeSmtpRequest({ client, throwOnError: true })).data
+}
+
+/** Google or GitHub; OpenID Connect is set by environment variables only. */
+export async function saveSignInProvider(client: OrbitClient, { provider, body }: { provider: Exclude<Provider, 'oidc'>; body: SignInProviderBody }): Promise<InstanceSettingsView> {
+  return (await saveSignInProviderRequest({ client, path: { provider }, body, throwOnError: true })).data
+}
+
+export async function removeSignInProvider(client: OrbitClient, provider: Exclude<Provider, 'oidc'>): Promise<InstanceSettingsView> {
+  return (await removeSignInProviderRequest({ client, path: { provider }, throwOnError: true })).data
 }
 
 export async function sendTestEmail(client: OrbitClient): Promise<void> {

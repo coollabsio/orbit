@@ -10,7 +10,7 @@ import { useChatContext } from '@/features/chat/api/chatContext'
 import { useAddMembers, useOpenDm, useRemoveMember } from '@/features/chat/api/mutations'
 import { useConversation } from '@/features/chat/api/queries'
 import type { Conversation } from '@/features/chat/api/types'
-import { canAddPeople, canManageChannel, chatErrorMessage, addablePeople } from '@/features/chat/components/dialogs/channelLib'
+import { canAddPeople, canManageChannel, chatErrorMessage, dmErrorMessage, addablePeople } from '@/features/chat/components/dialogs/channelLib'
 import { memberGroups } from '@/features/chat/lib/memberGroups'
 import { MemberPicker } from '@/features/chat/components/dialogs/MemberPicker'
 import { useChatNavigation } from '@/features/chat/useChatNavigation'
@@ -46,7 +46,7 @@ export function MembersPane({ conversationId }: { conversationId: string }) {
     if (openDm.isPending) return
     openDm.mutate(person.id === currentUserId ? [] : [person.id], {
       onSuccess: (dm) => openConversation(dm.id),
-      onError: (error) => toast.error(chatErrorMessage(error, `Could not open the conversation with ${person.name}. Try again.`)),
+      onError: (error) => toast.error(dmErrorMessage(error, `Could not open the conversation with ${person.name}. Try again.`)),
     })
   }
 

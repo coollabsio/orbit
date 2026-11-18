@@ -13,7 +13,8 @@ import { Textarea } from '@/components/ui/textarea'
 import { useCurrentUser } from '@/features/auth/api'
 import { useChatClient } from '@/features/chat/api/chatContext'
 import { useOpenDm } from '@/features/chat/api/mutations'
-import { chatErrorMessage } from '@/features/chat/components/dialogs/channelLib'
+import { dmErrorMessage } from '@/features/chat/components/dialogs/channelLib'
+import { useBlockPerson } from '@/features/chat/components/messages/useBlockPerson'
 import { useChatNavigation } from '@/features/chat/useChatNavigation'
 import { memberProfileQueryOptions, saveMemberNote } from '@/features/profile/api'
 import { localTimeLabel, phoneHref, PROFILE_LIMITS } from '@/features/profile/profileLib'
@@ -250,6 +251,8 @@ function ProfileCard({ userId, name, action, onClose }: { userId: string; name: 
         </div>
       )}
 
+      {!own ? <BlockAction userId={userId} name={member.name} onDone={onClose} /> : null}
+
       {!own && profileQuery.data ? <ProfileNote workspaceId={workspaceId} userId={userId} name={member.name} saved={profileQuery.data.note ?? ''} /> : null}
     </div>
   )
@@ -271,11 +274,34 @@ function MessageAction({ userId, name, onDone }: { userId: string; name: string;
             onDone()
             openConversation(dm.id)
           },
-          onError: (error) => toast.error(chatErrorMessage(error, `Could not open the conversation with ${name}. Try again.`)),
+          onError: (error) => toast.error(dmErrorMessage(error, `Could not open the conversation with ${name}. Try again.`)),
         })
       }
     >
       Message
+    </Button>
+  )
+}
+
+/** "Block" asks first, then hides the member's messages for the user in chat; "Unblock" undoes it at once. */
+function BlockAction({ userId, name, onDone }: { userId: string; name: string; onDone: () => void }) {
+  const client = useChatClient()
+  const blocking = useBlockPerson()
+  if (!client) return null
+  const blocked = blocking.isBlocked(userId)
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      className="w-full"
+      disabled={blocking.isPending}
+      onClick={() => {
+        onDone()
+        if (blocked) blocking.unblock(userId, name)
+        else void blocking.block(userId, name)
+      }}
+    >
+      {blocked ? 'Unblock' : 'Block'}
     </Button>
   )
 }

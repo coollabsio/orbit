@@ -1,7 +1,7 @@
 import { type Href, usePathname } from 'expo-router'
 import type { Permission } from '@orbit/api/generated/types.gen'
 import { type ReactNode, useState } from 'react'
-import { Pressable, ScrollView, Switch, View } from 'react-native'
+import { Platform, Pressable, ScrollView, Switch, View } from 'react-native'
 
 import { useOrbit } from '../../orbit-context'
 import { guestMayOpen } from '../../data/guest'
@@ -14,7 +14,7 @@ export interface SettingsNavItem {
   icon: IconName
   /** Shown only to roles that hold this permission. */
   permission?: Permission
-  /** Shown only in Orbit Cloud (billing on). */
+  /** Shown only in Orbit Cloud (billing on), and never on iOS: App Store guideline 3.1.1 refuses links to purchases outside the app. */
   cloud?: boolean
 }
 
@@ -29,28 +29,31 @@ export const WORKSPACE_NAV: readonly SettingsNavItem[] = [
   { href: '/settings/billing', label: 'Billing', icon: 'card', cloud: true },
   { href: '/settings/emoji', label: 'Emoji', icon: 'smile', permission: 'chat.manage' },
   { href: '/settings/stickers', label: 'Stickers', icon: 'sticker', permission: 'chat.manage' },
+  { href: '/settings/reports', label: 'Reports', icon: 'flag', permission: 'chat.manage' },
   { href: '/settings/file-storage', label: 'File storage', icon: 'cloudConnection' },
   { href: '/settings/github', label: 'GitHub', icon: 'link2' },
   { href: '/settings/workspace-agentic', label: 'Agentic', icon: 'robot' },
   // every member but a guest may create a personal export token there
   { href: '/settings/api-tokens', label: 'API tokens', icon: 'key', permission: 'workspace.export_personal' },
+  { href: '/settings/webhooks', label: 'Webhooks', icon: 'global', permission: 'integrations.manage' },
   { href: '/settings/import', label: 'Import', icon: 'import' },
   { href: '/settings/export', label: 'Export', icon: 'documentDownload', permission: 'workspace.export' },
   { href: '/settings/danger-zone', label: 'Danger zone', icon: 'danger', permission: 'workspace.delete' },
 ]
 
 /**
- * The links of `nav` this person may open: by permission, the cloud-only ones only in Orbit Cloud, and for a guest
+ * The links of `nav` this person may open: by permission, the cloud-only ones only in Orbit Cloud off iOS, and for a guest
  * only its own settings (`guestMayOpen`).
  */
 export function allowedNav<T extends SettingsNavItem>(nav: readonly T[], permissions: readonly Permission[], cloud: boolean, guest = false): T[] {
-  return nav.filter((item) => (!item.permission || permissions.includes(item.permission)) && (!item.cloud || cloud) && (!guest || guestMayOpen(item.href)))
+  return nav.filter((item) => (!item.permission || permissions.includes(item.permission)) && (!item.cloud || (cloud && Platform.OS !== 'ios')) && (!guest || guestMayOpen(item.href)))
 }
 
 export const ACCOUNT_NAV: readonly SettingsNavItem[] = [
   { href: '/settings/profile', label: 'Profile', icon: 'user' },
   { href: '/settings/security', label: 'Security', icon: 'lock' },
   { href: '/settings/sessions', label: 'Sessions', icon: 'shield' },
+  { href: '/settings/blocked-people', label: 'Blocked people', icon: 'shieldCross' },
   { href: '/settings/appearance', label: 'Appearance', icon: 'brush' },
   { href: '/settings/notifications', label: 'Notifications', icon: 'bell' },
   { href: '/settings/agentic', label: 'Agentic', icon: 'robot' },
@@ -61,6 +64,7 @@ export const ADMIN_NAV: readonly SettingsNavItem[] = [
   { href: '/settings/admin', label: 'General', icon: 'settings' },
   { href: '/settings/admin/users', label: 'Users', icon: 'people' },
   { href: '/settings/admin/email', label: 'Email', icon: 'mail' },
+  { href: '/settings/admin/sign-in-providers', label: 'Sign-in providers', icon: 'login' },
   { href: '/settings/admin/limits', label: 'Limits', icon: 'chart' },
   { href: '/settings/admin/storage', label: 'Storage', icon: 'cloudConnection' },
   { href: '/settings/admin/backups', label: 'Backups', icon: 'archiveBox' },

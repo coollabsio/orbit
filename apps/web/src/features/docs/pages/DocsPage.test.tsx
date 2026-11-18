@@ -36,7 +36,7 @@ const summary = (id: string, parent_id: string | null, position: number, title =
 })
 
 const teamspace = (id: string, name: string, position: number, is_default = position === 0): Teamspace => ({
-  id, workspace_id: 'workspace-1', name, icon: null, position, version: 1, is_default,
+  id, workspace_id: 'workspace-1', project_id: null, name, icon: null, position, version: 1, is_default,
   created_at: '2026-09-25T10:00:00Z', updated_at: '2026-09-25T10:00:00Z',
 })
 

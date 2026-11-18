@@ -7,6 +7,7 @@ import {
   authOptions as authOptionsRequest,
   changeMemberRole,
   changePassword as changePasswordRequest,
+  createFcmDevice,
   createInvitation,
   createRole,
   deleteRole,
@@ -17,6 +18,7 @@ import {
   setMemberCustomRole,
   updateRole,
   deleteAccount as deleteAccountRequest,
+  deleteFcmDevice,
   deletePasskey as deletePasskeyRequest,
   deletePushSubscription,
   deleteWorkspace as deleteWorkspaceRequest,
@@ -27,6 +29,7 @@ import {
   getTwoFactor,
   getWorkspaceBucket,
   getWorkspaceStorage,
+  listFcmDevices,
   listInvitations,
   listPasskeys,
   listPushSubscriptions,
@@ -50,6 +53,7 @@ import {
 import type {
   AuthOptions,
   AuthProblem,
+  FcmDeviceRecord,
   OwnedWorkspace,
   InvitationRecord,
   MemberProjectGrant,
@@ -87,6 +91,7 @@ export const accountKeys = {
   passkeys: ['account', 'passkeys'] as const,
   pushDevices: ['account', 'push-devices'] as const,
   apnsDevices: ['account', 'apns-devices'] as const,
+  fcmDevices: ['account', 'fcm-devices'] as const,
   twoFactor: ['account', 'two-factor'] as const,
   connectedAccounts: ['account', 'connected-accounts'] as const,
   oauthConnections: ['account', 'oauth-connections'] as const,
@@ -264,12 +269,34 @@ export async function removeApnsDevice(client: OrbitClient, id: string): Promise
   await client.delete({ url: '/api/v1/push/apns/{id}', path: { id }, throwOnError: true })
 }
 
+/** An Android phone that gets notifications through FCM. */
+export type FcmDevice = FcmDeviceRecord
+
+/** Adds this phone, or updates it when the server knows the token. It stops with the session. */
+export async function registerFcmDevice(client: OrbitClient, body: { token: string; label: string }): Promise<FcmDevice> {
+  return (await createFcmDevice({ client, body, throwOnError: true })).data
+}
+
+/** The user's Android phones. A server without the route has none. */
+export async function fcmDevices(client: OrbitClient): Promise<FcmDevice[]> {
+  try {
+    return (await listFcmDevices({ client, throwOnError: true })).data
+  } catch (error) {
+    if (error instanceof ApiProblem && error.status === 404) return []
+    throw error
+  }
+}
+
+export async function removeFcmDevice(client: OrbitClient, id: string): Promise<void> {
+  await deleteFcmDevice({ client, path: { id }, throwOnError: true })
+}
+
 /** Sends a test notification to all the user's devices; resolves to how many took it. */
 export async function sendTestPush(client: OrbitClient): Promise<number> {
   return (await sendTestPushRequest({ client, throwOnError: true })).data.sent
 }
 
-/** 503 `push_not_configured`: the server has no APNs key. */
+/** 503 `push_not_configured`: the server has no APNs key (iOS) or no FCM service account (Android). */
 export const pushNotConfigured = (error: unknown) => error instanceof ApiProblem && error.code === 'push_not_configured'
 
 /** The web's `ago`: `just now`, `5m ago`, then `on Sep 4`. */

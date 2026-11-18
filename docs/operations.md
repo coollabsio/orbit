@@ -44,6 +44,8 @@ Orbit reads its configuration only from environment variables that start with `O
 | `ORBIT_APNS_KEY_ID` | none | The 10-character key ID of the APNs key. |
 | `ORBIT_APNS_TEAM_ID` | none | The 10-character team ID of the Apple developer account. |
 | `ORBIT_APNS_TOPIC` | `io.coollabs.orbit` | The bundle ID of the iOS app. |
+| `ORBIT_FCM_SERVICE_ACCOUNT` | none (Android pushes off) | The JSON key of a Google service account of the Firebase project, for native Android push notifications. See [Android push notifications (FCM)](#android-push-notifications-fcm). |
+| `ORBIT_FCM_SERVICE_ACCOUNT_FILE` | none | The path of a file that contains the service account key, instead of `ORBIT_FCM_SERVICE_ACCOUNT`. Do not set both. |
 
 Create the app key once with `openssl rand -base64 32` and keep a copy outside the server. Orbit does not start without it. See [Email, registration and the app key](#email-registration-and-the-app-key).
 
@@ -203,6 +205,20 @@ One key sends to both APNs hosts: the app tells the server whether its device to
 
 A phone gets pushes like a browser: only while the session that registered it is valid, and not while the person is active in an open tab or in the app (its live connection). Revoking or deleting the session stops them. APNs answers for a token that is no longer valid (`410`, `BadDeviceToken`, `DeviceTokenNotForTopic`) remove the phone; the app registers it again when it starts. Other refusals (for example `403 InvalidProviderToken` for a wrong key ID or team ID) are logged as `APNs push not sent` and keep the phone.
 
+## Android push notifications (FCM)
+
+The Android app gets notifications through Firebase Cloud Messaging (FCM HTTP v1) only when the server has a service account key of the Firebase project. The server sends to FCM directly. It does not use the Expo push service.
+
+The app and the server must use the same Firebase project: the app gets its token from the project in its `google-services.json` (see "Android push (FCM)" in `apps/mobile/README.md`). On a self-hosted server with the Orbit app from Google Play, native push does not work for the same reason as on iOS. Android users can still turn on notifications in Orbit in Chrome (Web Push).
+
+1. In the [Firebase console](https://console.firebase.google.com/), open the project, then **Project settings → Service accounts**. Click **Generate new private key** and download the JSON file. Keep it secret: it gives access to the project.
+2. Set `ORBIT_FCM_SERVICE_ACCOUNT_FILE` to the path of that file (or `ORBIT_FCM_SERVICE_ACCOUNT` to its text). The server reads the project ID from the file.
+3. Restart Orbit. `orbit config show` shows `ORBIT_FCM_SERVICE_ACCOUNT=[REDACTED]`. Orbit does not start when the file is not a service account key (it needs `project_id`, `client_email` and an RSA `private_key`). The error message does not show the key.
+
+The server signs a JWT with the key and gets an OAuth 2 access token from Google (scope `firebase.messaging`). It keeps the token until shortly before it expires. Without a service account, the app's registration (`POST /api/v1/push/fcm`) answers `503 push_not_configured`, and Web Push works as before.
+
+An Android phone gets pushes as an iPhone does: only while the session that registered it is valid, and not while the person is active in an open tab or in the app. FCM answers for a token that is no longer valid (`UNREGISTERED`, `INVALID_ARGUMENT` for the token, `SENDER_ID_MISMATCH`) remove the phone. The app registers it again when it starts. Other refusals (for example `403 PERMISSION_DENIED` when the service account cannot send) are logged as `FCM push not sent` and keep the phone.
+
 ## Sign in with Google and GitHub
 
 People can sign in with a Google or GitHub account when the root user configures the provider. A provider that is not configured does not show on the sign-in pages.
@@ -257,6 +273,8 @@ The rules of [Sign in with Google and GitHub](#sign-in-with-google-and-github) a
 ### Native app redirects
 
 The mobile app receives the result at `orbit://auth/callback`. Orbit accepts no other redirect in production. For Expo Go in development, set `ORBIT_DEV_NATIVE_REDIRECTS` to the exact Expo URLs, separated by commas, for example `exp://100.64.0.5:8082/--/auth/callback`. Orbit compares each URL exactly. Orbit does not start when `ORBIT_ENV=production` and this variable is set.
+
+The mobile app also signs in with a passkey through this redirect. A passkey belongs to the web address of the server, so the app opens the server's page `/login/app` in the system browser. The page asks for the passkey and sends the browser back to the app with a one-time code. Only the app that started the sign-in can use the code. The page signs nobody in to the browser.
 
 ## Postgres
 
