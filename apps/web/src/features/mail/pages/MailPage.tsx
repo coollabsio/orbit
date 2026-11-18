@@ -10,6 +10,7 @@ import { useBulkUpdateThreads, useUpdateThread, type ThreadChange } from '@/feat
 import { useDrafts, useMailCounts, useMailMe, useMailSearch, useOutbound, useThread, useThreads } from '@/features/mail/api/queries'
 import { FolderRail } from '@/features/mail/components/FolderRail'
 import { MailEmptyState } from '@/features/mail/components/MailEmptyState'
+import { MailIdlePane } from '@/features/mail/components/MailIdlePane'
 import { PausedBanner, VacationBanners } from '@/features/mail/components/MailBanners'
 import { MailboxNotice } from '@/features/mail/components/MailboxNotice'
 import { MailSearch } from '@/features/mail/components/MailSearch'
@@ -36,7 +37,7 @@ import { useCommand } from '@/shortcuts/useCommand'
 const BULK_LIMIT = 100
 
 const EMPTY_FOLDER: Record<ListFolder, { title: string; description: string }> = {
-  inbox: { title: 'Your inbox is empty', description: 'New mail shows up here.' },
+  inbox: { title: 'You are all caught up', description: 'New mail shows up here.' },
   archive: { title: 'Nothing archived', description: 'Archived conversations show up here. Press E to archive one.' },
   spam: { title: 'No spam', description: 'Mail that fails authentication lands here.' },
   trash: { title: 'Trash is empty', description: 'Conversations in the trash are deleted for good after 30 days.' },
@@ -73,8 +74,12 @@ function MailApp({ view, threadId }: { view: MailView; threadId: string | null }
   // Drafts, Scheduled and Outbox read the drafts and the outbound queue; every list marks the threads with a draft
   const sendView = view.kind === 'folder' && (view.folder === 'drafts' || view.folder === 'scheduled' || view.folder === 'outbox') ? view.folder : null
   const source = view.kind === 'search' ? search : list
+  // **Unread**: only unread conversations, and those opened since (they stay until the view changes)
+  const [unreadOnly, setUnreadOnly] = useState(false)
+  const [keptRead, setKeptRead] = useState<ReadonlySet<string>>(() => new Set())
   // a send folder has no threads (the idle list query may hold another folder's cached rows)
-  const threads = sendView ? [] : (source.data ?? [])
+  const loaded = sendView ? [] : (source.data ?? [])
+  const threads = unreadOnly ? loaded.filter((thread) => thread.unread || keptRead.has(thread.id) || thread.id === threadId) : loaded
   const detail = useThread(threadId)
   // with a mailbox open, the send folders are that mailbox's
   const scope = view.kind === 'folder' ? view.mailboxId : undefined
@@ -112,6 +117,7 @@ function MailApp({ view, threadId }: { view: MailView; threadId: string | null }
   }
   const open = (id: string) => {
     setFocusedId(id)
+    if (unreadOnly) setKeptRead((previous) => new Set(previous).add(id))
     navigate(pathOf(id))
   }
   const close = () => navigate(pathOf(null))
@@ -284,8 +290,9 @@ function MailApp({ view, threadId }: { view: MailView; threadId: string | null }
           ? 'Starred'
           : 'Search'
   const icon = view.kind === 'folder' ? (FOLDERS.find((entry) => entry.folder === view.folder)?.icon ?? Mail) : view.kind === 'label' ? Tag : view.kind === 'starred' ? Star : SearchNormal
-  const empty =
-    view.kind === 'folder'
+  const empty = unreadOnly
+    ? { title: 'No unread conversations', description: 'You have read everything here.' }
+    : view.kind === 'folder'
       ? EMPTY_FOLDER[view.folder]
       : view.kind === 'label'
         ? { title: 'No conversations with this label', description: 'Press L in a conversation to add a label.' }
@@ -321,6 +328,13 @@ function MailApp({ view, threadId }: { view: MailView; threadId: string | null }
       : sendView
         ? { count: outboundItems.length, content: <OutboundList view={sendView} items={outboundItems} focusedId={focusedId} onFocus={setFocusedId} /> }
         : undefined
+  // the unread count next to the title: the folder's (Inbox, Spam) from the counts
+  const unreadCount =
+    view.kind === 'folder' && (view.folder === 'inbox' || view.folder === 'spam')
+      ? (counts.data?.mailboxes ?? []).filter((mailbox) => !view.mailboxId || mailbox.mailbox_id === view.mailboxId).reduce((sum, mailbox) => sum + mailbox[view.folder as 'inbox' | 'spam'], 0)
+      : 0
+  // a list of several mailboxes names each row's mailbox
+  const mixed = mailboxes.length > 1 && !(view.kind === 'folder' && view.mailboxId)
   const people = [...new Set(threads.flatMap((thread) => thread.from.map((person) => person.address)))]
   const picked = threads.filter((thread) => selected.has(thread.id))
   const bulkBar =
@@ -377,7 +391,7 @@ function MailApp({ view, threadId }: { view: MailView; threadId: string | null }
 
   return (
     <div className="group/mail flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background" data-view={threadId ? 'thread' : 'list'}>
-      <FolderRail view={view} mailboxes={mailboxes} labels={labels} counts={counts.data} showOutbox={showOutbox} />
+      <FolderRail view={view} mailboxes={mailboxes} labels={labels} counts={counts.data} showOutbox={showOutbox} onCompose={mailboxes.length > 0 ? () => void newEmail() : undefined} />
       <ThreadList
         title={title}
         view={view}
@@ -413,9 +427,16 @@ function MailApp({ view, threadId }: { view: MailView; threadId: string | null }
         draftThreads={draftThreads}
         showOutbox={showOutbox}
         rows={sendRows}
+        unreadCount={unreadCount}
+        unreadOnly={!sendView && view.kind !== 'search' ? { value: unreadOnly, onChange: (next) => { setUnreadOnly(next); setKeptRead(new Set()) } } : undefined}
+        onMarkAllRead={!sendView ? () => apply(loaded.filter((thread) => thread.unread), { read: true }, false) : undefined}
+        mailboxName={mixed ? (thread) => mailboxName(thread.mailbox_id) : undefined}
         onOpen={open}
         onSelect={toggleSelect}
         onStar={(thread) => star([thread])}
+        onArchive={(thread) => archive([thread])}
+        onToggleRead={(thread) => toggleRead([thread])}
+        onTrash={(thread) => trash([thread])}
       />
       <section className="flex h-full min-h-0 min-w-0 flex-1 flex-col border-l bg-background max-[899px]:border-l-0 max-[899px]:group-data-[view=list]/mail:hidden">
         {threadId ? (
@@ -435,7 +456,11 @@ function MailApp({ view, threadId }: { view: MailView; threadId: string | null }
           />
         ) : (
           <div className="flex min-h-0 flex-1 flex-col">
-            <MailEmptyState icon={Mail} {...(sendView ? SEND_PANE[sendView] : { title: 'Select a conversation', description: 'Choose a conversation from the list to read it here.' })} />
+            {sendView ? (
+              <MailEmptyState icon={Mail} {...SEND_PANE[sendView]} />
+            ) : (
+              <MailIdlePane unread={unreadCount} inbox={view.kind === 'folder' && view.folder === 'inbox'} />
+            )}
           </div>
         )}
       </section>

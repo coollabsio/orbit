@@ -1,6 +1,6 @@
 import type { ComponentType, ReactNode } from 'react'
 import { useNavigate } from 'react-router'
-import { DirectboxDefault, Star } from 'reicon-react'
+import { DirectboxDefault, Edit2, Star } from 'reicon-react'
 import type { MailCounts, MailLabel, MailMeMailbox } from '@orbit/api/generated/types.gen'
 import { InAppSidebar } from '@/app/shell/InAppSidebar'
 import { useInAppSidebar } from '@/app/shell/sidebarSlot'
@@ -10,6 +10,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { cn } from 'cn'
 import { FOLDERS, mailViewPath, railFolders, type MailView } from '@/features/mail/mailLib'
+import { Shortcut } from '@/shortcuts/Shortcut'
 
 interface FolderRailProps {
   view: MailView
@@ -18,6 +19,8 @@ interface FolderRailProps {
   counts: MailCounts | undefined
   /** The Outbox has something waiting or failed: only then its folder shows (§9.1 U11). */
   showOutbox: boolean
+  /** **Compose** (`c`); without it there is no button (no mailbox to send from). */
+  onCompose?: () => void
 }
 
 function RailRow({
@@ -60,11 +63,22 @@ function RailSection({ children }: { children: string }) {
   return <span className="mt-3 px-2.5 py-1 text-[0.6875rem] font-medium text-sidebar-foreground/60 select-none">{children}</span>
 }
 
+/** The rail's main action: a new message. Its key shows on it, so the shortcut is learnt by using the button. */
+function ComposeButton({ onClick }: { onClick: () => void }) {
+  return (
+    <Button type="button" className="mb-2 w-full justify-start gap-2.5 text-[0.8125rem]" onClick={onClick}>
+      <Edit2 />
+      <span className="flex-1 text-left">Compose</span>
+      <Shortcut id="mail.compose" className="opacity-70 *:[kbd]:border-primary-foreground/25 *:[kbd]:bg-primary-foreground/15 *:[kbd]:text-primary-foreground" />
+    </Button>
+  )
+}
+
 /**
  * The mail sidebar: the inbox of every mailbox, each mailbox with its unread count (when there are several), Starred,
  * the folders and the labels. With a mailbox open, the folders are that mailbox's.
  */
-export function FolderRail({ view, mailboxes, labels, counts, showOutbox }: FolderRailProps) {
+export function FolderRail({ view, mailboxes, labels, counts, showOutbox, onCompose }: FolderRailProps) {
   const navigate = useNavigate()
   const unread = (mailboxId: string | undefined, folder: 'inbox' | 'spam') =>
     (counts?.mailboxes ?? []).filter((mailbox) => !mailboxId || mailbox.mailbox_id === mailboxId).reduce((sum, mailbox) => sum + mailbox[folder], 0)
@@ -82,6 +96,7 @@ export function FolderRail({ view, mailboxes, labels, counts, showOutbox }: Fold
         </PaneHeader>
       )}
       <div className={cn('flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto', inAppSidebar ? 'px-3' : 'p-2')}>
+        {onCompose ? <ComposeButton onClick={onCompose} /> : null}
         <RailRow
           icon={FOLDERS[0].icon}
           label="Inbox"
@@ -89,6 +104,18 @@ export function FolderRail({ view, mailboxes, labels, counts, showOutbox }: Fold
           active={view.kind === 'folder' && view.folder === 'inbox' && !view.mailboxId}
           onClick={() => go({ kind: 'folder', folder: 'inbox' })}
         />
+        <RailRow icon={Star} label="Starred" active={view.kind === 'starred'} onClick={() => go({ kind: 'starred' })} />
+        {railFolders(showOutbox).map(({ folder, label, icon }) => (
+          <RailRow
+            key={folder}
+            icon={icon}
+            label={label}
+            unread={folder === 'spam' ? unread(scope, 'spam') : 0}
+            active={view.kind === 'folder' && view.folder === folder}
+            onClick={() => go({ kind: 'folder', folder, mailboxId: scope })}
+          />
+        ))}
+        {mailboxes.length > 1 ? <RailSection>Mailboxes</RailSection> : null}
         {mailboxes.length > 1
           ? mailboxes.map((mailbox) => (
               <RailRow
@@ -101,17 +128,6 @@ export function FolderRail({ view, mailboxes, labels, counts, showOutbox }: Fold
               />
             ))
           : null}
-        <RailRow icon={Star} label="Starred" active={view.kind === 'starred'} onClick={() => go({ kind: 'starred' })} />
-        {railFolders(showOutbox).map(({ folder, label, icon }) => (
-          <RailRow
-            key={folder}
-            icon={icon}
-            label={label}
-            unread={folder === 'spam' ? unread(scope, 'spam') : 0}
-            active={view.kind === 'folder' && view.folder === folder}
-            onClick={() => go({ kind: 'folder', folder, mailboxId: scope })}
-          />
-        ))}
         {labels.length > 0 ? <RailSection>Labels</RailSection> : null}
         {labels.map((label) => (
           <RailRow

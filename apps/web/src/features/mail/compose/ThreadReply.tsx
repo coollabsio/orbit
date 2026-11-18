@@ -16,7 +16,7 @@ import { heldReplyState } from '../mailStatus'
 import { useQueryClient } from '@tanstack/react-query'
 import { ApiProblem } from '@orbit/api/problem'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
-import { problemText, sendingOutboundId } from '../mailLib'
+import { personName, problemText, sendingOutboundId } from '../mailLib'
 import { Composer, type ComposerHandle } from './Composer'
 import { reopenDraft, useArchiveAfterSend, useComposerDock, useInlineReplyHost } from './useComposerDock'
 import { draftText, recipientSummary } from './composeLib'
@@ -173,6 +173,10 @@ export function ThreadReply({ threadId, last, ref }: ThreadReplyProps) {
   }
 
   const replyAll = last ? last.to.length + last.cc.length > 1 : false
+  // the composer windows sit at the bottom right: the bar stays above them
+  const dockOpen = dock.windows.length > 0
+  // the reply goes to the sender of the newest message, unless the user sent it (then to its recipients)
+  const replyTo = last && !last.delivery && last.from ? personName(last.from) : null
 
   if (openId) {
     return (
@@ -191,7 +195,8 @@ export function ThreadReply({ threadId, last, ref }: ThreadReplyProps) {
   }
 
   return (
-    <div data-slot="thread-reply" data-print-hide="" className="flex flex-col gap-3 pt-4">
+    // the bar stays at the bottom of the pane while the thread scrolls: the reply is always one click (or R) away
+    <div data-slot="thread-reply" data-print-hide="" className={`sticky bottom-0 z-10 -mx-5 -mb-8 flex flex-col gap-2 bg-linear-to-t from-background from-75% to-transparent px-5 pt-6 ${dockOpen ? 'pb-16' : 'pb-5'}`}>
       {saved && !savedInDock ? (
         <button
           type="button"
@@ -220,8 +225,17 @@ export function ThreadReply({ threadId, last, ref }: ThreadReplyProps) {
           </Button>
         </p>
       ) : null}
-      <div ref={actions} className="flex flex-wrap items-center gap-2">
-        <ReplyButton label="Reply" command="mail.reply" icon={<Reply />} disabled={create.isPending} onClick={() => start('reply', true)} />
+      <div ref={actions} className="flex min-w-0 items-center gap-1 rounded-xl border bg-card p-1 shadow-sm">
+        <button
+          type="button"
+          disabled={create.isPending}
+          onClick={() => start('reply', true)}
+          className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-lg px-2.5 text-left text-[0.8125rem] text-muted-foreground transition-colors outline-none hover:bg-muted/60 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 disabled:opacity-50"
+        >
+          <Reply className="size-4 shrink-0" />
+          <span className="min-w-0 flex-1 truncate">{replyTo ? `Reply to ${replyTo}…` : 'Reply…'}</span>
+          <Shortcut id="mail.reply" className="shrink-0 opacity-70" />
+        </button>
         {replyAll ? <ReplyButton label="Reply all" command="mail.replyAll" icon={<Reply />} disabled={create.isPending} onClick={() => start('reply_all', true)} /> : null}
         <ReplyButton label="Forward" command="mail.forward" icon={<ForwardRight />} disabled={create.isPending} onClick={() => start('forward', true)} />
       </div>
@@ -238,9 +252,9 @@ function ReplyButton({ label, command, icon, disabled, onClick }: { label: strin
         </span>
       }
     >
-      <Button variant="outline" size="sm" disabled={disabled} onClick={onClick}>
+      <Button variant="ghost" size="sm" className="shrink-0 text-muted-foreground hover:text-foreground" disabled={disabled} onClick={onClick}>
         {icon}
-        {label}
+        <span className="max-[1199px]:sr-only">{label}</span>
       </Button>
     </Tip>
   )

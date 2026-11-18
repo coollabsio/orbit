@@ -302,3 +302,70 @@ export function sendingOutboundId(error: unknown): string | null {
   const id = (error.problem as { outbound_id?: unknown }).outbound_id
   return typeof id === 'string' && id !== '' ? id : null
 }
+
+// ---------------------------------------------------------------- list and reading pane
+
+/** The date group of a list row, by the local day: Today, Yesterday, This week (last 7 days), else the month. */
+export function dateGroup(iso: string, now: Date = new Date()): string {
+  const day = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
+  const date = new Date(iso)
+  const days = Math.round((day(now) - day(date)) / 86_400_000)
+  if (days <= 0) return 'Today'
+  if (days === 1) return 'Yesterday'
+  if (days < 7) return 'This week'
+  const sameYear = date.getFullYear() === now.getFullYear()
+  return date.toLocaleDateString(undefined, sameYear ? { month: 'long' } : { month: 'long', year: 'numeric' })
+}
+
+/** The thread list with a header row before each new date group (`sentView`: by the time sent). */
+export type ListEntry = { kind: 'group'; label: string } | { kind: 'thread'; thread: MailThreadSummary }
+
+export function groupThreads(threads: MailThreadSummary[], sentView = false, now: Date = new Date()): ListEntry[] {
+  const entries: ListEntry[] = []
+  let current: string | null = null
+  for (const thread of threads) {
+    const label = dateGroup((sentView && thread.last_sent_at) || thread.last_message_at, now)
+    if (label !== current) {
+      entries.push({ kind: 'group', label })
+      current = label
+    }
+    entries.push({ kind: 'thread', thread })
+  }
+  return entries
+}
+
+/** A stable avatar colour for a mail address that is not a member's: the same sender always gets the same hue. */
+export function senderColor(address: string | null | undefined): string {
+  let hash = 0
+  for (const character of (address ?? '').toLowerCase()) hash = (hash * 31 + character.charCodeAt(0)) >>> 0
+  return `oklch(0.68 0.13 ${hash % 360})`
+}
+
+/**
+ * A plain-text body without its trailing quote: the `>` lines at the end and the "… wrote:" line before them (a
+ * short line that ends with a colon). `quote` is `null` when there is none, or when nothing else would stay.
+ */
+export function splitTextQuote(text: string): { body: string; quote: string | null } {
+  const lines = text.split('\n')
+  const blank = (line: string) => line.trim() === ''
+  let end = lines.length
+  while (end > 0 && blank(lines[end - 1])) end -= 1
+  let start = end
+  while (start > 0 && (lines[start - 1].trimStart().startsWith('>') || blank(lines[start - 1]))) start -= 1
+  while (start < end && blank(lines[start])) start += 1
+  if (start === end) return { body: text, quote: null }
+  let intro = start
+  while (intro > 0 && blank(lines[intro - 1])) intro -= 1
+  const before = intro > 0 ? lines[intro - 1].trim() : ''
+  const fold = before.endsWith(':') && before.length < 200 ? intro - 1 : start
+  if (!lines.slice(0, fold).some((line) => !blank(line))) return { body: text, quote: null }
+  return { body: lines.slice(0, fold).join('\n').trimEnd(), quote: lines.slice(fold, end).join('\n') }
+}
+
+/** Messages shown before a fold: the first one, and after the fold the last two. Threads of 5 or more fold. */
+const FOLD_FROM = 5
+
+/** The `[start, end)` indices of a long thread's middle messages that fold into "N more messages", or `null`. */
+export function foldedRange(count: number): [number, number] | null {
+  return count >= FOLD_FROM ? [1, count - 2] : null
+}
