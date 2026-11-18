@@ -18,7 +18,6 @@ use sqlx::{Any, Transaction};
 use utoipa::ToSchema;
 
 use super::domains::parse_id;
-use crate::repositories::membership::parse_permissions;
 use super::ingest::MAIL_TOPIC;
 use super::labels::{Label, load_labels};
 use super::mailboxes::{Mailbox, Scope, load_mailboxes};
@@ -26,6 +25,7 @@ use super::search::{Folders, Selection, ThreadCursor, people, select_threads};
 use super::threads::{is_inside, mailbox_users};
 use super::{MailError, MailQuery, MailRepository};
 use crate::live::{LiveHub, NewEvent, Recipients};
+use crate::repositories::membership::parse_permissions;
 
 /// Threads in a page when the caller names no limit.
 pub const THREAD_PAGE_DEFAULT: usize = 50;
@@ -296,6 +296,8 @@ pub struct ThreadListInput {
     pub folder: Option<MailFolder>,
     pub label_id: Option<Id>,
     pub starred: bool,
+    /// Only the threads the caller has not read (the folder's **Unread** switch).
+    pub unread: bool,
     /// Sent (spec §5.10): threads with mail sent from the mailbox, by the last one sent, in
     /// every folder but Trash. Not with `folder`.
     pub sent: bool,
@@ -488,6 +490,7 @@ impl MailRepository {
         selection.mailbox_id = input.mailbox_id;
         selection.label_id = input.label_id;
         selection.query.starred = input.starred;
+        selection.query.unread = input.unread;
         let (threads, more) = select_threads(
             &mut transaction,
             self.postgres(),

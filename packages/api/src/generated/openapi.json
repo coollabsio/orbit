@@ -52544,6 +52544,15 @@
             }
           },
           {
+            "name": "unread",
+            "in": "query",
+            "description": "Only the threads the caller has not read.",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
             "name": "sent",
             "in": "query",
             "description": "Sent: threads with mail sent from the mailbox, newest sent first, in every folder but\ntrash. Not together with `folder`.",

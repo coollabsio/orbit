@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import type { MailThreadSummary } from '@orbit/api/generated/types.gen'
-import { dateGroup, foldedRange, groupThreads, senderColor, splitTextQuote } from './mailLib'
+import { dateGroup, foldedRange, groupThreads, senderColor, splitTextQuote, withKept } from './mailLib'
 
 const now = new Date(2026, 10, 18, 15, 0) // Wed 18 Nov 2026, 15:00 local
 const at = (days: number, hour = 9) => new Date(2026, 10, 18 - days, hour).toISOString()
@@ -51,4 +51,14 @@ test('threads of 5 or more fold their middle messages', () => {
   expect(foldedRange(4)).toBeNull()
   expect(foldedRange(5)).toEqual([1, 3])
   expect(foldedRange(7)).toEqual([1, 5])
+})
+
+test('the Unread list keeps the rows opened since, in time order', () => {
+  const thread = (id: string, iso: string, unread = true) => ({ id, last_message_at: iso, last_sent_at: null, unread }) as unknown as MailThreadSummary
+  const list = [thread('a', at(0)), thread('c', at(2))]
+  const kept = new Map([['b', thread('b', at(1), false)], ['a', thread('a', at(0), false)]])
+  expect(withKept(list, kept).map((row) => row.id)).toEqual(['a', 'b', 'c'])
+  // a row still in the list is the list's copy, not the kept one
+  expect(withKept(list, kept)[0].unread).toBe(true)
+  expect(withKept(list, new Map())).toBe(list)
 })

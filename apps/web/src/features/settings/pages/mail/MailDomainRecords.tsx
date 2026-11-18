@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
 import { ArrowDown2, CloseCircle, Copy, CopySuccess, Danger, InfoCircle, TickCircle } from 'reicon-react'
 import { cn } from 'cn'
@@ -161,7 +161,8 @@ export function SetupStepRow({
   extra?: ReactNode
   blocked?: ReactNode
 }) {
-  const bodyId = `mail-step-${step.key}-${zone}`
+  // unique on the page: two domains can share a zone (example.com and mail.example.com)
+  const bodyId = useId()
   const tone = step.state === 'done' ? 'text-emerald-600 dark:text-emerald-400' : step.state === 'problem' ? 'text-destructive' : step.state === 'blocked' ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'
   return (
     <li className="flex flex-col">

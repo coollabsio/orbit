@@ -93,7 +93,7 @@ export function MessageItem({ threadId, message, expanded, avatarOf, onToggle, o
             onToggle()
           }}
         >
-          <UserAvatar user={avatarOf(message.from, name)} size={32} />
+          <UserAvatar user={avatarOf(message.from, name, Boolean(message.delivery) || Boolean(message.auth.aligned_domain))} size={32} />
           <div className="flex min-w-0 flex-col">
             <span className="truncate text-[0.8125rem] font-semibold text-foreground">{name}</span>
             {/* folded: the first line of the text in place of the address */}

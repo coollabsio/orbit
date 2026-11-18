@@ -334,6 +334,18 @@ export function groupThreads(threads: MailThreadSummary[], sentView = false, now
   return entries
 }
 
+/**
+ * The **Unread** list with the rows opened since it was switched on: they stay (as read) until the view changes, so a
+ * row does not vanish under the pointer when it is read. Newest first, as the list (`sentView`: by the time sent).
+ */
+export function withKept(list: MailThreadSummary[], kept: ReadonlyMap<string, MailThreadSummary>, sentView = false): MailThreadSummary[] {
+  const shown = new Set(list.map((thread) => thread.id))
+  const extra = [...kept.values()].filter((thread) => !shown.has(thread.id))
+  if (extra.length === 0) return list
+  const time = (thread: MailThreadSummary) => (sentView && thread.last_sent_at) || thread.last_message_at
+  return [...list, ...extra].sort((a, b) => time(b).localeCompare(time(a)))
+}
+
 /** A stable avatar colour for a mail address that is not a member's: the same sender always gets the same hue. */
 export function senderColor(address: string | null | undefined): string {
   let hash = 0

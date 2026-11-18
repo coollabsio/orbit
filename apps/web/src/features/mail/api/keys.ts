@@ -11,6 +11,8 @@ export interface ThreadFilter {
   starred?: boolean
   /** Sent: threads the mailbox sent mail in, every folder but the trash (not with `folder`). */
   sent?: boolean
+  /** Only the threads the user has not read (the list's **Unread** switch). */
+  unread?: boolean
 }
 
 /** The outbound queue views the server lists (`GET mail/outbound?view=`). Sent is a thread list (`ThreadFilter.sent`). */

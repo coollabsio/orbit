@@ -33631,6 +33631,10 @@ export type ListMailThreadsData = {
          */
         starred?: boolean;
         /**
+         * Only the threads the caller has not read.
+         */
+        unread?: boolean;
+        /**
          * Sent: threads with mail sent from the mailbox, newest sent first, in every folder but
          * trash. Not together with `folder`.
          */

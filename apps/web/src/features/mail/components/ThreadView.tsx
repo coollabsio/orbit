@@ -1,4 +1,4 @@
-import { useState, type ReactNode, type Ref } from 'react'
+import { useEffect, useRef, useState, type ReactNode, type Ref } from 'react'
 import { Archive, ArrowLeft, DirectInbox, ShieldCross, Sms as Mail, Star, Tag, Trash, Undo } from 'reicon-react'
 import { Link } from 'react-router'
 import { cn } from 'cn'
@@ -124,6 +124,16 @@ export function ThreadView({ detail, status, onRetry, labels, labelsById, canMan
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   /** The middle of a long thread is shown (it folds into "N more messages" at first). */
   const [showAll, setShowAll] = useState(false)
+  // the fold button goes away on click: the focus moves to the first message it showed
+  const messagesRef = useRef<HTMLDivElement>(null)
+  const focusFrom = useRef<number | null>(null)
+  useEffect(() => {
+    if (!showAll || focusFrom.current === null) return
+    // the header of that message (its first `role=button`; the body may hold others)
+    const shown = messagesRef.current?.querySelectorAll('[data-slot="mail-message"]')[focusFrom.current]?.querySelector<HTMLElement>('[role="button"]')
+    focusFrom.current = null
+    shown?.focus()
+  }, [showAll])
   const avatarOf = useMailAvatar()
   if (!detail) {
     return (
@@ -212,7 +222,7 @@ export function ThreadView({ detail, status, onRetry, labels, labelsById, canMan
         )}
       </PaneHeader>
       <div data-print-root="" className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex max-w-[800px] flex-col px-5 pt-6 pb-8">
+        <div ref={messagesRef} className="mx-auto flex max-w-[800px] flex-col px-5 pt-6 pb-8">
           <div className="flex flex-wrap items-center gap-2.5 pb-2">
             <h1 className="m-0 text-xl font-semibold break-words text-foreground">{subject}</h1>
             <Badge variant="secondary">{folderLabel(thread.folder)}</Badge>
@@ -257,7 +267,10 @@ export function ThreadView({ detail, status, onRetry, labels, labelsById, canMan
                   data-slot="mail-thread-fold"
                   data-print-hide=""
                   className="group/fold relative my-1 flex h-8 w-full items-center justify-center text-xs text-muted-foreground outline-none before:absolute before:inset-x-0 before:top-1/2 before:border-t before:border-dashed hover:text-foreground focus-visible:text-foreground"
-                  onClick={() => setShowAll(true)}
+                  onClick={() => {
+                    focusFrom.current = fold[0]
+                    setShowAll(true)
+                  }}
                 >
                   <span className="relative rounded-full border bg-background px-3 py-1 transition-colors group-hover/fold:bg-muted group-focus-visible/fold:ring-2 group-focus-visible/fold:ring-ring/50">
                     {fold[1] - fold[0]} more messages

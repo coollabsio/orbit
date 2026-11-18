@@ -85,9 +85,10 @@ pub fn render_document(html: &str, opts: &RenderOptions<'_>) -> Rendered {
         .to_string();
     let css = style_sheets(html);
     let plain = is_plain(&css, &body);
+    let blocked = blocked.load(Ordering::Relaxed);
     Rendered {
-        html: document(&css, &body, opts.nonce, plain),
-        blocked_remote_images: blocked.load(Ordering::Relaxed),
+        html: document(&css, &body, opts.nonce, plain, blocked),
+        blocked_remote_images: blocked,
     }
 }
 
@@ -107,7 +108,7 @@ pub fn render_text_document(text: &str, nonce: &str) -> String {
         None => push_escaped(&mut body, text),
     }
     body.push_str("</pre>");
-    document(TEXT_CSS, &body, nonce, true)
+    document(TEXT_CSS, &body, nonce, true, 0)
 }
 
 /// The byte offset where the trailing quote of a plain-text message starts, or `None` when the text does not end
@@ -215,22 +216,27 @@ const TEXT_CSS: &str = "pre{margin:0;font:inherit}";
 /// `blockquote` with its "… wrote:" line; never when nothing is visible before it), takes the app theme
 /// (`{orbitMailTheme, orbitMailBackground}` from the parent only, `dark` or `light` and a colour), and posts
 /// `{orbitMailHeight, orbitMailPlain, orbitMailBlocked, orbitMailTheme}` on every size change and after each theme
-/// message: the theme it shows, so the app keeps a plain frame hidden until it is in the app theme (no white flash). The height is the content's (`documentElement.scrollHeight` never drops below the frame's own
-/// height), so the frame shrinks again when the quote folds.
-const FRAME_SCRIPT: &str = r#"(()=>{const d=document,e=d.documentElement,b=d.body,p=e.hasAttribute('data-orbit-plain'),m=n=>n.nodeType==3?/\S/.test(n.data):n.nodeType==1&&(/\S/.test(n.textContent)||n.matches('img')||!!n.querySelector('img')),z=n=>{while(n&&!m(n))n=n.previousSibling;return n};let s=b.querySelector('.orbit-quote-intro,.gmail_quote,blockquote.orbit-quote,.orbit-quote-text'),c=b,k;if(!s){while((k=z(c.lastChild))&&k.nodeName=='DIV')c=k;if(k&&k.nodeName=='BLOCKQUOTE'){s=k;const q=z(k.previousSibling),x=q?q.textContent.trim():'';if(x.length<200&&x.endsWith(':'))s=q}}if(s){let h=[],v=0;for(let a=s,o=s;a!=b;a=a.parentNode,o=a.nextSibling){for(let r=a.previousSibling;r;r=r.previousSibling)v|=m(r);for(;o;o=o.nextSibling)h.push(o)}if(v){h=h.flatMap(n=>{if(n.nodeType==1)return[n];if(!m(n))return[];const w=d.createElement('span');n.before(w);w.append(n);return[w]});const t=d.createElement('button'),f=x=>{t.setAttribute('aria-expanded',x);t.setAttribute('aria-label',(x?'Hide':'Show')+' quoted text');for(const n of h)n.hidden=!x};t.type='button';t.className='orbit-fold';t.textContent='\u2022\u2022\u2022';f(false);t.addEventListener('click',()=>f(t.getAttribute('aria-expanded')!='true'));h[0].before(t)}}const P=()=>parent.postMessage({orbitMailHeight:Math.max(e.offsetHeight,b.scrollHeight),orbitMailPlain:p,orbitMailBlocked:b.querySelectorAll('img:not([src])').length,orbitMailTheme:e.dataset.theme||null},'*');addEventListener('message',ev=>{const g=ev.source==parent&&ev.data,t=g&&g.orbitMailTheme,c=g&&g.orbitMailBackground;if(t=='dark'||t=='light')e.dataset.theme=t;if(typeof c=='string'&&/^(#[0-9a-f]{3,8}|(rgba?|oklch|oklab|hsla?|lab|lch|color)\([0-9a-z.,%/ -]{1,80}\))$/i.test(c))e.style.setProperty('--orbit-bg',c);if(g)P()});const o=new ResizeObserver(P);o.observe(e);o.observe(b)})()"#;
+/// message: `orbitMailBlocked` is the server's count from `data-orbit-blocked`, and the theme is the one it shows, so
+/// the app keeps a plain frame hidden until it is in the app theme (no white flash). The height is the content's
+/// (`documentElement.scrollHeight` never drops below the frame's own height), so the frame shrinks again when the
+/// quote folds. Its own `<script>` element (the body's last child) never counts as visible text.
+const FRAME_SCRIPT: &str = r#"(()=>{const d=document,e=d.documentElement,b=d.body,p=e.hasAttribute('data-orbit-plain'),m=n=>n.nodeType==3?/\S/.test(n.data):n.nodeType==1&&n.nodeName!='SCRIPT'&&(/\S/.test(n.textContent)||n.matches('img')||!!n.querySelector('img')),z=n=>{while(n&&!m(n))n=n.previousSibling;return n};let s=b.querySelector('.orbit-quote-intro,.gmail_quote,blockquote.orbit-quote,.orbit-quote-text'),c=b,k;if(!s){while((k=z(c.lastChild))&&k.nodeName=='DIV')c=k;if(k&&k.nodeName=='BLOCKQUOTE'){s=k;const q=z(k.previousSibling),x=q?q.textContent.trim():'';if(x.length<200&&x.endsWith(':'))s=q}}if(s){let h=[],v=0;for(let a=s,o=s;a!=b;a=a.parentNode,o=a.nextSibling){for(let r=a.previousSibling;r;r=r.previousSibling)v|=m(r);for(;o;o=o.nextSibling)h.push(o)}if(v){h=h.flatMap(n=>{if(n.nodeType==1)return[n];if(!m(n))return[];const w=d.createElement('span');n.before(w);w.append(n);return[w]});const t=d.createElement('button'),f=x=>{t.setAttribute('aria-expanded',x);t.setAttribute('aria-label',(x?'Hide':'Show')+' quoted text');for(const n of h)n.hidden=!x};t.type='button';t.className='orbit-fold';t.textContent='\u2022\u2022\u2022';f(false);t.addEventListener('click',()=>f(t.getAttribute('aria-expanded')!='true'));h[0].before(t)}}const P=()=>parent.postMessage({orbitMailHeight:Math.max(e.offsetHeight,b.scrollHeight),orbitMailPlain:p,orbitMailBlocked:+(e.dataset.orbitBlocked||0),orbitMailTheme:e.dataset.theme||null},'*');addEventListener('message',ev=>{const g=ev.source==parent&&ev.data,t=g&&g.orbitMailTheme,c=g&&g.orbitMailBackground;if(t=='dark'||t=='light')e.dataset.theme=t;if(typeof c=='string'&&/^(#[0-9a-f]{3,8}|(rgba?|oklch|oklab|hsla?|lab|lch|color)\([0-9a-z.,%/ -]{1,80}\))$/i.test(c))e.style.setProperty('--orbit-bg',c);if(g)P()});const o=new ResizeObserver(P);o.observe(e);o.observe(b)})()"#;
 
 /// The full view document. The script goes at the end of the body, after the sanitized mail, because it needs the
-/// mail's DOM to fold the quote.
-fn document(css: &str, body: &str, nonce: &str, plain: bool) -> String {
+/// mail's DOM to fold the quote. `blocked` (the remote images the view removed) goes into `data-orbit-blocked` on the
+/// `<html>` element, for the script to post.
+fn document(css: &str, body: &str, nonce: &str, plain: bool, blocked: usize) -> String {
     let mut out = String::with_capacity(
         body.len() + css.len() + BASE_CSS.len() + DARK_CSS.len() + FRAME_SCRIPT.len() + 192,
     );
-    out.push_str(if plain {
-        "<!DOCTYPE html><html data-orbit-plain>"
-    } else {
-        "<!DOCTYPE html><html>"
-    });
-    out.push_str("<head><meta charset=\"utf-8\"><style>");
+    out.push_str("<!DOCTYPE html><html");
+    if plain {
+        out.push_str(" data-orbit-plain");
+    }
+    if blocked > 0 {
+        out.push_str(&format!(" data-orbit-blocked=\"{blocked}\""));
+    }
+    out.push_str("><head><meta charset=\"utf-8\"><style>");
     out.push_str(BASE_CSS);
     if plain {
         out.push_str(DARK_CSS);

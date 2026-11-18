@@ -49,7 +49,7 @@ interface ThreadListProps {
   unreadCount?: number
   /** **All / Unread**; without it there is no switch (send folders, search). */
   unreadOnly?: { value: boolean; onChange: (unreadOnly: boolean) => void }
-  /** Marks the loaded unread conversations as read; without it the header has no menu. */
+  /** Marks the unread conversations shown as read; without it the header has no menu. */
   onMarkAllRead?: () => void
   /** A thread's mailbox name when the list mixes mailboxes. */
   mailboxName?: (thread: MailThreadSummary) => string | undefined
@@ -159,7 +159,7 @@ export function ThreadList({
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-auto min-w-44">
                 <DropdownMenuItem disabled={!threads.some((thread) => thread.unread)} onClick={onMarkAllRead}>
-                  <TickCircle /> Mark all as read
+                  <TickCircle /> Mark all shown as read
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>

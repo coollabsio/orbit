@@ -102,7 +102,9 @@ fn document_has_the_frame_script_with_the_nonce() {
         "' quoted text'",
         "addEventListener('click'",
         "new ResizeObserver(",
-        "orbitMailBlocked:b.querySelectorAll('img:not([src])').length",
+        "orbitMailBlocked:+(e.dataset.orbitBlocked||0)",
+        // its own script element is not visible text (else a trailing blockquote never folds)
+        "n.nodeName!='SCRIPT'",
         "orbitMailTheme:e.dataset.theme||null",
         "if(g)P()",
     ] {
@@ -110,7 +112,6 @@ fn document_has_the_frame_script_with_the_nonce() {
     }
     // one element: no quote can end an attribute, no handler attribute, no network load
     let inner = &script[script.find('>').unwrap() + 1..script.len() - "</script>".len()];
-    // (`img:not([src])` only counts the images the view removed; setting a source would load one)
     for needle in [
         "\"", "</", "<!--", "onclick", "fetch(", ".src", "src=", "import",
     ] {
@@ -484,6 +485,15 @@ fn remote_images_are_removed_and_counted_without_a_proxy() {
     assert!(!rendered.html.contains("tracker.test"), "{}", rendered.html);
     assert!(!rendered.html.contains("local.png"), "{}", rendered.html);
     assert_eq!(rendered.blocked_remote_images, 3);
+    // the frame script posts the server's count: an image without a source that loading would not bring back (the
+    // relative one) does not count
+    assert!(
+        rendered
+            .html
+            .starts_with("<!DOCTYPE html><html data-orbit-plain data-orbit-blocked=\"3\"><head>"),
+        "{}",
+        rendered.html
+    );
 }
 
 #[test]
@@ -501,6 +511,11 @@ fn remote_images_go_through_the_proxy() {
     );
     assert!(!rendered.html.contains("tracker.test"), "{}", rendered.html);
     assert_eq!(rendered.blocked_remote_images, 0);
+    assert!(
+        !rendered.html.contains("data-orbit-blocked"),
+        "{}",
+        rendered.html
+    );
 }
 
 #[test]

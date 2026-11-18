@@ -86,6 +86,7 @@ export function useThreads(filter: ThreadFilter, enabled = true) {
           label_id: filter.labelId,
           starred: filter.starred || undefined,
           sent: filter.sent || undefined,
+          unread: filter.unread || undefined,
           cursor: pageParam,
         },
         throwOnError: true,

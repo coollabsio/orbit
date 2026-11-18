@@ -29,6 +29,7 @@ import {
   parseMailPath,
   problemText,
   threadFilterOf,
+  withKept,
   type MailView,
 } from '@/features/mail/mailLib'
 import { useCommand } from '@/shortcuts/useCommand'
@@ -69,17 +70,17 @@ function MailApp({ view, threadId }: { view: MailView; threadId: string | null }
   const me = useMailMe()
   const counts = useMailCounts()
   const filter = threadFilterOf(view)
-  const list = useThreads(filter ?? {}, filter !== null)
+  // **Unread**: the server lists only unread conversations; those opened since stay (as read) until the view changes
+  const [unreadOnly, setUnreadOnly] = useState(false)
+  const [kept, setKept] = useState<ReadonlyMap<string, MailThreadSummary>>(() => new Map())
+  const list = useThreads(filter && unreadOnly ? { ...filter, unread: true } : (filter ?? {}), filter !== null)
   const search = useMailSearch(query)
   // Drafts, Scheduled and Outbox read the drafts and the outbound queue; every list marks the threads with a draft
   const sendView = view.kind === 'folder' && (view.folder === 'drafts' || view.folder === 'scheduled' || view.folder === 'outbox') ? view.folder : null
   const source = view.kind === 'search' ? search : list
-  // **Unread**: only unread conversations, and those opened since (they stay until the view changes)
-  const [unreadOnly, setUnreadOnly] = useState(false)
-  const [keptRead, setKeptRead] = useState<ReadonlySet<string>>(() => new Set())
   // a send folder has no threads (the idle list query may hold another folder's cached rows)
   const loaded = sendView ? [] : (source.data ?? [])
-  const threads = unreadOnly ? loaded.filter((thread) => thread.unread || keptRead.has(thread.id) || thread.id === threadId) : loaded
+  const threads = unreadOnly ? withKept(loaded, kept, view.kind === 'folder' && view.folder === 'sent') : loaded
   const detail = useThread(threadId)
   // with a mailbox open, the send folders are that mailbox's
   const scope = view.kind === 'folder' ? view.mailboxId : undefined
@@ -117,7 +118,8 @@ function MailApp({ view, threadId }: { view: MailView; threadId: string | null }
   }
   const open = (id: string) => {
     setFocusedId(id)
-    if (unreadOnly) setKeptRead((previous) => new Set(previous).add(id))
+    const row = unreadOnly ? threads.find((thread) => thread.id === id) : undefined
+    if (row) setKept((previous) => new Map(previous).set(id, { ...row, unread: false }))
     navigate(pathOf(id))
   }
   const close = () => navigate(pathOf(null))
@@ -428,7 +430,7 @@ function MailApp({ view, threadId }: { view: MailView; threadId: string | null }
         showOutbox={showOutbox}
         rows={sendRows}
         unreadCount={unreadCount}
-        unreadOnly={!sendView && view.kind !== 'search' ? { value: unreadOnly, onChange: (next) => { setUnreadOnly(next); setKeptRead(new Set()) } } : undefined}
+        unreadOnly={!sendView && view.kind !== 'search' ? { value: unreadOnly, onChange: (next) => { setUnreadOnly(next); setKept(new Map()) } } : undefined}
         onMarkAllRead={!sendView ? () => apply(loaded.filter((thread) => thread.unread), { read: true }, false) : undefined}
         mailboxName={mixed ? (thread) => mailboxName(thread.mailbox_id) : undefined}
         onOpen={open}
