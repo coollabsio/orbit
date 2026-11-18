@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import { ApiProblem } from '@orbit/api/problem'
-import { applyDraftConflict, frameHeight, mailThreadPath, mailViewPath, parseMailPath, railFolders, searchSuggestions, sendingOutboundId, sentRecipients, threadFilterOf, type MailView } from './mailLib'
+import { applyDraftConflict, backgroundBehind, frameHeight, frameMessage, frameThemeMessage, mailThreadPath, mailViewPath, parseMailPath, railFolders, searchSuggestions, sendingOutboundId, sentRecipients, threadFilterOf, type MailView } from './mailLib'
 
 test('a message frame takes only a finite height from its own window, clamped to 80–20,000 px', () => {
   const frame = { name: 'frame' }
@@ -15,6 +15,43 @@ test('a message frame takes only a finite height from its own window, clamped to
   for (const data of [{ orbitMailHeight: Number.NaN }, { orbitMailHeight: Infinity }, { orbitMailHeight: '300' }, 300, null, 'orbitMailHeight']) {
     expect(frameHeight({ source: frame, data }, frame)).toBeNull()
   }
+})
+
+test('a message frame says whether its mail is plain, only with a valid height from its own window', () => {
+  const frame = { name: 'frame' }
+  expect(frameMessage({ source: frame, data: { orbitMailHeight: 300, orbitMailPlain: true } }, frame)).toEqual({ height: 300, plain: true, blocked: null, theme: null })
+  expect(frameMessage({ source: frame, data: { orbitMailHeight: 300, orbitMailPlain: false } }, frame)).toEqual({ height: 300, plain: false, blocked: null, theme: null })
+  // only `true` is plain; an old frame without the flag is not
+  for (const flag of [undefined, 'true', 1, null]) {
+    expect(frameMessage({ source: frame, data: { orbitMailHeight: 12, orbitMailPlain: flag } }, frame)).toEqual({ height: 80, plain: false, blocked: null, theme: null })
+  }
+  // the count of removed remote images: a whole number, else unknown
+  expect(frameMessage({ source: frame, data: { orbitMailHeight: 300, orbitMailBlocked: 2 } }, frame)?.blocked).toBe(2)
+  expect(frameMessage({ source: frame, data: { orbitMailHeight: 300, orbitMailBlocked: 0 } }, frame)?.blocked).toBe(0)
+  // the theme the frame shows: only `dark` or `light`
+  expect(frameMessage({ source: frame, data: { orbitMailHeight: 300, orbitMailTheme: 'dark' } }, frame)?.theme).toBe('dark')
+  expect(frameMessage({ source: frame, data: { orbitMailHeight: 300, orbitMailTheme: 'blue' } }, frame)?.theme).toBeNull()
+  for (const count of [-1, 1.5, '2', Number.NaN]) expect(frameMessage({ source: frame, data: { orbitMailHeight: 300, orbitMailBlocked: count } }, frame)?.blocked).toBeNull()
+  expect(frameMessage({ source: { name: 'other' }, data: { orbitMailHeight: 300, orbitMailPlain: true } }, frame)).toBeNull()
+  expect(frameMessage({ source: frame, data: { orbitMailPlain: true } }, frame)).toBeNull()
+  expect(frameMessage({ source: null, data: { orbitMailHeight: 300, orbitMailPlain: true } }, null)).toBeNull()
+  expect(frameThemeMessage('dark')).toEqual({ orbitMailTheme: 'dark' })
+  expect(frameThemeMessage('light')).toEqual({ orbitMailTheme: 'light' })
+  expect(frameThemeMessage('dark', 'rgb(10, 10, 10)')).toEqual({ orbitMailTheme: 'dark', orbitMailBackground: 'rgb(10, 10, 10)' })
+})
+
+test('the colour behind a frame is the first one that is not transparent', () => {
+  const chain = (colors: string[]) => {
+    const nodes = colors.map((color) => ({ color, parentElement: null as unknown }))
+    nodes.forEach((node, index) => { node.parentElement = nodes[index + 1] ?? null })
+    return { first: nodes[0] as unknown as Element, colorOf: (node: Element) => (node as unknown as { color: string }).color }
+  }
+  const a = chain(['rgba(0, 0, 0, 0)', 'transparent', 'oklch(0.145 0 0)', 'rgb(255, 255, 255)'])
+  expect(backgroundBehind(a.first, a.colorOf)).toBe('oklch(0.145 0 0)')
+  const b = chain(['rgb(1 2 3 / 0)', 'rgb(20, 20, 20)'])
+  expect(backgroundBehind(b.first, b.colorOf)).toBe('rgb(20, 20, 20)')
+  expect(backgroundBehind(chain(['transparent']).first, chain(['transparent']).colorOf)).toBeNull()
+  expect(backgroundBehind(null, () => 'red')).toBeNull()
 })
 
 test('mail paths name a view and an open thread, both ways', () => {

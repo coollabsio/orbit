@@ -120,6 +120,52 @@ export function frameHeight(event: { source: unknown; data: unknown }, frameWind
   return Math.min(FRAME_MAX_HEIGHT, Math.max(FRAME_MIN_HEIGHT, Math.ceil(height)))
 }
 
+/** What a message frame posts: its height, and whether the mail is plain (no colours of its own: it follows the app theme). */
+export interface FrameMessage {
+  height: number
+  plain: boolean
+  /** Remote images the view removed (they load with **Load images**); `null` from a frame that does not say. */
+  blocked: number | null
+  /** The theme the frame shows; `null` before the app's theme reached it. */
+  theme: 'dark' | 'light' | null
+}
+
+/**
+ * A message frame's post (`{orbitMailHeight, orbitMailPlain}`), with the same checks as {@link frameHeight}, or
+ * `null`. Only `orbitMailPlain: true` makes it plain.
+ */
+export function frameMessage(event: { source: unknown; data: unknown }, frameWindow: unknown): FrameMessage | null {
+  const height = frameHeight(event, frameWindow)
+  if (height === null) return null
+  const data = event.data as Record<string, unknown>
+  const blocked = data.orbitMailBlocked
+  return {
+    height,
+    plain: data.orbitMailPlain === true,
+    blocked: typeof blocked === 'number' && Number.isInteger(blocked) && blocked >= 0 ? blocked : null,
+    theme: data.orbitMailTheme === 'dark' || data.orbitMailTheme === 'light' ? data.orbitMailTheme : null,
+  }
+}
+
+/**
+ * The message that gives a plain message frame the app theme and the colour of the page behind it (posted with
+ * target `*`: the frame's origin is opaque). The frame paints that colour itself: a frame's own page is not
+ * transparent in every browser.
+ */
+export const frameThemeMessage = (theme: 'dark' | 'light', background?: string | null) =>
+  background ? { orbitMailTheme: theme, orbitMailBackground: background } : { orbitMailTheme: theme }
+
+const TRANSPARENT = /^(transparent|rgba\([^)]*,\s*0\)|rgb\([^)]*\/\s*0\))$/
+
+/** The first background colour that is not transparent, from `element` up through its parents (`null` without one). */
+export function backgroundBehind(element: Element | null, colorOf: (element: Element) => string): string | null {
+  for (let node = element; node; node = node.parentElement) {
+    const color = colorOf(node).trim()
+    if (color && !TRANSPARENT.test(color)) return color
+  }
+  return null
+}
+
 export interface SearchSuggestion {
   /** What the list shows. */
   label: string
