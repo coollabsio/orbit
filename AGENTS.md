@@ -66,6 +66,10 @@ can run at the same time:
   Thus a branch's migrations never change the main dev database. A worktree can have its own `.env.local`.
 - **URL:** when Tailscale runs, the web port is published over HTTPS on the tailnet name
   (`https://<host>.ts.net:<web port>`), and the server uses it as its public origin.
+- **Network:** `ORBIT_DEV_HOST` is the address the web server listens on (default `127.0.0.1`; `0.0.0.0`
+  opens it to the local network). The API stays on `127.0.0.1` (Orbit refuses another address in
+  development); the web server proxies `/api` to it. `ORBIT_DEV_PUBLIC_HOST` sets the host of the public origin
+  (`http://<host>:<web port>`) in place of the tailnet name. Set them in your shell, not in a tracked file.
 
 To test a running app, call Jean MCP `get_run_environments` with your `worktreeId`, and use the ports and URL it
 gives for your worktree. If your worktree has no running environment, start it with `start_run_environment`. Do not
