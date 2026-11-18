@@ -116,23 +116,28 @@ To add an icon, add its reicon name to `ICONS` in `scripts/generate-icons.ts` an
 
 ## Store builds
 
-The sign-in screen's Server dropdown starts on Orbit Cloud (`https://app.orbit.so`), so a cloud user only types an email and a password. A self-hosted user picks Custom and types the address of their Orbit server. When `EXPO_PUBLIC_ORBIT_SERVER` is set to another server, the dropdown starts on Custom with that address. The `preview` and `production` profiles in `eas.json` set it to Orbit Cloud, so a release build never fills in a dev server from `.env.local`.
+The project does not use EAS. The GitHub workflow `.github/workflows/testflight.yml` (manual run) makes the iOS store build: `expo prebuild`, then `xcodebuild` on a macOS runner, signed with the certificate and the profile in the `IOS_*` secrets, and uploaded to TestFlight with the App Store Connect API key. The workflow sets `ios.buildNumber` from the run number, sets `expo-notifications` to the production APNs environment and stops if the entitlement does not say `production`. The same build goes to TestFlight and, after review, to the App Store. The certificate and the profile expire each year: renew them at developer.apple.com and update the secrets.
 
-What is configured:
+The sign-in screen's Server dropdown starts on Orbit Cloud (`https://app.orbit.so`), so a cloud user only types an email and a password. A self-hosted user picks Custom and types the address of their Orbit server. When `EXPO_PUBLIC_ORBIT_SERVER` is set to another server, the dropdown starts on Custom with that address. The workflow sets it to Orbit Cloud, so a release build never fills in a dev server from `.env.local`.
 
-- `app.json`: the iOS bundle identifier and the Android package are `io.coollabs.orbit`. `ios.privacyManifests` declares no tracking, the data the app collects (email, name, photos or videos, and other user content, linked to the user, for app functionality only), and the required-reason APIs that React Native and the Expo modules use (UserDefaults, file timestamps, system boot time, disk space). The reasons are copied from each package's `PrivacyInfo.xcprivacy`. After you add a native module, check its manifest and add its reasons.
-- `eas.json`: the build version numbers live on EAS (`appVersionSource: remote`). The `development` profile makes an internal development build, `preview` an internal build, and `production` a store build that increments the build number.
-- On iOS the sign-in screen and Security → Connected accounts offer only the OpenID Connect provider, not Google or GitHub (`offeredProviders` in `src/data/sign-in-provider.ts`). App Store guideline 4.8 asks an app with a third-party or social login to also offer Sign in with Apple (or an equal private login). Accounts that are already connected stay listed, so they can be disconnected, and they still confirm changes.
-- The billing banner only shows the trial's days left or that the workspace is read-only. It has no link to billing. App Store guideline 3.1.1 and the Google Play payments policy forbid pointing to purchases outside the app.
+What is configured for App Review:
 
-What you still have to do:
+- `app.json`: the iOS bundle identifier and the Android package are `io.coollabs.orbit`. `ios.config.usesNonExemptEncryption` is `false`. `ios.privacyManifests` declares no tracking, the data the app collects (email, name, photos or videos, and other user content, linked to the user, for app functionality only), and the required-reason APIs that React Native and the Expo modules use (UserDefaults, file timestamps, system boot time, disk space). The reasons are copied from each package's `PrivacyInfo.xcprivacy`. After you add a native module, check its manifest and add its reasons.
+- The `expo-image-picker` plugin in `app.json` sets the camera, photo library and microphone texts. Guideline 5.1.1 asks each text to say why the app needs the access.
+- On iOS the sign-in screen and Security → Connected accounts offer only the OpenID Connect provider, not Google or GitHub (`offeredProviders` in `src/data/sign-in-provider.ts`). Guideline 4.8 asks an app with a third-party or social login to also offer Sign in with Apple (or an equal private login). Accounts that are already connected stay listed, so they can be disconnected, and they still confirm changes.
+- On iOS the Billing page is not in Settings, and its route goes back to Settings (`allowedNav` in `src/components/settings/Shell.tsx`, `settings/billing.tsx`). The billing banner shows only the trial's days left or that the workspace is read-only, with no link. Guideline 3.1.1 forbids pointing to purchases outside the app.
+- Mail is not in the dock or the drawer until it is ready. Guideline 2.1 refuses "coming soon" items.
+- The sign-in screen and the account menu link to the terms of service and the privacy policy (`src/data/legal.ts`). Guideline 5.1.1 asks for the privacy policy inside the app.
+- Chat has Report on a message and Block on a person, and owners and admins see the reports in Settings → Reports (guideline 1.2, user-generated content).
+- Settings → Profile has Delete account (guideline 5.1.1(v)).
 
-1. Create the project on EAS: `bunx eas-cli init` in `apps/mobile`. It adds `extra.eas.projectId` to `app.json`.
-2. Before you build the `development` profile, install the dev client: `bunx expo install expo-dev-client`.
-3. Create the apps in App Store Connect and in the Google Play Console with the identifier `io.coollabs.orbit`.
-4. Fill in `submit.production` in `eas.json`. iOS takes `appleId` (or `EXPO_APPLE_ID`), `ascAppId` (the App Store Connect app ID) and `appleTeamId`. Android takes `serviceAccountKeyPath` (a Google service account JSON key with access to the Play Console; keep it out of git, or upload it to EAS instead) and `track` (`internal` for the first upload). Google Play requires the first upload of an app to be done by hand in the Play Console.
-5. Build and submit: `bunx eas-cli build --platform all --profile production`, then `bunx eas-cli submit --platform ios --profile production` (and `android`).
-6. Fill in the App Store privacy labels and the Play data safety form so that they match `ios.privacyManifests`.
+What you do by hand in App Store Connect:
+
+1. Run the TestFlight workflow, and wait until the build shows in TestFlight.
+2. In the app version, pick that build, and add the screenshots from `marketing/app-store/`.
+3. Fill in the privacy labels so that they match `ios.privacyManifests`, the age rating, the category, the support URL and the privacy policy URL (`https://coollabs.io/privacy-policy/`).
+4. In App Review information, give a demo account on `https://app.orbit.so` with data in a workspace that does not become read-only. Say that the app cannot create an account, and that workspaces are private and invite-only.
+5. Submit the version for review.
 
 ## Android push (FCM)
 
