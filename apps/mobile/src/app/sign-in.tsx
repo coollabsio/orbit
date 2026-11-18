@@ -1,9 +1,11 @@
 import { useQuery } from '@tanstack/react-query'
+import * as WebBrowser from 'expo-web-browser'
 import { useEffect, useState } from 'react'
 import { Linking, Platform, ScrollView, View } from 'react-native'
 
 import { Select } from '../components/settings/Shell'
 import { accountKeys, authOptions } from '../data/account-api'
+import { PRIVACY_POLICY_URL, TERMS_OF_SERVICE_URL } from '../data/legal'
 import { createClient, normalizeServer, type SignIn, signIn as signInWithPassword, signInSecondFactor } from '../data/orbit'
 import { isPasswordTokenSpent, linkProviderAccount, looksLikeServer, offeredProviders, type PasswordStep, type Provider, providerErrorMessage, providerLabel, startProviderSignIn } from '../data/sign-in-provider'
 import { useSession } from '../session-context'
@@ -234,6 +236,17 @@ export default function SignInScreen() {
             )}
           </View>
         </View>
+        <Text className="mt-4 w-full max-w-115 self-center text-center text-[12px] leading-[18px] text-muted-foreground">
+          By signing in, you agree to the{' '}
+          <Text accessibilityRole="link" onPress={() => void WebBrowser.openBrowserAsync(TERMS_OF_SERVICE_URL).catch(() => undefined)} className="text-[12px] leading-[18px] text-muted-foreground underline">
+            Terms of service
+          </Text>{' '}
+          and the{' '}
+          <Text accessibilityRole="link" onPress={() => void WebBrowser.openBrowserAsync(PRIVACY_POLICY_URL).catch(() => undefined)} className="text-[12px] leading-[18px] text-muted-foreground underline">
+            Privacy policy
+          </Text>
+          .
+        </Text>
       </ScrollView>
     </View>
   )

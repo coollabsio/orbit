@@ -1,8 +1,10 @@
 import type { Href } from 'expo-router'
+import * as WebBrowser from 'expo-web-browser'
 import { type ReactNode, useState } from 'react'
 import { Pressable, ScrollView, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
+import { PRIVACY_POLICY_URL, TERMS_OF_SERVICE_URL } from '../data/legal'
 import { hasCustomStatus, PRESENCE_OPTIONS, withoutCustomStatus, withPresence } from '../data/status'
 import { useOwnStatus, useSetStatus } from '../hooks/account'
 import { useOrbit } from '../orbit-context'
@@ -97,6 +99,9 @@ export function AccountMenu({
             <Row icon="user" label="Account settings" onPress={run(() => onNavigate('/settings/profile'))} />
             <Row icon="brush" label="Appearance" onPress={run(() => onNavigate('/settings/appearance'))} />
             <Row icon="bell" label="Notifications" onPress={run(() => onNavigate('/settings/notifications'))} />
+            <Separator />
+            <Row icon="shield" label="Privacy policy" onPress={run(() => void WebBrowser.openBrowserAsync(PRIVACY_POLICY_URL).catch(() => undefined))} />
+            <Row icon="docs" label="Terms of service" onPress={run(() => void WebBrowser.openBrowserAsync(TERMS_OF_SERVICE_URL).catch(() => undefined))} />
             <Separator />
             <Row
               icon="logout"
