@@ -2,13 +2,14 @@ import type { NotificationRecord } from './orbit'
 
 const IMPORT_NAMES: Record<string, string> = { asana: 'Asana', linear: 'Linear', trello: 'Trello', notion: 'Notion', obsidian: 'Obsidian' }
 
-/** Where a notification leads in the app: its conversation, page, task or import, as on the web. */
+/** Where a notification leads in the app: its conversation, page, task, import or the chat reports, as on the web. */
 export function notificationTarget(notification: NotificationRecord): string | null {
   if (notification.kind === 'import_finished') {
     const source = notification.import_source ?? ''
     return IMPORT_NAMES[source] && notification.import_id ? `/settings/import/${source}/${notification.import_id}` : null
   }
   if (notification.kind === 'chat_mentioned' && notification.chat_conversation_id) return `/chat/${notification.chat_conversation_id}`
+  if (notification.kind === 'chat_reported') return '/settings/reports'
   if (notification.page_id) return `/docs/${notification.page_id}`
   return notification.task_id ? `/tasks/${notification.task_id}` : null
 }
@@ -30,6 +31,8 @@ export function notificationCopy(notification: NotificationRecord, pageTitle: st
     }
     case 'chat_mentioned':
       return { title: `${actor} mentioned you in chat`, body: 'Open the conversation to see the message.' }
+    case 'chat_reported':
+      return { title: `${actor} reported a chat message`, body: 'Open the reports to see the message.' }
     case 'page_mentioned':
       return { title: `${actor} mentioned you in ${page}`, body: 'Open the page to see where.' }
     case 'page_comment_mentioned':

@@ -1,5 +1,5 @@
 import { useContext, type ComponentType } from 'react'
-import { ArchiveBox, Brush, Card, Chart, ClipboardText, CloudConnection, Cpu, SecurityUser, Driver, Key, Keyboard, Link2, Lock, Login, Notification as Bell, Setting2 as Settings, ShieldTick as ShieldCheck, SmileCircle, Sms as Mail, Sticker, Danger as TriangleAlert, DocumentDownload, Import, User, People as Users, Global, Routing, DirectInbox, Tag, SmsTracking, UserTag } from 'reicon-react'
+import { ArchiveBox, Flag, UserBlock, Brush, Card, Chart, ClipboardText, CloudConnection, Cpu, SecurityUser, Driver, Key, Keyboard, Link2, Lock, Login, Notification as Bell, Setting2 as Settings, ShieldTick as ShieldCheck, SmileCircle, Sms as Mail, Sticker, Danger as TriangleAlert, DocumentDownload, Import, User, People as Users, Global, Routing, DirectInbox, Tag, SmsTracking, UserTag } from 'reicon-react'
 import type { Permission } from '@orbit/api/generated/types.gen'
 import { RobotIcon } from '@/components/common/icons/RobotIcon'
 import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
@@ -53,6 +53,7 @@ const AREAS: Record<SettingsAreaName, SettingsArea> = {
         items: [
           { to: '/settings/emoji', label: 'Emoji', icon: SmileCircle, permission: 'chat.manage' },
           { to: '/settings/stickers', label: 'Stickers', icon: Sticker, permission: 'chat.manage' },
+          { to: '/settings/reports', label: 'Reports', icon: Flag, permission: 'chat.manage' },
         ],
       },
       {
@@ -97,6 +98,7 @@ const AREAS: Record<SettingsAreaName, SettingsArea> = {
           { to: '/profile', label: 'Profile', icon: User, end: true },
           { to: '/profile/security', label: 'Security', icon: Lock },
           { to: '/profile/sessions', label: 'Sessions', icon: ShieldCheck },
+          { to: '/profile/blocked', label: 'Blocked people', icon: UserBlock },
         ],
       },
       {

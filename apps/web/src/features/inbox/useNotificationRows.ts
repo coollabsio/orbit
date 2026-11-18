@@ -28,7 +28,7 @@ export function useNotificationRows(notifications: NotificationRecord[]) {
       if (!notification.read_at) markRead.mutate(notification.id)
       const target = notificationTarget(notification)
       if (!target) return
-      if (notification.page_id || notification.chat_conversation_id || notification.import_id) {
+      if (notification.page_id || notification.chat_conversation_id || notification.import_id || notification.kind === 'chat_reported') {
         navigate(target)
         return
       }

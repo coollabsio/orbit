@@ -319,6 +319,7 @@ impl App {
         }
 
         let mailer = Mailer::new(database.clone(), app_key, &config.http.public_origin);
+        let chat_mailer = mailer.clone();
         let import_notices =
             crate::import_notice::ImportNotices::new(database.clone(), mailer.clone());
         let notion_imports = NotionImportService::new(
@@ -647,6 +648,7 @@ impl App {
                     cookie_mode,
                 )
                 .with_public_origin(&config.http.public_origin)
+                .with_mailer(chat_mailer)
                 .with_interactivity(
                     app_key,
                     config.environment == orbit_platform::EnvironmentMode::Development,

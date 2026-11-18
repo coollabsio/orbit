@@ -321,13 +321,18 @@ export function conversationActions(
 }
 
 /** What the long-press sheet of a message offers, in the web's order. */
-export type MessageAction = 'reply' | 'thread' | 'copy' | 'pin' | 'unpin' | 'unread' | 'edit' | 'delete'
+export type MessageAction = 'reply' | 'thread' | 'copy' | 'pin' | 'unpin' | 'unread' | 'report' | 'block' | 'unblock' | 'edit' | 'delete'
 
 /**
  * The web's `actionsFor`: system rows have none; a deleted message keeps "Reply in thread"; edit is for your own text
  * (not a forward, not a sticker alone); delete for your own message or a moderator. Reactions sit above the list.
  */
-export function messageActions(message: MessageRecord, userId: string, moderator: boolean, options: { inThread: boolean; canWrite: boolean }): MessageAction[] {
+export function messageActions(
+  message: MessageRecord,
+  userId: string,
+  moderator: boolean,
+  options: { inThread: boolean; canWrite: boolean; /** You blocked the author. */ authorBlocked: boolean },
+): MessageAction[] {
   if (message.kind !== 'message') return []
   const own = message.author_id === userId
   const actions: MessageAction[] = []
@@ -335,6 +340,9 @@ export function messageActions(message: MessageRecord, userId: string, moderator
   if (!options.inThread) actions.push('thread')
   if (message.deleted) return actions
   actions.push('copy', message.pinned ? 'unpin' : 'pin', 'unread')
+  // an integration posts as the member who set it up: its message can be reported, but blocking it would block that member
+  if (!own || message.bot) actions.push('report')
+  if (!own && !message.bot) actions.push(options.authorBlocked ? 'unblock' : 'block')
   const stickerOnly = Boolean(message.sticker_id) && message.body === ''
   if (own && !message.forwarded && !stickerOnly) actions.push('edit')
   if (own || moderator) actions.push('delete')

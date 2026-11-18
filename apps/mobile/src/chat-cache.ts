@@ -19,6 +19,9 @@ export const chatQueryKeys = {
   search: (workspaceId: string, query: Omit<chat.SearchQuery, 'cursor'>) => ['chat-search', workspaceId, query] as const,
   customEmoji: (workspaceId: string) => ['chat-emoji', workspaceId] as const,
   emojibase: (server: string) => ['emojibase', server] as const,
+  /** The people you blocked: one list for the account, not per workspace. */
+  blocks: ['chat-blocks'] as const,
+  reports: (workspaceId: string) => ['chat-reports', workspaceId] as const,
 }
 
 export type ConversationList = 'pins' | 'files' | 'threads'

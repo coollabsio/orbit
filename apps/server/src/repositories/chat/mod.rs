@@ -17,6 +17,7 @@ mod emoji;
 mod files;
 mod interactions;
 mod messages;
+mod safety;
 mod search;
 mod slack;
 mod state;
@@ -45,6 +46,9 @@ pub use emoji::{CustomEmojiImage, CustomEmojiRecord, EMOJI_MAX_BYTES};
 pub use interactions::{Click, ResponseTarget};
 pub use messages::BotPost;
 pub use messages::{ForwardInput, MessageCursor, SendInput};
+pub use safety::{
+    BlockedUserRecord, ChatReportRecord, REPORT_NOTE_MAX_CHARS, ReportMail, ReportReason,
+};
 pub use search::{SearchHitRecord, SearchInput, SearchPage};
 pub use slack::{attachment_blocks, cut, emoji_name, mrkdwn_to_markdown};
 pub use state::{ConversationCursor, ReadSnapshot, StateUpdate, ThreadCursor};

@@ -43,6 +43,8 @@ import { SessionsPage } from '@/features/settings/pages/SessionsPage'
 import { AgenticPage } from '@/features/settings/pages/AgenticPage'
 import { ShortcutsPage } from '@/features/settings/pages/ShortcutsPage'
 import { StickersPage } from '@/features/settings/pages/StickersPage'
+import { BlockedPeoplePage } from '@/features/settings/pages/BlockedPeoplePage'
+import { ReportsPage } from '@/features/settings/pages/ReportsPage'
 import { StoragePage } from '@/features/settings/pages/StoragePage'
 import { NotificationsPage } from '@/features/settings/pages/NotificationsPage'
 import { ApiTokensPage } from '@/features/settings/pages/ApiTokensPage'
@@ -157,6 +159,7 @@ export default function App() {
                   <Route path="notifications" element={<NotificationsPage />} />
                   <Route path="security" element={<SecurityPage />} />
                   <Route path="sessions" element={<SessionsPage />} />
+                  <Route path="blocked" element={<BlockedPeoplePage />} />
                   <Route path="agentic" element={<AgenticPage />} />
                   <Route path="shortcuts" element={<ShortcutsPage />} />
                   <Route path="storage" element={<StoragePage />} />
@@ -181,6 +184,7 @@ export default function App() {
                   <Route path="labels" element={<Navigate to="/tasks" replace />} />
                   <Route path="emoji" element={<EmojiPage />} />
                   <Route path="stickers" element={<StickersPage />} />
+                  <Route path="reports" element={<ReportsPage />} />
                   <Route path="github" element={<GithubPage />} />
                   <Route path="agentic" element={<AgenticPage />} />
                   <Route path="billing" element={<BillingPage />} />
