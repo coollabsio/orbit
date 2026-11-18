@@ -3751,6 +3751,12 @@ export type MailDomain = {
      */
     dmarc_policy?: string | null;
     /**
+     * The DNS zone that holds the domain at the last check (`example.com` for
+     * `mail.example.com`): DNS panels want record names relative to it. `null` before the first
+     * check or when its NS lookup found nothing.
+     */
+    dns_zone?: string | null;
+    /**
      * Suspended domains only: mail is refused after this.
      */
     grace_ends_at?: string | null;
@@ -3760,6 +3766,11 @@ export type MailDomain = {
      * Normalized: lower case, IDNA A-labels (`xn--…`), no trailing dot.
      */
     name: string;
+    /**
+     * The NS hosts of `dns_zone` (the setup page names the DNS host from them); empty before the
+     * first check or when none were found.
+     */
+    nameservers: Array<string>;
     /**
      * The domain's own send route; `null`: it follows the instance default.
      */

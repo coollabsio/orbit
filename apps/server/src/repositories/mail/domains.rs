@@ -119,6 +119,14 @@ pub struct DnsReport {
     /// The `p=` of the DMARC record: `none`, `quarantine` or `reject`.
     #[serde(default)]
     pub dmarc_policy: Option<String>,
+    /// The DNS zone that holds the domain (`example.com` for `mail.example.com`); `None` when
+    /// its NS lookup found nothing.
+    #[serde(default)]
+    pub zone: Option<String>,
+    /// The NS hosts of `zone` (lower case, no trailing dot, sorted): the setup page names the
+    /// DNS host from them.
+    #[serde(default)]
+    pub nameservers: Vec<String>,
 }
 
 impl DnsReport {
@@ -132,6 +140,8 @@ impl DnsReport {
             spf: RecordStatus::Unknown,
             dmarc: RecordStatus::Unknown,
             dmarc_policy: None,
+            zone: None,
+            nameservers: Vec::new(),
         }
     }
 }

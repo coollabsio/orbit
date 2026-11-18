@@ -33,13 +33,13 @@ export function RouteSelect({
   )
 }
 
-/** A domain's row: where its mail arrives. A change makes the MX record above expect the provider's hosts. */
+/** A domain's row: where its mail arrives. A change makes the MX record below expect the provider's hosts. */
 export function DomainRouteRow({ domain, providers }: { domain: MailDomain; providers: MailProviderView[] }) {
   const setRoute = useSetDomainRoute()
   return (
-    <SettingsRow className="flex-nowrap">
-      <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[0.8125rem] font-medium text-foreground">
-        Receive mail
+    <SettingsRow className="flex-nowrap px-0 py-0">
+      <span className="flex min-w-0 flex-1 items-center gap-1.5 text-xs text-muted-foreground">
+        Receive through
         <InfoTip text={`Where mail for ${domain.name} arrives. The MX record below changes with it.`} />
       </span>
       <RouteSelect
@@ -48,7 +48,7 @@ export function DomainRouteRow({ domain, providers }: { domain: MailDomain; prov
         providers={providers}
         disabled={setRoute.isPending}
         onChange={(value) => setRoute.mutate({ domainId: domain.id, providerId: value === DIRECT ? null : value }, {
-          onSuccess: () => toast('Route saved. Update the MX record if it changed.'),
+          onSuccess: () => toast('Route saved. Update the MX record below if it changed.'),
           onError: (error) => toast.error(mailProblem(error, 'The route could not be saved.')),
         })}
       />
@@ -70,9 +70,9 @@ export function DomainSendRouteRow({ domain, routes }: { domain: MailDomain; rou
   // the domain's own route; without one it follows the server's default, whatever that becomes
   const value = domain.own_send_route_id ?? DEFAULT_ROUTE
   return (
-    <SettingsRow className="flex-nowrap">
-      <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[0.8125rem] font-medium text-foreground">
-        Send mail
+    <SettingsRow className="flex-nowrap px-0 py-0">
+      <span className="flex min-w-0 flex-1 items-center gap-1.5 text-xs text-muted-foreground">
+        Send through
         <InfoTip text={`How mail from ${domain.name} is sent. The SPF record below changes with it.`} />
       </span>
       <Select
@@ -80,7 +80,7 @@ export function DomainSendRouteRow({ domain, routes }: { domain: MailDomain; rou
         value={value}
         disabled={setRoute.isPending}
         onValueChange={(next) => setRoute.mutate({ domainId: domain.id, routeId: next === DEFAULT_ROUTE ? null : (next as string) }, {
-          onSuccess: () => toast('Send route saved. Update the SPF record if it changed.'),
+          onSuccess: () => toast('Send route saved. Update the SPF record under Reach the inbox if it changed.'),
           onError: (error) => toast.error(mailProblem(error, 'The send route could not be saved.')),
         })}
       >

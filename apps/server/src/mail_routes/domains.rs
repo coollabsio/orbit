@@ -42,6 +42,13 @@ pub(crate) struct MailDomain {
     address_count: i64,
     /// The `p=` of the domain's DMARC record at the last check.
     dmarc_policy: Option<String>,
+    /// The DNS zone that holds the domain at the last check (`example.com` for
+    /// `mail.example.com`): DNS panels want record names relative to it. `null` before the first
+    /// check or when its NS lookup found nothing.
+    dns_zone: Option<String>,
+    /// The NS hosts of `dns_zone` (the setup page names the DNS host from them); empty before the
+    /// first check or when none were found.
+    nameservers: Vec<String>,
     /// The records to publish, each with its status at the last check.
     records: Vec<MailDnsRecord>,
     /// The provider that receives the domain's mail; `null`: this server's SMTP listener.
@@ -174,6 +181,11 @@ fn view(domain: Domain, hostname: Option<&str>) -> MailDomain {
         checked_at: domain.checked_at,
         catch_all_mailbox_id: domain.catch_all_mailbox_id,
         address_count: domain.address_count,
+        dns_zone: report.as_ref().and_then(|report| report.zone.clone()),
+        nameservers: report
+            .as_ref()
+            .map(|report| report.nameservers.clone())
+            .unwrap_or_default(),
         dmarc_policy: report.and_then(|report| report.dmarc_policy),
         records,
         provider: domain

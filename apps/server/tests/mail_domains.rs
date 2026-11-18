@@ -513,8 +513,12 @@ async fn verification_suspension_and_timeouts_follow_the_state_machine() {
         json!({ "status": "wrong", "found": "5 aspmx.l.google.com" })
     );
 
-    // Every record published: verified.
+    // Every record published: verified. The zone's name servers name the DNS host.
     publish_all(&fixture.dns, &domain);
+    fixture.dns.set_ns(
+        "example.com",
+        &["kim.ns.cloudflare.com", "bob.ns.cloudflare.com"],
+    );
     assert_eq!(
         fixture.check(&domain, at(start + 2 * MINUTE)).await,
         DomainStatus::Verified
@@ -525,6 +529,11 @@ async fn verification_suspension_and_timeouts_follow_the_state_machine() {
         assert_eq!(status(&read, kind), "ok", "{kind}");
     }
     assert_eq!(read["dmarc_policy"], "reject");
+    assert_eq!(read["dns_zone"], "example.com");
+    assert_eq!(
+        read["nameservers"],
+        json!(["bob.ns.cloudflare.com", "kim.ns.cloudflare.com"])
+    );
     let verified_at = read["verified_at"].clone();
     assert!(verified_at.is_string());
 

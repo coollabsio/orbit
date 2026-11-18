@@ -1,175 +1,204 @@
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
-import { Copy, Refresh2 } from 'reicon-react'
-import type { MailDnsRecord, MailDomain } from '@orbit/api/generated/types.gen'
-import { confirmAction } from '@/components/common/confirmAction'
+import { ArrowDown2, CloseCircle, Copy, CopySuccess, Danger, InfoCircle, TickCircle } from 'reicon-react'
+import { cn } from 'cn'
+import type { MailDnsRecord } from '@orbit/api/generated/types.gen'
 import { InfoTip } from '@/components/common/InfoTip'
 import { Tip } from '@/components/common/Tip'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { useRotateDkim } from '@/features/mail/api/mutations'
-import { SettingsRow } from '@/features/settings/components/SettingsParts'
-import { copyText, isSendRouteKind, KIND_LABELS, mailProblem, REQUIRED, routeLabel, routeRecordsNote, SEND_REQUIRED, spfHint } from './mailSettingsLib'
+import { writeClipboard } from '@/lib/clipboard'
+import { relativeHost, type SetupStep, type StepState } from './domainSetup'
 
-/** The badge of a record from the last check: OK, or what is missing and how much it matters. */
-function recordBadge(record: MailDnsRecord, checked: boolean, dkimRotating: boolean): { label: string; variant: 'secondary' | 'destructive' | 'outline'; hint: string } {
-  const required = REQUIRED.has(record.kind)
-  const sending = SEND_REQUIRED.has(record.kind)
-  const notFound = record.status.status === 'missing' || record.status.status === 'wrong'
-  if (record.kind === 'dkim' && dkimRotating && notFound) {
-    return {
-      label: 'New key: publish it',
-      variant: 'outline',
-      hint: 'Orbit still signs with the old key until this new record is published and found by the DNS check. Keep the old record until then.',
-    }
+/** How long a copy button shows its check. */
+const COPIED_MS = 1500
+
+/** Copies on demand; `copied` is true for a moment after a copy worked. A failed copy says so in a toast. */
+function useCopy() {
+  const [copied, setCopied] = useState(false)
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined)
+  useEffect(() => () => clearTimeout(timer.current), [])
+  function copy(text: string) {
+    writeClipboard(text).then(
+      () => {
+        setCopied(true)
+        clearTimeout(timer.current)
+        timer.current = setTimeout(() => setCopied(false), COPIED_MS)
+      },
+      () => toast.error('Could not copy. Select the text and copy it yourself.'),
+    )
   }
-  if (sending && notFound) {
-    return {
-      label: 'Required for sending',
-      variant: 'destructive',
-      hint: record.status.status === 'missing'
-        ? 'The record was not found. Orbit signs sent mail with this key and sends nothing without it.'
-        : 'The record has another value. Orbit signs sent mail with this key and sends nothing until it matches.',
-    }
-  }
-  switch (record.status.status) {
-    case 'ok':
-      return { label: 'OK', variant: 'secondary', hint: 'The record was found with this value.' }
-    case 'unknown':
-      return checked
-        ? { label: 'Unknown', variant: 'outline', hint: 'The DNS lookup did not answer. Orbit tries again on the next check.' }
-        : { label: 'Not checked', variant: 'outline', hint: 'Orbit has not checked the DNS yet.' }
-    case 'missing':
-      return required
-        ? { label: 'Required', variant: 'destructive', hint: 'The record was not found. Mail needs it.' }
-        : { label: 'Recommended', variant: 'outline', hint: 'The record was not found. Add it so other mail servers trust the domain.' }
-    case 'wrong':
-      return required
-        ? { label: 'Required', variant: 'destructive', hint: 'The record has another value. Mail needs this one.' }
-        : { label: 'Warning', variant: 'outline', hint: 'The record has another value. Replace it with this one.' }
-  }
+  return { copied, copy }
 }
 
+/** An icon button that copies `text`; its icon turns into a check for a moment. */
 export function CopyButton({ text, label }: { text: string; label: string }) {
+  const { copied, copy } = useCopy()
+  const name = `Copy ${label.toLowerCase()}`
   return (
-    <Tip label={`Copy ${label.toLowerCase()}`}>
-      <Button type="button" variant="ghost" size="icon-xs" aria-label={`Copy ${label.toLowerCase()}`} onClick={() => copyText(text, label)}>
-        <Copy />
+    <Tip label={copied ? 'Copied' : name}>
+      <Button type="button" variant="ghost" size="icon-xs" aria-label={name} onClick={() => copy(text)}>
+        {copied ? <CopySuccess className="text-emerald-600 dark:text-emerald-400" /> : <Copy />}
       </Button>
     </Tip>
   )
 }
 
-/**
- * The records to publish for a domain, each with copy buttons and its status at the last check (`checked`).
- * `dkimRotating`: the DKIM record is a new key, and the old one still signs.
- */
-export function MailDomainRecords({ records, checked, dkimRotating = false }: { records: MailDnsRecord[]; checked: boolean; dkimRotating?: boolean }) {
+/** A value to copy: the whole field is the button. A long value shows two lines until **Show all**. */
+function CopyField({ label, text, children, long = false }: { label: string; text: string; children?: ReactNode; long?: boolean }) {
+  const { copied, copy } = useCopy()
+  const [expanded, setExpanded] = useState(false)
+  const folded = long && !expanded
   return (
-    <Table aria-label="DNS records">
-      <TableHeader>
-        <TableRow>
-          <TableHead>Type</TableHead>
-          <TableHead>Name</TableHead>
-          <TableHead>Value</TableHead>
-          <TableHead>Status</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {records.map((record) => {
-          const badge = recordBadge(record, checked, dkimRotating)
-          const found = record.status.status === 'wrong' ? record.status.found : null
-          return (
-            <TableRow key={`${record.kind}:${record.value}`}>
-              <TableCell className="align-top">
-                <div className="flex flex-col gap-0.5">
-                  <span className="font-medium">{record.type}</span>
-                  <span className="text-xs text-muted-foreground">{KIND_LABELS[record.kind]}</span>
-                </div>
-              </TableCell>
-              <TableCell className="align-top">
-                <div className="flex items-start gap-1">
-                  <code className="min-w-0 py-0.5 font-mono text-xs break-all whitespace-normal">{record.name}</code>
-                  <CopyButton text={record.name} label="Name" />
-                </div>
-              </TableCell>
-              <TableCell className="max-w-md align-top">
-                <div className="flex items-start gap-1">
-                  <div className="flex min-w-0 flex-1 flex-col gap-1">
-                    <code className="py-0.5 font-mono text-xs break-all whitespace-normal">{record.value}</code>
-                    {record.priority != null ? <span className="text-xs text-muted-foreground">Priority {record.priority}</span> : null}
-                    {record.txt_strings.length > 1 ? (
-                      <div className="flex flex-col gap-0.5 text-xs whitespace-normal text-muted-foreground">
-                        <span>Longer than one TXT string. Most DNS panels take the value as it is; zone files need {record.txt_strings.length} strings:</span>
-                        <code className="font-mono break-all">{record.txt_strings.map((part) => `"${part}"`).join(' ')}</code>
-                      </div>
-                    ) : null}
-                  </div>
-                  <CopyButton text={record.value} label="Value" />
-                </div>
-              </TableCell>
-              <TableCell className="align-top">
-                <div className="flex max-w-56 flex-col items-start gap-1 whitespace-normal">
-                  <Badge variant={badge.variant} title={badge.hint}>{badge.label}</Badge>
-                  {found !== null ? <span className="text-xs break-all text-muted-foreground">Found: <code className="font-mono">{found || '(empty)'}</code></span> : null}
-                </div>
-              </TableCell>
-            </TableRow>
-          )
-        })}
-      </TableBody>
-    </Table>
+    <div className="flex min-w-0 flex-col items-start gap-1">
+      <button
+        type="button"
+        aria-label={`Copy ${label.toLowerCase()}: ${text}`}
+        onClick={() => copy(text)}
+        className={cn(
+          'group/copy flex w-full min-w-0 items-start gap-2 rounded-md border bg-muted/30 px-2 py-1 text-left font-mono text-xs text-foreground transition-colors duration-100 hover:border-foreground/25 hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none active:bg-muted',
+          copied && 'border-emerald-600/40 dark:border-emerald-400/40',
+        )}
+      >
+        <span className={cn('min-w-0 flex-1 py-px break-all', folded && 'line-clamp-2')}>{children ?? text}</span>
+        <span aria-hidden className={cn('flex shrink-0 items-center gap-1 pt-px font-sans text-[0.6875rem] text-muted-foreground group-hover/copy:text-foreground', copied && 'text-emerald-600 group-hover/copy:text-emerald-600 dark:text-emerald-400')}>
+          {copied ? <CopySuccess className="size-3.5" /> : <Copy className="size-3.5" />}
+          {copied ? 'Copied' : null}
+        </span>
+      </button>
+      <span role="status" className="sr-only">{copied ? `${label} copied` : ''}</span>
+      {long ? (
+        <button type="button" className="text-[0.6875rem] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline" onClick={() => setExpanded((value) => !value)}>
+          {expanded ? 'Show less' : 'Show all'}
+        </button>
+      ) : null}
+    </div>
   )
 }
 
-/** The DKIM selector of the domain's record (`o2026a` of `o2026a._domainkey.example.com`). */
-const selectorOf = (record: MailDnsRecord) => record.name.split('._domainkey.')[0] ?? record.name
+/** A long TXT value (a DKIM key) folds to two lines. */
+const LONG_VALUE = 120
+
+/** What the last check found for a record that is not OK. */
+function recordResult(record: MailDnsRecord, checked: boolean): { text: string; tone: 'ok' | 'todo' | 'problem' } {
+  switch (record.status.status) {
+    case 'ok':
+      return { text: 'Found', tone: 'ok' }
+    case 'missing':
+      return { text: 'Not found yet', tone: 'todo' }
+    case 'wrong':
+      return { text: `Found another value: ${record.status.found || '(empty)'}`, tone: 'problem' }
+    case 'unknown':
+      return { text: checked ? 'The DNS did not answer' : 'Not checked yet', tone: 'todo' }
+  }
+}
 
 /**
- * A domain's sending: the route in use and the records its provider needs besides Orbit's, and **Rotate key** for
- * Orbit's DKIM key.
+ * One record to publish: its type, its host relative to `zone` and its value, each to copy. `own`: the record's own
+ * result is shown (the step has several records; with one, the step's summary says it).
  */
-export function DomainSendRecords({ domain }: { domain: MailDomain }) {
-  const rotate = useRotateDkim()
-  const dkim = domain.records.find((record) => record.kind === 'dkim')
-  const kind = domain.send_route && isSendRouteKind(domain.send_route.kind) ? domain.send_route.kind : null
-  const note = kind ? routeRecordsNote(kind, domain.name) : null
-  const spf = kind && kind !== 'direct' ? spfHint(kind, null) : null
-
-  async function rotateKey() {
-    const confirmed = await confirmAction({
-      title: `Make a new DKIM key for ${domain.name}?`,
-      description: 'Orbit keeps signing with the current key until the new record is published and found by the DNS check. Then it switches, and you can delete the old record a few days later.',
-      confirmLabel: 'Make new key',
-    })
-    if (!confirmed) return
-    rotate.mutate(domain.id, {
-      onSuccess: () => toast('New DKIM key made. Publish its record below, then click Check now.'),
-      onError: (error) => toast.error(mailProblem(error, 'The new key could not be made.')),
-    })
-  }
-
+function RecordCard({ record, zone, checked, own }: { record: MailDnsRecord; zone: string; checked: boolean; own: boolean }) {
+  const host = relativeHost(record.name, zone)
+  const suffix = host === '@' ? null : record.name.slice(host.length)
+  const result = recordResult(record, checked)
   return (
-    <SettingsRow className="flex-nowrap">
-      <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-[0.8125rem]">
-        <span className="flex items-center gap-1.5 font-medium text-foreground">
-          Sending
-          <InfoTip text="Orbit signs every message with the domain's DKIM key: the DKIM record below is required for sending. SPF and DMARC help your mail reach the inbox." />
-        </span>
-        <span className="text-xs text-muted-foreground">
-          {domain.send_route ? `Sends through ${routeLabel(domain.send_route.kind)}.` : 'No send route: this domain cannot send. Pick one above, or ask your server admin for a default route.'}
-          {spf ? <> SPF includes <code className="font-mono">{spf}</code>.</> : null}
-          {note ? ` ${note}` : null}
-        </span>
+    <div className="grid grid-cols-[4.5rem_minmax(0,1fr)] items-start gap-x-3 gap-y-2 rounded-lg border bg-background p-3 text-xs">
+      <span className="pt-1 text-muted-foreground">Type</span>
+      <span className="pt-1 font-mono font-medium">{record.type}{record.priority != null ? <span className="ml-3 font-sans font-normal text-muted-foreground">Priority <span className="font-mono text-foreground">{record.priority}</span></span> : null}</span>
+      <span className="flex items-center gap-1 pt-1 text-muted-foreground">
+        Host
+        <InfoTip size={12} text={`Most DNS panels add ${zone} themselves: enter only this part.${host === '@' ? ' @ means the domain itself; some panels want it empty.' : ''} If your panel wants the full name, enter ${record.name}.`} />
+      </span>
+      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+        <div className="min-w-0 max-w-full"><CopyField label="Host" text={host} /></div>
+        {suffix ? <span className="font-mono text-[0.6875rem] break-all text-muted-foreground/70" title={record.name}>{suffix}</span> : null}
       </div>
-      {dkim ? (
-        <Tip label={domain.dkim_rotating ? 'A new key waits for its DNS record. Publish it, then click Check now.' : `Make a new key for selector ${selectorOf(dkim)}`}>
-          <Button type="button" variant="outline" disabled={rotate.isPending || domain.dkim_rotating} onClick={() => void rotateKey()}>
-            <Refresh2 />
-            {rotate.isPending ? 'Making key…' : 'Rotate key'}
-          </Button>
-        </Tip>
+      <span className="pt-1 text-muted-foreground">Value</span>
+      <CopyField label="Value" text={record.value} long={record.value.length > LONG_VALUE} />
+      {record.status.status === 'wrong' || (own && record.status.status !== 'ok') ? (
+        <>
+          <span aria-hidden />
+          <span className={cn('break-all', result.tone === 'problem' ? 'text-destructive' : 'text-muted-foreground')}>{result.text}</span>
+        </>
       ) : null}
-    </SettingsRow>
+    </div>
+  )
+}
+
+const STATE_LABEL: Record<StepState, string> = { done: 'Done', todo: 'To do', problem: 'Problem', unknown: 'Not known yet', blocked: 'Blocked' }
+
+/** The step's state as a circle: a check when done, a cross for a wrong value, else its number. */
+function StepIcon({ state, index }: { state: StepState; index: number }) {
+  if (state === 'done') return <TickCircle role="img" aria-label={STATE_LABEL[state]} weight="Filled" className="size-5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+  if (state === 'problem') return <CloseCircle role="img" aria-label={STATE_LABEL[state]} weight="Filled" className="size-5 shrink-0 text-destructive" />
+  if (state === 'blocked') return <Danger role="img" aria-label={STATE_LABEL[state]} className="size-5 shrink-0 text-amber-600 dark:text-amber-400" />
+  return (
+    <span role="img" aria-label={STATE_LABEL[state]} className="flex size-5 shrink-0 items-center justify-center rounded-full border border-muted-foreground/50 text-[0.625rem] font-semibold text-muted-foreground tabular-nums">
+      {index + 1}
+    </span>
+  )
+}
+
+/**
+ * One setup step: a header that opens and closes it, then its records. `extra` goes above the records (the route
+ * select, a note); `blocked` replaces them when Orbit cannot say what to publish.
+ */
+export function SetupStepRow({
+  step,
+  index,
+  open,
+  onToggle,
+  zone,
+  checked,
+  extra,
+  blocked,
+}: {
+  step: SetupStep
+  index: number
+  open: boolean
+  onToggle: () => void
+  zone: string
+  checked: boolean
+  extra?: ReactNode
+  blocked?: ReactNode
+}) {
+  const bodyId = `mail-step-${step.key}-${zone}`
+  const tone = step.state === 'done' ? 'text-emerald-600 dark:text-emerald-400' : step.state === 'problem' ? 'text-destructive' : step.state === 'blocked' ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'
+  return (
+    <li className="flex flex-col">
+      <div className="relative flex min-h-11 items-center gap-2.5 px-3 hover:bg-muted/40">
+        <StepIcon state={step.state} index={index} />
+        <span className="text-[0.8125rem] font-medium text-foreground">{step.title}</span>
+        {/* above the button, which covers the whole row */}
+        <span className="relative z-10 flex"><InfoTip text={step.help} /></span>
+        {step.optional ? <span className="rounded-sm bg-muted px-1.5 py-px text-[0.625rem] font-medium text-muted-foreground">Recommended</span> : null}
+        <span className={cn('ml-auto text-xs', tone)}>{step.summary}</span>
+        <button
+          type="button"
+          aria-expanded={open}
+          aria-controls={bodyId}
+          aria-label={`${step.title}: ${step.summary}`}
+          onClick={onToggle}
+          className="flex size-6 items-center justify-center rounded-md text-muted-foreground after:absolute after:inset-0 after:content-[''] focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none"
+        >
+          <ArrowDown2 aria-hidden className={cn('size-3.5 transition-transform duration-150 ease-out', open && 'rotate-180')} />
+        </button>
+      </div>
+      {open ? (
+        <div id={bodyId} className="flex flex-col gap-2 px-3 pt-1 pb-3 pl-[2.625rem]">
+          {extra}
+          {blocked ?? step.records.map((record) => <RecordCard key={`${record.kind}:${record.name}:${record.value}`} record={record} zone={zone} checked={checked} own={step.records.length > 1} />)}
+        </div>
+      ) : null}
+    </li>
+  )
+}
+
+/** A muted note in a step (what else the route needs). */
+export function StepNote({ children }: { children: ReactNode }) {
+  return (
+    <p className="m-0 flex items-start gap-1.5 text-xs text-muted-foreground">
+      <InfoCircle aria-hidden className="mt-px size-3.5 shrink-0" />
+      <span>{children}</span>
+    </p>
   )
 }

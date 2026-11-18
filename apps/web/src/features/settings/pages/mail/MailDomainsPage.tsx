@@ -1,8 +1,8 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useEffectEvent, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { useNavigate } from 'react-router'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { ChevronRight, Danger, Global, Refresh } from 'reicon-react'
+import { ArrowRight, ChevronRight, Copy, Danger, DocumentDownload, Global, More, Refresh, Refresh2, Trash } from 'reicon-react'
 import { cn } from 'cn'
 import type { MailDomain, MailMailbox, MailProviderView, MailSendRouteList } from '@orbit/api/generated/types.gen'
 import { confirmAction } from '@/components/common/confirmAction'
@@ -12,24 +12,29 @@ import { SettingsCard } from '@/components/common/SettingsCard'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { mailKeys } from '@/features/mail/api/keys'
-import { useCheckDomain, useCreateDomain, useDeleteDomain, useSetCatchAll, useSetDomainEnabled } from '@/features/mail/api/mutations'
+import { useCheckDomain, useCreateDomain, useDeleteDomain, useRotateDkim, useSetCatchAll, useSetDomainEnabled } from '@/features/mail/api/mutations'
 import { useMailboxes, useMailDomain, useMailDomains, useMailProviders, useSendRoutes } from '@/features/mail/api/queries'
 import { SettingsRow } from '@/features/settings/components/SettingsParts'
 import { useCan } from '@/features/workspaces/permissions'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
+import { writeClipboard } from '@/lib/clipboard'
 import { shortDate } from '@/lib/format'
 import { DomainRouteRow, DomainSendRouteRow, RouteSelect } from './DomainRoute'
-import { DomainSendRecords, MailDomainRecords } from './MailDomainRecords'
-import { count, dateTime, DIRECT, domainHealth, isMailDisabled, mailProblem, since } from './mailSettingsLib'
+import { dnsHost, firstOpenStep, setupSteps, zoneFile, zoneOf, type SetupStep, type StepKey } from './domainSetup'
+import { SetupStepRow, StepNote } from './MailDomainRecords'
+import { count, dateTime, DIRECT, domainHealth, isMailDisabled, isSendRouteKind, mailProblem, routeLabel, routeRecordsNote, since, spfHint } from './mailSettingsLib'
 
 /** **Check now** reads the domain this often until the check job has run, for at most `CHECK_WAIT_MS`. */
 const CHECK_POLL_MS = 2000
 const CHECK_WAIT_MS = 30_000
+/** Coming back to the page checks the DNS again, at most this often. */
+const AUTO_CHECK_GAP_MS = 30_000
 const NO_CATCH_ALL = 'none'
 
 /** Shown to members without `mail.manage`; the server refuses them too. */
@@ -52,6 +57,8 @@ function MailDomains() {
   const create = useCreateDomain()
   const [name, setName] = useState('')
   const [route, setRoute] = useState(DIRECT)
+  /** The domain added last: its card opens and scrolls into view. */
+  const [added, setAdded] = useState<string | null>(null)
   /** The server said the instance switch is off; it stays shown until the page is opened again. */
   const [disabled, setDisabled] = useState(false)
 
@@ -60,7 +67,7 @@ function MailDomains() {
     const trimmed = name.trim()
     if (!trimmed || create.isPending) return
     create.mutate({ name: trimmed, providerId: route === DIRECT ? null : route }, {
-      onSuccess: (domain) => { setName(''); toast(`${domain.name} added`) },
+      onSuccess: (domain) => { setName(''); setAdded(domain.id); toast(`${domain.name} added. Publish its records below.`) },
       onError: (error) => { if (isMailDisabled(error)) setDisabled(true) },
     })
   }
@@ -77,7 +84,10 @@ function MailDomains() {
       <SettingsCard title="Add a domain" description="Orbit receives mail for the domain once its verification record is in the DNS.">
         <form className="flex flex-col gap-3" onSubmit={submit}>
           <Field>
-            <FieldLabel htmlFor="mail-domain-name">Domain</FieldLabel>
+            <FieldLabel htmlFor="mail-domain-name">
+              Domain
+              <InfoTip text="A domain belongs to one workspace. A subdomain of a domain of another workspace is refused." />
+            </FieldLabel>
             <div className="flex flex-wrap items-center gap-2">
               <Input
                 id="mail-domain-name"
@@ -90,13 +100,14 @@ function MailDomains() {
               />
               <Button type="submit" disabled={!name.trim() || create.isPending || disabled}>{create.isPending ? 'Adding…' : 'Add domain'}</Button>
             </div>
-            <FieldDescription>A domain belongs to one workspace. A subdomain of a domain of another workspace is refused.</FieldDescription>
           </Field>
           {providers.length > 0 ? (
             <Field>
-              <FieldLabel htmlFor="mail-domain-route">Receive mail</FieldLabel>
+              <FieldLabel htmlFor="mail-domain-route">
+                Receive mail
+                <InfoTip text="Through a provider, this server needs no open port 25. You can change it later." />
+              </FieldLabel>
               <RouteSelect id="mail-domain-route" label="Where the domain's mail arrives" value={route} providers={providers} disabled={disabled} onChange={setRoute} />
-              <FieldDescription>Through a provider, this server needs no open port 25. You can change it later.</FieldDescription>
             </Field>
           ) : null}
           {create.isError && !disabled ? <p role="alert" className="text-xs text-destructive">{mailProblem(create.error, 'The domain could not be added.')}</p> : null}
@@ -112,7 +123,15 @@ function MailDomains() {
         <EmptyState icon={Global} title="No mail domains yet" description="Add a domain above, then publish its DNS records." />
       ) : null}
       {domains.data?.map((domain) => (
-        <DomainCard key={domain.id} listed={domain} mailboxes={mailboxes.data ?? []} providers={providers} sendRoutes={sendRoutes.data ?? null} />
+        <DomainCard
+          key={domain.id}
+          listed={domain}
+          mailboxes={mailboxes.data ?? []}
+          providers={providers}
+          sendRoutes={sendRoutes.data ?? null}
+          defaultOpen={domain.id === added || domains.data?.length === 1}
+          justAdded={domain.id === added}
+        />
       ))}
     </>
   )
@@ -123,11 +142,17 @@ function DomainCard({
   mailboxes,
   providers,
   sendRoutes,
+  defaultOpen,
+  justAdded,
 }: {
   listed: MailDomain
   mailboxes: MailMailbox[]
   providers: MailProviderView[]
   sendRoutes: MailSendRouteList | null
+  /** Open at first. */
+  defaultOpen: boolean
+  /** Added a moment ago: opens and scrolls into view. */
+  justAdded: boolean
 }) {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
@@ -136,9 +161,11 @@ function DomainCard({
   const setCatchAll = useSetCatchAll()
   const setEnabled = useSetDomainEnabled()
   const remove = useDeleteDomain()
-  const [open, setOpen] = useState(false)
-  /** While a check runs: when it was asked for, the `checked_at` before it and when to stop waiting. */
-  const [checking, setChecking] = useState<{ startedAt: number; checkedAt: string | null; until: number } | null>(null)
+  const rotate = useRotateDkim()
+  const [open, setOpen] = useState(defaultOpen)
+  const card = useRef<HTMLElement>(null)
+  /** While a check runs: when it was asked for, the `checked_at` before it, when to stop waiting, and whether it was an automatic one. */
+  const [checking, setChecking] = useState<{ startedAt: number; checkedAt: string | null; until: number; quiet: boolean } | null>(null)
   // polls until `checked_at` changes or the wait ends; a copy cached by an earlier check does not count
   const detail = useMailDomain(checking ? listed.id : null, (data, updatedAt) =>
     checking && Date.now() < checking.until && !(data && updatedAt > checking.startedAt && data.checked_at !== checking.checkedAt)
@@ -148,6 +175,23 @@ function DomainCard({
   const fresh = checking && detail.data && detail.dataUpdatedAt > checking.startedAt ? detail.data : null
   const domain = fresh ?? listed
   const waiting = checking !== null && !(fresh && fresh.checked_at !== checking.checkedAt)
+  const steps = setupSteps(domain)
+  const unfinished = firstOpenStep(steps)
+  /** Something left for the user: a blocked step waits for the server admin, not for the DNS. */
+  const actionable = steps.some((step) => step.state !== 'done' && step.state !== 'blocked')
+  /** The steps the user opened or closed; the others follow the state (the first unfinished one is open). */
+  const [toggled, setToggled] = useState<Partial<Record<StepKey, boolean>>>({})
+  const stepOpen = (key: StepKey) => toggled[key] ?? key === unfinished
+
+  // just added (the list may show the domain before the page knows it was added): open it, then scroll to it
+  const [wasAdded, setWasAdded] = useState(justAdded)
+  if (justAdded && !wasAdded) {
+    setWasAdded(true)
+    setOpen(true)
+  }
+  useEffect(() => {
+    if (justAdded) card.current?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+  }, [justAdded])
 
   useEffect(() => {
     if (!checking) return
@@ -158,17 +202,35 @@ function DomainCard({
     }
     const timer = setTimeout(() => {
       setChecking(null)
-      toast('The DNS has not answered yet. Orbit checks again on its next run.')
+      if (!checking.quiet) toast('The DNS has not answered yet. Orbit checks again on its next run.')
     }, Math.max(0, checking.until - Date.now()))
     return () => clearTimeout(timer)
   }, [checking, waiting, queryClient, workspaceId])
 
-  function checkNow() {
+  function checkNow(quiet = false) {
     check.mutate(domain.id, {
-      onSuccess: () => setChecking({ startedAt: Date.now(), checkedAt: domain.checked_at ?? null, until: Date.now() + CHECK_WAIT_MS }),
-      onError: (error) => toast.error(mailProblem(error, 'The check could not start.')),
+      onSuccess: () => setChecking({ startedAt: Date.now(), checkedAt: domain.checked_at ?? null, until: Date.now() + CHECK_WAIT_MS, quiet }),
+      onError: (error) => { if (!quiet) toast.error(mailProblem(error, 'The check could not start.')) },
     })
   }
+
+  // Back from the DNS panel: check again, at most every AUTO_CHECK_GAP_MS, while a step is not done.
+  const lastAutoCheck = useRef(0)
+  const autoCheck = useEffectEvent(() => {
+    if (check.isPending || waiting || Date.now() - lastAutoCheck.current < AUTO_CHECK_GAP_MS) return
+    lastAutoCheck.current = Date.now()
+    checkNow(true)
+  })
+  useEffect(() => {
+    if (!open || !actionable || domain.status === 'disabled') return
+    const onReturn = () => { if (document.visibilityState === 'visible') autoCheck() }
+    window.addEventListener('focus', onReturn)
+    document.addEventListener('visibilitychange', onReturn)
+    return () => {
+      window.removeEventListener('focus', onReturn)
+      document.removeEventListener('visibilitychange', onReturn)
+    }
+  }, [open, actionable, domain.status])
 
   async function removeDomain() {
     if (domain.address_count > 0) {
@@ -193,16 +255,68 @@ function DomainCard({
     })
   }
 
+  async function rotateKey() {
+    const confirmed = await confirmAction({
+      title: `Make a new DKIM key for ${domain.name}?`,
+      description: 'Orbit keeps signing with the current key until the new record is published and found by the DNS check. Then it switches, and you can delete the old record a few days later.',
+      confirmLabel: 'Make new key',
+    })
+    if (!confirmed) return
+    rotate.mutate(domain.id, {
+      onSuccess: () => {
+        setToggled((value) => ({ ...value, send: true }))
+        toast('New DKIM key made. Publish its record under Send mail.')
+      },
+      onError: (error) => toast.error(mailProblem(error, 'The new key could not be made.')),
+    })
+  }
+
+  function copyZoneFile() {
+    writeClipboard(zoneFile(domain)).then(
+      () => toast('Zone file copied. Paste it into the import of your DNS panel.'),
+      () => toast.error('Could not copy the zone file.'),
+    )
+  }
+
   const health = domainHealth(domain)
+  const zone = zoneOf(domain)
+  const checked = Boolean(domain.checked_at)
+  const host = dnsHost(domain.nameservers)
   const verify = domain.records.find((record) => record.kind === 'verify')
+  const sendKind = domain.send_route && isSendRouteKind(domain.send_route.kind) ? domain.send_route.kind : null
+  const routeNote = sendKind ? routeRecordsNote(sendKind, domain.name) : null
+  const spf = sendKind && sendKind !== 'direct' ? spfHint(sendKind, null) : null
   const catchAllOptions = [
     { value: NO_CATCH_ALL, label: 'None: refuse unknown addresses' },
     ...mailboxes.map((mailbox) => ({ value: mailbox.id, label: `${mailbox.name} (${mailbox.addresses[0]?.address ?? 'no address'})` })),
   ]
   const catchAll = domain.catch_all_mailbox_id ?? NO_CATCH_ALL
 
+  /** What each step shows above its records. */
+  const extras: Partial<Record<StepKey, ReactNode>> = {
+    receive: providers.length > 0 || domain.provider ? <DomainRouteRow domain={domain} providers={providers} /> : null,
+    send: (
+      <>
+        {sendRoutes && sendRoutes.routes.length > 0 ? <DomainSendRouteRow domain={domain} routes={sendRoutes} /> : null}
+        {domain.send_route
+          ? routeNote ? <StepNote>{routeNote}</StepNote> : null
+          : <StepNote>No send route: this domain cannot send. Pick one above, or ask your server admin for a default route.</StepNote>}
+      </>
+    ),
+    inbox: spf ? <StepNote>The SPF record includes <code className="font-mono">{spf}</code> for {routeLabel(domain.send_route?.kind ?? '')}.</StepNote> : null,
+  }
+  const blocked: Partial<Record<StepKey, ReactNode>> = {
+    receive: (
+      <StepNote>
+        This Orbit server has no mail host name, so Orbit cannot say which MX record to publish. An instance administrator sets <code className="font-mono">ORBIT_MAIL_HOSTNAME</code>
+        {providers.length > 0 ? ', or you can receive through a provider above.' : '.'}
+      </StepNote>
+    ),
+    send: <StepNote>This domain has no DKIM key yet. Click Check DNS; Orbit makes the key with the next check.</StepNote>,
+  }
+
   return (
-    <section className="m-0 flex w-full min-w-0 flex-col rounded-lg bg-card shadow-[0_0_0_1px_var(--border)]">
+    <section ref={card} className="m-0 flex w-full min-w-0 scroll-mt-4 flex-col rounded-lg bg-card shadow-[0_0_0_1px_var(--border)]">
       <button
         type="button"
         aria-expanded={open}
@@ -212,19 +326,46 @@ function DomainCard({
       >
         <ChevronRight aria-hidden className={cn('size-4 shrink-0 text-muted-foreground transition-transform duration-[120ms]', open && 'rotate-90')} />
         <span className="min-w-0 flex-1 truncate">{domain.name}</span>
+        {actionable && domain.status !== 'disabled' ? <StepDots steps={steps.filter((step) => step.state !== 'blocked')} /> : null}
         <Badge variant={health.variant} title={health.hint}>{health.label}</Badge>
       </button>
       {open ? (
         <div id={`mail-domain-${domain.id}`} className="relative min-w-0 overflow-hidden rounded-b-lg border-t bg-background">
           <div className="flex flex-col divide-y">
-            <SettingsRow className="flex-nowrap">
-              <span className="min-w-0 flex-1 text-xs text-muted-foreground">{statusText(domain)}</span>
-              <div className="flex shrink-0 items-center gap-2">
-                <Button type="button" variant="outline" disabled={check.isPending || waiting} onClick={checkNow}>
-                  <Refresh />
-                  {waiting ? 'Checking…' : 'Check now'}
+            <SettingsRow className="flex-nowrap py-2.5">
+              <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
+                {host ? (
+                  <>
+                    <span>DNS at <span className="font-medium text-foreground">{host.name}</span></span>
+                    {host.url ? (
+                      <a href={host.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-0.5 font-medium text-primary underline-offset-2 hover:underline">
+                        Open DNS settings
+                        <ArrowRight aria-hidden className="size-3 -rotate-45" />
+                      </a>
+                    ) : null}
+                  </>
+                ) : (
+                  <span>Add these records where the DNS of {zone} is hosted.</span>
+                )}
+              </span>
+              <div className="flex shrink-0 items-center gap-1.5">
+                <Button type="button" variant={actionable ? 'default' : 'outline'} disabled={check.isPending || waiting} onClick={() => checkNow()}>
+                  <Refresh className={cn(waiting && 'animate-spin')} />
+                  {waiting ? 'Checking…' : 'Check DNS'}
                 </Button>
-                <Button type="button" variant="ghost" className="text-destructive" disabled={remove.isPending} onClick={() => void removeDomain()}>Remove</Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger render={<Button type="button" variant="ghost" size="icon" aria-label={`More for ${domain.name}`} />}>
+                    <More />
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-auto min-w-56">
+                    <DropdownMenuItem onClick={copyZoneFile}><Copy /> Copy records as zone file</DropdownMenuItem>
+                    <DropdownMenuItem disabled={!domain.records.some((record) => record.kind === 'dkim') || domain.dkim_rotating || rotate.isPending} onClick={() => void rotateKey()}>
+                      <Refresh2 /> {domain.dkim_rotating ? 'New DKIM key waits for its record' : 'Make a new DKIM key'}
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem variant="destructive" disabled={remove.isPending} onClick={() => void removeDomain()}><Trash /> Remove domain</DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
             </SettingsRow>
             {domain.status === 'suspended' ? (
@@ -235,13 +376,36 @@ function DomainCard({
                   <AlertDescription>
                     {verify?.status.status === 'wrong' ? `The TXT record at ${verify.name} has another value. ` : `The TXT record at ${verify?.name ?? `_orbit-verify.${domain.name}`} was not found. `}
                     {domain.grace_ends_at ? `Orbit receives mail for ${domain.name} until ${dateTime(domain.grace_ends_at)}, then refuses it. ` : null}
-                    Publish the record again, then click Check now.
+                    Publish the record again under Verify the domain, then click Check DNS.
                   </AlertDescription>
                 </Alert>
               </div>
             ) : null}
-            {providers.length > 0 || domain.provider ? <DomainRouteRow domain={domain} providers={providers} /> : null}
-            {sendRoutes && sendRoutes.routes.length > 0 ? <DomainSendRouteRow domain={domain} routes={sendRoutes} /> : null}
+            <ol aria-label={`Setup of ${domain.name}`} className="m-0 flex list-none flex-col divide-y p-0">
+              {steps.map((step, index) => (
+                <SetupStepRow
+                  key={step.key}
+                  step={step}
+                  index={index}
+                  open={stepOpen(step.key)}
+                  onToggle={() => setToggled((value) => ({ ...value, [step.key]: !stepOpen(step.key) }))}
+                  zone={zone}
+                  checked={checked}
+                  extra={extras[step.key]}
+                  blocked={step.state === 'blocked' ? blocked[step.key] : undefined}
+                />
+              ))}
+            </ol>
+            <SettingsRow className="flex-nowrap py-2">
+              <span className="flex min-w-0 flex-1 items-center gap-1.5 text-xs text-muted-foreground">
+                {statusText(domain)}
+                <InfoTip text={`Orbit checks the DNS every 10 minutes for 72 hours after you add a domain, then less often. While this page is open, it also checks when you come back to it. DNS changes can take a few minutes to show.`} />
+              </span>
+              <Button type="button" variant="ghost" size="sm" className="shrink-0 text-muted-foreground" onClick={copyZoneFile}>
+                <DocumentDownload />
+                Copy as zone file
+              </Button>
+            </SettingsRow>
             <SettingsRow className="flex-nowrap">
               <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[0.8125rem] font-medium text-foreground">
                 Mail on
@@ -276,10 +440,6 @@ function DomainCard({
                 </SelectContent>
               </Select>
             </SettingsRow>
-            <DomainSendRecords domain={domain} />
-            <div className="px-2 py-1">
-              <MailDomainRecords records={domain.records} checked={Boolean(domain.checked_at)} dkimRotating={domain.dkim_rotating} />
-            </div>
           </div>
         </div>
       ) : null}
@@ -287,15 +447,36 @@ function DomainCard({
   )
 }
 
+/** One dot for each step the user can do: filled when done. Shown while one is left. */
+function StepDots({ steps }: { steps: SetupStep[] }) {
+  const done = steps.filter((step) => step.state === 'done').length
+  return (
+    <span className="flex items-center gap-2 text-xs font-normal text-muted-foreground">
+      <span className="tabular-nums">{done} of {steps.length} steps</span>
+      <span aria-hidden className="flex gap-1">
+        {steps.map((step) => (
+          <span
+            key={step.key}
+            className={cn(
+              'size-1.5 rounded-full',
+              step.state === 'done' ? 'bg-emerald-600 dark:bg-emerald-400' : step.state === 'problem' ? 'bg-destructive' : 'bg-muted-foreground/30',
+            )}
+          />
+        ))}
+      </span>
+    </span>
+  )
+}
+
 function statusText(domain: MailDomain): string {
-  const checked = domain.checked_at ? ` Last checked ${since(domain.checked_at)}.` : ' Not checked yet.'
+  const checked = domain.checked_at ? `Checked ${since(domain.checked_at)}.` : 'Not checked yet.'
   switch (domain.status) {
     case 'pending':
-      return `Publish the records below at your DNS provider. Orbit checks every 10 minutes for 72 hours after you add the domain; Check now checks at once.${checked}`
+      return checked
     case 'verified':
-      return `Receives mail${domain.verified_at ? ` since ${shortDate(domain.verified_at)}` : ''}. ${count(domain.address_count, 'address', 'addresses')}.${checked}`
+      return `Receives mail${domain.verified_at ? ` since ${shortDate(domain.verified_at)}` : ''}. ${count(domain.address_count, 'address', 'addresses')}. ${checked}`
     case 'suspended':
-      return `Still receives mail during the grace period.${checked}`
+      return `Still receives mail during the grace period. ${checked}`
     case 'disabled':
       return 'Mail for this domain is refused.'
   }

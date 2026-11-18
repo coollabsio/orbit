@@ -82872,6 +82872,7 @@
           "name",
           "status",
           "address_count",
+          "nameservers",
           "records",
           "dkim_rotating",
           "created_at"
@@ -82911,6 +82912,13 @@
             ],
             "description": "The `p=` of the domain's DMARC record at the last check."
           },
+          "dns_zone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The DNS zone that holds the domain at the last check (`example.com` for\n`mail.example.com`): DNS panels want record names relative to it. `null` before the first\ncheck or when its NS lookup found nothing."
+          },
           "grace_ends_at": {
             "type": [
               "string",
@@ -82932,6 +82940,13 @@
           "name": {
             "type": "string",
             "description": "Normalized: lower case, IDNA A-labels (`xn--…`), no trailing dot."
+          },
+          "nameservers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The NS hosts of `dns_zone` (the setup page names the DNS host from them); empty before the\nfirst check or when none were found."
           },
           "own_send_route_id": {
             "type": [
