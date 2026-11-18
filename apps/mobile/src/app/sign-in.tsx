@@ -7,7 +7,7 @@ import { Select } from '../components/settings/Shell'
 import { accountKeys, authOptions } from '../data/account-api'
 import { PRIVACY_POLICY_URL, TERMS_OF_SERVICE_URL } from '../data/legal'
 import { createClient, normalizeServer, type SignIn, signIn as signInWithPassword, signInSecondFactor } from '../data/orbit'
-import { isPasswordTokenSpent, linkProviderAccount, looksLikeServer, offeredProviders, type PasswordStep, type Provider, providerErrorMessage, providerLabel, startProviderSignIn } from '../data/sign-in-provider'
+import { isPasswordTokenSpent, linkProviderAccount, looksLikeServer, offeredProviders, type PasswordStep, type Provider, providerErrorMessage, providerLabel, startPasskeySignIn, startProviderSignIn } from '../data/sign-in-provider'
 import { useSession } from '../session-context'
 import { providerDevice } from '../sign-in-provider'
 import { alpha, useTheme } from '../theme'
@@ -38,7 +38,7 @@ export default function SignInScreen() {
   const [password, setPassword] = useState(DEV_USER.password)
   const [code, setCode] = useState('')
   const [linkPassword, setLinkPassword] = useState('')
-  const [busy, setBusy] = useState<'password' | Provider | null>(null)
+  const [busy, setBusy] = useState<'password' | 'passkey' | Provider | null>(null)
   const [error, setError] = useState(state.status === 'signed_out' ? state.error : undefined)
   const current = looksLikeServer(server) ? normalizeServer(server) : null
   // asks the typed server which providers it offers once typing pauses
@@ -50,9 +50,12 @@ export default function SignInScreen() {
     retry: false,
     staleTime: 60_000,
   })
-  const providers = current !== null && current === typedServer ? offeredProviders(options.data?.providers ?? [], Platform.OS) : []
+  // the options of the server in the field, not of one typed a moment ago
+  const offered = current !== null && current === typedServer ? options.data : undefined
+  const providers = offeredProviders(offered?.providers ?? [], Platform.OS)
+  const passkeys = offered?.passkeys_enabled === true
 
-  const run = async (kind: 'password' | Provider, action: () => Promise<void>) => {
+  const run = async (kind: 'password' | 'passkey' | Provider, action: () => Promise<void>) => {
     setBusy(kind)
     setError(undefined)
     try {
@@ -84,6 +87,14 @@ export default function SignInScreen() {
         setLinkPassword('')
         setStep({ name: 'password', server: normalized, challenge: result })
       }
+    })
+
+  // the server's own sign-in page asks for the passkey in the browser sheet: a passkey belongs to the server's web address
+  const continueWithPasskey = () =>
+    run('passkey', async () => {
+      const normalized = normalizeServer(server)
+      const result = await startPasskeySignIn(createClient(normalized, () => null), providerDevice)
+      if (result.kind === 'signed_in' || result.kind === 'two_factor') await finish(normalized, result)
     })
 
   const back = (message?: string) => {
@@ -162,13 +173,14 @@ export default function SignInScreen() {
                   </Text>
                 ) : null}
                 <Button label="Sign in" size="lg" block loading={busy === 'password'} disabled={busy !== null || !server || !email || !password} onPress={submitCredentials} />
-                {providers.length > 0 ? (
+                {passkeys || providers.length > 0 ? (
                   <>
                     <View className="flex-row items-center gap-3">
                       <View className="h-px flex-1 bg-border" />
                       <Text className="text-[12px] text-muted-foreground">or</Text>
                       <View className="h-px flex-1 bg-border" />
                     </View>
+                    {passkeys ? <Button label="Sign in with a passkey" variant="outline" size="lg" block loading={busy === 'passkey'} disabled={busy !== null} onPress={() => void continueWithPasskey()} /> : null}
                     {providers.map((provider) => (
                       <Button
                         key={provider}

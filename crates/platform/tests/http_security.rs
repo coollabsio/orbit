@@ -993,7 +993,15 @@ async fn native_provider_sign_in_posts_need_no_origin_but_other_paths_do() {
             post(|| async { StatusCode::NO_CONTENT }),
         )
         .route(
+            "/api/v1/auth/providers/link",
+            post(|| async { StatusCode::NO_CONTENT }),
+        )
+        .route(
             "/api/v1/auth/providers/{provider}/other",
+            post(|| async { StatusCode::NO_CONTENT }),
+        )
+        .route(
+            "/api/v1/auth/passkey/app/{step}",
             post(|| async { StatusCode::NO_CONTENT }),
         )
         .route(
@@ -1009,7 +1017,11 @@ async fn native_provider_sign_in_posts_need_no_origin_but_other_paths_do() {
             StatusCode::NO_CONTENT,
         ),
         ("/api/v1/auth/providers/exchange", StatusCode::NO_CONTENT),
+        ("/api/v1/auth/providers/link", StatusCode::NO_CONTENT),
         ("/api/v1/auth/providers/google/other", StatusCode::FORBIDDEN),
+        // The app starts a passkey sign-in; only the web page, with its Origin, finishes the browser step.
+        ("/api/v1/auth/passkey/app/start", StatusCode::NO_CONTENT),
+        ("/api/v1/auth/passkey/app/finish", StatusCode::FORBIDDEN),
         ("/api/v1/auth/providers/a/b/start", StatusCode::FORBIDDEN),
         ("/api/v1/auth/connected-accounts", StatusCode::FORBIDDEN),
     ] {

@@ -69,6 +69,8 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::auth_routes::passkeys::delete_passkey,
         crate::auth_routes::passkeys::start_passkey_login,
         crate::auth_routes::passkeys::finish_passkey_login,
+        crate::auth_routes::passkeys::start_app_passkey_sign_in,
+        crate::auth_routes::passkeys::finish_app_passkey_sign_in,
         crate::auth_routes::providers::start_provider_sign_in,
         crate::auth_routes::providers::provider_callback,
         crate::auth_routes::providers::exchange_provider_sign_in,

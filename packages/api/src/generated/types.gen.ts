@@ -2601,6 +2601,30 @@ export type FilterNode = FilterGroup | Condition;
 
 export type FilterOperator = 'is' | 'is_not' | 'is_empty' | 'is_not_empty' | 'includes_any' | 'includes_all' | 'excludes' | 'before' | 'after' | 'between' | 'contains';
 
+export type FinishAppPasskeyBody = {
+    /**
+     * From `/api/v1/auth/passkey/login/start`.
+     */
+    challenge_token: string;
+    /**
+     * The browser's `PublicKeyCredential.toJSON()`.
+     */
+    credential: {
+        [key: string]: unknown;
+    };
+    /**
+     * The `flow` of the page's URL fragment.
+     */
+    flow: string;
+};
+
+export type FinishAppPasskeyResponse = {
+    /**
+     * The app's redirect with the handoff code: `{redirect}?handoff=…`. Send the browser there.
+     */
+    redirect_url: string;
+};
+
 export type FinishPasskeyLoginBody = {
     challenge_token: string;
     /**
@@ -6849,7 +6873,8 @@ export type PublicMe = {
     user: null | PublicUser;
     workspace: PublicNamed;
     /**
-     * Every workspace the token may use, with its access there. Always one item today.
+     * Every workspace the token may use, with its access there. An API token has one; an OAuth
+     * connection can have several.
      */
     workspaces: Array<PublicWorkspaceGrant>;
 };
@@ -7886,6 +7911,26 @@ export type SocketTicketResponse = {
      * without a cookie.
      */
     ticket: string;
+};
+
+export type StartAppPasskeyBody = {
+    /**
+     * `base64url(sha256(code_verifier))` of a random verifier the app keeps (43 characters). The same verifier goes
+     * to `/api/v1/auth/providers/exchange`.
+     */
+    code_challenge: string;
+    /**
+     * The app's redirect URI: `orbit://auth/callback` (development servers can allow more with
+     * `ORBIT_DEV_NATIVE_REDIRECTS`).
+     */
+    redirect: string;
+};
+
+export type StartAppPasskeyResponse = {
+    /**
+     * Orbit's own sign-in page for this flow. Open it in the system browser's auth session.
+     */
+    authorize_url: string;
 };
 
 export type StartAsanaImportBody = {
@@ -16269,6 +16314,122 @@ export type AuthOptionsResponses = {
 };
 
 export type AuthOptionsResponse = AuthOptionsResponses[keyof AuthOptionsResponses];
+
+export type FinishAppPasskeySignInData = {
+    body: FinishAppPasskeyBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/auth/passkey/app/finish';
+};
+
+export type FinishAppPasskeySignInErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: AuthProblem;
+    /**
+     * authentication_required
+     */
+    401: AuthProblem;
+    /**
+     * origin_forbidden
+     */
+    403: AuthProblem;
+    /**
+     * contract_mismatch
+     */
+    409: AuthProblem;
+    /**
+     * request_too_large
+     */
+    413: AuthProblem;
+    /**
+     * internal_error
+     */
+    500: AuthProblem;
+    /**
+     * authentication_busy
+     */
+    503: AuthProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: AuthProblem;
+};
+
+export type FinishAppPasskeySignInError = FinishAppPasskeySignInErrors[keyof FinishAppPasskeySignInErrors];
+
+export type FinishAppPasskeySignInResponses = {
+    200: FinishAppPasskeyResponse;
+};
+
+export type FinishAppPasskeySignInResponse = FinishAppPasskeySignInResponses[keyof FinishAppPasskeySignInResponses];
+
+export type StartAppPasskeySignInData = {
+    body: StartAppPasskeyBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/auth/passkey/app/start';
+};
+
+export type StartAppPasskeySignInErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: AuthProblem;
+    /**
+     * authentication_required
+     */
+    401: AuthProblem;
+    /**
+     * origin_forbidden
+     */
+    403: AuthProblem;
+    /**
+     * contract_mismatch
+     */
+    409: AuthProblem;
+    /**
+     * request_too_large
+     */
+    413: AuthProblem;
+    /**
+     * invalid_code_challenge or invalid_redirect
+     */
+    422: AuthProblem;
+    /**
+     * internal_error
+     */
+    500: AuthProblem;
+    /**
+     * authentication_busy
+     */
+    503: AuthProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: AuthProblem;
+};
+
+export type StartAppPasskeySignInError = StartAppPasskeySignInErrors[keyof StartAppPasskeySignInErrors];
+
+export type StartAppPasskeySignInResponses = {
+    200: StartAppPasskeyResponse;
+};
+
+export type StartAppPasskeySignInResponse = StartAppPasskeySignInResponses[keyof StartAppPasskeySignInResponses];
 
 export type FinishPasskeyLoginData = {
     body: FinishPasskeyLoginBody;

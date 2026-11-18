@@ -258,6 +258,8 @@ The rules of [Sign in with Google and GitHub](#sign-in-with-google-and-github) a
 
 The mobile app receives the result at `orbit://auth/callback`. Orbit accepts no other redirect in production. For Expo Go in development, set `ORBIT_DEV_NATIVE_REDIRECTS` to the exact Expo URLs, separated by commas, for example `exp://100.64.0.5:8082/--/auth/callback`. Orbit compares each URL exactly. Orbit does not start when `ORBIT_ENV=production` and this variable is set.
 
+The mobile app also signs in with a passkey through this redirect. A passkey belongs to the web address of the server, so the app opens the server's page `/login/app` in the system browser. The page asks for the passkey and sends the browser back to the app with a one-time code. Only the app that started the sign-in can use the code. The page signs nobody in to the browser.
+
 ## Postgres
 
 With `ORBIT_DATABASE_URL`, the database is on another host. `ORBIT_APP_KEY` encrypts saved secrets, the S3 secret among them, so every server and every new server needs the same key. Keep it with the database credentials.

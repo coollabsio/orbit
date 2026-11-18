@@ -350,6 +350,14 @@ pub fn auth_router(state: AuthState) -> Router {
             "/api/v1/auth/passkey/login/finish",
             post(passkeys::finish_passkey_login),
         )
+        .route(
+            "/api/v1/auth/passkey/app/start",
+            post(passkeys::start_app_passkey_sign_in),
+        )
+        .route(
+            "/api/v1/auth/passkey/app/finish",
+            post(passkeys::finish_app_passkey_sign_in),
+        )
         .route("/api/v1/auth/two-factor", get(two_factor::get_two_factor))
         .route(
             "/api/v1/auth/two-factor/totp/setup",

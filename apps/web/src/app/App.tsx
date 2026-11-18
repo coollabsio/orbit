@@ -61,6 +61,7 @@ import { InboxPage } from '@/features/inbox/pages/InboxPage'
 import { AuthGate, GuestGate } from '@/features/auth/AuthGate'
 import { AcceptInvitationPage } from '@/features/auth/pages/AcceptInvitationPage'
 import { OAuthConsentPage } from '@/features/auth/pages/OAuthConsentPage'
+import { AppSignInPage } from '@/features/auth/pages/AppSignInPage'
 import { ProviderCallbackPage } from '@/features/auth/pages/ProviderCallbackPage'
 import { LoginPage } from '@/features/auth/pages/LoginPage'
 import { RecoveryPage } from '@/features/auth/pages/RecoveryPage'
@@ -105,6 +106,8 @@ export default function App() {
         <Route path="oauth/consent" element={<OAuthConsentPage />} />
         {/* outside GuestGate: connect and confirm come back here signed in */}
         <Route path="login/callback" element={<ProviderCallbackPage />} />
+        {/* outside GuestGate: the Orbit app's passkey sign-in asks for the passkey whether or not this browser is signed in */}
+        <Route path="login/app" element={<AppSignInPage />} />
         <Route path="accept-invitation" element={<AcceptInvitationPage />} />
         <Route path="confirm-email" element={<ConfirmEmailPage />} />
         <Route element={<AuthGate />}>

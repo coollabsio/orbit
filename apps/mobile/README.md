@@ -30,6 +30,7 @@ Every action runs in the app; nothing opens the web.
 - The app keeps the token in the device keychain (`expo-secure-store`). It sends the token as `Authorization: Bearer <token>` on every request and on the WebSocket upgrade.
 - The token is a normal Orbit session. It shows in Account → Sessions, and you can revoke it there.
 - **Continue with Google / GitHub** shows on the sign-in screen for each provider the server's admin set up (`providers` in `GET /api/v1/auth/options`). The app starts the flow (`POST /api/v1/auth/providers/{provider}/start` with a PKCE challenge), opens the provider in the system browser's auth session (`expo-web-browser`), and gets back a one-time `handoff` on its redirect URL. It exchanges the handoff and the PKCE verifier for the session token (`POST /api/v1/auth/providers/exchange`). The token never goes in a URL. Two-factor sign-in still asks for the code after this.
+- **Sign in with a passkey** shows when the server has passkeys (`passkeys_enabled` in `GET /api/v1/auth/options`). A passkey belongs to the server's web address, and an app can use it natively only with an associated-domains entitlement for each server, which self-hosted servers cannot have. Thus the app starts a flow (`POST /api/v1/auth/passkey/app/start` with a PKCE challenge and its redirect) and opens the server's own page (`/login/app#flow=…`) in the auth session. The page asks for the passkey (`POST /api/v1/auth/passkey/app/finish`) and sends the browser to the app's redirect with a one-time `handoff`. The app exchanges it as for a provider (`POST /api/v1/auth/providers/exchange`). The browser step makes no session and sets no cookie. A passkey needs no two-factor code.
 - Security → Connected accounts connects and disconnects providers. An account without a password confirms authenticator changes with a fresh provider sign-in when the server answers `reauthentication_required`.
 
 The server side lives in `apps/server` of the same repo.
@@ -74,7 +75,7 @@ Requirements: Bun, the Orbit dev server (`just dev` at the repo root), and a pho
 
    `just mobile` sets `REACT_NATIVE_PACKAGER_HOSTNAME` from `ORBIT_MOBILE_HOST`, so Metro tells the phone to load the app from that host.
 
-6. Optional: to test Google or GitHub sign-in in Expo Go, allow the app's Expo Go redirect on the server. A development or store build sends `orbit://auth/callback`, which every server accepts. Expo Go sends its own URL instead, for example `exp://devbox.example.ts.net:8082/--/auth/callback` (the Metro host and port, then `/--/auth/callback`). Add that exact value to the server's environment and restart it:
+6. Optional: to test Google, GitHub or passkey sign-in in Expo Go, allow the app's Expo Go redirect on the server. A development or store build sends `orbit://auth/callback`, which every server accepts. Expo Go sends its own URL instead, for example `exp://devbox.example.ts.net:8082/--/auth/callback` (the Metro host and port, then `/--/auth/callback`). Add that exact value to the server's environment and restart it:
 
    ```bash
    ORBIT_DEV_NATIVE_REDIRECTS=exp://devbox.example.ts.net:8082/--/auth/callback

@@ -16,8 +16,9 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 use totp_rs::{Builder, Secret, Totp};
 use utoipa::ToSchema;
-use webauthn_rs::prelude::{DiscoverableAuthentication, PasskeyRegistration};
+use webauthn_rs::prelude::{DiscoverableAuthentication, Passkey, PasskeyRegistration};
 
+use super::passkeys::AppSignIn;
 use super::providers::ProviderFlow;
 use super::{
     ApiError, ApiJson, AuthState, LoginResponse, ProblemBody, SessionDelivery, authenticate,
@@ -69,6 +70,16 @@ pub(super) enum Pending {
         flow: ProviderFlow,
         outcome: Result<ProviderProfile, ProviderFailure>,
     },
+    /// Keyed by the flow token in the sign-in page's URL: the app waits for a passkey in the browser.
+    AppSignIn { flow: AppSignIn },
+    /// Keyed by the one-time handoff code: the passkey was right, the app that started picks up the session. The
+    /// passkey carries its new use counter, which the exchange saves with the session.
+    PasskeyHandoff {
+        flow: AppSignIn,
+        passkey_id: Id,
+        user_id: Id,
+        passkey: Box<Passkey>,
+    },
     /// A provider sign-in found an account by its email: the account password must confirm the first link.
     ProviderLink {
         user: AuthenticatedUser,
@@ -102,6 +113,8 @@ impl Pending {
             Self::PasskeyLogin { .. } => "passkey_login",
             Self::ProviderAuthorization { .. } => "provider_authorization",
             Self::ProviderHandoff { .. } => "provider_handoff",
+            Self::AppSignIn { .. } => "app_sign_in",
+            Self::PasskeyHandoff { .. } => "passkey_handoff",
             Self::ProviderLink { .. } => "provider_link",
         }
     }

@@ -14832,6 +14832,270 @@
         ]
       }
     },
+    "/api/v1/auth/passkey/app/finish": {
+      "post": {
+        "tags": [
+          "crate::auth_routes::passkeys"
+        ],
+        "summary": "The sign-in page's answer to [`start_app_passkey_sign_in`]. Checks the passkey and parks the result behind a\none-time handoff code for the app. It makes no session and sets no cookie: the browser stays as it was, and only\nthe exchange with the app's verifier signs in.",
+        "operationId": "finish_app_passkey_sign_in",
+        "parameters": [
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FinishAppPasskeyBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FinishAppPasskeyResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "authentication_busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/passkey/app/start": {
+      "post": {
+        "tags": [
+          "crate::auth_routes::passkeys"
+        ],
+        "summary": "Starts a passkey sign-in for the Orbit app. A passkey belongs to the server's web origin, so the app opens the\nreturned page in the system browser; the page ends at the app's redirect with a one-time handoff code, which the\napp trades with its verifier at `/api/v1/auth/providers/exchange`.",
+        "operationId": "start_app_passkey_sign_in",
+        "parameters": [
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartAppPasskeyBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StartAppPasskeyResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "invalid_code_challenge or invalid_redirect",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "authentication_busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/auth/passkey/login/finish": {
       "post": {
         "tags": [
@@ -15658,7 +15922,7 @@
         "tags": [
           "crate::auth_routes::providers"
         ],
-        "summary": "Where every provider flow ends, for every client and intent. `sign_in`: 200 `LoginResponse` (a cookie for\nbrowsers, `session_token` for requests without Origin) or 202 two-factor challenge, the same answers as\n`/api/v1/auth/login`. `connect` and `confirm`: 204.",
+        "summary": "Where every provider flow ends, for every client and intent, and where the app's passkey sign-in\n(`/api/v1/auth/passkey/app/start`) ends with 200 `LoginResponse`. `sign_in`: 200 `LoginResponse` (a cookie for\nbrowsers, `session_token` for requests without Origin) or 202 two-factor challenge, the same answers as\n`/api/v1/auth/login`. `connect` and `confirm`: 204.",
         "operationId": "exchange_provider_sign_in",
         "parameters": [
           {
@@ -72670,6 +72934,41 @@
           "contains"
         ]
       },
+      "FinishAppPasskeyBody": {
+        "type": "object",
+        "required": [
+          "flow",
+          "challenge_token",
+          "credential"
+        ],
+        "properties": {
+          "challenge_token": {
+            "type": "string",
+            "description": "From `/api/v1/auth/passkey/login/start`."
+          },
+          "credential": {
+            "type": "object",
+            "description": "The browser's `PublicKeyCredential.toJSON()`."
+          },
+          "flow": {
+            "type": "string",
+            "description": "The `flow` of the page's URL fragment."
+          }
+        },
+        "additionalProperties": false
+      },
+      "FinishAppPasskeyResponse": {
+        "type": "object",
+        "required": [
+          "redirect_url"
+        ],
+        "properties": {
+          "redirect_url": {
+            "type": "string",
+            "description": "The app's redirect with the handoff code: `{redirect}?handoff=…`. Send the browser there."
+          }
+        }
+      },
       "FinishPasskeyLoginBody": {
         "type": "object",
         "required": [
@@ -83047,7 +83346,7 @@
             "items": {
               "$ref": "#/components/schemas/PublicWorkspaceGrant"
             },
-            "description": "Every workspace the token may use, with its access there. Always one item today."
+            "description": "Every workspace the token may use, with its access there. An API token has one; an OAuth\nconnection can have several."
           }
         }
       },
@@ -85531,6 +85830,36 @@
           "ticket": {
             "type": "string",
             "description": "Pass as the `ticket` query parameter of the co-editing socket of the requested document,\nwithout a cookie."
+          }
+        }
+      },
+      "StartAppPasskeyBody": {
+        "type": "object",
+        "required": [
+          "code_challenge",
+          "redirect"
+        ],
+        "properties": {
+          "code_challenge": {
+            "type": "string",
+            "description": "`base64url(sha256(code_verifier))` of a random verifier the app keeps (43 characters). The same verifier goes\nto `/api/v1/auth/providers/exchange`."
+          },
+          "redirect": {
+            "type": "string",
+            "description": "The app's redirect URI: `orbit://auth/callback` (development servers can allow more with\n`ORBIT_DEV_NATIVE_REDIRECTS`)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "StartAppPasskeyResponse": {
+        "type": "object",
+        "required": [
+          "authorize_url"
+        ],
+        "properties": {
+          "authorize_url": {
+            "type": "string",
+            "description": "Orbit's own sign-in page for this flow. Open it in the system browser's auth session."
           }
         }
       },
