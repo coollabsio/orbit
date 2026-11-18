@@ -1,11 +1,5 @@
 ## Highlights
 
-### Mail
-
-Orbit can now receive mail for your workspace's domains, at its own SMTP listener or through a provider (PostShiba, Cloudflare Email Routing, Postmark, Mailgun, SES, Resend). Shared and personal mailboxes, labels, stars, spam and search are in the new Mail app. Mail is off by default: the root user turns it on in **Admin → Inbound mail**, then a workspace adds its domain and mailboxes in **Settings → Mail**. Sending mail is not in this release. (#36)
-
-![Mail inbox](https://github.com/coollabsio/orbit/releases/download/<tag>/screenshot-mail.png)
-
 ### Milestones, cycles and estimates
 
 Plan a project with milestones and cycles, and give tasks estimates. The milestone timeline shows each milestone's progress in tasks and points, with the cycles on top. Tasks carried over to the next cycle stay in the cycle's progress. (#113, #129)

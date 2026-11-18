@@ -4,18 +4,7 @@
   "slides": [
     {
       "type": "title",
-      "subtitle": "Mail, milestones and cycles, recurring tasks, custom roles, OpenID Connect and more."
-    },
-    {
-      "tag": "Mail",
-      "title": "Receive and read mail",
-      "shot": "mail",
-      "box": [
-        262,
-        48,
-        1170,
-        450
-      ]
+      "subtitle": "Milestones and cycles, recurring tasks, private projects, custom roles, OpenID Connect and more."
     },
     {
       "tag": "Tasks",
@@ -140,7 +129,6 @@
       "type": "outro",
       "title": "Update to v0.4.0 today",
       "lines": [
-        "Mail is off by default: turn it on in Admin → Inbound mail.",
         "Read the full changelog in the release notes."
       ]
     }

@@ -104,7 +104,7 @@ for row in "Rotate the database credentials|high|3" "Review OAuth scopes of the 
 done
 
 curl -sf -X POST "$api/roles" "${auth[@]}" -d '{"name":"Project lead","permissions":["projects.manage","projects.view_private","members.manage","views.manage_shared","comments.moderate"],"project_grants":[]}' > /dev/null
-curl -sf -X POST "$api/roles" "${auth[@]}" -d '{"name":"Support","permissions":["mail.manage","chat.manage"],"project_grants":[]}' > /dev/null
+curl -sf -X POST "$api/roles" "${auth[@]}" -d '{"name":"Support","permissions":["chat.manage"],"project_grants":[]}' > /dev/null
 role=$(curl -sf "$api/roles" "${auth[@]}" | jq -r '(.items // .)[] | select(.name=="Project lead") | .id')
 curl -sf -X PUT "$api/members/$mate_membership/custom-role" "${auth[@]}" -d "$(jq -nc --arg r "$role" '{role_id:$r,expected_version:0}')" > /dev/null || echo "custom-role: check body"
 
