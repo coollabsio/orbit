@@ -2,6 +2,7 @@ import { toast } from 'sonner'
 import type { Limits, MailDnsRecordKind, MailDomain, MailProviderKind, MailProviderView, RouteSettings, SendTier } from '@orbit/api/generated/types.gen'
 import { ApiProblem } from '@orbit/api/problem'
 import { fullDate, relativeTime, timeOfDay } from '@/lib/format'
+import { writeClipboard } from '@/lib/clipboard'
 
 /** The server's words for a refused mail request (its `detail` names the reason), else `fallback`. */
 export function mailProblem(error: unknown, fallback: string): string {
@@ -13,7 +14,7 @@ export const isMailDisabled = (error: unknown) => error instanceof ApiProblem &&
 
 /** Copies `text` and says so; `what` names it in the toast ("Name copied"). */
 export function copyText(text: string, what: string) {
-  void navigator.clipboard.writeText(text).then(
+  void writeClipboard(text).then(
     () => toast(`${what} copied`),
     () => toast.error('Could not copy to the clipboard.'),
   )

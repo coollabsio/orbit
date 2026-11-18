@@ -17,6 +17,7 @@ import { useDatabaseEnv } from './context'
 import { dropAfterRowId } from './databaseLib'
 import { GripIcon } from './GripIcon'
 import { isComputed } from '@orbit/database/meta'
+import { writeClipboard } from '@/lib/clipboard'
 
 const ROW_HEIGHT = 33
 const MIN_WIDTH = 32
@@ -217,7 +218,7 @@ export function DatabaseTable(props: DatabaseTableProps) {
       case 'c':
         if (!mod) return
         handled()
-        return void navigator.clipboard.writeText(property.type === 'title' ? row.title : displayText(property, cellOf(row, property), ctx))
+        return void writeClipboard(property.type === 'title' ? row.title : displayText(property, cellOf(row, property), ctx))
     }
   }
 

@@ -6,21 +6,7 @@ import { Copy } from 'reicon-react'
 import { Button } from '@/components/ui/button'
 import { Tip } from '@/components/common/Tip'
 import { cn } from 'cn'
-
-function copyTextFallback(text: string) {
-  const textarea = document.createElement('textarea')
-  textarea.value = text
-  textarea.setAttribute('readonly', '')
-  textarea.style.position = 'fixed'
-  textarea.style.top = '-9999px'
-  textarea.style.left = '-9999px'
-  document.body.appendChild(textarea)
-  textarea.select()
-  textarea.setSelectionRange(0, textarea.value.length)
-  const copied = document.execCommand('copy')
-  document.body.removeChild(textarea)
-  if (!copied) throw new Error('Copy failed')
-}
+import { writeClipboard } from '@/lib/clipboard'
 
 export function CopyCodeButton({ getText, className }: { getText: () => string; className?: string }) {
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
@@ -28,19 +14,12 @@ export function CopyCodeButton({ getText, className }: { getText: () => string; 
   async function copyCode() {
     const text = getText()
     try {
-      if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(text)
-      else copyTextFallback(text)
+      await writeClipboard(text)
       setCopyState('copied')
       toast('Code copied')
     } catch {
-      try {
-        copyTextFallback(text)
-        setCopyState('copied')
-        toast('Code copied')
-      } catch {
-        setCopyState('failed')
-        toast.error('Could not copy the code.')
-      }
+      setCopyState('failed')
+      toast.error('Could not copy the code.')
     }
     setTimeout(() => setCopyState('idle'), 1600)
   }

@@ -6,6 +6,7 @@ import { useConversationState } from '@/features/chat/api/queries'
 import type { Conversation, NotifyLevel } from '@/features/chat/api/types'
 import { conversationPath } from '@/features/chat/chatRoutes'
 import { useMembers } from '@/features/workspaces/api'
+import { writeClipboard } from '@/lib/clipboard'
 
 /** The current user is a workspace owner or admin: they manage every channel and the shared categories. */
 export function useIsChatAdmin(): boolean {
@@ -44,8 +45,7 @@ export function useConversationActions(conversation: Conversation) {
     toggleFavorite: () => setFavorite.mutate({ conversationId: id, favorite: !state?.favorite }, { onError: failed(state?.favorite ? 'remove the star' : 'add the star') }),
     setNotify: (notify: NotifyLevel) => setNotify.mutate({ conversationId: id, notify }, { onError: failed('change the notification setting') }),
     copyLink: () => {
-      navigator.clipboard
-        .writeText(`${window.location.origin}${conversationPath(id)}`)
+      writeClipboard(`${window.location.origin}${conversationPath(id)}`)
         .then(() => toast.success('Link copied'))
         .catch(failed('copy the link'))
     },

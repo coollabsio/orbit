@@ -23,6 +23,7 @@ import { useOwnStatus } from '@/features/realtime/useOwnStatus'
 import { useMembers } from '@/features/workspaces/api'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { GuestBadge } from '@/components/common/GuestBadge'
+import { writeClipboard } from '@/lib/clipboard'
 
 interface ProfileTarget {
   open: boolean
@@ -169,7 +170,7 @@ function ProfileCard({ userId, name, action, onClose }: { userId: string; name: 
   const status = own ? mine.presence : others.status
   const custom = own ? mine : others
   const localTime = localTimeLabel(profile?.timezone, now)
-  const copyEmail = () => void navigator.clipboard.writeText(member.email).then(() => toast('Email copied'), () => toast.error('Could not copy to the clipboard.'))
+  const copyEmail = () => void writeClipboard(member.email).then(() => toast('Email copied'), () => toast.error('Could not copy to the clipboard.'))
 
   return (
     <div data-slot="profile-card" className="flex flex-col gap-3 p-4">

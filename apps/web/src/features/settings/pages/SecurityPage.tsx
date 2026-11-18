@@ -30,6 +30,7 @@ import {
 import { RowIcon, SettingsRow } from '@/features/settings/components/SettingsParts'
 import { relativeTime } from '@/lib/format'
 import { LoadingText } from '@/components/ui/spinner'
+import { writeClipboard } from '@/lib/clipboard'
 
 function problemDetail(error: unknown, fallback: string) {
   return error instanceof ApiProblem ? error.detail : fallback
@@ -247,7 +248,7 @@ function CopyField({ label, value }: { label: string; value: string }) {
 
 async function copyText(text: string) {
   try {
-    await navigator.clipboard.writeText(text)
+    await writeClipboard(text)
     toast('Copied')
   } catch {
     toast.error('Could not copy. Select and copy it manually.')

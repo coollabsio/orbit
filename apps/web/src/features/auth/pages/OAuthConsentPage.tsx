@@ -13,6 +13,7 @@ import { createApiClient } from '@/api/client'
 import { oauthRequest, type OAuthConsent } from '@/features/auth/oauth'
 import { loginPath } from '@/features/auth/returnTo'
 import { LoadingText } from '@/components/ui/spinner'
+import { writeClipboard } from '@/lib/clipboard'
 
 // Anonymous consent sessions must not trigger the app-wide /login redirect.
 const consentClient = createApiClient()
@@ -69,7 +70,7 @@ export function OAuthConsentPage() {
   async function copyCallback() {
     if (!callback) return
     try {
-      await navigator.clipboard.writeText(callback.url)
+      await writeClipboard(callback.url)
       setCopyState('copied')
     } catch {
       setCopyState('failed')

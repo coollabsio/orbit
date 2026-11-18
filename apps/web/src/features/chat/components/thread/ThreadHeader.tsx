@@ -8,6 +8,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { useSetThreadFollow } from '../../api/mutations'
 import { threadPath } from '../../chatRoutes'
 import { useChatNavigation } from '../../useChatNavigation'
+import { writeClipboard } from '@/lib/clipboard'
 
 function FollowButton({ rootId, following }: { rootId: string; following: boolean }) {
   const { mutate: setFollow, isPending } = useSetThreadFollow()
@@ -145,7 +146,7 @@ export function ThreadHeader({
         <DropdownMenuContent align="end" className="w-auto min-w-44">
           <DropdownMenuItem
             onClick={() => {
-              navigator.clipboard.writeText(`${window.location.origin}${threadPath(conversationId, rootId)}`).then(
+              writeClipboard(`${window.location.origin}${threadPath(conversationId, rootId)}`).then(
                 () => toast.success('Link copied'),
                 () => toast.error('Could not copy. Try again.'),
               )

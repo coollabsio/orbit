@@ -34,6 +34,7 @@ import { formErrorMessage, useSubmitForm } from './formApi'
 import { GripIcon } from './GripIcon'
 import { Pill } from './cells/Pill'
 import { PROPERTY_TYPES } from './propertyMeta'
+import { writeClipboard } from '@/lib/clipboard'
 
 const MAX_LABEL = 200
 const MAX_TEXT = 2_000
@@ -56,7 +57,7 @@ export function DatabaseFormView({ database, viewId, form, onForm }: DatabaseFor
   const [preview, setPreview] = useState(false)
   const path = formPath(databaseId, viewId, linkId)
   const copyLink = () =>
-    void navigator.clipboard.writeText(new URL(path, window.location.origin).toString()).then(
+    void writeClipboard(new URL(path, window.location.origin).toString()).then(
       () => toast.success('Form link copied. Members who can open this database can fill it in.'),
       () => toast.error('Could not copy the link.'),
     )

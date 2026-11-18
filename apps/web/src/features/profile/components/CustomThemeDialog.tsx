@@ -19,6 +19,7 @@ import {
   serializeCustomTheme,
   type CustomTheme,
 } from '@/lib/customTheme'
+import { writeClipboard } from '@/lib/clipboard'
 
 /** The colours the fields start from when the user edits the Orbit default. */
 const CUSTOM_BASE: CustomTheme = { sidebar: '#1f1f23', selected: '#34343b', accent: '#f2458f', chat: '#26262b' }
@@ -159,7 +160,7 @@ function CustomThemeForm({ value, onSave }: { value: CustomTheme | null; onSave:
                   size="icon-xs"
                   aria-label="Copy share code"
                   onClick={() => {
-                    void navigator.clipboard.writeText(serializeCustomTheme(colors)).then(
+                    void writeClipboard(serializeCustomTheme(colors)).then(
                       () => toast.success('Share code copied'),
                       () => toast.error('Could not copy the share code.'),
                     )
