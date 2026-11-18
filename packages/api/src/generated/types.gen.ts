@@ -2584,6 +2584,26 @@ export type ExchangeProviderBody = {
  */
 export type ExportMode = 'full' | 'personal';
 
+export type FcmDeviceBody = {
+    /**
+     * What the list of devices shows, e.g. "Pixel 9 · Android 16".
+     */
+    label: string;
+    /**
+     * The FCM registration token of the app.
+     */
+    token: string;
+};
+
+/**
+ * A phone the user gets pushes on through FCM.
+ */
+export type FcmDeviceRecord = {
+    created_at: string;
+    id: string;
+    label: string;
+};
+
 export type FilterField = 'status' | 'status_category' | 'assignee' | 'creator' | 'label' | 'priority' | 'project' | 'due_date' | 'created_at' | 'updated_at' | 'text' | 'parent' | 'sub_issues' | 'milestone' | 'cycle' | 'estimate';
 
 /**
@@ -18804,6 +18824,168 @@ export type DeleteApnsDeviceResponses = {
 };
 
 export type DeleteApnsDeviceResponse = DeleteApnsDeviceResponses[keyof DeleteApnsDeviceResponses];
+
+export type ListFcmDevicesData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/push/fcm';
+};
+
+export type ListFcmDevicesErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type ListFcmDevicesError = ListFcmDevicesErrors[keyof ListFcmDevicesErrors];
+
+export type ListFcmDevicesResponses = {
+    200: Array<FcmDeviceRecord>;
+};
+
+export type ListFcmDevicesResponse = ListFcmDevicesResponses[keyof ListFcmDevicesResponses];
+
+export type CreateFcmDeviceData = {
+    body: FcmDeviceBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/push/fcm';
+};
+
+export type CreateFcmDeviceErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * invalid_token
+     */
+    422: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * push_not_configured
+     */
+    503: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type CreateFcmDeviceError = CreateFcmDeviceErrors[keyof CreateFcmDeviceErrors];
+
+export type CreateFcmDeviceResponses = {
+    200: FcmDeviceRecord;
+};
+
+export type CreateFcmDeviceResponse = CreateFcmDeviceResponses[keyof CreateFcmDeviceResponses];
+
+export type DeleteFcmDeviceData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/api/v1/push/fcm/{id}';
+};
+
+export type DeleteFcmDeviceErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type DeleteFcmDeviceError = DeleteFcmDeviceErrors[keyof DeleteFcmDeviceErrors];
+
+export type DeleteFcmDeviceResponses = {
+    204: void;
+};
+
+export type DeleteFcmDeviceResponse = DeleteFcmDeviceResponses[keyof DeleteFcmDeviceResponses];
 
 export type GetPushKeyData = {
     body?: never;

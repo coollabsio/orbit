@@ -65,6 +65,8 @@ const APNS_KEY_FILE_ENV: &str = "ORBIT_APNS_KEY_FILE";
 const APNS_KEY_ID_ENV: &str = "ORBIT_APNS_KEY_ID";
 const APNS_TEAM_ID_ENV: &str = "ORBIT_APNS_TEAM_ID";
 const APNS_TOPIC_ENV: &str = "ORBIT_APNS_TOPIC";
+const FCM_SERVICE_ACCOUNT_ENV: &str = "ORBIT_FCM_SERVICE_ACCOUNT";
+const FCM_SERVICE_ACCOUNT_FILE_ENV: &str = "ORBIT_FCM_SERVICE_ACCOUNT_FILE";
 /// The bundle id of the Orbit iOS app.
 const APNS_DEFAULT_TOPIC: &str = "io.coollabs.orbit";
 const STRIPE_API_BASE: &str = "https://api.stripe.com";
@@ -89,6 +91,9 @@ pub struct Config {
     /// Native iOS pushes through Apple's push service (`ORBIT_APNS_*`); `None` when the key is not
     /// set: browsers still get Web Push.
     pub apns: Option<ApnsConfig>,
+    /// Native Android pushes through Firebase Cloud Messaging (`ORBIT_FCM_SERVICE_ACCOUNT`);
+    /// `None` when it is not set.
+    pub fcm: Option<FcmConfig>,
     /// Instance settings from the environment (`ORBIT_SMTP_*`, `ORBIT_S3_*`, …): each one replaces the value
     /// saved in Admin.
     pub instance: InstanceConfig,
@@ -105,6 +110,13 @@ pub struct ApnsConfig {
     pub team_id: String,
     /// The bundle id of the app (`apns-topic`).
     pub topic: String,
+}
+
+/// The server's identity towards FCM: the JSON key of a Google service account of the Firebase
+/// project. The server checks it when it starts.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FcmConfig {
+    pub service_account: Secret,
 }
 
 /// The APNs variables, collected before they are checked together.
@@ -1030,6 +1042,7 @@ fn apply_environment(
         STRIPE_SECRET_KEY_ENV,
         STRIPE_WEBHOOK_SECRET_ENV,
         APNS_KEY_ENV,
+        FCM_SERVICE_ACCOUNT_ENV,
     ] {
         if environment.contains_key(key) && environment.contains_key(&format!("{key}_FILE")) {
             return Err(ConfigError::AmbiguousSecret {
@@ -1144,6 +1157,14 @@ fn apply_environment(
             apns.team_id = Some(value.trim().to_owned());
         } else if key == APNS_TOPIC_ENV {
             apns.topic = Some(value.trim().to_owned());
+        } else if key == FCM_SERVICE_ACCOUNT_ENV {
+            config.fcm = Some(FcmConfig {
+                service_account: Secret::new(value.clone()),
+            });
+        } else if key == FCM_SERVICE_ACCOUNT_FILE_ENV {
+            config.fcm = Some(FcmConfig {
+                service_account: Secret::new(read_secret_file(key, Path::new(value))?),
+            });
         } else if instance::is_instance_key(key) {
             // Read below, as a group.
         } else if key.starts_with("ORBIT_")
@@ -1309,6 +1330,15 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn fcm_is_off_without_its_service_account() {
+        assert_eq!(production(&[]).fcm, None);
+        let fcm = production(&[("ORBIT_FCM_SERVICE_ACCOUNT", "{}")])
+            .fcm
+            .unwrap();
+        assert_eq!(fcm.service_account.expose(), "{}");
     }
 
     #[test]

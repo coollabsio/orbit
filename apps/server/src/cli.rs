@@ -1446,6 +1446,11 @@ pub fn redacted_config(config: &Config) -> String {
         ]),
         None => lines.push("# ORBIT_APNS_KEY is not set: no native iOS pushes".to_owned()),
     }
+    lines.push(if config.fcm.is_some() {
+        "ORBIT_FCM_SERVICE_ACCOUNT=[REDACTED]".to_owned()
+    } else {
+        "# ORBIT_FCM_SERVICE_ACCOUNT is not set: no native Android pushes".to_owned()
+    });
     let instance = config.instance.redacted_lines();
     if instance.is_empty() {
         lines.push("# No instance settings are set by variables: Admin saves them".to_owned());

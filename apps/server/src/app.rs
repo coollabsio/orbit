@@ -851,6 +851,10 @@ impl App {
             let client = crate::push::apns::ApnsClient::new(apns).map_err(AppError::Background)?;
             push.set_apns_sender(std::sync::Arc::new(client));
         }
+        if let Some(fcm) = &self.config.fcm {
+            let client = crate::push::fcm::FcmClient::new(fcm).map_err(AppError::Background)?;
+            push.set_fcm_sender(std::sync::Arc::new(client));
+        }
         let token = service_shutdown.clone();
         spawn_service(&mut services, "push inbox", async move {
             push.run_inbox_service(token).await

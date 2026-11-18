@@ -2927,6 +2927,7 @@ dependencies = [
  "rand_core 0.6.4",
  "rcgen",
  "reqwest",
+ "ring",
  "rmcp",
  "rustls-pki-types",
  "schemars 1.2.2",

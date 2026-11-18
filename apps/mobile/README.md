@@ -21,7 +21,7 @@ Every action runs in the app; nothing opens the web.
 - `src/orbit-context.tsx`: `useOrbit()` gives the client, the user and the current workspace (the last one chosen, else the first).
 - `src/components/docs/PageEditor.dom.tsx`: the page editor, an Expo DOM component (`'use dom'`) running BlockNote with the web's schema from `@orbit/editor` (`packages/editor`). It connects to the page's collab socket with a one-time ticket (`getTicket` native action), and the screen (`src/app/(tabs)/docs/[id].tsx`) drives it through props, native actions and `ref.run(command)`. `src/data/page-editor.ts` holds the commands, the toolbar state and the answers to close codes.
 - `src/live.ts`: the workspace events socket (marks task, project and inbox queries stale) and the chat live socket (patches messages and read states). Both close in the background and reconnect in the foreground.
-- `src/push.ts`: iOS push notifications straight through APNs (no Expo push service). Settings → Notifications turns them on (`POST /api/v1/push/apns` with the raw device token and the profile's APNs environment); launch, sign-in and a workspace change register the token again when iOS allows notifications. A tapped notification's `url` (a web path) opens the matching screen (`src/data/push-route.ts`). The server pushes only when the user has no active live connection, which is why the sockets close in the background. Expo Go cannot get them: use a TestFlight or development build.
+- `src/push.ts`: native push notifications with no Expo push service. iOS goes straight through APNs, and Android goes straight through Firebase Cloud Messaging (FCM). Settings → Notifications turns them on. iOS sends `POST /api/v1/push/apns` with the raw device token and the profile's APNs environment. Android makes the notification channel `default` and sends `POST /api/v1/push/fcm` with the FCM registration token. Launch, sign-in and a workspace change register the token again when the system allows notifications. A tapped notification's `url` (a web path) opens the matching screen (`src/data/push-route.ts`). The server pushes only when the user has no active live connection, which is why the sockets close in the background. Expo Go cannot get them: use a TestFlight, release or development build.
 
 ## How the app talks to Orbit
 
@@ -134,7 +134,20 @@ What you still have to do:
 5. Build and submit: `bunx eas-cli build --platform all --profile production`, then `bunx eas-cli submit --platform ios --profile production` (and `android`).
 6. Fill in the App Store privacy labels and the Play data safety form so that they match `ios.privacyManifests`.
 
+## Android push (FCM)
+
+The Android app gets its FCM token from the Firebase project in `google-services.json`. This file is not in git (`.gitignore`). `app.config.js` adds `android.googleServicesFile` only when the file exists, because prebuild stops when `app.json` names a file that is missing. Without the file, the Android build has no FCM token, and Settings → Notifications cannot turn on notifications.
+
+To build the Android app with push:
+
+1. In the [Firebase console](https://console.firebase.google.com/), open the Firebase project (or create one), and add an Android app with the package name `io.coollabs.orbit`.
+2. Download `google-services.json` and put it in `apps/mobile/`. Do not commit it.
+3. Make the native project again: `bunx expo prebuild --platform android --clean`, then `bunx expo run:android`.
+4. Give the Orbit server a service account key of the same Firebase project (`ORBIT_FCM_SERVICE_ACCOUNT_FILE`). See "Android push notifications (FCM)" in `docs/operations.md`.
+
+The server and the app must use the same Firebase project. If they do not, FCM refuses the tokens (`SENDER_ID_MISMATCH`), and the server removes them.
+
 ## Next steps
 
-- Android push (FCM). iOS push needs a TestFlight or development build (`bunx expo run:ios`); Expo Go cannot get it.
-- Browser-sheet sign-in for passkeys. Admin → Sign-in providers (client ID and secret) is web-only.
+- Test Android push from end to end with a real Firebase project. The server and the app have the code, but no push went through a real Firebase project yet.
+- iOS push needs a TestFlight or development build (`bunx expo run:ios`). Android push needs a build with `google-services.json` (`bunx expo run:android`). Expo Go cannot get either.

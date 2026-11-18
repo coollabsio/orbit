@@ -414,6 +414,11 @@ pub fn auth_router(state: AuthState) -> Router {
             get(push::list_apns_devices).post(push::create_apns_device),
         )
         .route("/api/v1/push/apns/{id}", delete(push::delete_apns_device))
+        .route(
+            "/api/v1/push/fcm",
+            get(push::list_fcm_devices).post(push::create_fcm_device),
+        )
+        .route("/api/v1/push/fcm/{id}", delete(push::delete_fcm_device))
         .route("/api/v1/push/test", post(push::send_test_push))
         .route(
             "/api/v1/notification-preferences",

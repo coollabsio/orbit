@@ -1,7 +1,7 @@
 /**
- * Native push notifications on iOS, straight through APNs: the server sends to Apple with this device's token, no Expo
- * push service. One query (`thisDeviceKey`) knows whether this device gets notifications; reading it registers the
- * token again when iOS already allows notifications, since a token can change. Its key has the workspace, so
+ * Native push notifications straight through APNs on iOS and FCM on Android: the server sends to Apple or Google with
+ * this device's token, no Expo push service. One query (`thisDeviceKey`) knows whether this device gets notifications;
+ * reading it registers the token again when the system already allows notifications, since a token can change. Its key has the workspace, so
  * `usePushNotifications` (in the tabs layout) runs it on launch, sign-in and workspace change; it also opens the screen
  * of a tapped notification.
  */
@@ -22,23 +22,29 @@ import { storage } from './storage'
 
 /** What the "This device" card shows. */
 export type ThisDevice =
-  /** Web, Android, or Expo Go: Expo Go's token belongs to Expo Go, not to Orbit. */
+  /** Web, or Expo Go: Expo Go's token belongs to Expo Go, not to Orbit. */
   | { state: 'unsupported'; reason: 'expo-go' | 'platform' }
-  /** iOS Settings turned notifications off for Orbit; the app cannot ask again. */
+  /** The system settings turned notifications off for Orbit; the app cannot ask again. */
   | { state: 'denied' }
   /** Not asked yet, or turned off here (the device was removed). */
   | { state: 'off' }
-  /** The server has no APNs key. */
+  /** The server has no APNs key (iOS) or no FCM service account (Android). */
   | { state: 'not_configured' }
   | { state: 'on'; deviceId: string }
 
-export const thisDeviceKey = (workspaceId: string) => ['account', 'apns-this-device', workspaceId] as const
+/** Which push service a phone gets notifications from: APNs for iOS, FCM for Android. */
+export type PhoneKind = 'apns' | 'fcm'
+
+export const thisDeviceKey = (workspaceId: string) => ['account', 'push-this-device', workspaceId] as const
+
+/** The Android notification channel the server names in each push (`CHANNEL_ID` in the server's `push/fcm.rs`). */
+const ANDROID_CHANNEL = 'default'
 
 /** Set when the user removed this device: launches do not add it back until Turn on. */
 const OPTED_OUT = 'orbit.push.opted-out'
 
 const unsupported = (): ThisDevice | null => {
-  if (Platform.OS !== 'ios') return { state: 'unsupported', reason: 'platform' }
+  if (Platform.OS !== 'ios' && Platform.OS !== 'android') return { state: 'unsupported', reason: 'platform' }
   if (Constants.executionEnvironment === ExecutionEnvironment.StoreClient) return { state: 'unsupported', reason: 'expo-go' }
   return null
 }
@@ -51,8 +57,17 @@ if (!unsupported()) {
   })
 }
 
-/** `iPhone 16 Pro · iOS 26.1`, as the Devices list names it. */
-const deviceLabel = () => `${Device.modelName ?? (Device.deviceType === Device.DeviceType.TABLET ? 'iPad' : 'iPhone')} · iOS ${Device.osVersion ?? Platform.Version}`
+/** `iPhone 16 Pro · iOS 26.1` or `Pixel 9 · Android 16`, as the Devices list names it. */
+const deviceLabel = () =>
+  Platform.OS === 'android'
+    ? `${Device.modelName ?? 'Android phone'} · Android ${Device.osVersion ?? Platform.Version}`
+    : `${Device.modelName ?? (Device.deviceType === Device.DeviceType.TABLET ? 'iPad' : 'iPhone')} · iOS ${Device.osVersion ?? Platform.Version}`
+
+/** Android 13 and later ask for the permission only when a channel exists; making it again changes nothing. */
+async function prepareChannel() {
+  if (Platform.OS !== 'android') return
+  await Notifications.setNotificationChannelAsync(ANDROID_CHANNEL, { name: 'Notifications', importance: Notifications.AndroidImportance.HIGH })
+}
 
 /** The APNs environment of this build's provisioning profile: development for a dev build, production for TestFlight. */
 async function environment(): Promise<account.ApnsEnvironment> {
@@ -64,7 +79,10 @@ async function environment(): Promise<account.ApnsEnvironment> {
 async function register(client: OrbitClient): Promise<ThisDevice> {
   try {
     const { data: token } = await Notifications.getDevicePushTokenAsync()
-    const device = await account.registerApnsDevice(client, { token: String(token), environment: await environment(), label: deviceLabel() })
+    const device =
+      Platform.OS === 'android'
+        ? await account.registerFcmDevice(client, { token: String(token), label: deviceLabel() })
+        : await account.registerApnsDevice(client, { token: String(token), environment: await environment(), label: deviceLabel() })
     return { state: 'on', deviceId: device.id }
   } catch (error) {
     if (account.pushNotConfigured(error)) return { state: 'not_configured' }
@@ -72,12 +90,16 @@ async function register(client: OrbitClient): Promise<ThisDevice> {
   }
 }
 
+/** Turned off in the system settings. Android can ask once more after the first "Don't allow"; iOS cannot. */
+const blocked = (permission: Notifications.NotificationPermissionsStatus) => permission.status === 'denied' && !permission.canAskAgain
+
 /** Reads the permission and, when it is granted, registers the token again. Never asks. */
 async function syncThisDevice(client: OrbitClient): Promise<ThisDevice> {
   const skip = unsupported()
   if (skip) return skip
+  await prepareChannel()
   const permission = await Notifications.getPermissionsAsync()
-  if (permission.status === 'denied') return { state: 'denied' }
+  if (blocked(permission)) return { state: 'denied' }
   if (!permission.granted || (await storage.get(OPTED_OUT)) === '1') return { state: 'off' }
   return register(client)
 }
@@ -88,36 +110,39 @@ export function useThisDevice({ refresh = false } = {}) {
   return useQuery({ queryKey: thisDeviceKey(workspaceId), queryFn: () => syncThisDevice(client), staleTime: Infinity, refetchOnMount: refresh ? 'always' : false })
 }
 
-/** Turn on: asks iOS (the first time), then registers. */
+/** Turn on: asks the system (the first time), then registers. */
 export function useTurnOnPush() {
   const { client, workspaceId } = useOrbit()
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: async (): Promise<ThisDevice> => {
+      await prepareChannel()
       const permission = await Notifications.requestPermissionsAsync()
-      if (!permission.granted) return permission.status === 'denied' ? { state: 'denied' } : { state: 'off' }
+      if (!permission.granted) return blocked(permission) ? { state: 'denied' } : { state: 'off' }
       await storage.remove(OPTED_OUT)
       return register(client)
     },
     onSuccess: (device) => queryClient.setQueryData(thisDeviceKey(workspaceId), device),
-    onSettled: () => void queryClient.invalidateQueries({ queryKey: account.accountKeys.apnsDevices }),
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: phoneDevicesKey(Platform.OS === 'android' ? 'fcm' : 'apns') }),
   })
 }
 
-/** Removes an iOS device from the list. Removing this one also keeps launches from adding it back. */
-export function useRemoveApnsDevice() {
+const phoneDevicesKey = (kind: PhoneKind) => (kind === 'fcm' ? account.accountKeys.fcmDevices : account.accountKeys.apnsDevices)
+
+/** Removes a phone from the list. Removing this one also keeps launches from adding it back. */
+export function useRemovePhoneDevice() {
   const { client, workspaceId } = useOrbit()
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: async (id: string) => {
-      await account.removeApnsDevice(client, id)
+    mutationFn: async ({ kind, id }: { kind: PhoneKind; id: string }) => {
+      await (kind === 'fcm' ? account.removeFcmDevice(client, id) : account.removeApnsDevice(client, id))
       const here = queryClient.getQueryData<ThisDevice>(thisDeviceKey(workspaceId))
       if (here?.state === 'on' && here.deviceId === id) {
         await storage.set(OPTED_OUT, '1')
         queryClient.setQueryData<ThisDevice>(thisDeviceKey(workspaceId), { state: 'off' })
       }
     },
-    onSettled: () => void queryClient.invalidateQueries({ queryKey: account.accountKeys.apnsDevices }),
+    onSettled: (_data, _error, { kind }) => void queryClient.invalidateQueries({ queryKey: phoneDevicesKey(kind) }),
   })
 }
 
