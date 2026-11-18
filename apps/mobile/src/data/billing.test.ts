@@ -1,7 +1,8 @@
 import { expect, test } from 'bun:test'
 import type { BillingView } from '@orbit/api/generated/types.gen'
 
-import { billingBanner } from './billing'
+import { billingBanner, newWorkspaceTrialNote } from './billing'
+import { fullDate } from './format'
 
 const NOW = Date.parse('2026-10-27T12:00:00Z')
 const view = (fields: Partial<BillingView>): BillingView => ({
@@ -31,4 +32,18 @@ test('full access, a trial without data and no billing show nothing', () => {
   expect(billingBanner(view({}), NOW)).toBeNull()
   expect(billingBanner(view({ access: 'trial', trial: null }), NOW)).toBeNull()
   expect(billingBanner(undefined, NOW)).toBeNull()
+})
+
+test('a new workspace starts the trial when the account has had none', () => {
+  expect(newWorkspaceTrialNote({ days: 14, ends_at: null }, NOW)).toBe('This workspace starts your 14-day free trial. Later workspaces share it.')
+  expect(newWorkspaceTrialNote({ days: 0, ends_at: null }, NOW)).toBe('This workspace needs a plan before you can add to it.')
+})
+
+test('a new workspace shares a running trial and is read-only after it', () => {
+  expect(newWorkspaceTrialNote({ days: 14, ends_at: '2026-11-03T12:00:00Z' }, NOW)).toBe(`This workspace shares your free trial, which ends on ${fullDate('2026-11-03T12:00:00Z')}.`)
+  expect(newWorkspaceTrialNote({ days: 14, ends_at: '2026-10-20T12:00:00Z' }, NOW)).toBe(`Your free trial ended on ${fullDate('2026-10-20T12:00:00Z')}. This workspace stays read-only until it has a plan.`)
+})
+
+test('nothing is said without a trial', () => {
+  expect(newWorkspaceTrialNote(undefined, NOW)).toBeNull()
 })

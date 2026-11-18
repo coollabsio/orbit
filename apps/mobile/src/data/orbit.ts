@@ -7,6 +7,7 @@ import {
   createComment,
   createProject as createProjectRequest,
   createTask,
+  createWorkspace as createWorkspaceRequest,
   deleteChatMessage,
   deleteComment,
   deleteTask,
@@ -137,6 +138,11 @@ export async function signOut(client: OrbitClient): Promise<void> {
 
 export async function workspaces(client: OrbitClient): Promise<WorkspaceRecord[]> {
   return (await listWorkspaces({ client, throwOnError: true })).data
+}
+
+/** The server gives every new workspace a "General" project; on Orbit Cloud the first one starts the account's trial. */
+export async function createWorkspace(client: OrbitClient, name: string): Promise<WorkspaceRecord> {
+  return (await createWorkspaceRequest({ client, body: { name }, throwOnError: true })).data
 }
 
 /** Follows `next_cursor` until the server has no more. */
