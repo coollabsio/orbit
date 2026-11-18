@@ -34,6 +34,7 @@ export const WORKSPACE_NAV: readonly SettingsNavItem[] = [
   { href: '/settings/workspace-agentic', label: 'Agentic', icon: 'robot' },
   // every member but a guest may create a personal export token there
   { href: '/settings/api-tokens', label: 'API tokens', icon: 'key', permission: 'workspace.export_personal' },
+  { href: '/settings/webhooks', label: 'Webhooks', icon: 'global', permission: 'integrations.manage' },
   { href: '/settings/import', label: 'Import', icon: 'import' },
   { href: '/settings/export', label: 'Export', icon: 'documentDownload', permission: 'workspace.export' },
   { href: '/settings/danger-zone', label: 'Danger zone', icon: 'danger', permission: 'workspace.delete' },
@@ -61,6 +62,7 @@ export const ADMIN_NAV: readonly SettingsNavItem[] = [
   { href: '/settings/admin', label: 'General', icon: 'settings' },
   { href: '/settings/admin/users', label: 'Users', icon: 'people' },
   { href: '/settings/admin/email', label: 'Email', icon: 'mail' },
+  { href: '/settings/admin/sign-in-providers', label: 'Sign-in providers', icon: 'login' },
   { href: '/settings/admin/limits', label: 'Limits', icon: 'chart' },
   { href: '/settings/admin/storage', label: 'Storage', icon: 'cloudConnection' },
   { href: '/settings/admin/backups', label: 'Backups', icon: 'archiveBox' },

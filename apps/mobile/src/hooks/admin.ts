@@ -142,6 +142,8 @@ function useSettingsWrite<T>(write: (client: ReturnType<typeof useOrbit>['client
 export const useSetRegistration = () => useSettingsWrite(admin.setRegistration)
 export const useSaveSmtp = () => useSettingsWrite(admin.saveSmtp)
 export const useRemoveSmtp = () => useSettingsWrite((client, _: void) => admin.removeSmtp(client))
+export const useSaveSignInProvider = () => useSettingsWrite(admin.saveSignInProvider)
+export const useRemoveSignInProvider = () => useSettingsWrite(admin.removeSignInProvider)
 export const useSaveLimits = () => useSettingsWrite(admin.saveLimits)
 export const useSaveS3 = () => useSettingsWrite(admin.saveS3)
 export const useRemoveS3 = () => useSettingsWrite((client, _: void) => admin.removeS3(client))

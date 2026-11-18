@@ -9,6 +9,7 @@ import * as admin from '../src/data/admin-api'
 import { docBlocks, paragraphBlocks, visibleThreads } from '../src/data/docs'
 import * as docs from '../src/data/docs-api'
 import * as api from '../src/data/orbit'
+import * as hooks from '../src/data/webhooks-api'
 
 const [server = 'http://127.0.0.1:18080', email = 'test@example.com', password = 'password'] = process.argv.slice(2)
 
@@ -144,7 +145,31 @@ try {
   check(!(await api.teamspaces(client, ws)).some((item) => item.id === teamspace.id), 'teamspace deleted')
   cleanup.pop()
 
-  // ---- admin (reads only)
+  // ---- webhooks
+  if (workspace.permissions.includes('integrations.manage')) {
+    const [project] = await api.projects(client, ws)
+    if (!project) throw new Error('the webhook check needs a project')
+    const created = await hooks.createWebhook(client, ws, { name: 'Mobile check hook', url: 'https://example.com/orbit-webhook', event_types: ['task.created'], project_ids: [project.id] })
+    cleanup.push(() => hooks.deleteWebhook(client, ws, created.id).catch(() => undefined))
+    check(created.signing_secret.startsWith('whsec_'), 'webhook created with its signing secret')
+    const off = await hooks.updateWebhook(client, ws, created.id, { enabled: false, event_types: ['task.created', 'task.deleted'] })
+    check(!off.enabled && off.event_types.length === 2, 'webhook turned off and its events changed')
+    const rotated = await hooks.rotateSecret(client, ws, created.id)
+    check(rotated.startsWith('whsec_') && rotated !== created.signing_secret, 'webhook secret rotated')
+    check(Array.isArray(await hooks.webhookDeliveries(client, ws, created.id)), 'webhook deliveries listed')
+    const refused = await hooks.createWebhook(client, ws, { name: '', url: 'https://example.com/orbit-webhook', event_types: ['task.created'], project_ids: [project.id] }).then(
+      (other) => hooks.deleteWebhook(client, ws, other.id).then(() => 'accepted'),
+      (error: unknown) => hooks.webhookFailure(error, 'other error'),
+    )
+    check(refused === 'Enter a name of 1 to 100 characters.', `a blank webhook name is refused: ${refused}`)
+    await hooks.deleteWebhook(client, ws, created.id)
+    check(!(await hooks.webhooks(client, ws)).some((item) => item.id === created.id), 'webhook deleted')
+    cleanup.pop()
+  } else {
+    console.log('skip webhooks: the account cannot manage integrations')
+  }
+
+  // ---- admin (reads, and a sign-in provider that is put back)
   if (user.installation_admin) {
     const users = await admin.adminUsers(client, '')
     check(users.items.some((item) => item.id === user.id), `admin users: ${users.items.length}${users.next ? '+' : ''}`)
@@ -154,6 +179,19 @@ try {
     check(Array.isArray(await admin.backups(client)), 'backups listed')
     const kinds = await admin.jobLimits(client)
     check(kinds.length > 0, `job limits: ${kinds.map((kind) => `${admin.jobLabel(kind.kind)} ${admin.limitText(kind.concurrency)}`).join(', ')}`)
+    const settings = await admin.instanceSettings(client)
+    check(Array.isArray(settings.sign_in_providers), `sign-in providers: ${settings.sign_in_providers.map((item) => item.provider).join(', ') || 'none'}`)
+    if (!settings.sign_in_providers.some((item) => item.provider === 'github') && !settings.environment.sign_in_providers.includes('github')) {
+      cleanup.push(() => admin.removeSignInProvider(client, 'github').catch(() => undefined))
+      const saved = await admin.saveSignInProvider(client, { provider: 'github', body: { client_id: 'mobile-check', client_secret: 'mobile-check-secret' } })
+      const github = saved.sign_in_providers.find((item) => item.provider === 'github')
+      check(github?.client_id === 'mobile-check' && github.secret_set && github.callback_url.endsWith('/api/v1/auth/providers/github/callback'), `GitHub saved: ${github?.callback_url}`)
+      const removed = await admin.removeSignInProvider(client, 'github')
+      check(!removed.sign_in_providers.some((item) => item.provider === 'github'), 'GitHub removed')
+      cleanup.pop()
+    } else {
+      console.log('skip the GitHub provider write: GitHub is already set up')
+    }
   } else {
     console.log('skip admin reads: the account is not an installation admin')
   }
