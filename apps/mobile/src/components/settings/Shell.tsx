@@ -1,7 +1,7 @@
 import { type Href, usePathname } from 'expo-router'
 import type { Permission } from '@orbit/api/generated/types.gen'
 import { type ReactNode, useState } from 'react'
-import { Pressable, ScrollView, Switch, View } from 'react-native'
+import { Platform, Pressable, ScrollView, Switch, View } from 'react-native'
 
 import { useOrbit } from '../../orbit-context'
 import { guestMayOpen } from '../../data/guest'
@@ -14,7 +14,7 @@ export interface SettingsNavItem {
   icon: IconName
   /** Shown only to roles that hold this permission. */
   permission?: Permission
-  /** Shown only in Orbit Cloud (billing on). */
+  /** Shown only in Orbit Cloud (billing on), and never on iOS: App Store guideline 3.1.1 refuses links to purchases outside the app. */
   cloud?: boolean
 }
 
@@ -40,11 +40,11 @@ export const WORKSPACE_NAV: readonly SettingsNavItem[] = [
 ]
 
 /**
- * The links of `nav` this person may open: by permission, the cloud-only ones only in Orbit Cloud, and for a guest
+ * The links of `nav` this person may open: by permission, the cloud-only ones only in Orbit Cloud off iOS, and for a guest
  * only its own settings (`guestMayOpen`).
  */
 export function allowedNav<T extends SettingsNavItem>(nav: readonly T[], permissions: readonly Permission[], cloud: boolean, guest = false): T[] {
-  return nav.filter((item) => (!item.permission || permissions.includes(item.permission)) && (!item.cloud || cloud) && (!guest || guestMayOpen(item.href)))
+  return nav.filter((item) => (!item.permission || permissions.includes(item.permission)) && (!item.cloud || (cloud && Platform.OS !== 'ios')) && (!guest || guestMayOpen(item.href)))
 }
 
 export const ACCOUNT_NAV: readonly SettingsNavItem[] = [
