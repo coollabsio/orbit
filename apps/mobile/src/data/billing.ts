@@ -81,7 +81,7 @@ export function annualSaving(plans: readonly PlanView[]): number | null {
 
 /** A plan's name with its interval: `Team · Annual`. */
 export function planTitle(plan: PlanView): string {
-  return planTitle(plan)
+  return plan.interval ? `${plan.name} · ${INTERVAL_LABELS[plan.interval]}` : plan.name
 }
 
 /** The label of a plan card's button: `Choose annual`, or `Choose Team` without an interval. */
