@@ -9,6 +9,7 @@
     "@orbit/api": "workspace:*",
     "@orbit/database": "workspace:*",
     "@orbit/editor": "workspace:*",
+    "@pierre/diffs": "1.6.4",
     "@react-native-community/datetimepicker": "9.2.1",
     "@tanstack/react-query": "^5.102.8",
     "expo": "~58.0.17",

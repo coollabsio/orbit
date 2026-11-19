@@ -46,6 +46,7 @@ import { descendantCount, parentPickerTitle, trashConfirmDescription } from '@/f
 import { TaskPickerDialog } from './TaskPickerDialog'
 import { AddRelationMenu, DuplicateBanner, TaskRelationsSection } from './TaskRelations'
 import { TaskBreadcrumb } from './TaskBreadcrumb'
+import { TaskPullRequests } from '@/features/pulls/components/TaskPullRequests'
 import { SubIssuesSection } from './TaskSubIssues'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { useWorkspaceReadOnly } from '@/features/workspaces/billing'
@@ -82,7 +83,8 @@ export function TaskDetail({ task, project, state, onClose, onOpenTask, onOpenPr
   // Orbit Cloud without a subscription: the description socket drops edits, so offer none.
   const contentReadOnly = githubContentReadOnly || workspaceReadOnly
   const githubSyncPaused = githubLinks.data?.some((link) => link.source && link.state === 'paused')
-  const githubPullRequests = githubLinks.data?.filter((link) => link.kind === 'pull_request' && !link.source) ?? []
+  // a synced pull request (`source`) is listed too: its row opens Orbit's viewer, the source link opens GitHub
+  const githubPullRequests = githubLinks.data?.filter((link) => link.kind === 'pull_request') ?? []
   // the task is the GitHub issue or pull request it syncs from: the server refuses to move it to another project
   const githubIssueLinked = githubLinks.data?.some((link) => link.source) ?? false
   const taskLabels = task ? projectLabels(state.labels, task.projectId).filter((label) => task.labels.includes(label.id)).sort((a, b) => a.name.localeCompare(b.name)) : []
@@ -235,13 +237,7 @@ export function TaskDetail({ task, project, state, onClose, onOpenTask, onOpenPr
 
             {githubPullRequests.length > 0 ? <section aria-label="GitHub links" className="mt-6 border-t pt-4">
               <h3 className="mb-2 text-xs font-semibold text-muted-foreground">GitHub</h3>
-              <div className="grid gap-1">
-                {githubPullRequests.map((link) => <a key={link.url} href={link.url} target="_blank" rel="noopener noreferrer" className="flex min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-xs text-foreground transition-colors duration-150 ease-out hover:bg-muted">
-                  <Link2 className="size-4 shrink-0 text-muted-foreground" />
-                  <span className="truncate">{link.title}</span>
-                  <span className="ml-auto shrink-0 text-muted-foreground">{link.state === 'paused' ? 'Paused PR' : link.state === 'merged' ? 'Merged PR' : link.state === 'closed' ? 'Closed PR' : 'Open PR'}</span>
-                </a>)}
-              </div>
+              <TaskPullRequests links={githubPullRequests} />
             </section> : null}
             <SubIssuesSection
               parent={task}

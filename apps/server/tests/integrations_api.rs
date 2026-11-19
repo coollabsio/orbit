@@ -66,7 +66,10 @@ async fn database_github_app_routes_issues_without_orbit_tokens() {
     );
     assert_eq!(
         manifest["manifest"]["default_events"],
-        json!(["issues", "pull_request"])
+        json!([
+            "issues", "pull_request", "pull_request_review", "pull_request_review_comment",
+            "pull_request_review_thread", "check_suite", "check_run", "status"
+        ])
     );
     assert_eq!(manifest["manifest"]["public"], false);
     assert_eq!(
@@ -1895,7 +1898,7 @@ async fn integrations_do_not_write_to_a_read_only_cloud_workspace() {
     let before = tasks().await;
 
     // Not the exempt root workspace and past its trial, so without a subscription it is read-only.
-    sqlx::query("UPDATE workspaces SET created_at = 0, billing_exempt = 0 WHERE id = $1")
+    sqlx::query("UPDATE workspaces SET created_at = 0, trial_started_at = 0, billing_exempt = 0 WHERE id = $1")
         .bind(fixture.workspace_id.to_string())
         .execute(fixture.database.pool())
         .await

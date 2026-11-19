@@ -278,3 +278,32 @@ async fn replay_marks_batches_of_only_saved_view_changes_as_views_only() {
     assert_eq!(resync.kind, "resync_required");
     assert!(!resync.views_only);
 }
+
+#[tokio::test]
+async fn replay_names_the_pull_requests_that_changed_on_github() {
+    let db = TestDatabase::new().await.unwrap();
+    let workspace = Id::new_v7();
+    let record = |resource: &'static str, metadata: serde_json::Value| {
+        let db = &db;
+        async move {
+            let mut tx = db.pool().begin().await.unwrap();
+            audit::record(&mut tx, workspace, None, "github.pull.changed", AuditOutcome::Success, resource, None, "test", metadata, TimestampMillis::now())
+                .await
+                .unwrap();
+            tx.commit().await.unwrap();
+        }
+    };
+    use orbit_server::realtime::replay;
+    record("github_pull", serde_json::json!({ "pull": "acme/repo#12" })).await;
+    record("github_pull", serde_json::json!({ "pull": "acme/repo#12" })).await;
+    record("github_pull", serde_json::json!({ "pull": "acme/other#3" })).await;
+    let events = replay(&db, workspace, Some(0)).await.unwrap();
+    assert_eq!(events.github_pulls, vec!["acme/other#3".to_owned(), "acme/repo#12".to_owned()]);
+    assert!(events.github_only);
+    assert!(!events.views_only);
+    record("task", serde_json::json!({})).await;
+    assert!(!replay(&db, workspace, Some(0)).await.unwrap().github_only);
+    // nothing new: no pull requests
+    let latest = replay(&db, workspace, Some(4)).await.unwrap();
+    assert!(latest.github_pulls.is_empty());
+}

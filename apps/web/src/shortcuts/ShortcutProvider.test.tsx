@@ -48,6 +48,16 @@ test('an open dialog blocks page commands but not the command menu', async () =>
   expect(calls).toEqual(['palette'])
 })
 
+test('the pull request overlay runs its own keys, not the page keys under it, until a popup opens over it', async () => {
+  const user = userEvent.setup()
+  const { rerender } = mount(<><Probe id="pull.nextFile" run={record('file')} /><Probe id="detail.next" run={record('task')} /><div role="dialog" data-pull-overlay /></>)
+  await user.keyboard('j')
+  expect(calls).toEqual(['file'])
+  rerender(<ShortcutProvider><Probe id="pull.nextFile" run={record('file')} /><Probe id="detail.next" run={record('task')} /><div role="dialog" data-pull-overlay /><div role="dialog" /></ShortcutProvider>)
+  await user.keyboard('j')
+  expect(calls).toEqual(['file'])
+})
+
 test('a sequence runs its command and not the single-key command of its last step', async () => {
   const user = userEvent.setup()
   mount(<><Probe id="nav.inbox" run={record('inbox')} /><Probe id="task.setAssignee" run={record('assignee')} /></>)

@@ -44,6 +44,7 @@ import { setOpenPage, useAppSidebarTheme } from '@/lib/customTheme'
 import { MenuSurfaceContext } from '@/components/ui/menuSurface'
 import { useSidebarMenuSurface } from './sidebarMenu'
 import { hostsPageList, SidebarSlotContext } from './sidebarSlot'
+import { PullOverlay } from '@/features/pulls/PullOverlay'
 
 const desktopQuery = '(min-width: 900px)'
 const subscribeDesktop = (onChange: () => void) => {
@@ -240,6 +241,8 @@ function Shell() {
       {paletteOpen && !guest ? <CommandPalette onClose={() => setPaletteOpen(false)} /> : null}
       {helpOpen ? <ShortcutHelpDialog onClose={() => setHelpOpen(false)} mailEnabled={mailEnabled} /> : null}
       <NavigationCommands />
+      {/* a pull request opens over any page (`?pr=owner/repo/n`) */}
+      {!guest ? <PullOverlay /> : null}
       <SequenceHint />
       {/* the floating mail composers stay open on every page (Mail on; a guest has no mailbox) */}
       {mailEnabled && !guest ? (

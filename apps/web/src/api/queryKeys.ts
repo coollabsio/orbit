@@ -3,6 +3,10 @@ type TaskFilters = Readonly<Record<string, string | number | boolean | undefined
 const workspace = (workspaceId: string) => ['workspace', workspaceId] as const
 
 export const queryKeys = {
+  github: {
+    /** The signed-in member's GitHub connection in this workspace. */
+    connection: (workspaceId: string) => [...workspace(workspaceId), 'github', 'me'] as const,
+  },
   setup: ['setup-status'] as const,
   currentUser: ['current-user'] as const,
   /** Orbit Cloud: the caller's trial, which every workspace they create shares. */

@@ -6,6 +6,7 @@ import type { ChatEvent } from '@orbit/api/generated/types.gen'
 
 import { chatKeys, keys, type QueryKey, workspaceDataKeys } from './keys'
 import type { ConversationStateRecord, MessageRecord } from './orbit'
+import { pullKeys } from './pulls-api'
 
 /** `https://orbit.example.com` → `wss://orbit.example.com/api/v1/…`. React Native's `URL` has no `protocol` setter. */
 export function socketUrl(server: string, path: string, query: Record<string, string | undefined> = {}): string {
@@ -23,6 +24,10 @@ export interface WorkspaceEvent {
   kind: 'workspace.changed' | 'resync_required'
   sequence: string
   workspaces_changed?: boolean
+  /** GitHub pull requests that changed (`owner/repo#12`) and the member can see. */
+  github_pulls?: string[]
+  /** Every change was a GitHub pull request change. */
+  github_only?: boolean
 }
 
 export function parseWorkspaceEvent(raw: unknown): WorkspaceEvent | null {
@@ -39,8 +44,21 @@ export function parseWorkspaceEvent(raw: unknown): WorkspaceEvent | null {
 
 /** The queries a workspace event makes stale. A resync, or a change to the workspace list, also refreshes the list. */
 export function workspaceEventKeys(event: WorkspaceEvent, workspaceId: string): QueryKey[] {
+  // GitHub activity alone (pushes, CI, reviews) leaves the tasks and the inbox alone: only open pull requests refresh
+  if (event.kind !== 'resync_required' && event.github_only === true) return []
   const list = event.kind === 'resync_required' || event.workspaces_changed === true ? [keys.workspaces] : []
   return [...workspaceDataKeys(workspaceId), ...list]
+}
+
+/** The pull request queries a workspace event makes stale (refreshed exactly: the files keep the commit the reader
+ *  sees). */
+export function githubPullKeys(event: WorkspaceEvent, workspaceId: string): (readonly unknown[])[] {
+  return (Array.isArray(event.github_pulls) ? event.github_pulls : []).flatMap((pull) => {
+    const match = typeof pull === 'string' ? /^([^/#]+)\/([^/#]+)#(\d+)$/.exec(pull) : null
+    if (!match) return []
+    const ref = { owner: match[1], repo: match[2], number: Number(match[3]) }
+    return [pullKeys.pull(workspaceId, ref), pullKeys.threads(workspaceId, ref), pullKeys.conversation(workspaceId, ref)]
+  })
 }
 
 // ---- `/api/v1/workspaces/{id}/live`

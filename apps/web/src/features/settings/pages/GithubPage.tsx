@@ -53,6 +53,13 @@ export function GithubPage() {
         </> : <p className="text-sm text-muted-foreground">Ask a workspace owner or admin to register the App.</p>}
       </div>
     ) : <div className="flex flex-col items-start gap-3">
+      {settings.needs_recreate ? <div role="alert" className="flex w-full flex-col items-start gap-2 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2.5">
+        <p className="text-sm text-foreground">This GitHub App is from an older Orbit version. Re-create it to review pull requests in Orbit. You must then install it again and connect each project to its repository again.</p>
+        {settings.can_manage ? <>
+          <Button variant="outline" disabled={!settings.key_configured || register.isPending} onClick={() => void beginRegistration()}>Re-create GitHub App</Button>
+          {register.isError ? <p className="text-xs text-destructive">{register.error instanceof Error ? register.error.message : 'App registration could not start.'}</p> : null}
+        </> : <p className="text-xs text-muted-foreground">Ask a workspace owner or admin to re-create it.</p>}
+      </div> : null}
       <p className="text-sm text-foreground">App: {settings.app_slug}</p>
       {settings.can_manage && settings.install_url ? <Button variant="outline" onClick={() => window.location.assign(settings.install_url!)}>Install or change repositories</Button> : null}
       <div className="w-full">

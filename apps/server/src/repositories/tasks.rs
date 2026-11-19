@@ -281,8 +281,9 @@ pub struct NotificationRecord {
     pub actor_user_id: Id,
     /// `task_assigned`, `comment_mentioned` (task comment), `description_mentioned` (task
     /// description), `page_comment_mentioned`, `page_mentioned` (an @mention in a page body) or
-    /// `chat_mentioned` (a chat message), `import_finished` (a long import ended) or
-    /// `chat_reported` (a member reported a chat message).
+    /// `chat_mentioned` (a chat message), `import_finished` (a long import ended), `chat_reported` (a member
+    /// reported a chat message), or a GitHub pull request notice: `github_review_requested`, `github_review`,
+    /// `github_merged`.
     pub kind: String,
     /// Set for task notifications.
     #[schema(value_type = Option<String>)]
@@ -313,6 +314,14 @@ pub struct NotificationRecord {
     pub import_id: Option<Id>,
     /// How the import ended: `completed` or `failed`.
     pub import_status: Option<String>,
+    /// GitHub notices (`github_review_requested`, `github_review`, `github_merged`): the repository (`owner/repo`)
+    /// and the pull request number.
+    pub github_repository: Option<String>,
+    pub github_pull_number: Option<i64>,
+    /// Who acted on GitHub (their GitHub login; they may have no Orbit account).
+    pub github_actor_login: Option<String>,
+    /// A `github_review`'s result: `approved`, `changes_requested` or `commented`.
+    pub github_review_state: Option<String>,
     /// The report of a `chat_reported` notification (a member reported a chat message).
     #[schema(value_type = Option<String>)]
     pub chat_report_id: Option<Id>,
@@ -3874,7 +3883,7 @@ impl TaskRepository {
         let after = cursor_i64_pair(cursor, &fingerprint)?;
         let mut query = SqlBuilder::new(
             "SELECT id, workspace_id, recipient_user_id, actor_user_id, kind, task_id, comment_id, page_id, \
-             page_thread_id, page_comment_id, page_block_id, chat_conversation_id, chat_message_id, import_source, import_id, import_status, chat_report_id, read_at, created_at FROM notifications WHERE workspace_id = ",
+             page_thread_id, page_comment_id, page_block_id, chat_conversation_id, chat_message_id, import_source, import_id, import_status, github_repository, github_pull_number, github_actor_login, github_review_state, chat_report_id, read_at, created_at FROM notifications WHERE workspace_id = ",
         );
         query
             .push_bind(workspace_id.to_string())
@@ -3954,7 +3963,7 @@ impl TaskRepository {
         .await?;
         let row = sqlx::query(
             "SELECT id, workspace_id, recipient_user_id, actor_user_id, kind, task_id, comment_id, page_id, \
-             page_thread_id, page_comment_id, page_block_id, chat_conversation_id, chat_message_id, import_source, import_id, import_status, chat_report_id, read_at, created_at FROM notifications WHERE id = $1 AND workspace_id = $2 AND recipient_user_id = $3",
+             page_thread_id, page_comment_id, page_block_id, chat_conversation_id, chat_message_id, import_source, import_id, import_status, github_repository, github_pull_number, github_actor_login, github_review_state, chat_report_id, read_at, created_at FROM notifications WHERE id = $1 AND workspace_id = $2 AND recipient_user_id = $3",
         )
         .bind(notification_id.to_string())
         .bind(workspace_id.to_string())
@@ -5987,6 +5996,10 @@ fn notification_from_row(row: sqlx::any::AnyRow) -> Result<NotificationRecord, T
         import_source: row.get("import_source"),
         import_id: optional_id(row.get("import_id"))?,
         import_status: row.get("import_status"),
+        github_repository: row.get("github_repository"),
+        github_pull_number: row.get("github_pull_number"),
+        github_actor_login: row.get("github_actor_login"),
+        github_review_state: row.get("github_review_state"),
         chat_report_id: optional_id(row.get("chat_report_id"))?,
         read_at: row
             .get::<Option<i64>, _>("read_at")

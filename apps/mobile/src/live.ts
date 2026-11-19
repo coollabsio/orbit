@@ -4,7 +4,7 @@ import { useEffect } from 'react'
 import { AppState, Platform } from 'react-native'
 
 import { keys } from './data/keys'
-import { chatResyncKeys, LiveCursor, parseLiveFrame, parseWorkspaceEvent, socketUrl, workspaceEventKeys } from './data/live'
+import { chatResyncKeys, githubPullKeys, LiveCursor, parseLiveFrame, parseWorkspaceEvent, socketUrl, workspaceEventKeys } from './data/live'
 import { reconnectingSocket, type SocketLike } from './data/socket'
 import { applyChatEvents } from './chat-cache'
 import { readPresenceFrame, resetPresence } from './data/chat-presence'
@@ -46,6 +46,8 @@ export function useLiveUpdates() {
         if (!event) return
         after = event.sequence
         invalidate(workspaceEventKeys(event, workspaceId))
+        // best effort: GitHub may refuse (no connection, an outage); the workspace refresh never waits for it
+        for (const queryKey of githubPullKeys(event, workspaceId)) void queryClient.invalidateQueries({ queryKey, exact: true }).catch(() => {})
       },
     })
 

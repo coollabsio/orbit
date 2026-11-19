@@ -53,6 +53,7 @@ export const ACCOUNT_NAV: readonly SettingsNavItem[] = [
   { href: '/settings/profile', label: 'Profile', icon: 'user' },
   { href: '/settings/security', label: 'Security', icon: 'lock' },
   { href: '/settings/sessions', label: 'Sessions', icon: 'shield' },
+  { href: '/settings/github-account', label: 'GitHub', icon: 'link2' },
   { href: '/settings/blocked-people', label: 'Blocked people', icon: 'shieldCross' },
   { href: '/settings/appearance', label: 'Appearance', icon: 'brush' },
   { href: '/settings/notifications', label: 'Notifications', icon: 'bell' },

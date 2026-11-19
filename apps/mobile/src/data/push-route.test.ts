@@ -36,3 +36,12 @@ test('reads the url from the iOS remote payload, then from data', () => {
   expect(pushUrl({ content: { data: { url: '/chat/c1?thread=m9' } }, trigger: { type: 'push', remoteMessage: { data: { url: '/chat/c1?thread=m9' } } } })).toBe('/chat/c1?thread=m9')
   expect(pushUrl({ content: { data: {} }, trigger: { type: 'push', payload: { aps: {} } } })).toBeNull()
 })
+
+test('pull request paths open the pull request screens', () => {
+  expect(pushRoute('https://orbit.test/tasks/pulls/acme/repo/12')).toBe('/pulls/acme/repo/12')
+  expect(pushRoute('/tasks/pulls/acme/repo/12?comment=5')).toBe('/pulls/acme/repo/12?comment=5')
+  expect(pushRoute('/tasks/pulls/my%20org/repo/12')).toBe('/pulls/my%20org/repo/12')
+  expect(pushRoute('/tasks/projects/p1/pulls')).toBe('/tasks/project/p1/pulls')
+  expect(pushRoute('/tasks/projects/p1/settings')).toBe('/tasks')
+  expect(pushRoute('/tasks/pulls/acme')).toBe('/tasks')
+})

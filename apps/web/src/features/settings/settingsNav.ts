@@ -102,6 +102,7 @@ const AREAS: Record<SettingsAreaName, SettingsArea> = {
           { to: '/profile', label: 'Profile', icon: User, end: true },
           { to: '/profile/security', label: 'Security', icon: Lock },
           { to: '/profile/sessions', label: 'Sessions', icon: ShieldCheck },
+          { to: '/profile/github', label: 'GitHub', icon: Link2 },
           { to: '/profile/blocked', label: 'Blocked people', icon: UserBlock },
         ],
       },

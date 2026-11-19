@@ -5,7 +5,8 @@ import { Button } from '@/components/ui/button'
 import { Tip } from '@/components/common/Tip'
 import { ProfileTrigger } from '@/components/common/ProfileTrigger'
 import { relativeTime } from '@/lib/format'
-import { notificationCopy } from '@/features/inbox/api'
+import { ProviderMark } from '@/components/common/icons/ProviderMark'
+import { notificationCopy, notificationLine } from '@/features/inbox/api'
 import type { useNotificationRows } from '@/features/inbox/useNotificationRows'
 
 type Rows = ReturnType<typeof useNotificationRows>
@@ -34,7 +35,7 @@ export function NotificationRow({ notification, rows, onOpen }: { notification: 
           <span className="truncate text-[0.8125rem] text-foreground data-unread:font-semibold" data-unread={unread || undefined}>
             {copy.title}
           </span>
-          <span className="truncate text-xs text-muted-foreground/70">{actor && !notification.import_id ? `${actor.name} · ${copy.body}` : copy.body}</span>
+          <span className="truncate text-xs text-muted-foreground/70">{notificationLine(notification, copy.body, actor?.name)}</span>
         </span>
         <span
           className="shrink-0 text-xs text-muted-foreground/70 tabular-nums transition-opacity duration-100 group-has-[[data-slot=notification-read]:focus-visible]/row:opacity-0 data-unread:hover-fine:group-hover/row:opacity-0"
@@ -47,6 +48,11 @@ export function NotificationRow({ notification, rows, onOpen }: { notification: 
       {notification.import_id ? (
         <span aria-hidden="true" className="pointer-events-none absolute top-1/2 left-[30px] flex size-7 -translate-y-1/2 items-center justify-center rounded-full bg-muted">
           <Import className="size-4 text-muted-foreground" />
+        </span>
+      ) : notification.kind.startsWith('github_') && notification.actor_user_id === notification.recipient_user_id ? (
+        // who acted on GitHub has no Orbit account: the GitHub mark, not the reader's own avatar
+        <span aria-hidden="true" className="pointer-events-none absolute top-1/2 left-[30px] flex size-7 -translate-y-1/2 items-center justify-center rounded-full bg-muted text-foreground [&_svg]:size-4">
+          <ProviderMark provider="github" />
         </span>
       ) : (
         <ProfileTrigger userId={actor?.id} name={actor?.name ?? 'Unknown'} kind="avatar" className="absolute top-1/2 left-[30px] flex -translate-y-1/2">
