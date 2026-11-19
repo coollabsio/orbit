@@ -13,7 +13,7 @@ const STATE_LABEL: Record<string, string> = { paused: 'Paused PR', merged: 'Merg
 /** The web's GitHub section of a task: each linked pull request opens the viewer; the arrow opens it on GitHub. */
 export function TaskPulls({ taskId }: { taskId: string }) {
   const { colors } = useTheme()
-  const links = (useTaskGithubLinks(taskId).data ?? []).filter((link) => link.kind === 'pull_request' && !link.source)
+  const links = (useTaskGithubLinks(taskId).data ?? []).filter((link) => link.kind === 'pull_request')
   if (links.length === 0) return null
   return (
     <View>

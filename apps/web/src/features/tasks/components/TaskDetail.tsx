@@ -83,7 +83,8 @@ export function TaskDetail({ task, project, state, onClose, onOpenTask, onOpenPr
   // Orbit Cloud without a subscription: the description socket drops edits, so offer none.
   const contentReadOnly = githubContentReadOnly || workspaceReadOnly
   const githubSyncPaused = githubLinks.data?.some((link) => link.source && link.state === 'paused')
-  const githubPullRequests = githubLinks.data?.filter((link) => link.kind === 'pull_request' && !link.source) ?? []
+  // a synced pull request (`source`) is listed too: its row opens Orbit's viewer, the source link opens GitHub
+  const githubPullRequests = githubLinks.data?.filter((link) => link.kind === 'pull_request') ?? []
   // the task is the GitHub issue or pull request it syncs from: the server refuses to move it to another project
   const githubIssueLinked = githubLinks.data?.some((link) => link.source) ?? false
   const taskLabels = task ? projectLabels(state.labels, task.projectId).filter((label) => task.labels.includes(label.id)).sort((a, b) => a.name.localeCompare(b.name)) : []

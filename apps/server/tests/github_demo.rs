@@ -205,3 +205,45 @@ async fn the_demo_seed_runs_twice_without_errors_and_adds_notices() {
     .unwrap();
     assert!(notices >= 2, "{notices}");
 }
+
+#[tokio::test]
+async fn the_demo_links_pull_request_482_to_a_task_like_the_label_sync() {
+    let (fixture, app, member) = demo().await;
+    let status: String = sqlx::query_scalar("SELECT id FROM task_statuses WHERE project_id = $1 ORDER BY position LIMIT 1")
+        .bind(fixture.project_id.to_string())
+        .fetch_one(fixture.database.pool())
+        .await
+        .unwrap();
+    let input = orbit_server::repositories::tasks::CreateTask {
+        project_id: fixture.project_id,
+        status_id: status.parse().unwrap(),
+        title: "Review the webhook limit".to_owned(),
+        description: String::new(),
+        description_json: None,
+        source_url: None,
+        priority: "none".to_owned(),
+        position: None,
+        assignee_ids: vec![],
+        label_ids: vec![],
+        due_start_at: None,
+        due_at: None,
+        parent_task_id: None,
+        milestone_id: None,
+        cycle_id: None,
+        estimate: None,
+    };
+    TaskRepository::new((*fixture.database).clone())
+        .create_task(fixture.workspace_id, fixture.user_id, input, "test", orbit_platform::TimestampMillis::now())
+        .await
+        .unwrap();
+    // the seed links the project's first task that has no GitHub link yet
+    seed_demo(&fixture.database, &KEY, fixture.workspace_id, fixture.project_id, fixture.user_id, member)
+        .await
+        .unwrap();
+    let pull = format!("/api/v1/workspaces/{}/github/pulls/{DEMO_REPOSITORY}/482", fixture.workspace());
+    let (status, detail) = call(&fixture, &app, "GET", &pull, None).await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    let tasks = detail["tasks"].as_array().unwrap();
+    assert_eq!(tasks.len(), 1, "{detail}");
+    assert_eq!(tasks[0]["title"], "Review the webhook limit");
+}

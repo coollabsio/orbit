@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render } from '@testing-library/react'
+import { render, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { MemoryRouter } from 'react-router'
 import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
@@ -56,11 +56,13 @@ test('related pull requests stay in GitHub without a duplicate issue row', async
   expect(view.getByRole('link', { name: 'github.com' })).toHaveProperty('href', 'https://github.com/acme/repo/issues/12')
 })
 
-test('pull request tasks use the source link without a duplicate GitHub section', async () => {
+test('a pull request task lists its pull request, so it opens in Orbit, and keeps the source link', async () => {
   globalThis.fetch = (async () => Response.json([{ kind: 'pull_request', title: 'acme/repo#8', url: 'https://github.com/acme/repo/pull/8', state: 'paused', source: true }])) as unknown as typeof fetch
   const view = render(<TaskDetail task={{ ...task, sourceUrl: 'https://github.com/acme/repo/pull/8' }} project={undefined} state={state} onClose={() => {}} />, { wrapper: Wrapper })
   expect(await view.findByText('GitHub sync paused')).toBeTruthy()
   expect(view.getByText("This task's title and description are read-only while it is linked to GitHub.")).toBeTruthy()
-  expect(view.queryByRole('region', { name: 'GitHub links' })).toBeNull()
+  const region = view.getByRole('region', { name: 'GitHub links' })
+  expect(within(region).getByText('Paused PR')).toBeTruthy()
+  expect(within(region).getByText('acme/repo#8')).toBeTruthy()
   expect(view.getByRole('link', { name: 'github.com' })).toHaveProperty('href', 'https://github.com/acme/repo/pull/8')
 })

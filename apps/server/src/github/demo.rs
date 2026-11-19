@@ -109,22 +109,21 @@ pub async fn seed_demo(
         .await?;
     }
     let task: Option<String> = sqlx::query_scalar(
-        "SELECT id FROM tasks WHERE project_id = $1 AND deleted_at IS NULL ORDER BY created_at LIMIT 1",
+        "SELECT id FROM tasks WHERE project_id = $1 AND deleted_at IS NULL \
+         AND id NOT IN (SELECT task_id FROM github_issue_links) ORDER BY created_at LIMIT 1",
     )
     .bind(project.to_string())
     .fetch_optional(&mut *tx)
     .await?;
     if let Some(task) = task {
+        // the link the webhook makes for a pull request with the project's label
         sqlx::query(
-            "INSERT INTO github_pull_links (workspace_id, repository, pull_number, task_id, title, url, state, updated_at) \
-             VALUES ($1, $2, 482, $3, $4, $5, 'open', $6) ON CONFLICT DO NOTHING",
+            "INSERT INTO github_issue_links (workspace_id, repository, issue_number, task_id, kind, pull_state) \
+             VALUES ($1, $2, 482, $3, 'pull_request', 'open') ON CONFLICT DO NOTHING",
         )
         .bind(&workspace_id)
         .bind(DEMO_REPOSITORY)
         .bind(task)
-        .bind(PULL_482_TITLE)
-        .bind(format!("https://github.com/{DEMO_REPOSITORY}/pull/482"))
-        .bind(now)
         .execute(&mut *tx)
         .await?;
     }

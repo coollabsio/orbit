@@ -117,22 +117,20 @@ pub(crate) async fn get_github_pull(
     Ok(Json(detail))
 }
 
-/// Orbit tasks linked to the pull request (by the webhook or by issue sync) that the member sees.
+/// Orbit tasks linked to the pull request (the webhook's label sync) that the member sees.
 async fn linked_tasks(
     state: &IntegrationState,
     access: &PullAccess,
     request_id: Option<&RequestId>,
 ) -> Result<Vec<PullTaskRef>, ApiError> {
-    let sees = user_sees_project_sql("t.project_id", "$5");
+    let sees = user_sees_project_sql("t.project_id", "$4");
     let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
         "SELECT t.id, t.title FROM tasks t WHERE t.deleted_at IS NULL AND t.workspace_id = $1 AND {sees} AND t.id IN (\
-         SELECT task_id FROM github_issue_links WHERE workspace_id = $1 AND lower(repository) = $2 AND issue_number = $3 AND kind = 'pull_request' \
-         UNION SELECT task_id FROM github_pull_links WHERE workspace_id = $1 AND lower(repository) = $2 AND pull_number = $4) \
+         SELECT task_id FROM github_issue_links WHERE workspace_id = $1 AND lower(repository) = $2 AND issue_number = $3 AND kind = 'pull_request') \
          ORDER BY t.title"
     )))
     .bind(access.workspace.to_string())
     .bind(access.pull.repository())
-    .bind(access.pull.number)
     .bind(access.pull.number)
     .bind(access.user.to_string())
     .fetch_all(state.database().pool())
