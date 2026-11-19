@@ -167,7 +167,10 @@ pub(crate) mod tests {
         )
         .unwrap();
         let shrunk = shrink_image(&jpeg).unwrap();
-        let pixel = *image::load_from_memory(&shrunk).unwrap().to_rgb8().get_pixel(32, 32);
+        let pixel = *image::load_from_memory(&shrunk)
+            .unwrap()
+            .to_rgb8()
+            .get_pixel(32, 32);
         // P3 (200, 100, 60) is about sRGB (215, 92, 47); left unconverted, it would stay (200, 100, 60).
         assert!(pixel[0] >= 209 && pixel[2] <= 53, "{pixel:?}");
     }
