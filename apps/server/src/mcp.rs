@@ -36,7 +36,11 @@ use crate::token_api::{
     TaskQuery, TokenApi, TokenApiError, parse_cycle_filter, parse_milestone_filter,
 };
 
+mod comments;
+mod context;
 mod databases;
+mod plan;
+mod trash;
 
 #[derive(Clone)]
 pub struct McpState {
@@ -265,6 +269,10 @@ struct UpdateArgs {
     /// Points, 0 to 1000; `null` clears the estimate.
     #[serde(default, deserialize_with = "present")]
     estimate: Option<Option<i64>>,
+    /// Marks the task as a duplicate of this task (its id, or its identifier such as ENG-12) and
+    /// moves it to the Duplicate status; `null` unmarks it.
+    #[serde(default, deserialize_with = "present")]
+    duplicate_of_id: Option<Option<String>>,
 }
 /// A field that is present, `null` included: `null` clears the value, a missing field keeps it.
 fn present<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
@@ -537,7 +545,12 @@ fn write_definition<T: JsonSchema>(
 }
 /// The scope a tool needs; `None` for `get_me`, which every connection may call.
 fn required_scope(name: &str) -> Option<ApiTokenScope> {
-    if let Some(scope) = databases::scope(name) {
+    if let Some(scope) = databases::scope(name)
+        .or_else(|| trash::scope(name))
+        .or_else(|| plan::scope(name))
+        .or_else(|| comments::scope(name))
+        .or_else(|| context::scope(name))
+    {
         return Some(scope);
     }
     Some(match name {
@@ -573,7 +586,7 @@ fn tools() -> Vec<Tool> {
         ),
         write_definition::<UpdateArgs>(
             "update_task",
-            "Update a task using its current version. parent_task_id moves the task under another task; null detaches it. Related task projects must also be approved. assignee_ids replaces the assignees: add your get_me user id to claim a task, send [] to unassign everyone. label_ids replaces the labels with label IDs of the task's project (from list_labels); [] removes all labels. recurrence makes the task repeat, e.g. {\"frequency\": \"weekly\", \"interval\": 1, \"weekdays\": [\"mon\", \"wed\"], \"base\": \"due\"}; base \"completion\" counts from the day it is completed (no weekdays); null stops repeating. milestone_id, cycle_id and estimate set the plan; null clears each.",
+            "Update a task using its current version. parent_task_id moves the task under another task; null detaches it. Related task projects must also be approved. assignee_ids replaces the assignees: add your get_me user id to claim a task, send [] to unassign everyone. label_ids replaces the labels with label IDs of the task's project (from list_labels); [] removes all labels. recurrence makes the task repeat, e.g. {\"frequency\": \"weekly\", \"interval\": 1, \"weekdays\": [\"mon\", \"wed\"], \"base\": \"due\"}; base \"completion\" counts from the day it is completed (no weekdays); null stops repeating. milestone_id, cycle_id and estimate set the plan; null clears each. duplicate_of_id marks the task as a duplicate of another task and moves it to the Duplicate status; null unmarks it.",
             true,
         ),
         write_definition::<DeleteArgs>(
@@ -708,6 +721,10 @@ fn tools() -> Vec<Tool> {
         ),
     ];
     tools.extend(databases::tools());
+    tools.extend(trash::tools());
+    tools.extend(plan::tools());
+    tools.extend(comments::tools());
+    tools.extend(context::tools());
     tools
 }
 
@@ -856,7 +873,20 @@ impl TaskTools {
             Ok(api) => api,
             Err(error) => return tool_error(error),
         };
-        if let Some(result) = databases::call(&api, &request).await {
+        let module = match databases::call(&api, &request).await {
+            Some(result) => Some(result),
+            None => match trash::call(&api, &request).await {
+                Some(result) => Some(result),
+                None => match plan::call(&api, &request).await {
+                    Some(result) => Some(result),
+                    None => match comments::call(&api, &request).await {
+                        Some(result) => Some(result),
+                        None => context::call(&api, &request).await,
+                    },
+                },
+            },
+        };
+        if let Some(result) = module {
             return match result? {
                 Ok(value) => Ok(CallToolResult::structured(value)),
                 Err(error) => tool_error(error),
@@ -908,6 +938,10 @@ impl TaskTools {
                         Some(parent) => Some(api.optional_task_id(parent.as_deref()).await?),
                         None => None,
                     };
+                    let duplicate_of_id = match a.duplicate_of_id {
+                        Some(original) => Some(api.optional_task_id(original.as_deref()).await?),
+                        None => None,
+                    };
                     let patch = TaskPatch {
                         title: a.title,
                         description: a.description,
@@ -920,6 +954,7 @@ impl TaskTools {
                         milestone_id,
                         cycle_id,
                         estimate: a.estimate,
+                        duplicate_of_id,
                         ..Default::default()
                     };
                     api.update_task(&a.task_id, a.expected_version, patch).await
@@ -1262,6 +1297,7 @@ fn tool_error(error: TokenApiError) -> Result<CallToolResult, ErrorData> {
                 "A task cannot be its own parent or a sub-issue of its own sub-issues"
             }
             TaskError::ParentInvalid => "The parent task does not exist or is in the trash",
+            TaskError::TrialLimit(reached) => return text(&reached.detail()),
             _ => "Task service is unavailable",
         }),
         TokenApiError::Page(PageError::TrialLimit(reached)) => text(&reached.detail()),
@@ -1275,6 +1311,8 @@ fn tool_error(error: TokenApiError) -> Result<CallToolResult, ErrorData> {
             PageError::Busy => "Document is busy; try again in a moment",
             PageError::TooLarge => DOC_TOO_LARGE_DETAIL,
             PageError::InvalidCursor => "Invalid pagination cursor",
+            PageError::DatabaseTrashed => "Restore the row's database from the trash first",
+            PageError::RowLimit => "The database holds the most rows allowed",
             _ => "Document is not available",
         }),
     }

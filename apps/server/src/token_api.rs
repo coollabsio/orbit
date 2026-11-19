@@ -42,9 +42,13 @@ use crate::repositories::workspaces::{WorkspaceError, WorkspaceRepository};
 use crate::task_import::escape_markdown;
 use orbit_domain::Permission;
 
+mod comments;
+mod context;
 mod databases;
+mod plan;
 mod relations;
 mod setup;
+mod trash;
 pub use databases::{DatabaseRowPatch, LinkedDatabase, NewDatabase, NewDatabaseRow};
 pub use setup::StatusPatch;
 

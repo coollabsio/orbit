@@ -224,6 +224,18 @@ scripts, CI jobs and the Orbit CLI. That API serves tasks and docs, not chat. Se
 | `update_project` | Required `project_id`, `expected_version`; optional `name`, `color` | The project after the change. |
 | `create_task_status`, `update_task_status` | Required `project_id` and, to create, `name` and `category`; to update, `status_id` and `expected_version`. Optional `name`, `category`, `color`, `description`, `position` | The status. |
 | `create_label`, `update_label` | Required `project_id` and, to create, `name`; to update, `label_id` and `expected_version`. Optional `name`, `color` | The label. |
+| `list_task_activity` | Required `task_id`; optional `cursor`, `limit` | The task's history, newest first: `action`, `actor_id`, `actor_name`, `metadata`, `occurred_at`, and `next_cursor`. |
+| `update_comment` | Required `task_id`, `comment_id`, `expected_version`, `body` (Markdown) | The comment, with its new `version`. |
+| `delete_comment` | Required `task_id`, `comment_id`, `expected_version` | `{"deleted": true}`. |
+| `list_task_trash` | Optional `cursor`, `limit` | Tasks in the trash of approved projects, last trashed first: the `get_task` view plus `deleted_at` and `trashed_descendant_count`, and `next_cursor`. |
+| `get_trashed_task` | Required `task_id` | One trashed task: the `get_task` view plus `deleted_at`, `status`, `labels` and `deleted_by`. |
+| `restore_task` | Required `task_id`, `expected_version` | The restored task, as `get_task` returns it. |
+| `create_milestone` | Required `project_id`, `name`; optional `description`, `target_at` | The milestone, as `list_milestones` returns it. |
+| `update_milestone` | Required `project_id`, `milestone_id`, `expected_version`; optional `name`, `description`, `target_at` (`null` clears each), `position` | The milestone. |
+| `create_cycle` | Required `project_id`; optional `name`, `starts_at`, `ends_at` | The cycle with `relative`, as `list_cycles` returns it. |
+| `update_cycle` | Required `project_id`, `cycle_id`, `expected_version`; optional `name` (`null` clears), `starts_at`, `ends_at` | The cycle. |
+| `delete_milestone`, `delete_cycle` | Required `project_id`, `milestone_id` or `cycle_id`, `expected_version` | `{"deleted": true}`. Its tasks stay, without a milestone or cycle. |
+| `delete_task_status`, `delete_label` | Required `project_id`, `status_id` or `label_id`, `expected_version` | `{"deleted": true}`. A deleted label comes off its tasks. |
 | `list_task_relations` | Required `task_id` | The task's relations (`blocks`, `related`, `duplicate`): `id`, `type`, `direction` and the other `task`. Relations to tasks outside the approved projects are left out. |
 | `get_me` | Optional `workspace_id` | The connection: its user (`null` for a service account), workspace, scopes and approved project IDs, and `workspaces`: every workspace it covers with its own scopes and project IDs. Needs no permission. |
 
@@ -325,20 +337,21 @@ Service-account tokens support tasks only; docs and chat require a personal iden
 
 | Permission | Tools |
 | --- | --- |
-| Task read | `list_projects`, `list_tasks`, `get_task`, `list_task_statuses`, `list_labels`, `list_milestones`, `list_cycles`, `list_members`, `list_comments`, `list_task_relations` |
-| Task write | `create_task`, `update_task`, `delete_task`, `create_comment`, `create_project`, `update_project`, `create_task_status`, `update_task_status`, `create_label`, `update_label`, `create_task_relation`, `delete_task_relation` |
+| Task read | `list_projects`, `list_tasks`, `get_task`, `list_task_statuses`, `list_labels`, `list_milestones`, `list_cycles`, `list_members`, `list_comments`, `list_task_relations`, `list_task_activity`, `list_task_trash`, `get_trashed_task` |
+| Task write | `create_task`, `update_task`, `delete_task`, `restore_task`, `create_comment`, `update_comment`, `delete_comment`, `create_project`, `update_project`, `create_task_status`, `update_task_status`, `delete_task_status`, `create_label`, `update_label`, `delete_label`, `create_milestone`, `update_milestone`, `delete_milestone`, `create_cycle`, `update_cycle`, `delete_cycle`, `create_task_relation`, `delete_task_relation` |
 | None | `get_me` |
-| Docs read | `list_docs`, `get_doc`, `list_doc_versions`, `get_doc_version`, `get_database`, `query_database`, `list_database_views` |
-| Docs write | `create_doc`, `update_doc`, `delete_doc`, `move_doc`, `create_database_row`, `update_database_row`, `trash_database_rows`, `create_database_property`, `update_database_property`, `delete_database_property`, `create_database`, `create_database_view`, `update_database_view`, `delete_database_view`, `create_database_link`, `delete_database_link` |
+| Docs read | `list_docs`, `get_doc`, `list_doc_versions`, `get_doc_version`, `list_doc_trash`, `list_doc_comments`, `list_teamspaces`, `get_database`, `query_database`, `list_database_views` |
+| Docs write | `create_doc`, `update_doc`, `delete_doc`, `move_doc`, `restore_doc`, `create_doc_comment`, `create_database_row`, `update_database_row`, `trash_database_rows`, `create_database_property`, `update_database_property`, `delete_database_property`, `create_database`, `create_database_view`, `update_database_view`, `delete_database_view`, `create_database_link`, `delete_database_link` |
 | Chat read | `list_conversations`, `list_messages`, `get_thread`, `search_messages` |
 
 Task create takes `project_id`, `status_id`, `title`, optional markdown `description`,
 `priority`, `parent_task_id` (creates a sub-issue), `assignee_ids`, `label_ids`, `milestone_id`,
 `cycle_id` and `estimate` (0 to 1000 points). The milestone and the cycle must be in the task's
 project. Task update takes `task_id`, `expected_version`, and optional title, description, status,
-priority, `assignee_ids`, `label_ids`, `milestone_id`, `cycle_id`, `estimate` or `parent_task_id`:
+priority, `assignee_ids`, `label_ids`, `milestone_id`, `cycle_id`, `estimate`, `duplicate_of_id` or `parent_task_id`:
 a task ID or identifier moves the task under that task, and `null` detaches it. `null` also clears
-the milestone, the cycle or the estimate.
+the milestone, the cycle or the estimate. `duplicate_of_id` (a task in an approved project) marks the
+task as its duplicate and moves it to the Duplicate status; `null` unmarks it.
 `assignee_ids` replaces the whole list with member user IDs from `list_members` or `get_me`, and
 `[]` unassigns everyone; to claim a task, send the current list plus your own `get_me` user ID.
 `label_ids` replaces the whole list with label IDs of the task's project from `list_labels`, and
@@ -387,6 +400,36 @@ the move deleted. `list_doc_versions` takes `page_id` and optional `cursor`, `li
 the stored versions newest first, without content. `get_doc_version` takes `page_id` and
 `version_id` and returns that version with `markdown`; to restore it, send that Markdown to
 `update_doc`.
+`update_comment` and `delete_comment` need a personal connection (a service account is
+refused). Only the author can edit a task comment; the author, or a member who may moderate
+comments in the project, can delete it.
+`list_task_activity` leaves out references outside the grant: the ID of a task or project in a
+project that is not approved becomes `null` with `<field>_hidden: true`, and its title is left
+out. `actor_id` is `null` for system events and service accounts; then
+`metadata.actor_service_account_name` names the account.
+Items stay in the trash for 30 days. `list_task_trash` leaves out tasks of projects that are not
+approved, so a page can hold fewer than `limit` items: follow `next_cursor`. Restoring a task also
+restores the sub-issues trashed with it; a task whose parent is still in the trash comes back at
+the top level. A task that is only in a trashed project is not in the task trash.
+`list_doc_trash` lists only docs trashed directly, with `version` for `restore_doc`; restoring a
+doc restores its sub-docs, and a database row comes back only after its database.
+Milestone and cycle dates take an RFC 3339 time or `YYYY-MM-DD` (a milestone's day is noon UTC, a
+cycle's day is midnight UTC). A cycle's `ends_at` is exclusive. `create_cycle` without dates
+starts where the project's last cycle ends and lasts as many days; the first cycle starts today
+(UTC) and lasts two weeks. The cycles of a project cannot overlap, but they can touch.
+`delete_task_status` and `delete_label` need a member who may manage the project. A status that a
+task uses (tasks in the trash too) or the Duplicate status cannot be deleted.
+`list_teamspaces` lists every teamspace that the connected person can see, whatever the approved
+projects. Use an `id` as `teamspace_id` in `create_doc` or `move_doc`; `is_default` marks the
+teamspace that `create_doc` uses without one. `project_id` is `null` for global docs
+(`global: true`) or for a project that is not approved.
+`list_doc_comments` takes `page_id` and returns `threads`: each with `quote`, `resolved`,
+`resolved_by`, `created_by` and `comments` (Markdown `body`, `author` `{id, name}`,
+`mentioned_user_ids`, `edited_at`, and `deleted` for a deleted comment). `create_doc_comment`
+takes `page_id`, a Markdown `body` and either `thread_id` (a reply) or `quote` (a new thread on
+that text). It returns the new comment with its `thread_id`. A doc comment keeps only paragraphs,
+bold, italic, code, links and `@Name` mentions; headings and list items become paragraphs. A new
+thread keeps the quoted text, but it is not anchored in the doc text.
 Status `category` is `unstarted`, `started`, `completed` or `cancelled`; Orbit makes the
 Duplicate status itself, and it cannot change its category. A label name must be new in its
 project. Colors are `#rrggbb`. A database outage on a doc or chat tool is a JSON-RPC internal error
