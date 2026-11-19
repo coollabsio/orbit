@@ -465,7 +465,7 @@ pub enum TaskRelationDirection {
 }
 
 /// Relation types a client can create. Duplicates go through `duplicate_of_id` on task updates.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, ToSchema)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, ToSchema, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum NewTaskRelationType {
     Blocks,

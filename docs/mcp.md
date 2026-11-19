@@ -221,6 +221,10 @@ scripts, CI jobs and the Orbit CLI. That API serves tasks and docs, not chat. Se
 | `list_cycles` | Required `project_id` | Every cycle of an approved project, by start date: `number`, `name`, `starts_at`, `ends_at` (exclusive), the progress counts, and `relative`. |
 | `list_members` | Optional `cursor`, `limit` | Workspace members: `user_id` and `display_name`. |
 | `list_comments` | Required `task_id`; optional `cursor`, `limit` | Comments on the task, oldest first, and `next_cursor`. |
+| `update_project` | Required `project_id`, `expected_version`; optional `name`, `color` | The project after the change. |
+| `create_task_status`, `update_task_status` | Required `project_id` and, to create, `name` and `category`; to update, `status_id` and `expected_version`. Optional `name`, `category`, `color`, `description`, `position` | The status. |
+| `create_label`, `update_label` | Required `project_id` and, to create, `name`; to update, `label_id` and `expected_version`. Optional `name`, `color` | The label. |
+| `list_task_relations` | Required `task_id` | The task's relations (`blocks`, `related`, `duplicate`): `id`, `type`, `direction` and the other `task`. Relations to tasks outside the approved projects are left out. |
 | `get_me` | Optional `workspace_id` | The connection: its user (`null` for a service account), workspace, scopes and approved project IDs, and `workspaces`: every workspace it covers with its own scopes and project IDs. Needs no permission. |
 
 `list_tasks` searches titles and descriptions. `parent_task_id` (a task ID or an identifier
@@ -321,11 +325,11 @@ Service-account tokens support tasks only; docs and chat require a personal iden
 
 | Permission | Tools |
 | --- | --- |
-| Task read | `list_projects`, `list_tasks`, `get_task`, `list_task_statuses`, `list_labels`, `list_milestones`, `list_cycles`, `list_members`, `list_comments` |
-| Task write | `create_task`, `update_task`, `delete_task`, `create_comment`, `create_project` |
+| Task read | `list_projects`, `list_tasks`, `get_task`, `list_task_statuses`, `list_labels`, `list_milestones`, `list_cycles`, `list_members`, `list_comments`, `list_task_relations` |
+| Task write | `create_task`, `update_task`, `delete_task`, `create_comment`, `create_project`, `update_project`, `create_task_status`, `update_task_status`, `create_label`, `update_label`, `create_task_relation`, `delete_task_relation` |
 | None | `get_me` |
-| Docs read | `list_docs`, `get_doc`, `get_database`, `query_database`, `list_database_views` |
-| Docs write | `create_doc`, `update_doc`, `create_database_row`, `update_database_row`, `trash_database_rows`, `create_database_property`, `update_database_property`, `delete_database_property`, `create_database`, `create_database_view`, `update_database_view`, `delete_database_view`, `create_database_link`, `delete_database_link` |
+| Docs read | `list_docs`, `get_doc`, `list_doc_versions`, `get_doc_version`, `get_database`, `query_database`, `list_database_views` |
+| Docs write | `create_doc`, `update_doc`, `delete_doc`, `move_doc`, `create_database_row`, `update_database_row`, `trash_database_rows`, `create_database_property`, `update_database_property`, `delete_database_property`, `create_database`, `create_database_view`, `update_database_view`, `delete_database_view`, `create_database_link`, `delete_database_link` |
 | Chat read | `list_conversations`, `list_messages`, `get_thread`, `search_messages` |
 
 Task create takes `project_id`, `status_id`, `title`, optional markdown `description`,
@@ -344,14 +348,20 @@ consent, or when you create the token): a connection for chosen projects could n
 project. `key` is the identifier prefix (1 to 20 letters, digits or underscores, unique in the
 workspace).
 `create_comment` takes `task_id` and a Markdown `body` and writes as the connection's user (or
-its service account). A task
+its service account).
+`create_task_relation` takes `task_id`, `type` and `other_task_id` (both tasks in approved
+projects). `type` is `blocks` (`task_id` blocks `other_task_id`), `blocked_by` or `related`. A
+relation that already links the two tasks is replaced. A duplicate relation, or a `blocks`
+relation in the other direction, is refused: delete it first. `delete_task_relation` takes
+`task_id` and a `relation_id` from `list_task_relations`; removing a duplicate relation also moves
+the duplicate out of the Duplicate status. In a relation, `direction` is `outgoing` when the task
+is the blocker or the duplicate. A task
 cannot become a sub-issue of itself or of its own sub-issues. Delete takes `task_id` and `expected_version` and moves the task subtree
 to the trash for 30 days. With `permanent: true` it deletes the subtree forever instead, with
 its comments and attachments; this cannot be undone. It also works for a task that is
 already in the trash (then the version is not checked), and needs a connection of a workspace
-owner or admin. Read the latest task version before updating or deleting. `update_task`,
-`delete_task` and `update_doc` fail with "version changed" if the task or doc changed after
-your read, including edits in the editor. Read it again and retry. A malformed task
+owner or admin. Read the latest task version before updating or deleting. The tools that take
+`expected_version` fail with "version changed" if the item changed after your read, including edits in the editor. Read it again and retry. A malformed task
 identifier is an invalid-params error. Task writes require
 approval for every project in the related parent/sub-issue tree, since task automations can
 change related tasks. Task tools return a projection that excludes references outside grants.
@@ -367,7 +377,19 @@ page's title, or "Untitled" for pages you cannot see. Doc writes act as the conn
 and fail on a locked doc. A doc can have at most 4,000 blocks (nested ones included):
 `create_doc` with more, `update_doc` with `markdown` that gives more, or `update_doc` with
 `markdown` for a doc that already has more, fail with "A doc can have at most 4,000 blocks"
-and change nothing. A database outage on a doc or chat tool is a JSON-RPC internal error
+and change nothing.
+`delete_doc` takes `page_id` and `expected_version` and moves the doc and its sub-docs to the
+trash, where people can restore them; deleting forever is not available. `move_doc` takes
+`page_id`, `expected_version` and a place: `parent_id`, or for a root move `teamspace_id` or
+`private: true` (omitted: the doc's own space), and an optional `position` among the new
+siblings (default: last). Its result has `dropped_values`: the database property values that
+the move deleted. `list_doc_versions` takes `page_id` and optional `cursor`, `limit`, and lists
+the stored versions newest first, without content. `get_doc_version` takes `page_id` and
+`version_id` and returns that version with `markdown`; to restore it, send that Markdown to
+`update_doc`.
+Status `category` is `unstarted`, `started`, `completed` or `cancelled`; Orbit makes the
+Duplicate status itself, and it cannot change its category. A label name must be new in its
+project. Colors are `#rrggbb`. A database outage on a doc or chat tool is a JSON-RPC internal error
 (-32603), not "Resource is not available".
 `list_docs` takes an optional `project_id` (an approved project). A teamspace can hold the docs
 of one project (Project settings → Docs). With `project_id`, the list leaves out the docs of

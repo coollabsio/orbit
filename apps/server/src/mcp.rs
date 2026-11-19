@@ -29,10 +29,11 @@ use crate::repositories::api_tokens::{
 use crate::repositories::databases::{DatabaseError, invalid_detail};
 use crate::repositories::pages::PageError;
 use crate::repositories::task_recurrences::TaskRecurrence;
+use crate::repositories::task_relations::NewTaskRelationType;
 use crate::repositories::tasks::{TaskError, TaskRepository};
 use crate::token_api::{
-    DOC_TOO_LARGE_DETAIL, DocPatch, NewComment, NewDoc, NewTask, TaskPatch, TaskQuery, TokenApi,
-    TokenApiError, parse_cycle_filter, parse_milestone_filter,
+    DOC_TOO_LARGE_DETAIL, DocMove, DocPatch, NewComment, NewDoc, NewTask, StatusPatch, TaskPatch,
+    TaskQuery, TokenApi, TokenApiError, parse_cycle_filter, parse_milestone_filter,
 };
 
 mod databases;
@@ -339,6 +340,129 @@ struct CreateCommentArgs {
 }
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+struct CreateRelationArgs {
+    /// Task id, or its identifier such as ENG-12.
+    task_id: String,
+    /// `blocks` (task_id blocks other_task_id), `blocked_by` or `related`.
+    #[serde(rename = "type")]
+    kind: NewTaskRelationType,
+    /// The other task, in an approved project: its id, or its identifier such as ENG-12.
+    other_task_id: String,
+}
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct DeleteRelationArgs {
+    /// Task id, or its identifier such as ENG-12.
+    task_id: String,
+    /// A relation id from list_task_relations of this task.
+    relation_id: String,
+}
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct UpdateProjectArgs {
+    project_id: String,
+    /// The `version` that you read.
+    expected_version: u64,
+    /// 1 to 200 characters.
+    name: Option<String>,
+    /// `#rrggbb`.
+    color: Option<String>,
+}
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct CreateStatusArgs {
+    project_id: String,
+    /// 1 to 200 characters.
+    name: String,
+    /// `unstarted`, `started`, `completed` or `cancelled`. Tasks in a `completed` or
+    /// `cancelled` status are done.
+    category: String,
+    /// `#rrggbb`. Default: a color that matches the category.
+    color: Option<String>,
+    /// Up to 20,000 characters.
+    description: Option<String>,
+    /// The place in the board order (0 is first). Default: after the last status.
+    position: Option<i64>,
+}
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct UpdateStatusArgs {
+    project_id: String,
+    status_id: String,
+    /// The `version` that you read.
+    expected_version: u64,
+    /// 1 to 200 characters.
+    name: Option<String>,
+    /// `unstarted`, `started`, `completed` or `cancelled`.
+    category: Option<String>,
+    /// `#rrggbb`.
+    color: Option<String>,
+    /// Up to 20,000 characters.
+    description: Option<String>,
+    /// The place in the board order (0 is first).
+    position: Option<i64>,
+}
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct CreateLabelArgs {
+    project_id: String,
+    /// 1 to 100 characters, unique in the project.
+    name: String,
+    /// `#rrggbb`. Default: gray.
+    color: Option<String>,
+}
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct UpdateLabelArgs {
+    project_id: String,
+    label_id: String,
+    /// The `version` that you read.
+    expected_version: u64,
+    /// 1 to 100 characters, unique in the project.
+    name: Option<String>,
+    /// `#rrggbb`.
+    color: Option<String>,
+}
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct DeleteDocArgs {
+    page_id: String,
+    /// The `version` that you read.
+    expected_version: u64,
+}
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct MoveDocArgs {
+    page_id: String,
+    /// The `version` that you read.
+    expected_version: u64,
+    /// The new parent document. Omit it to move the document to a space root.
+    parent_id: Option<String>,
+    /// Root moves only: the target teamspace. Omit it to keep the document's space.
+    teamspace_id: Option<String>,
+    /// Root moves only: `true` moves the document to the connected user's private space.
+    private: Option<bool>,
+    /// The place among the new siblings (0 is first). Default: last.
+    position: Option<u64>,
+}
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct DocVersionsArgs {
+    page_id: String,
+    /// Continue from the next_cursor of the previous response.
+    cursor: Option<String>,
+    /// Maximum number of versions, from 1 to 100. Default: 50.
+    limit: Option<usize>,
+}
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct DocVersionArgs {
+    page_id: String,
+    /// A version id from list_doc_versions.
+    version_id: String,
+}
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 struct PageArgs {
     page_id: String,
 }
@@ -418,11 +542,22 @@ fn required_scope(name: &str) -> Option<ApiTokenScope> {
     }
     Some(match name {
         "get_me" => return None,
-        "create_task" | "update_task" | "delete_task" | "create_comment" | "create_project" => {
-            ApiTokenScope::TasksWrite
+        "create_task"
+        | "update_task"
+        | "delete_task"
+        | "create_comment"
+        | "create_project"
+        | "create_task_relation"
+        | "delete_task_relation"
+        | "update_project"
+        | "create_task_status"
+        | "update_task_status"
+        | "create_label"
+        | "update_label" => ApiTokenScope::TasksWrite,
+        "list_docs" | "get_doc" | "list_doc_versions" | "get_doc_version" => {
+            ApiTokenScope::DocsRead
         }
-        "list_docs" | "get_doc" => ApiTokenScope::DocsRead,
-        "create_doc" | "update_doc" => ApiTokenScope::DocsWrite,
+        "create_doc" | "update_doc" | "delete_doc" | "move_doc" => ApiTokenScope::DocsWrite,
         "list_conversations" | "list_messages" | "get_thread" | "search_messages" => {
             ApiTokenScope::ChatRead
         }
@@ -456,6 +591,24 @@ fn tools() -> Vec<Tool> {
             "update_doc",
             "Update a visible document using its current version. Send the document's Markdown with your edits; unchanged blocks stay exactly as they are.",
             true,
+        ),
+        write_definition::<DeleteDocArgs>(
+            "delete_doc",
+            "Move a visible document and its sub-documents to the trash, using its current version. People can restore them from the trash; deleting forever is not available here.",
+            true,
+        ),
+        write_definition::<MoveDocArgs>(
+            "move_doc",
+            "Move a visible document, with its sub-documents, under another document or to a space root, using its current version. dropped_values counts the database property values that the move deleted.",
+            true,
+        ),
+        definition::<DocVersionsArgs>(
+            "list_doc_versions",
+            "List the stored versions of a visible document, newest first, without content.",
+        ),
+        definition::<DocVersionArgs>(
+            "get_doc_version",
+            "Read one stored version of a visible document, with its content as Markdown. To restore it, send that Markdown to update_doc.",
         ),
         definition::<EmptyArgs>("list_conversations", "List visible chat conversations."),
         definition::<MessagesArgs>(
@@ -509,11 +662,50 @@ fn tools() -> Vec<Tool> {
             "list_projects",
             "List the projects approved for this connection.",
         ),
+        write_definition::<UpdateProjectArgs>(
+            "update_project",
+            "Rename or recolor an approved project, using its current version. A missing field keeps its value.",
+            false,
+        ),
+        write_definition::<CreateStatusArgs>(
+            "create_task_status",
+            "Add a workflow status to an approved project.",
+            false,
+        ),
+        write_definition::<UpdateStatusArgs>(
+            "update_task_status",
+            "Change a workflow status of an approved project, using its current version. A missing field keeps its value. The Duplicate status cannot change its category, and no other status can take it.",
+            false,
+        ),
+        write_definition::<CreateLabelArgs>(
+            "create_label",
+            "Add a label to an approved project. The name must be new in the project.",
+            false,
+        ),
+        write_definition::<UpdateLabelArgs>(
+            "update_label",
+            "Rename or recolor a label of an approved project, using its current version. A missing field keeps its value.",
+            false,
+        ),
         definition::<ListTasksArgs>(
             "list_tasks",
             "Search and list live tasks in approved projects. Includes completed tasks and sub-issues; parent_task_id lists the sub-issues of one task. milestone_id and cycle_id filter by plan; cycle_id also takes current, next or previous.",
         ),
         definition::<TaskArgs>("get_task", "Read one live task from an approved project."),
+        definition::<TaskArgs>(
+            "list_task_relations",
+            "List the relations of a live task in an approved project: blocks, related and duplicate. direction is outgoing when this task is the blocker or the duplicate, incoming otherwise. task is the other task (number, title, status_id). Relations to tasks outside the approved projects are left out.",
+        ),
+        write_definition::<CreateRelationArgs>(
+            "create_task_relation",
+            "Link two live tasks of approved projects: type blocks (task_id blocks other_task_id), blocked_by or related. A relation that already links the two tasks is replaced; the same relation again is returned unchanged. A duplicate relation, or a blocks relation in the other direction, is refused: delete it first. Mark duplicates in the web app.",
+            true,
+        ),
+        write_definition::<DeleteRelationArgs>(
+            "delete_task_relation",
+            "Remove a relation of a task, by its id from list_task_relations. Removing a duplicate relation also moves the duplicate out of the Duplicate status.",
+            true,
+        ),
     ];
     tools.extend(databases::tools());
     tools
@@ -775,6 +967,36 @@ impl TaskTools {
                     .await
                     .map(|p| json!(p))
             }
+            "delete_doc" => {
+                let a: DeleteDocArgs = arguments(&request)?;
+                api.delete_doc(parse_id(&a.page_id)?, a.expected_version)
+                    .await
+                    .map(|()| json!({"deleted": true}))
+            }
+            "move_doc" => {
+                let a: MoveDocArgs = arguments(&request)?;
+                let target = DocMove {
+                    parent_id: a.parent_id.as_deref().map(parse_id).transpose()?,
+                    teamspace_id: a.teamspace_id.as_deref().map(parse_id).transpose()?,
+                    private: a.private,
+                    position: a.position,
+                };
+                api.move_doc(parse_id(&a.page_id)?, a.expected_version, target)
+                    .await
+                    .map(|doc| json!(doc))
+            }
+            "list_doc_versions" => {
+                let a: DocVersionsArgs = arguments(&request)?;
+                api.doc_versions(parse_id(&a.page_id)?, a.cursor.as_deref(), a.limit)
+                    .await
+                    .map(|page| json!({"items": page.items, "next_cursor": page.next_cursor}))
+            }
+            "get_doc_version" => {
+                let a: DocVersionArgs = arguments(&request)?;
+                api.doc_version(parse_id(&a.page_id)?, parse_id(&a.version_id)?)
+                    .await
+                    .map(|version| json!(version))
+            }
             "list_conversations" => {
                 let _: EmptyArgs = arguments(&request)?;
                 api.conversations().await.map(|p| json!({"items": p}))
@@ -862,6 +1084,66 @@ impl TaskTools {
                     .await
                     .map(|project| json!(project))
             }
+            "update_project" => {
+                let a: UpdateProjectArgs = arguments(&request)?;
+                api.update_project(
+                    parse_id(&a.project_id)?,
+                    a.expected_version,
+                    a.name,
+                    a.color,
+                )
+                .await
+                .map(|project| json!(project))
+            }
+            "create_task_status" => {
+                let a: CreateStatusArgs = arguments(&request)?;
+                let status = StatusPatch {
+                    name: Some(a.name),
+                    description: a.description,
+                    color: a.color,
+                    category: Some(a.category),
+                    position: a.position,
+                };
+                api.create_status(parse_id(&a.project_id)?, status)
+                    .await
+                    .map(|status| json!(status))
+            }
+            "update_task_status" => {
+                let a: UpdateStatusArgs = arguments(&request)?;
+                let patch = StatusPatch {
+                    name: a.name,
+                    description: a.description,
+                    color: a.color,
+                    category: a.category,
+                    position: a.position,
+                };
+                api.update_status(
+                    parse_id(&a.project_id)?,
+                    parse_id(&a.status_id)?,
+                    a.expected_version,
+                    patch,
+                )
+                .await
+                .map(|status| json!(status))
+            }
+            "create_label" => {
+                let a: CreateLabelArgs = arguments(&request)?;
+                api.create_label(parse_id(&a.project_id)?, &a.name, a.color)
+                    .await
+                    .map(|label| json!(label))
+            }
+            "update_label" => {
+                let a: UpdateLabelArgs = arguments(&request)?;
+                api.update_label(
+                    parse_id(&a.project_id)?,
+                    parse_id(&a.label_id)?,
+                    a.expected_version,
+                    a.name,
+                    a.color,
+                )
+                .await
+                .map(|label| json!(label))
+            }
             "list_projects" => {
                 let _: EmptyArgs = arguments(&request)?;
                 api.projects()
@@ -894,6 +1176,29 @@ impl TaskTools {
             "get_task" => {
                 let a: TaskArgs = arguments(&request)?;
                 api.get_task(&a.task_id).await.map(|task| json!(task))
+            }
+            "list_task_relations" => {
+                let a: TaskArgs = arguments(&request)?;
+                api.relations(&a.task_id)
+                    .await
+                    .map(|items| json!({"items": items}))
+            }
+            "create_task_relation" => {
+                let a: CreateRelationArgs = arguments(&request)?;
+                match api.add_relation(&a.task_id, a.kind, &a.other_task_id).await {
+                    Err(TokenApiError::Task(TaskError::Conflict)) => {
+                        return Ok(CallToolResult::error(vec![ContentBlock::text(
+                            "The tasks have a duplicate relation or a blocks relation in the other direction; delete it first",
+                        )]));
+                    }
+                    result => result.map(|relation| json!(relation)),
+                }
+            }
+            "delete_task_relation" => {
+                let a: DeleteRelationArgs = arguments(&request)?;
+                api.remove_relation(&a.task_id, parse_id(&a.relation_id)?)
+                    .await
+                    .map(|()| json!({"deleted": true}))
             }
             _ => return Err(ErrorData::invalid_params("Unknown tool", None)),
         };
@@ -946,9 +1251,12 @@ fn tool_error(error: TokenApiError) -> Result<CallToolResult, ErrorData> {
                 "cycle_id must be a cycle of the task's project (see list_cycles)"
             }
             TaskError::Invalid { field: "estimate" } => "estimate must be 0 to 1000 points",
+            TaskError::Invalid { field: "task_id" } => {
+                "other_task_id must be another live task in an approved project"
+            }
             TaskError::InvalidFilter { .. } | TaskError::Invalid { .. } => "Invalid task query",
             TaskError::VersionConflict { .. } => {
-                "Task version changed; read the task again before retrying"
+                "The version changed; read it again before retrying"
             }
             TaskError::ParentCycle => {
                 "A task cannot be its own parent or a sub-issue of its own sub-issues"
@@ -966,6 +1274,7 @@ fn tool_error(error: TokenApiError) -> Result<CallToolResult, ErrorData> {
             PageError::Locked => "Document is locked",
             PageError::Busy => "Document is busy; try again in a moment",
             PageError::TooLarge => DOC_TOO_LARGE_DETAIL,
+            PageError::InvalidCursor => "Invalid pagination cursor",
             _ => "Document is not available",
         }),
     }
