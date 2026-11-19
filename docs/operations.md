@@ -19,6 +19,7 @@ Orbit reads its configuration only from environment variables that start with `O
 | `ORBIT_SHUTDOWN_DELAY_SECONDS` | `0` | 0 to 300. Use it behind a load balancer: after SIGTERM, `/health/ready` reports 503 and the server continues to serve for this time. See [Orbit Cloud](#deployment). |
 | `ORBIT_DATABASE_PATH` | `data/orbit.sqlite` | The SQLite database file. Keep the database, attachment directory and backup directory separate. |
 | `ORBIT_DATABASE_URL` | none | Postgres instead of SQLite, for example `postgres://orbit:password@db.internal:5432/orbit`. See [Postgres](#postgres). |
+| `ORBIT_DATABASE_MAX_CONNECTIONS` | `5` (SQLite), `20` (Postgres) | 1 to 500. The size of each database pool. On Postgres, a server opens two pools of this size. See [Orbit Cloud](#deployment). |
 | `ORBIT_ATTACHMENTS_PATH` | `data/attachments` | |
 | `ORBIT_BACKUPS_PATH` | `backups` | Must be outside the attachment directory. |
 | `ORBIT_JOBS_CONCURRENCY` | `4` | |
@@ -296,7 +297,7 @@ A request, a live socket or a co-editing socket can go to any server; sticky ses
 
 ### Deployment
 
-- **Postgres:** one database with failover (a managed service, or Patroni). Connect directly or through a pooler in session mode: Orbit uses advisory locks and `LISTEN`/`NOTIFY`, which a pooler in transaction mode (PgBouncer `pool_mode = transaction`) breaks. Give each server its share of `max_connections` (each server uses its pools plus two connections: the ownership lock and the cluster listener).
+- **Postgres:** one database with failover (a managed service, or Patroni). Connect directly or through a pooler in session mode: Orbit uses advisory locks and `LISTEN`/`NOTIFY`, which a pooler in transaction mode (PgBouncer `pool_mode = transaction`) breaks. Give each server its share of the Postgres `max_connections`. Set the pool size with `ORBIT_DATABASE_MAX_CONNECTIONS` (default 20). Each server uses up to two times this value, plus one connection for the ownership lock. The cluster listener uses a connection from a pool. A write waits at most 30 seconds for another write to finish. Then it fails, and a background task tries again on its next round.
 - **Configuration on every server:** the same `ORBIT_DATABASE_URL`, `ORBIT_APP_KEY` and `ORBIT_PUBLIC_ORIGIN`. `ORBIT_TRUSTED_PROXIES` holds the load balancer addresses.
 - **Storage:** save a bucket in **Admin → Storage** and turn on attachments and backups in S3 before the second server starts. The local disk of a server then holds only temporary files (upload staging, backup downloads), so it can be an ephemeral volume. While other servers run, Orbit refuses to move attachments back to local disks (409 `storage_shared`), and a server that hears other servers while attachments are local logs a warning.
 - **Load balancer:** check `/health/ready` and remove a server on 503. Keep WebSockets open for a long time (idle timeout of 1 hour or more) for `/api/v1/workspaces/{id}/events`, the live socket (`/api/v1/workspaces/{id}/live`) and the co-editing socket of a page.

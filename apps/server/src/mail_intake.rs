@@ -162,68 +162,99 @@ impl MailIntake {
 
         let database = self.repo.database();
         let finalization = self.repo.uploads().begin_finalization().await;
-        let now = database.database_now().await?;
-        let mut transaction = database.immediate_transaction().await?;
-        let mut receipts = Vec::with_capacity(workspaces.len());
-        for (workspace_id, recipients) in workspaces {
-            let receipt_id = Id::new_v7();
-            let (key_version, key) = self
-                .repo
-                .keys()
-                .current(&mut transaction, workspace_id)
-                .await?;
-            let sealed = seal_blob(&key, &receipt_aad(receipt_id), &message.raw)?;
-            let blob = finalization
-                .finalize_bytes_in_transaction(&mut transaction, workspace_id, &sealed, now)
-                .await?;
-            insert_receipt(
-                &mut transaction,
-                &NewReceipt {
-                    id: receipt_id,
-                    workspace_id,
-                    source: message.source.as_str(),
-                    blob_id: blob.id,
-                    key_version,
-                    raw_sha256: &raw_sha256,
-                    size,
-                    mail_from: message.mail_from.as_deref(),
-                    peer_ip: peer_ip.clone(),
-                    helo: &message.helo,
-                    tls: tls.clone(),
-                    auth: auth.clone(),
-                },
-                now,
-            )
-            .await?;
-            for (address_id, rcpt) in recipients {
-                insert_receipt_recipient(&mut transaction, receipt_id, address_id, rcpt).await?;
+        // Each workspace's sealed blob goes to the store before the write transaction: the store can be slow, and
+        // nothing may wait for it under the write lock.
+        let mut keys = Vec::with_capacity(workspaces.len());
+        if !workspaces.is_empty() {
+            let mut transaction = database.immediate_transaction().await?;
+            for (workspace_id, _) in &workspaces {
+                keys.push(
+                    self.repo
+                        .keys()
+                        .current(&mut transaction, *workspace_id)
+                        .await?,
+                );
             }
-            let job = Job::new(
-                mail_ingest_kind(),
-                json!({ "receipt_id": receipt_id.to_string() }),
-                now,
-            )
-            .with_workspace(workspace_id.to_string());
-            JobStore::enqueue_in(&mut transaction, &job).await?;
-            receipts.push(receipt_id);
+            transaction.commit().await?;
         }
-        if !tests.is_empty() {
-            let result = json!({
-                "peer_ip": peer_ip,
-                "helo": message.helo,
-                "mail_from": message.mail_from,
-                "size": size,
-                "tls": message.tls,
-                "auth": message.auth,
-            })
-            .to_string();
-            for test_id in tests {
-                record_health_test(&mut transaction, test_id, &result, now).await?;
+        let mut sealed_blobs = Vec::with_capacity(workspaces.len());
+        let stored = async {
+            for ((workspace_id, _), (key_version, key)) in workspaces.iter().zip(keys) {
+                let receipt_id = Id::new_v7();
+                let sealed = seal_blob(&key, &receipt_aad(receipt_id), &message.raw)?;
+                let prepared = finalization.prepare_bytes(*workspace_id, &sealed).await?;
+                sealed_blobs.push((receipt_id, key_version, prepared));
+            }
+            let now = database.database_now().await?;
+            let mut transaction = database.immediate_transaction().await?;
+            let mut receipts = Vec::with_capacity(workspaces.len());
+            for ((workspace_id, recipients), (receipt_id, key_version, prepared)) in
+                workspaces.iter().zip(&sealed_blobs)
+            {
+                let (workspace_id, receipt_id, key_version) =
+                    (*workspace_id, *receipt_id, *key_version);
+                let blob = finalization
+                    .finalize_bytes_in_transaction(&mut transaction, prepared)
+                    .await?;
+                insert_receipt(
+                    &mut transaction,
+                    &NewReceipt {
+                        id: receipt_id,
+                        workspace_id,
+                        source: message.source.as_str(),
+                        blob_id: blob.id,
+                        key_version,
+                        raw_sha256: &raw_sha256,
+                        size,
+                        mail_from: message.mail_from.as_deref(),
+                        peer_ip: peer_ip.clone(),
+                        helo: &message.helo,
+                        tls: tls.clone(),
+                        auth: auth.clone(),
+                    },
+                    now,
+                )
+                .await?;
+                for (address_id, rcpt) in recipients {
+                    insert_receipt_recipient(&mut transaction, receipt_id, *address_id, rcpt)
+                        .await?;
+                }
+                let job = Job::new(
+                    mail_ingest_kind(),
+                    json!({ "receipt_id": receipt_id.to_string() }),
+                    now,
+                )
+                .with_workspace(workspace_id.to_string());
+                JobStore::enqueue_in(&mut transaction, &job).await?;
+                receipts.push(receipt_id);
+            }
+            if !tests.is_empty() {
+                let result = json!({
+                    "peer_ip": peer_ip,
+                    "helo": message.helo,
+                    "mail_from": message.mail_from,
+                    "size": size,
+                    "tls": message.tls,
+                    "auth": message.auth,
+                })
+                .to_string();
+                for test_id in tests {
+                    record_health_test(&mut transaction, test_id, &result, now).await?;
+                }
+            }
+            transaction.commit().await?;
+            Ok::<_, IntakeError>(receipts)
+        }
+        .await;
+        if stored.is_err() {
+            // The sender retries a refused message, and each try seals new bytes: without this, the blobs of the
+            // tries would count toward the workspaces' storage for a day.
+            for (_, _, prepared) in &sealed_blobs {
+                finalization.abandon(prepared).await;
             }
         }
-        transaction.commit().await?;
         drop(finalization);
-        Ok(receipts)
+        stored
     }
 }
 

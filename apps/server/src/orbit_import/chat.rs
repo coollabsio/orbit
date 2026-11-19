@@ -554,6 +554,15 @@ async fn write_message(
     new: NewImportedMessage<'_>,
 ) -> Result<Id, Failure> {
     let finalization = service.inner.uploads.begin_finalization().await;
+    let mut prepared = Vec::with_capacity(new.staged.len());
+    for (_, upload) in new.staged {
+        prepared.push(
+            finalization
+                .prepare(upload)
+                .await
+                .map_err(|error| Failure::Transient(error.to_string()))?,
+        );
+    }
     let now = service.database().database_now().await?;
     let mut tx = service.database().immediate_transaction().await?;
     let id = Id::new_v7();
@@ -604,9 +613,9 @@ async fn write_message(
         .execute(&mut *tx)
         .await?;
     }
-    for (source_file_id, upload) in new.staged {
+    for ((source_file_id, upload), prepared) in new.staged.iter().zip(&prepared) {
         let blob = finalization
-            .finalize_blob_in_transaction(&mut tx, upload, now)
+            .finalize_blob_in_transaction(&mut tx, prepared, now)
             .await
             .map_err(|error| Failure::Transient(error.to_string()))?;
         let file_id = Id::new_v7();

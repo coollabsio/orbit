@@ -38,6 +38,8 @@ use crate::collab::{CollabError, CollabHub, CollabLock, DocKey, DocKind, LinkPol
 use crate::export::markdown::LinkResolver;
 
 const TRASH_RETENTION_MILLIS: i64 = 30 * 24 * 60 * 60 * 1_000;
+/// Pages deleted per write transaction when purging, so one purge never holds the writer lock long.
+const PURGE_BATCH: i64 = 200;
 const SEARCH_LIMIT: i64 = 20;
 /// At most this many words of a query are searched for.
 const SEARCH_MAX_TERMS: usize = 16;
@@ -1899,48 +1901,23 @@ impl PageRepository {
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<(), PageError> {
-        let mut tx = self.database.immediate_transaction().await?;
-        let actor = require_access_tx(&mut tx, workspace_id, actor_id).await?;
-        let row = sqlx::query(sqlx::AssertSqlSafe(format!(
-            "SELECT deleted_at IS NOT NULL AND trashed_with IS NOT DISTINCT FROM id AS in_trash FROM pages \
-             WHERE id = $1 AND workspace_id = $2 AND {visible}",
-            visible = visible(3)
-        )))
-        .bind(page_id.to_string())
-        .bind(workspace_id.to_string())
-        .bind(actor_id.to_string())
-        .fetch_optional(&mut *tx)
-        .await?
-        .ok_or(PageError::NotFound)?;
-        if !row.get::<bool, _>("in_trash") {
-            return Err(PageError::NotTrashed);
-        }
-        let current = page_in_tx(&mut tx, workspace_id, page_id, actor_id, true).await?;
-        if !actor.can_purge_page(current.teamspace_id.is_none()) {
-            return Err(PageError::Forbidden);
-        }
-        check_version(expected_version, current.version, &current)?;
-        let purged = purge_batch(&mut tx, page_id).await?;
-        audit::record(
-            &mut tx,
-            workspace_id,
-            Some(actor_id),
-            "page.purged",
-            AuditOutcome::Success,
-            "page",
-            Some(page_id),
-            request_id,
-            json!({"pages": purged}),
-            now,
-        )
-        .await?;
-        tx.commit().await?;
+        let result = self
+            .purge_trashed_root(
+                workspace_id,
+                page_id,
+                actor_id,
+                PurgeRequest::Page { expected_version },
+                request_id,
+                now,
+            )
+            .await;
         CollabHub::revalidate_database(&self.database, Some(workspace_id));
-        Ok(())
+        result
     }
 
     /// Deletes forever every trashed page the caller may purge: their own private pages, plus
     /// teamspace pages for workspace owners and admins. Members' teamspace trash is left alone.
+    /// `purged` counts the trash entries deleted; one restored meanwhile is skipped.
     pub async fn empty_trash(
         &self,
         workspace_id: Id,
@@ -1948,42 +1925,117 @@ impl PageRepository {
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<PageTrashEmptied, PageError> {
-        let mut tx = self.database.immediate_transaction().await?;
-        let actor = require_access_tx(&mut tx, workspace_id, actor_id).await?;
+        let result = self
+            .empty_trash_roots(workspace_id, actor_id, request_id, now)
+            .await;
+        CollabHub::revalidate_database(&self.database, Some(workspace_id));
+        result
+    }
+
+    async fn empty_trash_roots(
+        &self,
+        workspace_id: Id,
+        actor_id: Id,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<PageTrashEmptied, PageError> {
+        let actor = require_access(self.database.pool(), workspace_id, actor_id).await?;
         let roots = sqlx::query_scalar::<_, String>(
             "SELECT id FROM pages WHERE workspace_id = $1 AND deleted_at IS NOT NULL \
-             AND trashed_with = id AND (owner_id = $2 OR ($3 AND teamspace_id IS NOT NULL)) \
+             AND trashed_with = id AND (owner_id = $2 OR ($3 = 1 AND teamspace_id IS NOT NULL)) \
              ORDER BY deleted_at, id",
         )
         .bind(workspace_id.to_string())
         .bind(actor_id.to_string())
-        .bind(actor.can_purge_page(false))
-        .fetch_all(&mut *tx)
-        .await?
-        .into_iter()
-        .map(parse_id)
-        .collect::<Result<Vec<_>, _>>()?;
-        for root in &roots {
-            let purged = purge_batch(&mut tx, *root).await?;
-            audit::record(
-                &mut tx,
-                workspace_id,
-                Some(actor_id),
-                "page.purged",
-                AuditOutcome::Success,
-                "page",
-                Some(*root),
-                request_id,
-                json!({"pages": purged}),
-                now,
-            )
-            .await?;
+        .bind(i64::from(actor.can_purge_page(false)))
+        .fetch_all(self.database.pool())
+        .await?;
+        let mut purged = 0_u64;
+        for root in roots {
+            match self
+                .purge_trashed_root(
+                    workspace_id,
+                    parse_id(root)?,
+                    actor_id,
+                    PurgeRequest::Trash,
+                    request_id,
+                    now,
+                )
+                .await
+            {
+                Ok(()) => purged += 1,
+                Err(PageError::NotTrashed) => {}
+                Err(error) => return Err(error),
+            }
         }
-        tx.commit().await?;
-        CollabHub::revalidate_database(&self.database, Some(workspace_id));
-        Ok(PageTrashEmptied {
-            purged: roots.len() as u64,
-        })
+        Ok(PageTrashEmptied { purged })
+    }
+
+    /// Deletes the trashed page `root` and the pages trashed along with it, [`PURGE_BATCH`] per
+    /// write transaction, deepest first: the root goes in the last batch, so a run that stopped
+    /// midway leaves it in the trash for a retry to finish. Each transaction re-checks access and
+    /// that the root is still in the trash, so a restore meanwhile stops the run (`NotTrashed`).
+    /// Sub-pages trashed on their own earlier keep their own trash entry (their `parent_id` is
+    /// cleared by the foreign key), like restore treats them. Files, favorites and the search
+    /// entry go through cascades and triggers. The audit row counts the pages this run deleted.
+    async fn purge_trashed_root(
+        &self,
+        workspace_id: Id,
+        root: Id,
+        actor_id: Id,
+        request: PurgeRequest,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<(), PageError> {
+        let mut purged = 0_u64;
+        loop {
+            let mut tx = self.database.immediate_transaction().await?;
+            check_purgeable(&mut tx, workspace_id, root, actor_id, request).await?;
+            let ids = sqlx::query_scalar::<_, String>(
+                "WITH RECURSIVE subtree(id, depth) AS ( \
+                     SELECT $1, 0 \
+                     UNION ALL \
+                     SELECT pages.id, subtree.depth + 1 FROM pages JOIN subtree ON pages.parent_id = subtree.id \
+                     WHERE pages.deleted_at IS NOT NULL AND pages.trashed_with = $2 \
+                 ) \
+                 SELECT id FROM subtree ORDER BY depth DESC, id LIMIT $3",
+            )
+            .bind(root.to_string())
+            .bind(root.to_string())
+            .bind(PURGE_BATCH)
+            .fetch_all(&mut *tx)
+            .await?;
+            let root_id = root.to_string();
+            let mut root_gone = false;
+            for id in &ids {
+                let deleted =
+                    sqlx::query("DELETE FROM pages WHERE id = $1 AND deleted_at IS NOT NULL")
+                        .bind(id)
+                        .execute(&mut *tx)
+                        .await?
+                        .rows_affected();
+                purged += deleted;
+                root_gone |= deleted > 0 && *id == root_id;
+            }
+            if root_gone {
+                audit::record(
+                    &mut tx,
+                    workspace_id,
+                    Some(actor_id),
+                    "page.purged",
+                    AuditOutcome::Success,
+                    "page",
+                    Some(root),
+                    request_id,
+                    json!({"pages": purged}),
+                    now,
+                )
+                .await?;
+                tx.commit().await?;
+                return Ok(());
+            }
+            tx.commit().await?;
+        }
     }
 
     /// Copies a live page the caller can see (with `include_children`, its whole live subtree in
@@ -2736,33 +2788,66 @@ pub(crate) fn split_marks(marked: &str) -> (String, Vec<TextRange>) {
     (text, ranges)
 }
 
-/// Hard-deletes the trashed page `root_id` and the pages trashed along with it; returns how many
-/// pages went. Sub-pages trashed on their own earlier keep their own trash entry (their
-/// `parent_id` is cleared by the foreign key), like restore treats them.
-async fn purge_batch(tx: &mut Transaction<'_, Any>, root_id: Id) -> Result<u64, PageError> {
-    let ids = sqlx::query_scalar::<_, String>(
-        "WITH RECURSIVE subtree(id) AS ( \
-             SELECT $1 \
-             UNION ALL \
-             SELECT pages.id FROM pages JOIN subtree ON pages.parent_id = subtree.id \
-             WHERE pages.deleted_at IS NOT NULL AND pages.trashed_with = $2 \
-         ) \
-         SELECT id FROM subtree",
-    )
-    .bind(root_id.to_string())
-    .bind(root_id.to_string())
-    .fetch_all(&mut **tx)
-    .await?;
-    let mut purged = 0;
-    // Children first, so no row of the batch is left pointing at a deleted parent mid-way.
-    for id in ids.iter().rev() {
-        purged += sqlx::query("DELETE FROM pages WHERE id = $1 AND deleted_at IS NOT NULL")
-            .bind(id)
-            .execute(&mut **tx)
+/// What a purge re-checks in each of its transactions.
+#[derive(Clone, Copy)]
+enum PurgeRequest {
+    /// One page, trashed directly: a private page by its owner, a teamspace page by a workspace
+    /// owner or admin, at `expected_version`. `NotFound`, `NotTrashed`, `Forbidden` or a conflict
+    /// otherwise.
+    Page { expected_version: u64 },
+    /// Emptying the trash: the caller's own trash entries, plus teamspace ones for workspace
+    /// owners and admins. `NotTrashed` otherwise.
+    Trash,
+}
+
+async fn check_purgeable(
+    tx: &mut Transaction<'_, Any>,
+    workspace_id: Id,
+    root: Id,
+    actor_id: Id,
+    request: PurgeRequest,
+) -> Result<(), PageError> {
+    let actor = require_access_tx(tx, workspace_id, actor_id).await?;
+    match request {
+        PurgeRequest::Trash => {
+            let found: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM pages WHERE id = $1 AND workspace_id = $2 \
+                 AND deleted_at IS NOT NULL AND trashed_with = id \
+                 AND (owner_id = $3 OR ($4 = 1 AND teamspace_id IS NOT NULL))",
+            )
+            .bind(root.to_string())
+            .bind(workspace_id.to_string())
+            .bind(actor_id.to_string())
+            .bind(i64::from(actor.can_purge_page(false)))
+            .fetch_one(&mut **tx)
+            .await?;
+            if found == 0 {
+                return Err(PageError::NotTrashed);
+            }
+        }
+        PurgeRequest::Page { expected_version } => {
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "SELECT deleted_at IS NOT NULL AND trashed_with IS NOT DISTINCT FROM id AS in_trash FROM pages \
+                 WHERE id = $1 AND workspace_id = $2 AND {visible}",
+                visible = visible(3)
+            )))
+            .bind(root.to_string())
+            .bind(workspace_id.to_string())
+            .bind(actor_id.to_string())
+            .fetch_optional(&mut **tx)
             .await?
-            .rows_affected();
+            .ok_or(PageError::NotFound)?;
+            if !row.get::<bool, _>("in_trash") {
+                return Err(PageError::NotTrashed);
+            }
+            let current = page_in_tx(tx, workspace_id, root, actor_id, true).await?;
+            if !actor.can_purge_page(current.teamspace_id.is_none()) {
+                return Err(PageError::Forbidden);
+            }
+            check_version(expected_version, current.version, &current)?;
+        }
     }
-    Ok(purged)
+    Ok(())
 }
 
 /// "<title> (copy)", keeping the result within the title limit; "Untitled (copy)" when empty.

@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::str::FromStr;
 use std::time::Duration;
 
@@ -11,7 +11,7 @@ use super::{
     Job, JobError, JobKind, JobKindRegistrationError, JobKindRegistry, JobLimits, JobPriority,
     JobState,
 };
-use crate::{Database, Flag, Id, ParseIdError, TimestampMillis};
+use crate::{Database, Flag, Id, ParseIdError, SqlBuilder, TimestampMillis};
 
 const DEAD_RETENTION_MILLIS: i64 = 30 * 24 * 60 * 60 * 1_000;
 
@@ -113,63 +113,75 @@ impl JobStore {
         selection: ClaimSelection,
     ) -> Result<Option<Claim>, JobStoreError> {
         let mut transaction = self.database.immediate_transaction().await?;
-        let rows = sqlx::query(
-            "SELECT id, state, attempt_count, max_attempts, claim_token, kind, workspace_id FROM jobs \
-             WHERE ((state = 'queued' AND available_at <= $1) \
-                    OR (state = 'running' AND lease_expires_at <= $2)) \
-               AND ($3 = 'any' OR ($4 = 'critical' AND priority = 'critical') \
-                    OR ($5 = 'noncritical' AND priority != 'critical')) \
-             ORDER BY CASE priority WHEN 'critical' THEN 0 WHEN 'high' THEN 1 \
-                       WHEN 'normal' THEN 2 ELSE 3 END, available_at, created_at, id",
-        )
-        .bind(now.as_millis())
-        .bind(now.as_millis())
-        .bind(selection_name(selection))
-        .bind(selection_name(selection))
-        .bind(selection_name(selection))
-        .fetch_all(&mut *transaction)
-        .await?;
         // Read on every claim, so a change in Admin reaches every server without a restart.
         let overrides = load_limit_overrides(&mut *transaction).await?;
-        // A kind at its limit (no workspace) or a workspace at its limit, known for this claim.
-        let mut blocked = BTreeSet::<(String, Option<String>)>::new();
+        // The claim transaction is serialized, so the counts include the jobs of every server of
+        // the database, and they cannot change until a job is claimed.
+        let running = load_running_counts(&mut transaction, now).await?;
+        let mut waits = HashMap::<String, bool>::new();
+        let mut blocked = Blocked::default();
+        let mut after = None;
 
-        for row in rows {
-            let kind: String = row.try_get("kind")?;
-            let workspace_id: Option<String> = row.try_get("workspace_id")?;
-            if blocked.contains(&(kind.clone(), None))
-                || blocked.contains(&(kind.clone(), workspace_id.clone()))
-            {
-                continue;
+        loop {
+            let rows =
+                load_candidates(&mut transaction, now, selection, after.as_ref(), &blocked).await?;
+            let Some(last) = rows.last() else { break };
+            after = Some(CandidateCursor::of(last)?);
+            let last_page = rows.len() < CLAIM_PAGE_SIZE;
+
+            for row in &rows {
+                let kind: String = row.try_get("kind")?;
+                let workspace_id: Option<String> = row.try_get("workspace_id")?;
+                if blocked.contains(&kind, workspace_id.as_deref()) {
+                    continue;
+                }
+                let policy = self.kinds.resolve(&kind);
+                let limits = overrides
+                    .get(&kind)
+                    .copied()
+                    .unwrap_or_else(|| policy.default_limits());
+                let kind_running = running.get(&kind);
+                if let Some(limit) = limits.concurrency
+                    && kind_running.map_or(0, |counts| counts.total) >= i64::from(limit)
+                {
+                    blocked.kinds.insert(kind);
+                    continue;
+                }
+                if let (Some(limit), Some(workspace)) =
+                    (limits.workspace_concurrency, workspace_id.as_deref())
+                    && kind_running.map_or(0, |counts| counts.workspace(workspace))
+                        >= i64::from(limit)
+                {
+                    let another_waits = match waits.get(&kind) {
+                        Some(&another_waits) => another_waits,
+                        None => {
+                            let another_waits = another_workspace_waits(
+                                &mut transaction,
+                                &kind,
+                                kind_running,
+                                limit,
+                                now,
+                            )
+                            .await?;
+                            waits.insert(kind.clone(), another_waits);
+                            another_waits
+                        }
+                    };
+                    if another_waits {
+                        blocked.workspaces.insert((kind, workspace.to_owned()));
+                        continue;
+                    }
+                }
+                if let Some(claim) = self
+                    .claim_row(&mut transaction, row, now, policy.lease())
+                    .await?
+                {
+                    transaction.commit().await?;
+                    return Ok(Some(claim));
+                }
             }
-            let policy = self.kinds.resolve(&kind);
-            let limits = overrides
-                .get(&kind)
-                .copied()
-                .unwrap_or_else(|| policy.default_limits());
-            // The claim transaction is serialized, so the counts include the jobs of every
-            // server of the database.
-            if let Some(limit) = limits.concurrency
-                && count_running(&mut transaction, &kind, None, now).await? >= i64::from(limit)
-            {
-                blocked.insert((kind, None));
-                continue;
-            }
-            if let (Some(limit), Some(workspace)) =
-                (limits.workspace_concurrency, workspace_id.as_deref())
-                && count_running(&mut transaction, &kind, Some(workspace), now).await?
-                    >= i64::from(limit)
-                && another_workspace_waits(&mut transaction, &kind, workspace, limit, now).await?
-            {
-                blocked.insert((kind, workspace_id));
-                continue;
-            }
-            if let Some(claim) = self
-                .claim_row(&mut transaction, &row, now, policy.lease())
-                .await?
-            {
-                transaction.commit().await?;
-                return Ok(Some(claim));
+            if last_page {
+                break;
             }
         }
 
@@ -201,6 +213,13 @@ impl JobStore {
         let previous_attempt: i64 = row.try_get("attempt_count")?;
         let max_attempts: i64 = row.try_get("max_attempts")?;
         let old_token: Option<String> = row.try_get("claim_token")?;
+        let job_id = match Id::from_str(&id) {
+            Ok(job_id) => job_id,
+            Err(error) => {
+                bury_invalid_job(transaction, &id, &error.to_string(), now).await?;
+                return Ok(None);
+            }
+        };
         if state == "running" {
             sqlx::query(
                 "UPDATE job_attempts SET finished_at = $1, outcome = 'lease_expired', \
@@ -275,7 +294,7 @@ impl JobStore {
             .await?;
 
         Ok(Some(Claim {
-            job_id: Id::from_str(&id)?,
+            job_id,
             attempt: u32::try_from(attempt)
                 .map_err(|_| JobStoreError::InvalidData("attempt count overflow".to_owned()))?,
             claim_token,
@@ -514,6 +533,33 @@ async fn insert_job<'e>(
     .rows_affected())
 }
 
+/// Marks a job dead that the worker cannot read, so one bad row does not stop the worker (and the server) on
+/// every poll. The row stays for an operator to inspect.
+async fn bury_invalid_job(
+    transaction: &mut Transaction<'_, Any>,
+    id: &str,
+    reason: &str,
+    now: TimestampMillis,
+) -> Result<(), JobStoreError> {
+    tracing::error!(
+        job_id = id,
+        reason,
+        "job worker: a job row is invalid; marking it dead"
+    );
+    sqlx::query(
+        "UPDATE jobs SET state = 'dead', lease_owner = NULL, claim_token = NULL, \
+         lease_expires_at = NULL, last_error = $1, dead_at = $2, updated_at = $3 \
+         WHERE id = $4 AND state IN ('queued', 'running')",
+    )
+    .bind(format!("invalid job data: {reason}"))
+    .bind(now.as_millis())
+    .bind(now.as_millis())
+    .bind(id)
+    .execute(&mut **transaction)
+    .await?;
+    Ok(())
+}
+
 fn decode_job(row: &AnyRow, kinds: &JobKindRegistry) -> Result<Job, JobStoreError> {
     fn optional_id(value: Option<String>) -> Result<Option<Id>, ParseIdError> {
         value.map(|value| Id::from_str(&value)).transpose()
@@ -585,70 +631,191 @@ pub async fn load_limit_overrides<'e>(
         .collect()
 }
 
-async fn count_running(
-    transaction: &mut Transaction<'_, Any>,
-    kind: &str,
-    workspace_id: Option<&str>,
-    now: TimestampMillis,
-) -> Result<i64, sqlx::Error> {
-    match workspace_id {
-        None => {
-            sqlx::query_scalar(
-                "SELECT COUNT(*) FROM jobs WHERE kind = $1 AND state = 'running' \
-                 AND lease_expires_at > $2",
-            )
-            .bind(kind)
-            .bind(now.as_millis())
-            .fetch_one(&mut **transaction)
-            .await
-        }
-        Some(workspace_id) => {
-            sqlx::query_scalar(
-                "SELECT COUNT(*) FROM jobs WHERE kind = $1 AND state = 'running' \
-                 AND lease_expires_at > $2 AND workspace_id = $3",
-            )
-            .bind(kind)
-            .bind(now.as_millis())
-            .bind(workspace_id)
-            .fetch_one(&mut **transaction)
-            .await
-        }
+const CLAIM_PAGE_SIZE: usize = 100;
+const PRIORITY_RANK: &str = "CAST(CASE priority WHEN 'critical' THEN 0 WHEN 'high' THEN 1 \
+                             WHEN 'normal' THEN 2 ELSE 3 END AS BIGINT)";
+
+/// Kinds at their cluster limit, and workspaces at their limit of a kind while another
+/// workspace waits, as found during one claim.
+#[derive(Default)]
+struct Blocked {
+    kinds: BTreeSet<String>,
+    workspaces: BTreeSet<(String, String)>,
+}
+
+impl Blocked {
+    fn contains(&self, kind: &str, workspace_id: Option<&str>) -> bool {
+        self.kinds.contains(kind)
+            || workspace_id.is_some_and(|workspace| {
+                self.workspaces
+                    .contains(&(kind.to_owned(), workspace.to_owned()))
+            })
     }
 }
 
-/// Whether another workspace below its limit has a job of `kind` ready to run.
+/// The claim order key of the last candidate of a page.
+struct CandidateCursor {
+    priority_rank: i64,
+    available_at: i64,
+    created_at: i64,
+    id: String,
+}
+
+impl CandidateCursor {
+    fn of(row: &AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(Self {
+            priority_rank: row.try_get("priority_rank")?,
+            available_at: row.try_get("available_at")?,
+            created_at: row.try_get("created_at")?,
+            id: row.try_get("id")?,
+        })
+    }
+}
+
+/// One page of the claimable jobs in claim order, after `after`, without the blocked ones.
+async fn load_candidates(
+    transaction: &mut Transaction<'_, Any>,
+    now: TimestampMillis,
+    selection: ClaimSelection,
+    after: Option<&CandidateCursor>,
+    blocked: &Blocked,
+) -> Result<Vec<AnyRow>, sqlx::Error> {
+    let mut query = SqlBuilder::new(format!(
+        "SELECT id, state, attempt_count, max_attempts, claim_token, kind, workspace_id, \
+         available_at, created_at, {PRIORITY_RANK} AS priority_rank FROM jobs \
+         WHERE ((state = 'queued' AND available_at <= "
+    ));
+    query
+        .push_bind(now.as_millis())
+        .push(") OR (state = 'running' AND lease_expires_at <= ")
+        .push_bind(now.as_millis())
+        .push("))");
+    query.push(match selection {
+        ClaimSelection::Any => "",
+        ClaimSelection::Critical => " AND priority = 'critical'",
+        ClaimSelection::NonCritical => " AND priority != 'critical'",
+    });
+    if !blocked.kinds.is_empty() {
+        query.push(" AND kind NOT IN (");
+        let mut kinds = query.separated(", ");
+        for kind in &blocked.kinds {
+            kinds.push_bind(kind.as_str());
+        }
+        query.push(")");
+    }
+    for (kind, workspace_id) in &blocked.workspaces {
+        query
+            .push(" AND NOT (kind = ")
+            .push_bind(kind.as_str())
+            .push(" AND workspace_id IS NOT NULL AND workspace_id = ")
+            .push_bind(workspace_id.as_str())
+            .push(")");
+    }
+    if let Some(after) = after {
+        query
+            .push(format_args!(
+                " AND ({PRIORITY_RANK}, available_at, created_at, id) > ("
+            ))
+            .push_bind(after.priority_rank)
+            .push(", ")
+            .push_bind(after.available_at)
+            .push(", ")
+            .push_bind(after.created_at)
+            .push(", ")
+            .push_bind(after.id.as_str())
+            .push(")");
+    }
+    query
+        .push(format_args!(
+            " ORDER BY {PRIORITY_RANK}, available_at, created_at, id LIMIT "
+        ))
+        .push_bind(i64::try_from(CLAIM_PAGE_SIZE).unwrap_or(i64::MAX));
+    query.build().fetch_all(&mut **transaction).await
+}
+
+#[derive(Default)]
+struct KindRunning {
+    total: i64,
+    by_workspace: HashMap<String, i64>,
+}
+
+impl KindRunning {
+    fn workspace(&self, workspace_id: &str) -> i64 {
+        self.by_workspace.get(workspace_id).copied().unwrap_or(0)
+    }
+}
+
+/// The jobs that run now (lease not expired), by kind and workspace.
+async fn load_running_counts(
+    transaction: &mut Transaction<'_, Any>,
+    now: TimestampMillis,
+) -> Result<HashMap<String, KindRunning>, sqlx::Error> {
+    let rows = sqlx::query(
+        "SELECT kind, workspace_id, COUNT(*) AS running FROM jobs \
+         WHERE state = 'running' AND lease_expires_at > $1 GROUP BY kind, workspace_id",
+    )
+    .bind(now.as_millis())
+    .fetch_all(&mut **transaction)
+    .await?;
+    let mut counts = HashMap::<String, KindRunning>::new();
+    for row in rows {
+        let kind: String = row.try_get("kind")?;
+        let workspace_id: Option<String> = row.try_get("workspace_id")?;
+        let running: i64 = row.try_get("running")?;
+        let entry = counts.entry(kind).or_default();
+        entry.total += running;
+        if let Some(workspace_id) = workspace_id {
+            entry.by_workspace.insert(workspace_id, running);
+        }
+    }
+    Ok(counts)
+}
+
+/// Whether a workspace below `limit` has a job of `kind` ready to run. The asking workspace is at
+/// `limit`, so it is never one of them.
 async fn another_workspace_waits(
     transaction: &mut Transaction<'_, Any>,
     kind: &str,
-    workspace_id: &str,
+    running: Option<&KindRunning>,
     limit: u32,
     now: TimestampMillis,
 ) -> Result<bool, sqlx::Error> {
-    let Flag(waits) = sqlx::query_scalar(
-        "SELECT EXISTS (SELECT 1 FROM jobs waiting WHERE waiting.kind = $1 \
-         AND waiting.state = 'queued' AND waiting.available_at <= $2 \
-         AND waiting.workspace_id IS NOT NULL AND waiting.workspace_id != $3 \
-         AND (SELECT COUNT(*) FROM jobs running WHERE running.kind = $4 \
-              AND running.workspace_id = waiting.workspace_id AND running.state = 'running' \
-              AND running.lease_expires_at > $5) < $6)",
-    )
-    .bind(kind)
-    .bind(now.as_millis())
-    .bind(workspace_id)
-    .bind(kind)
-    .bind(now.as_millis())
-    .bind(i64::from(limit))
-    .fetch_one(&mut **transaction)
-    .await?;
-    Ok(waits)
-}
-
-fn selection_name(selection: ClaimSelection) -> &'static str {
-    match selection {
-        ClaimSelection::Any => "any",
-        ClaimSelection::Critical => "critical",
-        ClaimSelection::NonCritical => "noncritical",
+    if limit == 0 {
+        return Ok(false);
     }
+    let mut query = SqlBuilder::new(
+        "SELECT EXISTS (SELECT 1 FROM jobs WHERE state = 'queued' AND available_at <= ",
+    );
+    query
+        .push_bind(now.as_millis())
+        .push(" AND kind = ")
+        .push_bind(kind)
+        .push(" AND workspace_id IS NOT NULL");
+    let mut full = Vec::new();
+    for (workspace_id, count) in running
+        .map(|running| &running.by_workspace)
+        .into_iter()
+        .flatten()
+    {
+        if *count >= i64::from(limit) {
+            full.push(workspace_id.as_str());
+        }
+    }
+    if !full.is_empty() {
+        query.push(" AND workspace_id NOT IN (");
+        let mut workspaces = query.separated(", ");
+        for workspace_id in full {
+            workspaces.push_bind(workspace_id);
+        }
+        query.push(")");
+    }
+    query.push(")");
+    let Flag(waits) = query
+        .build()
+        .fetch_one(&mut **transaction)
+        .await?
+        .try_get(0)?;
+    Ok(waits)
 }
 
 pub(crate) fn add_duration(timestamp: TimestampMillis, duration: Duration) -> TimestampMillis {

@@ -293,7 +293,7 @@ async fn finalize_rehashes_staged_bytes_before_publication() {
 }
 
 #[tokio::test]
-async fn failed_attachment_write_rolls_back_blob_metadata_and_leaves_quarantined_bytes() {
+async fn failed_attachment_write_leaves_a_quarantined_blob_without_a_reference() {
     let fixture = Fixture::new().await;
     let workspace = Id::new_v7();
     let existing = fixture
@@ -326,6 +326,14 @@ async fn failed_attachment_write_rolls_back_blob_metadata_and_leaves_quarantined
         fixture
             .database
             .scalar::<i64>("SELECT COUNT(*) FROM attachment_blobs")
+            .await
+            .unwrap(),
+        2
+    );
+    assert_eq!(
+        fixture
+            .database
+            .scalar::<i64>("SELECT COUNT(*) FROM attachment_references")
             .await
             .unwrap(),
         1

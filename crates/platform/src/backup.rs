@@ -97,6 +97,7 @@ pub struct BackupSnapshot {
 #[derive(Clone, Debug, Default)]
 pub struct AttachmentMutationCoordinator {
     lock: Arc<RwLock<()>>,
+    operations: Arc<tokio::sync::Mutex<()>>,
 }
 
 #[derive(Debug)]
@@ -104,10 +105,26 @@ pub struct AttachmentMutationGuard {
     _guard: OwnedRwLockReadGuard<()>,
 }
 
+/// One blob operation of this process at a time (uploads, reconcile, the retention file purge), also a mutation.
+#[derive(Debug)]
+pub struct AttachmentOperationGuard {
+    _operation: tokio::sync::OwnedMutexGuard<()>,
+    _mutation: AttachmentMutationGuard,
+}
+
 impl AttachmentMutationCoordinator {
     pub async fn begin(&self) -> AttachmentMutationGuard {
         AttachmentMutationGuard {
             _guard: self.lock.clone().read_owned().await,
+        }
+    }
+
+    /// Takes the operation lock before the mutation lock, always in this order, so the two cannot deadlock.
+    pub async fn begin_operation(&self) -> AttachmentOperationGuard {
+        let operation = self.operations.clone().lock_owned().await;
+        AttachmentOperationGuard {
+            _operation: operation,
+            _mutation: self.begin().await,
         }
     }
 }
