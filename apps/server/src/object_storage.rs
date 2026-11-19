@@ -360,20 +360,30 @@ pub async fn move_images_to_blobs(
                 .parse()
                 .map_err(|_| UploadError::InvalidState)?;
             let finalization = uploads.begin_finalization().await;
-            let now = database.database_now().await?;
-            let mut transaction = database.immediate_transaction().await?;
+            let current =
+                format!("SELECT bytes FROM {table} WHERE {key} = $1 AND bytes IS NOT NULL");
             // Replaced or deleted since the list was read.
-            let Some(bytes) = sqlx::query_scalar::<_, Vec<u8>>(sqlx::AssertSqlSafe(format!(
-                "SELECT bytes FROM {table} WHERE {key} = $1 AND bytes IS NOT NULL"
-            )))
-            .bind(&row_key)
-            .fetch_optional(&mut *transaction)
-            .await?
+            let Some(bytes) =
+                sqlx::query_scalar::<_, Vec<u8>>(sqlx::AssertSqlSafe(current.clone()))
+                    .bind(&row_key)
+                    .fetch_optional(database.pool())
+                    .await?
             else {
                 continue;
             };
+            let prepared = finalization.prepare_unmetered_bytes(scope, &bytes).await?;
+            let mut transaction = database.immediate_transaction().await?;
+            // Replaced or deleted while the bytes went to the store: the next run moves the new image.
+            let unchanged = sqlx::query_scalar::<_, Vec<u8>>(sqlx::AssertSqlSafe(current))
+                .bind(&row_key)
+                .fetch_optional(&mut *transaction)
+                .await?
+                .is_some_and(|stored| stored == bytes);
+            if !unchanged {
+                continue;
+            }
             let blob = finalization
-                .finalize_unmetered_bytes_in_transaction(&mut transaction, scope, &bytes, now)
+                .finalize_bytes_in_transaction(&mut transaction, &prepared)
                 .await?;
             sqlx::query(sqlx::AssertSqlSafe(format!(
                 "UPDATE {table} SET bytes = NULL, blob_id = $1 WHERE {key} = $2"

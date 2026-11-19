@@ -10,9 +10,9 @@ use tokio::fs;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 
 use super::image_shrink::{SHRINK_MIN_BYTES, shrink_image};
-use super::{BlobReader, BlobStore, BlobStoreError, StoredObject};
+use super::{BlobReader, BlobStore, BlobStoreError};
 use crate::{
-    AttachmentMutationCoordinator, AttachmentMutationGuard, Database, Id, TimestampMillis,
+    AttachmentMutationCoordinator, AttachmentOperationGuard, Database, Id, TimestampMillis,
 };
 
 const HOUR_MILLIS: i64 = 60 * 60 * 1000;
@@ -142,8 +142,40 @@ pub struct FinalizedAttachment {
 
 pub struct UploadFinalization<'a> {
     service: &'a UploadService,
-    _operation: tokio::sync::MutexGuard<'a, ()>,
-    _mutation: AttachmentMutationGuard,
+    _operation: AttachmentOperationGuard,
+}
+
+/// A staged upload whose bytes are in the blob store and whose `attachment_blobs` row is committed with a fresh
+/// quarantine, so reconcile on any server keeps both. Only [`UploadFinalization::prepare`] makes one, in its own
+/// short transactions: the store (S3) is never called inside the caller's write transaction.
+#[derive(Debug)]
+pub struct PreparedUpload {
+    upload: StagedUpload,
+    claimed: ClaimedBlob,
+}
+
+/// [`PreparedUpload`] for bytes without a pending upload. Only [`UploadFinalization::prepare_bytes`] and
+/// [`UploadFinalization::prepare_unmetered_bytes`] make one.
+#[derive(Debug)]
+pub struct PreparedBlob {
+    claimed: ClaimedBlob,
+}
+
+/// A committed `attachment_blobs` row from [`UploadService::claim_blob`].
+#[derive(Debug)]
+struct ClaimedBlob {
+    blob: FinalizedBlob,
+    /// The claim added the row; otherwise the workspace already had a row for these bytes.
+    created: bool,
+}
+
+/// What [`UploadService::claim_blob`] checks before it records the blob row.
+#[derive(Clone, Copy)]
+enum Claim {
+    /// A staged pending upload, within the workspace's storage quota.
+    PendingUpload,
+    MeteredBytes,
+    UnmeteredBytes,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -223,20 +255,80 @@ pub struct UploadService {
     store: Arc<dyn BlobStore>,
     mutations: AttachmentMutationCoordinator,
     limits: UploadLimits,
-    operations: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl UploadFinalization<'_> {
+    /// Records the blob of a staged upload (within the workspace's storage quota) and writes its bytes to the
+    /// store. Call it before the write transaction that references the blob: it opens its own short transaction,
+    /// and the store can be slow. When no reference follows, reconcile removes the blob after the quarantine.
+    pub async fn prepare(&self, upload: &StagedUpload) -> Result<PreparedUpload, UploadError> {
+        let claimed = self
+            .service
+            .claim_blob(upload, Claim::PendingUpload)
+            .await?;
+        match self.service.store.install(upload).await {
+            Ok(_) => Ok(PreparedUpload {
+                upload: upload.clone(),
+                claimed,
+            }),
+            Err(error) => {
+                self.service.unclaim(&claimed).await;
+                Err(match error {
+                    BlobStoreError::StagedContentChanged => UploadError::StagedContentChanged,
+                    error => error.into(),
+                })
+            }
+        }
+    }
+
+    /// [`Self::prepare`] for bytes the server already checked (an emoji, a sticker, a received mail), as a blob of
+    /// `workspace_id` within its storage quota, without a pending upload.
+    pub async fn prepare_bytes(
+        &self,
+        workspace_id: Id,
+        bytes: &[u8],
+    ) -> Result<PreparedBlob, UploadError> {
+        let (_, claimed) = self
+            .service
+            .install_claimed_bytes(workspace_id, bytes, Claim::MeteredBytes)
+            .await?;
+        Ok(PreparedBlob { claimed })
+    }
+
+    /// [`Self::prepare_bytes`] without the storage quota: for a profile picture (grouped under the user id, not a
+    /// workspace) and for images that already were in the database before they move to the store.
+    pub async fn prepare_unmetered_bytes(
+        &self,
+        scope_id: Id,
+        bytes: &[u8],
+    ) -> Result<PreparedBlob, UploadError> {
+        let (_, claimed) = self
+            .service
+            .install_claimed_bytes(scope_id, bytes, Claim::UnmeteredBytes)
+            .await?;
+        Ok(PreparedBlob { claimed })
+    }
+
+    /// Gives up a prepared blob that gets no reference, so its bytes stop counting toward the workspace's storage
+    /// now and not only after the quarantine. For callers that fail often with bytes nobody uploads again (a
+    /// refused mail that its sender retries). Does nothing when the workspace had the blob before, or something
+    /// references it. Best effort: reconcile removes what stays.
+    pub async fn abandon(&self, prepared: &PreparedBlob) {
+        self.service.unclaim(&prepared.claimed).await;
+    }
+
+    /// [`Self::finalize_blob_in_transaction`] plus the task attachment reference.
     pub async fn finalize_in_transaction(
         &self,
         transaction: &mut Transaction<'_, Any>,
-        upload: &StagedUpload,
+        prepared: &PreparedUpload,
         attachment: NewAttachmentReference,
         now: TimestampMillis,
     ) -> Result<FinalizedAttachment, UploadError> {
         let blob = self
-            .finalize_blob_in_transaction(transaction, upload, now)
+            .finalize_blob_in_transaction(transaction, prepared, now)
             .await?;
+        let upload = &prepared.upload;
         let size_i64 = i64::try_from(upload.size_bytes).map_err(|_| UploadError::SizeOverflow)?;
         sqlx::query(
             "INSERT INTO attachment_references (\
@@ -265,46 +357,20 @@ impl UploadFinalization<'_> {
         })
     }
 
-    /// Installs the staged bytes as a (deduplicated) workspace blob and completes the pending
-    /// upload, without creating a reference. The caller must insert its own reference row (e.g. a
-    /// page file) in the same transaction, or the blob becomes reclaimable after quarantine.
+    /// Completes the pending upload of a prepared blob, without creating a reference. The caller must insert its
+    /// own reference row (e.g. a page file) in the same transaction, or the blob becomes reclaimable after
+    /// quarantine. Fails with [`UploadError::InvalidState`] when the upload is no longer staged, or the blob was
+    /// deleted or replaced since [`Self::prepare`].
     pub async fn finalize_blob_in_transaction(
         &self,
         transaction: &mut Transaction<'_, Any>,
-        upload: &StagedUpload,
+        prepared: &PreparedUpload,
         now: TimestampMillis,
     ) -> Result<FinalizedBlob, UploadError> {
+        let upload = &prepared.upload;
+        require_staged(transaction, upload, now).await?;
+        require_claimed(transaction, &prepared.claimed.blob).await?;
         let size_i64 = i64::try_from(upload.size_bytes).map_err(|_| UploadError::SizeOverflow)?;
-        let valid: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM pending_uploads \
-             WHERE id = $1 AND workspace_id = $2 AND user_id = $3 AND temporary_path = $4 \
-               AND original_name = $5 AND media_type = $6 AND byte_size = $7 AND sha256 = $8 \
-               AND state = 'staged' AND expires_at > $9",
-        )
-        .bind(upload.id.to_string())
-        .bind(upload.workspace_id.to_string())
-        .bind(upload.owner_id.to_string())
-        .bind(upload.temporary_path.to_string_lossy().as_ref())
-        .bind(&upload.display_name)
-        .bind(&upload.detected_media_type)
-        .bind(size_i64)
-        .bind(&upload.sha256)
-        .bind(now.as_millis())
-        .fetch_one(&mut **transaction)
-        .await?;
-        if valid != 1 {
-            return Err(UploadError::InvalidState);
-        }
-        ensure_storage_quota(transaction, upload.workspace_id, &upload.sha256, size_i64).await?;
-
-        let stored = match self.service.store.install(upload).await {
-            Err(BlobStoreError::StagedContentChanged) => {
-                return Err(UploadError::StagedContentChanged);
-            }
-            result => result?,
-        };
-        let blob = record_blob(transaction, upload, &stored.storage_key, now).await?;
-
         let updated = sqlx::query(
             "UPDATE pending_uploads SET state = 'complete', completed_at = $1 \
              WHERE id = $2 AND workspace_id = $3 AND user_id = $4 AND state = 'staged' \
@@ -322,38 +388,72 @@ impl UploadFinalization<'_> {
             return Err(UploadError::InvalidState);
         }
 
-        Ok(blob)
+        Ok(prepared.claimed.blob.clone())
     }
 
-    /// Stores bytes the server already checked (an emoji, a sticker) as a blob of `workspace_id`, without a pending
-    /// upload, within the workspace's storage quota. As with [`Self::finalize_blob_in_transaction`], the caller
-    /// inserts its reference in the same transaction.
+    /// The blob of [`Self::prepare_bytes`] or [`Self::prepare_unmetered_bytes`], checked inside the caller's write
+    /// transaction. As with [`Self::finalize_blob_in_transaction`], the caller inserts its reference in the same
+    /// transaction.
     pub async fn finalize_bytes_in_transaction(
         &self,
         transaction: &mut Transaction<'_, Any>,
-        workspace_id: Id,
-        bytes: &[u8],
-        now: TimestampMillis,
+        prepared: &PreparedBlob,
     ) -> Result<FinalizedBlob, UploadError> {
-        let size_i64 = i64::try_from(bytes.len()).map_err(|_| UploadError::SizeOverflow)?;
-        let sha256 = format!("{:x}", Sha256::digest(bytes));
-        ensure_storage_quota(transaction, workspace_id, &sha256, size_i64).await?;
-        self.finalize_unmetered_bytes_in_transaction(transaction, workspace_id, bytes, now)
-            .await
+        require_claimed(transaction, &prepared.claimed.blob).await?;
+        Ok(prepared.claimed.blob.clone())
     }
+}
 
-    /// [`Self::finalize_bytes_in_transaction`] without the storage quota: for a profile picture (grouped under the
-    /// user id, not a workspace) and for images that already were in the database before they move to the store.
-    pub async fn finalize_unmetered_bytes_in_transaction(
-        &self,
-        transaction: &mut Transaction<'_, Any>,
-        scope_id: Id,
-        bytes: &[u8],
-        now: TimestampMillis,
-    ) -> Result<FinalizedBlob, UploadError> {
-        let (staged, stored) = self.service.install_bytes(scope_id, bytes).await?;
-        record_blob(transaction, &staged, &stored.storage_key, now).await
+async fn require_staged(
+    transaction: &mut Transaction<'_, Any>,
+    upload: &StagedUpload,
+    now: TimestampMillis,
+) -> Result<(), UploadError> {
+    let size_i64 = i64::try_from(upload.size_bytes).map_err(|_| UploadError::SizeOverflow)?;
+    let valid: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM pending_uploads \
+         WHERE id = $1 AND workspace_id = $2 AND user_id = $3 AND temporary_path = $4 \
+           AND original_name = $5 AND media_type = $6 AND byte_size = $7 AND sha256 = $8 \
+           AND state = 'staged' AND expires_at > $9",
+    )
+    .bind(upload.id.to_string())
+    .bind(upload.workspace_id.to_string())
+    .bind(upload.owner_id.to_string())
+    .bind(upload.temporary_path.to_string_lossy().as_ref())
+    .bind(&upload.display_name)
+    .bind(&upload.detected_media_type)
+    .bind(size_i64)
+    .bind(&upload.sha256)
+    .bind(now.as_millis())
+    .fetch_one(&mut **transaction)
+    .await?;
+    if valid != 1 {
+        return Err(UploadError::InvalidState);
     }
+    Ok(())
+}
+
+/// The prepared blob's row still holds the prepared bytes: reconcile did not reclaim it, an admin did not delete it
+/// and [`UploadService::replace_blob`] did not change it (each of those changes the row's hash or removes the row).
+async fn require_claimed(
+    transaction: &mut Transaction<'_, Any>,
+    blob: &FinalizedBlob,
+) -> Result<(), UploadError> {
+    let size_i64 = i64::try_from(blob.size_bytes).map_err(|_| UploadError::SizeOverflow)?;
+    let claimed: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM attachment_blobs \
+         WHERE id = $1 AND workspace_id = $2 AND sha256 = $3 AND byte_size = $4",
+    )
+    .bind(blob.id.to_string())
+    .bind(blob.workspace_id.to_string())
+    .bind(&blob.sha256)
+    .bind(size_i64)
+    .fetch_one(&mut **transaction)
+    .await?;
+    if claimed != 1 {
+        return Err(UploadError::InvalidState);
+    }
+    Ok(())
 }
 
 /// Bytes of files a workspace stores: each blob once, however many references it has. A blob stops counting
@@ -401,25 +501,30 @@ async fn ensure_storage_quota(
     Ok(())
 }
 
-/// Adds the `attachment_blobs` row of an installed blob, or finds the row of the same bytes.
+/// Adds the `attachment_blobs` row of a blob that is about to be installed, or finds the row of the same bytes.
+/// Either way the row's quarantine then ends no sooner than a day from `now`, so reconcile on any server neither
+/// deletes the row nor releases its object while the bytes are written and the reference is committed.
 async fn record_blob(
     transaction: &mut Transaction<'_, Any>,
     upload: &StagedUpload,
-    storage_key: &str,
     now: TimestampMillis,
-) -> Result<FinalizedBlob, UploadError> {
+) -> Result<ClaimedBlob, UploadError> {
     let size_i64 = i64::try_from(upload.size_bytes).map_err(|_| UploadError::SizeOverflow)?;
     let quarantine_until = now.as_millis().saturating_add(QUARANTINE_MILLIS);
+    let new_id = Id::new_v7();
     sqlx::query(
         "INSERT INTO attachment_blobs (\
             id, workspace_id, sha256, byte_size, storage_key, created_at, quarantine_until\
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT DO NOTHING",
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7) \
+         ON CONFLICT (workspace_id, sha256, byte_size) DO UPDATE SET quarantine_until = CASE \
+            WHEN attachment_blobs.quarantine_until > excluded.quarantine_until \
+            THEN attachment_blobs.quarantine_until ELSE excluded.quarantine_until END",
     )
-    .bind(Id::new_v7().to_string())
+    .bind(new_id.to_string())
     .bind(upload.workspace_id.to_string())
     .bind(&upload.sha256)
     .bind(size_i64)
-    .bind(storage_key)
+    .bind(super::blob_storage_key(upload))
     .bind(now.as_millis())
     .bind(quarantine_until)
     .execute(&mut **transaction)
@@ -435,13 +540,17 @@ async fn record_blob(
     .fetch_one(&mut **transaction)
     .await?;
     let id_text: String = row.try_get("id")?;
-    Ok(FinalizedBlob {
-        id: id_text.parse().map_err(|_| UploadError::InvalidState)?,
-        workspace_id: upload.workspace_id,
-        sha256: upload.sha256.clone(),
-        size_bytes: upload.size_bytes,
-        storage_key: row.try_get("storage_key")?,
-        quarantine_until: row.try_get("quarantine_until")?,
+    let id: Id = id_text.parse().map_err(|_| UploadError::InvalidState)?;
+    Ok(ClaimedBlob {
+        blob: FinalizedBlob {
+            id,
+            workspace_id: upload.workspace_id,
+            sha256: upload.sha256.clone(),
+            size_bytes: upload.size_bytes,
+            storage_key: row.try_get("storage_key")?,
+            quarantine_until: row.try_get("quarantine_until")?,
+        },
+        created: id == new_id,
     })
 }
 
@@ -458,7 +567,6 @@ impl UploadService {
             store,
             mutations,
             limits,
-            operations: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
 
@@ -510,8 +618,15 @@ impl UploadService {
     where
         R: AsyncRead + Unpin,
     {
-        self.stage_with(workspace_id, owner_id, display_name, request_bytes_received, reader, true)
-            .await
+        self.stage_with(
+            workspace_id,
+            owner_id,
+            display_name,
+            request_bytes_received,
+            reader,
+            true,
+        )
+        .await
     }
 
     async fn stage_with<R>(
@@ -659,8 +774,7 @@ impl UploadService {
     pub async fn begin_finalization(&self) -> UploadFinalization<'_> {
         UploadFinalization {
             service: self,
-            _operation: self.operations.lock().await,
-            _mutation: self.mutations.begin().await,
+            _operation: self.mutations.begin_operation().await,
         }
     }
 
@@ -670,10 +784,11 @@ impl UploadService {
         attachment: NewAttachmentReference,
     ) -> Result<FinalizedBlob, UploadError> {
         let finalization = self.begin_finalization().await;
+        let prepared = finalization.prepare(upload).await?;
         let now = self.database.database_now().await?;
         let mut transaction = self.database.immediate_transaction().await?;
         let finalized = finalization
-            .finalize_in_transaction(&mut transaction, upload, attachment, now)
+            .finalize_in_transaction(&mut transaction, &prepared, attachment, now)
             .await?;
         transaction.commit().await?;
         Ok(finalized.blob)
@@ -681,8 +796,7 @@ impl UploadService {
 
     /// Abandons a staged upload that will not be finalized, removing its temporary bytes now.
     pub async fn discard(&self, upload: &StagedUpload) -> Result<(), UploadError> {
-        let _operation = self.operations.lock().await;
-        let _mutation = self.mutations.begin().await;
+        let _operation = self.mutations.begin_operation().await;
         self.store.delete_temporary(&upload.temporary_path).await?;
         sqlx::query(
             "UPDATE pending_uploads SET state = 'failed' WHERE id = $1 AND workspace_id = $2 \
@@ -703,8 +817,7 @@ impl UploadService {
     /// the same bytes). Returns `false` when there is no such live blob, or a profile picture, custom emoji or
     /// sticker uses it (those are deleted where they are managed).
     pub async fn delete_blob(&self, workspace_id: Id, blob_id: Id) -> Result<bool, UploadError> {
-        let _operation = self.operations.lock().await;
-        let _mutation = self.mutations.begin().await;
+        let _operation = self.mutations.begin_operation().await;
         let now = self.database.database_now().await?;
         let tombstone = format!("deleted:{blob_id}");
         let mut transaction = self.database.immediate_transaction().await?;
@@ -751,8 +864,7 @@ impl UploadService {
         bytes: &[u8],
         extension: &str,
     ) -> Result<bool, UploadError> {
-        let _operation = self.operations.lock().await;
-        let _mutation = self.mutations.begin().await;
+        let _operation = self.mutations.begin_operation().await;
         let Some(row) = sqlx::query(
             "SELECT workspace_id FROM attachment_blobs WHERE id = $1 AND storage_key = $2",
         )
@@ -782,67 +894,96 @@ impl UploadService {
         let workspace_id = workspace_id
             .parse()
             .map_err(|_| UploadError::InvalidState)?;
-        let (staged, stored) = self.install_bytes(workspace_id, bytes).await?;
+        // The new bytes get a blob row of their own while they are written, so reconcile on another server does
+        // not delete their object as untracked. The transaction below hands the object over to `blob_id`.
+        let (staged, claimed) = self
+            .install_claimed_bytes(workspace_id, bytes, Claim::UnmeteredBytes)
+            .await?;
+        let storage_key = super::blob_storage_key(&staged);
         let media_type = staged.detected_media_type.as_str();
+        let claimed_id = claimed.blob.id.to_string();
 
-        let updated = async {
-            let mut transaction = self.database.immediate_transaction().await?;
-            sqlx::query(
-                "UPDATE attachment_blobs SET sha256 = $1, byte_size = $2, storage_key = $3 WHERE id = $4",
-            )
-            .bind(&sha256)
-            .bind(size_i64)
-            .bind(&stored.storage_key)
+        // An early return rolls back: the claimed row then stays, and reconcile removes it after its quarantine.
+        let mut transaction = self.database.immediate_transaction().await?;
+        let claimed_references: i64 = sqlx::query_scalar(BLOB_REFERENCE_COUNT)
+            .bind(&claimed_id)
+            .bind(&claimed_id)
+            .fetch_one(&mut *transaction)
+            .await?;
+        if claimed_references > 0 {
+            // An upload of the same bytes took the claimed row meanwhile.
+            return Ok(false);
+        }
+        sqlx::query("DELETE FROM attachment_blobs WHERE id = $1")
+            .bind(&claimed_id)
+            .execute(&mut *transaction)
+            .await?;
+        let updated = sqlx::query(
+            "UPDATE attachment_blobs SET sha256 = $1, byte_size = $2, storage_key = $3 \
+             WHERE id = $4 AND storage_key = $5",
+        )
+        .bind(&sha256)
+        .bind(size_i64)
+        .bind(&storage_key)
+        .bind(blob_id)
+        .bind(expected_key)
+        .execute(&mut *transaction)
+        .await?
+        .rows_affected();
+        if updated != 1 {
+            return Ok(false);
+        }
+        for (table, name, media, size) in [
+            (
+                "attachment_references",
+                "display_name",
+                "media_type",
+                "byte_size",
+            ),
+            ("page_files", "file_name", "mime_type", "size_bytes"),
+            ("chat_message_files", "file_name", "mime_type", "size_bytes"),
+        ] {
+            let references = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "SELECT id, {name} AS name FROM {table} WHERE blob_id = $1"
+            )))
+            .bind(blob_id)
+            .fetch_all(&mut *transaction)
+            .await?;
+            for reference in references {
+                let old_name: String = reference.try_get("name")?;
+                sqlx::query(sqlx::AssertSqlSafe(format!(
+                    "UPDATE {table} SET {name} = $1, {media} = $2, {size} = $3 WHERE id = $4"
+                )))
+                .bind(with_extension(&old_name, extension))
+                .bind(media_type)
+                .bind(size_i64)
+                .bind(reference.try_get::<String, _>("id")?)
+                .execute(&mut *transaction)
+                .await?;
+            }
+        }
+        for table in ["user_avatars", "custom_emoji", "custom_stickers"] {
+            sqlx::query(sqlx::AssertSqlSafe(format!(
+                "UPDATE {table} SET mime_type = $1 WHERE blob_id = $2"
+            )))
+            .bind(media_type)
             .bind(blob_id)
             .execute(&mut *transaction)
             .await?;
-            for (table, name, media, size) in [
-                ("attachment_references", "display_name", "media_type", "byte_size"),
-                ("page_files", "file_name", "mime_type", "size_bytes"),
-                ("chat_message_files", "file_name", "mime_type", "size_bytes"),
-            ] {
-                let references =
-                    sqlx::query(sqlx::AssertSqlSafe(format!("SELECT id, {name} AS name FROM {table} WHERE blob_id = $1")))
-                        .bind(blob_id)
-                        .fetch_all(&mut *transaction)
-                        .await?;
-                for reference in references {
-                    let old_name: String = reference.try_get("name")?;
-                    sqlx::query(sqlx::AssertSqlSafe(format!(
-                        "UPDATE {table} SET {name} = $1, {media} = $2, {size} = $3 WHERE id = $4"
-                    )))
-                    .bind(with_extension(&old_name, extension))
-                    .bind(media_type)
-                    .bind(size_i64)
-                    .bind(reference.try_get::<String, _>("id")?)
-                    .execute(&mut *transaction)
-                    .await?;
-                }
-            }
-            for table in ["user_avatars", "custom_emoji", "custom_stickers"] {
-                sqlx::query(sqlx::AssertSqlSafe(format!("UPDATE {table} SET mime_type = $1 WHERE blob_id = $2")))
-                    .bind(media_type)
-                    .bind(blob_id)
-                    .execute(&mut *transaction)
-                    .await?;
-            }
-            transaction.commit().await
         }
-        .await;
-        if let Err(error) = updated {
-            let _ = self.store.delete(&stored.storage_key).await;
-            return Err(error.into());
-        }
+        transaction.commit().await?;
         self.store.release(expected_key).await?;
         Ok(true)
     }
 
-    /// Writes `bytes` to the store as a blob of `workspace_id`, without a database row.
-    async fn install_bytes(
+    /// Records `bytes` as a blob of `scope_id` and writes them to the store: the row first, in its own short
+    /// transaction ([`Self::claim_blob`]), then the store with no database lock held.
+    async fn install_claimed_bytes(
         &self,
-        workspace_id: Id,
+        scope_id: Id,
         bytes: &[u8],
-    ) -> Result<(StagedUpload, StoredObject), UploadError> {
+        claim: Claim,
+    ) -> Result<(StagedUpload, ClaimedBlob), UploadError> {
         let size_bytes = u64::try_from(bytes.len()).map_err(|_| UploadError::SizeOverflow)?;
         let temporary_path = self.store.create_temporary()?;
         let mut temporary = TemporaryFile::new(self.store.clone(), temporary_path.clone());
@@ -854,7 +995,7 @@ impl UploadService {
             })?;
         let staged = StagedUpload {
             id: Id::new_v7(),
-            workspace_id,
+            workspace_id: scope_id,
             owner_id: Id::new_v7(),
             sha256: format!("{:x}", Sha256::digest(bytes)),
             size_bytes,
@@ -862,14 +1003,77 @@ impl UploadService {
             display_name: String::new(),
             temporary_path,
         };
-        let stored = self.store.install(&staged).await?;
+        let claimed = self.claim_blob(&staged, claim).await?;
+        if let Err(error) = self.store.install(&staged).await {
+            self.unclaim(&claimed).await;
+            return Err(error.into());
+        }
         temporary.disarm();
-        Ok((staged, stored))
+        Ok((staged, claimed))
+    }
+
+    /// Removes the row of a claim that added it, unless something references the blob, so bytes that never got
+    /// a reference stop counting toward the workspace's storage at once. Safe against an upload of the same bytes
+    /// that found the row meanwhile, on any server: its write transaction either committed a reference before
+    /// this one, and the row stays, or finds the row gone ([`require_claimed`]) and fails without a reference. Best
+    /// effort: on an error the row stays, and reconcile removes it after its quarantine.
+    async fn unclaim(&self, claimed: &ClaimedBlob) {
+        if !claimed.created {
+            return;
+        }
+        let id = claimed.blob.id.to_string();
+        let removed = async {
+            let mut transaction = self.database.immediate_transaction().await?;
+            let references: i64 = sqlx::query_scalar(BLOB_REFERENCE_COUNT)
+                .bind(&id)
+                .bind(&id)
+                .fetch_one(&mut *transaction)
+                .await?;
+            if references == 0 {
+                sqlx::query("DELETE FROM attachment_blobs WHERE id = $1")
+                    .bind(&id)
+                    .execute(&mut *transaction)
+                    .await?;
+            }
+            transaction.commit().await
+        }
+        .await;
+        if let Err(error) = removed {
+            tracing::debug!(%error, blob_id = %id, "an unused blob row stays until reconcile removes it");
+        }
+    }
+
+    /// Commits the blob row of `upload` before its bytes go to the store, in a short write transaction that calls
+    /// no store. The upload's object is tracked from then on, and the row's quarantine is fresh, so reconcile on
+    /// any server leaves both alone while the bytes are written with no database lock held. A failure after this
+    /// leaves a row without references, which reconcile removes after the quarantine.
+    async fn claim_blob(
+        &self,
+        upload: &StagedUpload,
+        claim: Claim,
+    ) -> Result<ClaimedBlob, UploadError> {
+        let size_i64 = i64::try_from(upload.size_bytes).map_err(|_| UploadError::SizeOverflow)?;
+        let now = self.database.database_now().await?;
+        let mut transaction = self.database.immediate_transaction().await?;
+        if matches!(claim, Claim::PendingUpload) {
+            require_staged(&mut transaction, upload, now).await?;
+        }
+        if !matches!(claim, Claim::UnmeteredBytes) {
+            ensure_storage_quota(
+                &mut transaction,
+                upload.workspace_id,
+                &upload.sha256,
+                size_i64,
+            )
+            .await?;
+        }
+        let claimed = record_blob(&mut transaction, upload, now).await?;
+        transaction.commit().await?;
+        Ok(claimed)
     }
 
     pub async fn reconcile(&self, now_millis: i64) -> Result<ReconcileResult, UploadError> {
-        let _operation = self.operations.lock().await;
-        let _mutation = self.mutations.begin().await;
+        let _operation = self.mutations.begin_operation().await;
         let mut result = ReconcileResult::default();
 
         // Fail closed: without every reference table, no blob can be proven unreferenced.
@@ -921,43 +1125,59 @@ impl UploadService {
             let storage_key: String = row.try_get("storage_key")?;
             let deleted = row.try_get::<Option<i64>, _>("deleted_at")?.is_some();
             blob_inventory.remove(&storage_key);
-            let mut transaction = self.database.immediate_transaction().await?;
+            // The checks before the write transaction only save work and keep the store out of it: the
+            // transaction decides again.
             let references: i64 = sqlx::query_scalar(BLOB_REFERENCE_COUNT)
                 .bind(&id)
                 .bind(&id)
-                .fetch_one(&mut *transaction)
+                .fetch_one(self.database.pool())
                 .await?;
-            if references == 0 && deleted {
-                // Its object went when the blob was deleted (reconcile removed it as untracked).
-                result.deleted_blobs += sqlx::query(
-                    "DELETE FROM attachment_blobs WHERE id = $1 AND quarantine_until <= $2",
-                )
-                .bind(&id)
-                .bind(now_millis)
-                .execute(&mut *transaction)
-                .await?
-                .rows_affected();
-            } else if references == 0 {
+            if references > 0 {
+                continue;
+            }
+            // A deleted blob has no object: it went when the blob was deleted (reconcile removed it as untracked).
+            if !deleted {
                 let recently_published = self
                     .store
                     .blob_modified_at(&storage_key)
                     .await?
                     .is_some_and(|modified_at| modified_at > quarantine_cutoff);
                 if recently_published {
-                    transaction.commit().await?;
                     continue;
                 }
-                self.store.release(&storage_key).await?;
-                result.deleted_blobs += sqlx::query(
-                    "DELETE FROM attachment_blobs WHERE id = $1 AND quarantine_until <= $2",
+            }
+            let mut transaction = self.database.immediate_transaction().await?;
+            let references: i64 = sqlx::query_scalar(BLOB_REFERENCE_COUNT)
+                .bind(&id)
+                .bind(&id)
+                .fetch_one(&mut *transaction)
+                .await?;
+            let removed = if references == 0 {
+                // An upload that claimed the row meanwhile moved its quarantine, so the row stays.
+                sqlx::query(
+                    "DELETE FROM attachment_blobs \
+                     WHERE id = $1 AND quarantine_until <= $2 AND storage_key = $3",
                 )
                 .bind(&id)
                 .bind(now_millis)
+                .bind(&storage_key)
                 .execute(&mut *transaction)
                 .await?
-                .rows_affected();
-            }
+                .rows_affected()
+            } else {
+                0
+            };
             transaction.commit().await?;
+            if removed == 0 {
+                continue;
+            }
+            result.deleted_blobs += removed;
+            if !deleted {
+                // Only after the row is gone, and outside the transaction. An upload of the same bytes on another
+                // server may already have a new row for this key: in S3 a release only refreshes the object, and
+                // without S3 there is one server, where the operation lock keeps uploads out of a reconcile.
+                self.store.release(&storage_key).await?;
+            }
         }
 
         for object in blob_inventory.into_values() {
@@ -966,22 +1186,32 @@ impl UploadService {
             if object.modified_at_millis > untracked_cutoff {
                 continue;
             }
+            const TRACKED: &str = "SELECT COUNT(*) FROM attachment_blobs WHERE storage_key = $1";
+            let tracked: i64 = sqlx::query_scalar(TRACKED)
+                .bind(&object.storage_key)
+                .fetch_one(self.database.pool())
+                .await?;
+            if tracked > 0 {
+                continue;
+            }
+            let recently_published = self
+                .store
+                .blob_modified_at(&object.storage_key)
+                .await?
+                .is_some_and(|modified_at| modified_at > untracked_cutoff);
+            if recently_published {
+                continue;
+            }
             let mut transaction = self.database.immediate_transaction().await?;
-            let tracked: i64 =
-                sqlx::query_scalar("SELECT COUNT(*) FROM attachment_blobs WHERE storage_key = $1")
-                    .bind(&object.storage_key)
-                    .fetch_one(&mut *transaction)
-                    .await?;
+            let tracked: i64 = sqlx::query_scalar(TRACKED)
+                .bind(&object.storage_key)
+                .fetch_one(&mut *transaction)
+                .await?;
             if tracked == 0 {
-                let recently_published = self
-                    .store
-                    .blob_modified_at(&object.storage_key)
-                    .await?
-                    .is_some_and(|modified_at| modified_at > untracked_cutoff);
-                if recently_published {
-                    transaction.commit().await?;
-                    continue;
-                }
+                // The one store call inside a write transaction. An upload commits its blob row (a serialized
+                // write) before it writes or refreshes the object. With the write lock held from the check above
+                // to the end of the delete, no upload on any server can adopt this object in between; a delete
+                // after the lock is released could remove an object that an upload just adopted.
                 self.store.delete(&object.storage_key).await?;
                 result.deleted_untracked_files += 1;
             }

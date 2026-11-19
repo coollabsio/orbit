@@ -50,8 +50,12 @@ const POSTGRES_LOCALE_CHECK: &str = "SELECT 'B' < 'a' AND lower('Ü') = 'ü' AND
 const POSTGRES_DATABASE_OPTIONS: &str = "TEMPLATE template0 ENCODING 'UTF8' \
     LOCALE_PROVIDER builtin BUILTIN_LOCALE 'C.UTF-8' LOCALE 'C.UTF-8'";
 /// Transaction-scoped advisory lock taken by every write transaction on Postgres, so writers run
-/// one at a time as under SQLite's `BEGIN IMMEDIATE`.
-const POSTGRES_WRITE_LOCK: &str = "SELECT 1 FROM pg_advisory_xact_lock(8030594652542121842)";
+/// one at a time as under SQLite's `BEGIN IMMEDIATE`. A writer waits for it at most as long as the
+/// pool waits for a connection, then fails with a transient lock timeout (55P03): waiting writers
+/// hold pool connections, so an unlimited wait behind one slow writer starves every reader.
+/// `SET LOCAL` ends with the transaction.
+pub const POSTGRES_WRITE_LOCK: &str = "SET LOCAL lock_timeout = '30s'; \
+    SELECT 1 FROM pg_advisory_xact_lock(8030594652542121842)";
 
 /// Whether tests run on Postgres (`ORBIT_TEST_POSTGRES_URL` is set), for tests that only make
 /// sense on SQLite (files, PRAGMAs, old SQLite migrations).
@@ -60,12 +64,15 @@ pub fn testing_postgres() -> bool {
     test_postgres_url().is_some()
 }
 
-/// Whether `error` only means that another writer held a lock for too long: SQLite's
-/// `SQLITE_BUSY` / `SQLITE_LOCKED` after the busy timeout, or a Postgres lock timeout, deadlock or
-/// serialization failure. The same statement can succeed later, so a background loop retries it
-/// on its next round instead of stopping the server.
+/// Whether `error` only means that the database is busy: SQLite's `SQLITE_BUSY` /
+/// `SQLITE_LOCKED` after the busy timeout, a Postgres lock timeout, deadlock or serialization
+/// failure, or no free pool connection within the acquire timeout. The same statement can succeed
+/// later, so a background loop retries it on its next round instead of stopping the server.
 #[must_use]
 pub fn is_transient_lock_error(error: &sqlx::Error) -> bool {
+    if matches!(error, sqlx::Error::PoolTimedOut) {
+        return true;
+    }
     let Some(error) = error.as_database_error() else {
         return false;
     };
@@ -143,9 +150,16 @@ impl DatabaseConfig {
     /// The database of `[data]`: Postgres when `database_url` is set, else the SQLite file.
     #[must_use]
     pub fn for_data(data: &crate::DataConfig) -> Self {
+        let default = Self::new(&data.database);
+        let backend_default = if data.database_url.is_some() {
+            20
+        } else {
+            default.max_connections
+        };
         Self {
             postgres_url: data.database_url.clone(),
-            ..Self::new(&data.database)
+            max_connections: data.max_connections.unwrap_or(backend_default),
+            ..default
         }
     }
 }
@@ -587,7 +601,7 @@ impl Database {
             Backend::Sqlite => self.inner.pool.begin_with("BEGIN IMMEDIATE").await,
             Backend::Postgres => {
                 let mut transaction = self.inner.pool.begin().await?;
-                sqlx::query(POSTGRES_WRITE_LOCK)
+                sqlx::raw_sql(POSTGRES_WRITE_LOCK)
                     .execute(&mut *transaction)
                     .await?;
                 Ok(transaction)

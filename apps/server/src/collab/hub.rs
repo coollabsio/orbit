@@ -363,8 +363,7 @@ impl CollabHub {
             Backend::Sqlite => self.inner.pool.begin_with("BEGIN IMMEDIATE").await,
             Backend::Postgres => {
                 let mut tx = self.inner.pool.begin().await?;
-                // Same advisory lock as `orbit_platform::Database::immediate_transaction`.
-                sqlx::query("SELECT 1 FROM pg_advisory_xact_lock(8030594652542121842)")
+                sqlx::raw_sql(orbit_platform::POSTGRES_WRITE_LOCK)
                     .execute(&mut *tx)
                     .await?;
                 Ok(tx)

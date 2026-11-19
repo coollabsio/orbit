@@ -251,11 +251,24 @@ impl Worker {
         claim: Claim,
         shutdown: CancellationToken,
     ) -> Result<(), JobStoreError> {
-        let job = self
-            .store
-            .get(claim.job_id)
-            .await?
-            .ok_or(JobStoreError::NotFound(claim.job_id))?;
+        let job = match self.store.get(claim.job_id).await {
+            Ok(Some(job)) => job,
+            Ok(None) => return Err(JobStoreError::NotFound(claim.job_id)),
+            Err(error @ JobStoreError::Database(_)) => return Err(error),
+            // A row the worker cannot read (payload, state, priority): the job fails, the worker goes on.
+            Err(error) => {
+                tracing::error!(job_id = %claim.job_id, %error, "job worker: a job row is invalid; failing it");
+                let now = self.store.database_now().await?;
+                self.store
+                    .fail(
+                        &claim,
+                        JobError::Permanent(format!("invalid job data: {error}")),
+                        now,
+                    )
+                    .await?;
+                return Ok(());
+            }
+        };
         let kind_name = job.kind.name().to_owned();
         let priority = job.priority;
         if priority != JobPriority::Critical {

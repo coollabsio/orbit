@@ -1452,9 +1452,10 @@ impl IdentityRepository {
         now: TimestampMillis,
     ) -> Result<(), IdentityError> {
         let finalization = uploads.begin_finalization().await;
+        let prepared = finalization.prepare_unmetered_bytes(user_id, bytes).await?;
         let mut transaction = self.database.immediate_transaction().await?;
         let blob = finalization
-            .finalize_unmetered_bytes_in_transaction(&mut transaction, user_id, bytes, now)
+            .finalize_bytes_in_transaction(&mut transaction, &prepared)
             .await?;
         sqlx::query(
             "INSERT INTO user_avatars (user_id, mime_type, blob_id, updated_at) VALUES ($1, $2, $3, $4) \

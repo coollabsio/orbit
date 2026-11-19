@@ -5,6 +5,7 @@
 use orbit_domain::{Actor, Permission};
 use orbit_platform::{Flag, Id, Row, TimestampMillis};
 use serde::Serialize;
+use sqlx::AnyConnection;
 use sqlx::any::AnyRow;
 use utoipa::ToSchema;
 
@@ -66,6 +67,29 @@ fn clean_name(name: &str) -> Result<String, ChatError> {
     }
 }
 
+/// The workspace has room for one more emoji and none is named `name`.
+async fn require_emoji_slot(
+    conn: &mut AnyConnection,
+    workspace_id: Id,
+    name: &str,
+) -> Result<(), ChatError> {
+    let (count, Flag(taken)): (i64, Flag) = sqlx::query_as(
+        "SELECT COUNT(*), COALESCE(MAX(CASE WHEN name = $1 THEN 1 ELSE 0 END), 0) \
+         FROM custom_emoji WHERE workspace_id = $2",
+    )
+    .bind(name)
+    .bind(workspace_id.to_string())
+    .fetch_one(&mut *conn)
+    .await?;
+    if taken {
+        return Err(ChatError::EmojiNameTaken);
+    }
+    if count >= MAX_EMOJI {
+        return Err(ChatError::EmojiLimit);
+    }
+    Ok(())
+}
+
 fn require_manager(actor: Actor) -> Result<(), ChatError> {
     if actor.can(Permission::ChatManage) {
         Ok(())
@@ -114,29 +138,24 @@ impl ChatRepository {
         bytes: &[u8],
     ) -> Result<Written<CustomEmojiRecord>, ChatError> {
         let finalization = self.uploads.begin_finalization().await;
-        let now = self.database.database_now().await?;
-        let mut tx = self.database.immediate_transaction().await?;
-        require_manager(load_actor(&mut tx, workspace_id, actor_id).await?)?;
+        // The checks run before the bytes are stored, so a refused request stores nothing, and again in the
+        // transaction, which decides.
+        self.authorize_emoji(workspace_id, actor_id).await?;
         let name = clean_name(name)?;
         if bytes.is_empty() || bytes.len() > EMOJI_MAX_BYTES {
             return Err(ChatError::Invalid { field: "file" });
         }
-        let (count, Flag(taken)): (i64, Flag) = sqlx::query_as(
-            "SELECT COUNT(*), COALESCE(MAX(CASE WHEN name = $1 THEN 1 ELSE 0 END), 0) \
-             FROM custom_emoji WHERE workspace_id = $2",
-        )
-        .bind(&name)
-        .bind(workspace_id.to_string())
-        .fetch_one(&mut *tx)
-        .await?;
-        if taken {
-            return Err(ChatError::EmojiNameTaken);
+        {
+            let mut conn = self.database.pool().acquire().await?;
+            require_emoji_slot(&mut conn, workspace_id, &name).await?;
         }
-        if count >= MAX_EMOJI {
-            return Err(ChatError::EmojiLimit);
-        }
+        let prepared = finalization.prepare_bytes(workspace_id, bytes).await?;
+        let now = self.database.database_now().await?;
+        let mut tx = self.database.immediate_transaction().await?;
+        require_manager(load_actor(&mut tx, workspace_id, actor_id).await?)?;
+        require_emoji_slot(&mut tx, workspace_id, &name).await?;
         let blob = finalization
-            .finalize_bytes_in_transaction(&mut tx, workspace_id, bytes, now)
+            .finalize_bytes_in_transaction(&mut tx, &prepared)
             .await?;
         let id = Id::new_v7();
         sqlx::query(
