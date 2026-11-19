@@ -73,11 +73,11 @@ export function applyMention(text: string, query: MentionQuery, suggestion: Ment
   return { text: `${text.slice(0, query.start)}${insertion}${text.slice(query.end)}`, cursor: query.start + insertion.length }
 }
 
-/** The text after the `@` button: an `@` at the cursor, after a space unless the cursor starts a word. */
-export function insertTrigger(text: string, cursor: number): { text: string; cursor: number } {
+/** The text after the `@` or `#` button: the trigger at the cursor, after a space unless the cursor starts a word. */
+export function insertTrigger(text: string, cursor: number, trigger: '@' | '#'): { text: string; cursor: number } {
   const at = Math.min(cursor, text.length)
   const previous = text[at - 1]
-  const insertion = previous === undefined || /\s/.test(previous) ? '@' : ' @'
+  const insertion = previous === undefined || /\s/.test(previous) ? trigger : ` ${trigger}`
   return { text: `${text.slice(0, at)}${insertion}${text.slice(at)}`, cursor: at + insertion.length }
 }
 

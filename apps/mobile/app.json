@@ -103,6 +103,14 @@
       "@react-native-community/datetimepicker",
       "expo-web-browser",
       [
+        "expo-image-picker",
+        {
+          "photosPermission": "Orbit uses your photos so you can attach them to chat messages, tasks and docs, and set your avatar or workspace emoji.",
+          "cameraPermission": "Orbit uses the camera so you can take a photo or video and send it in a chat message.",
+          "microphonePermission": "Orbit uses the microphone to record sound when you take a video for a chat message."
+        }
+      ],
+      [
         "expo-notifications",
         {
           "mode": "development",

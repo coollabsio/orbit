@@ -1,14 +1,14 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useEffectEvent, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router'
 import { toast } from 'sonner'
 import { ApiProblem } from '@orbit/api/problem'
-import { useProviderExchange } from '@/features/auth/api'
+import { useProviderExchange, useProviderName } from '@/features/auth/api'
 import { AuthCard } from '@/features/auth/components/AuthForm'
 import { AuthMessage } from '@/features/auth/components/AuthMessage'
 import { LinkPasswordStep } from '@/features/auth/components/LinkPasswordStep'
 import { TwoFactorStep } from '@/features/auth/components/TwoFactorStep'
 import { loginDestination } from '@/features/auth/returnTo'
-import { clearProviderFlow, parseProviderCallback, PROVIDER_NAMES, storedProviderFlow } from '@/features/auth/providerSignIn'
+import { clearProviderFlow, parseProviderCallback, type ProviderFlow, storedProviderFlow } from '@/features/auth/providerSignIn'
 
 /** Where a `connect` or `confirm` goes back to: the account page that started it. */
 function settingsDestination(returnTo: string | null) {
@@ -16,7 +16,7 @@ function settingsDestination(returnTo: string | null) {
 }
 
 /**
- * `/login/callback#handoff=…`: the server's redirect back from Google or GitHub. Trades the handoff and this tab's
+ * `/login/callback#handoff=…`: the server's redirect back from the sign-in provider. Trades the handoff and this tab's
  * verifier for a session (or a code step), or finishes a `connect` / `confirm` for the signed-in account.
  */
 export function ProviderCallbackPage() {
@@ -28,6 +28,11 @@ export function ProviderCallbackPage() {
   // The password step of a first link can lead to a code step of its own.
   const [linkTwoFactorToken, setLinkTwoFactorToken] = useState<string | null>(null)
   const started = useRef(false)
+  const providerName = useProviderName()
+  // An Effect Event: the exchange can finish after the sign-in options (and the OpenID Connect label) have loaded.
+  const announceDone = useEffectEvent(({ intent, provider }: ProviderFlow) => {
+    toast(intent === 'connect' ? `${providerName(provider)} is connected` : `Confirmed with ${providerName(provider)}. Try the change again.`)
+  })
   const { handoff, returnTo, flow } = callback
 
   useEffect(() => {
@@ -41,7 +46,7 @@ export function ProviderCallbackPage() {
       onSuccess: (result) => {
         if (result.kind === 'signed_in') void navigate(loginDestination(returnTo), { replace: true })
         if (result.kind === 'done') {
-          toast(flow.intent === 'connect' ? `${PROVIDER_NAMES[flow.provider]} is connected` : `Confirmed with ${PROVIDER_NAMES[flow.provider]}. Try the change again.`)
+          announceDone(flow)
           void navigate(settingsDestination(returnTo), { replace: true })
         }
       },

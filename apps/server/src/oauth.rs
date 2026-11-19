@@ -82,53 +82,59 @@ impl OAuthState {
         )
     }
 
-    /// Opaque tokens are audience-bound in SQLite, not taken from an external issuer.
-    pub async fn authenticate(&self, token: &str) -> Result<Option<ApiTokenPrincipal>, OAuthError> {
+    /// Opaque tokens are audience-bound in SQLite, not taken from an external issuer. One token covers
+    /// every workspace of its grant group that is still live: a grant that was revoked (the user left
+    /// that workspace) or has no project left drops out, and the others stay. `None` when none is left.
+    pub async fn authenticate(
+        &self,
+        token: &str,
+    ) -> Result<Option<Vec<ApiTokenPrincipal>>, OAuthError> {
         let now = TimestampMillis::now().as_millis();
-        let row = sqlx::query("SELECT g.id, g.user_id, g.workspace_id, g.project_ids, g.all_projects, g.mcp_scopes FROM oauth_tokens t JOIN oauth_grants g ON g.id = t.grant_id JOIN users u ON u.id = g.user_id JOIN memberships m ON m.user_id = g.user_id AND m.workspace_id = g.workspace_id AND m.role <> 'guest' JOIN workspaces w ON w.id = g.workspace_id WHERE t.access_hash = $1 AND t.access_expires_at > $2 AND g.revoked_at IS NULL AND g.resource = $3 AND g.scope = 'tasks:read' AND u.suspended_at IS NULL AND w.deleted_at IS NULL")
-            .bind(hash(token)).bind(now).bind(&self.resource).fetch_optional(self.database.pool()).await?;
-        let Some(row) = row else {
-            return Ok(None);
-        };
-        let workspace_id: Id = row
-            .get::<String, _>("workspace_id")
-            .parse()
-            .map_err(|error| OAuthError::server().cause(error))?;
-        // An all-projects grant covers the live projects of today and stays valid without any.
-        if row.get::<bool, _>("all_projects") {
-            let viewer = row
-                .get::<String, _>("user_id")
+        let rows = sqlx::query("SELECT g.id, g.user_id, g.workspace_id, g.project_ids, g.all_projects, g.mcp_scopes FROM oauth_tokens t JOIN oauth_grants f ON f.id = t.grant_id JOIN oauth_grants g ON g.group_id = f.group_id JOIN users u ON u.id = g.user_id JOIN memberships m ON m.user_id = g.user_id AND m.workspace_id = g.workspace_id AND m.role <> 'guest' JOIN workspaces w ON w.id = g.workspace_id WHERE t.access_hash = $1 AND t.access_expires_at > $2 AND g.revoked_at IS NULL AND g.resource = $3 AND g.scope = 'tasks:read' AND u.suspended_at IS NULL AND w.deleted_at IS NULL ORDER BY g.created_at, g.id")
+            .bind(hash(token)).bind(now).bind(&self.resource).fetch_all(self.database.pool()).await?;
+        let mut principals = Vec::new();
+        for row in rows {
+            let workspace_id: Id = row
+                .get::<String, _>("workspace_id")
                 .parse()
                 .map_err(|error| OAuthError::server().cause(error))?;
-            let approved = live_projects(self.database.pool(), workspace_id, Some(viewer))
-                .await
+            // An all-projects grant covers the live projects of today and stays valid without any.
+            if row.get::<bool, _>("all_projects") {
+                let viewer = row
+                    .get::<String, _>("user_id")
+                    .parse()
+                    .map_err(|error| OAuthError::server().cause(error))?;
+                let approved = live_projects(self.database.pool(), workspace_id, Some(viewer))
+                    .await
+                    .map_err(|error| OAuthError::server().cause(error))?;
+                principals.push(principal(&row, workspace_id, approved)?);
+                continue;
+            }
+            let project_ids: Vec<String> = serde_json::from_str(row.get("project_ids"))
                 .map_err(|error| OAuthError::server().cause(error))?;
-            return principal(&row, workspace_id, approved).map(Some);
-        }
-        let project_ids: Vec<String> = serde_json::from_str(row.get("project_ids"))
-            .map_err(|error| OAuthError::server().cause(error))?;
-        let mut approved = Vec::new();
-        for id in project_ids {
-            let Flag(active) = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
-                "SELECT EXISTS(SELECT 1 FROM projects WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL AND {})",
-                user_sees_project_sql("projects.id", "$3")
-            )))
-            .bind(&id)
-            .bind(row.get::<String, _>("workspace_id"))
-            .bind(row.get::<String, _>("user_id"))
-            .fetch_one(self.database.pool())
-            .await?;
-            if active {
-                approved.push(
-                    id.parse()
-                        .map_err(|error| OAuthError::server().cause(error))?,
-                );
+            let mut approved = Vec::new();
+            for id in project_ids {
+                let Flag(active) = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+                    "SELECT EXISTS(SELECT 1 FROM projects WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL AND {})",
+                    user_sees_project_sql("projects.id", "$3")
+                )))
+                .bind(&id)
+                .bind(row.get::<String, _>("workspace_id"))
+                .bind(row.get::<String, _>("user_id"))
+                .fetch_one(self.database.pool())
+                .await?;
+                if active {
+                    approved.push(
+                        id.parse()
+                            .map_err(|error| OAuthError::server().cause(error))?,
+                    );
+                }
+            }
+            if !approved.is_empty() {
+                principals.push(principal(&row, workspace_id, approved)?);
             }
         }
-        if approved.is_empty() {
-            return Ok(None);
-        }
-        principal(&row, workspace_id, approved).map(Some)
+        Ok((!principals.is_empty()).then_some(principals))
     }
 }
 
@@ -413,7 +419,7 @@ async fn prune(tx: &mut Transaction<'_, Any>, now: i64, idle: i64) -> Result<u64
          AND NOT EXISTS (SELECT 1 FROM oauth_requests r WHERE r.client_id = oauth_clients.id AND r.expires_at > $2) \
          AND NOT EXISTS (SELECT 1 FROM oauth_grants g WHERE g.client_id = oauth_clients.id \
          AND (g.created_at > $1 OR g.revoked_at > $1 OR (g.revoked_at IS NULL \
-         AND EXISTS (SELECT 1 FROM oauth_tokens t WHERE t.grant_id = g.id AND t.refresh_expires_at > $1))))",
+         AND EXISTS (SELECT 1 FROM oauth_tokens t WHERE t.grant_id = g.group_id AND t.refresh_expires_at > $1))))",
     )
     .bind(now - idle)
     .bind(now)
@@ -603,16 +609,25 @@ async fn consent(
 struct Approval {
     csrf_token: String,
     approved: bool,
-    workspace_id: Option<Id>,
+    /// The workspaces the connection may use, each with its own projects. One workspace at most once.
+    #[serde(default)]
+    workspaces: Vec<WorkspaceAccess>,
+    #[serde(default)]
+    scopes: Vec<String>,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WorkspaceAccess {
+    workspace_id: Id,
     #[serde(default)]
     project_ids: Vec<Id>,
     /// Approve every live project of the workspace, including projects created later, instead
     /// of `project_ids`.
     #[serde(default)]
     all_projects: bool,
-    #[serde(default)]
-    scopes: Vec<String>,
 }
+/// At most this many workspaces in one connection.
+const MAX_WORKSPACES: usize = 20;
 async fn approve(
     State(state): State<OAuthState>,
     Path(id): Path<String>,
@@ -628,30 +643,37 @@ async fn approve(
     let mut callback =
         Url::parse(row.get("redirect_uri")).map_err(|error| OAuthError::server().cause(error))?;
     if input.approved {
-        let workspace = input
-            .workspace_id
-            .ok_or_else(|| OAuthError::invalid("invalid_request"))?;
-        let project_ids = if input.all_projects {
-            let Flag(member) = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM workspaces w JOIN memberships m ON m.workspace_id = w.id AND m.role <> 'guest' WHERE w.id = $1 AND m.user_id = $2 AND w.deleted_at IS NULL)")
-                .bind(workspace.to_string()).bind(user.to_string()).fetch_one(&mut *tx).await?;
-            if !member {
-                return Err(OAuthError::invalid("invalid_request"));
-            }
-            Vec::new()
-        } else {
-            input.project_ids
-        };
-        if !input.all_projects && (project_ids.is_empty() || project_ids.len() > 100) {
+        if input.workspaces.is_empty() || input.workspaces.len() > MAX_WORKSPACES {
             return Err(OAuthError::invalid("invalid_request"));
         }
-        for project in &project_ids {
-            let Flag(allowed) = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
-                "SELECT EXISTS(SELECT 1 FROM projects p JOIN workspaces w ON w.id = p.workspace_id JOIN memberships m ON m.workspace_id = w.id AND m.role <> 'guest' WHERE p.id = $1 AND p.workspace_id = $2 AND m.user_id = $3 AND p.deleted_at IS NULL AND w.deleted_at IS NULL AND {})",
-                user_sees_project_sql("p.id", "m.user_id")
-            )))
-                .bind(project.to_string()).bind(workspace.to_string()).bind(user.to_string()).fetch_one(&mut *tx).await?;
-            if !allowed {
+        for (index, access) in input.workspaces.iter().enumerate() {
+            let workspace = access.workspace_id;
+            if input.workspaces[..index]
+                .iter()
+                .any(|other| other.workspace_id == workspace)
+            {
                 return Err(OAuthError::invalid("invalid_request"));
+            }
+            let Flag(member) = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM workspaces w JOIN memberships m ON m.workspace_id = w.id AND m.role <> 'guest' WHERE w.id = $1 AND m.user_id = $2 AND w.deleted_at IS NULL)")
+                .bind(workspace.to_string()).bind(user.to_string()).fetch_one(&mut *tx).await?;
+            if !member
+                || (!access.all_projects
+                    && (access.project_ids.is_empty() || access.project_ids.len() > 100))
+            {
+                return Err(OAuthError::invalid("invalid_request"));
+            }
+            if access.all_projects {
+                continue;
+            }
+            for project in &access.project_ids {
+                let Flag(allowed) = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+                    "SELECT EXISTS(SELECT 1 FROM projects p JOIN workspaces w ON w.id = p.workspace_id JOIN memberships m ON m.workspace_id = w.id AND m.role <> 'guest' WHERE p.id = $1 AND p.workspace_id = $2 AND m.user_id = $3 AND p.deleted_at IS NULL AND w.deleted_at IS NULL AND {})",
+                    user_sees_project_sql("p.id", "m.user_id")
+                )))
+                    .bind(project.to_string()).bind(workspace.to_string()).bind(user.to_string()).fetch_one(&mut *tx).await?;
+                if !allowed {
+                    return Err(OAuthError::invalid("invalid_request"));
+                }
             }
         }
         if input.scopes.iter().any(|s| !SCOPES.contains(&s.as_str())) {
@@ -664,26 +686,35 @@ async fn approve(
             .cloned()
             .collect::<Vec<_>>()
             .join(" ");
-        let grant = Id::new_v7();
+        // The token belongs to the first grant; every grant carries the first one's ID as its group.
+        let group = Id::new_v7();
         let code = generate_opaque_token();
-        sqlx::query("INSERT INTO oauth_grants (id, client_id, user_id, workspace_id, project_ids, resource, scope, created_at, mcp_scopes, all_projects) VALUES ($1, $2, $3, $4, $5, $6, 'tasks:read', $7, $8, $9)")
-            .bind(grant.to_string()).bind(row.get::<String, _>("client_id")).bind(user.to_string()).bind(workspace.to_string())
-            .bind(json!(project_ids).to_string()).bind(row.get::<String, _>("resource")).bind(now).bind(&extra).bind(i64::from(input.all_projects)).execute(&mut *tx).await?;
+        for (index, access) in input.workspaces.iter().enumerate() {
+            let grant = if index == 0 { group } else { Id::new_v7() };
+            let project_ids = if access.all_projects {
+                Vec::new()
+            } else {
+                access.project_ids.clone()
+            };
+            sqlx::query("INSERT INTO oauth_grants (id, client_id, user_id, workspace_id, project_ids, resource, scope, created_at, mcp_scopes, all_projects, group_id) VALUES ($1, $2, $3, $4, $5, $6, 'tasks:read', $7, $8, $9, $10)")
+                .bind(grant.to_string()).bind(row.get::<String, _>("client_id")).bind(user.to_string()).bind(access.workspace_id.to_string())
+                .bind(json!(project_ids).to_string()).bind(row.get::<String, _>("resource")).bind(now).bind(&extra).bind(i64::from(access.all_projects)).bind(group.to_string()).execute(&mut *tx).await?;
+            audit::record(
+                &mut tx,
+                access.workspace_id,
+                Some(user),
+                "oauth.grant.created",
+                AuditOutcome::Success,
+                "oauth_grant",
+                Some(grant),
+                "oauth-consent",
+                json!({"scope": granted_scopes(&extra), "all_projects": access.all_projects}),
+                TimestampMillis::from_millis(now),
+            )
+            .await?;
+        }
         sqlx::query("UPDATE oauth_requests SET code_hash = $1, grant_id = $2, csrf_hash = NULL, expires_at = $3 WHERE id = $4")
-            .bind(hash(&code)).bind(grant.to_string()).bind(now + 60_000).bind(&id).execute(&mut *tx).await?;
-        audit::record(
-            &mut tx,
-            workspace,
-            Some(user),
-            "oauth.grant.created",
-            AuditOutcome::Success,
-            "oauth_grant",
-            Some(grant),
-            "oauth-consent",
-            json!({"scope": granted_scopes(&extra), "all_projects": input.all_projects}),
-            TimestampMillis::from_millis(now),
-        )
-        .await?;
+            .bind(hash(&code)).bind(group.to_string()).bind(now + 60_000).bind(&id).execute(&mut *tx).await?;
         callback.query_pairs_mut().append_pair("code", &code);
     } else {
         sqlx::query("DELETE FROM oauth_requests WHERE id = $1")
@@ -776,7 +807,7 @@ async fn token(
             let refresh = input
                 .refresh_token
                 .ok_or_else(|| OAuthError::invalid("invalid_request"))?;
-            let row = sqlx::query("SELECT t.grant_id, t.refresh_used_at FROM oauth_tokens t JOIN oauth_grants g ON g.id = t.grant_id WHERE t.refresh_hash = $1 AND t.refresh_expires_at > $2 AND g.client_id = $3 AND g.resource = $4 AND g.revoked_at IS NULL")
+            let row = sqlx::query("SELECT t.grant_id, t.refresh_used_at FROM oauth_tokens t JOIN oauth_grants g ON g.id = t.grant_id WHERE t.refresh_hash = $1 AND t.refresh_expires_at > $2 AND g.client_id = $3 AND g.resource = $4")
                 .bind(hash(&refresh)).bind(now).bind(&input.client_id).bind(&state.resource).fetch_optional(&mut *tx).await?.ok_or_else(|| OAuthError::invalid("invalid_grant"))?;
             let grant: String = row.get("grant_id");
             if row.get::<Option<i64>, _>("refresh_used_at").is_some() {
@@ -795,10 +826,10 @@ async fn token(
     };
     let valid_query = match state.database.backend() {
         Backend::Sqlite => {
-            "SELECT EXISTS(SELECT 1 FROM oauth_grants g JOIN users u ON u.id = g.user_id JOIN memberships m ON m.user_id = g.user_id AND m.workspace_id = g.workspace_id AND m.role <> 'guest' JOIN workspaces w ON w.id = g.workspace_id WHERE g.id = $1 AND g.client_id = $2 AND g.revoked_at IS NULL AND u.suspended_at IS NULL AND w.deleted_at IS NULL AND (g.all_projects = 1 OR EXISTS(SELECT 1 FROM projects p, json_each(g.project_ids) j WHERE p.id = j.value AND p.workspace_id = g.workspace_id AND p.deleted_at IS NULL)))"
+            "SELECT EXISTS(SELECT 1 FROM oauth_grants g JOIN users u ON u.id = g.user_id JOIN memberships m ON m.user_id = g.user_id AND m.workspace_id = g.workspace_id AND m.role <> 'guest' JOIN workspaces w ON w.id = g.workspace_id WHERE g.group_id = (SELECT group_id FROM oauth_grants WHERE id = $1) AND g.client_id = $2 AND g.revoked_at IS NULL AND u.suspended_at IS NULL AND w.deleted_at IS NULL AND (g.all_projects = 1 OR EXISTS(SELECT 1 FROM projects p, json_each(g.project_ids) j WHERE p.id = j.value AND p.workspace_id = g.workspace_id AND p.deleted_at IS NULL)))"
         }
         Backend::Postgres => {
-            "SELECT EXISTS(SELECT 1 FROM oauth_grants g JOIN users u ON u.id = g.user_id JOIN memberships m ON m.user_id = g.user_id AND m.workspace_id = g.workspace_id AND m.role <> 'guest' JOIN workspaces w ON w.id = g.workspace_id WHERE g.id = $1 AND g.client_id = $2 AND g.revoked_at IS NULL AND u.suspended_at IS NULL AND w.deleted_at IS NULL AND (g.all_projects = 1 OR EXISTS(SELECT 1 FROM projects p, jsonb_array_elements_text(g.project_ids::jsonb) AS j(value) WHERE p.id = j.value AND p.workspace_id = g.workspace_id AND p.deleted_at IS NULL)))"
+            "SELECT EXISTS(SELECT 1 FROM oauth_grants g JOIN users u ON u.id = g.user_id JOIN memberships m ON m.user_id = g.user_id AND m.workspace_id = g.workspace_id AND m.role <> 'guest' JOIN workspaces w ON w.id = g.workspace_id WHERE g.group_id = (SELECT group_id FROM oauth_grants WHERE id = $1) AND g.client_id = $2 AND g.revoked_at IS NULL AND u.suspended_at IS NULL AND w.deleted_at IS NULL AND (g.all_projects = 1 OR EXISTS(SELECT 1 FROM projects p, jsonb_array_elements_text(g.project_ids::jsonb) AS j(value) WHERE p.id = j.value AND p.workspace_id = g.workspace_id AND p.deleted_at IS NULL)))"
         }
     };
     let Flag(valid) = sqlx::query_scalar(valid_query)
@@ -844,17 +875,18 @@ async fn revoke(
     State(state): State<OAuthState>,
     Form(input): Form<Revocation>,
 ) -> Result<StatusCode, OAuthError> {
-    sqlx::query("UPDATE oauth_grants SET revoked_at = $1 WHERE client_id = $2 AND id IN (SELECT grant_id FROM oauth_tokens WHERE access_hash = $3 OR refresh_hash = $4)")
+    sqlx::query("UPDATE oauth_grants SET revoked_at = $1 WHERE client_id = $2 AND revoked_at IS NULL AND group_id IN (SELECT f.group_id FROM oauth_grants f JOIN oauth_tokens t ON t.grant_id = f.id WHERE t.access_hash = $3 OR t.refresh_hash = $4)")
         .bind(TimestampMillis::now().as_millis()).bind(input.client_id).bind(hash(&input.token)).bind(hash(&input.token)).execute(state.database.pool()).await?;
     Ok(StatusCode::OK)
 }
 
+/// Ends a connection: the grants of every workspace in the group of `grant`, and so its tokens.
 async fn revoke_grant(
     tx: &mut Transaction<'_, Any>,
     grant: &str,
     now: i64,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query("UPDATE oauth_grants SET revoked_at = $1 WHERE id = $2")
+    sqlx::query("UPDATE oauth_grants SET revoked_at = $1 WHERE revoked_at IS NULL AND group_id = (SELECT group_id FROM oauth_grants WHERE id = $2)")
         .bind(now)
         .bind(grant)
         .execute(&mut **tx)
@@ -900,12 +932,12 @@ async fn disconnect(
         .ok_or_else(|| OAuthError::invalid("invalid_request"))?
         .parse()
         .map_err(|error| OAuthError::server().cause(error))?;
-    revoke_grant(
-        &mut tx,
-        &grant.to_string(),
-        TimestampMillis::now().as_millis(),
-    )
-    .await?;
+    // The connection's other workspaces stay; its tokens stop when the last one is gone.
+    sqlx::query("UPDATE oauth_grants SET revoked_at = $1 WHERE id = $2 AND revoked_at IS NULL")
+        .bind(TimestampMillis::now().as_millis())
+        .bind(grant.to_string())
+        .execute(&mut *tx)
+        .await?;
     audit::record(
         &mut tx,
         workspace,

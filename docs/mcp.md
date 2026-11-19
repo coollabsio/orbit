@@ -128,9 +128,15 @@ needed. In your MCP client, choose **Streamable HTTP** and **OAuth**, then enter
 1. The client discovers Orbit's authorization server and registers as a public
    client with a callback URI.
 2. Orbit opens its sign-in page if you are not signed in.
-3. Select a workspace and the projects that the client may read.
+3. Select one or more workspaces, and for each the projects that the client may read.
 4. Click **Allow read access**. Orbit returns an authorization code to the client.
 5. The client exchanges the code using its S256 PKCE verifier and connects.
+
+One connection can cover several workspaces. Each has its own projects, and the
+permissions you choose apply to all of them. When a connection covers more than one
+workspace, every tool takes a `workspace_id` argument (the IDs are in `get_me`),
+and a call without it fails with a message that says so. With one workspace the argument
+is not needed. API tokens belong to one workspace.
 
 The only scope is `tasks:read`. Project selection is stored in the grant, not in
 client-supplied tool arguments. Access tokens last 15 minutes. Refresh tokens
@@ -138,8 +144,10 @@ last 30 days and rotate on every successful refresh. Reuse of a consumed refresh
 token revokes the entire connection. Authorization codes last one minute, can
 be used once, and require the exact client and registered callback URI.
 
-Open **Account settings → Agentic → Connected apps** to disconnect a client. This stops
-all its access and refresh tokens. Current workspace membership, account
+Open **Account settings → Agentic → Connected apps** to disconnect a client. Each
+workspace of a connection is one row: disconnecting a row removes that workspace, and
+the tokens stop when the last workspace is gone. Leaving a workspace removes it from
+your connections in the same way. Current workspace membership, account
 suspension, project availability, token expiry, audience, and revocation are
 checked on every MCP request. Removing a project does not grant access to any
 other project. Existing connections survive server restarts.
@@ -213,7 +221,7 @@ scripts, CI jobs and the Orbit CLI. That API serves tasks and docs, not chat. Se
 | `list_cycles` | Required `project_id` | Every cycle of an approved project, by start date: `number`, `name`, `starts_at`, `ends_at` (exclusive), the progress counts, and `relative`. |
 | `list_members` | Optional `cursor`, `limit` | Workspace members: `user_id` and `display_name`. |
 | `list_comments` | Required `task_id`; optional `cursor`, `limit` | Comments on the task, oldest first, and `next_cursor`. |
-| `get_me` | None | The connection: its user (`null` for a service account), workspace, scopes and approved project IDs. Needs no permission. |
+| `get_me` | Optional `workspace_id` | The connection: its user (`null` for a service account), workspace, scopes and approved project IDs, and `workspaces`: every workspace it covers with its own scopes and project IDs. Needs no permission. |
 
 `list_tasks` searches titles and descriptions. `parent_task_id` (a task ID or an identifier
 such as `ENG-12`) lists only the direct sub-issues of that task. The default limit is 50; the valid
@@ -228,7 +236,9 @@ The progress counts of milestones and cycles are `task_count`, `completed_count`
 `estimate_total` and `estimate_completed`. They count live tasks; cancelled and duplicate tasks are
 not counted, and completed means a status in the `completed` category. A cycle's `relative` is
 `current` (it runs now), `next` (the first that starts after now), `previous` (the last that
-ended before now) or `null`.
+ended before now) or `null`. A cycle's `carried_over_count` counts the live tasks that "Move
+unfinished tasks to next cycle" took out of it and that are not back in it. They are not in its
+`task_count`, so a past cycle still shows the work that it did not finish.
 
 Task results include title, description, project/status IDs, priority,
 assignee/label IDs, due dates, `milestone_id`, `cycle_id`, `estimate` (points, or `null`),
@@ -359,6 +369,11 @@ and fail on a locked doc. A doc can have at most 4,000 blocks (nested ones inclu
 `markdown` for a doc that already has more, fail with "A doc can have at most 4,000 blocks"
 and change nothing. A database outage on a doc or chat tool is a JSON-RPC internal error
 (-32603), not "Resource is not available".
+`list_docs` takes an optional `project_id` (an approved project). A teamspace can hold the docs
+of one project (Project settings → Docs). With `project_id`, the list leaves out the docs of
+teamspaces of other projects: you get the global docs (teamspaces without a project), that
+project's docs and private docs. This filter is not a permission: without `project_id`, and in
+`get_doc`, every visible doc stays available.
 Databases are docs with `kind: "database"` in `list_docs`, and their rows are docs: `get_doc`
 of a row also returns its `database_id` and `values`. `get_database` takes `database_id` and
 returns the properties (with option names), views, templates and `row_count`.

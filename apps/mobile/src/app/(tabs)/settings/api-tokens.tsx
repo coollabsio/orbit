@@ -4,6 +4,7 @@ import { type ReactNode, useState } from 'react'
 import { Pressable, View } from 'react-native'
 
 import { ConfirmDialog, type ConfirmRequest } from '../../../components/settings/Dialog'
+import { Checkbox, CheckRow, ProjectPicker } from '../../../components/settings/ProjectPicker'
 import { Badge, FieldLabel, RowIcon, Select, SettingsCard, SettingsRow, SettingsShell, WORKSPACE_NAV } from '../../../components/settings/Shell'
 import { Toggles } from '../../../components/settings/Toggles'
 import { relativeTime, shortDate } from '../../../data/format'
@@ -11,8 +12,7 @@ import { type AccessLevel, accessLevel, EXPIRATION_OPTIONS, type ExpirationValue
 import { useApiTokens, useApiTokenWrites } from '../../../hooks/workspace-settings'
 import { useOrbit } from '../../../orbit-context'
 import { useProjects } from '../../../queries'
-import { useTheme } from '../../../theme'
-import { Button, Icon, Input, Text, LabelTip } from '../../../ui'
+import { Button, Input, LabelTip, Text } from '../../../ui'
 
 const LEVELS: { value: AccessLevel; label: string }[] = [
   { value: 'none', label: 'No access' },
@@ -239,51 +239,6 @@ function AccessPicker({ resources, scopes, onChange, details }: { resources: Sco
           {details[resource.name] ? <View className="border-l border-border pl-4">{details[resource.name]}</View> : null}
         </View>
       ))}
-    </View>
-  )
-}
-
-/** The project checklist under the Tasks row, with "Select all" above two or more projects. `all` covers every project, including future ones, and hides the list. */
-function ProjectPicker({ projects, selected, onChange, all, onAllChange, empty }: { projects: { id: string; name: string }[]; selected: string[]; onChange: (ids: string[]) => void; all: boolean; onAllChange: (all: boolean) => void; empty?: string }) {
-  const some = selected.length > 0 && selected.length < projects.length
-  return (
-    <View accessibilityLabel="Projects" className="gap-3">
-      <CheckRow label="All projects, including future ones" checked={all} onPress={() => onAllChange(!all)} />
-      {all ? null : (
-        <>
-          {projects.length > 1 ? (
-            <CheckRow label="Select all" muted checked={selected.length === projects.length} indeterminate={some} onPress={() => onChange(selected.length === projects.length ? [] : projects.map((project) => project.id))} />
-          ) : null}
-          {projects.map((project) => {
-            const checked = selected.includes(project.id)
-            return <CheckRow key={project.id} label={project.name} checked={checked} onPress={() => onChange(checked ? selected.filter((other) => other !== project.id) : [...selected, project.id])} />
-          })}
-          {empty ? <Text className="text-[14px] leading-[20px] text-muted-foreground">{empty}</Text> : null}
-        </>
-      )}
-    </View>
-  )
-}
-
-function CheckRow({ label, hint, checked, indeterminate = false, muted = false, onPress }: { label: string; hint?: string; checked: boolean; indeterminate?: boolean; muted?: boolean; onPress: () => void }) {
-  return (
-    <Pressable accessibilityRole="checkbox" accessibilityLabel={label} accessibilityState={{ checked: indeterminate ? 'mixed' : checked }} onPress={onPress} hitSlop={4} className={`flex-row gap-2 ${hint ? 'items-start' : 'items-center'}`}>
-      <Checkbox checked={checked} indeterminate={indeterminate} />
-      <View className="flex-1 gap-0.5">
-        <Text className={`text-[14px] leading-[18px] ${muted ? 'text-muted-foreground' : 'font-noto-medium text-foreground'}`}>{label}</Text>
-        {hint ? <Text className="text-[12px] leading-[16px] text-muted-foreground">{hint}</Text> : null}
-      </View>
-    </Pressable>
-  )
-}
-
-/** The web `Checkbox`: a 16px box, primary with a check (or a dash) when on. */
-function Checkbox({ checked, indeterminate = false }: { checked: boolean; indeterminate?: boolean }) {
-  const { colors } = useTheme()
-  const on = checked || indeterminate
-  return (
-    <View className={`size-4 items-center justify-center rounded-[4px] border ${on ? 'border-primary bg-primary' : 'border-input dark:bg-input/30'}`}>
-      {on ? <Icon name={indeterminate ? 'minus' : 'check'} size={14} color={colors.primaryForeground} /> : null}
     </View>
   )
 }

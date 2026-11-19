@@ -1,10 +1,15 @@
 /**
- * The browser side of "Continue with Google / GitHub": a PKCE verifier kept in this tab while the provider's page is
+ * The browser side of "Continue with Google / GitHub / SSO": a PKCE verifier kept in this tab while the provider's page is
  * open, and the handoff the server puts in the `/login/callback` fragment.
  */
 import type { Provider, SignInIntent } from '@orbit/api/generated/types.gen'
 
-export const PROVIDER_NAMES: Record<Provider, string> = { google: 'Google', github: 'GitHub' }
+/** Fallback labels; the OpenID Connect label comes from the server (`useProviderName`). */
+export const PROVIDER_NAMES: Record<Provider, string> = { google: 'Google', github: 'GitHub', oidc: 'SSO' }
+
+export function isProvider(value: unknown): value is Provider {
+  return typeof value === 'string' && Object.hasOwn(PROVIDER_NAMES, value)
+}
 
 /** What the tab remembers between leaving for the provider and coming back to `/login/callback`. */
 export type ProviderFlow = { provider: Provider; intent: SignInIntent; verifier: string }
@@ -36,7 +41,7 @@ export function saveProviderFlow(flow: ProviderFlow) {
 export function storedProviderFlow(): ProviderFlow | null {
   try {
     const value = JSON.parse(sessionStorage.getItem(FLOW_KEY) ?? 'null') as Partial<ProviderFlow> | null
-    if (!value || !(value.provider === 'google' || value.provider === 'github') || typeof value.verifier !== 'string') return null
+    if (!value || !isProvider(value.provider) || typeof value.verifier !== 'string') return null
     if (!(value.intent === 'sign_in' || value.intent === 'connect' || value.intent === 'confirm')) return null
     return { provider: value.provider, intent: value.intent, verifier: value.verifier }
   } catch {

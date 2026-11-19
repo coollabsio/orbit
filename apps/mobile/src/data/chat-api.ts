@@ -7,19 +7,23 @@ import {
   addChatMembers,
   addChatReaction,
   archiveChatChannel,
+  blockChatUser,
   createChatCategory,
   createChatChannel,
   deleteChatCategory,
   deleteChatMessage,
+  deleteReportedChatMessage,
   editChatMessage,
   followChatThread,
   getChatThread,
   joinChatChannel,
   leaveChatChannel,
+  listChatBlocks,
   listChatEmoji,
   listChatFiles,
   listChatMessages,
   listChatPins,
+  listChatReports,
   listChatSearch,
   listChatThreads,
   listFollowedChatThreads,
@@ -33,15 +37,20 @@ import {
   removeChatMember,
   removeChatReaction,
   renameChatCategory,
+  reportChatMessage,
   sendChatMessage,
+  unblockChatUser,
   updateChatChannel,
   updateChatState,
   uploadChatFile,
 } from '@orbit/api/generated/sdk.gen'
 import type {
+  BlockedUserRecord,
   ChatChannelUpdateBody,
   ChatEvent,
   ChatFileRecord,
+  ChatReportReason,
+  ChatReportRecord,
   ChatStateBody,
   CustomEmojiRecord,
   FollowedThreadRecord,
@@ -53,7 +62,7 @@ import type {
 
 import type { CategoryRecord, ConversationRecord, ConversationStateRecord, MessageRecord, OrbitClient } from './orbit'
 
-export type { ChatEvent, ChatFileRecord, CustomEmojiRecord, FollowedThreadRecord, SearchPage, ThreadPage, ThreadStateRecord }
+export type { BlockedUserRecord, ChatEvent, ChatFileRecord, ChatReportReason, ChatReportRecord, CustomEmojiRecord, FollowedThreadRecord, SearchPage, ThreadPage, ThreadStateRecord }
 
 /** What a write made, and the live events it caused. */
 export interface ChatWrite<T> {
@@ -226,6 +235,32 @@ export interface SearchQuery {
 export async function search(client: OrbitClient, workspaceId: string, input: SearchQuery): Promise<SearchPage> {
   const query = { query: input.query || undefined, conversation_id: input.conversationId, author_id: input.authorId, has_file: input.hasFile, cursor: input.cursor }
   return (await listChatSearch({ ...at(client, workspaceId), query })).data
+}
+
+// ---- reports and blocks
+
+/** Reports a message to the workspace owners and admins. Reporting the same message again changes nothing. */
+export async function reportMessage(client: OrbitClient, workspaceId: string, messageId: string, reason: ChatReportReason, note: string): Promise<ChatReportRecord> {
+  return (await reportChatMessage({ ...onMessage(client, workspaceId, messageId), body: { reason, note } })).data
+}
+
+/** The workspace's reports, newest first. Only for members with `chat.manage`. */
+export async function reports(client: OrbitClient, workspaceId: string): Promise<ChatReportRecord[]> {
+  return (await listChatReports(at(client, workspaceId))).data
+}
+
+export async function deleteReportedMessage(client: OrbitClient, workspaceId: string, reportId: string): Promise<ChatWrite<true>> {
+  return eventsOnly((await deleteReportedChatMessage({ client, path: { workspace_id: workspaceId, report_id: reportId }, throwOnError: true })).data)
+}
+
+/** The people you blocked, in every workspace. */
+export async function blocks(client: OrbitClient): Promise<BlockedUserRecord[]> {
+  return (await listChatBlocks({ client, throwOnError: true })).data
+}
+
+export async function setBlocked(client: OrbitClient, userId: string, blocked: boolean): Promise<void> {
+  const request = { client, path: { user_id: userId }, throwOnError: true as const }
+  await (blocked ? blockChatUser(request) : unblockChatUser(request))
 }
 
 // ---- threads

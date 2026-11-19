@@ -196,12 +196,20 @@ test('#general: an admin edits it but cannot archive it or add people; a plain m
 
 test('message sheet: own text gets edit and delete, another author only for a moderator, a deleted one keeps the thread', () => {
   const own = message('m1', { author_id: 'me', pinned: false, sticker_id: null, body: 'hi' })
-  expect(messageActions(own, 'me', false, { inThread: false, canWrite: true })).toEqual(['reply', 'thread', 'copy', 'pin', 'unread', 'edit', 'delete'])
+  expect(messageActions(own, 'me', false, { inThread: false, canWrite: true, authorBlocked: false })).toEqual(['reply', 'thread', 'copy', 'pin', 'unread', 'edit', 'delete'])
   const theirs = message('m2', { author_id: 'ada', pinned: true, sticker_id: null, body: 'hi' })
-  expect(messageActions(theirs, 'me', false, { inThread: true, canWrite: true })).toEqual(['reply', 'copy', 'unpin', 'unread'])
-  expect(messageActions(theirs, 'me', true, { inThread: true, canWrite: false })).toEqual(['copy', 'unpin', 'unread', 'delete'])
-  expect(messageActions(message('m3', { deleted: true }), 'me', true, { inThread: false, canWrite: true })).toEqual(['thread'])
-  expect(messageActions(message('m4', { kind: 'join' }), 'me', true, { inThread: false, canWrite: true })).toEqual([])
+  expect(messageActions(theirs, 'me', false, { inThread: true, canWrite: true, authorBlocked: false })).toEqual(['reply', 'copy', 'unpin', 'unread', 'report', 'block'])
+  expect(messageActions(theirs, 'me', true, { inThread: true, canWrite: false, authorBlocked: true })).toEqual(['copy', 'unpin', 'unread', 'report', 'unblock', 'delete'])
+  expect(messageActions(message('m3', { deleted: true }), 'me', true, { inThread: false, canWrite: true, authorBlocked: false })).toEqual(['thread'])
+  expect(messageActions(message('m4', { kind: 'join' }), 'me', true, { inThread: false, canWrite: true, authorBlocked: false })).toEqual([])
+})
+
+test('message sheet: an integration message can be reported, never blocked', () => {
+  const bot = { name: 'Deploys', icon_url: null, icon_emoji: null, interactive: false, webhook_id: 'w1' }
+  const mine = message('m5', { author_id: 'me', pinned: false, sticker_id: null, body: 'ok', bot })
+  expect(messageActions(mine, 'me', false, { inThread: true, canWrite: false, authorBlocked: false })).toEqual(['copy', 'pin', 'unread', 'report', 'edit', 'delete'])
+  const theirs = message('m6', { author_id: 'ada', pinned: false, sticker_id: null, body: 'ok', bot })
+  expect(messageActions(theirs, 'me', false, { inThread: true, canWrite: false, authorBlocked: false })).toEqual(['copy', 'pin', 'unread', 'report'])
 })
 
 test('channel names are typed lowercase with hyphens, and sent without a trailing one', () => {

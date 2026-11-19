@@ -1,0 +1,136 @@
+{
+  "version": "v0.4.0",
+  "notes": "Shots made with marketing/release-video (build-tag.sh v0.4.0, seed-demo.sh, shoot.mjs) on 2026-11-18. The server was restarted with ORBIT_OIDC_ISSUER=https://sso.acme.dev, ORBIT_OIDC_CLIENT_ID, ORBIT_OIDC_CLIENT_SECRET and ORBIT_OIDC_DISPLAY_NAME='Acme SSO' for the login page. `shot` is a scene name in release-video/scenes.mjs. `box` is in screenshot CSS px (1440x900).",
+  "slides": [
+    {
+      "type": "title",
+      "subtitle": "Milestones and cycles, recurring tasks, private projects, custom roles, OpenID Connect and more."
+    },
+    {
+      "tag": "Tasks",
+      "title": "Milestones, cycles and estimates",
+      "shot": "milestones",
+      "box": [
+        226,
+        50,
+        1212,
+        420
+      ],
+      "hideLeft": 224
+    },
+    {
+      "tag": "Tasks",
+      "title": "Recurring tasks",
+      "shot": "recurring",
+      "box": [
+        1008,
+        466,
+        316,
+        260
+      ],
+      "hideLeft": 224
+    },
+    {
+      "tag": "Projects",
+      "title": "Private projects",
+      "shot": "private-project",
+      "box": [
+        470,
+        72,
+        725,
+        300
+      ],
+      "hideLeft": 224,
+      "shiftDown": 85
+    },
+    {
+      "tag": "Workspace",
+      "title": "Custom roles",
+      "shot": "roles",
+      "box": [
+        263,
+        75,
+        700,
+        215
+      ],
+      "hideLeft": 224
+    },
+    {
+      "tag": "Sign-in",
+      "title": "Sign in with OpenID Connect",
+      "shot": "oidc-login",
+      "box": [
+        490,
+        224,
+        460,
+        452
+      ],
+      "hideLeft": 0
+    },
+    {
+      "tag": "Search",
+      "title": "Context-aware ⌘K search",
+      "shot": "search",
+      "box": [
+        432,
+        108,
+        577,
+        272
+      ]
+    },
+    {
+      "tag": "Chat",
+      "title": "Reference tasks with #",
+      "shot": "task-refs",
+      "box": [
+        276,
+        612,
+        700,
+        276
+      ]
+    },
+    {
+      "tag": "Activity",
+      "title": "Latest notifications in the bell",
+      "shot": "notifications",
+      "box": [
+        172,
+        45,
+        382,
+        346
+      ],
+      "hideLeft": 0
+    },
+    {
+      "tag": "Appearance",
+      "title": "Font and text size",
+      "shot": "font-size",
+      "box": [
+        263,
+        338,
+        1138,
+        524
+      ],
+      "hideLeft": 224
+    },
+    {
+      "type": "list",
+      "tag": "Also in v0.4.0",
+      "items": [
+        "<b>Outgoing task webhooks</b> with signed deliveries",
+        "<b>Teamspaces linked to projects</b>, for project docs",
+        "<b>A color theme for each app</b>: docs, chat and tasks",
+        "<b>Two-way chat bots</b>, and unread thread replies in Unreads",
+        "<b>MCP and API</b>: one OAuth connection for several workspaces, databases and views",
+        "<b>Mobile</b>: paste images straight into the chat field"
+      ]
+    },
+    {
+      "type": "outro",
+      "title": "Update to v0.4.0 today",
+      "lines": [
+        "Read the full changelog in the release notes."
+      ]
+    }
+  ]
+}

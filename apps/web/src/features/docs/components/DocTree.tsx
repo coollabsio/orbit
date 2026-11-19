@@ -52,6 +52,7 @@ import {
   type SpaceKey,
 } from '@/features/docs/pageTree'
 import { favoriteDropIndex, useMoveFavorite, usePageFavorites, useToggleFavorite } from '@/features/docs/api/favorites'
+import { useProjects } from '@/features/tasks/api/projects'
 import { isPageVersionConflict, movePageErrorMessage, useCreatePage, useMovePage } from '@/features/docs/api/pages'
 import {
   teamspaceDeleteError,
@@ -110,6 +111,8 @@ export function DocTree({
   const inAppSidebar = useInAppSidebar()
   const teamspacesQuery = useTeamspaces(workspaceId)
   const teamspaces = teamspacesQuery.data ?? []
+  // Only projects the member sees: a teamspace of a hidden private project shows no project.
+  const projects = useProjects(workspaceId).data ?? []
   const createPage = useCreatePage(workspaceId)
   const movePage = useMovePage(workspaceId)
   const createTeamspace = useCreateTeamspace(workspaceId)
@@ -694,6 +697,7 @@ export function DocTree({
                             Default
                           </span>
                         ) : null}
+                        <TeamspaceProject project={projects.find((project) => project.id === teamspace.project_id)} />
                       </span>
                     )}
                     <TreeRowActions>
@@ -866,6 +870,20 @@ function SpacePages({ open, children }: { open: boolean; children: ReactNode }) 
         {children}
       </div>
     </div>
+  )
+}
+
+/** The project whose docs a teamspace holds, as a small label after its name. */
+function TeamspaceProject({ project }: { project: { name: string; color: string } | undefined }) {
+  if (!project) return null
+  return (
+    <span
+      className="inline-flex min-w-0 shrink items-center gap-1 rounded-sm bg-muted px-1 text-[0.625rem] leading-4 font-medium text-muted-foreground"
+      title={`Docs of the project ${project.name}`}
+    >
+      <span className="size-1.5 shrink-0 rounded-full" style={{ backgroundColor: project.color }} aria-hidden="true" />
+      <span className="truncate">{project.name}</span>
+    </span>
   )
 }
 

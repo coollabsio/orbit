@@ -141,6 +141,7 @@ export function notificationTarget(notification: NotificationRecord): string | n
     const [owner, repo] = (notification.github_repository ?? '').split('/')
     return owner && repo && notification.github_pull_number ? pullPath({ owner, repo, number: notification.github_pull_number }) : null
   }
+  if (notification.kind === 'chat_reported') return '/settings/reports'
   if (notification.kind === 'import_finished') {
     const source = IMPORTS[notification.import_source ?? '']
     return source && notification.import_id ? `${source.page}/${notification.import_id}` : null
@@ -194,6 +195,9 @@ export function notificationCopy(notification: NotificationRecord, pageTitle?: s
   }
   if (notification.kind === 'chat_mentioned') {
     return { title: `${actorName ?? 'Someone'} mentioned you in chat`, body: 'Open the conversation to see the message.' }
+  }
+  if (notification.kind === 'chat_reported') {
+    return { title: `${actorName ?? 'Someone'} reported a chat message`, body: 'Open the reports to see the message.' }
   }
   if (notification.kind === 'page_mentioned') {
     const page = pageTitle === undefined ? 'a page' : `“${pageTitle.trim() || 'Untitled'}”`

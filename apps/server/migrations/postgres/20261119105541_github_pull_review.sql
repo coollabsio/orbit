@@ -1,4 +1,4 @@
--- GitHub pull request review, as in migrations/20261112150000_github_pull_review.sql: user connections, then notices.
+-- GitHub pull request review, as in ../20261119105541_github_pull_review.sql: user connections, then notices.
 ALTER TABLE github_apps ADD COLUMN client_id TEXT;
 -- The origin the app was registered from: its OAuth callback URL lives there.
 ALTER TABLE github_apps ADD COLUMN callback_origin TEXT;
@@ -51,8 +51,8 @@ ALTER TABLE notifications DROP CONSTRAINT notifications_scope_check;
 ALTER TABLE notifications ADD CONSTRAINT notifications_kind_check
     CHECK (kind IN ('task_assigned', 'comment_mentioned', 'description_mentioned',
                     'page_comment_mentioned', 'page_mentioned', 'chat_mentioned',
-                    'import_finished', 'github_review_requested', 'github_review',
-                    'github_merged'));
+                    'import_finished', 'chat_reported', 'github_review_requested',
+                    'github_review', 'github_merged'));
 ALTER TABLE notifications ADD CONSTRAINT notifications_scope_check
     CHECK (
         (kind IN ('task_assigned', 'comment_mentioned', 'description_mentioned')
@@ -66,7 +66,8 @@ ALTER TABLE notifications ADD CONSTRAINT notifications_scope_check
         OR (kind = 'page_mentioned'
             AND task_id IS NULL AND comment_id IS NULL
             AND page_id IS NOT NULL AND page_thread_id IS NULL AND page_comment_id IS NULL)
-        OR (kind IN ('chat_mentioned', 'import_finished', 'github_review_requested', 'github_review', 'github_merged')
+        OR (kind IN ('chat_mentioned', 'import_finished', 'chat_reported', 'github_review_requested',
+                     'github_review', 'github_merged')
             AND task_id IS NULL AND comment_id IS NULL
             AND page_id IS NULL AND page_thread_id IS NULL AND page_comment_id IS NULL
             AND page_block_id IS NULL)

@@ -1,5 +1,5 @@
-import { billingCheckout, billingPortal, getBilling } from '@orbit/api/generated/sdk.gen'
-import type { BillingView, PlanInterval, PlanView, SubscriptionStatus, WorkspaceAccess } from '@orbit/api/generated/types.gen'
+import { billingCheckout, billingPortal, getAccountTrial, getBilling } from '@orbit/api/generated/sdk.gen'
+import type { AccountTrial, BillingView, PlanInterval, PlanView, SubscriptionStatus, WorkspaceAccess } from '@orbit/api/generated/types.gen'
 
 import { fullDate } from './format'
 import type { OrbitClient } from './orbit'
@@ -10,6 +10,27 @@ export const billingKey = (workspaceId: string) => ['billing', workspaceId] as c
 
 export async function workspaceBilling(client: OrbitClient, workspaceId: string): Promise<BillingView> {
   return (await getBilling({ client, path: { workspace_id: workspaceId }, throwOnError: true })).data
+}
+
+/** Orbit Cloud: the caller's trial, which every workspace they create shares. */
+export const accountTrialKey = ['account-trial'] as const
+
+export async function accountTrial(client: OrbitClient): Promise<AccountTrial> {
+  return (await getAccountTrial({ client, throwOnError: true })).data
+}
+
+/** The web's `newWorkspaceTrialNote`: what one more workspace means for the caller's trial; `null` when there is nothing to say. */
+export function newWorkspaceTrialNote(trial: AccountTrial | undefined, now: number): string | null {
+  if (!trial) return null
+  if (!trial.ends_at) {
+    return trial.days > 0
+      ? `This workspace starts your ${trial.days}-day free trial. Later workspaces share it.`
+      : 'This workspace needs a plan before you can add to it.'
+  }
+  const date = fullDate(trial.ends_at)
+  return Date.parse(trial.ends_at) > now
+    ? `This workspace shares your free trial, which ends on ${date}.`
+    : `Your free trial ended on ${date}. This workspace stays read-only until it has a plan.`
 }
 
 export type BillingBanner = { kind: 'trial' | 'read_only'; text: string }
@@ -81,7 +102,7 @@ export function annualSaving(plans: readonly PlanView[]): number | null {
 
 /** A plan's name with its interval: `Team · Annual`. */
 export function planTitle(plan: PlanView): string {
-  return planTitle(plan)
+  return plan.interval ? `${plan.name} · ${INTERVAL_LABELS[plan.interval]}` : plan.name
 }
 
 /** The label of a plan card's button: `Choose annual`, or `Choose Team` without an interval. */

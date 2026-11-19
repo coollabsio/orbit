@@ -17,6 +17,8 @@ expo-env.d.ts
 *.p12
 *.key
 *.mobileprovision
+# Firebase project of Android push (FCM); see README.
+google-services.json
 
 # Metro
 .metro-health-check*

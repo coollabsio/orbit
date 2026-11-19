@@ -7,7 +7,7 @@ import { Pane, PaneHeader, PaneTitle } from '@/components/common/Pane'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import { confirmAction } from '@/components/common/confirmAction'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
-import { useCan } from '@/features/workspaces/permissions'
+import { canIn, canPurgeTask } from '@/features/workspaces/permissions'
 import { useTeamMembers } from '@/features/workspaces/api'
 import { pageMentionCandidates } from '@/features/docs/editor/pageMentions'
 import { statusFromRecord, usePurgeProject, useProjects, useProjectTrash, useRestoreProject, useTrashedProject, useTrashedProjectTasks } from '@/features/tasks/api/projects'
@@ -29,7 +29,6 @@ export function TrashedTaskPage() {
   const { taskId = '' } = useParams()
   const { workspace } = useWorkspace()
   const navigate = useNavigate()
-  const canPurge = useCan('pages.purge')
   const task = useTrashedTask(workspace.id, taskId)
   const liveProjects = useProjects(workspace.id)
   const trashedProjects = useProjectTrash(workspace.id)
@@ -46,6 +45,7 @@ export function TrashedTaskPage() {
   const nameOf = (userId: string | null) => members.data?.find((member) => member.id === userId)?.name
   const status = statusFromRecord(record.status)
   const busy = restore.isPending || purge.isPending
+  const canPurge = canPurgeTask(workspace, record.project_id)
   const requestPurge = async () => {
     const confirmed = await confirmAction({
       title: `Delete “${record.title || 'Untitled task'}” forever?`,
@@ -104,7 +104,6 @@ export function TrashedProjectPage() {
   const { projectId = '' } = useParams()
   const { workspace } = useWorkspace()
   const navigate = useNavigate()
-  const canPurge = useCan('pages.purge')
   const project = useTrashedProject(workspace.id, projectId)
   const tasks = useTrashedProjectTasks(workspace.id, projectId)
   const members = useTeamMembers(workspace.id)
@@ -115,6 +114,7 @@ export function TrashedProjectPage() {
   const record = project.data
   const statuses = new Map(record.statuses.map((status) => [status.id, statusFromRecord(status)]))
   const busy = restore.isPending || purge.isPending
+  const canPurge = canPurgeTask(workspace, record.id)
   const requestPurge = async () => {
     const confirmed = await confirmAction({
       title: `Delete “${record.name}” forever?`,
@@ -130,7 +130,7 @@ export function TrashedProjectPage() {
       title={record.name}
       banner={
         <TrashBanner text={trashedNotice('project', deletedBy, record.deleted_at ?? record.updated_at)}>
-          <Button variant="outline" size="sm" disabled={busy} onClick={() => restore.mutate({ projectId: record.id, version: record.version }, { onSuccess: () => navigate(`/tasks?project=${record.id}`) })}><RotateCcw className="size-3.5" />Restore project</Button>
+          {canIn(workspace, 'projects.manage', record.id) ? <Button variant="outline" size="sm" disabled={busy} onClick={() => restore.mutate({ projectId: record.id, version: record.version }, { onSuccess: () => navigate(`/tasks?project=${record.id}`) })}><RotateCcw className="size-3.5" />Restore project</Button> : null}
           {canPurge ? <Button variant="outline" size="sm" disabled={busy} onClick={() => void requestPurge()}><Trash2 className="size-3.5" />Delete forever</Button> : null}
         </TrashBanner>
       }

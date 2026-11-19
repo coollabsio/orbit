@@ -11,7 +11,7 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, patch, post, put};
 use axum::{Json, Router};
-use orbit_domain::WorkspaceRole;
+use orbit_domain::{Permission, WorkspaceRole};
 use orbit_platform::{
     BackupError, BackupKind, BackupService, BackupSnapshot, ClientIp, Id, JobLimits, ObjectStorage,
     PasswordError, PasswordExecutor, PasswordService, RateLimitConfig, RequestId, ThrottleDecision,
@@ -41,6 +41,7 @@ use crate::repositories::instance_settings::{
     adjustable_job_kinds, can_confirm_sign_up,
 };
 use crate::repositories::sign_in_providers::SaveSignInProviderError;
+use crate::repositories::workspace_roles::{MemberProjectGrant, ProjectGrant, WorkspaceRoleRecord};
 use crate::repositories::workspace_storage::{WorkspaceStorageError, WorkspaceStorageRepository};
 use crate::repositories::workspaces::{InvitationDelivery, WorkspaceError, WorkspaceRepository};
 use crate::sign_in_providers::Provider;
@@ -221,6 +222,26 @@ pub fn workspace_router(state: WorkspaceState) -> Router {
         .route(
             "/api/v1/workspaces/{workspace_id}/members/{membership_id}",
             patch(change_member_role).delete(remove_member),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/members/{membership_id}/custom-role",
+            put(set_member_custom_role),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/roles",
+            get(list_roles).post(create_role),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/project-grants",
+            get(list_project_grants).put(set_project_grant),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/project-grants/{project_id}/{user_id}",
+            delete(revoke_project_grant),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/roles/{role_id}",
+            patch(update_role).delete(delete_role),
         )
         .route(
             "/api/v1/workspaces/{workspace_id}/transfer-ownership",
@@ -831,6 +852,267 @@ async fn change_member_role(
         )
         .await
         .map_err(|error| workspace_problem(error, instance, request_id.as_ref()))?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Serialize, ToSchema)]
+struct RolesResponse {
+    items: Vec<WorkspaceRoleRecord>,
+    /// The permissions a custom role may carry, in display order.
+    grantable_permissions: Vec<Permission>,
+    /// The grantable permissions that a role may also hold for single projects.
+    project_permissions: Vec<Permission>,
+}
+
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/roles", params(("workspace_id" = String, Path)), responses((status = 200, body = RolesResponse)))]
+async fn list_roles(
+    State(state): State<WorkspaceState>,
+    Path(workspace_id): Path<String>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<Json<RolesResponse>, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace_id}/roles");
+    let session = authenticate(&state, &headers, &instance, request_id.as_ref()).await?;
+    let workspace_id = parse_id(&workspace_id, &instance, request_id.as_ref())?;
+    let items = state
+        .workspaces
+        .list_roles(workspace_id, session.user.id)
+        .await
+        .map_err(|error| workspace_problem(error, &instance, request_id.as_ref()))?;
+    Ok(Json(RolesResponse {
+        items,
+        grantable_permissions: Permission::grantable(),
+        project_permissions: Permission::grantable()
+            .into_iter()
+            .filter(|permission| permission.is_project_scoped())
+            .collect(),
+    }))
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+struct RoleCreateBody {
+    /// 1–40 characters after trimming; not Owner, Admin, Member or Guest.
+    name: String,
+    /// What a member with this role may do beyond an ordinary member. Only grantable permissions.
+    permissions: Vec<Permission>,
+    /// What the role also grants in single projects.
+    #[serde(default)]
+    #[schema(required = false)]
+    project_grants: Vec<ProjectGrant>,
+}
+
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/roles", params(("workspace_id" = String, Path)), request_body = RoleCreateBody, responses((status = 201, body = WorkspaceRoleRecord)))]
+async fn create_role(
+    State(state): State<WorkspaceState>,
+    Path(workspace_id): Path<String>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<RoleCreateBody>,
+) -> Result<(StatusCode, Json<WorkspaceRoleRecord>), ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace_id}/roles");
+    let session = authenticate(&state, &headers, &instance, request_id.as_ref()).await?;
+    let workspace_id = parse_id(&workspace_id, &instance, request_id.as_ref())?;
+    let role = state
+        .workspaces
+        .create_role(
+            workspace_id,
+            session.user.id,
+            &body.name,
+            &body.permissions,
+            &body.project_grants,
+            request_id_value(request_id.as_ref()),
+            TimestampMillis::now(),
+        )
+        .await
+        .map_err(|error| workspace_problem(error, &instance, request_id.as_ref()))?;
+    Ok((StatusCode::CREATED, Json(role)))
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+struct RoleUpdateBody {
+    expected_version: u64,
+    name: Option<String>,
+    permissions: Option<Vec<Permission>>,
+    /// Replaces the role's project grants; absent: unchanged.
+    project_grants: Option<Vec<ProjectGrant>>,
+}
+
+#[utoipa::path(patch, path = "/api/v1/workspaces/{workspace_id}/roles/{role_id}", params(("workspace_id" = String, Path), ("role_id" = String, Path)), request_body = RoleUpdateBody, responses((status = 200, body = WorkspaceRoleRecord)))]
+async fn update_role(
+    State(state): State<WorkspaceState>,
+    Path((workspace_id, role_id)): Path<(String, String)>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<RoleUpdateBody>,
+) -> Result<Json<WorkspaceRoleRecord>, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace_id}/roles/{role_id}");
+    let session = authenticate(&state, &headers, &instance, request_id.as_ref()).await?;
+    let workspace_id = parse_id(&workspace_id, &instance, request_id.as_ref())?;
+    let role_id = parse_id(&role_id, &instance, request_id.as_ref())?;
+    state
+        .workspaces
+        .update_role(
+            workspace_id,
+            session.user.id,
+            role_id,
+            body.name.as_deref(),
+            body.permissions.as_deref(),
+            body.project_grants.as_deref(),
+            body.expected_version,
+            request_id_value(request_id.as_ref()),
+            TimestampMillis::now(),
+        )
+        .await
+        .map(Json)
+        .map_err(|error| workspace_problem(error, &instance, request_id.as_ref()))
+}
+
+#[utoipa::path(delete, path = "/api/v1/workspaces/{workspace_id}/roles/{role_id}", params(("workspace_id" = String, Path), ("role_id" = String, Path)), responses((status = 204)))]
+async fn delete_role(
+    State(state): State<WorkspaceState>,
+    Path((workspace_id, role_id)): Path<(String, String)>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<StatusCode, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace_id}/roles/{role_id}");
+    let session = authenticate(&state, &headers, &instance, request_id.as_ref()).await?;
+    let workspace_id = parse_id(&workspace_id, &instance, request_id.as_ref())?;
+    let role_id = parse_id(&role_id, &instance, request_id.as_ref())?;
+    state
+        .workspaces
+        .delete_role(
+            workspace_id,
+            session.user.id,
+            role_id,
+            request_id_value(request_id.as_ref()),
+            TimestampMillis::now(),
+        )
+        .await
+        .map_err(|error| workspace_problem(error, &instance, request_id.as_ref()))?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/project-grants", params(("workspace_id" = String, Path)), responses((status = 200, body = Vec<MemberProjectGrant>)))]
+async fn list_project_grants(
+    State(state): State<WorkspaceState>,
+    Path(workspace_id): Path<String>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<Json<Vec<MemberProjectGrant>>, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace_id}/project-grants");
+    let session = authenticate(&state, &headers, &instance, request_id.as_ref()).await?;
+    let workspace_id = parse_id(&workspace_id, &instance, request_id.as_ref())?;
+    state
+        .workspaces
+        .list_project_grants(workspace_id, session.user.id)
+        .await
+        .map(Json)
+        .map_err(|error| workspace_problem(error, &instance, request_id.as_ref()))
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+struct ProjectGrantBody {
+    project_id: String,
+    user_id: String,
+    /// Replaces what the member holds directly in the project. Only project-scoped permissions.
+    permissions: Vec<Permission>,
+}
+
+#[utoipa::path(put, path = "/api/v1/workspaces/{workspace_id}/project-grants", params(("workspace_id" = String, Path)), request_body = ProjectGrantBody, responses((status = 204)))]
+async fn set_project_grant(
+    State(state): State<WorkspaceState>,
+    Path(workspace_id): Path<String>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<ProjectGrantBody>,
+) -> Result<StatusCode, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace_id}/project-grants");
+    let session = authenticate(&state, &headers, &instance, request_id.as_ref()).await?;
+    let workspace_id = parse_id(&workspace_id, &instance, request_id.as_ref())?;
+    let project_id = parse_id(&body.project_id, &instance, request_id.as_ref())?;
+    let user_id = parse_id(&body.user_id, &instance, request_id.as_ref())?;
+    state
+        .workspaces
+        .set_project_grant(
+            workspace_id,
+            session.user.id,
+            project_id,
+            user_id,
+            &body.permissions,
+            request_id_value(request_id.as_ref()),
+            TimestampMillis::now(),
+        )
+        .await
+        .map_err(|error| workspace_problem(error, &instance, request_id.as_ref()))?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(delete, path = "/api/v1/workspaces/{workspace_id}/project-grants/{project_id}/{user_id}", params(("workspace_id" = String, Path), ("project_id" = String, Path), ("user_id" = String, Path)), responses((status = 204)))]
+async fn revoke_project_grant(
+    State(state): State<WorkspaceState>,
+    Path((workspace_id, project_id, user_id)): Path<(String, String, String)>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<StatusCode, ApiError> {
+    let instance =
+        format!("/api/v1/workspaces/{workspace_id}/project-grants/{project_id}/{user_id}");
+    let session = authenticate(&state, &headers, &instance, request_id.as_ref()).await?;
+    let workspace_id = parse_id(&workspace_id, &instance, request_id.as_ref())?;
+    let project_id = parse_id(&project_id, &instance, request_id.as_ref())?;
+    let user_id = parse_id(&user_id, &instance, request_id.as_ref())?;
+    state
+        .workspaces
+        .revoke_project_grant(
+            workspace_id,
+            session.user.id,
+            project_id,
+            user_id,
+            request_id_value(request_id.as_ref()),
+            TimestampMillis::now(),
+        )
+        .await
+        .map_err(|error| workspace_problem(error, &instance, request_id.as_ref()))?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+struct CustomRoleBody {
+    /// The custom role to give, or `null` to take the member's custom role away.
+    role_id: Option<String>,
+    expected_version: u64,
+}
+
+#[utoipa::path(put, path = "/api/v1/workspaces/{workspace_id}/members/{membership_id}/custom-role", params(("workspace_id" = String, Path), ("membership_id" = String, Path)), request_body = CustomRoleBody, responses((status = 204)))]
+async fn set_member_custom_role(
+    State(state): State<WorkspaceState>,
+    Path((workspace_id, membership_id)): Path<(String, String)>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<CustomRoleBody>,
+) -> Result<StatusCode, ApiError> {
+    let instance =
+        format!("/api/v1/workspaces/{workspace_id}/members/{membership_id}/custom-role");
+    let session = authenticate(&state, &headers, &instance, request_id.as_ref()).await?;
+    let workspace_id = parse_id(&workspace_id, &instance, request_id.as_ref())?;
+    let membership_id = parse_id(&membership_id, &instance, request_id.as_ref())?;
+    let role_id = optional_id(body.role_id, &instance, request_id.as_ref())?;
+    state
+        .workspaces
+        .set_member_custom_role(
+            workspace_id,
+            session.user.id,
+            membership_id,
+            role_id,
+            body.expected_version,
+            request_id_value(request_id.as_ref()),
+            TimestampMillis::now(),
+        )
+        .await
+        .map_err(|error| workspace_problem(error, &instance, request_id.as_ref()))?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -1842,7 +2124,8 @@ struct InstanceSettingsView {
     storage: StorageView,
     limits: LimitsView,
     mail: InstanceMailView,
-    /// The Google and GitHub OAuth clients that are saved. A provider that is not listed is off.
+    /// The OAuth clients of the sign-in providers that are on: Google and GitHub saved here or set by the
+    /// environment, and OpenID Connect from `ORBIT_OIDC_*`. A provider that is not listed is off.
     sign_in_providers: Vec<SignInProviderView>,
     /// The settings that `ORBIT_*` environment variables set. They replace the saved values, and changing them
     /// here gives 409 `set_by_environment`.
@@ -1866,7 +2149,7 @@ struct EnvironmentView {
     backup_schedule: bool,
     /// `ORBIT_S3_KEEP_DELETED_DAYS`.
     s3_keep_deleted_days: bool,
-    /// `ORBIT_GOOGLE_*`, `ORBIT_GITHUB_*`.
+    /// `ORBIT_GOOGLE_*`, `ORBIT_GITHUB_*`, `ORBIT_OIDC_*`.
     sign_in_providers: Vec<Provider>,
 }
 
@@ -1919,6 +2202,8 @@ struct InstanceMailView {
 struct SignInProviderView {
     provider: Provider,
     client_id: String,
+    /// The OpenID Connect issuer (`ORBIT_OIDC_ISSUER`); `null` for Google and GitHub.
+    issuer: Option<String>,
     /// A client secret is saved. The secret itself is never returned.
     secret_set: bool,
     /// The redirect URI to register at the provider.
@@ -1976,10 +2261,18 @@ async fn settings_view(
         settings.smtp.is_some(),
         !sign_in_providers.is_empty(),
     );
+    let environment = EnvironmentSettings::of(state.identity.database());
     let sign_in_providers = sign_in_providers
         .into_iter()
         .map(|saved| SignInProviderView {
             provider: saved.provider,
+            issuer: match saved.provider {
+                Provider::Oidc => environment
+                    .oidc
+                    .as_ref()
+                    .map(|oidc| oidc.issuer.as_str().trim_end_matches('/').to_owned()),
+                Provider::Google | Provider::Github => None,
+            },
             client_id: saved.client_id,
             secret_set: !saved.client_secret.is_empty(),
             callback_url: saved.provider.callback_url(&state.public_origin),
@@ -2507,10 +2800,39 @@ fn sign_in_provider_not_found(
         StatusCode::NOT_FOUND,
         "provider_not_found",
         "Unknown provider",
-        "Orbit can sign in with google or github.",
+        "Orbit can sign in with google, github or oidc.",
         instance,
         request_id,
     )
+}
+
+/// 409 `set_by_environment` for a provider the environment sets, and 422 `invalid_sign_in_provider` for OpenID
+/// Connect, which only `ORBIT_OIDC_*` sets.
+fn only_saved_here(
+    database: &orbit_platform::Database,
+    provider: Provider,
+    instance: &str,
+    request_id: Option<&Extension<RequestId>>,
+) -> Result<(), ApiError> {
+    let variables = match provider {
+        Provider::Google => "ORBIT_GOOGLE_CLIENT_ID",
+        Provider::Github => "ORBIT_GITHUB_CLIENT_ID",
+        Provider::Oidc => "ORBIT_OIDC_ISSUER",
+    };
+    if EnvironmentSettings::of(database)
+        .sign_in_provider(provider)
+        .is_some()
+    {
+        return Err(set_by_environment(variables, instance, request_id));
+    }
+    if provider == Provider::Oidc {
+        return Err(invalid_sign_in_provider(
+            "OpenID Connect is set with the ORBIT_OIDC_* environment variables, not here.",
+            instance,
+            request_id,
+        ));
+    }
+    Ok(())
 }
 
 /// Saves the OAuth client of a sign-in provider; the sign-in pages offer it from then on. The secret is encrypted
@@ -2528,16 +2850,7 @@ async fn save_sign_in_provider(
     let session = require_root(&state, &headers, instance, rid).await?;
     let provider =
         Provider::parse(&provider).ok_or_else(|| sign_in_provider_not_found(instance, rid))?;
-    if EnvironmentSettings::of(state.identity.database())
-        .sign_in_provider(provider)
-        .is_some()
-    {
-        let variables = match provider {
-            Provider::Google => "ORBIT_GOOGLE_CLIENT_ID",
-            Provider::Github => "ORBIT_GITHUB_CLIENT_ID",
-        };
-        return Err(set_by_environment(variables, instance, rid));
-    }
+    only_saved_here(state.identity.database(), provider, instance, rid)?;
     let client_id = body.client_id.trim();
     if client_id.is_empty() || client_id.len() > 256 {
         return Err(invalid_sign_in_provider(
@@ -2598,16 +2911,7 @@ async fn remove_sign_in_provider(
     let session = require_root(&state, &headers, instance, rid).await?;
     let provider =
         Provider::parse(&provider).ok_or_else(|| sign_in_provider_not_found(instance, rid))?;
-    if EnvironmentSettings::of(state.identity.database())
-        .sign_in_provider(provider)
-        .is_some()
-    {
-        let variables = match provider {
-            Provider::Google => "ORBIT_GOOGLE_CLIENT_ID",
-            Provider::Github => "ORBIT_GITHUB_CLIENT_ID",
-        };
-        return Err(set_by_environment(variables, instance, rid));
-    }
+    only_saved_here(state.identity.database(), provider, instance, rid)?;
     InstanceSettingsRepository::new(state.identity.database().clone())
         .remove_sign_in_provider(
             session.user.id,
@@ -3963,6 +4267,22 @@ fn workspace_problem(
             "workspace_conflict",
             "Workspace conflict",
             "The workspace operation conflicts with its current state.",
+            instance,
+            request_id,
+        ),
+        WorkspaceError::InvalidRole(detail) => ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_role",
+            "Invalid role",
+            detail,
+            instance,
+            request_id,
+        ),
+        WorkspaceError::RoleNameTaken => ApiError::new(
+            StatusCode::CONFLICT,
+            "role_name_taken",
+            "Role name taken",
+            "A role with that name exists in this workspace.",
             instance,
             request_id,
         ),

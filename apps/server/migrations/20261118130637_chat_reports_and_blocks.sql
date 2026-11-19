@@ -1,45 +1,38 @@
--- GitHub user access tokens for PR review: the app's OAuth client, one connection for each member, and the
--- single-use states of the OAuth web flow. Apps registered before this have no client and must be re-created.
-ALTER TABLE github_apps ADD COLUMN client_id TEXT;
--- The origin the app was registered from: its OAuth callback URL lives there.
-ALTER TABLE github_apps ADD COLUMN callback_origin TEXT;
-ALTER TABLE github_apps ADD COLUMN client_secret_encrypted BLOB;
-
-CREATE TABLE github_user_connections (
-    workspace_id TEXT NOT NULL REFERENCES github_apps(workspace_id) ON DELETE CASCADE,
-    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    github_user_id INTEGER NOT NULL,
-    login TEXT NOT NULL,
-    access_token_encrypted BLOB NOT NULL,
-    access_expires_at INTEGER,
-    refresh_token_encrypted BLOB,
-    refresh_expires_at INTEGER,
-    broken INTEGER NOT NULL DEFAULT 0 CHECK (broken IN (0, 1)),
+-- SQLite. Postgres: postgres/20261118130637_chat_reports_and_blocks.sql.
+--
+-- App Store guideline 1.2 (user content). A member reports a chat message: the report keeps a copy
+-- of the body, so the people who act on it can read it after an edit or a delete, and also when
+-- they cannot read the conversation (a DM). The members who can manage chat get an inbox
+-- notification (kind `chat_reported`). A user blocks another user: the blocker's chat hides the
+-- blocked person's messages, and the blocked person cannot open or write a DM with the blocker.
+CREATE TABLE chat_message_reports (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    conversation_id TEXT NOT NULL REFERENCES chat_conversations(id) ON DELETE CASCADE,
+    message_id TEXT REFERENCES chat_messages(id) ON DELETE SET NULL,
+    reporter_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    author_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    reason TEXT NOT NULL CHECK (reason IN ('spam', 'harassment', 'inappropriate', 'other')),
+    note TEXT NOT NULL DEFAULT '' CHECK (length(note) <= 500),
+    body TEXT NOT NULL,
     created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL,
-    PRIMARY KEY (workspace_id, user_id),
-    UNIQUE (workspace_id, github_user_id),
-    FOREIGN KEY (workspace_id, user_id) REFERENCES memberships(workspace_id, user_id) ON DELETE CASCADE
+    UNIQUE (message_id, reporter_id)
 );
 
-CREATE TABLE github_user_authorizations (
-    state_hash BLOB PRIMARY KEY,
-    workspace_id TEXT NOT NULL REFERENCES github_apps(workspace_id) ON DELETE CASCADE,
-    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    code_verifier_encrypted BLOB NOT NULL,
-    client TEXT NOT NULL CHECK (client IN ('web', 'mobile')),
-    return_url TEXT,
-    -- After GitHub's callback: its code, and the hash of the one-time token the signed-in member finishes with.
-    code_encrypted BLOB,
-    finish_hash BLOB,
-    expires_at INTEGER NOT NULL
-);
-CREATE INDEX github_user_authorizations_expiry ON github_user_authorizations (expires_at);
-CREATE UNIQUE INDEX github_user_authorizations_finish ON github_user_authorizations (finish_hash);
+CREATE INDEX chat_message_reports_workspace ON chat_message_reports (workspace_id, created_at);
+CREATE INDEX chat_message_reports_conversation ON chat_message_reports (conversation_id);
+CREATE INDEX chat_message_reports_reporter ON chat_message_reports (reporter_id);
+CREATE INDEX chat_message_reports_author ON chat_message_reports (author_id);
 
--- GitHub pull request notices in the inbox: a review was requested, a review came in on your pull request, your
--- pull request was merged. Push for them can be turned off with one setting.
-ALTER TABLE notification_prefs ADD COLUMN github INTEGER NOT NULL DEFAULT 1 CHECK (github IN (0, 1));
+CREATE TABLE user_blocks (
+    blocker_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    blocked_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (blocker_id, blocked_id),
+    CHECK (blocker_id <> blocked_id)
+);
+
+CREATE INDEX user_blocks_blocked ON user_blocks (blocked_id);
 
 -- The kind CHECK changes, so the table is rebuilt as in 0082.
 PRAGMA defer_foreign_keys = ON;
@@ -55,8 +48,7 @@ CREATE TABLE notifications (
     kind TEXT NOT NULL
         CHECK (kind IN ('task_assigned', 'comment_mentioned', 'description_mentioned',
                         'page_comment_mentioned', 'page_mentioned', 'chat_mentioned',
-                        'import_finished', 'github_review_requested', 'github_review',
-                        'github_merged')),
+                        'import_finished', 'chat_reported')),
     task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE,
     comment_id TEXT REFERENCES task_comments(id) ON DELETE CASCADE,
     page_id TEXT REFERENCES pages(id) ON DELETE CASCADE,
@@ -72,17 +64,8 @@ CREATE TABLE notifications (
     import_source TEXT CHECK (import_source IN ('asana', 'linear', 'trello', 'notion', 'obsidian')),
     import_id TEXT,
     import_status TEXT CHECK (import_status IN ('completed', 'failed')),
-    -- GitHub pull request notices: the repository (`owner/repo`), the number, who acted on GitHub (their login:
-    -- they may have no Orbit account), the review's result and the comment to open.
-    github_repository TEXT,
-    github_pull_number INTEGER,
-    github_actor_login TEXT,
-    github_review_state TEXT CHECK (github_review_state IN ('approved', 'changes_requested', 'commented')),
-    github_comment_id INTEGER,
-    CHECK ((kind LIKE 'github_%') = (github_repository IS NOT NULL)),
-    CHECK ((github_repository IS NULL) = (github_pull_number IS NULL)),
-    CHECK ((github_repository IS NULL) = (github_actor_login IS NULL)),
-    CHECK ((kind = 'github_review') = (github_review_state IS NOT NULL)),
+    chat_report_id TEXT REFERENCES chat_message_reports(id) ON DELETE CASCADE,
+    CHECK ((kind = 'chat_reported') = (chat_report_id IS NOT NULL)),
     CHECK ((kind = 'chat_mentioned') = (chat_conversation_id IS NOT NULL)),
     CHECK ((kind = 'import_finished') = (import_id IS NOT NULL)),
     CHECK ((import_id IS NULL) = (import_source IS NULL) AND (import_id IS NULL) = (import_status IS NULL)),
@@ -99,7 +82,7 @@ CREATE TABLE notifications (
         OR (kind = 'page_mentioned'
             AND task_id IS NULL AND comment_id IS NULL
             AND page_id IS NOT NULL AND page_thread_id IS NULL AND page_comment_id IS NULL)
-        OR (kind IN ('chat_mentioned', 'import_finished', 'github_review_requested', 'github_review', 'github_merged')
+        OR (kind IN ('chat_mentioned', 'import_finished', 'chat_reported')
             AND task_id IS NULL AND comment_id IS NULL
             AND page_id IS NULL AND page_thread_id IS NULL AND page_comment_id IS NULL
             AND page_block_id IS NULL)
@@ -140,6 +123,7 @@ CREATE INDEX notifications_page_mentions ON notifications (page_id, recipient_us
     WHERE kind = 'page_mentioned';
 
 CREATE INDEX notifications_unpushed ON notifications (id) WHERE pushed_at IS NULL;
+CREATE INDEX notifications_chat_report ON notifications (chat_report_id);
 
 CREATE TRIGGER notifications_validate_scope_insert
 BEFORE INSERT ON notifications

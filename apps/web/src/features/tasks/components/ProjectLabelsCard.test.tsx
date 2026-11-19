@@ -13,7 +13,7 @@ const otherProjectLabel = { ...label, id: 'label-2', project_id: 'project-2', na
 
 afterEach(() => { globalThis.fetch = originalFetch })
 
-function renderPage() {
+function renderPage(readOnly = false) {
   const requests: Request[] = []
   globalThis.fetch = mock(async (input: RequestInfo | URL, init?: RequestInit) => {
     const request = new Request(input, init)
@@ -25,7 +25,7 @@ function renderPage() {
   }) as unknown as typeof fetch
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
   const workspace = testWorkspace('member')
-  const view = render(<QueryClientProvider client={client}><WorkspaceContext.Provider value={{ workspace, workspaces: [workspace], selectWorkspace: () => {} }}><ProjectLabelsCard projectId="project-1" /></WorkspaceContext.Provider></QueryClientProvider>)
+  const view = render(<QueryClientProvider client={client}><WorkspaceContext.Provider value={{ workspace, workspaces: [workspace], selectWorkspace: () => {} }}><ProjectLabelsCard projectId="project-1" readOnly={readOnly} /></WorkspaceContext.Provider></QueryClientProvider>)
   return { view, requests }
 }
 
@@ -67,4 +67,12 @@ test('the card lists and creates only the labels of its project', async () => {
   const request = requests.find((item) => item.method === 'POST')!
   expect(new URL(request.url).pathname).toBe('/api/v1/workspaces/workspace-1/projects/project-1/labels')
   expect(await request.json()).toEqual({ name: 'Docs', color: '#5e6ad2' })
+})
+
+test('read-only, the card lists the labels without create, edit or delete', async () => {
+  const { view } = renderPage(true)
+  expect(await view.findByText('Bug')).toBeTruthy()
+  expect(view.queryByLabelText('Label name')).toBeNull()
+  expect(view.queryByRole('button', { name: 'Edit Bug' })).toBeNull()
+  expect(view.queryByRole('button', { name: 'Delete Bug' })).toBeNull()
 })

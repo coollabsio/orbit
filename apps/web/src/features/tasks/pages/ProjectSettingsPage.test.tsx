@@ -16,7 +16,7 @@ const status = (id: string, name: string, category: string, position: number) =>
   id, workspace_id: 'workspace-1', project_id: 'project-1', name, description: '', color: '#8b8f98', category, position, version: 1,
 })
 
-function renderSettings(projectOverrides: Record<string, unknown> = {}, calls: Array<{ method: string; body: unknown }> = []) {
+function renderSettings(section: string, projectOverrides: Record<string, unknown> = {}, calls: Array<{ method: string; body: unknown }> = [], viewer = workspace) {
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const request = input as Request
     const path = new URL(request.url).pathname
@@ -35,9 +35,9 @@ function renderSettings(projectOverrides: Record<string, unknown> = {}, calls: A
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={client}>
-      <WorkspaceContext.Provider value={{ workspace, workspaces: [workspace], selectWorkspace: () => {} }}>
-        <MemoryRouter initialEntries={['/tasks/projects/project-1/settings']}>
-          <Routes><Route path="/tasks/projects/:projectId/settings" element={<ProjectSettingsPage />} /></Routes>
+      <WorkspaceContext.Provider value={{ workspace: viewer, workspaces: [viewer], selectWorkspace: () => {} }}>
+        <MemoryRouter initialEntries={[`/tasks/projects/project-1/settings/${section}`]}>
+          <Routes><Route path="/tasks/projects/:projectId/settings/:section?" element={<ProjectSettingsPage />} /></Routes>
         </MemoryRouter>
       </WorkspaceContext.Provider>
     </QueryClientProvider>,
@@ -45,7 +45,7 @@ function renderSettings(projectOverrides: Record<string, unknown> = {}, calls: A
 }
 
 test('the Duplicate status is a locked system status: renamable, not deletable, no siblings', async () => {
-  const view = renderSettings()
+  const view = renderSettings('statuses')
   expect(await view.findByRole('img', { name: 'System status' })).toBeTruthy()
   expect(view.queryByRole('button', { name: 'Add duplicate status' })).toBeNull()
   expect(view.getByRole('button', { name: 'Add unstarted status' })).toBeTruthy()
@@ -56,7 +56,7 @@ test('the Duplicate status is a locked system status: renamable, not deletable, 
 }, 20000)
 
 test('the last regular status still cannot be deleted even though Duplicate exists', async () => {
-  const view = renderSettings()
+  const view = renderSettings('statuses')
   fireEvent.click(await view.findByRole('button', { name: 'Todo actions' }))
   const remove = await view.findByRole('menuitem', { name: /Delete/ }, { timeout: 5000 })
   expect(remove.hasAttribute('data-disabled')).toBe(true)
@@ -64,7 +64,7 @@ test('the last regular status still cannot be deleted even though Duplicate exis
 
 test('sub-issue automations show the saved settings and save a switch at once', async () => {
   const calls: Array<{ method: string; body: unknown }> = []
-  const view = renderSettings({ auto_close_parent: true, auto_close_sub_issues: false }, calls)
+  const view = renderSettings('sub-issues', { auto_close_parent: true, auto_close_sub_issues: false }, calls)
   const closeParent = await view.findByRole('switch', { name: 'Close parent when all sub-issues are done' })
   const closeChildren = view.getByRole('switch', { name: 'Close open sub-issues when parent is closed' })
   expect(closeParent.getAttribute('aria-checked')).toBe('true')
@@ -104,8 +104,8 @@ test('a second toggle right after the first carries the version the PATCH just r
   const view = render(
     <QueryClientProvider client={client}>
       <WorkspaceContext.Provider value={{ workspace, workspaces: [workspace], selectWorkspace: () => {} }}>
-        <MemoryRouter initialEntries={['/tasks/projects/project-1/settings']}>
-          <Routes><Route path="/tasks/projects/:projectId/settings" element={<ProjectSettingsPage />} /></Routes>
+        <MemoryRouter initialEntries={['/tasks/projects/project-1/settings/sub-issues']}>
+          <Routes><Route path="/tasks/projects/:projectId/settings/:section?" element={<ProjectSettingsPage />} /></Routes>
         </MemoryRouter>
       </WorkspaceContext.Provider>
     </QueryClientProvider>,
@@ -152,8 +152,8 @@ test('two quick toggles while the first save is in flight both persist, one PATC
   const view = render(
     <QueryClientProvider client={client}>
       <WorkspaceContext.Provider value={{ workspace, workspaces: [workspace], selectWorkspace: () => {} }}>
-        <MemoryRouter initialEntries={['/tasks/projects/project-1/settings']}>
-          <Routes><Route path="/tasks/projects/:projectId/settings" element={<ProjectSettingsPage />} /></Routes>
+        <MemoryRouter initialEntries={['/tasks/projects/project-1/settings/sub-issues']}>
+          <Routes><Route path="/tasks/projects/:projectId/settings/:section?" element={<ProjectSettingsPage />} /></Routes>
         </MemoryRouter>
       </WorkspaceContext.Provider>
     </QueryClientProvider>,
@@ -179,4 +179,30 @@ test('two quick toggles while the first save is in flight both persist, one PATC
   ])
   await waitFor(() => expect(closeParent.getAttribute('aria-checked')).toBe('false'))
   expect(closeChildren.getAttribute('aria-checked')).toBe('true')
+}, 20000)
+
+const READ_ONLY_NOTE = 'You can view these settings. Changing them needs permission to manage this project.'
+
+test('without projects.manage the statuses are listed read-only', async () => {
+  const view = renderSettings('statuses', {}, [], testWorkspace('member'))
+  expect(await view.findByText('Todo')).toBeTruthy()
+  expect(view.getByText(READ_ONLY_NOTE)).toBeTruthy()
+  expect(view.queryByRole('button', { name: 'Add unstarted status' })).toBeNull()
+  expect(view.queryByRole('button', { name: 'Todo actions' })).toBeNull()
+}, 20000)
+
+test('without projects.manage the general fields and sub-issue switches are disabled', async () => {
+  const general = renderSettings('general', {}, [], testWorkspace('member'))
+  expect((await general.findByLabelText('Name')).hasAttribute('disabled')).toBe(true)
+  expect(general.getByText(READ_ONLY_NOTE)).toBeTruthy()
+  general.unmount()
+  const subIssues = renderSettings('sub-issues', {}, [], testWorkspace('member'))
+  const toggle = await subIssues.findByRole('switch', { name: 'Close parent when all sub-issues are done' })
+  expect(toggle.getAttribute('aria-disabled') === 'true' || toggle.hasAttribute('data-disabled') || toggle.hasAttribute('disabled')).toBe(true)
+}, 20000)
+
+test('a project grant of projects.manage makes the settings editable for a member', async () => {
+  const view = renderSettings('statuses', {}, [], testWorkspace('member', { project_permissions: [{ project_id: 'project-1', permissions: ['projects.manage'] }] }))
+  expect(await view.findByRole('button', { name: 'Add unstarted status' })).toBeTruthy()
+  expect(view.queryByText(READ_ONLY_NOTE)).toBeNull()
 }, 20000)

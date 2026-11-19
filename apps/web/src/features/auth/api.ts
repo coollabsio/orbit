@@ -6,6 +6,7 @@ import { disablePushForSignOut } from '@/features/realtime/push'
 import { clearViewSessionEdits } from '@/features/views/useViewState'
 import { clearLocalCache, withinTime } from '@/lib/localCache'
 import { connectionRetryDelay, retryConnectionFailure } from '@/lib/connection'
+import { PROVIDER_NAMES } from '@/features/auth/providerSignIn'
 import {
   authOptions,
   changePassword,
@@ -13,6 +14,7 @@ import {
   deleteAccount,
   disconnectConnectedAccount,
   exchangeProviderSignIn,
+  finishAppPasskeySignIn,
   finishPasskeyLogin,
   linkProviderSignIn,
   listConnectedAccounts,
@@ -154,6 +156,25 @@ export function usePasskeyLogin() {
       return required(data, 'Login response was empty.')
     },
     onSuccess: signedIn,
+  })
+}
+
+/**
+ * The browser step of the Orbit app's passkey sign-in (`/login/app`): the same ceremony, but the server signs nobody in
+ * here. It answers with the app's redirect and a one-time handoff, which only the app that started can use.
+ */
+export function useAppPasskeySignIn() {
+  return useMutation({
+    mutationFn: async (flow: string) => {
+      const { data: challenge } = await startPasskeyLogin({ client: apiClient, throwOnError: true })
+      const credential = await getPasskey(required(challenge, 'Passkey challenge was empty.').options)
+      const { data } = await finishAppPasskeySignIn({
+        client: apiClient,
+        body: { flow, challenge_token: challenge.challenge_token, credential },
+        throwOnError: true,
+      })
+      return required(data, 'Sign-in response was empty.').redirect_url
+    },
   })
 }
 
@@ -309,6 +330,12 @@ export function useAuthOptions() {
       return data
     },
   })
+}
+
+/** The label of a provider on buttons and rows: the OpenID Connect one is the server's `ORBIT_OIDC_DISPLAY_NAME`. */
+export function useProviderName(): (provider: Provider) => string {
+  const oidcName = useAuthOptions().data?.oidc_name
+  return (provider) => (provider === 'oidc' && oidcName) || PROVIDER_NAMES[provider]
 }
 
 export function useRequestRegistration() {

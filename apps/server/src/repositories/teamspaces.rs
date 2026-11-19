@@ -1,7 +1,8 @@
 //! Docs teamspaces: shared page spaces inside a workspace. Every member sees, creates and renames
 //! them; owners and admins delete them, and only while they hold no live pages. The default
 //! teamspace is derived, never stored: the lowest `(position, id)` in the workspace, so moving a
-//! teamspace to the top makes it the default.
+//! teamspace to the top makes it the default. A teamspace can hold the docs of one project
+//! (`project_id`, #64); the others hold the workspace's global docs.
 
 use orbit_domain::Permission;
 use orbit_platform::{Database, Flag, Id, Row, TimestampMillis};
@@ -11,13 +12,15 @@ use sqlx::{Any, Transaction};
 use thiserror::Error;
 use utoipa::ToSchema;
 
-use super::tasks::{TaskError, record_mutation, require_access, require_access_tx};
+use super::tasks::{
+    TaskError, record_mutation, require_access, require_access_tx, require_project_tx,
+};
 use super::workspaces::{WorkspaceError, require_permission};
 
 /// Name of the teamspace every new workspace starts with.
 pub const DEFAULT_TEAMSPACE_NAME: &str = "General";
 const TEAMSPACE_COLUMNS: &str =
-    "id, workspace_id, name, icon, position, version, created_at, updated_at";
+    "id, workspace_id, name, icon, position, version, project_id, created_at, updated_at";
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
 #[schema(as = Teamspace)]
@@ -31,6 +34,10 @@ pub struct TeamspaceRecord {
     pub icon: Option<String>,
     pub position: i64,
     pub version: u64,
+    /// The project whose docs this teamspace holds; `null` for global docs. The project may be
+    /// trashed or not visible to the caller.
+    #[schema(value_type = Option<String>, required = true)]
+    pub project_id: Option<Id>,
     /// True for the workspace's first teamspace by position; new root pages go there by default.
     pub is_default: bool,
     #[schema(value_type = String, format = DateTime)]
@@ -44,11 +51,12 @@ pub struct TeamspaceList {
     pub items: Vec<TeamspaceRecord>,
 }
 
-/// `None` leaves a field unchanged; `Some(None)` clears the icon.
+/// `None` leaves a field unchanged; `Some(None)` clears the icon or the project.
 #[derive(Clone, Debug, Default)]
 pub struct TeamspaceChanges {
     pub name: Option<String>,
     pub icon: Option<Option<String>>,
+    pub project_id: Option<Option<Id>>,
 }
 
 #[derive(Debug, Error)]
@@ -61,6 +69,10 @@ pub enum TeamspaceError {
     NotEmpty,
     #[error("the last teamspace of a workspace cannot be deleted")]
     LastTeamspace,
+    #[error("the project does not exist or is not visible")]
+    ProjectNotFound,
+    #[error("the project already has a teamspace")]
+    ProjectTaken,
     #[error("stale version")]
     VersionConflict { current: Box<Value> },
     #[error("stored teamspace data is invalid")]
@@ -164,6 +176,7 @@ impl TeamspaceRepository {
             icon,
             position,
             version: 0,
+            project_id: None,
             is_default,
             created_at: now,
             updated_at: now,
@@ -187,12 +200,32 @@ impl TeamspaceRepository {
         check_version(expected_version, &current)?;
         let name = changes.name.unwrap_or_else(|| current.name.clone());
         let icon = changes.icon.unwrap_or_else(|| current.icon.clone());
+        let project_id = changes.project_id.unwrap_or(current.project_id);
+        if let Some(project_id) = project_id.filter(|id| current.project_id != Some(*id)) {
+            require_project_tx(&mut tx, workspace_id, project_id, actor_id)
+                .await
+                .map_err(|error| match error {
+                    TaskError::Unavailable(error) => TeamspaceError::Unavailable(error),
+                    _ => TeamspaceError::ProjectNotFound,
+                })?;
+            let Flag(taken) = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM teamspaces WHERE project_id = $1 AND id <> $2)",
+            )
+            .bind(project_id.to_string())
+            .bind(teamspace_id.to_string())
+            .fetch_one(&mut *tx)
+            .await?;
+            if taken {
+                return Err(TeamspaceError::ProjectTaken);
+            }
+        }
         sqlx::query(
-            "UPDATE teamspaces SET name = $1, icon = $2, updated_at = $3, version = version + 1 \
-             WHERE id = $4 AND workspace_id = $5 AND version = $6",
+            "UPDATE teamspaces SET name = $1, icon = $2, project_id = $3, updated_at = $4, \
+             version = version + 1 WHERE id = $5 AND workspace_id = $6 AND version = $7",
         )
         .bind(&name)
         .bind(&icon)
+        .bind(project_id.map(|id| id.to_string()))
         .bind(now.as_millis())
         .bind(teamspace_id.to_string())
         .bind(workspace_id.to_string())
@@ -214,6 +247,7 @@ impl TeamspaceRepository {
         Ok(TeamspaceRecord {
             name,
             icon,
+            project_id,
             version: current.version + 1,
             updated_at: now,
             ..current
@@ -492,6 +526,10 @@ fn teamspace_from_row(
         position: row.get("position"),
         version: u64::try_from(row.get::<i64, _>("version"))
             .map_err(|_| TeamspaceError::Corrupt)?,
+        project_id: row
+            .get::<Option<String>, _>("project_id")
+            .map(parse_id)
+            .transpose()?,
         is_default,
         created_at: TimestampMillis::from_millis(row.get("created_at")),
         updated_at: TimestampMillis::from_millis(row.get("updated_at")),

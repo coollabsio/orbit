@@ -1280,7 +1280,7 @@ async fn docs_and_chat_require_explicit_scopes_and_doc_writes_need_docs_write() 
     send(outsider, secret_channel.value.id, "secret pineapple plan").await;
     f.app = router(
         McpState::new(Arc::new(f.tokens.clone()), Arc::new(f.tasks.clone()))
-            .with_content(pages, chat),
+            .with_content(pages.clone(), chat),
         "https://orbit.test",
     );
     for name in ["list_docs", "list_conversations", "search_messages"] {
@@ -1294,6 +1294,60 @@ async fn docs_and_chat_require_explicit_scopes_and_doc_writes_need_docs_write() 
         .unwrap();
     let docs = f.tool("list_docs", json!({})).await;
     assert!(docs.to_string().contains("MCP document"), "{docs}");
+    // With project_id: the global docs and that project's teamspace, not other projects' docs.
+    for (name, project) in [
+        ("Approved docs", f.project),
+        ("Other docs", f.other_project),
+    ] {
+        let teamspace = Id::new_v7();
+        sqlx::query(
+            "INSERT INTO teamspaces (id, workspace_id, name, position, version, project_id, created_at, updated_at) \
+             VALUES ($1, $2, $3, 5, 0, $4, 1, 1)",
+        )
+        .bind(teamspace.to_string())
+        .bind(f.workspace.to_string())
+        .bind(name)
+        .bind(project.to_string())
+        .execute(f.database.pool())
+        .await
+        .unwrap();
+        pages
+            .create_page(
+                f.workspace,
+                f.user,
+                CreatePage {
+                    kind: orbit_server::repositories::pages::PageKind::Page,
+                    parent_id: None,
+                    space: SpaceRequest {
+                        teamspace_id: Some(teamspace),
+                        private: None,
+                    },
+                    title: format!("{name} page"),
+                    icon: None,
+                    position: None,
+                },
+                "test",
+                TimestampMillis::now(),
+            )
+            .await
+            .unwrap();
+    }
+    let all = f.tool("list_docs", json!({})).await.to_string();
+    assert!(
+        all.contains("Approved docs page") && all.contains("Other docs page"),
+        "{all}"
+    );
+    let scoped = f
+        .tool("list_docs", json!({"project_id": f.project}))
+        .await
+        .to_string();
+    assert!(scoped.contains("MCP document"), "{scoped}");
+    assert!(scoped.contains("Approved docs page"), "{scoped}");
+    assert!(!scoped.contains("Other docs page"), "{scoped}");
+    let denied = f
+        .tool("list_docs", json!({"project_id": f.other_project}))
+        .await;
+    assert_eq!(denied["result"]["isError"], true, "{denied}");
     let doc = f.tool("get_doc", json!({"page_id": page.id})).await;
     assert_eq!(
         doc["result"]["structuredContent"]["title"], "MCP document",

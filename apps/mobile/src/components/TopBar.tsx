@@ -8,10 +8,11 @@ import { isGuestRole } from '../data/guest'
 import { useOrbit } from '../orbit-context'
 import { useUnreadNotifications } from '../queries'
 import { alpha, useTheme } from '../theme'
-import { Avatar, Icon, PickerSheet, Text } from '../ui'
+import { Avatar, Icon, Text } from '../ui'
 import { logo } from '../ui/icons.gen'
 import { AccountMenu } from './AccountMenu'
 import { useOpenDrawer } from './Drawer'
+import { WorkspaceSheet } from './WorkspaceSheet'
 
 /**
  * The web's phone `Topbar`: logo, workspace switcher, Activity, account menu and the button that opens the drawer.
@@ -21,7 +22,7 @@ export function TopBar() {
   const { colors, scheme } = useTheme()
   const insets = useSafeAreaInsets()
   const openDrawer = useOpenDrawer()
-  const { user, workspace, workspaces, selectWorkspace } = useOrbit()
+  const { user, workspace } = useOrbit()
   const pathname = usePathname()
   // a guest has Chat and its account settings only: no Activity
   const guest = isGuestRole(workspace.role)
@@ -81,16 +82,7 @@ export function TopBar() {
         </Pressable>
       </View>
       <AccountMenu visible={accountOpen} onClose={() => setAccountOpen(false)} onNavigate={(href) => router.navigate(href)} />
-      <PickerSheet
-        visible={switching}
-        title="Workspaces"
-        options={workspaces.map((item) => ({ key: item.id, label: item.name, subtitle: item.role, selected: item.id === workspace.id }))}
-        onSelect={(id) => {
-          setSwitching(false)
-          selectWorkspace(id)
-        }}
-        onClose={() => setSwitching(false)}
-      />
+      <WorkspaceSheet visible={switching} onClose={() => setSwitching(false)} />
     </View>
   )
 }

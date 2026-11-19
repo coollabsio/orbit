@@ -2,12 +2,11 @@ import { useState } from 'react'
 import type { Provider } from '@orbit/api/generated/types.gen'
 import { ApiProblem } from '@orbit/api/problem'
 import { Button } from '@/components/ui/button'
-import { useLinkProviderSignIn } from '@/features/auth/api'
+import { useLinkProviderSignIn, useProviderName } from '@/features/auth/api'
 import { AuthForm, AuthInput } from '@/features/auth/components/AuthForm'
-import { PROVIDER_NAMES } from '@/features/auth/providerSignIn'
 
 /**
- * The password step when a Google or GitHub account first connects to an existing Orbit account by its email.
+ * The password step when a provider account first connects to an existing Orbit account by its email.
  * `onTwoFactor` gets the code challenge when the account has two-factor sign-in on. `onBack` gets the reason when
  * the step expired or was used up, and `null` when the person pressed Back.
  */
@@ -21,7 +20,7 @@ export function LinkPasswordStep({ token, provider, email, onSignedIn, onTwoFact
 }) {
   const link = useLinkProviderSignIn()
   const [password, setPassword] = useState('')
-  const name = PROVIDER_NAMES[provider]
+  const name = useProviderName()(provider)
   return (
     <AuthForm
       title={`Connect ${name}`}

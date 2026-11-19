@@ -44,6 +44,8 @@ Orbit reads its configuration only from environment variables that start with `O
 | `ORBIT_APNS_KEY_ID` | none | The 10-character key ID of the APNs key. |
 | `ORBIT_APNS_TEAM_ID` | none | The 10-character team ID of the Apple developer account. |
 | `ORBIT_APNS_TOPIC` | `io.coollabs.orbit` | The bundle ID of the iOS app. |
+| `ORBIT_FCM_SERVICE_ACCOUNT` | none (Android pushes off) | The JSON key of a Google service account of the Firebase project, for native Android push notifications. See [Android push notifications (FCM)](#android-push-notifications-fcm). |
+| `ORBIT_FCM_SERVICE_ACCOUNT_FILE` | none | The path of a file that contains the service account key, instead of `ORBIT_FCM_SERVICE_ACCOUNT`. Do not set both. |
 
 Create the app key once with `openssl rand -base64 32` and keep a copy outside the server. Orbit does not start without it. See [Email, registration and the app key](#email-registration-and-the-app-key).
 
@@ -76,6 +78,9 @@ The variables of one group are set together. For example, `ORBIT_SMTP_HOST` need
 | `ORBIT_OPEN_REGISTRATION` | saved value | `true` or `false`. `true` requires `ORBIT_SMTP_*` or a provider variable below. On Orbit Cloud, it requires `ORBIT_SMTP_*`. |
 | `ORBIT_GOOGLE_CLIENT_ID`, `ORBIT_GOOGLE_CLIENT_SECRET`, `ORBIT_GOOGLE_CLIENT_SECRET_FILE` | none | The Google OAuth client. Set the ID and the secret together. See [Sign in with Google and GitHub](#sign-in-with-google-and-github). |
 | `ORBIT_GITHUB_CLIENT_ID`, `ORBIT_GITHUB_CLIENT_SECRET`, `ORBIT_GITHUB_CLIENT_SECRET_FILE` | none | The GitHub OAuth client. Set the ID and the secret together. |
+| `ORBIT_OIDC_ISSUER` | none | The issuer URL of an OpenID Connect provider, for example `https://auth.example.com/application/o/orbit/`. Requires `ORBIT_OIDC_CLIENT_ID` and `ORBIT_OIDC_CLIENT_SECRET`. See [Sign in with OpenID Connect](#sign-in-with-openid-connect). |
+| `ORBIT_OIDC_CLIENT_ID`, `ORBIT_OIDC_CLIENT_SECRET`, `ORBIT_OIDC_CLIENT_SECRET_FILE` | none | The client that the provider issued to Orbit. |
+| `ORBIT_OIDC_DISPLAY_NAME` | `SSO` | The name on the sign-in button ("Continue with SSO"), at most 50 characters. |
 
 Orbit does not test the `ORBIT_S3_*` bucket at startup, as Admin does when it saves one. An unreachable bucket shows up as a move error on **Admin → Storage** and as failed backups. Orbit refuses to start when a workspace's own bucket overlaps the `ORBIT_S3_*` bucket.
 
@@ -200,6 +205,20 @@ One key sends to both APNs hosts: the app tells the server whether its device to
 
 A phone gets pushes like a browser: only while the session that registered it is valid, and not while the person is active in an open tab or in the app (its live connection). Revoking or deleting the session stops them. APNs answers for a token that is no longer valid (`410`, `BadDeviceToken`, `DeviceTokenNotForTopic`) remove the phone; the app registers it again when it starts. Other refusals (for example `403 InvalidProviderToken` for a wrong key ID or team ID) are logged as `APNs push not sent` and keep the phone.
 
+## Android push notifications (FCM)
+
+The Android app gets notifications through Firebase Cloud Messaging (FCM HTTP v1) only when the server has a service account key of the Firebase project. The server sends to FCM directly. It does not use the Expo push service.
+
+The app and the server must use the same Firebase project: the app gets its token from the project in its `google-services.json` (see "Android push (FCM)" in `apps/mobile/README.md`). On a self-hosted server with the Orbit app from Google Play, native push does not work for the same reason as on iOS. Android users can still turn on notifications in Orbit in Chrome (Web Push).
+
+1. In the [Firebase console](https://console.firebase.google.com/), open the project, then **Project settings → Service accounts**. Click **Generate new private key** and download the JSON file. Keep it secret: it gives access to the project.
+2. Set `ORBIT_FCM_SERVICE_ACCOUNT_FILE` to the path of that file (or `ORBIT_FCM_SERVICE_ACCOUNT` to its text). The server reads the project ID from the file.
+3. Restart Orbit. `orbit config show` shows `ORBIT_FCM_SERVICE_ACCOUNT=[REDACTED]`. Orbit does not start when the file is not a service account key (it needs `project_id`, `client_email` and an RSA `private_key`). The error message does not show the key.
+
+The server signs a JWT with the key and gets an OAuth 2 access token from Google (scope `firebase.messaging`). It keeps the token until shortly before it expires. Without a service account, the app's registration (`POST /api/v1/push/fcm`) answers `503 push_not_configured`, and Web Push works as before.
+
+An Android phone gets pushes as an iPhone does: only while the session that registered it is valid, and not while the person is active in an open tab or in the app. FCM answers for a token that is no longer valid (`UNREGISTERED`, `INVALID_ARGUMENT` for the token, `SENDER_ID_MISMATCH`) remove the phone. The app registers it again when it starts. Other refusals (for example `403 PERMISSION_DENIED` when the service account cannot send) are logged as `FCM push not sent` and keep the phone.
+
 ## Sign in with Google and GitHub
 
 People can sign in with a Google or GitHub account when the root user configures the provider. A provider that is not configured does not show on the sign-in pages.
@@ -234,9 +253,28 @@ Orbit uses these rules:
 - An account with two-factor authentication must still enter its code after the provider sign-in.
 - People connect and disconnect providers in their security settings. Orbit does not let a person remove the last sign-in method (password, passkey or provider).
 
+## Sign in with OpenID Connect
+
+People can sign in with your own identity provider, for example Authentik, Keycloak, Authelia, Zitadel or Pocket ID. Orbit supports one OpenID Connect provider. Only the `ORBIT_OIDC_*` variables configure it, so **Admin → Sign-in providers** shows it read-only.
+
+1. At the identity provider, create a confidential client (an OAuth2/OpenID Connect application with a client secret) that uses the authorization code flow.
+2. Add this redirect URI: `{ORBIT_PUBLIC_ORIGIN}/api/v1/auth/providers/oidc/callback`.
+3. Allow the scopes `openid`, `email` and `profile`.
+4. Set `ORBIT_OIDC_ISSUER`, `ORBIT_OIDC_CLIENT_ID` and `ORBIT_OIDC_CLIENT_SECRET` (or `ORBIT_OIDC_CLIENT_SECRET_FILE`). Optionally, set `ORBIT_OIDC_DISPLAY_NAME`. Restart Orbit.
+
+`ORBIT_OIDC_ISSUER` must be the `issuer` value of the provider's `{issuer}/.well-known/openid-configuration` document; Orbit refuses a document that names another issuer. Orbit reads this document at each sign-in, so it gets the endpoints of the provider, and a provider that is not available at startup does not stop Orbit. The provider must have a userinfo endpoint. Orbit sends the client secret with HTTP Basic authentication (`client_secret_basic`). It uses `client_secret_post` only when the provider does not support Basic.
+
+The rules of [Sign in with Google and GitHub](#sign-in-with-google-and-github) apply, with these details:
+
+- Orbit identifies an account by the issuer and the `sub` claim together. If you change `ORBIT_OIDC_ISSUER`, the existing connections do not apply. At the next sign-in, people connect again with a verified email.
+- A first sign-in connects to an existing account only when the provider sends `email_verified` as `true`. Some providers send `false` until you configure email verification. Then Orbit refuses the first sign-in because the email is not verified.
+- A security confirmation asks the provider for a new sign-in (`prompt=login`, `max_age=0`). A normal sign-in uses the provider's session, so people who are signed in to the provider continue without a new sign-in.
+
 ### Native app redirects
 
 The mobile app receives the result at `orbit://auth/callback`. Orbit accepts no other redirect in production. For Expo Go in development, set `ORBIT_DEV_NATIVE_REDIRECTS` to the exact Expo URLs, separated by commas, for example `exp://100.64.0.5:8082/--/auth/callback`. Orbit compares each URL exactly. Orbit does not start when `ORBIT_ENV=production` and this variable is set.
+
+The mobile app also signs in with a passkey through this redirect. A passkey belongs to the web address of the server, so the app opens the server's page `/login/app` in the system browser. The page asks for the passkey and sends the browser back to the app with a one-time code. Only the app that started the sign-in can use the code. The page signs nobody in to the browser.
 
 ## Postgres
 

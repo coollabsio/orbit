@@ -197,9 +197,11 @@ export const estimateLabel = (points: number) => `${points} ${points === 1 ? 'po
 export const sortMilestones = (milestones: readonly TaskMilestone[]) => [...milestones].sort((a, b) => a.position - b.position || a.name.localeCompare(b.name))
 
 /** `3/8`: done tasks of all the live tasks. */
-export const progressLabel = (item: Pick<TaskMilestone, 'completed_count' | 'task_count' | 'estimate_completed' | 'estimate_total'>) => {
+export const progressLabel = (item: Pick<TaskMilestone, 'completed_count' | 'task_count' | 'estimate_completed' | 'estimate_total'> & Partial<Pick<TaskCycle, 'carried_over_count'>>) => {
   const tasks = `${item.completed_count}/${item.task_count} ${item.task_count === 1 ? 'task' : 'tasks'}`
-  return item.estimate_total > 0 ? `${tasks} · ${item.estimate_completed}/${item.estimate_total} pts` : tasks
+  const points = item.estimate_total > 0 ? ` · ${item.estimate_completed}/${item.estimate_total} pts` : ''
+  const carried = item.carried_over_count ? ` · ${item.carried_over_count} carried over` : ''
+  return `${tasks}${points}${carried}`
 }
 
 /** The cycle's name, else `Cycle 3`. */

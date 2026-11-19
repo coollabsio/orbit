@@ -2,10 +2,13 @@ import type { ComponentType, ReactNode } from 'react'
 import { useNavigate } from 'react-router'
 import { DirectboxDefault, Star } from 'reicon-react'
 import type { MailCounts, MailLabel, MailMeMailbox } from '@orbit/api/generated/types.gen'
+import { InAppSidebar } from '@/app/shell/InAppSidebar'
+import { useInAppSidebar } from '@/app/shell/sidebarSlot'
 import { ColorDot } from '@/components/common/ColorDot'
 import { PaneHeader, PaneTitle } from '@/components/common/Pane'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { cn } from 'cn'
 import { FOLDERS, mailViewPath, type MailView } from '@/features/mail/mailLib'
 
 interface FolderRailProps {
@@ -65,13 +68,18 @@ export function FolderRail({ view, mailboxes, labels, counts }: FolderRailProps)
     (counts?.mailboxes ?? []).filter((mailbox) => !mailboxId || mailbox.mailbox_id === mailboxId).reduce((sum, mailbox) => sum + mailbox[folder], 0)
   const scope = view.kind === 'folder' ? view.mailboxId : undefined
   const go = (next: MailView) => navigate(mailViewPath(next))
+  // in the app sidebar its Back row says "Mail", so the list has no header of its own
+  const inAppSidebar = useInAppSidebar()
 
   return (
-    <nav aria-label="Mail folders" className="flex h-full w-[200px] shrink-0 flex-col bg-background max-[899px]:hidden">
-      <PaneHeader>
-        <PaneTitle>Mail</PaneTitle>
-      </PaneHeader>
-      <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto p-2">
+    <InAppSidebar>
+    <nav aria-label="Mail folders" className={inAppSidebar ? 'flex min-h-0 flex-1 flex-col' : 'flex h-full w-[200px] shrink-0 flex-col bg-background max-[899px]:hidden'}>
+      {inAppSidebar ? null : (
+        <PaneHeader>
+          <PaneTitle>Mail</PaneTitle>
+        </PaneHeader>
+      )}
+      <div className={cn('flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto', inAppSidebar ? 'px-3' : 'p-2')}>
         <RailRow
           icon={FOLDERS[0].icon}
           label="Inbox"
@@ -117,5 +125,6 @@ export function FolderRail({ view, mailboxes, labels, counts }: FolderRailProps)
         ))}
       </div>
     </nav>
+    </InAppSidebar>
   )
 }

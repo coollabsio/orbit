@@ -21,7 +21,7 @@ async fn setup() -> (GithubFixture, Id) {
 fn pull(author: (i64, &str)) -> Value {
     json!({
         "number": 12, "title": "Fix the login", "body": "", "state": "open", "merged": false, "draft": false,
-        "html_url": "https://github.com/acme/repo/pull/12", "labels": [],
+        "html_url": "https://github.com/acme/repo/pull/12", "labels": [], "updated_at": "2026-11-19T10:00:00Z",
         "user": { "id": author.0, "login": author.1 }
     })
 }
@@ -82,6 +82,21 @@ async fn review_request_notifies_connected_reviewer() {
         .await
         .unwrap();
     assert_eq!(actor, fixture.user_id.to_string(), "the actor is the Orbit user of the GitHub account");
+}
+
+#[tokio::test]
+async fn replayed_review_request_with_a_new_delivery_id_makes_no_second_notice() {
+    let (fixture, _) = setup().await;
+    let body = delivery("review_requested", json!({ "pull_request": pull((1, "octo")), "requested_reviewer": { "id": 2, "login": "mia" }, "sender": { "id": 1, "login": "octo" } }));
+    assert!(fixture.webhook("pull_request", "d-1", body.clone()).await.status().is_success());
+    // the delivery id is not signed: the same body with another one is the same request
+    assert!(fixture.webhook("pull_request", "d-2", body.clone()).await.status().is_success());
+    assert_eq!(notices(&fixture).await.len(), 1);
+    // a new request (GitHub changes the pull request's `updated_at`) is a new notice
+    let mut again = body;
+    again["pull_request"]["updated_at"] = json!("2026-11-19T11:00:00Z");
+    assert!(fixture.webhook("pull_request", "d-3", again).await.status().is_success());
+    assert_eq!(notices(&fixture).await.len(), 2);
 }
 
 #[tokio::test]

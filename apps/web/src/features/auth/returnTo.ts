@@ -1,6 +1,6 @@
 const ORIGIN = 'https://orbit.invalid'
 // Going back to a sign-in page after a sign-in would loop or show the wrong page.
-const AUTH_PAGES = new Set(['/login', '/login/callback', '/register', '/recovery', '/setup'])
+const AUTH_PAGES = new Set(['/login', '/login/callback', '/login/app', '/register', '/recovery', '/setup'])
 
 /**
  * Where to go after a sign-in: the Orbit page in `return_to`, or `/`. Never another origin. An OAuth consent link keeps

@@ -55,3 +55,10 @@ test('the second line names the Orbit actor, except for imports and GitHub notic
   expect(notificationLine({ ...task, kind: 'import_finished', import_id: 'i1' }, 'Done', 'Ada')).toBe('Done')
   expect(notificationLine(task, 'Body', undefined)).toBe('Body')
 })
+
+test('a chat report opens the reports page and names the reporter', () => {
+  const report = { ...base, kind: 'chat_reported', chat_report_id: 'r1' } satisfies NotificationRecord
+  expect(notificationTarget(report)).toBe('/settings/reports')
+  expect(notificationCopy(report, undefined, 'Ada')).toEqual({ title: 'Ada reported a chat message', body: 'Open the reports to see the message.' })
+  expect(isMention(report)).toBe(false)
+})

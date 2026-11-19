@@ -3,6 +3,8 @@
 //!
 //! - [`webpush`]: the encryption and the VAPID header.
 //! - [`apns`]: native iOS pushes through Apple's push service, when the server has a key.
+//! - [`fcm`]: native Android pushes through Firebase Cloud Messaging, when the server has a
+//!   service account.
 //! - [`PushService`]: who is notified (their preferences, "do not disturb"), and where.
 //!
 //! Chat messages are notified when they are sent ([`PushService::chat_message`]). Inbox
@@ -14,6 +16,7 @@
 //! the Inbox show what was missed, so pushes are not kept in the job queue.
 
 pub mod apns;
+pub mod fcm;
 pub mod webpush;
 
 use std::collections::HashMap;
@@ -321,6 +324,8 @@ struct Inner {
     subject: OnceLock<String>,
     /// Set when the server has an APNs key (or a test set a fake one).
     apns: OnceLock<Arc<dyn ApnsSender>>,
+    /// Set when the server has an FCM service account (or a test set a fake one).
+    fcm: OnceLock<Arc<dyn fcm::FcmSender>>,
 }
 
 #[derive(Clone)]
@@ -350,6 +355,7 @@ impl PushService {
             key: OnceCell::new(),
             subject: OnceLock::new(),
             apns: OnceLock::new(),
+            fcm: OnceLock::new(),
         });
         Self {
             database: database.clone(),
@@ -673,8 +679,8 @@ impl PushService {
     }
 
     /// Pushes to every browser and phone of the user whose session is still good; returns how
-    /// many took it. A subscription that the browser ended, or a phone token APNs no longer
-    /// takes, is removed.
+    /// many took it. A subscription that the browser ended, or a phone token APNs or FCM no
+    /// longer takes, is removed.
     pub async fn push(&self, user_id: Id, notice: &Notice) -> Result<usize, sqlx::Error> {
         self.deliver(user_id, &notice.clamped()).await
     }
@@ -682,11 +688,12 @@ impl PushService {
     /// [`Self::push`] of a notice that was clamped. The browsers and the phones get it at the
     /// same time: a user has [`MAX_SUBSCRIPTIONS`] of each at most.
     async fn deliver(&self, user_id: Id, notice: &Notice) -> Result<usize, sqlx::Error> {
-        let (browsers, phones) = tokio::join!(
+        let (browsers, iphones, androids) = tokio::join!(
             self.deliver_web(user_id, notice),
-            self.deliver_apns(user_id, notice)
+            self.deliver_apns(user_id, notice),
+            self.deliver_fcm(user_id, notice)
         );
-        Ok(browsers? + phones?)
+        Ok(browsers? + iphones? + androids?)
     }
 
     async fn deliver_apns(&self, user_id: Id, notice: &Notice) -> Result<usize, sqlx::Error> {
@@ -725,12 +732,8 @@ impl PushService {
             let (sender, message) = (Arc::clone(sender), message.clone());
             Some(async move {
                 let id = device.id;
-                let mut result = sender.send(device.clone(), message.clone()).await;
                 // A busy APNs (or an expired provider token) gets the push once more.
-                if matches!(result, Err(SendError::Busy(_))) {
-                    tokio::time::sleep(RETRY_AFTER).await;
-                    result = sender.send(device, message).await;
-                }
+                let result = send_twice(|| sender.send(device.clone(), message.clone())).await;
                 (id, result)
             })
         });
@@ -1174,6 +1177,18 @@ impl PushService {
             }
         }
     }
+}
+
+/// Sends, and once more after [`RETRY_AFTER`] when the push service was busy.
+async fn send_twice(
+    send: impl Fn() -> BoxFuture<'static, Result<(), SendError>>,
+) -> Result<(), SendError> {
+    let result = send().await;
+    if matches!(result, Err(SendError::Busy(_))) {
+        tokio::time::sleep(RETRY_AFTER).await;
+        return send().await;
+    }
+    result
 }
 
 /// What a chat message is to one member of its conversation.

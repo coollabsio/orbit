@@ -19,7 +19,7 @@ struct Notice<'a> {
 }
 
 /// What a webhook delivery means for the inbox; `None` when it is no notice.
-fn notice_of<'a>(event: &str, delivery: &str, payload: &'a Value) -> Option<Notice<'a>> {
+fn notice_of<'a>(event: &str, payload: &'a Value) -> Option<Notice<'a>> {
     let action = payload["action"].as_str().unwrap_or("");
     let repository = payload["repository"]["full_name"].as_str()?.to_lowercase();
     let pull = &payload["pull_request"];
@@ -30,13 +30,16 @@ fn notice_of<'a>(event: &str, delivery: &str, payload: &'a Value) -> Option<Noti
         // a review asked of a person (team requests carry `requested_team` instead and are left out)
         ("pull_request", "review_requested") => {
             let reviewer = payload["requested_reviewer"]["id"].as_i64()?;
+            // A new request changes `updated_at`; a resent copy of the same signed body does not. (The delivery id
+            // is not signed: a replay with a new one must not make a new notice.)
+            let at = pull["updated_at"].as_str().unwrap_or_default();
             Some(Notice {
                 recipient_github_id: reviewer,
                 actor_github_id: payload["sender"]["id"].as_i64(),
                 actor_login: login(&payload["sender"]),
                 kind: "github_review_requested",
                 review_state: None,
-                dedupe_key: format!("github:rr:{repository}#{number}:{reviewer}:{delivery}"),
+                dedupe_key: format!("github:rr:{repository}#{number}:{reviewer}:{at}"),
             })
         }
         // A review on the author's pull request. GitHub sends one for a review with many inline comments, and one for
@@ -76,8 +79,8 @@ fn notice_of<'a>(event: &str, delivery: &str, payload: &'a Value) -> Option<Noti
 /// Writes the inbox notice for a pull request event, if it is one. Unknown recipients, members who cannot see a
 /// project connected to the repository, and people acting on their own pull request get nothing. A delivery GitHub
 /// retries makes no second notice (`dedupe_key`).
-pub async fn notify_pull_event(state: &IntegrationState, workspace: &Id, event: &str, delivery: &str, payload: &Value) -> Result<(), sqlx::Error> {
-    let Some(notice) = notice_of(event, delivery, payload) else { return Ok(()) };
+pub async fn notify_pull_event(state: &IntegrationState, workspace: &Id, event: &str, payload: &Value) -> Result<(), sqlx::Error> {
+    let Some(notice) = notice_of(event, payload) else { return Ok(()) };
     if notice.actor_github_id == Some(notice.recipient_github_id) {
         return Ok(());
     }

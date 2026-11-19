@@ -12,10 +12,13 @@ import {
   linkProviderAccount,
   looksLikeServer,
   nativeRedirect,
+  type Provider,
   type ProviderDevice,
   providerErrorMessage,
+  offeredProviders,
   providerRows,
   signInMethods,
+  startPasskeySignIn,
   startProviderSignIn,
   withReauthentication,
 } from './sign-in-provider'
@@ -115,6 +118,30 @@ test('a sign-in starts, opens the auth session, and exchanges the handoff for a 
   ])
 })
 
+test('a passkey sign-in opens the server page and exchanges the handoff for a session token', async () => {
+  const { client, sent } = server([
+    { status: 200, body: { authorize_url: 'https://orbit.test/login/app#flow=f1' } },
+    { status: 200, body: { session_id: 's1', session_token: 'tok', user } },
+  ])
+  const phone = device({ type: 'success', url: 'orbit://auth/callback?handoff=h1' })
+  expect(await startPasskeySignIn(client, phone)).toEqual({ kind: 'signed_in', token: 'tok', user })
+  expect(phone.opened).toEqual(['https://orbit.test/login/app#flow=f1 -> orbit://auth/callback'])
+  expect(sent).toEqual([
+    { url: 'https://orbit.test/api/v1/auth/passkey/app/start', body: { code_challenge: await codeChallenge(VERIFIER, sha256), redirect: 'orbit://auth/callback' }, origin: null },
+    { url: 'https://orbit.test/api/v1/auth/providers/exchange', body: { handoff: 'h1', code_verifier: VERIFIER }, origin: null },
+  ])
+})
+
+test('a closed passkey page exchanges nothing, and a redirect without a handoff is an error', async () => {
+  const closed = server([{ status: 200, body: { authorize_url: 'https://orbit.test/login/app#flow=f1' } }])
+  expect(await startPasskeySignIn(closed.client, device({ type: 'cancel' }))).toEqual({ kind: 'cancelled' })
+  expect(closed.sent.map((request) => request.url)).toEqual(['https://orbit.test/api/v1/auth/passkey/app/start'])
+
+  const other = server([{ status: 200, body: { authorize_url: 'https://orbit.test/login/app#flow=f1' } }])
+  await expect(startPasskeySignIn(other.client, device({ type: 'success', url: 'orbit://elsewhere?handoff=h1' }))).rejects.toThrow('The passkey sign-in did not finish. Try again.')
+  expect(other.sent.map((request) => request.url)).toEqual(['https://orbit.test/api/v1/auth/passkey/app/start'])
+})
+
 test('a connect sends the current password and is connected on 204', async () => {
   const { client, sent } = server([{ status: 200, body: { authorize_url: 'https://github.com/login/oauth/authorize' } }, { status: 204 }])
   expect(await startProviderSignIn(client, 'github', 'connect', device({ type: 'success', url: 'orbit://auth/callback?handoff=h2' }), 'secret')).toEqual({ kind: 'connected' })
@@ -172,10 +199,12 @@ test('a wrong link password keeps the token; a spent token starts over', async (
 })
 
 test('sign-in methods list the password, then the connected providers', () => {
-  const account = (provider: 'google' | 'github') => ({ provider, email: 'ada', created_at: '2026-01-01T00:00:00Z' })
+  const account = (provider: Provider) => ({ provider, email: 'ada', created_at: '2026-01-01T00:00:00Z' })
   expect(signInMethods(true, [account('github'), account('google')])).toEqual(['Password', 'Google', 'GitHub'])
   expect(signInMethods(false, [account('github')])).toEqual(['GitHub'])
   expect(signInMethods(undefined, [])).toEqual(['Password'])
+  expect(signInMethods(true, [account('oidc'), account('google')], 'Authentik')).toEqual(['Password', 'Google', 'Authentik'])
+  expect(signInMethods(false, [account('oidc')], null)).toEqual(['SSO'])
 })
 
 test('error codes read as sentences; unknown codes keep the server detail', () => {
@@ -209,9 +238,20 @@ test('connected accounts list configured providers, plus a connected one no long
     { provider: 'github', account: github },
   ])
   expect(providerRows([], [])).toEqual([])
+  const oidc = { provider: 'oidc' as const, email: 'ada', created_at: '2026-01-01T00:00:00Z' }
+  expect(providerRows(['oidc', 'github'], [oidc])).toEqual([
+    { provider: 'github', account: null },
+    { provider: 'oidc', account: oidc },
+  ])
 })
 
 test('a server field is worth asking once it has a dot, a port, or is localhost', () => {
   expect(['orbit.example.com', 'https://orbit.example.com/', 'http://10.0.0.5:8888', 'localhost', 'devbox:18888'].map(looksLikeServer)).toEqual([true, true, true, true, true])
   expect(['', 'orb', 'https://', 'orbit example.com'].map(looksLikeServer)).toEqual([false, false, false, false])
+})
+
+test('iOS offers only the OpenID Connect provider; other platforms offer all', () => {
+  expect(offeredProviders(['google', 'github', 'oidc'], 'ios')).toEqual(['oidc'])
+  expect(offeredProviders(['github'], 'ios')).toEqual([])
+  expect(offeredProviders(['google', 'github'], 'android')).toEqual(['google', 'github'])
 })

@@ -278,7 +278,8 @@ export function Composer({ state, placeholder, nameOf, alsoSendTo }: { state: Co
         <View className="flex-row items-center gap-1 p-1.5">
           <IconButton icon="attach" label="Attach files" size={32} iconSize={20} disabled={mode.kind === 'edit'} onPress={() => setAttachOpen(true)} />
           <IconButton icon="smile" label="Emoji" size={32} iconSize={20} onPress={() => setEmojiOpen(true)} />
-          <IconButton icon="at" label="Mention" size={32} iconSize={20} onPress={mention.mention} />
+          <IconButton icon="at" label="Mention" size={32} iconSize={20} onPress={() => mention.mention('@')} />
+          <IconButton icon="hashtag" label="Mention a channel or task" size={32} iconSize={20} onPress={() => mention.mention('#')} />
           <View className="flex-1" />
           <Pressable
             accessibilityRole="button"

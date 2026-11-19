@@ -43,6 +43,9 @@ pub struct CycleRecord {
     pub estimate_total: i64,
     /// The estimates of `completed_count`'s tasks, summed.
     pub estimate_completed: i64,
+    /// Live tasks that "move unfinished tasks" took out of this cycle and that are not back in it.
+    /// They are not in `task_count`, so a past cycle still shows the work it did not finish.
+    pub carried_over_count: i64,
 }
 
 /// A cycle PATCH: `None` keeps a field; `Some(None)` clears the name.
@@ -67,7 +70,12 @@ fn select_sql(filter: &'static str) -> String {
     format!(
         "SELECT task_cycles.id, task_cycles.workspace_id, task_cycles.project_id, task_cycles.number, \
          task_cycles.name, task_cycles.starts_at, task_cycles.ends_at, task_cycles.version, \
-         task_cycles.created_at, task_cycles.updated_at, {progress} FROM task_cycles {join} \
+         task_cycles.created_at, task_cycles.updated_at, {progress}, \
+         (SELECT CAST(COUNT(*) AS BIGINT) FROM task_cycle_carryovers AS carry \
+         JOIN tasks AS carry_task ON carry_task.id = carry.task_id \
+         WHERE carry.cycle_id = task_cycles.id AND carry_task.deleted_at IS NULL \
+         AND carry_task.cycle_id IS DISTINCT FROM task_cycles.id) AS carried_over_count \
+         FROM task_cycles {join} \
          WHERE task_cycles.workspace_id = $1 AND task_cycles.project_id = $2 {filter} \
          GROUP BY task_cycles.id ORDER BY task_cycles.starts_at, task_cycles.id"
     )
@@ -305,7 +313,8 @@ impl TaskRepository {
 
     /// Moves the cycle's live tasks that are not completed, cancelled or duplicates to the next
     /// cycle (the first that starts at or after this one's end). Each moved task gets a new
-    /// version and a `task.updated` activity entry. `NoNextCycle` when there is none.
+    /// version, a `task.updated` activity entry and a `task_cycle_carryovers` row, which keeps it in
+    /// this cycle's `carried_over_count`. `NoNextCycle` when there is none.
     pub async fn move_unfinished_tasks(
         &self,
         workspace_id: Id,
@@ -344,6 +353,15 @@ impl TaskRepository {
         .await?;
         let changes = json!({ "changes": { "cycle": { "from": cycle_id, "to": next_id } } });
         for task_id in &moved {
+            sqlx::query(
+                "INSERT INTO task_cycle_carryovers (cycle_id, task_id, carried_at) VALUES ($1, $2, $3) \
+                 ON CONFLICT (cycle_id, task_id) DO NOTHING",
+            )
+            .bind(cycle_id.to_string())
+            .bind(task_id.as_str())
+            .bind(now.as_millis())
+            .execute(&mut *tx)
+            .await?;
             self.record_write(
                 &mut tx,
                 workspace_id,
@@ -441,5 +459,6 @@ fn cycle_from_row(row: sqlx::any::AnyRow) -> Result<CycleRecord, TaskError> {
         completed_count: row.get("completed_count"),
         estimate_total: row.get("estimate_total"),
         estimate_completed: row.get("estimate_completed"),
+        carried_over_count: row.get("carried_over_count"),
     })
 }

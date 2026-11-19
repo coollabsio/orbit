@@ -458,6 +458,11 @@ export type AuthOptions = {
      */
     mail_enabled: boolean;
     /**
+     * The label of the OpenID Connect provider on the sign-in buttons ("Continue with {oidc_name}"), from
+     * `ORBIT_OIDC_DISPLAY_NAME`. `null` when it is not set up.
+     */
+    oidc_name?: string | null;
+    /**
      * People can add passkeys and sign in with them (the public origin is a domain name).
      */
     passkeys_enabled: boolean;
@@ -689,6 +694,13 @@ export type BillingView = {
 export type BlockText = {
     text: string;
     type: TextKind;
+};
+
+export type BlockedUserRecord = {
+    avatar_url?: string | null;
+    created_at: string;
+    display_name: string;
+    user_id: string;
 };
 
 /**
@@ -1004,6 +1016,41 @@ export type ChatPlaceBody = {
      * The category to put the channel in; null for the channels without a category.
      */
     category_id?: string | null;
+};
+
+export type ChatReportBody = {
+    /**
+     * At most 500 characters.
+     */
+    note?: string;
+    reason: ChatReportReason;
+};
+
+export type ChatReportReason = 'spam' | 'harassment' | 'inappropriate' | 'other';
+
+export type ChatReportRecord = {
+    author_id: string;
+    author_name: string;
+    /**
+     * The message body when it was reported.
+     */
+    body: string;
+    conversation_id: string;
+    created_at: string;
+    id: string;
+    /**
+     * The message was deleted after the report.
+     */
+    message_deleted: boolean;
+    /**
+     * Null once the message is gone for good.
+     */
+    message_id: string | null;
+    note: string;
+    reason: ChatReportReason;
+    reporter_id: string;
+    reporter_name: string;
+    workspace_id: string;
 };
 
 /**
@@ -1842,6 +1889,22 @@ export type CustomEmojiRecord = {
     url: string;
 };
 
+export type CustomRoleBody = {
+    expected_version: number;
+    /**
+     * The custom role to give, or `null` to take the member's custom role away.
+     */
+    role_id?: string | null;
+};
+
+/**
+ * A custom role, as a member's row names it.
+ */
+export type CustomRoleRef = {
+    id: string;
+    name: string;
+};
+
 export type CustomStickerRecord = {
     /**
      * A GIF.
@@ -2533,7 +2596,7 @@ export type EnvironmentView = {
      */
     s3_keep_deleted_days: boolean;
     /**
-     * `ORBIT_GOOGLE_*`, `ORBIT_GITHUB_*`.
+     * `ORBIT_GOOGLE_*`, `ORBIT_GITHUB_*`, `ORBIT_OIDC_*`.
      */
     sign_in_providers: Array<Provider>;
     /**
@@ -2563,6 +2626,26 @@ export type ExchangeProviderBody = {
  */
 export type ExportMode = 'full' | 'personal';
 
+export type FcmDeviceBody = {
+    /**
+     * What the list of devices shows, e.g. "Pixel 9 · Android 16".
+     */
+    label: string;
+    /**
+     * The FCM registration token of the app.
+     */
+    token: string;
+};
+
+/**
+ * A phone the user gets pushes on through FCM.
+ */
+export type FcmDeviceRecord = {
+    created_at: string;
+    id: string;
+    label: string;
+};
+
 export type FilterField = 'status' | 'status_category' | 'assignee' | 'creator' | 'label' | 'priority' | 'project' | 'due_date' | 'created_at' | 'updated_at' | 'text' | 'parent' | 'sub_issues' | 'milestone' | 'cycle' | 'estimate';
 
 /**
@@ -2579,6 +2662,30 @@ export type FilterGroup = {
 export type FilterNode = FilterGroup | Condition;
 
 export type FilterOperator = 'is' | 'is_not' | 'is_empty' | 'is_not_empty' | 'includes_any' | 'includes_all' | 'excludes' | 'before' | 'after' | 'between' | 'contains';
+
+export type FinishAppPasskeyBody = {
+    /**
+     * From `/api/v1/auth/passkey/login/start`.
+     */
+    challenge_token: string;
+    /**
+     * The browser's `PublicKeyCredential.toJSON()`.
+     */
+    credential: {
+        [key: string]: unknown;
+    };
+    /**
+     * The `flow` of the page's URL fragment.
+     */
+    flow: string;
+};
+
+export type FinishAppPasskeyResponse = {
+    /**
+     * The app's redirect with the handoff code: `{redirect}?handoff=…`. Send the browser there.
+     */
+    redirect_url: string;
+};
 
 export type FinishPasskeyLoginBody = {
     challenge_token: string;
@@ -3162,7 +3269,8 @@ export type InstanceSettingsView = {
      */
     registration_ready: boolean;
     /**
-     * The Google and GitHub OAuth clients that are saved. A provider that is not listed is off.
+     * The OAuth clients of the sign-in providers that are on: Google and GitHub saved here or set by the
+     * environment, and OpenID Connect from `ORBIT_OIDC_*`. A provider that is not listed is off.
      */
     sign_in_providers: Array<SignInProviderView>;
     smtp?: null | SmtpView;
@@ -3564,6 +3672,10 @@ export type ListPublicComment = {
 
 export type ListPublicCycle = {
     items: Array<{
+        /**
+         * Live tasks moved out of this cycle to a later one and not back in it; not in `task_count`.
+         */
+        carried_over_count: number;
         completed_count: number;
         /**
          * Exclusive: the next cycle may start at this instant.
@@ -4561,6 +4673,18 @@ export type MemberProfile = {
     user_id: string;
 };
 
+/**
+ * A project permission that one member holds in one project, apart from any role. A project's
+ * creator holds `projects.manage` this way until an owner or admin revokes it.
+ */
+export type MemberProjectGrant = {
+    display_name: string;
+    permissions: Array<Permission>;
+    project_id: string;
+    project_name: string;
+    user_id: string;
+};
+
 export type MemberRecord = {
     /**
      * The member's profile picture; absent while they have none.
@@ -4579,6 +4703,7 @@ export type MemberRecord = {
      */
     can_transfer_ownership: boolean;
     created_at: string;
+    custom_role?: null | CustomRoleRef;
     display_name: string;
     email: string;
     id: string;
@@ -4822,6 +4947,10 @@ export type NotificationRecord = {
     chat_conversation_id?: string | null;
     chat_message_id?: string | null;
     /**
+     * The report of a `chat_reported` notification (a member reported a chat message).
+     */
+    chat_report_id?: string | null;
+    /**
      * The task comment of a `comment_mentioned` notification.
      */
     comment_id?: string | null;
@@ -4857,8 +4986,9 @@ export type NotificationRecord = {
     /**
      * `task_assigned`, `comment_mentioned` (task comment), `description_mentioned` (task
      * description), `page_comment_mentioned`, `page_mentioned` (an @mention in a page body) or
-     * `chat_mentioned` (a chat message), `import_finished` (a long import ended), or a GitHub pull request notice:
-     * `github_review_requested`, `github_review`, `github_merged`.
+     * `chat_mentioned` (a chat message), `import_finished` (a long import ended), `chat_reported` (a member
+     * reported a chat message), or a GitHub pull request notice: `github_review_requested`, `github_review`,
+     * `github_merged`.
      */
     kind: string;
     /**
@@ -5959,6 +6089,7 @@ export type PageMemberRecord = {
          */
         can_transfer_ownership: boolean;
         created_at: string;
+        custom_role?: null | CustomRoleRef;
         display_name: string;
         email: string;
         id: string;
@@ -5981,6 +6112,10 @@ export type PageNotificationRecord = {
          */
         chat_conversation_id?: string | null;
         chat_message_id?: string | null;
+        /**
+         * The report of a `chat_reported` notification (a member reported a chat message).
+         */
+        chat_report_id?: string | null;
         /**
          * The task comment of a `comment_mentioned` notification.
          */
@@ -6017,8 +6152,9 @@ export type PageNotificationRecord = {
         /**
          * `task_assigned`, `comment_mentioned` (task comment), `description_mentioned` (task
          * description), `page_comment_mentioned`, `page_mentioned` (an @mention in a page body) or
-         * `chat_mentioned` (a chat message), `import_finished` (a long import ended), or a GitHub pull request notice:
-         * `github_review_requested`, `github_review`, `github_merged`.
+         * `chat_mentioned` (a chat message), `import_finished` (a long import ended), `chat_reported` (a member
+         * reported a chat message), or a GitHub pull request notice: `github_review_requested`, `github_review`,
+         * `github_merged`.
          */
         kind: string;
         /**
@@ -6088,6 +6224,11 @@ export type PageStatusRecord = {
 
 export type PageTaskCycle = {
     items: Array<{
+        /**
+         * Live tasks that "move unfinished tasks" took out of this cycle and that are not back in it.
+         * They are not in `task_count`, so a past cycle still shows the work it did not finish.
+         */
+        carried_over_count: number;
         /**
          * Of `task_count`, the tasks in a completed status.
          */
@@ -6296,7 +6437,7 @@ export type PasswordConfirmationBody = {
  * A workspace capability that depends on the member's role. Actions open to
  * every member (tasks, projects, attachments, docs) are not listed here.
  */
-export type Permission = 'workspace.update' | 'workspace.delete' | 'workspace.transfer' | 'members.manage' | 'audit.view' | 'api_tokens.manage' | 'integrations.manage' | 'teamspaces.delete' | 'pages.purge' | 'views.manage_shared' | 'comments.moderate' | 'chat.manage' | 'mail.manage' | 'billing.manage' | 'storage.manage' | 'workspace.export' | 'workspace.export_personal';
+export type Permission = 'workspace.update' | 'workspace.delete' | 'workspace.transfer' | 'members.manage' | 'audit.view' | 'api_tokens.manage' | 'integrations.manage' | 'teamspaces.delete' | 'pages.purge' | 'views.manage_shared' | 'comments.moderate' | 'chat.manage' | 'mail.manage' | 'billing.manage' | 'storage.manage' | 'workspace.export' | 'workspace.export_personal' | 'roles.manage' | 'projects.view_private' | 'tasks.purge' | 'projects.manage';
 
 export type PersonalMailboxOverride = {
     local_part: string;
@@ -6410,6 +6551,15 @@ export type ProjectBody = {
     private?: boolean;
 };
 
+export type ProjectGrantBody = {
+    /**
+     * Replaces what the member holds directly in the project. Only project-scoped permissions.
+     */
+    permissions: Array<Permission>;
+    project_id: string;
+    user_id: string;
+};
+
 export type ProjectMemberBody = {
     /**
      * An active workspace member who is not a guest.
@@ -6431,6 +6581,14 @@ export type ProjectOrder = {
      * Live projects in the caller's order. Projects not listed follow them, by name.
      */
     project_ids: Array<string>;
+};
+
+/**
+ * The project-scoped permissions a member holds in one project.
+ */
+export type ProjectPermissions = {
+    permissions: Array<Permission>;
+    project_id: string;
 };
 
 export type ProjectRecord = {
@@ -6477,7 +6635,7 @@ export type ProjectUpdateBody = {
     private?: boolean | null;
 };
 
-export type Provider = 'google' | 'github';
+export type Provider = 'google' | 'github' | 'oidc';
 
 export type PtrAddress = {
     ip: string;
@@ -6829,6 +6987,10 @@ export type PublicCreateTaskBody = {
 };
 
 export type PublicCycle = {
+    /**
+     * Live tasks moved out of this cycle to a later one and not back in it; not in `task_count`.
+     */
+    carried_over_count: number;
     completed_count: number;
     /**
      * Exclusive: the next cycle may start at this instant.
@@ -7136,7 +7298,8 @@ export type PublicMe = {
     user: null | PublicUser;
     workspace: PublicNamed;
     /**
-     * Every workspace the token may use, with its access there. Always one item today.
+     * Every workspace the token may use, with its access there. An API token has one; an OAuth
+     * connection can have several.
      */
     workspaces: Array<PublicWorkspaceGrant>;
 };
@@ -7892,6 +8055,58 @@ export type RoleChangeBody = {
     role: RoleBody;
 };
 
+export type RoleCreateBody = {
+    /**
+     * 1–40 characters after trimming; not Owner, Admin, Member or Guest.
+     */
+    name: string;
+    /**
+     * What a member with this role may do beyond an ordinary member. Only grantable permissions.
+     */
+    permissions: Array<Permission>;
+    /**
+     * What the role also grants in single projects.
+     */
+    project_grants?: Array<RoleProjectGrant>;
+};
+
+/**
+ * Project-scoped permissions that a role holds in one project.
+ */
+export type RoleProjectGrant = {
+    /**
+     * Only project-scoped permissions (`Permission::is_project_scoped`).
+     */
+    permissions: Array<Permission>;
+    project_id: string;
+    /**
+     * The project's name; ignored in requests.
+     */
+    project_name?: string;
+};
+
+export type RoleUpdateBody = {
+    expected_version: number;
+    name?: string | null;
+    permissions?: Array<Permission> | null;
+    /**
+     * Replaces the role's project grants; absent: unchanged.
+     */
+    project_grants?: Array<RoleProjectGrant> | null;
+};
+
+export type RolesResponse = {
+    /**
+     * The permissions a custom role may carry, in display order.
+     */
+    grantable_permissions: Array<Permission>;
+    items: Array<WorkspaceRoleRecord>;
+    /**
+     * The grantable permissions that a role may also hold for single projects.
+     */
+    project_permissions: Array<Permission>;
+};
+
 export type S3Body = {
     access_key_id: string;
     bucket: string;
@@ -8069,6 +8284,10 @@ export type SignInProviderView = {
      */
     callback_url: string;
     client_id: string;
+    /**
+     * The OpenID Connect issuer (`ORBIT_OIDC_ISSUER`); `null` for Google and GitHub.
+     */
+    issuer?: string | null;
     provider: Provider;
     /**
      * A client secret is saved. The secret itself is never returned.
@@ -8122,6 +8341,26 @@ export type SocketTicketResponse = {
      * without a cookie.
      */
     ticket: string;
+};
+
+export type StartAppPasskeyBody = {
+    /**
+     * `base64url(sha256(code_verifier))` of a random verifier the app keeps (43 characters). The same verifier goes
+     * to `/api/v1/auth/providers/exchange`.
+     */
+    code_challenge: string;
+    /**
+     * The app's redirect URI: `orbit://auth/callback` (development servers can allow more with
+     * `ORBIT_DEV_NATIVE_REDIRECTS`).
+     */
+    redirect: string;
+};
+
+export type StartAppPasskeyResponse = {
+    /**
+     * Orbit's own sign-in page for this flow. Open it in the system browser's auth session.
+     */
+    authorize_url: string;
 };
 
 export type StartAsanaImportBody = {
@@ -8355,6 +8594,11 @@ export type TaskConflict = {
 };
 
 export type TaskCycle = {
+    /**
+     * Live tasks that "move unfinished tasks" took out of this cycle and that are not back in it.
+     * They are not in `task_count`, so a past cycle still shows the work it did not finish.
+     */
+    carried_over_count: number;
     /**
      * Of `task_count`, the tasks in a completed status.
      */
@@ -8732,6 +8976,11 @@ export type Teamspace = {
     is_default: boolean;
     name: string;
     position: number;
+    /**
+     * The project whose docs this teamspace holds; `null` for global docs. The project may be
+     * trashed or not visible to the caller.
+     */
+    project_id: string | null;
     updated_at: string;
     version: number;
     workspace_id: string;
@@ -8751,6 +9000,11 @@ export type TeamspaceUpdateBody = {
      * 1 to 100 characters after trimming.
      */
     name?: string | null;
+    /**
+     * The project whose docs the teamspace holds. Absent: unchanged. `null`: global docs. A
+     * project has at most one teamspace.
+     */
+    project_id?: string | null;
 };
 
 export type TestPushResult = {
@@ -9533,11 +9787,35 @@ export type WorkspaceRecord = {
      * What the caller's role may do in this workspace.
      */
     permissions: Array<Permission>;
+    /**
+     * What the caller's custom role grants in single projects, beyond `permissions`.
+     */
+    project_permissions: Array<ProjectPermissions>;
     role: WorkspaceRole;
     version: number;
 };
 
 export type WorkspaceRole = 'owner' | 'admin' | 'member' | 'guest';
+
+export type WorkspaceRoleRecord = {
+    created_at: string;
+    id: string;
+    /**
+     * How many members hold the role.
+     */
+    member_count: number;
+    name: string;
+    /**
+     * What a member with this role may do beyond an ordinary member.
+     */
+    permissions: Array<Permission>;
+    /**
+     * What the role grants in single projects, beyond its workspace-wide permissions.
+     */
+    project_grants: Array<RoleProjectGrant>;
+    updated_at: string;
+    version: number;
+};
 
 /**
  * How many bytes of files a workspace stores, and its quota.
@@ -9976,7 +10254,13 @@ export type PublicListDocsData = {
          */
         workspace_id: string;
     };
-    query?: never;
+    query?: {
+        /**
+         * An approved project: only the global docs, the docs of this project's teamspace and
+         * private docs.
+         */
+        project_id?: string;
+    };
     url: '/api/public/v1/workspaces/{workspace_id}/docs';
 };
 
@@ -16461,6 +16745,122 @@ export type AuthOptionsResponses = {
 
 export type AuthOptionsResponse = AuthOptionsResponses[keyof AuthOptionsResponses];
 
+export type FinishAppPasskeySignInData = {
+    body: FinishAppPasskeyBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/auth/passkey/app/finish';
+};
+
+export type FinishAppPasskeySignInErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: AuthProblem;
+    /**
+     * authentication_required
+     */
+    401: AuthProblem;
+    /**
+     * origin_forbidden
+     */
+    403: AuthProblem;
+    /**
+     * contract_mismatch
+     */
+    409: AuthProblem;
+    /**
+     * request_too_large
+     */
+    413: AuthProblem;
+    /**
+     * internal_error
+     */
+    500: AuthProblem;
+    /**
+     * authentication_busy
+     */
+    503: AuthProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: AuthProblem;
+};
+
+export type FinishAppPasskeySignInError = FinishAppPasskeySignInErrors[keyof FinishAppPasskeySignInErrors];
+
+export type FinishAppPasskeySignInResponses = {
+    200: FinishAppPasskeyResponse;
+};
+
+export type FinishAppPasskeySignInResponse = FinishAppPasskeySignInResponses[keyof FinishAppPasskeySignInResponses];
+
+export type StartAppPasskeySignInData = {
+    body: StartAppPasskeyBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/auth/passkey/app/start';
+};
+
+export type StartAppPasskeySignInErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: AuthProblem;
+    /**
+     * authentication_required
+     */
+    401: AuthProblem;
+    /**
+     * origin_forbidden
+     */
+    403: AuthProblem;
+    /**
+     * contract_mismatch
+     */
+    409: AuthProblem;
+    /**
+     * request_too_large
+     */
+    413: AuthProblem;
+    /**
+     * invalid_code_challenge or invalid_redirect
+     */
+    422: AuthProblem;
+    /**
+     * internal_error
+     */
+    500: AuthProblem;
+    /**
+     * authentication_busy
+     */
+    503: AuthProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: AuthProblem;
+};
+
+export type StartAppPasskeySignInError = StartAppPasskeySignInErrors[keyof StartAppPasskeySignInErrors];
+
+export type StartAppPasskeySignInResponses = {
+    200: StartAppPasskeyResponse;
+};
+
+export type StartAppPasskeySignInResponse = StartAppPasskeySignInResponses[keyof StartAppPasskeySignInResponses];
+
 export type FinishPasskeyLoginData = {
     body: FinishPasskeyLoginBody;
     headers?: {
@@ -17084,6 +17484,10 @@ export type StartProviderSignInErrors = {
      * internal_error
      */
     500: AuthProblem;
+    /**
+     * provider_unavailable: the OpenID Connect discovery failed
+     */
+    502: AuthProblem;
     /**
      * authentication_busy
      */
@@ -17993,6 +18397,182 @@ export type GetAccountTrialResponses = {
 
 export type GetAccountTrialResponse = GetAccountTrialResponses[keyof GetAccountTrialResponses];
 
+export type ListChatBlocksData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/chat/blocks';
+};
+
+export type ListChatBlocksErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * chat_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ListChatBlocksError = ListChatBlocksErrors[keyof ListChatBlocksErrors];
+
+export type ListChatBlocksResponses = {
+    200: Array<BlockedUserRecord>;
+};
+
+export type ListChatBlocksResponse = ListChatBlocksResponses[keyof ListChatBlocksResponses];
+
+export type UnblockChatUserData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        user_id: string;
+    };
+    query?: never;
+    url: '/api/v1/chat/blocks/{user_id}';
+};
+
+export type UnblockChatUserErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, chat_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * chat_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type UnblockChatUserError = UnblockChatUserErrors[keyof UnblockChatUserErrors];
+
+export type UnblockChatUserResponses = {
+    204: void;
+};
+
+export type UnblockChatUserResponse = UnblockChatUserResponses[keyof UnblockChatUserResponses];
+
+export type BlockChatUserData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        user_id: string;
+    };
+    query?: never;
+    url: '/api/v1/chat/blocks/{user_id}';
+};
+
+export type BlockChatUserErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, chat_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * chat_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type BlockChatUserError = BlockChatUserErrors[keyof BlockChatUserErrors];
+
+export type BlockChatUserResponses = {
+    204: void;
+};
+
+export type BlockChatUserResponse = BlockChatUserResponses[keyof BlockChatUserResponses];
+
 export type ReadHookMessagesData = {
     body?: never;
     headers?: {
@@ -18884,6 +19464,168 @@ export type DeleteApnsDeviceResponses = {
 };
 
 export type DeleteApnsDeviceResponse = DeleteApnsDeviceResponses[keyof DeleteApnsDeviceResponses];
+
+export type ListFcmDevicesData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/push/fcm';
+};
+
+export type ListFcmDevicesErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type ListFcmDevicesError = ListFcmDevicesErrors[keyof ListFcmDevicesErrors];
+
+export type ListFcmDevicesResponses = {
+    200: Array<FcmDeviceRecord>;
+};
+
+export type ListFcmDevicesResponse = ListFcmDevicesResponses[keyof ListFcmDevicesResponses];
+
+export type CreateFcmDeviceData = {
+    body: FcmDeviceBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/push/fcm';
+};
+
+export type CreateFcmDeviceErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * invalid_token
+     */
+    422: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * push_not_configured
+     */
+    503: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type CreateFcmDeviceError = CreateFcmDeviceErrors[keyof CreateFcmDeviceErrors];
+
+export type CreateFcmDeviceResponses = {
+    200: FcmDeviceRecord;
+};
+
+export type CreateFcmDeviceResponse = CreateFcmDeviceResponses[keyof CreateFcmDeviceResponses];
+
+export type DeleteFcmDeviceData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/api/v1/push/fcm/{id}';
+};
+
+export type DeleteFcmDeviceErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type DeleteFcmDeviceError = DeleteFcmDeviceErrors[keyof DeleteFcmDeviceErrors];
+
+export type DeleteFcmDeviceResponses = {
+    204: void;
+};
+
+export type DeleteFcmDeviceResponse = DeleteFcmDeviceResponses[keyof DeleteFcmDeviceResponses];
 
 export type GetPushKeyData = {
     body?: never;
@@ -22899,6 +23641,69 @@ export type AddChatReactionResponses = {
 
 export type AddChatReactionResponse = AddChatReactionResponses[keyof AddChatReactionResponses];
 
+export type ReportChatMessageData = {
+    body: ChatReportBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        message_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/chat/messages/{message_id}/report';
+};
+
+export type ReportChatMessageErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, chat_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * chat_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ReportChatMessageError = ReportChatMessageErrors[keyof ReportChatMessageErrors];
+
+export type ReportChatMessageResponses = {
+    200: ChatReportRecord;
+};
+
+export type ReportChatMessageResponse = ReportChatMessageResponses[keyof ReportChatMessageResponses];
+
 export type MarkChatMessageUnreadData = {
     body?: never;
     headers?: {
@@ -23147,6 +23952,123 @@ export type RestoreChatReadResponses = {
 };
 
 export type RestoreChatReadResponse = RestoreChatReadResponses[keyof RestoreChatReadResponses];
+
+export type ListChatReportsData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/chat/reports';
+};
+
+export type ListChatReportsErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * chat_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ListChatReportsError = ListChatReportsErrors[keyof ListChatReportsErrors];
+
+export type ListChatReportsResponses = {
+    200: Array<ChatReportRecord>;
+};
+
+export type ListChatReportsResponse = ListChatReportsResponses[keyof ListChatReportsResponses];
+
+export type DeleteReportedChatMessageData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        report_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/chat/reports/{report_id}/message';
+};
+
+export type DeleteReportedChatMessageErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, chat_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * chat_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type DeleteReportedChatMessageError = DeleteReportedChatMessageErrors[keyof DeleteReportedChatMessageErrors];
+
+export type DeleteReportedChatMessageResponses = {
+    200: ChatEvents;
+};
+
+export type DeleteReportedChatMessageResponse = DeleteReportedChatMessageResponses[keyof DeleteReportedChatMessageResponses];
 
 export type ListChatSearchData = {
     body?: never;
@@ -32064,6 +32986,61 @@ export type ChangeMemberRoleResponses = {
 
 export type ChangeMemberRoleResponse = ChangeMemberRoleResponses[keyof ChangeMemberRoleResponses];
 
+export type SetMemberCustomRoleData = {
+    body: CustomRoleBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        membership_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/members/{membership_id}/custom-role';
+};
+
+export type SetMemberCustomRoleErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type SetMemberCustomRoleError = SetMemberCustomRoleErrors[keyof SetMemberCustomRoleErrors];
+
+export type SetMemberCustomRoleResponses = {
+    204: void;
+};
+
+export type SetMemberCustomRoleResponse = SetMemberCustomRoleResponses[keyof SetMemberCustomRoleResponses];
+
 export type ListNotificationsData = {
     body?: never;
     headers?: {
@@ -34465,6 +35442,166 @@ export type PutMemberNoteResponses = {
 
 export type PutMemberNoteResponse = PutMemberNoteResponses[keyof PutMemberNoteResponses];
 
+export type ListProjectGrantsData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/project-grants';
+};
+
+export type ListProjectGrantsErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type ListProjectGrantsError = ListProjectGrantsErrors[keyof ListProjectGrantsErrors];
+
+export type ListProjectGrantsResponses = {
+    200: Array<MemberProjectGrant>;
+};
+
+export type ListProjectGrantsResponse = ListProjectGrantsResponses[keyof ListProjectGrantsResponses];
+
+export type SetProjectGrantData = {
+    body: ProjectGrantBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/project-grants';
+};
+
+export type SetProjectGrantErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type SetProjectGrantError = SetProjectGrantErrors[keyof SetProjectGrantErrors];
+
+export type SetProjectGrantResponses = {
+    204: void;
+};
+
+export type SetProjectGrantResponse = SetProjectGrantResponses[keyof SetProjectGrantResponses];
+
+export type RevokeProjectGrantData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        project_id: string;
+        user_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/project-grants/{project_id}/{user_id}';
+};
+
+export type RevokeProjectGrantErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type RevokeProjectGrantError = RevokeProjectGrantErrors[keyof RevokeProjectGrantErrors];
+
+export type RevokeProjectGrantResponses = {
+    204: void;
+};
+
+export type RevokeProjectGrantResponse = RevokeProjectGrantResponses[keyof RevokeProjectGrantResponses];
+
 export type GetProjectOrderData = {
     body?: never;
     headers?: {
@@ -36775,6 +37912,220 @@ export type RestoreWorkspaceResponses = {
 };
 
 export type RestoreWorkspaceResponse = RestoreWorkspaceResponses[keyof RestoreWorkspaceResponses];
+
+export type ListRolesData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/roles';
+};
+
+export type ListRolesErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type ListRolesError = ListRolesErrors[keyof ListRolesErrors];
+
+export type ListRolesResponses = {
+    200: RolesResponse;
+};
+
+export type ListRolesResponse = ListRolesResponses[keyof ListRolesResponses];
+
+export type CreateRoleData = {
+    body: RoleCreateBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/roles';
+};
+
+export type CreateRoleErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type CreateRoleError = CreateRoleErrors[keyof CreateRoleErrors];
+
+export type CreateRoleResponses = {
+    201: WorkspaceRoleRecord;
+};
+
+export type CreateRoleResponse = CreateRoleResponses[keyof CreateRoleResponses];
+
+export type DeleteRoleData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        role_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/roles/{role_id}';
+};
+
+export type DeleteRoleErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type DeleteRoleError = DeleteRoleErrors[keyof DeleteRoleErrors];
+
+export type DeleteRoleResponses = {
+    204: void;
+};
+
+export type DeleteRoleResponse = DeleteRoleResponses[keyof DeleteRoleResponses];
+
+export type UpdateRoleData = {
+    body: RoleUpdateBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        role_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/roles/{role_id}';
+};
+
+export type UpdateRoleErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type UpdateRoleError = UpdateRoleErrors[keyof UpdateRoleErrors];
+
+export type UpdateRoleResponses = {
+    200: WorkspaceRoleRecord;
+};
+
+export type UpdateRoleResponse = UpdateRoleResponses[keyof UpdateRoleResponses];
 
 export type GetWorkspaceStorageData = {
     body?: never;

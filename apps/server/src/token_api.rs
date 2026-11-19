@@ -260,7 +260,8 @@ pub struct MemberView {
 pub struct Me {
     pub token: TokenInfo,
     pub workspace: Named,
-    /// Every workspace the token may use, with its access there. Always one item today.
+    /// Every workspace the token may use, with its access there. An API token has one; an OAuth
+    /// connection can have several.
     pub workspaces: Vec<WorkspaceGrant>,
     /// The token's creator; `null` for a service-account token.
     #[schema(required = true)]
@@ -706,17 +707,17 @@ impl TokenApi {
         })
     }
 
-    /// The token, its workspace and its identity. Needs no scope.
-    pub async fn me(&self, principal: &ApiTokenPrincipal) -> Result<Me> {
+    /// The token, its workspace and its identity. Needs no scope. `workspaces` lists `all`, the
+    /// workspaces of the connection (an API token has one); `principal` is the one that
+    /// `workspace` and `token` describe.
+    pub async fn me(&self, principal: &ApiTokenPrincipal, all: &[ApiTokenPrincipal]) -> Result<Me> {
+        // An OAuth connection has no api_tokens row: its grant ID stands in for the token ID.
         let row = sqlx::query(
-            "SELECT api_tokens.name, api_tokens.expires_at, workspaces.name AS workspace_name, \
-             users.email, users.display_name \
-             FROM api_tokens JOIN workspaces ON workspaces.id = api_tokens.workspace_id \
-             LEFT JOIN users ON users.id = api_tokens.created_by \
-             WHERE api_tokens.id = $1 AND api_tokens.workspace_id = $2",
+            "SELECT workspaces.name AS workspace_name, api_tokens.name, api_tokens.expires_at,              users.email, users.display_name              FROM workspaces              LEFT JOIN api_tokens ON api_tokens.id = $1 AND api_tokens.workspace_id = workspaces.id              LEFT JOIN users ON users.id = $3              WHERE workspaces.id = $2",
         )
         .bind(principal.token_id.to_string())
         .bind(principal.workspace_id.to_string())
+        .bind(principal.creator_id.to_string())
         .fetch_optional(self.tasks.database().pool())
         .await?
         .ok_or(TokenApiError::NotAvailable)?;
@@ -734,23 +735,37 @@ impl TokenApi {
                     .unwrap_or_default(),
             }),
         };
-        let scopes: Vec<&'static str> = principal
-            .scopes
-            .iter()
-            .map(|scope| scope.as_str())
-            .collect();
+        let grant = |principal: &ApiTokenPrincipal, name: String| WorkspaceGrant {
+            id: principal.workspace_id,
+            name,
+            scopes: principal
+                .scopes
+                .iter()
+                .map(|scope| scope.as_str())
+                .collect(),
+            project_ids: principal.project_ids.clone(),
+        };
+        let mut workspaces = Vec::with_capacity(all.len());
+        for other in all {
+            let name: String = sqlx::query_scalar("SELECT name FROM workspaces WHERE id = $1")
+                .bind(other.workspace_id.to_string())
+                .fetch_one(self.tasks.database().pool())
+                .await?;
+            workspaces.push(grant(other, name));
+        }
         let workspace_name: String = row.get("workspace_name");
         Ok(Me {
-            workspaces: vec![WorkspaceGrant {
-                id: principal.workspace_id,
-                name: workspace_name.clone(),
-                scopes: scopes.clone(),
-                project_ids: principal.project_ids.clone(),
-            }],
+            workspaces,
             token: TokenInfo {
                 id: principal.token_id,
-                name: row.get("name"),
-                scopes,
+                name: row
+                    .get::<Option<String>, _>("name")
+                    .unwrap_or_else(|| "OAuth connection".to_owned()),
+                scopes: principal
+                    .scopes
+                    .iter()
+                    .map(|scope| scope.as_str())
+                    .collect(),
                 project_ids: principal.project_ids.clone(),
                 expires_at: row
                     .get::<Option<i64>, _>("expires_at")
@@ -1539,14 +1554,35 @@ impl Authorized<'_> {
         repository.as_ref().ok_or(TokenApiError::NotAvailable)
     }
 
-    /// Each doc's `version` is its [`revision`], as in [`DocView`].
-    pub async fn list_docs(&self) -> Result<PageList> {
+    /// Each doc's `version` is its [`revision`], as in [`DocView`]. With `project_id` (an
+    /// approved project), only the global docs, the project's teamspace and private docs: the
+    /// docs of teamspaces linked to other projects are left out.
+    pub async fn list_docs(&self, project_id: Option<Id>) -> Result<PageList> {
         let pages = self.content(ApiTokenScope::DocsRead, &self.api.pages)?;
         let p = self.principal;
+        if project_id.is_some_and(|id| !self.approved(id)) {
+            return Err(TaskError::NotFound.into());
+        }
         let mut list = pages
             .pages(p.workspace_id, p.actor_id)
             .await
             .map_err(hidden_page)?;
+        if let Some(project_id) = project_id {
+            let other: HashSet<Id> = sqlx::query_scalar::<_, String>(
+                "SELECT id FROM teamspaces WHERE workspace_id = $1 AND project_id IS NOT NULL \
+                 AND project_id <> $2",
+            )
+            .bind(p.workspace_id.to_string())
+            .bind(project_id.to_string())
+            .fetch_all(self.api.tasks.database().pool())
+            .await
+            .map_err(TaskError::from)?
+            .iter()
+            .filter_map(|id| id.parse().ok())
+            .collect();
+            list.items
+                .retain(|page| !page.teamspace_id.is_some_and(|id| other.contains(&id)));
+        }
         for page in &mut list.items {
             page.version = revision(page.version, page.updated_at);
         }
@@ -1599,8 +1635,13 @@ impl Authorized<'_> {
         })
     }
 
-    /// `blocks` as Markdown, with links to the pages that the actor can see.
-    async fn markdown(&self, pages: &PageRepository, page_id: Id, blocks: &[Value]) -> Result<String> {
+    /// `blocks` of the doc `page_id` as Markdown, with links to the pages that the actor can see.
+    async fn markdown(
+        &self,
+        pages: &PageRepository,
+        page_id: Id,
+        blocks: &[Value],
+    ) -> Result<String> {
         let mut linked = HashSet::new();
         linked_pages(blocks, &mut linked);
         let mut titles = HashMap::new();

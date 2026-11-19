@@ -1,11 +1,13 @@
 import { useQuery } from '@tanstack/react-query'
+import * as WebBrowser from 'expo-web-browser'
 import { useEffect, useState } from 'react'
-import { Linking, ScrollView, View } from 'react-native'
+import { Linking, Platform, ScrollView, View } from 'react-native'
 
 import { Select } from '../components/settings/Shell'
 import { accountKeys, authOptions } from '../data/account-api'
+import { PRIVACY_POLICY_URL, TERMS_OF_SERVICE_URL } from '../data/legal'
 import { createClient, normalizeServer, type SignIn, signIn as signInWithPassword, signInSecondFactor } from '../data/orbit'
-import { isPasswordTokenSpent, linkProviderAccount, looksLikeServer, type PasswordStep, type Provider, PROVIDER_LABEL, providerErrorMessage, startProviderSignIn } from '../data/sign-in-provider'
+import { isPasswordTokenSpent, linkProviderAccount, looksLikeServer, offeredProviders, type PasswordStep, type Provider, providerErrorMessage, providerLabel, startPasskeySignIn, startProviderSignIn } from '../data/sign-in-provider'
 import { useSession } from '../session-context'
 import { providerDevice } from '../sign-in-provider'
 import { alpha, useTheme } from '../theme'
@@ -36,7 +38,7 @@ export default function SignInScreen() {
   const [password, setPassword] = useState(DEV_USER.password)
   const [code, setCode] = useState('')
   const [linkPassword, setLinkPassword] = useState('')
-  const [busy, setBusy] = useState<'password' | Provider | null>(null)
+  const [busy, setBusy] = useState<'password' | 'passkey' | Provider | null>(null)
   const [error, setError] = useState(state.status === 'signed_out' ? state.error : undefined)
   const current = looksLikeServer(server) ? normalizeServer(server) : null
   // asks the typed server which providers it offers once typing pauses
@@ -48,9 +50,12 @@ export default function SignInScreen() {
     retry: false,
     staleTime: 60_000,
   })
-  const providers = current !== null && current === typedServer ? (options.data?.providers ?? []) : []
+  // the options of the server in the field, not of one typed a moment ago
+  const offered = current !== null && current === typedServer ? options.data : undefined
+  const providers = offeredProviders(offered?.providers ?? [], Platform.OS)
+  const passkeys = offered?.passkeys_enabled === true
 
-  const run = async (kind: 'password' | Provider, action: () => Promise<void>) => {
+  const run = async (kind: 'password' | 'passkey' | Provider, action: () => Promise<void>) => {
     setBusy(kind)
     setError(undefined)
     try {
@@ -84,6 +89,14 @@ export default function SignInScreen() {
       }
     })
 
+  // the server's own sign-in page asks for the passkey in the browser sheet: a passkey belongs to the server's web address
+  const continueWithPasskey = () =>
+    run('passkey', async () => {
+      const normalized = normalizeServer(server)
+      const result = await startPasskeySignIn(createClient(normalized, () => null), providerDevice)
+      if (result.kind === 'signed_in' || result.kind === 'two_factor') await finish(normalized, result)
+    })
+
   const back = (message?: string) => {
     setStep({ name: 'credentials' })
     setCode('')
@@ -109,7 +122,7 @@ export default function SignInScreen() {
     })
 
   const credentials = step.name === 'credentials'
-  const linking = step.name === 'password' ? PROVIDER_LABEL[step.challenge.provider] : null
+  const linking = step.name === 'password' ? providerLabel(step.challenge.provider, options.data?.oidc_name) : null
   const title = credentials ? 'Orbit' : linking ? `Connect ${linking}` : 'Two-factor code'
   const subtitle = credentials
     ? 'Sign in to your tasks, docs, mail and chat.'
@@ -160,17 +173,18 @@ export default function SignInScreen() {
                   </Text>
                 ) : null}
                 <Button label="Sign in" size="lg" block loading={busy === 'password'} disabled={busy !== null || !server || !email || !password} onPress={submitCredentials} />
-                {providers.length > 0 ? (
+                {passkeys || providers.length > 0 ? (
                   <>
                     <View className="flex-row items-center gap-3">
                       <View className="h-px flex-1 bg-border" />
                       <Text className="text-[12px] text-muted-foreground">or</Text>
                       <View className="h-px flex-1 bg-border" />
                     </View>
+                    {passkeys ? <Button label="Sign in with a passkey" variant="outline" size="lg" block loading={busy === 'passkey'} disabled={busy !== null} onPress={() => void continueWithPasskey()} /> : null}
                     {providers.map((provider) => (
                       <Button
                         key={provider}
-                        label={`Continue with ${PROVIDER_LABEL[provider]}`}
+                        label={`Continue with ${providerLabel(provider, options.data?.oidc_name)}`}
                         icon={provider}
                         variant="outline"
                         size="lg"
@@ -234,6 +248,17 @@ export default function SignInScreen() {
             )}
           </View>
         </View>
+        <Text className="mt-4 w-full max-w-115 self-center text-center text-[12px] leading-[18px] text-muted-foreground">
+          By signing in, you agree to the{' '}
+          <Text accessibilityRole="link" onPress={() => void WebBrowser.openBrowserAsync(TERMS_OF_SERVICE_URL).catch(() => undefined)} className="text-[12px] leading-[18px] text-muted-foreground underline">
+            Terms of service
+          </Text>{' '}
+          and the{' '}
+          <Text accessibilityRole="link" onPress={() => void WebBrowser.openBrowserAsync(PRIVACY_POLICY_URL).catch(() => undefined)} className="text-[12px] leading-[18px] text-muted-foreground underline">
+            Privacy policy
+          </Text>
+          .
+        </Text>
       </ScrollView>
     </View>
   )

@@ -482,6 +482,17 @@ function PageEditorInner({
    * `/docs/<uuid>` links and links to this app (same origin) navigate in the app (no reload, no new tab) unless a
    * modifier asks for a new tab.
    */
+  // Double-clicking an image block opens it in the full-screen viewer, like the toolbar's zoom button.
+  const onDoubleClick = (event: MouseEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement
+    const image = target.closest('[data-content-type=image]')?.querySelector('img')
+    const id = target.closest('[data-node-type=blockContainer]')?.getAttribute('data-id')
+    if (!image?.src || !id || !image.contains(target)) return
+    const block = editor.getBlock(id)
+    const name = block?.type === 'image' && typeof block.props.name === 'string' ? block.props.name : ''
+    setZoomImage({ id, fileName: name || 'Image', mimeType: '', fileSize: 0, url: image.currentSrc || image.src })
+  }
+
   const onClickCapture = (event: MouseEvent<HTMLDivElement>) => {
     const href = linkAnchor(event.target)?.getAttribute('href')
     if (!href || event.button !== 0 || opensNewTab(event.nativeEvent)) return
@@ -524,7 +535,7 @@ function PageEditorInner({
   return (
     <PageEditorContext value={context}>
       <PageMentionNamesContext value={mentionNames}>
-      <div className="contents" onClickCapture={onClickCapture} onKeyDownCapture={onKeyDownCapture}>
+      <div className="contents" onClickCapture={onClickCapture} onDoubleClick={onDoubleClick} onKeyDownCapture={onKeyDownCapture}>
         <ThemedBlockNoteView
           editor={editor}
           editable={mountEditable}

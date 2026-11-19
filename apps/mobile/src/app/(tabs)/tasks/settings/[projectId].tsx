@@ -5,6 +5,7 @@ import { Alert, Pressable, ScrollView, View } from 'react-native'
 import { ActionSheet, ConfirmDialog, type ConfirmRequest, Dialog, type SheetAction } from '../../../../components/settings/Dialog'
 import { Badge, Note, RowText, SettingsCard, SettingsRow, SmallOutlineButton } from '../../../../components/settings/Shell'
 import { DayPicker } from '../../../../components/tasks/DayPicker'
+import { ProjectDocsCard } from '../../../../components/tasks/ProjectDocsCard'
 import type { TaskCycle, TaskMilestone } from '../../../../data/task-api'
 import {
   cycleDates,
@@ -37,7 +38,8 @@ type Form = { kind: 'milestone'; milestone: TaskMilestone | null } | { kind: 'cy
 
 /**
  * A project's settings on the phone: its milestones (progress, target date, order) and its cycles (dates, the current
- * one, moving unfinished tasks on). Opened from the project's task list. Statuses and labels stay on the web.
+ * one, moving unfinished tasks on) and its docs teamspace. Opened from the project's task list. Statuses and labels stay
+ * on the web.
  */
 export default function ProjectSettingsScreen() {
   const { projectId } = useLocalSearchParams<{ projectId: string }>()
@@ -197,6 +199,8 @@ export default function ProjectSettingsScreen() {
               )
             })}
           </SettingsCard>
+
+          {project ? <ProjectDocsCard project={project} /> : null}
         </ScrollView>
       </KeyboardSpace>
 

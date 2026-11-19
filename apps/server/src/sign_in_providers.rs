@@ -1,5 +1,6 @@
-//! Google and GitHub as sign-in providers: the authorization URL, the code exchange and the profile. Everything that
-//! knows a provider's wire format is here. Callers get a [`ProviderProfile`] or a [`ProviderFailure`].
+//! Google, GitHub and one OpenID Connect provider (`ORBIT_OIDC_*`) as sign-in providers: the authorization URL, the
+//! code exchange and the profile. Everything that knows a provider's wire format is here. Callers get a
+//! [`ProviderProfile`] or a [`ProviderFailure`].
 
 use std::time::Duration;
 
@@ -19,10 +20,12 @@ pub const APP_REDIRECT: &str = "orbit://auth/callback";
 pub enum Provider {
     Google,
     Github,
+    /// Any OpenID Connect identity provider, set only with `ORBIT_OIDC_*`.
+    Oidc,
 }
 
 impl Provider {
-    pub const ALL: [Self; 2] = [Self::Google, Self::Github];
+    pub const ALL: [Self; 3] = [Self::Google, Self::Github, Self::Oidc];
 
     /// The value in paths, JSON and the `provider` columns.
     #[must_use]
@@ -30,6 +33,7 @@ impl Provider {
         match self {
             Self::Google => "google",
             Self::Github => "github",
+            Self::Oidc => "oidc",
         }
     }
 
@@ -55,6 +59,8 @@ impl Provider {
 pub struct ProviderCredentials {
     pub client_id: String,
     pub client_secret: String,
+    /// `ORBIT_OIDC_ISSUER`, for [`Provider::Oidc`] only.
+    pub issuer: Option<Url>,
 }
 
 /// Where the providers are. `Default` is production; tests point every URL at one local fake server.
@@ -205,17 +211,17 @@ impl ProviderClient {
         Self { http, endpoints }
     }
 
-    /// The URL the browser opens. Scopes: Google `openid email profile`; GitHub `read:user user:email`.
-    #[must_use]
-    pub fn authorization_url(
+    /// The URL the browser opens. Scopes: Google and OpenID Connect `openid email profile`; GitHub
+    /// `read:user user:email`. OpenID Connect reads the authorization endpoint from discovery first.
+    pub async fn authorization_url(
         &self,
         provider: Provider,
-        client_id: &str,
+        credentials: &ProviderCredentials,
         redirect_uri: &str,
         state: &str,
         pkce_challenge: &str,
         freshness: Freshness,
-    ) -> Url {
+    ) -> Result<Url, ProviderFailure> {
         let (mut url, scope) = match provider {
             Provider::Google => (
                 self.endpoints.google_authorize.clone(),
@@ -225,11 +231,15 @@ impl ProviderClient {
                 self.endpoints.github_authorize.clone(),
                 "read:user user:email",
             ),
+            Provider::Oidc => (
+                self.discover(credentials).await?.authorization_endpoint,
+                "openid email profile",
+            ),
         };
         {
             let mut query = url.query_pairs_mut();
             query
-                .append_pair("client_id", client_id)
+                .append_pair("client_id", &credentials.client_id)
                 .append_pair("redirect_uri", redirect_uri)
                 .append_pair("response_type", "code")
                 .append_pair("scope", scope)
@@ -248,13 +258,21 @@ impl ProviderClient {
                 (Provider::Github, _) => {
                     query.append_pair("prompt", "select_account");
                 }
+                // The identity provider's own session is the point of single sign-on: no prompt by default.
+                (Provider::Oidc, Freshness::Any) => {}
+                (Provider::Oidc, Freshness::ForceLogin) => {
+                    query
+                        .append_pair("prompt", "login")
+                        .append_pair("max_age", "0");
+                }
             }
         }
-        url
+        Ok(url)
     }
 
     /// Code, then access token, then profile. Google: token endpoint, then userinfo. GitHub: token endpoint with
     /// `Accept: application/json` (errors come back as 200 with `error`), then `/user` and `/user/emails`.
+    /// OpenID Connect: discovery, then the token and userinfo endpoints it names.
     pub async fn profile(
         &self,
         provider: Provider,
@@ -263,22 +281,42 @@ impl ProviderClient {
         code: &str,
         pkce_verifier: &str,
     ) -> Result<ProviderProfile, ProviderFailure> {
-        let token_url = match provider {
-            Provider::Google => &self.endpoints.google_token,
-            Provider::Github => &self.endpoints.github_token,
+        let (token_url, discovery) = match provider {
+            Provider::Google => (self.endpoints.google_token.clone(), None),
+            Provider::Github => (self.endpoints.github_token.clone(), None),
+            Provider::Oidc => {
+                let discovery = self.discover(credentials).await?;
+                (discovery.token_endpoint.clone(), Some(discovery))
+            }
         };
-        let token = self
+        let mut form = vec![
+            ("grant_type", "authorization_code"),
+            ("code", code),
+            ("redirect_uri", redirect_uri),
+            ("code_verifier", pkce_verifier),
+        ];
+        let mut request = self
             .http
-            .post(token_url.clone())
-            .header(reqwest::header::ACCEPT, "application/json")
-            .form(&[
-                ("grant_type", "authorization_code"),
-                ("code", code),
-                ("redirect_uri", redirect_uri),
-                ("client_id", credentials.client_id.as_str()),
-                ("client_secret", credentials.client_secret.as_str()),
-                ("code_verifier", pkce_verifier),
-            ])
+            .post(token_url)
+            .header(reqwest::header::ACCEPT, "application/json");
+        if discovery
+            .as_ref()
+            .is_some_and(OidcDiscovery::takes_basic_auth)
+        {
+            // RFC 6749 section 2.3.1: both parts are form-encoded before they go into the header.
+            let encode = |value: &str| {
+                url::form_urlencoded::byte_serialize(value.as_bytes()).collect::<String>()
+            };
+            request = request.basic_auth(
+                encode(&credentials.client_id),
+                Some(encode(&credentials.client_secret)),
+            );
+        } else {
+            form.push(("client_id", credentials.client_id.as_str()));
+            form.push(("client_secret", credentials.client_secret.as_str()));
+        }
+        let token = request
+            .form(&form)
             .send()
             .await
             .map_err(|error| unavailable(provider, "token request", &error))?;
@@ -287,10 +325,98 @@ impl ProviderClient {
             tracing::warn!(provider = provider.as_str(), error = ?token.error, "provider refused the code");
             ProviderFailure::Unavailable
         })?;
-        match provider {
-            Provider::Google => self.google_profile(&access_token).await,
-            Provider::Github => self.github_profile(&access_token).await,
+        match (provider, discovery) {
+            (Provider::Google, _) => self.google_profile(&access_token).await,
+            (Provider::Github, _) => self.github_profile(&access_token).await,
+            (Provider::Oidc, Some(discovery)) => self.oidc_profile(&discovery, &access_token).await,
+            (Provider::Oidc, None) => Err(ProviderFailure::Unavailable),
         }
+    }
+
+    /// `{issuer}/.well-known/openid-configuration`, read on every use so a change at the identity provider needs no
+    /// restart. The document must name the configured issuer (OpenID Connect Discovery 1.0, section 4.3).
+    async fn discover(
+        &self,
+        credentials: &ProviderCredentials,
+    ) -> Result<OidcDiscovery, ProviderFailure> {
+        let provider = Provider::Oidc;
+        let issuer = credentials
+            .issuer
+            .as_ref()
+            .ok_or(ProviderFailure::Unavailable)?;
+        let issuer = issuer.as_str().trim_end_matches('/');
+        let response = self
+            .http
+            .get(format!("{issuer}/.well-known/openid-configuration"))
+            .header(reqwest::header::ACCEPT, "application/json")
+            .send()
+            .await
+            .map_err(|error| unavailable(provider, "discovery", &error))?;
+        let discovery: OidcDiscovery = read_json(provider, "discovery", response).await?;
+        if discovery.issuer.trim_end_matches('/') != issuer {
+            tracing::warn!(
+                expected = issuer,
+                found = discovery.issuer,
+                "the OpenID Connect discovery document names another issuer"
+            );
+            return Err(ProviderFailure::Unavailable);
+        }
+        if discovery.userinfo_endpoint.is_none() {
+            tracing::warn!(
+                issuer,
+                "the OpenID Connect provider has no userinfo endpoint"
+            );
+            return Err(ProviderFailure::Unavailable);
+        }
+        Ok(discovery)
+    }
+
+    /// The identity key is the issuer and `sub` together (OpenID Connect Core 1.0, section 5.7): `sub` is unique
+    /// only at one issuer, so pointing `ORBIT_OIDC_ISSUER` at another identity provider cannot reuse old links.
+    async fn oidc_profile(
+        &self,
+        discovery: &OidcDiscovery,
+        access_token: &str,
+    ) -> Result<ProviderProfile, ProviderFailure> {
+        let provider = Provider::Oidc;
+        let userinfo = discovery
+            .userinfo_endpoint
+            .clone()
+            .ok_or(ProviderFailure::Unavailable)?;
+        let response = self
+            .http
+            .get(userinfo)
+            .bearer_auth(access_token)
+            .header(reqwest::header::ACCEPT, "application/json")
+            .send()
+            .await
+            .map_err(|error| unavailable(provider, "userinfo", &error))?;
+        let user: OidcUserInfo = read_json(provider, "userinfo", response).await?;
+        if user.sub.is_empty() || user.sub.len() > 256 {
+            return Err(ProviderFailure::Unavailable);
+        }
+        let email = user.email.filter(|email| !email.trim().is_empty());
+        let email_verified = matches!(&user.email_verified, Some(serde_json::Value::Bool(true)))
+            || matches!(&user.email_verified, Some(serde_json::Value::String(value)) if value == "true");
+        let verified_email = email
+            .as_deref()
+            .filter(|_| email_verified)
+            .map(orbit_platform::normalize_email);
+        let username = user
+            .preferred_username
+            .filter(|name| !name.trim().is_empty());
+        let name = user
+            .name
+            .as_deref()
+            .filter(|name| !name.trim().is_empty())
+            .or(username.as_deref());
+        Ok(ProviderProfile {
+            provider,
+            subject: format!("{} {}", discovery.issuer.trim_end_matches('/'), user.sub),
+            display_name: display_name(name, email.as_deref()),
+            email: verified_email.clone().or(email).or(username),
+            verified_email,
+        })
     }
 
     async fn google_profile(&self, access_token: &str) -> Result<ProviderProfile, ProviderFailure> {
@@ -405,6 +531,39 @@ struct GoogleUserInfo {
 }
 
 #[derive(Deserialize)]
+struct OidcDiscovery {
+    issuer: String,
+    authorization_endpoint: Url,
+    token_endpoint: Url,
+    userinfo_endpoint: Option<Url>,
+    #[serde(default)]
+    token_endpoint_auth_methods_supported: Option<Vec<String>>,
+}
+
+impl OidcDiscovery {
+    /// `client_secret_basic` is the default when the provider lists no methods (Discovery 1.0, section 3), and the
+    /// one every provider must support; `client_secret_post` only when the provider lists it and not basic.
+    fn takes_basic_auth(&self) -> bool {
+        self.token_endpoint_auth_methods_supported
+            .as_ref()
+            .is_none_or(|methods| {
+                methods.iter().any(|method| method == "client_secret_basic")
+                    || !methods.iter().any(|method| method == "client_secret_post")
+            })
+    }
+}
+
+/// Some providers send `email_verified` as the string `"true"`.
+#[derive(Deserialize)]
+struct OidcUserInfo {
+    sub: String,
+    email: Option<String>,
+    email_verified: Option<serde_json::Value>,
+    name: Option<String>,
+    preferred_username: Option<String>,
+}
+
+#[derive(Deserialize)]
 struct GithubUser {
     id: u64,
     login: String,
@@ -466,17 +625,25 @@ mod tests {
         assert_eq!(display_name(Some(&"x".repeat(300)), None).len(), 100);
     }
 
-    #[test]
-    fn the_authorization_url_carries_state_pkce_and_scope() {
+    #[tokio::test]
+    async fn the_authorization_url_carries_state_pkce_and_scope() {
         let client = ProviderClient::new(ProviderEndpoints::default());
-        let url = client.authorization_url(
-            Provider::Google,
-            "id.apps.googleusercontent.com",
-            "https://orbit.example/api/v1/auth/providers/google/callback",
-            "state-1",
-            "challenge-1",
-            Freshness::ForceLogin,
-        );
+        let credentials = ProviderCredentials {
+            client_id: "id.apps.googleusercontent.com".to_owned(),
+            client_secret: "secret".to_owned(),
+            issuer: None,
+        };
+        let url = client
+            .authorization_url(
+                Provider::Google,
+                &credentials,
+                "https://orbit.example/api/v1/auth/providers/google/callback",
+                "state-1",
+                "challenge-1",
+                Freshness::ForceLogin,
+            )
+            .await
+            .unwrap();
         assert_eq!(
             url.as_str(),
             "https://accounts.google.com/o/oauth2/v2/auth?client_id=id.apps.googleusercontent.com\

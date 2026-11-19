@@ -21,7 +21,7 @@ Every action runs in the app; nothing opens the web.
 - `src/orbit-context.tsx`: `useOrbit()` gives the client, the user and the current workspace (the last one chosen, else the first).
 - `src/components/docs/PageEditor.dom.tsx`: the page editor, an Expo DOM component (`'use dom'`) running BlockNote with the web's schema from `@orbit/editor` (`packages/editor`). It connects to the page's collab socket with a one-time ticket (`getTicket` native action), and the screen (`src/app/(tabs)/docs/[id].tsx`) drives it through props, native actions and `ref.run(command)`. `src/data/page-editor.ts` holds the commands, the toolbar state and the answers to close codes.
 - `src/live.ts`: the workspace events socket (marks task, project and inbox queries stale) and the chat live socket (patches messages and read states). Both close in the background and reconnect in the foreground.
-- `src/push.ts`: iOS push notifications straight through APNs (no Expo push service). Settings → Notifications turns them on (`POST /api/v1/push/apns` with the raw device token and the profile's APNs environment); launch, sign-in and a workspace change register the token again when iOS allows notifications. A tapped notification's `url` (a web path) opens the matching screen (`src/data/push-route.ts`). The server pushes only when the user has no active live connection, which is why the sockets close in the background. Expo Go cannot get them: use a TestFlight or development build.
+- `src/push.ts`: native push notifications with no Expo push service. iOS goes straight through APNs, and Android goes straight through Firebase Cloud Messaging (FCM). Settings → Notifications turns them on. iOS sends `POST /api/v1/push/apns` with the raw device token and the profile's APNs environment. Android makes the notification channel `default` and sends `POST /api/v1/push/fcm` with the FCM registration token. Launch, sign-in and a workspace change register the token again when the system allows notifications. A tapped notification's `url` (a web path) opens the matching screen (`src/data/push-route.ts`). The server pushes only when the user has no active live connection, which is why the sockets close in the background. Expo Go cannot get them: use a TestFlight, release or development build.
 
 ## How the app talks to Orbit
 
@@ -30,6 +30,7 @@ Every action runs in the app; nothing opens the web.
 - The app keeps the token in the device keychain (`expo-secure-store`). It sends the token as `Authorization: Bearer <token>` on every request and on the WebSocket upgrade.
 - The token is a normal Orbit session. It shows in Account → Sessions, and you can revoke it there.
 - **Continue with Google / GitHub** shows on the sign-in screen for each provider the server's admin set up (`providers` in `GET /api/v1/auth/options`). The app starts the flow (`POST /api/v1/auth/providers/{provider}/start` with a PKCE challenge), opens the provider in the system browser's auth session (`expo-web-browser`), and gets back a one-time `handoff` on its redirect URL. It exchanges the handoff and the PKCE verifier for the session token (`POST /api/v1/auth/providers/exchange`). The token never goes in a URL. Two-factor sign-in still asks for the code after this.
+- **Sign in with a passkey** shows when the server has passkeys (`passkeys_enabled` in `GET /api/v1/auth/options`). A passkey belongs to the server's web address, and an app can use it natively only with an associated-domains entitlement for each server, which self-hosted servers cannot have. Thus the app starts a flow (`POST /api/v1/auth/passkey/app/start` with a PKCE challenge and its redirect) and opens the server's own page (`/login/app#flow=…`) in the auth session. The page asks for the passkey (`POST /api/v1/auth/passkey/app/finish`) and sends the browser to the app's redirect with a one-time `handoff`. The app exchanges it as for a provider (`POST /api/v1/auth/providers/exchange`). The browser step makes no session and sets no cookie. A passkey needs no two-factor code.
 - Security → Connected accounts connects and disconnects providers. An account without a password confirms authenticator changes with a fresh provider sign-in when the server answers `reauthentication_required`.
 
 The server side lives in `apps/server` of the same repo.
@@ -74,7 +75,7 @@ Requirements: Bun, the Orbit dev server (`just dev` at the repo root), and a pho
 
    `just mobile` sets `REACT_NATIVE_PACKAGER_HOSTNAME` from `ORBIT_MOBILE_HOST`, so Metro tells the phone to load the app from that host.
 
-6. Optional: to test Google or GitHub sign-in in Expo Go, allow the app's Expo Go redirect on the server. A development or store build sends `orbit://auth/callback`, which every server accepts. Expo Go sends its own URL instead, for example `exp://devbox.example.ts.net:8082/--/auth/callback` (the Metro host and port, then `/--/auth/callback`). Add that exact value to the server's environment and restart it:
+6. Optional: to test Google, GitHub or passkey sign-in in Expo Go, allow the app's Expo Go redirect on the server. A development or store build sends `orbit://auth/callback`, which every server accepts. Expo Go sends its own URL instead, for example `exp://devbox.example.ts.net:8082/--/auth/callback` (the Metro host and port, then `/--/auth/callback`). Add that exact value to the server's environment and restart it:
 
    ```bash
    ORBIT_DEV_NATIVE_REDIRECTS=exp://devbox.example.ts.net:8082/--/auth/callback
@@ -115,24 +116,43 @@ To add an icon, add its reicon name to `ICONS` in `scripts/generate-icons.ts` an
 
 ## Store builds
 
-The sign-in screen's Server dropdown starts on Orbit Cloud (`https://app.orbit.so`), so a cloud user only types an email and a password. A self-hosted user picks Custom and types the address of their Orbit server. When `EXPO_PUBLIC_ORBIT_SERVER` is set to another server, the dropdown starts on Custom with that address. The `preview` and `production` profiles in `eas.json` set it to Orbit Cloud, so a release build never fills in a dev server from `.env.local`.
+The project does not use EAS. The GitHub workflow `.github/workflows/testflight.yml` (manual run) makes the iOS store build: `expo prebuild`, then `xcodebuild` on a macOS runner, signed with the certificate and the profile in the `IOS_*` secrets, and uploaded to TestFlight with the App Store Connect API key. The workflow sets `ios.buildNumber` from the run number, sets `expo-notifications` to the production APNs environment and stops if the entitlement does not say `production`. The same build goes to TestFlight and, after review, to the App Store. The certificate and the profile expire each year: renew them at developer.apple.com and update the secrets.
 
-What is configured:
+The sign-in screen's Server dropdown starts on Orbit Cloud (`https://app.orbit.so`), so a cloud user only types an email and a password. A self-hosted user picks Custom and types the address of their Orbit server. When `EXPO_PUBLIC_ORBIT_SERVER` is set to another server, the dropdown starts on Custom with that address. The workflow sets it to Orbit Cloud, so a release build never fills in a dev server from `.env.local`.
 
-- `app.json`: the iOS bundle identifier and the Android package are `io.coollabs.orbit`. `ios.privacyManifests` declares no tracking, the data the app collects (email, name, photos or videos, and other user content, linked to the user, for app functionality only), and the required-reason APIs that React Native and the Expo modules use (UserDefaults, file timestamps, system boot time, disk space). The reasons are copied from each package's `PrivacyInfo.xcprivacy`. After you add a native module, check its manifest and add its reasons.
-- `eas.json`: the build version numbers live on EAS (`appVersionSource: remote`). The `development` profile makes an internal development build, `preview` an internal build, and `production` a store build that increments the build number.
-- The billing banner only shows the trial's days left or that the workspace is read-only. It has no link to billing. App Store guideline 3.1.1 and the Google Play payments policy forbid pointing to purchases outside the app.
+What is configured for App Review:
 
-What you still have to do:
+- `app.json`: the iOS bundle identifier and the Android package are `io.coollabs.orbit`. `ios.config.usesNonExemptEncryption` is `false`. `ios.privacyManifests` declares no tracking, the data the app collects (email, name, photos or videos, and other user content, linked to the user, for app functionality only), and the required-reason APIs that React Native and the Expo modules use (UserDefaults, file timestamps, system boot time, disk space). The reasons are copied from each package's `PrivacyInfo.xcprivacy`. After you add a native module, check its manifest and add its reasons.
+- The `expo-image-picker` plugin in `app.json` sets the camera, photo library and microphone texts. Guideline 5.1.1 asks each text to say why the app needs the access.
+- On iOS the sign-in screen and Security → Connected accounts offer only the OpenID Connect provider, not Google or GitHub (`offeredProviders` in `src/data/sign-in-provider.ts`). Guideline 4.8 asks an app with a third-party or social login to also offer Sign in with Apple (or an equal private login). Accounts that are already connected stay listed, so they can be disconnected, and they still confirm changes.
+- On iOS the Billing page is not in Settings, and its route goes back to Settings (`allowedNav` in `src/components/settings/Shell.tsx`, `settings/billing.tsx`). The billing banner shows only the trial's days left or that the workspace is read-only, with no link. Guideline 3.1.1 forbids pointing to purchases outside the app.
+- Mail is not in the dock or the drawer until it is ready. Guideline 2.1 refuses "coming soon" items.
+- The sign-in screen and the account menu link to the terms of service and the privacy policy (`src/data/legal.ts`). Guideline 5.1.1 asks for the privacy policy inside the app.
+- Chat has Report on a message and Block on a person, and owners and admins see the reports in Settings → Reports (guideline 1.2, user-generated content).
+- Settings → Profile has Delete account (guideline 5.1.1(v)).
 
-1. Create the project on EAS: `bunx eas-cli init` in `apps/mobile`. It adds `extra.eas.projectId` to `app.json`.
-2. Before you build the `development` profile, install the dev client: `bunx expo install expo-dev-client`.
-3. Create the apps in App Store Connect and in the Google Play Console with the identifier `io.coollabs.orbit`.
-4. Fill in `submit.production` in `eas.json`. iOS takes `appleId` (or `EXPO_APPLE_ID`), `ascAppId` (the App Store Connect app ID) and `appleTeamId`. Android takes `serviceAccountKeyPath` (a Google service account JSON key with access to the Play Console; keep it out of git, or upload it to EAS instead) and `track` (`internal` for the first upload). Google Play requires the first upload of an app to be done by hand in the Play Console.
-5. Build and submit: `bunx eas-cli build --platform all --profile production`, then `bunx eas-cli submit --platform ios --profile production` (and `android`).
-6. Fill in the App Store privacy labels and the Play data safety form so that they match `ios.privacyManifests`.
+What you do by hand in App Store Connect:
+
+1. Run the TestFlight workflow, and wait until the build shows in TestFlight.
+2. In the app version, pick that build, and add the screenshots from `marketing/app-store/`.
+3. Fill in the privacy labels so that they match `ios.privacyManifests`, the age rating, the category, the support URL and the privacy policy URL (`https://coollabs.io/privacy-policy/`).
+4. In App Review information, give a demo account on `https://app.orbit.so` with data in a workspace that does not become read-only. Say that the app cannot create an account, and that workspaces are private and invite-only.
+5. Submit the version for review.
+
+## Android push (FCM)
+
+The Android app gets its FCM token from the Firebase project in `google-services.json`. This file is not in git (`.gitignore`). `app.config.js` adds `android.googleServicesFile` only when the file exists, because prebuild stops when `app.json` names a file that is missing. Without the file, the Android build has no FCM token, and Settings → Notifications cannot turn on notifications.
+
+To build the Android app with push:
+
+1. In the [Firebase console](https://console.firebase.google.com/), open the Firebase project (or create one), and add an Android app with the package name `io.coollabs.orbit`.
+2. Download `google-services.json` and put it in `apps/mobile/`. Do not commit it.
+3. Make the native project again: `bunx expo prebuild --platform android --clean`, then `bunx expo run:android`.
+4. Give the Orbit server a service account key of the same Firebase project (`ORBIT_FCM_SERVICE_ACCOUNT_FILE`). See "Android push notifications (FCM)" in `docs/operations.md`.
+
+The server and the app must use the same Firebase project. If they do not, FCM refuses the tokens (`SENDER_ID_MISMATCH`), and the server removes them.
 
 ## Next steps
 
-- Android push (FCM). iOS push needs a TestFlight or development build (`bunx expo run:ios`); Expo Go cannot get it.
-- Browser-sheet sign-in for passkeys. Admin → Sign-in providers (client ID and secret) is web-only.
+- Test Android push from end to end with a real Firebase project. The server and the app have the code, but no push went through a real Firebase project yet.
+- iOS push needs a TestFlight or development build (`bunx expo run:ios`). Android push needs a build with `google-services.json` (`bunx expo run:android`). Expo Go cannot get either.

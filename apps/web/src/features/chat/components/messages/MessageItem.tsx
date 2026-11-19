@@ -33,7 +33,7 @@ function FailedNote({ message }: { message: Message }) {
   const { retry, discard } = useMessageList()
   return (
     <div role="alert" data-slot="message-failed" className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-destructive">
-      <span>Not sent.</span>
+      <span>Not sent.{message.sendError ? ` ${message.sendError}` : null}</span>
       <Button variant="link" size="xs" className="h-6 px-0 text-destructive" onClick={() => retry(message)}>
         Try again
       </Button>

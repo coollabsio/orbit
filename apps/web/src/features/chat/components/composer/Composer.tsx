@@ -9,7 +9,7 @@ import {
   type Ref,
   useId,
 } from 'react'
-import { At, Paperclip2, Send2, SmileCircle, Sticker, Xmark } from 'reicon-react'
+import { At, Hashtag, Paperclip2, Send2, SmileCircle, Sticker, Xmark } from 'reicon-react'
 import type { CustomStickerRecord } from '@orbit/api/generated/types.gen'
 import { confirmAction } from '@/components/common/confirmAction'
 import { EmojiPicker } from '@/components/common/EmojiPicker'
@@ -187,10 +187,10 @@ export function Composer({ ref, conversation, threadRootId = null, replyTo = nul
     })
   }
 
-  /** The `@` button: the list opens only after a space or at the start of a line. */
-  function mentionSomeone() {
+  /** The `@` and `#` buttons: the list opens only after a space or at the start of a line. */
+  function startMention(trigger: '@' | '#') {
     const before = text[(input.current?.selectionStart ?? text.length) - 1]
-    insertAtCursor(before === undefined || /\s/.test(before) ? '@' : ' @')
+    insertAtCursor(before === undefined || /\s/.test(before) ? trigger : ` ${trigger}`)
   }
 
   function onChange(event: ChangeEvent<HTMLTextAreaElement>) {
@@ -377,8 +377,13 @@ export function Composer({ ref, conversation, threadRootId = null, replyTo = nul
               </Popover>
             ) : null}
             <Tip label="Mention someone">
-              <Button variant="ghost" size="icon" aria-label="Mention someone" onClick={mentionSomeone}>
+              <Button variant="ghost" size="icon" aria-label="Mention someone" onClick={() => startMention('@')}>
                 <At className="size-5" />
+              </Button>
+            </Tip>
+            <Tip label="Mention a channel or task">
+              <Button variant="ghost" size="icon" aria-label="Mention a channel or task" onClick={() => startMention('#')}>
+                <Hashtag className="size-5" />
               </Button>
             </Tip>
             <span className="flex-1" />

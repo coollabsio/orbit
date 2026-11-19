@@ -6,7 +6,7 @@ import type { ChannelInput, ChatClient, SendMessageInput, UploadOptions, Webhook
 import { patchMessage, updateOutbox } from './events'
 import { chatKeys } from './keys'
 import { requireClient } from './queries'
-import type { Attachment, Category, Conversation, ConversationState, Message, MessageSticker, NotifyLevel, ReplyQuote, ThreadState } from './types'
+import { ChatError, type Attachment, type Category, type Conversation, type ConversationState, type Message, type MessageSticker, type NotifyLevel, type ReplyQuote, type ThreadState } from './types'
 
 const TYPING_INTERVAL = 8000
 /** When the typing signal was last sent, for each composer (conversation or thread). */
@@ -90,10 +90,12 @@ export function useSendMessage() {
     // Usually the `message.created` event took the row out already. It did not if nobody listened to the client then
     // (the user was in a different workspace), or if a resync came in place of the event.
     onSuccess: (_message, input) => updateOutbox(queryClient, workspaceId, (waiting) => waiting.filter((item) => item.nonce !== input.nonce)),
-    onError: (_error, _input, optimistic) => {
+    onError: (error, _input, optimistic) => {
       if (!optimistic) return
+      // A refusal says why (a block, an archived channel); another failure can go again as it is.
+      const sendError = error instanceof ChatError && error.code === 'forbidden' ? error.message : undefined
       updateOutbox(queryClient, workspaceId, (waiting) =>
-        waiting.map((item) => (item.id === optimistic.id ? { ...item, sendState: 'failed' } : item)),
+        waiting.map((item) => (item.id === optimistic.id ? { ...item, sendState: 'failed', sendError } : item)),
       )
     },
   })

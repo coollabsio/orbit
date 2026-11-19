@@ -201,7 +201,11 @@ pub mod templates {
     /// `name` on one line in quotes: without control, invisible or direction characters (which
     /// could add lines or reorder text), and at most 60 characters long.
     fn quoted_name(name: &str) -> String {
-        const MAX_CHARS: usize = 60;
+        quoted(name, 60)
+    }
+
+    /// As [`quoted_name`], at most `max_chars` long.
+    fn quoted(name: &str, max_chars: usize) -> String {
         let visible: String = name
             .chars()
             .filter(|character| {
@@ -216,8 +220,8 @@ pub mod templates {
             })
             .collect();
         let words = visible.split_whitespace().collect::<Vec<_>>().join(" ");
-        let mut short: String = words.chars().take(MAX_CHARS).collect();
-        if words.chars().count() > MAX_CHARS {
+        let mut short: String = words.chars().take(max_chars).collect();
+        if words.chars().count() > max_chars {
             short.push('…');
         }
         format!("\"{short}\"")
@@ -249,6 +253,30 @@ pub mod templates {
                 "Your {source} import into the workspace {} {outcome}: {summary}.\n\n\
                  See the result:\n{url}\n",
                 quoted_name(workspace)
+            ),
+        }
+    }
+
+    /// A member reported a chat message. The message text is user content: it is cleaned up
+    /// and cut as a name is, so it cannot make the email say something Orbit does not.
+    #[must_use]
+    pub fn chat_report(
+        to: &str,
+        workspace: &str,
+        reason: &str,
+        message: &str,
+        url: &str,
+    ) -> OutgoingEmail {
+        OutgoingEmail {
+            to: to.to_owned(),
+            subject: "A chat message was reported on Orbit".to_owned(),
+            body: format!(
+                "A member of the workspace {} reported a chat message.\n\n\
+                 Reason: {reason}\n\
+                 Message: {}\n\n\
+                 Workspace owners and admins can see the report and delete the message:\n{url}\n",
+                quoted_name(workspace),
+                quoted(message, 300)
             ),
         }
     }

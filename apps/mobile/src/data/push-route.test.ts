@@ -32,6 +32,8 @@ test('reads the url from the iOS remote payload, then from data', () => {
   const remote = { content: { data: null }, trigger: { type: 'push', payload: { aps: {}, url: '/chat/c1' } } }
   expect(pushUrl(remote)).toBe('/chat/c1')
   expect(pushUrl({ content: { data: { url: '/activity' } }, trigger: null })).toBe('/activity')
+  // Android: the FCM `data` of the message
+  expect(pushUrl({ content: { data: { url: '/chat/c1?thread=m9' } }, trigger: { type: 'push', remoteMessage: { data: { url: '/chat/c1?thread=m9' } } } })).toBe('/chat/c1?thread=m9')
   expect(pushUrl({ content: { data: {} }, trigger: { type: 'push', payload: { aps: {} } } })).toBeNull()
 })
 

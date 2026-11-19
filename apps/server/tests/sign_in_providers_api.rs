@@ -1,5 +1,5 @@
-//! Sign in with Google and GitHub, end to end over the auth and admin routers, against a local stand-in for both
-//! providers that checks the client secret, the redirect URI and PKCE like the real ones.
+//! Sign in with Google, GitHub and OpenID Connect, end to end over the auth and admin routers, against a local
+//! stand-in for the providers that checks the client secret, the redirect URI and PKCE like the real ones.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -40,6 +40,11 @@ enum FakeUser {
         login: &'static str,
         emails: Vec<(&'static str, bool, bool)>,
     },
+    Oidc {
+        sub: &'static str,
+        email: &'static str,
+        verified: bool,
+    },
 }
 
 fn google(sub: &'static str, email: &'static str) -> FakeUser {
@@ -64,7 +69,7 @@ struct Grant {
     user: FakeUser,
 }
 
-/// Google and GitHub in one local server. A code is good once and only with the right secret and verifier.
+/// Google, GitHub and an OpenID Connect provider at `/oidc` in one local server. A code is good once and only with the right secret and verifier.
 #[derive(Clone, Default)]
 struct FakeProviders {
     grants: Arc<Mutex<HashMap<String, Grant>>>,
@@ -94,6 +99,24 @@ impl FakeProviders {
         Json(json!({"access_token": token, "token_type": "bearer"}))
     }
 
+    /// Like a provider whose discovery lists no auth methods: the client authenticates with HTTP Basic only.
+    async fn oidc_token(
+        State(fake): State<FakeProviders>,
+        headers: HeaderMap,
+        Form(mut form): Form<HashMap<String, String>>,
+    ) -> Json<Value> {
+        let basic = format!(
+            "Basic {}",
+            base64::engine::general_purpose::STANDARD
+                .encode(format!("oidc-client:{CLIENT_SECRET}"))
+        );
+        if headers[header::AUTHORIZATION] != basic.as_str() || form.contains_key("client_secret") {
+            return Json(json!({"error": "invalid_client"}));
+        }
+        form.insert("client_secret".to_owned(), CLIENT_SECRET.to_owned());
+        Self::token(State(fake), Form(form)).await
+    }
+
     fn user(&self, headers: &HeaderMap) -> FakeUser {
         let token = headers[header::AUTHORIZATION]
             .to_str()
@@ -115,6 +138,29 @@ impl FakeProviders {
                         panic!("GitHub user at Google");
                     };
                     Json(json!({"sub": sub, "email": email, "email_verified": verified, "name": "Ada Google"}))
+                }),
+            )
+            .route("/oidc/token", post(Self::oidc_token))
+            .route(
+                "/oidc/.well-known/openid-configuration",
+                get(|headers: HeaderMap| async move {
+                    let issuer = format!("http://{}/oidc", headers[header::HOST].to_str().unwrap());
+                    Json(json!({
+                        "issuer": issuer,
+                        "authorization_endpoint": format!("{issuer}/authorize"),
+                        "token_endpoint": format!("{issuer}/token"),
+                        "userinfo_endpoint": format!("{issuer}/userinfo"),
+                    }))
+                }),
+            )
+            .route(
+                "/oidc/userinfo",
+                get(|State(fake): State<FakeProviders>, headers: HeaderMap| async move {
+                    let FakeUser::Oidc { sub, email, verified } = fake.user(&headers) else {
+                        panic!("another provider's user at the OpenID Connect provider");
+                    };
+                    // As a string, the way some providers send it.
+                    Json(json!({"sub": sub, "email": email, "email_verified": verified.to_string(), "preferred_username": "ada"}))
                 }),
             )
             .route(
@@ -217,6 +263,8 @@ struct Fixture {
     database: TestDatabase,
     app: Router,
     fake: FakeProviders,
+    /// The local stand-in; the OpenID Connect issuer is `{fake_url}/oidc`.
+    fake_url: String,
     /// The root account (owner@example.com, with a password).
     owner_cookie: String,
 }
@@ -263,6 +311,7 @@ impl Fixture {
             database,
             app: auth_router(auth).merge(workspace_router(workspaces)),
             fake,
+            fake_url: url,
             owner_cookie: format!("__Host-orbit_session={}", setup.session.token),
         };
         for provider in ["google", "github"] {
@@ -465,9 +514,9 @@ async fn admin_saves_providers_with_an_encrypted_secret_that_an_empty_save_keeps
     assert_eq!(
         saved.body["sign_in_providers"],
         json!([
-            {"provider": "github", "client_id": "github-client", "secret_set": true,
+            {"provider": "github", "client_id": "github-client", "issuer": null, "secret_set": true,
              "callback_url": "https://orbit.test/api/v1/auth/providers/github/callback"},
-            {"provider": "google", "client_id": "google-client-2", "secret_set": true,
+            {"provider": "google", "client_id": "google-client-2", "issuer": null, "secret_set": true,
              "callback_url": "https://orbit.test/api/v1/auth/providers/google/callback"},
         ])
     );
@@ -1457,4 +1506,118 @@ async fn five_wrong_passwords_end_the_link_step() {
             .await,
         0
     );
+}
+
+#[tokio::test]
+async fn openid_connect_comes_from_the_environment_and_keys_links_by_issuer_and_subject() {
+    let fixture = Fixture::new().await;
+    let issuer = format!("{}/oidc", fixture.fake_url);
+    orbit_server::repositories::environment_settings::EnvironmentSettings::from_config(
+        &orbit_platform::InstanceConfig {
+            oidc: Some(orbit_platform::OidcConfig {
+                issuer: issuer.clone(),
+                client: orbit_platform::OAuthClientConfig {
+                    client_id: "oidc-client".to_owned(),
+                    client_secret: orbit_platform::Secret::new(CLIENT_SECRET.to_owned()),
+                },
+                display_name: "Pocket ID".to_owned(),
+            }),
+            ..orbit_platform::InstanceConfig::default()
+        },
+        &APP_KEY,
+    )
+    .unwrap()
+    .install(&fixture.database);
+
+    let options = fixture
+        .send("GET", "/api/v1/auth/options", None, false, None)
+        .await;
+    assert_eq!(
+        options.body["providers"],
+        json!(["github", "google", "oidc"])
+    );
+    assert_eq!(options.body["oidc_name"], "Pocket ID");
+
+    let settings = fixture
+        .send(
+            "GET",
+            "/api/v1/admin/settings",
+            Some(&fixture.owner_cookie),
+            true,
+            None,
+        )
+        .await;
+    assert_eq!(
+        settings.body["environment"]["sign_in_providers"],
+        json!(["oidc"])
+    );
+    assert_eq!(
+        settings.body["sign_in_providers"][2],
+        json!({"provider": "oidc", "client_id": "oidc-client", "issuer": issuer, "secret_set": true,
+               "callback_url": "https://orbit.test/api/v1/auth/providers/oidc/callback"})
+    );
+    let save = fixture
+        .admin_save(
+            "oidc",
+            json!({"client_id": "other", "client_secret": "other"}),
+        )
+        .await;
+    assert_eq!(save.status, StatusCode::CONFLICT);
+    assert_eq!(save.code(), "set_by_environment");
+
+    let started = fixture
+        .start(
+            "oidc",
+            json!({"intent": "sign_in", "code_challenge": challenge("verifier"), "redirect": "web"}),
+            None,
+        )
+        .await;
+    let authorize = url::Url::parse(started.body["authorize_url"].as_str().unwrap()).unwrap();
+    assert_eq!(authorize.path(), "/oidc/authorize");
+    let query: HashMap<String, String> = authorize.query_pairs().into_owned().collect();
+    assert_eq!(
+        (
+            query["client_id"].as_str(),
+            query["scope"].as_str(),
+            query.get("prompt")
+        ),
+        ("oidc-client", "openid email profile", None)
+    );
+
+    let owner = FakeUser::Oidc {
+        sub: "4f1c",
+        email: "Owner@Example.com",
+        verified: true,
+    };
+    let challenge = fixture.flow("oidc", "sign_in", owner.clone(), None).await;
+    assert_eq!(challenge.status, StatusCode::ACCEPTED, "{}", challenge.body);
+    assert_eq!(challenge.body["email"], "owner@example.com");
+    let linked = fixture.link(&challenge, PASSWORD, Client::Web).await;
+    assert_eq!(linked.status, StatusCode::OK, "{}", linked.body);
+    assert_eq!(
+        fixture
+            .database
+            .scalar::<String>("SELECT subject FROM user_identities WHERE provider = 'oidc'")
+            .await
+            .unwrap(),
+        format!("{issuer} 4f1c")
+    );
+    let again = fixture.flow("oidc", "sign_in", owner, None).await;
+    assert_eq!(again.status, StatusCode::OK, "{}", again.body);
+    assert_eq!(again.body["user"]["id"], linked.body["user"]["id"]);
+
+    let unverified = fixture
+        .flow(
+            "oidc",
+            "sign_in",
+            FakeUser::Oidc {
+                sub: "9a2e",
+                email: "owner@example.com",
+                verified: false,
+            },
+            None,
+        )
+        .await;
+    assert_eq!(unverified.status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(unverified.code(), "provider_email_unverified");
 }

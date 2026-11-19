@@ -127,10 +127,12 @@ export function isMilestoneLate(milestone: Pick<Milestone, 'target_at' | 'task_c
   return targetDay(milestone.target_at) < new Date(now.getFullYear(), now.getMonth(), now.getDate())
 }
 
-type PlanningCounts = { task_count: number; completed_count: number; estimate_total: number; estimate_completed: number }
+type PlanningCounts = { task_count: number; completed_count: number; estimate_total: number; estimate_completed: number; carried_over_count?: number }
 
-/** "3/8 tasks", plus "· 5/13 pts" once a task in it is estimated. Cancelled and duplicate tasks are not counted. */
+/** "3/8 tasks", plus "· 5/13 pts" once a task in it is estimated, plus "· 2 carried over" for a cycle whose unfinished tasks moved on. Cancelled and duplicate tasks are not counted. */
 export function planningProgress(counts: PlanningCounts): string {
   const tasks = `${counts.completed_count}/${counts.task_count} ${counts.task_count === 1 ? 'task' : 'tasks'}`
-  return counts.estimate_total > 0 ? `${tasks} · ${counts.estimate_completed}/${counts.estimate_total} pts` : tasks
+  const points = counts.estimate_total > 0 ? ` · ${counts.estimate_completed}/${counts.estimate_total} pts` : ''
+  const carried = counts.carried_over_count ? ` · ${counts.carried_over_count} carried over` : ''
+  return `${tasks}${points}${carried}`
 }

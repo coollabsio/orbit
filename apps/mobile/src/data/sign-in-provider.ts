@@ -1,17 +1,34 @@
 /**
- * Sign-in with Google or GitHub: the server's start → provider → handoff → exchange flow, in the system browser's auth
- * session. No React and no Expo: the screens pass the device parts (`ProviderDevice`, see `src/sign-in-provider.ts`),
+ * Sign-in with Google, GitHub, an OpenID Connect provider or a passkey: the server's start → browser → handoff → exchange flow, in the system
+ * browser's auth session. No React and no Expo: the screens pass the device parts (`ProviderDevice`, see `src/sign-in-provider.ts`),
  * so tests run the whole flow over a fake fetch and a fake browser.
  */
 import { ApiProblem } from '@orbit/api/problem'
-import { disconnectConnectedAccount, exchangeProviderSignIn, linkProviderSignIn, listConnectedAccounts, startProviderSignIn as startRequest } from '@orbit/api/generated/sdk.gen'
+import { disconnectConnectedAccount, exchangeProviderSignIn, linkProviderSignIn, listConnectedAccounts, startAppPasskeySignIn, startProviderSignIn as startRequest } from '@orbit/api/generated/sdk.gen'
 import type { ConnectedAccount, ExchangeChallenge, LoginResponse, Provider, SignInIntent } from '@orbit/api/generated/types.gen'
 
 import { type OrbitClient, type SignIn, signedIn } from './orbit'
 
 export type { ConnectedAccount, Provider, SignInIntent }
 
-export const PROVIDER_LABEL: Record<Provider, string> = { google: 'Google', github: 'GitHub' }
+/** Fallback labels; use `providerLabel` for the server's OpenID Connect name. */
+export const PROVIDER_LABEL: Record<Provider, string> = { google: 'Google', github: 'GitHub', oidc: 'SSO' }
+
+/** The order of the providers everywhere they are listed. */
+const PROVIDERS: readonly Provider[] = ['google', 'github', 'oidc']
+
+/**
+ * The providers the app shows for sign-in and connecting. On iOS only OpenID Connect (a company login): App Store
+ * guideline 4.8 asks an app with Google or GitHub sign-in to also offer Sign in with Apple. Connected accounts stay listed.
+ */
+export function offeredProviders(providers: readonly Provider[], os: string): Provider[] {
+  return os === 'ios' ? providers.filter((provider) => provider === 'oidc') : [...providers]
+}
+
+/** A provider's label: the OpenID Connect one is the server's `oidc_name` (`ORBIT_OIDC_DISPLAY_NAME`) from its auth options. */
+export function providerLabel(provider: Provider, oidcName?: string | null): string {
+  return (provider === 'oidc' && oidcName) || PROVIDER_LABEL[provider]
+}
 
 /** The redirect the server accepts from every build of the app. */
 export const NATIVE_REDIRECT = 'orbit://auth/callback'
@@ -94,26 +111,53 @@ export async function linkProviderAccount(client: OrbitClient, passwordToken: st
 
 export const isPasswordTokenSpent = (error: unknown) => error instanceof ApiProblem && error.code === 'invalid_password_token'
 
-/**
- * Runs one provider flow. `client` is Origin-less: without a token for `sign_in`, with the session's for `connect` and
- * `confirm`. The session token comes back only in the exchange's body, never in a URL. `password` goes with `connect`
- * from an account that has one.
- */
-export async function startProviderSignIn(client: OrbitClient, provider: Provider, intent: SignInIntent, device: ProviderDevice, password?: string): Promise<ProviderOutcome> {
+/** A flow the server started for the challenge of `verifier`, with the page to open in the browser. */
+interface StartedFlow {
+  authorizeUrl: string
+  redirect: string
+  verifier: string
+}
+
+/** Starts a flow: a new verifier, whose challenge and the app's redirect go to the server with `request`. */
+async function startFlow(device: ProviderDevice, request: (codeChallenge: string, redirect: string) => Promise<{ authorize_url: string }>): Promise<StartedFlow> {
   const verifier = codeVerifier(device.randomBytes)
   const redirect = device.redirect()
-  const { data } = await startRequest({
-    client,
-    path: { provider },
-    body: { intent, code_challenge: await codeChallenge(verifier, device.sha256), redirect, password },
-    throwOnError: true,
-  })
-  const session = await device.openAuthSession(data.authorize_url, redirect)
-  if (session.type !== 'success') return { kind: 'cancelled' }
+  const { authorize_url: authorizeUrl } = await request(await codeChallenge(verifier, device.sha256), redirect)
+  return { authorizeUrl, redirect, verifier }
+}
+
+/**
+ * Opens the flow's page in the auth session and trades the handoff it comes back with, and the verifier, for the
+ * exchange's answer. `null`: the person closed the browser. The session token comes back only in the exchange's body,
+ * never in a URL.
+ */
+async function finishFlow(client: OrbitClient, device: ProviderDevice, { authorizeUrl, redirect, verifier }: StartedFlow, unfinished: string) {
+  const session = await device.openAuthSession(authorizeUrl, redirect)
+  if (session.type !== 'success') return null
   const handoff = handoffFrom(session.url, redirect)
-  if (!handoff) throw new Error(`${PROVIDER_LABEL[provider]} did not finish the sign-in. Try again.`)
+  if (!handoff) throw new Error(unfinished)
   const exchanged = await exchangeProviderSignIn({ client, body: { handoff, code_verifier: verifier }, throwOnError: true })
-  return exchangeOutcome(intent, exchanged.response.status, exchanged.data as LoginResponse | ExchangeChallenge | undefined)
+  return { status: exchanged.response.status, body: exchanged.data as LoginResponse | ExchangeChallenge | undefined }
+}
+
+/**
+ * Runs one provider flow. `client` is Origin-less: without a token for `sign_in`, with the session's for `connect` and
+ * `confirm`. `password` goes with `connect` from an account that has one.
+ */
+export async function startProviderSignIn(client: OrbitClient, provider: Provider, intent: SignInIntent, device: ProviderDevice, password?: string): Promise<ProviderOutcome> {
+  const flow = await startFlow(device, async (code_challenge, redirect) => (await startRequest({ client, path: { provider }, body: { intent, code_challenge, redirect, password }, throwOnError: true })).data)
+  const answer = await finishFlow(client, device, flow, `${PROVIDER_LABEL[provider]} did not finish the sign-in. Try again.`)
+  return answer ? exchangeOutcome(intent, answer.status, answer.body) : { kind: 'cancelled' }
+}
+
+/**
+ * Signs in with a passkey. A passkey belongs to the server's web address, so the server's own sign-in page asks for it
+ * in the auth session; the app gets the session the same way as from a provider. `client` is Origin-less and tokenless.
+ */
+export async function startPasskeySignIn(client: OrbitClient, device: ProviderDevice): Promise<ProviderOutcome> {
+  const flow = await startFlow(device, async (code_challenge, redirect) => (await startAppPasskeySignIn({ client, body: { code_challenge, redirect }, throwOnError: true })).data)
+  const answer = await finishFlow(client, device, flow, 'The passkey sign-in did not finish. Try again.')
+  return answer ? exchangeOutcome('sign_in', answer.status, answer.body) : { kind: 'cancelled' }
 }
 
 const MESSAGES: Record<string, string> = {
@@ -135,6 +179,8 @@ const MESSAGES: Record<string, string> = {
   identity_not_found: 'This provider is not connected.',
   last_sign_in_method: 'This is your only way to sign in. Set a password or connect another account first.',
   invalid_password_token: 'The sign-in took too long or was already used. Try again.',
+  passkeys_unavailable: 'This server does not offer passkeys.',
+  invalid_passkey: 'This passkey cannot sign in. It was removed from your account, or the account is suspended.',
 }
 
 /** A readable message for a provider flow's error; other errors keep the server's own detail. */
@@ -170,9 +216,9 @@ export async function disconnect(client: OrbitClient, provider: Provider): Promi
 }
 
 /** How the account signs in, for the profile: "Password", then each connected provider. */
-export function signInMethods(hasPassword: boolean | undefined, connected: readonly ConnectedAccount[]): string[] {
-  const providers = (['google', 'github'] as const).filter((provider) => connected.some((account) => account.provider === provider))
-  return [...(hasPassword !== false ? ['Password'] : []), ...providers.map((provider) => PROVIDER_LABEL[provider])]
+export function signInMethods(hasPassword: boolean | undefined, connected: readonly ConnectedAccount[], oidcName?: string | null): string[] {
+  const providers = PROVIDERS.filter((provider) => connected.some((account) => account.provider === provider))
+  return [...(hasPassword !== false ? ['Password'] : []), ...providers.map((provider) => providerLabel(provider, oidcName))]
 }
 
 export interface ProviderRow {
@@ -182,8 +228,7 @@ export interface ProviderRow {
 
 /** The Connected accounts card: every configured provider, and any connected one the admin has since removed. */
 export function providerRows(configured: readonly Provider[], connected: readonly ConnectedAccount[]): ProviderRow[] {
-  const order: Provider[] = ['google', 'github']
-  return order
+  return PROVIDERS
     .filter((provider) => configured.includes(provider) || connected.some((account) => account.provider === provider))
     .map((provider) => ({ provider, account: connected.find((account) => account.provider === provider) ?? null }))
 }

@@ -1,8 +1,7 @@
 import { ApiProblem } from '@orbit/api/problem'
 import { ProviderMark } from '@/components/common/icons/ProviderMark'
 import { Button } from '@/components/ui/button'
-import { useConnectedAccounts, useStartProviderSignIn } from '@/features/auth/api'
-import { PROVIDER_NAMES } from '@/features/auth/providerSignIn'
+import { useConnectedAccounts, useProviderName, useStartProviderSignIn } from '@/features/auth/api'
 
 /**
  * Answers 401 `reauthentication_required` for an account without a password: a fresh sign-in with its connected
@@ -11,9 +10,10 @@ import { PROVIDER_NAMES } from '@/features/auth/providerSignIn'
 export function ConfirmWithProvider({ returnTo }: { returnTo: string }) {
   const accounts = useConnectedAccounts()
   const start = useStartProviderSignIn()
+  const providerName = useProviderName()
   const provider = accounts.data?.[0]?.provider
   if (!provider) return <p role="alert" className="text-[0.8125rem] text-destructive">Sign out and sign in again, then try again.</p>
-  const name = PROVIDER_NAMES[provider]
+  const name = providerName(provider)
   return (
     <div role="alert" className="grid gap-3 text-[0.8125rem]">
       <p>For your security, confirm it is you with {name} first. Then try again.</p>

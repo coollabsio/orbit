@@ -29,6 +29,10 @@ export interface MessageHandlers {
   threadUnread?: (rootId: string) => boolean
   /** Absent in a thread: its replies have no thread of their own. */
   onOpenThread?: (message: MessageRecord) => void
+  /** You blocked this person: their messages start collapsed. */
+  isBlocked: (userId: string) => boolean
+  /** A tap on the author's avatar or name: the person's sheet. */
+  onOpenPerson: (message: MessageRecord) => void
 }
 
 /**
@@ -40,6 +44,7 @@ export function MessageItem({ message, groupStart, highlighted = false, handlers
   // a guest has no pull request viewer: no GitHub cards
   const guest = useIsGuest()
   const { user } = useOrbit()
+  const [revealed, setRevealed] = useState(false)
   const author = handlers.nameOf(message.author_id)
   // the web's `data-mentioned` row: it mentions you, `@channel` or `@here`
   const mentioned = message.mentions.user_ids.includes(user.id) || message.mentions.channel || message.mentions.here
@@ -55,6 +60,26 @@ export function MessageItem({ message, groupStart, highlighted = false, handlers
     )
   }
 
+  if (!revealed && !message.bot && handlers.isBlocked(message.author_id)) {
+    return (
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Message from a person you blocked"
+        accessibilityHint="Shows the message"
+        onPress={() => setRevealed(true)}
+        onLongPress={() => handlers.onLongPress(message)}
+        delayLongPress={350}
+        className={`flex-row items-center gap-2 px-3 py-1 active:bg-muted ${groupStart ? 'mt-2' : 'mt-0'}`}
+      >
+        <View className="w-7.5 items-center">
+          <Icon name="eyeSlash" size={16} color={colors.mutedForeground} />
+        </View>
+        <Text className="flex-1 text-[13px] leading-[20px] text-muted-foreground">Message from a person you blocked</Text>
+        <Text className="font-noto-medium text-[12px] leading-[16px] text-muted-foreground">Show</Text>
+      </Pressable>
+    )
+  }
+
   const body = message.deleted ? 'Message deleted.' : handlers.text(message.body)
   return (
     <Pressable
@@ -65,11 +90,17 @@ export function MessageItem({ message, groupStart, highlighted = false, handlers
     >
       {message.reply_to ? <Quote author={handlers.nameOf(message.reply_to.author_id)} body={message.reply_to.sticker && !message.reply_to.body ? 'Sticker' : handlers.text(message.reply_to.body)} /> : null}
       <View className={`flex-row gap-2 px-3 pb-0.5 ${groupStart ? 'pt-1' : 'pt-0.5'}`}>
-        <View className="w-7.5 pt-0.5">{groupStart ? <Avatar id={message.author_id} name={author} size={30} /> : null}</View>
+        <View className="w-7.5 pt-0.5">
+          {groupStart ? (
+            <Pressable accessibilityRole="button" accessibilityLabel={`Open ${author}`} onPress={() => handlers.onOpenPerson(message)}>
+              <Avatar id={message.author_id} name={author} size={30} />
+            </Pressable>
+          ) : null}
+        </View>
         <View className="flex-1 min-w-0">
           {groupStart ? (
             <View className="flex-row items-baseline gap-2">
-              <Text numberOfLines={1} className="font-noto-medium text-[14px] leading-[20px] shrink">
+              <Text numberOfLines={1} accessibilityRole="button" onPress={() => handlers.onOpenPerson(message)} className="font-noto-medium text-[14px] leading-[20px] shrink">
                 {author}
               </Text>
               <Text className="text-[12px] leading-[16px] text-muted-foreground">{timeOfDay(message.created_at)}</Text>

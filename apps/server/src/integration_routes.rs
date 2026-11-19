@@ -181,6 +181,8 @@ impl IntegrationState {
             .refresh_locks
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+        // drop the locks nobody holds, so the map does not keep one for every member who ever refreshed
+        locks.retain(|_, lock| Arc::strong_count(lock) > 1);
         Arc::clone(locks.entry((*workspace, *user)).or_default())
     }
 }
@@ -1033,14 +1035,6 @@ async fn github_webhook_from_database(
         .and_then(|value| value.to_str().ok())
         .unwrap_or("")
         .to_owned();
-    let delivery = request
-        .headers()
-        .get("x-github-delivery")
-        .and_then(|value| value.to_str().ok())
-        .unwrap_or("")
-        .chars()
-        .take(100)
-        .collect::<String>();
     let event = request
         .headers()
         .get("x-github-event")
@@ -1149,7 +1143,7 @@ async fn github_webhook_from_database(
     if (notice || !changed.is_empty()) && !read_only(state, workspace_id, id).await? {
         // A notice or refresh failure must not fail the delivery: GitHub would retry it and the task sync below.
         if notice
-            && let Err(error) = crate::github::notify::notify_pull_event(state, &workspace_id, &event, &delivery, &payload).await
+            && let Err(error) = crate::github::notify::notify_pull_event(state, &workspace_id, &event, &payload).await
         {
             tracing::warn!(%workspace_id, event, %error, "GitHub notice not written");
         }

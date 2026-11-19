@@ -2,7 +2,7 @@ import type { BillingView, PlanView } from '@orbit/api/generated/types.gen'
 import { Redirect } from 'expo-router'
 import * as WebBrowser from 'expo-web-browser'
 import { type ReactNode, useEffect, useState } from 'react'
-import { View } from 'react-native'
+import { Platform, View } from 'react-native'
 
 import { Note, SettingsCard, SettingsShell, WORKSPACE_NAV } from '../../../components/settings/Shell'
 import { ACCESS_LABELS, annualSaving, billingDescription, chooseLabel, groupByProduct, money, planLabel, planTitle, renewal, STATUS_LABELS } from '../../../data/billing'
@@ -16,14 +16,17 @@ import { Button, Text } from '../../../ui'
 const CONFIRM_POLL_MS = 3000
 const CONFIRM_POLL_FOR_MS = 60_000
 
-/** Orbit Cloud: the workspace's plan. The owner subscribes through Stripe Checkout and manages it in the Billing Portal, both in the browser. */
+/**
+ * Orbit Cloud: the workspace's plan. The owner subscribes through Stripe Checkout and manages it in the Billing Portal, both in the browser.
+ * Not on iOS: App Store guideline 3.1.1 refuses purchases outside the app.
+ */
 export default function BillingScreen() {
   const options = useAuthOptions()
   const enabled = options.data?.billing_enabled ?? false
   const query = useWorkspaceBilling()
   return (
     <SettingsShell title="Settings" nav={WORKSPACE_NAV} onRefresh={() => query.refetch()}>
-      {options.data && !enabled ? (
+      {Platform.OS === 'ios' || (options.data && !enabled) ? (
         <Redirect href="/settings" />
       ) : query.isError ? (
         <SettingsCard title="Billing">

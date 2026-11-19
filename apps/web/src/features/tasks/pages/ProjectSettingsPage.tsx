@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { useNavigate, useParams } from 'react-router'
-import { ArrowLeft, Check, Lock, UserAdd, MoreH as MoreHorizontal, Edit as Pencil, Add as Plus, TaskSquare as SquareCheck, Trash as Trash2 } from 'reicon-react'
+import { Link, Navigate, useNavigate, useParams } from 'react-router'
+import { ArrowLeft, Check, ChevronRight, Lock, UserAdd, MoreH as MoreHorizontal, Edit as Pencil, Add as Plus, TaskSquare as SquareCheck, Trash as Trash2 } from 'reicon-react'
 import { Button } from '@/components/ui/button'
 import { Tip } from '@/components/common/Tip'
 import { Input } from '@/components/ui/input'
@@ -16,10 +16,12 @@ import { InfoTip } from '@/components/common/InfoTip'
 import { UnsavedBar } from '@/components/common/UnsavedBar'
 import { ProjectLabelsCard } from '@/features/tasks/components/ProjectLabelsCard'
 import { ProjectCyclesCard } from '@/features/tasks/components/ProjectCyclesCard'
+import { ProjectDocsCard } from '@/features/tasks/components/ProjectDocsCard'
 import { ProjectMilestonesCard } from '@/features/tasks/components/ProjectMilestonesCard'
 import { TaskStatusIcon } from '@/features/tasks/components/TaskStatusIcon'
 import { CATEGORY_LABEL, CATEGORY_ORDER, PROJECT_COLORS, STATUS_COLORS, defaultStatusOf, projectStatuses } from '@/features/tasks/taskMeta'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
+import { canIn } from '@/features/workspaces/permissions'
 import type { Project, StatusCategory, TaskStatusDef } from '@/features/tasks/api/models'
 import { useAddProjectMembers, useCreateStatus, useDeleteProject, useDeleteStatus, useProjectMembers, useProjectStatuses, useProjects, useRemoveProjectMember, useReorderStatuses, useUpdateProject, useUpdateStatus } from '@/features/tasks/api/projects'
 import { ProjectVisibilityChoice } from '@/features/tasks/components/ProjectVisibilityChoice'
@@ -36,15 +38,24 @@ import { ColorSwatch, CustomColorSwatch } from '@/components/common/ColorSwatch'
 import { ProjectGithubCard, type PendingProjectSave } from '@/features/tasks/components/ProjectGithubCard'
 import { useSlowPending } from '@/lib/useDebouncedValue'
 import { loadFailed } from '@/lib/connection'
+import { useIsPhone } from '@/features/chat/pages/useChatViewport'
+import { PROJECT_SETTINGS_GROUPS, projectSettingsItem, projectSettingsPath, type ProjectSettingsSection } from '@/features/tasks/projectSettingsNav'
 
+/** The sections the server changes only for holders of `projects.manage`; milestones, cycles, docs and GitHub stay open. */
+const MANAGED_SECTIONS: ReadonlySet<ProjectSettingsSection> = new Set(['general', 'access', 'statuses', 'labels', 'sub-issues', 'danger-zone'])
 
 
 type Editor = { mode: 'new'; category: StatusCategory } | { mode: 'edit'; statusId: string }
 
-/** One-page project configuration (no sub-navigation): general, statuses, danger zone. */
+/**
+ * A project's settings, one page per section (`projectSettingsNav`). The app sidebar lists the sections; on a phone the
+ * bare settings path is a menu of them instead.
+ */
 export function ProjectSettingsPage() {
-  const { projectId } = useParams()
+  const { projectId, section } = useParams()
   const navigate = useNavigate()
+  const phone = useIsPhone()
+  const page = section ? projectSettingsItem(section) : null
   const { workspace } = useWorkspace()
   const projectsQuery = useProjects(workspace.id)
   const statusQuery = useProjectStatuses(workspace.id, projectId)
@@ -56,6 +67,7 @@ export function ProjectSettingsPage() {
   const statusesSaving = useSlowPending(createStatus.isPending || updateStatus.isPending || deleteStatus.isPending || reorderStatuses.isPending)
   const deleteProject = useDeleteProject(workspace.id)
   const project = projectsQuery.data?.find((p) => p.id === projectId)
+  const canManage = canIn(workspace, 'projects.manage', projectId)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [editor, setEditor] = useState<Editor | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<TaskStatusDef | null>(null)
@@ -76,6 +88,9 @@ export function ProjectSettingsPage() {
     setDropAt(null)
   }
 
+  // desktop opens General, a phone its menu; an unknown section opens the default too
+  if (projectId && (section ? !page : !phone)) return <Navigate to={phone ? `/tasks/projects/${projectId}/settings` : projectSettingsPath(projectId, 'general')} replace />
+
   if (projectsQuery.isPending || statusQuery.isPending || tasksQuery.isPending) {
     return <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background"><Pane><EmptyState icon={SquareCheck} title="Loading project" description="Loading persisted project settings." /></Pane></div>
   }
@@ -86,13 +101,26 @@ export function ProjectSettingsPage() {
   return (
     <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
       <Pane className="relative">
-        <PaneHeader>
-          <Tip label="Back to tasks" side="bottom">
-            <Button variant="ghost" size="icon-sm" className="text-muted-foreground/70" onClick={() => navigate('/tasks')} aria-label="Back to tasks">
+        <PaneHeader className="gap-[7px] text-muted-foreground">
+          {/* a phone's section goes back to the menu; elsewhere Back leaves the settings for the project's tasks */}
+          <Tip label={phone && page ? 'Back to project settings' : 'Back to tasks'} side="bottom">
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="text-muted-foreground/70"
+              onClick={() => navigate(phone && page ? `/tasks/projects/${projectId}/settings` : project ? `/tasks?project=${project.id}` : '/tasks')}
+              aria-label={phone && page ? 'Back to project settings' : 'Back to tasks'}
+            >
               <ArrowLeft className="size-4" />
             </Button>
           </Tip>
-          <PaneTitle>{project ? `${project.name} settings` : 'Project settings'}</PaneTitle>
+          <span className="truncate text-[0.8125rem] font-semibold">{project ? `${project.name} settings` : 'Project settings'}</span>
+          {page ? (
+            <>
+              <span aria-hidden>/</span>
+              <PaneTitle render={<h1 />}>{page.label}</PaneTitle>
+            </>
+          ) : null}
         </PaneHeader>
         {!project ? (
           <div className="min-h-0 flex-1 overflow-y-auto">
@@ -101,8 +129,10 @@ export function ProjectSettingsPage() {
         ) : (
           <div className="min-h-0 flex-1 overflow-y-auto">
             <div className="mx-auto flex w-full max-w-[800px] flex-col gap-6 px-10 pt-7 pb-12 max-[899px]:px-5">
-              <ProjectGeneralCard key={`${project.id}:${project.name}:${project.key}:${project.color}`} project={project} onPendingChange={setGeneralPending} />
+              {page && MANAGED_SECTIONS.has(page.section) && !canManage ? <p className="text-sm text-muted-foreground">You can view these settings. Changing them needs permission to manage this project.</p> : null}
+              {section === 'general' ? <ProjectGeneralCard key={`${project.id}:${project.name}:${project.key}:${project.color}`} project={project} readOnly={!canManage} onPendingChange={setGeneralPending} /> : null}
 
+              {section === 'statuses' ? (
               <SettingsCard title="Statuses" flush>
                 <div className="flex flex-col py-3 pr-3 pl-[18px]">
                   {CATEGORY_ORDER.map((category) => {
@@ -111,7 +141,7 @@ export function ProjectSettingsPage() {
                       <div key={category}>
                         <div className="flex items-center justify-between rounded-md bg-muted px-3 py-2 text-[0.8125rem] text-muted-foreground">
                           <span>{CATEGORY_LABEL[category]}</span>
-                          {category === 'duplicate' ? null : (
+                          {category === 'duplicate' || !canManage ? null : (
                             <Tip label="Add status">
                               <Button
                                 variant="ghost"
@@ -141,7 +171,7 @@ export function ProjectSettingsPage() {
                             <div
                               key={status.id}
                               className="group/row relative flex items-center gap-3 px-1 py-2.5 data-dragging:rounded-lg data-dragging:bg-muted data-[drop=before]:before:absolute data-[drop=before]:before:inset-x-0 data-[drop=before]:before:-top-px data-[drop=before]:before:h-0.5 data-[drop=before]:before:rounded-[1px] data-[drop=before]:before:bg-primary data-[drop=after]:after:absolute data-[drop=after]:after:inset-x-0 data-[drop=after]:after:-bottom-px data-[drop=after]:after:h-0.5 data-[drop=after]:after:rounded-[1px] data-[drop=after]:after:bg-primary"
-                              draggable
+                              draggable={canManage}
                               data-dragging={dragId === status.id || undefined}
                               data-drop={dropAt?.id === status.id ? dropAt.position : undefined}
                               onDragStart={(e) => {
@@ -178,9 +208,11 @@ export function ProjectSettingsPage() {
                                 endDrag()
                               }}
                             >
-                              <span className="absolute -left-[13px] inline-flex text-muted-foreground/70 opacity-0 transition-opacity group-hover/row:opacity-100" aria-hidden="true">
-                                <GripIcon />
-                              </span>
+                              {canManage ? (
+                                <span className="absolute -left-[13px] inline-flex text-muted-foreground/70 opacity-0 transition-opacity group-hover/row:opacity-100" aria-hidden="true">
+                                  <GripIcon />
+                                </span>
+                              ) : null}
                               <span className="inline-flex size-10 items-center justify-center rounded-lg bg-muted">
                                 <TaskStatusIcon status={status} size={16} />
                               </span>
@@ -206,7 +238,7 @@ export function ProjectSettingsPage() {
                                 ) : null}
                               </span>
                               <div className="flex-1" />
-                              <DropdownMenu>
+                              {canManage ? <DropdownMenu>
                                 <Tip label="Actions">
                                   <DropdownMenuTrigger
                                     render={
@@ -233,7 +265,7 @@ export function ProjectSettingsPage() {
                                     Delete
                                   </DropdownMenuItem>
                                 </DropdownMenuContent>
-                              </DropdownMenu>
+                              </DropdownMenu> : null}
                             </div>
                           ),
                         )}
@@ -257,25 +289,32 @@ export function ProjectSettingsPage() {
                 {reorderStatuses.isError ? <p role="alert" className="text-destructive">Status reorder failed. <Button variant="ghost" onClick={() => reorderStatuses.variables && reorderStatuses.mutate(reorderStatuses.variables)}>Retry</Button></p> : null}
                 {statusesSaving ? <p role="status">Saving statuses…</p> : null}
               </SettingsCard>
+              ) : null}
 
-              <ProjectAccessCard project={project} />
+              {section === 'access' ? <ProjectAccessCard project={project} readOnly={!canManage} /> : null}
 
-              <ProjectLabelsCard projectId={project.id} />
+              {section === 'labels' ? <ProjectLabelsCard projectId={project.id} readOnly={!canManage} /> : null}
 
-              <ProjectMilestonesCard projectId={project.id} />
+              {section === 'milestones' ? <ProjectMilestonesCard projectId={project.id} /> : null}
 
-              <ProjectCyclesCard projectId={project.id} />
+              {section === 'cycles' ? <ProjectCyclesCard projectId={project.id} /> : null}
 
-              <ProjectGithubCard workspaceId={workspace.id} projectId={project.id} onPendingChange={setGithubPending} />
+              {section === 'docs' ? <ProjectDocsCard project={project} /> : null}
 
-              <SubIssueSettingsCard project={project} />
+              {section === 'github' ? <ProjectGithubCard workspaceId={workspace.id} projectId={project.id} onPendingChange={setGithubPending} /> : null}
 
+              {section === 'sub-issues' ? <SubIssueSettingsCard project={project} readOnly={!canManage} /> : null}
+
+              {section === 'danger-zone' ? (
               <SettingsCard title="Danger zone" description="Deleting a project moves the project and all of its tasks to trash.">
-                <Button variant="destructive" onClick={() => setConfirmDelete(true)}>
+                <Button variant="destructive" disabled={!canManage} onClick={() => setConfirmDelete(true)}>
                   Delete project
                 </Button>
                 {deleteProject.isError ? <p role="alert" className="text-destructive">Project deletion failed. <Button variant="ghost" onClick={() => deleteProject.variables && deleteProject.mutate(deleteProject.variables, { onSuccess: () => navigate('/tasks') })}>Retry</Button></p> : null}
               </SettingsCard>
+              ) : null}
+
+              {page ? null : <ProjectSettingsMenu projectId={project.id} />}
             </div>
           </div>
         )}
@@ -317,11 +356,31 @@ export function ProjectSettingsPage() {
   )
 }
 
+/** A phone's project settings menu: the section groups as cards of links, like the workspace settings menu. */
+function ProjectSettingsMenu({ projectId }: { projectId: string }) {
+  return PROJECT_SETTINGS_GROUPS.map((group) => (
+    <nav key={group.label} aria-label={group.label} className="flex flex-col gap-2">
+      <h2 className="px-1 text-xs font-medium text-muted-foreground">{group.label}</h2>
+      <ul className="overflow-hidden rounded-lg bg-card shadow-[0_0_0_1px_var(--border)]">
+        {group.items.map((item) => (
+          <li key={item.section} className="not-first:border-t">
+            <Link to={projectSettingsPath(projectId, item.section)} className="flex min-h-12 items-center gap-3 px-4 text-sm font-medium text-foreground active:bg-muted">
+              <item.icon className="size-[18px] shrink-0 text-muted-foreground" />
+              <span className="min-w-0 flex-1 truncate">{item.label}</span>
+              <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </nav>
+  ))
+}
+
 /**
  * General card with a draft: edits stay local until "Save Changes" (Reset drops them). The parent
  * keys this component by the saved values, so a fresh draft is created after each save.
  */
-function ProjectGeneralCard({ project, onPendingChange }: { project: Project; onPendingChange: (pending: PendingProjectSave | null) => void }) {
+function ProjectGeneralCard({ project, readOnly, onPendingChange }: { project: Project; readOnly: boolean; onPendingChange: (pending: PendingProjectSave | null) => void }) {
   const { workspace } = useWorkspace()
   const updateProject = useUpdateProject(workspace.id, project.id)
   const saveProject = updateProject.mutate
@@ -346,7 +405,7 @@ function ProjectGeneralCard({ project, onPendingChange }: { project: Project; on
             <Label className="mb-1.5 text-[0.8125rem] text-muted-foreground" htmlFor="project-name">
               Name
             </Label>
-            <Input id="project-name" value={draft.name} onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))} />
+            <Input id="project-name" disabled={readOnly} value={draft.name} onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))} />
           </div>
           <div className="w-full min-w-0">
             <Label className="mb-1.5 text-[0.8125rem] text-muted-foreground" htmlFor="project-key">
@@ -355,6 +414,7 @@ function ProjectGeneralCard({ project, onPendingChange }: { project: Project; on
             </Label>
             <Input
               id="project-key"
+              disabled={readOnly}
               value={draft.key}
               maxLength={5}
               placeholder="INF"
@@ -363,7 +423,7 @@ function ProjectGeneralCard({ project, onPendingChange }: { project: Project; on
           </div>
           <div className="col-span-2 w-full min-w-0 max-[899px]:col-span-1">
             <span className="mb-1.5 flex text-[0.8125rem] leading-none font-medium text-muted-foreground">Color</span>
-            <div className="flex flex-wrap items-center gap-2 pt-1.5">
+            <fieldset disabled={readOnly} aria-label="Color" className="flex flex-wrap items-center gap-2 pt-1.5 disabled:opacity-50">
               {PROJECT_COLORS.map((color) => (
                 <ColorSwatch
                   key={color}
@@ -378,7 +438,7 @@ function ProjectGeneralCard({ project, onPendingChange }: { project: Project; on
               ))}
               <Separator orientation="vertical" className="data-vertical:h-5 data-vertical:self-center" />
               <CustomColorSwatch value={draft.color} onChange={(color) => setDraft((d) => ({ ...d, color }))} />
-            </div>
+            </fieldset>
           </div>
         </div>
       </SettingsCard>
@@ -391,7 +451,7 @@ function ProjectGeneralCard({ project, onPendingChange }: { project: Project; on
  * Workspace or Private, saved on choice like the sub-issue switches. A private project lists its members; owners and
  * admins see it without being listed. Leaving a project you cannot see otherwise takes you back to Tasks.
  */
-function ProjectAccessCard({ project }: { project: Project }) {
+function ProjectAccessCard({ project, readOnly }: { project: Project; readOnly: boolean }) {
   const { workspace } = useWorkspace()
   const navigate = useNavigate()
   const currentUserId = useCurrentUser().data?.id ?? null
@@ -437,7 +497,7 @@ function ProjectAccessCard({ project }: { project: Project }) {
     <SettingsCard
       title="Access"
       description="Who can see this project and its tasks."
-      actions={isPrivate && project.private ? (
+      actions={isPrivate && project.private && !readOnly ? (
         <Popover open={adding} onOpenChange={(open) => { setAdding(open); if (!open) setSelectedIds([]) }}>
           <PopoverTrigger render={<Button variant="outline" size="sm"><UserAdd className="size-3.5" />Add people</Button>} />
           <PopoverContent align="end" className="w-80">
@@ -450,7 +510,7 @@ function ProjectAccessCard({ project }: { project: Project }) {
       ) : undefined}
     >
       <div className="flex flex-col gap-4">
-        <ProjectVisibilityChoice isPrivate={isPrivate} disabled={updateProject.isPending} onChange={choose} />
+        <ProjectVisibilityChoice isPrivate={isPrivate} disabled={readOnly || updateProject.isPending} onChange={choose} />
         {updateProject.isError ? <p role="alert" className="text-xs text-destructive">Couldn’t change who can see this project. Try again.</p> : null}
         {isPrivate && project.private ? (
           <div className="flex flex-col gap-2">
@@ -460,7 +520,7 @@ function ProjectAccessCard({ project }: { project: Project }) {
             ) : membersQuery.isError ? (
               <p role="alert" className="text-sm text-destructive">The members could not be loaded. <Button variant="ghost" size="xs" onClick={() => void membersQuery.refetch()}>Retry</Button></p>
             ) : listed.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Nobody is listed yet. Add the people who should see this project.</p>
+              <p className="text-sm text-muted-foreground">{readOnly ? 'Nobody is listed yet.' : 'Nobody is listed yet. Add the people who should see this project.'}</p>
             ) : (
               <ul aria-label="Project members" className="flex flex-col divide-y divide-border">
                 {listed.map((person) => (
@@ -470,9 +530,9 @@ function ProjectAccessCard({ project }: { project: Project }) {
                       <span className="truncate text-sm font-medium text-foreground">{person.id === currentUserId ? `${person.name} (you)` : person.name}</span>
                       <span className="truncate text-xs text-muted-foreground">@{person.handle}</span>
                     </span>
-                    <Button variant="ghost" size="sm" className="text-muted-foreground" aria-label={person.id === currentUserId ? 'Leave project' : `Remove ${person.name}`} disabled={removeMember.isPending} onClick={() => void remove(person.id)}>
+                    {readOnly ? null : <Button variant="ghost" size="sm" className="text-muted-foreground" aria-label={person.id === currentUserId ? 'Leave project' : `Remove ${person.name}`} disabled={removeMember.isPending} onClick={() => void remove(person.id)}>
                       {person.id === currentUserId ? 'Leave' : 'Remove'}
-                    </Button>
+                    </Button>}
                   </li>
                 ))}
               </ul>
@@ -504,7 +564,7 @@ const savedSubIssueSettings = (record: Project): SubIssueSettingValues => ({
  * The switches stay enabled while a save is in flight: a toggle updates the desired values, and saves run one at a
  * time, each carrying the version the previous PATCH returned, so a quick second toggle is queued, not lost.
  */
-function SubIssueSettingsCard({ project }: { project: Project }) {
+function SubIssueSettingsCard({ project, readOnly }: { project: Project; readOnly: boolean }) {
   const { workspace } = useWorkspace()
   const updateProject = useUpdateProject(workspace.id, project.id)
   const saveProject = updateProject.mutateAsync
@@ -555,7 +615,7 @@ function SubIssueSettingsCard({ project }: { project: Project }) {
               {setting.label}
               <InfoTip text={setting.description} />
             </span>
-            <Switch aria-label={setting.label} checked={value(setting.field)} onCheckedChange={(checked: boolean) => save(setting.field, checked)} />
+            <Switch aria-label={setting.label} disabled={readOnly} checked={value(setting.field)} onCheckedChange={(checked: boolean) => save(setting.field, checked)} />
           </div>
         ))}
       </div>

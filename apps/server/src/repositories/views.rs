@@ -151,7 +151,7 @@ impl ViewRepository {
             .fetch_all(self.database.pool())
             .await?
             .into_iter()
-            .map(|row| view_from_row(row, caller))
+            .map(|row| view_from_row(row, &caller))
             .collect()
     }
 
@@ -162,7 +162,7 @@ impl ViewRepository {
         view_id: Id,
     ) -> Result<SavedViewRecord, TaskError> {
         let caller = load_caller(self.database.pool(), workspace_id, actor_id).await?;
-        find_view(self.database.pool(), caller, workspace_id, view_id).await
+        find_view(self.database.pool(), &caller, workspace_id, view_id).await
     }
 
     pub async fn create_view(
@@ -210,7 +210,7 @@ impl ViewRepository {
             now,
         )
         .await?;
-        let record = find_view(&mut *tx, caller, workspace_id, id).await?;
+        let record = find_view(&mut *tx, &caller, workspace_id, id).await?;
         tx.commit().await?;
         Ok(record)
     }
@@ -231,7 +231,7 @@ impl ViewRepository {
         let now = TimestampMillis::now();
         let mut tx = self.database.immediate_transaction().await?;
         let caller = load_caller(&mut *tx, workspace_id, actor_id).await?;
-        let current = find_view(&mut *tx, caller, workspace_id, view_id).await?;
+        let current = find_view(&mut *tx, &caller, workspace_id, view_id).await?;
         if !current.can_edit {
             return Err(TaskError::Forbidden);
         }
@@ -283,7 +283,7 @@ impl ViewRepository {
             now,
         )
         .await?;
-        let record = find_view(&mut *tx, caller, workspace_id, view_id).await?;
+        let record = find_view(&mut *tx, &caller, workspace_id, view_id).await?;
         tx.commit().await?;
         Ok(record)
     }
@@ -298,7 +298,7 @@ impl ViewRepository {
         let now = TimestampMillis::now();
         let mut tx = self.database.immediate_transaction().await?;
         let caller = load_caller(&mut *tx, workspace_id, actor_id).await?;
-        let current = find_view(&mut *tx, caller, workspace_id, view_id).await?;
+        let current = find_view(&mut *tx, &caller, workspace_id, view_id).await?;
         if !current.can_edit {
             return Err(TaskError::Forbidden);
         }
@@ -336,7 +336,7 @@ impl ViewRepository {
         let now = TimestampMillis::now();
         let mut tx = self.database.immediate_transaction().await?;
         let caller = load_caller(&mut *tx, workspace_id, actor_id).await?;
-        let current = find_view(&mut *tx, caller, workspace_id, view_id).await?;
+        let current = find_view(&mut *tx, &caller, workspace_id, view_id).await?;
         if current.is_favorite == favorite {
             return Ok(());
         }
@@ -633,7 +633,7 @@ fn visible_views_sql(tail: &str) -> String {
 
 async fn find_view<'e, E>(
     executor: E,
-    caller: Actor,
+    caller: &Actor,
     workspace_id: Id,
     view_id: Id,
 ) -> Result<SavedViewRecord, TaskError>
@@ -649,10 +649,10 @@ where
         .fetch_optional(executor)
         .await?
         .ok_or(TaskError::NotFound)?;
-    view_from_row(row, caller)
+    view_from_row(row, &caller)
 }
 
-fn view_from_row(row: AnyRow, caller: Actor) -> Result<SavedViewRecord, TaskError> {
+fn view_from_row(row: AnyRow, caller: &Actor) -> Result<SavedViewRecord, TaskError> {
     let owner_id = parse_id(row.get("owner_user_id"))?;
     let visibility = Visibility::from_db(row.get::<String, _>("visibility").as_str())?;
     let (state, state_error) = decode_state(row.get::<String, _>("state_json").as_str());

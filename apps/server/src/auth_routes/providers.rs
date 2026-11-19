@@ -1,4 +1,4 @@
-//! Sign in with Google and GitHub: start, the provider's callback, and the exchange where Orbit decides.
+//! Sign in with Google, GitHub and OpenID Connect: start, the provider's callback, and the exchange where Orbit decides.
 //!
 //! The callback never signs anyone in. It talks to the provider and parks the outcome behind a one-time handoff
 //! code bound to the client that started (the S256 challenge of a verifier only that client holds). Web and native
@@ -21,13 +21,15 @@ use utoipa::{IntoParams, ToSchema};
 use super::two_factor::{self, FirstFactor, Pending, busy};
 use super::{
     ApiError, ApiJson, AuthState, LoginResponse, ProblemBody, SessionDelivery, authenticate,
-    last_sign_in_method, request_id_value, signed_in_response,
+    last_sign_in_method, passkeys, request_id_value, signed_in_response,
 };
 use crate::audit::AuditOutcome;
+use crate::repositories::environment_settings::EnvironmentSettings;
 use crate::repositories::instance_settings::InstanceSettingsRepository;
 use crate::repositories::sign_in_providers::{
     ConnectedAccount, IdentityChangeError, ProviderSignInError, SavedSignInProvider, SignInRefusal,
 };
+use crate::repositories::two_factor::StoredPasskey;
 use crate::secret_box::decrypt_secret;
 use crate::sign_in_providers::{
     Freshness, Provider, ProviderCredentials, ProviderFailure, ProviderProfile, is_pkce_challenge,
@@ -78,13 +80,14 @@ pub(super) async fn configured(state: &AuthState) -> Result<Vec<Provider>, sqlx:
     let Some(app_key) = state.app_key.as_ref() else {
         return Ok(Vec::new());
     };
+    let environment = EnvironmentSettings::of(state.database());
     Ok(InstanceSettingsRepository::new(state.database().clone())
         .sign_in_providers()
         .await?
         .into_iter()
         .filter_map(|saved| {
             let provider = saved.provider;
-            open(app_key, saved).map(|_| provider)
+            open(app_key, &environment, saved).map(|_| provider)
         })
         .collect())
 }
@@ -100,14 +103,24 @@ async fn credentials(
     let saved = InstanceSettingsRepository::new(state.database().clone())
         .sign_in_provider(provider)
         .await?;
-    Ok(saved.and_then(|saved| open(app_key, saved)))
+    let environment = EnvironmentSettings::of(state.database());
+    Ok(saved.and_then(|saved| open(app_key, &environment, saved)))
 }
 
-fn open(app_key: &[u8; 32], saved: SavedSignInProvider) -> Option<ProviderCredentials> {
+fn open(
+    app_key: &[u8; 32],
+    environment: &EnvironmentSettings,
+    saved: SavedSignInProvider,
+) -> Option<ProviderCredentials> {
+    let issuer = match saved.provider {
+        Provider::Oidc => Some(environment.oidc.as_ref()?.issuer.clone()),
+        Provider::Google | Provider::Github => None,
+    };
     let client_secret = decrypt_secret(app_key, &saved.client_secret).ok()?;
     Some(ProviderCredentials {
         client_id: saved.client_id,
         client_secret,
+        issuer,
     })
 }
 
@@ -179,11 +192,11 @@ pub(super) struct StartProviderResponse {
     authorize_url: String,
 }
 
-/// Starts a provider flow. Problems: 404 `provider_not_configured`, 422 `invalid_code_challenge`,
+/// Starts a provider flow. Problems: 404 `provider_not_configured`, 502 `provider_unavailable`, 422 `invalid_code_challenge`,
 /// `invalid_redirect` or `invalid_return_to`, 401 `authentication_required` for `connect` and `confirm`, and for
 /// `connect` 401 `password_required`, `invalid_credentials` or `reauthentication_required` and 429
 /// `authentication_throttled`.
-#[utoipa::path(post, path = "/api/v1/auth/providers/{provider}/start", params(("provider" = Provider, Path)), request_body = StartProviderBody, responses((status = 200, body = StartProviderResponse), (status = 401, description = "authentication_required, invalid_credentials, password_required or reauthentication_required", body = ProblemBody, content_type = "application/problem+json"), (status = 404, description = "provider_not_configured", body = ProblemBody, content_type = "application/problem+json"), (status = 422, description = "invalid_code_challenge, invalid_redirect or invalid_return_to", body = ProblemBody, content_type = "application/problem+json"), (status = 429, description = "authentication_throttled", body = ProblemBody, content_type = "application/problem+json"), (status = 503, description = "authentication_busy", body = ProblemBody, content_type = "application/problem+json")))]
+#[utoipa::path(post, path = "/api/v1/auth/providers/{provider}/start", params(("provider" = Provider, Path)), request_body = StartProviderBody, responses((status = 200, body = StartProviderResponse), (status = 401, description = "authentication_required, invalid_credentials, password_required or reauthentication_required", body = ProblemBody, content_type = "application/problem+json"), (status = 404, description = "provider_not_configured", body = ProblemBody, content_type = "application/problem+json"), (status = 422, description = "invalid_code_challenge, invalid_redirect or invalid_return_to", body = ProblemBody, content_type = "application/problem+json"), (status = 429, description = "authentication_throttled", body = ProblemBody, content_type = "application/problem+json"), (status = 502, description = "provider_unavailable: the OpenID Connect discovery failed", body = ProblemBody, content_type = "application/problem+json"), (status = 503, description = "authentication_busy", body = ProblemBody, content_type = "application/problem+json")))]
 pub(super) async fn start_provider_sign_in(
     State(state): State<AuthState>,
     headers: HeaderMap,
@@ -285,14 +298,28 @@ pub(super) async fn start_provider_sign_in(
         .await
         .map_err(|error| ApiError::internal(START, rid).cause(error))?
         .ok_or_else(|| busy(START, rid))?;
-    let url = state.providers.authorization_url(
-        provider,
-        &credentials.client_id,
-        &provider.callback_url(&state.public_origin),
-        &state_token,
-        &challenge,
-        freshness,
-    );
+    let url = state
+        .providers
+        .authorization_url(
+            provider,
+            &credentials,
+            &provider.callback_url(&state.public_origin),
+            &state_token,
+            &challenge,
+            freshness,
+        )
+        .await;
+    let Ok(url) = url else {
+        let _ = state.pending.take(&state_token).await;
+        return Err(ApiError::new(
+            StatusCode::BAD_GATEWAY,
+            "provider_unavailable",
+            "Provider not available",
+            "The sign-in provider did not answer. Try again later.",
+            START,
+            rid,
+        ));
+    };
     Ok(Json(StartProviderResponse {
         authorize_url: url.into(),
     }))
@@ -495,10 +522,11 @@ fn invalid_handoff(request_id: Option<&Extension<RequestId>>) -> ApiError {
     )
 }
 
-/// Where every provider flow ends, for every client and intent. `sign_in`: 200 `LoginResponse` (a cookie for
+/// Where every provider flow ends, for every client and intent, and where the app's passkey sign-in
+/// (`/api/v1/auth/passkey/app/start`) ends with 200 `LoginResponse`. `sign_in`: 200 `LoginResponse` (a cookie for
 /// browsers, `session_token` for requests without Origin) or 202 two-factor challenge, the same answers as
 /// `/api/v1/auth/login`. `connect` and `confirm`: 204.
-#[utoipa::path(post, path = "/api/v1/auth/providers/exchange", request_body = ExchangeProviderBody, responses((status = 200, body = LoginResponse), (status = 202, description = "`two_factor_token`: the account has two-factor sign-in on, send a code to /api/v1/auth/login/two-factor. `password_token`: the provider account connects to an existing account, send its password to /api/v1/auth/providers/link.", body = ExchangeChallenge), (status = 204, description = "connect or confirm finished"), (status = 400, description = "invalid_handoff or provider_denied", body = ProblemBody, content_type = "application/problem+json"), (status = 401, description = "authentication_required", body = ProblemBody, content_type = "application/problem+json"), (status = 403, description = "registration_closed, account_email_unverified, link_needs_sign_in, account_suspended, session_mismatch or identity_mismatch", body = ProblemBody, content_type = "application/problem+json"), (status = 409, description = "identity_in_use, identity_conflict or provider_already_connected", body = ProblemBody, content_type = "application/problem+json"), (status = 422, description = "provider_email_unverified", body = ProblemBody, content_type = "application/problem+json"), (status = 502, description = "provider_failed", body = ProblemBody, content_type = "application/problem+json"), (status = 503, description = "authentication_busy", body = ProblemBody, content_type = "application/problem+json")))]
+#[utoipa::path(post, path = "/api/v1/auth/providers/exchange", request_body = ExchangeProviderBody, responses((status = 200, body = LoginResponse), (status = 202, description = "`two_factor_token`: the account has two-factor sign-in on, send a code to /api/v1/auth/login/two-factor. `password_token`: the provider account connects to an existing account, send its password to /api/v1/auth/providers/link.", body = ExchangeChallenge), (status = 204, description = "connect or confirm finished"), (status = 400, description = "invalid_handoff or provider_denied", body = ProblemBody, content_type = "application/problem+json"), (status = 401, description = "authentication_required, or invalid_passkey when the passkey was removed or the account suspended after the browser step", body = ProblemBody, content_type = "application/problem+json"), (status = 403, description = "registration_closed, account_email_unverified, link_needs_sign_in, account_suspended, session_mismatch or identity_mismatch", body = ProblemBody, content_type = "application/problem+json"), (status = 409, description = "identity_in_use, identity_conflict or provider_already_connected", body = ProblemBody, content_type = "application/problem+json"), (status = 422, description = "provider_email_unverified", body = ProblemBody, content_type = "application/problem+json"), (status = 502, description = "provider_failed", body = ProblemBody, content_type = "application/problem+json"), (status = 503, description = "authentication_busy", body = ProblemBody, content_type = "application/problem+json")))]
 pub(super) async fn exchange_provider_sign_in(
     State(state): State<AuthState>,
     headers: HeaderMap,
@@ -506,20 +534,42 @@ pub(super) async fn exchange_provider_sign_in(
     ApiJson(body): ApiJson<ExchangeProviderBody>,
 ) -> Result<Response, ApiError> {
     let rid = request_id.as_ref();
-    let Some((_, Pending::ProviderHandoff { flow, outcome })) = state
+    let taken = state
         .pending
         .take(&body.handoff)
         .await
-        .map_err(|error| ApiError::internal(EXCHANGE, rid).cause(error))?
-    else {
-        return Err(invalid_handoff(rid));
+        .map_err(|error| ApiError::internal(EXCHANGE, rid).cause(error))?;
+    let started_by = |client_challenge: &str| {
+        constant_time_eq(
+            pkce_challenge(&body.code_verifier).as_bytes(),
+            client_challenge.as_bytes(),
+        )
     };
-    if !constant_time_eq(
-        pkce_challenge(&body.code_verifier).as_bytes(),
-        flow.client_challenge.as_bytes(),
-    ) {
-        return Err(invalid_handoff(rid));
-    }
+    let (flow, outcome) = match taken {
+        Some((_, Pending::ProviderHandoff { flow, outcome }))
+            if started_by(&flow.client_challenge) =>
+        {
+            (flow, outcome)
+        }
+        // The app's passkey sign-in (`/api/v1/auth/passkey/app/start`): the browser step proved the passkey.
+        Some((
+            _,
+            Pending::PasskeyHandoff {
+                flow,
+                passkey_id,
+                user_id,
+                passkey,
+            },
+        )) if started_by(&flow.client_challenge) => {
+            let stored = StoredPasskey {
+                id: passkey_id,
+                user_id,
+                passkey: *passkey,
+            };
+            return passkeys::passkey_session(&state, &headers, &stored, EXCHANGE, rid).await;
+        }
+        _ => return Err(invalid_handoff(rid)),
+    };
     let provider = flow.provider;
     let profile = match outcome {
         Ok(profile) => profile,

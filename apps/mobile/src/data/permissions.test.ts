@@ -1,0 +1,34 @@
+import { expect, test } from 'bun:test'
+import { canInProject, canPurgeTask } from './permissions'
+
+test('a workspace-wide permission covers every project', () => {
+  const workspace = { permissions: ['tasks.purge' as const], project_permissions: [] }
+  expect(canInProject(workspace, 'tasks.purge', 'p1')).toBe(true)
+  expect(canInProject(workspace, 'tasks.purge', 'p2')).toBe(true)
+  expect(canPurgeTask(workspace, 'p2')).toBe(true)
+})
+
+test('a project grant covers only that project', () => {
+  const workspace = { permissions: [], project_permissions: [{ project_id: 'p1', permissions: ['tasks.purge' as const] }] }
+  expect(canInProject(workspace, 'tasks.purge', 'p1')).toBe(true)
+  expect(canInProject(workspace, 'tasks.purge', 'p2')).toBe(false)
+  expect(canInProject(workspace, 'comments.moderate', 'p1')).toBe(false)
+  expect(canPurgeTask(workspace, 'p1')).toBe(true)
+  expect(canPurgeTask(workspace, 'p2')).toBe(false)
+})
+
+test('pages.purge purges tasks in every project', () => {
+  expect(canPurgeTask({ permissions: ['pages.purge'], project_permissions: [] }, 'p1')).toBe(true)
+})
+
+test('no grant, or no project_permissions field, purges nothing', () => {
+  expect(canPurgeTask({ permissions: ['tasks.create'], project_permissions: [] }, 'p1')).toBe(false)
+  expect(canPurgeTask({ permissions: [] }, 'p1')).toBe(false)
+})
+
+test('projects.manage granted in one project manages only that project', () => {
+  const workspace = { permissions: [], project_permissions: [{ project_id: 'p1', permissions: ['projects.manage' as const] }] }
+  expect(canInProject(workspace, 'projects.manage', 'p1')).toBe(true)
+  expect(canInProject(workspace, 'projects.manage', 'p2')).toBe(false)
+  expect(canInProject({ permissions: ['projects.manage'], project_permissions: [] }, 'projects.manage', 'p2')).toBe(true)
+})

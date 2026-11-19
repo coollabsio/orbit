@@ -1,18 +1,18 @@
 import { useEffect, useState } from 'react'
-import { AppState, Linking, View } from 'react-native'
+import { AppState, Linking, Platform, View } from 'react-native'
 
 import { ACCOUNT_NAV, Badge, Note, RowIcon, RowText, SettingsCard, SettingsRow, SettingsShell, Toggle } from '../../../components/settings/Shell'
 import { NOTIFICATION_CHOICES } from '../../../data/account-api'
 import { shortDate } from '../../../data/format'
-import { useApnsDevices, useNotificationPrefs, usePushDevices, useRemovePushDevice, useSaveNotificationPrefs, useSendTestPush } from '../../../hooks/account'
-import { type ThisDevice as ThisDeviceState, useRemoveApnsDevice, useThisDevice, useTurnOnPush } from '../../../push'
+import { useApnsDevices, useFcmDevices, useNotificationPrefs, usePushDevices, useRemovePushDevice, useSaveNotificationPrefs, useSendTestPush } from '../../../hooks/account'
+import { type ThisDevice as ThisDeviceState, useRemovePhoneDevice, useThisDevice, useTurnOnPush } from '../../../push'
 import { useIsGuest } from '../../../orbit-context'
 import { errorMessage } from '../../../session-context'
 import { Button, Text } from '../../../ui'
 
 /**
- * The web's Notifications page. This device turns on iOS notifications (APNs) for this iPhone; Devices lists the
- * browsers and the iOS devices that get them, from the server. Other devices (how long this browser window waits) and
+ * The web's Notifications page. This device turns on notifications for this phone (APNs on iOS, FCM on Android); Devices
+ * lists the browsers and the phones that get them, from the server. Other devices (how long this browser window waits) and
  * Sounds (this browser's notification sounds) are settings of a browser, kept in its storage, so the app leaves them out.
  */
 export default function NotificationsScreen() {
@@ -24,10 +24,11 @@ export default function NotificationsScreen() {
   const choices = NOTIFICATION_CHOICES.filter((choice) => !guest || choice.chat)
   const devices = usePushDevices()
   const apns = useApnsDevices()
+  const fcm = useFcmDevices()
   const here = useThisDevice({ refresh: true })
 
   return (
-    <SettingsShell title="Account settings" nav={ACCOUNT_NAV} onRefresh={() => Promise.all([prefs.refetch(), devices.refetch(), apns.refetch(), here.refetch()])}>
+    <SettingsShell title="Account settings" nav={ACCOUNT_NAV} onRefresh={() => Promise.all([prefs.refetch(), devices.refetch(), apns.refetch(), fcm.refetch(), here.refetch()])}>
       <SettingsCard title="This device" description="Get a notification here when you are not looking at Orbit.">
         <ThisDevice />
       </SettingsCard>
@@ -65,14 +66,20 @@ export default function NotificationsScreen() {
 
 const PARAGRAPH = 'text-[14px] leading-[21px] text-muted-foreground'
 
+const android = Platform.OS === 'android'
+
 const STATE_TEXT: Record<Exclude<ThisDeviceState['state'], 'unsupported'>, string> = {
   on: 'Notifications are on for this device.',
   off: 'Notifications are off on this device.',
-  denied: 'Notifications are off for Orbit in iOS Settings. Turn on Allow Notifications there, then come back.',
-  not_configured: 'For now, the app gets notifications only from Orbit Cloud. To get them on this iPhone from this server, open Orbit in Safari, add it to the Home Screen, and turn on notifications there.',
+  denied: android
+    ? 'Notifications are off for Orbit in the Android settings. Turn them on there, then come back.'
+    : 'Notifications are off for Orbit in iOS Settings. Turn on Allow Notifications there, then come back.',
+  not_configured: android
+    ? 'This server cannot send notifications to the Android app. To get them on this phone, open Orbit in Chrome and turn on notifications there.'
+    : 'For now, the app gets notifications only from Orbit Cloud. To get them on this iPhone from this server, open Orbit in Safari, add it to the Home Screen, and turn on notifications there.',
 }
 
-/** Whether this iPhone gets notifications, with the button that changes it, as the web's This device. */
+/** Whether this phone gets notifications, with the button that changes it, as the web's This device. */
 function ThisDevice() {
   const device = useThisDevice({ refresh: true })
   const turnOn = useTurnOnPush()
@@ -104,8 +111,10 @@ function ThisDevice() {
     return (
       <Text className={PARAGRAPH}>
         {state.reason === 'expo-go'
-          ? 'Expo Go cannot get Orbit notifications. Install Orbit from TestFlight or the App Store to get them here.'
-          : 'This app gets notifications on iPhone and iPad only. Turn them on in Orbit in a browser to be notified there.'}
+          ? android
+            ? 'Expo Go cannot get Orbit notifications. Install a build of the Orbit app to get them here.'
+            : 'Expo Go cannot get Orbit notifications. Install Orbit from TestFlight or the App Store to get them here.'
+          : 'This app gets notifications on iPhone, iPad and Android only. Turn them on in Orbit in a browser to be notified there.'}
       </Text>
     )
   }
@@ -130,28 +139,30 @@ function ThisDevice() {
   )
 }
 
-/** The web's Devices card: the browsers and the iOS devices that get notifications, each with Remove. */
+/** The web's Devices card: the browsers and the phones that get notifications, each with Remove. */
 function Devices() {
   const browsers = usePushDevices()
   const apns = useApnsDevices()
+  const fcm = useFcmDevices()
   const here = useThisDevice()
   const removeBrowser = useRemovePushDevice()
-  const removeApns = useRemoveApnsDevice()
+  const removePhone = useRemovePhoneDevice()
   const hereId = here.data?.state === 'on' ? here.data.deviceId : null
   const list = [
-    ...(apns.data ?? []).map((device) => ({ ...device, mobile: true, remove: () => removeApns.mutate(device.id) })),
+    ...(apns.data ?? []).map((device) => ({ ...device, mobile: true, remove: () => removePhone.mutate({ kind: 'apns', id: device.id }) })),
+    ...(fcm.data ?? []).map((device) => ({ ...device, mobile: true, remove: () => removePhone.mutate({ kind: 'fcm', id: device.id }) })),
     ...(browsers.data ?? []).map((device) => ({ ...device, mobile: /Android|iOS|iPadOS/.test(device.label), remove: () => removeBrowser.mutate(device.id) })),
   ]
-  const pending = browsers.isPending || apns.isPending
-  const failed = browsers.isError || apns.isError
-  const removeError = removeBrowser.error ?? removeApns.error
+  const pending = browsers.isPending || apns.isPending || fcm.isPending
+  const failed = browsers.isError || apns.isError || fcm.isError
+  const removeError = removeBrowser.error ?? removePhone.error
   return (
     <>
       {pending ? <SettingsRow first><Note loading>Loading devices…</Note></SettingsRow> : null}
       {failed ? (
         <SettingsRow first>
           <Note error>Devices could not be loaded.</Note>
-          <Button label="Retry" variant="ghost" onPress={() => void Promise.all([browsers.refetch(), apns.refetch()])} />
+          <Button label="Retry" variant="ghost" onPress={() => void Promise.all([browsers.refetch(), apns.refetch(), fcm.refetch()])} />
         </SettingsRow>
       ) : null}
       {!pending && !failed && list.length === 0 ? (
@@ -164,7 +175,7 @@ function Devices() {
             <SettingsRow key={device.id} first={index === 0}>
               <RowIcon icon={device.mobile ? 'mobile' : 'monitor'} />
               <RowText title={device.label} subtitle={`Added ${shortDate(device.created_at)}`} badges={device.id === hereId ? <Badge label="This device" /> : undefined} />
-              <Button label="Remove" variant="ghost" disabled={removeBrowser.isPending || removeApns.isPending} onPress={device.remove} />
+              <Button label="Remove" variant="ghost" disabled={removeBrowser.isPending || removePhone.isPending} onPress={device.remove} />
             </SettingsRow>
           ))
         : null}

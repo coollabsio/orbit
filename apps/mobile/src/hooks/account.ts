@@ -1,4 +1,5 @@
 /** The account and workspace settings queries and writes, over `data/account-api.ts`. */
+import type { ProjectGrantBody } from '@orbit/api/generated/types.gen'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import * as ImagePicker from 'expo-image-picker'
 import { useEffect, useState } from 'react'
@@ -154,7 +155,7 @@ export function useDeletePasskey() {
   })
 }
 
-/** The browsers that get push notifications. The iOS devices are in `useApnsDevices`. */
+/** The browsers that get push notifications. The phones are in `useApnsDevices` (iOS) and `useFcmDevices` (Android). */
 export function usePushDevices() {
   const { client } = useOrbit()
   return useQuery({ queryKey: account.accountKeys.pushDevices, queryFn: () => account.pushDevices(client) })
@@ -172,6 +173,11 @@ export function useRemovePushDevice() {
 export function useApnsDevices() {
   const { client } = useOrbit()
   return useQuery({ queryKey: account.accountKeys.apnsDevices, queryFn: () => account.apnsDevices(client) })
+}
+
+export function useFcmDevices() {
+  const { client } = useOrbit()
+  return useQuery({ queryKey: account.accountKeys.fcmDevices, queryFn: () => account.fcmDevices(client) })
 }
 
 /** Resolves to the number of devices the test notification went to. */
@@ -308,6 +314,54 @@ export function useInvitations(enabled: boolean) {
   return useQuery({ queryKey: account.accountKeys.invitations(workspaceId), queryFn: () => account.pendingInvitations(client, workspaceId), enabled })
 }
 
+export function useWorkspaceRoles(enabled: boolean) {
+  const { client, workspaceId } = useOrbit()
+  return useQuery({ queryKey: account.accountKeys.roles(workspaceId), queryFn: () => account.workspaceRoles(client, workspaceId), enabled })
+}
+
+/** Custom role writes. Each refreshes the members, whose rows name the role (the roles sit under the same prefix). */
+export function useRoleWrites() {
+  const { client, workspaceId } = useOrbit()
+  const queryClient = useQueryClient()
+  const onSettled = () => void queryClient.invalidateQueries({ queryKey: keys.members(workspaceId) })
+  return {
+    create: useMutation({ mutationFn: (draft: account.RoleDraft) => account.createWorkspaceRole(client, workspaceId, draft), onSettled }),
+    update: useMutation({ mutationFn: ({ role, draft }: { role: account.WorkspaceRoleRecord; draft: account.RoleDraft }) => account.updateWorkspaceRole(client, workspaceId, role, draft), onSettled }),
+    remove: useMutation({ mutationFn: (roleId: string) => account.deleteWorkspaceRole(client, workspaceId, roleId), onSettled }),
+  }
+}
+
+export function useMemberProjectGrants(enabled: boolean) {
+  const { client, workspaceId } = useOrbit()
+  return useQuery({ queryKey: account.accountKeys.projectGrants(workspaceId), queryFn: () => account.memberProjectGrants(client, workspaceId), enabled })
+}
+
+/** Sets (replaces) a member's direct project grant. Refreshes the grants, and the workspace, whose permissions change when it was the caller's. */
+export function useSetProjectGrant() {
+  const { client, workspaceId } = useOrbit()
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (grant: ProjectGrantBody) => account.setMemberProjectGrant(client, workspaceId, grant),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: account.accountKeys.projectGrants(workspaceId) })
+      void queryClient.invalidateQueries({ queryKey: keys.workspaces })
+    },
+  })
+}
+
+/** Revokes a member's direct project grant. Refreshes the grants, and the workspace, whose permissions change when it was the caller's. */
+export function useRevokeProjectGrant() {
+  const { client, workspaceId } = useOrbit()
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (grant: account.MemberProjectGrant) => account.revokeMemberProjectGrant(client, workspaceId, grant),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: account.accountKeys.projectGrants(workspaceId) })
+      void queryClient.invalidateQueries({ queryKey: keys.workspaces })
+    },
+  })
+}
+
 /** Member and invitation writes. Each refreshes the members (invitations sit under the same prefix). */
 export function useMemberWrites() {
   const { client, workspace, workspaceId } = useOrbit()
@@ -327,6 +381,7 @@ export function useMemberWrites() {
       onSettled,
     }),
     revokeInvitation: useMutation({ mutationFn: (id: string) => account.revokeInvitation(client, workspaceId, id), onSettled }),
+    setCustomRole: useMutation({ mutationFn: ({ member, roleId }: { member: MemberRecord; roleId: string | null }) => account.setCustomRole(client, workspaceId, member, roleId), onSettled }),
     /** Leaves the workspace: the workspace list drops it and the app opens the next one. */
     leave: useMutation({ mutationFn: (member: MemberRecord) => account.removeMembership(client, workspaceId, member), onSuccess: () => void queryClient.invalidateQueries({ queryKey: keys.workspaces }) }),
   }

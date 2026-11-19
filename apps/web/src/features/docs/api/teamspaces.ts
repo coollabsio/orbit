@@ -62,18 +62,25 @@ export interface UpdateTeamspaceInput {
   name?: string
   /** An emoji; `null` removes the icon (the sidebar shows the default teamspace glyph). */
   icon?: string | null
+  /** The project whose docs the teamspace holds; `null` makes them global docs again. */
+  projectId?: string | null
 }
 
-/** Renames a teamspace and/or changes its icon (`PATCH`, only the given fields). */
+/** Renames a teamspace, changes its icon and/or its project (`PATCH`, only the given fields). */
 export function useUpdateTeamspace(workspaceId: string) {
   const queryClient = useQueryClient()
   const key = queryKeys.teamspaces(workspaceId)
   return useMutation<Teamspace, Error, UpdateTeamspaceInput>({
-    mutationFn: async ({ teamspaceId, version, name, icon }) => {
+    mutationFn: async ({ teamspaceId, version, name, icon, projectId }) => {
       const { data } = await updateTeamspace({
         client: apiClient,
         path: { workspace_id: workspaceId, teamspace_id: teamspaceId },
-        body: { expected_version: version, ...(name === undefined ? {} : { name }), ...(icon === undefined ? {} : { icon }) },
+        body: {
+          expected_version: version,
+          ...(name === undefined ? {} : { name }),
+          ...(icon === undefined ? {} : { icon }),
+          ...(projectId === undefined ? {} : { project_id: projectId }),
+        },
         throwOnError: true,
       })
       if (!data) throw new Error('Update teamspace response was empty.')
