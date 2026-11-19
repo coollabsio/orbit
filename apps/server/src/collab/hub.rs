@@ -19,6 +19,7 @@
 //! Applying an update twice changes nothing, so a room may get one both ways.
 
 use std::collections::{HashMap, HashSet};
+use std::panic::Location;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex as StdMutex, OnceLock, PoisonError, Weak};
 use std::time::{Duration, Instant};
@@ -26,7 +27,9 @@ use std::time::{Duration, Instant};
 use axum::body::Bytes;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
-use orbit_platform::{Backend, Database, Flag, Id, Row, TimestampMillis};
+use orbit_platform::{
+    Backend, Database, Flag, Id, Row, TimestampMillis, WriteLockMode, WriteScope,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::{Any, AnyConnection, AnyPool, Transaction};
@@ -319,6 +322,7 @@ pub struct CollabHub {
 pub(crate) struct HubInner {
     pool: AnyPool,
     backend: Backend,
+    write_lock: WriteLockMode,
     cluster: Arc<Cluster>,
     config: CollabConfig,
     rooms: StdMutex<HashMap<DocKey, Arc<Room>>>,
@@ -356,19 +360,23 @@ pub(crate) struct Handled {
 }
 
 impl CollabHub {
-    /// A write transaction serialized like `Database::immediate_transaction` (the hub keeps the
-    /// pool, not the `Database`, which owns the hub).
-    async fn write_transaction(&self) -> Result<Transaction<'static, Any>, sqlx::Error> {
-        match self.inner.backend {
-            Backend::Sqlite => self.inner.pool.begin_with("BEGIN IMMEDIATE").await,
-            Backend::Postgres => {
-                let mut tx = self.inner.pool.begin().await?;
-                sqlx::raw_sql(orbit_platform::POSTGRES_WRITE_LOCK)
-                    .execute(&mut *tx)
-                    .await?;
-                Ok(tx)
-            }
-        }
+    /// A write transaction like `Database::immediate_transaction` (`WriteScope::Global`) or
+    /// `Database::workspace_transaction` (the hub keeps the pool, not the `Database`, which owns
+    /// the hub). Every writer of a document's update log must exclude the others until it
+    /// commits, so that the log's `seq` order is its commit order: the scope is the workspace of
+    /// the document (`Room::workspace_id`) or `Global`.
+    #[track_caller]
+    fn write_transaction(
+        &self,
+        scope: WriteScope,
+    ) -> impl Future<Output = Result<Transaction<'static, Any>, sqlx::Error>> + Send + '_ {
+        orbit_platform::begin_write_transaction(
+            &self.inner.pool,
+            self.inner.backend,
+            self.inner.write_lock,
+            scope,
+            Location::caller(),
+        )
     }
 
     /// The hub of this database (one per open database; created on first use).
@@ -381,10 +389,12 @@ impl CollabHub {
     pub fn install(database: &Database, config: CollabConfig) -> Self {
         let pool = database.pool().clone();
         let backend = database.backend();
+        let write_lock = database.write_lock_mode();
         let cluster = Cluster::of(database);
         let inner = database.extension(move || HubInner {
             pool,
             backend,
+            write_lock,
             cluster,
             config,
             rooms: StdMutex::new(HashMap::new()),
@@ -823,13 +833,15 @@ impl CollabHub {
     /// so a content write on another server lands before (and is read) or after (and replaces the
     /// stored document, see [`CollabWrite::replace`]).
     async fn initialize(&self, room: &Room, state: &mut RoomState) -> Result<(), CollabError> {
-        let mut tx = self.write_transaction().await?;
+        let workspace_id = *room.workspace_id.get().ok_or(CollabError::NotFound)?;
+        let mut tx = self
+            .write_transaction(WriteScope::Workspace(workspace_id))
+            .await?;
         let blocks = self.content(room, &mut tx).await?;
         state.reset_doc();
         write_document(state, &blocks, &room.policy());
         state.take_captured();
         let snapshot = state.full_state();
-        let workspace_id = *room.workspace_id.get().ok_or(CollabError::NotFound)?;
         let now = TimestampMillis::now().as_millis();
         let inserted = sqlx::query(room.key.kind.sql(
             "INSERT INTO page_collab_docs (page_id, workspace_id, snapshot, snapshot_seq, epoch, \
@@ -878,7 +890,7 @@ impl CollabHub {
         state.take_captured();
         let snapshot = state.full_state();
         let epoch = random_epoch();
-        let mut tx = self.write_transaction().await?;
+        let mut tx = self.write_transaction(WriteScope::Global).await?;
         sqlx::query(room.key.kind.sql(
             "UPDATE page_collab_docs SET snapshot = $1, snapshot_seq = $2, epoch = $3, \
              converter_version = $4, projected_seq = $5, updated_at = $6 WHERE page_id = $7",
@@ -964,7 +976,9 @@ impl CollabHub {
         }
         let key = room.key;
         let workspace_id = *room.workspace_id.get().ok_or(CollabError::NotFound)?;
-        let mut tx = self.write_transaction().await?;
+        let mut tx = self
+            .write_transaction(WriteScope::Workspace(workspace_id))
+            .await?;
         // First what the other servers wrote: the projection and the snapshot must have it.
         if let Err(error) = self.catch_up(&mut tx, room, state).await {
             let _ = tx.rollback().await;

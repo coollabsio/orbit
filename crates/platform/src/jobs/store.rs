@@ -112,11 +112,11 @@ impl JobStore {
         now: TimestampMillis,
         selection: ClaimSelection,
     ) -> Result<Option<Claim>, JobStoreError> {
-        let mut transaction = self.database.immediate_transaction().await?;
+        let mut transaction = self.database.jobs_transaction().await?;
         // Read on every claim, so a change in Admin reaches every server without a restart.
         let overrides = load_limit_overrides(&mut *transaction).await?;
-        // The claim transaction is serialized, so the counts include the jobs of every server of
-        // the database, and they cannot change until a job is claimed.
+        // Claims are serialized (the job queue's write lock), so the counts include the jobs of
+        // every server of the database, and no other claim can raise them until this one ends.
         let running = load_running_counts(&mut transaction, now).await?;
         let mut waits = HashMap::<String, bool>::new();
         let mut blocked = Blocked::default();
@@ -337,7 +337,7 @@ impl JobStore {
         claim: &Claim,
         now: TimestampMillis,
     ) -> Result<bool, JobStoreError> {
-        let mut transaction = self.database.immediate_transaction().await?;
+        let mut transaction = self.database.jobs_transaction().await?;
         let result = sqlx::query(
             "UPDATE jobs SET state = 'succeeded', lease_owner = NULL, claim_token = NULL, \
              lease_expires_at = NULL, updated_at = $1 \
@@ -362,7 +362,7 @@ impl JobStore {
         error: JobError,
         now: TimestampMillis,
     ) -> Result<bool, JobStoreError> {
-        let mut transaction = self.database.immediate_transaction().await?;
+        let mut transaction = self.database.jobs_transaction().await?;
         let row = sqlx::query(
             "SELECT max_attempts, kind FROM jobs WHERE id = $1 AND state = 'running' \
              AND attempt_count = $2 AND claim_token = $3",
@@ -429,7 +429,7 @@ impl JobStore {
         claim: &Claim,
         now: TimestampMillis,
     ) -> Result<bool, JobStoreError> {
-        let mut transaction = self.database.immediate_transaction().await?;
+        let mut transaction = self.database.jobs_transaction().await?;
         let result = sqlx::query(
             "UPDATE jobs SET state = 'queued', attempt_count = attempt_count - 1, \
              available_at = $1, lease_owner = NULL, claim_token = NULL, lease_expires_at = NULL, \

@@ -865,6 +865,16 @@ impl App {
         spawn_service(&mut services, "object storage mover", mover);
         let attachments = self.attachments.clone();
         let token = service_shutdown.clone();
+        if self.database.backend() == orbit_platform::Backend::Postgres {
+            let monitor = orbit_platform::run_write_lock_monitor(
+                self.database.clone(),
+                service_shutdown.clone(),
+            );
+            spawn_service(&mut services, "write lock monitor", async move {
+                monitor.await;
+                Ok(())
+            });
+        }
         spawn_service(&mut services, "attachment reconciliation", async move {
             attachments
                 .run_reconciliation_service(token)

@@ -310,7 +310,7 @@ impl ChatRepository {
             return Err(ChatError::Invalid { field: "nonce" });
         }
         let now = TimestampMillis::now();
-        let mut tx = self.database.immediate_transaction().await?;
+        let mut tx = self.database.workspace_transaction(workspace_id).await?;
         let access = load_access(&mut tx, workspace_id, actor_id, input.conversation_id).await?;
         access.require_member()?;
         access.require_open()?;
@@ -719,7 +719,7 @@ impl ChatRepository {
     ) -> Result<Written<MessageRecord>, ChatError> {
         let body = clean_body(body, false)?;
         let now = TimestampMillis::now();
-        let mut tx = self.database.immediate_transaction().await?;
+        let mut tx = self.database.workspace_transaction(workspace_id).await?;
         let (access, message) =
             load_message_access(&mut tx, workspace_id, actor_id, message_id).await?;
         if message.deleted || message.kind != MessageKind::Message {
@@ -754,7 +754,7 @@ impl ChatRepository {
         message_id: Id,
     ) -> Result<Written<()>, ChatError> {
         let now = TimestampMillis::now();
-        let mut tx = self.database.immediate_transaction().await?;
+        let mut tx = self.database.workspace_transaction(workspace_id).await?;
         let (access, message) =
             load_message_access(&mut tx, workspace_id, actor_id, message_id).await?;
         if message.deleted || message.kind != MessageKind::Message {
@@ -790,7 +790,7 @@ impl ChatRepository {
             return Err(ChatError::Invalid { field: "emoji" });
         }
         let now = TimestampMillis::now();
-        let mut tx = self.database.immediate_transaction().await?;
+        let mut tx = self.database.workspace_transaction(workspace_id).await?;
         let (access, message) =
             load_message_access(&mut tx, workspace_id, actor_id, message_id).await?;
         access.require_member()?;
