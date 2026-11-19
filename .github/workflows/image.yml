@@ -171,18 +171,20 @@ jobs:
           image="ghcr.io/${GITHUB_REPOSITORY,,}"
           tag=${GITHUB_SHA::7}
           if [ "$EVENT" = release ]; then
+            published="$image:$VERSION"
             tags=(--tag "$image:$VERSION")
             # a pre-release (for example 0.2.0-rc.1) gets only its exact tag
             if [ "$PRERELEASE" != true ]; then
               tags+=(--tag "$image:${VERSION%.*}" --tag "$image:latest")
             fi
           else
+            published="$image:$tag"
             tags=(--tag "$image:$tag" --tag "$image:main")
           fi
           docker buildx imagetools create "${tags[@]}" \
             "$image:$tag-amd64" \
             "$image:$tag-arm64"
-          docker buildx imagetools inspect "$image:$tag" | tee manifest.txt
+          docker buildx imagetools inspect "$published" | tee manifest.txt
           grep -E 'Platform:[[:space:]]+linux/amd64' manifest.txt
           grep -E 'Platform:[[:space:]]+linux/arm64' manifest.txt
       - name: Deploy to Coolify Cloud

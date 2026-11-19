@@ -118,11 +118,15 @@ impl PageFileRepository {
             return Err(PageFileError::NotFound);
         }
         let finalization = self.uploads.begin_finalization().await;
+        // Checked again in the transaction; here it keeps a refused request from storing its bytes.
+        self.authorize_upload(workspace_id, page_id, actor_id)
+            .await?;
+        let prepared = finalization.prepare(upload).await?;
         let now = self.database.database_now().await?;
         let mut tx = self.database.immediate_transaction().await?;
         require_live_page(&mut tx, workspace_id, page_id, actor_id).await?;
         let blob = finalization
-            .finalize_blob_in_transaction(&mut tx, upload, now)
+            .finalize_blob_in_transaction(&mut tx, &prepared, now)
             .await?;
         let id = Id::new_v7();
         let size = i64::try_from(upload.size_bytes).map_err(|_| UploadError::SizeOverflow)?;

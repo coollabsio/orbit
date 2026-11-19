@@ -499,31 +499,20 @@ impl AttachmentRepository {
         upload: &StagedUpload,
     ) -> Result<CreatedAttachment, AttachmentRepositoryError> {
         let finalization = self.uploads.begin_finalization().await;
+        // Checked again in the transaction; here it keeps a refused request from storing its bytes.
+        if !member_may_attach(self.database.pool(), workspace_id, task_id, actor_id).await? {
+            return Err(AttachmentRepositoryError::NotFound);
+        }
+        let prepared = finalization.prepare(upload).await?;
         let now = self.database.database_now().await?;
         let mut transaction = self.database.immediate_transaction().await?;
-        let Flag(allowed) = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
-            "SELECT EXISTS (SELECT 1 FROM memberships JOIN users ON users.id = memberships.user_id \
-             JOIN tasks ON tasks.workspace_id = memberships.workspace_id AND tasks.id = $1 \
-             JOIN projects ON projects.id = tasks.project_id \
-             JOIN workspaces ON workspaces.id = tasks.workspace_id \
-             WHERE memberships.workspace_id = $2 AND memberships.user_id = $3 \
-             AND memberships.role <> 'guest' \
-             AND users.suspended_at IS NULL AND tasks.deleted_at IS NULL \
-             AND projects.deleted_at IS NULL AND workspaces.deleted_at IS NULL AND {})",
-            user_sees_project_sql("tasks.project_id", "users.id")
-        )))
-        .bind(task_id.to_string())
-        .bind(workspace_id.to_string())
-        .bind(actor_id.to_string())
-        .fetch_one(&mut *transaction)
-        .await?;
-        if !allowed {
+        if !member_may_attach(&mut *transaction, workspace_id, task_id, actor_id).await? {
             return Err(AttachmentRepositoryError::NotFound);
         }
         let finalized = finalization
             .finalize_in_transaction(
                 &mut transaction,
-                upload,
+                &prepared,
                 NewAttachmentReference::new(task_id, None),
                 now,
             )
@@ -589,6 +578,20 @@ impl AttachmentRepository {
             return Err(AttachmentRepositoryError::NotFound);
         }
         let finalization = self.uploads.begin_finalization().await;
+        // Checked again in the transaction; here it keeps a refused request from storing its bytes.
+        let checked_at = self.database.database_now().await?.as_millis();
+        let access = task_access(
+            self.database.pool(),
+            session,
+            workspace_id,
+            task_id,
+            checked_at,
+        )
+        .await?;
+        if access != 1 {
+            return Err(AttachmentRepositoryError::NotFound);
+        }
+        let prepared = finalization.prepare(upload).await?;
         let mut transaction = self.database.immediate_transaction().await?;
         let now_query = match self.database.backend() {
             Backend::Sqlite => {
@@ -670,7 +673,7 @@ impl AttachmentRepository {
             ..NewAttachmentReference::new(task_id, target_comment_id)
         };
         let finalized = finalization
-            .finalize_in_transaction(&mut transaction, upload, reference, now)
+            .finalize_in_transaction(&mut transaction, &prepared, reference, now)
             .await?;
         transaction.commit().await?;
 
@@ -690,6 +693,35 @@ impl AttachmentRepository {
             comment,
         ))
     }
+}
+
+/// `actor_id` is an active non-guest member who sees the task's live project.
+async fn member_may_attach<'e, E>(
+    executor: E,
+    workspace_id: Id,
+    task_id: Id,
+    actor_id: Id,
+) -> Result<bool, sqlx::Error>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Any>,
+{
+    let Flag(allowed) = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+        "SELECT EXISTS (SELECT 1 FROM memberships JOIN users ON users.id = memberships.user_id \
+         JOIN tasks ON tasks.workspace_id = memberships.workspace_id AND tasks.id = $1 \
+         JOIN projects ON projects.id = tasks.project_id \
+         JOIN workspaces ON workspaces.id = tasks.workspace_id \
+         WHERE memberships.workspace_id = $2 AND memberships.user_id = $3 \
+         AND memberships.role <> 'guest' \
+         AND users.suspended_at IS NULL AND tasks.deleted_at IS NULL \
+         AND projects.deleted_at IS NULL AND workspaces.deleted_at IS NULL AND {})",
+        user_sees_project_sql("tasks.project_id", "users.id")
+    )))
+    .bind(task_id.to_string())
+    .bind(workspace_id.to_string())
+    .bind(actor_id.to_string())
+    .fetch_one(executor)
+    .await?;
+    Ok(allowed)
 }
 
 async fn task_access<'e, E>(

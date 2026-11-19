@@ -919,7 +919,10 @@ impl MailRepository {
         upload: &StagedUpload,
         content_id: Option<&str>,
     ) -> Result<DraftFile, MailError> {
+        // Checked again in the transaction; here it keeps a refused request from storing its bytes.
+        self.authorize_draft_file(membership_id, draft_id).await?;
         let finalization = self.uploads.begin_finalization().await;
+        let prepared = finalization.prepare(upload).await?;
         let now = self.database.database_now().await?;
         let mut transaction = self.database.immediate_transaction().await?;
         let found: Option<String> = sqlx::query_scalar(
@@ -941,7 +944,7 @@ impl MailRepository {
             return Err(MailError::Unprocessable("draft_files_limit"));
         }
         let blob = finalization
-            .finalize_blob_in_transaction(&mut transaction, upload, now)
+            .finalize_blob_in_transaction(&mut transaction, &prepared, now)
             .await?;
         let id = Id::new_v7();
         let size =

@@ -147,10 +147,11 @@ impl Fixture {
     async fn receipt(&self, raw: &[u8]) -> (String, String) {
         let finalization = self.uploads.begin_finalization().await;
         let now = TimestampMillis::now();
-        let mut tx = self.database.immediate_transaction().await.unwrap();
         let workspace_id: Id = self.workspace_id.parse().unwrap();
+        let prepared = finalization.prepare_bytes(workspace_id, raw).await.unwrap();
+        let mut tx = self.database.immediate_transaction().await.unwrap();
         let blob = finalization
-            .finalize_bytes_in_transaction(&mut tx, workspace_id, raw, now)
+            .finalize_bytes_in_transaction(&mut tx, &prepared)
             .await
             .unwrap();
         let id = Id::new_v7().to_string();
@@ -529,17 +530,10 @@ async fn blob_referenced_by_receipt_is_not_reconciled() {
     let (receipt, kept) = fixture.receipt(b"sealed raw message").await;
     // A blob without a reference, to prove the reconcile runs.
     let finalization = fixture.uploads.begin_finalization().await;
-    let mut tx = fixture.database.immediate_transaction().await.unwrap();
     finalization
-        .finalize_bytes_in_transaction(
-            &mut tx,
-            fixture.workspace_id.parse().unwrap(),
-            b"orphan",
-            TimestampMillis::now(),
-        )
+        .prepare_bytes(fixture.workspace_id.parse().unwrap(), b"orphan")
         .await
         .unwrap();
-    tx.commit().await.unwrap();
     drop(finalization);
 
     let later = TimestampMillis::now().as_millis() + 2 * DAY_MILLIS;
@@ -927,14 +921,13 @@ impl Fixture {
     /// A blob without any reference yet.
     async fn bare_blob(&self, bytes: &[u8]) -> String {
         let finalization = self.uploads.begin_finalization().await;
+        let prepared = finalization
+            .prepare_bytes(self.workspace_id.parse().unwrap(), bytes)
+            .await
+            .unwrap();
         let mut tx = self.database.immediate_transaction().await.unwrap();
         let blob = finalization
-            .finalize_bytes_in_transaction(
-                &mut tx,
-                self.workspace_id.parse().unwrap(),
-                bytes,
-                TimestampMillis::now(),
-            )
+            .finalize_bytes_in_transaction(&mut tx, &prepared)
             .await
             .unwrap();
         tx.commit().await.unwrap();

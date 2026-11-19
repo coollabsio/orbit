@@ -26,6 +26,8 @@ const HTTP_DEV_NATIVE_REDIRECTS_ENV: &str = "ORBIT_DEV_NATIVE_REDIRECTS";
 const ENVIRONMENT_ENV: &str = "ORBIT_ENV";
 const DATA_DATABASE_ENV: &str = "ORBIT_DATABASE_PATH";
 const DATA_DATABASE_URL_ENV: &str = "ORBIT_DATABASE_URL";
+const DATA_DATABASE_MAX_CONNECTIONS_ENV: &str = "ORBIT_DATABASE_MAX_CONNECTIONS";
+const DATA_WRITE_LOCK_ENV: &str = "ORBIT_WRITE_LOCK";
 const DATA_ATTACHMENTS_ENV: &str = "ORBIT_ATTACHMENTS_PATH";
 const DATA_BACKUPS_ENV: &str = "ORBIT_BACKUPS_PATH";
 const JOBS_CONCURRENCY_ENV: &str = "ORBIT_JOBS_CONCURRENCY";
@@ -229,6 +231,10 @@ pub struct DataConfig {
     pub database: PathBuf,
     /// A Postgres URL (`postgres://user:password@host/database`) used instead of SQLite.
     pub database_url: Option<String>,
+    /// The size of each database pool; `None` uses 5 for SQLite and 20 for Postgres.
+    pub max_connections: Option<u32>,
+    /// Postgres only: `global` makes every write transaction take the global write lock.
+    pub write_lock: crate::WriteLockMode,
     pub attachments: PathBuf,
     pub backups: PathBuf,
 }
@@ -238,6 +244,8 @@ impl Default for DataConfig {
         Self {
             database: PathBuf::from("data/orbit.sqlite"),
             database_url: None,
+            max_connections: None,
+            write_lock: crate::WriteLockMode::default(),
             attachments: PathBuf::from("data/attachments"),
             backups: PathBuf::from("backups"),
         }
@@ -253,6 +261,8 @@ impl fmt::Debug for DataConfig {
                 "database_url",
                 &self.database_url.as_deref().map(redact_database_url),
             )
+            .field("max_connections", &self.max_connections)
+            .field("write_lock", &self.write_lock)
             .field("attachments", &self.attachments)
             .field("backups", &self.backups)
             .finish()
@@ -983,6 +993,16 @@ impl Config {
                 detail: "must be a postgres:// or postgresql:// URL".to_owned(),
             });
         }
+        if self
+            .data
+            .max_connections
+            .is_some_and(|connections| !(1..=500).contains(&connections))
+        {
+            return Err(ConfigError::InvalidSetting {
+                key: DATA_DATABASE_MAX_CONNECTIONS_ENV,
+                detail: "must be between 1 and 500".to_owned(),
+            });
+        }
         if self.app_key.is_none() {
             return Err(ConfigError::InvalidSetting {
                 key: APP_KEY_ENV,
@@ -1080,6 +1100,10 @@ fn apply_environment(
             config.data.database = PathBuf::from(value);
         } else if key == DATA_DATABASE_URL_ENV {
             config.data.database_url = Some(value.clone()).filter(|value| !value.is_empty());
+        } else if key == DATA_DATABASE_MAX_CONNECTIONS_ENV {
+            config.data.max_connections = Some(parse_environment(key, value)?);
+        } else if key == DATA_WRITE_LOCK_ENV {
+            config.data.write_lock = parse_environment(key, value)?;
         } else if key == DATA_ATTACHMENTS_ENV {
             config.data.attachments = PathBuf::from(value);
         } else if key == DATA_BACKUPS_ENV {

@@ -721,7 +721,7 @@ impl MailRepository {
             return Err(MailError::Invalid { field: "restore" });
         }
         let now = self.database.database_now().await?;
-        let mut transaction = self.database.immediate_transaction().await?;
+        let mut transaction = self.database.workspace_transaction(workspace_id).await?;
         let reader = reader(&mut transaction, workspace_id, user_id).await?;
         if !change.add_labels.is_empty() {
             let wanted: BTreeSet<Id> = change.add_labels.iter().copied().collect();

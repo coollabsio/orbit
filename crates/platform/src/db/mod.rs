@@ -2,10 +2,12 @@ mod builder;
 mod migrate;
 mod row;
 mod test_db;
+mod write_lock;
 
 use std::any::Any;
 use std::fmt;
 use std::fs::{self, File, OpenOptions};
+use std::panic::Location;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::{Arc, Mutex, PoisonError};
@@ -19,7 +21,7 @@ use sqlx::sqlite::{SqliteConnectOptions, SqliteConnection, SqliteJournalMode};
 use sqlx::{AnyPool, Connection, Decode, Transaction, Type};
 use thiserror::Error;
 
-use crate::TimestampMillis;
+use crate::{Id, TimestampMillis};
 
 pub use builder::{Separated, SqlBuilder};
 pub(crate) use migrate::metadata_table_sql;
@@ -29,6 +31,9 @@ pub use migrate::{
 };
 pub use row::{Column, Flag, NotBool, Row};
 pub use test_db::{TestDatabase, TestDatabaseError};
+pub use write_lock::{
+    WriteLockMode, WriteScope, begin_write_transaction, run_write_lock_monitor, write_lock_sql,
+};
 
 /// Server URL (e.g. `postgres://orbit:orbit@127.0.0.1:15432/orbit`) that makes tests run on
 /// Postgres; see [`Database::open`].
@@ -49,10 +54,6 @@ const POSTGRES_LOCALE_CHECK: &str = "SELECT 'B' < 'a' AND lower('Ü') = 'ü' AND
 /// How Orbit creates (or needs) a Postgres database: see `POSTGRES_LOCALE_CHECK`.
 const POSTGRES_DATABASE_OPTIONS: &str = "TEMPLATE template0 ENCODING 'UTF8' \
     LOCALE_PROVIDER builtin BUILTIN_LOCALE 'C.UTF-8' LOCALE 'C.UTF-8'";
-/// Transaction-scoped advisory lock taken by every write transaction on Postgres, so writers run
-/// one at a time as under SQLite's `BEGIN IMMEDIATE`.
-const POSTGRES_WRITE_LOCK: &str = "SELECT 1 FROM pg_advisory_xact_lock(8030594652542121842)";
-
 /// Whether tests run on Postgres (`ORBIT_TEST_POSTGRES_URL` is set), for tests that only make
 /// sense on SQLite (files, PRAGMAs, old SQLite migrations).
 #[must_use]
@@ -60,12 +61,15 @@ pub fn testing_postgres() -> bool {
     test_postgres_url().is_some()
 }
 
-/// Whether `error` only means that another writer held a lock for too long: SQLite's
-/// `SQLITE_BUSY` / `SQLITE_LOCKED` after the busy timeout, or a Postgres lock timeout, deadlock or
-/// serialization failure. The same statement can succeed later, so a background loop retries it
-/// on its next round instead of stopping the server.
+/// Whether `error` only means that the database is busy: SQLite's `SQLITE_BUSY` /
+/// `SQLITE_LOCKED` after the busy timeout, a Postgres lock timeout, deadlock or serialization
+/// failure, or no free pool connection within the acquire timeout. The same statement can succeed
+/// later, so a background loop retries it on its next round instead of stopping the server.
 #[must_use]
 pub fn is_transient_lock_error(error: &sqlx::Error) -> bool {
+    if matches!(error, sqlx::Error::PoolTimedOut) {
+        return true;
+    }
     let Some(error) = error.as_database_error() else {
         return false;
     };
@@ -117,6 +121,8 @@ pub struct DatabaseConfig {
     pub max_connections: u32,
     pub busy_timeout: Duration,
     pub access: Access,
+    /// Postgres only: see [`WriteLockMode`].
+    pub write_lock: WriteLockMode,
 }
 
 impl DatabaseConfig {
@@ -128,6 +134,7 @@ impl DatabaseConfig {
             max_connections: 5,
             busy_timeout: Duration::from_secs(5),
             access: Access::Exclusive,
+            write_lock: WriteLockMode::default(),
         }
     }
 
@@ -143,9 +150,17 @@ impl DatabaseConfig {
     /// The database of `[data]`: Postgres when `database_url` is set, else the SQLite file.
     #[must_use]
     pub fn for_data(data: &crate::DataConfig) -> Self {
+        let default = Self::new(&data.database);
+        let backend_default = if data.database_url.is_some() {
+            20
+        } else {
+            default.max_connections
+        };
         Self {
             postgres_url: data.database_url.clone(),
-            ..Self::new(&data.database)
+            max_connections: data.max_connections.unwrap_or(backend_default),
+            write_lock: data.write_lock,
+            ..default
         }
     }
 }
@@ -162,6 +177,7 @@ impl fmt::Debug for DatabaseConfig {
             .field("max_connections", &self.max_connections)
             .field("busy_timeout", &self.busy_timeout)
             .field("access", &self.access)
+            .field("write_lock", &self.write_lock)
             .finish()
     }
 }
@@ -177,6 +193,7 @@ struct DatabaseInner {
     backend: Backend,
     /// The native pool of a Postgres database, for `COPY` (backups), which the Any driver lacks.
     postgres: Option<PgPool>,
+    write_lock: WriteLockMode,
     path: PathBuf,
     ownership: Ownership,
     extensions: Extensions,
@@ -416,6 +433,7 @@ impl Database {
                 pool,
                 backend: Backend::Sqlite,
                 postgres: None,
+                write_lock: config.write_lock,
                 path: config.path.clone(),
                 ownership: Ownership::File {
                     _lock: ownership_lock,
@@ -488,6 +506,7 @@ impl Database {
                 pool,
                 backend: Backend::Postgres,
                 postgres: Some(postgres),
+                write_lock: config.write_lock,
                 path: config.path.clone(),
                 ownership: Ownership::Postgres {
                     connection: tokio::sync::Mutex::new(connection),
@@ -579,20 +598,58 @@ impl Database {
         self.inner.pool.begin().await
     }
 
-    /// A write transaction. Writers run one at a time on both backends: SQLite takes the write
-    /// lock with `BEGIN IMMEDIATE`, Postgres a transaction-scoped advisory lock, so
-    /// read-then-write logic sees no concurrent writer.
-    pub async fn immediate_transaction(&self) -> Result<Transaction<'_, sqlx::Any>, sqlx::Error> {
-        match self.inner.backend {
-            Backend::Sqlite => self.inner.pool.begin_with("BEGIN IMMEDIATE").await,
-            Backend::Postgres => {
-                let mut transaction = self.inner.pool.begin().await?;
-                sqlx::query(POSTGRES_WRITE_LOCK)
-                    .execute(&mut *transaction)
-                    .await?;
-                Ok(transaction)
-            }
-        }
+    /// A write transaction that excludes every other writer of the database, on both backends, so
+    /// read-then-write logic sees no concurrent writer. SQLite takes the write lock with
+    /// `BEGIN IMMEDIATE`, Postgres the global advisory lock ([`WriteScope::Global`]).
+    #[track_caller]
+    pub fn immediate_transaction(
+        &self,
+    ) -> impl Future<Output = Result<Transaction<'_, sqlx::Any>, sqlx::Error>> + Send + '_ {
+        self.write_transaction(WriteScope::Global, Location::caller())
+    }
+
+    /// A write transaction that excludes the other writers of `workspace_id` and every
+    /// [`Self::immediate_transaction`], but not the writers of other workspaces (on Postgres; a
+    /// SQLite database has one writer). Use it only when the transaction reads and writes rows
+    /// of this workspace only, plus rows that a unique constraint or one atomic statement
+    /// protects; anything else needs `immediate_transaction`.
+    ///
+    /// On Postgres it takes the global lock shared, then the workspace's lock. With
+    /// `ORBIT_WRITE_LOCK=global` it is an `immediate_transaction`.
+    #[track_caller]
+    pub fn workspace_transaction(
+        &self,
+        workspace_id: Id,
+    ) -> impl Future<Output = Result<Transaction<'_, sqlx::Any>, sqlx::Error>> + Send + '_ {
+        self.write_transaction(WriteScope::Workspace(workspace_id), Location::caller())
+    }
+
+    /// A write transaction of the job store: it excludes the other job store writers and every
+    /// [`Self::immediate_transaction`], but not the writers of the workspaces (on Postgres; a
+    /// SQLite database has one writer). So code outside the job store that reads `jobs` or
+    /// `job_limits` and then writes them needs `immediate_transaction`.
+    ///
+    /// On Postgres it takes the global lock shared, then the job queue's lock. With
+    /// `ORBIT_WRITE_LOCK=global` it is an `immediate_transaction`.
+    #[track_caller]
+    pub fn jobs_transaction(
+        &self,
+    ) -> impl Future<Output = Result<Transaction<'_, sqlx::Any>, sqlx::Error>> + Send + '_ {
+        self.write_transaction(WriteScope::Jobs, Location::caller())
+    }
+
+    async fn write_transaction(
+        &self,
+        scope: WriteScope,
+        caller: &'static Location<'static>,
+    ) -> Result<Transaction<'_, sqlx::Any>, sqlx::Error> {
+        let inner = &self.inner;
+        begin_write_transaction(&inner.pool, inner.backend, inner.write_lock, scope, caller).await
+    }
+
+    #[must_use]
+    pub fn write_lock_mode(&self) -> WriteLockMode {
+        self.inner.write_lock
     }
 
     /// Returns UTC wall time as observed by the database, at millisecond precision.

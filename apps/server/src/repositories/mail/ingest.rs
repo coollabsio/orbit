@@ -3,9 +3,10 @@
 //!
 //! The raw message is read and parsed before the transaction; the message, its attachments, the
 //! threads, the search rows and the receipt's `ingested` mark are written in one
-//! `immediate_transaction()`. A re-run is safe: the message is unique for its receipt and each
-//! mailbox gets the same bytes once (`mail_thread_messages (mailbox_id, raw_sha256)`), so a retry
-//! after any failure adds nothing twice. Live events go out after the commit.
+//! `workspace_transaction` of the receipt's workspace (every mailbox it delivers to is in that
+//! workspace). A re-run is safe: the message is unique for its receipt and each mailbox gets the
+//! same bytes once (`mail_thread_messages (mailbox_id, raw_sha256)`), so a retry after any
+//! failure adds nothing twice. Live events go out after the commit.
 
 use std::borrow::Cow;
 
@@ -259,7 +260,7 @@ impl MailRepository {
             .is_ok_and(|auth| matches!(auth.dmarc, DmarcVerdict::Fail { .. }));
 
         let workspace_id = receipt.workspace_id;
-        let mut transaction = self.database.immediate_transaction().await?;
+        let mut transaction = self.database.workspace_transaction(workspace_id).await?;
         // Another server may have finished it meanwhile.
         let status: Option<String> =
             sqlx::query_scalar("SELECT status FROM mail_receipts WHERE id = $1")

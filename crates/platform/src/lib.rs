@@ -23,9 +23,9 @@ pub use auth::{
     generate_opaque_token, normalize_email,
 };
 pub use backup::{
-    AttachmentMutationCoordinator, AttachmentMutationGuard, BackupEncryption, BackupError,
-    BackupFile, BackupKind, BackupManifest, BackupService, BackupSnapshot, SnapshotReader,
-    SnapshotRow,
+    AttachmentMutationCoordinator, AttachmentMutationGuard, AttachmentOperationGuard,
+    BackupEncryption, BackupError, BackupFile, BackupKind, BackupManifest, BackupService,
+    BackupSnapshot, SnapshotReader, SnapshotRow,
 };
 pub use config::{
     ApnsConfig, AppKey, BackupSchedule, BillingConfig, Config, ConfigError, DataConfig,
@@ -36,8 +36,9 @@ pub use config::{
 pub use db::{
     Access, Backend, Column, Database, DatabaseConfig, DatabaseError, Flag, GuardedMigrationError,
     Migration, MigrationError, MigrationRunner, NotBool, PendingMigration, Row, Separated,
-    Singleton, SqlBuilder, TestDatabase, TestDatabaseError, is_transient_lock_error,
-    lock_database_ownership, run_guarded_migrations, testing_postgres,
+    Singleton, SqlBuilder, TestDatabase, TestDatabaseError, WriteLockMode, WriteScope,
+    begin_write_transaction, is_transient_lock_error, lock_database_ownership,
+    run_guarded_migrations, run_write_lock_monitor, testing_postgres, write_lock_sql,
 };
 #[cfg(any(test, feature = "test-support"))]
 pub use files::start_fake_s3;
@@ -45,10 +46,11 @@ pub use files::{
     AuthorizedAttachment, BLOB_REFERENCE_COUNT, BlobDownload, BlobFuture, BlobMoveStatus,
     BlobObject, BlobReader, BlobStore, BlobStoreError, ContentDisposition, DownloadMetadata,
     FinalizedAttachment, FinalizedBlob, INLINE_IMAGE_TYPES, LocalBlobStore, NewAttachmentReference,
-    ObjectStorage, ObjectStorageState, ReconcileResult, S3_DELETE_DELAY_MILLIS, S3Bucket, S3Config,
-    S3Error, S3Object, SHRINK_MIN_BYTES, SigV4Credentials, SigV4Request, StagedUpload,
-    StoredObject, TieredBlobStore, UploadError, UploadFinalization, UploadLimitError, UploadLimits,
-    UploadService, WORKSPACE_STORAGE_USED, WorkspaceBucket, shrink_image, sigv4_authorization,
+    ObjectStorage, ObjectStorageState, PreparedBlob, PreparedUpload, ReconcileResult,
+    S3_DELETE_DELAY_MILLIS, S3Bucket, S3Config, S3Error, S3Object, SHRINK_MIN_BYTES,
+    SigV4Credentials, SigV4Request, StagedUpload, StoredObject, TieredBlobStore, UploadError,
+    UploadFinalization, UploadLimitError, UploadLimits, UploadService, WORKSPACE_STORAGE_USED,
+    WorkspaceBucket, shrink_image, sigv4_authorization,
 };
 pub use health::{HealthCheck, HealthCheckResult, HealthRegistry, ReadinessReport};
 pub use http::{

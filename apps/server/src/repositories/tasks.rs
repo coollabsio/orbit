@@ -2167,7 +2167,7 @@ impl TaskRepository {
             });
         }
         validate_estimate(input.estimate)?;
-        let mut tx = self.database.immediate_transaction().await?;
+        let mut tx = self.database.workspace_transaction(workspace_id).await?;
         let scope = ProjectScope::of(&require_access_tx(&mut tx, workspace_id, actor_id).await?);
         if self
             .project_grant
@@ -2727,7 +2727,7 @@ impl TaskRepository {
             ),
             false => None,
         };
-        let mut tx = self.database.immediate_transaction().await?;
+        let mut tx = self.database.workspace_transaction(workspace_id).await?;
         let scope = ProjectScope::of(&require_access_tx(&mut tx, workspace_id, actor_id).await?);
         self.check_project_grant(&mut tx, workspace_id, update.id)
             .await?;
@@ -2933,7 +2933,7 @@ impl TaskRepository {
                     .await?,
             );
         }
-        let mut tx = self.database.immediate_transaction().await?;
+        let mut tx = self.database.workspace_transaction(workspace_id).await?;
         let scope = ProjectScope::of(&require_access_tx(&mut tx, workspace_id, actor_id).await?);
         // Each item's before/after pair brackets its own write only; the automation runs after
         // every write, so its result never depends on the order of the items.
@@ -3654,7 +3654,7 @@ impl TaskRepository {
         now: TimestampMillis,
     ) -> Result<CommentRecord, TaskError> {
         let id = Id::new_v7();
-        let mut tx = self.database.immediate_transaction().await?;
+        let mut tx = self.database.workspace_transaction(workspace_id).await?;
         let actor = require_task_tx(&mut tx, workspace_id, task_id, actor_id).await?;
         if let Some(grant) = &self.project_grant {
             let project: String = sqlx::query_scalar(

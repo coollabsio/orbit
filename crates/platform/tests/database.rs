@@ -47,8 +47,11 @@ async fn opens_sqlite_with_required_pragmas() {
 
 #[tokio::test]
 async fn a_writer_that_waited_out_the_busy_timeout_gets_a_transient_lock_error() {
+    assert!(orbit_platform::is_transient_lock_error(
+        &sqlx::Error::PoolTimedOut
+    ));
     if orbit_platform::testing_postgres() {
-        // Orbit's writers wait for the write lock without a timeout; a statement with one fails.
+        // Orbit's writers wait 30 s for the write lock; a shorter timeout keeps the test fast.
         let database = TestDatabase::new().await.unwrap();
         let mut holder = database.pool().begin().await.unwrap();
         sqlx::query("SELECT 1 FROM pg_advisory_xact_lock(42)")

@@ -825,7 +825,15 @@ async fn database_finalization_failure_leaves_new_bytes_quarantined_for_reconcil
         .fetch_one(fixture.database.pool())
         .await
         .unwrap();
-    assert_eq!(tracked, 0, "the failed database transaction is rolled back");
+    assert_eq!(
+        tracked, 1,
+        "the blob row is committed before the bytes are stored and stays, unreferenced, for reconcile"
+    );
+    let references: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM attachment_references")
+        .fetch_one(fixture.database.pool())
+        .await
+        .unwrap();
+    assert_eq!(references, 0);
 
     let state = AttachmentState::new(
         Arc::clone(&fixture.identity),
@@ -1156,18 +1164,19 @@ async fn uploads_stay_within_the_workspace_storage_quota() {
         AttachmentMutationCoordinator::default(),
         UploadLimits::default(),
     );
-    let now = TimestampMillis::now();
     {
         let finalization = uploads.begin_finalization().await;
-        let mut transaction = fixture.database.immediate_transaction().await.unwrap();
         assert!(matches!(
-            finalization
-                .finalize_bytes_in_transaction(&mut transaction, workspace_id, b"emoji", now)
-                .await,
+            finalization.prepare_bytes(workspace_id, b"emoji").await,
             Err(UploadError::StorageQuotaExceeded { .. })
         ));
+        let avatar = finalization
+            .prepare_unmetered_bytes(owner_id, b"avatar")
+            .await
+            .unwrap();
+        let mut transaction = fixture.database.immediate_transaction().await.unwrap();
         finalization
-            .finalize_unmetered_bytes_in_transaction(&mut transaction, owner_id, b"avatar", now)
+            .finalize_bytes_in_transaction(&mut transaction, &avatar)
             .await
             .unwrap();
         transaction.commit().await.unwrap();

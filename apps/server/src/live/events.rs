@@ -34,7 +34,7 @@ pub(super) async fn append(
     events: &[NewEvent],
 ) -> Result<u64, sqlx::Error> {
     let workspace = workspace_id.to_string();
-    let mut transaction = database.immediate_transaction().await?;
+    let mut transaction = database.workspace_transaction(workspace_id).await?;
     let mut seq: i64 = sqlx::query_scalar(
         "SELECT CAST(COALESCE(MAX(seq), 0) AS BIGINT) FROM live_events WHERE workspace_id = $1",
     )

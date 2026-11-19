@@ -371,7 +371,7 @@ impl PageCommentRepository {
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<PageComment, PageCommentError> {
-        let mut tx = self.database.immediate_transaction().await?;
+        let mut tx = self.database.workspace_transaction(workspace_id).await?;
         let page = visible_page(&mut tx, workspace_id, page_id, actor_id).await?;
         require_thread(&mut tx, page_id, thread_id).await?;
         let comment_id = insert_comment(&mut tx, &page, thread_id, actor_id, &body, now).await?;

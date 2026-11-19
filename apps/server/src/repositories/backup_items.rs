@@ -8,8 +8,8 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use orbit_platform::{
-    BackupError, BackupSnapshot, Database, Flag, Id, Row, SnapshotReader, SnapshotRow,
-    StagedUpload, TimestampMillis, UploadError, UploadService,
+    BackupError, BackupSnapshot, Database, Flag, Id, PreparedUpload, Row, SnapshotReader,
+    SnapshotRow, StagedUpload, TimestampMillis, UploadError, UploadService,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -478,6 +478,7 @@ impl BackupItemRepository {
         } = meta;
         let root = &pages[0];
         let finalization = self.uploads.begin_finalization().await;
+        staging.install(&finalization).await?;
         let now = self.database.database_now().await?;
         let mut tx = self.database.immediate_transaction().await?;
         require_live_workspace(&mut tx, workspace_id).await?;
@@ -850,6 +851,7 @@ impl BackupItemRepository {
             request_id,
         } = meta;
         let finalization = self.uploads.begin_finalization().await;
+        staging.install(&finalization).await?;
         let now = self.database.database_now().await?;
         let mut tx = self.database.immediate_transaction().await?;
         require_live_workspace(&mut tx, workspace_id).await?;
@@ -1298,6 +1300,8 @@ struct SnapshotBlob {
     sha256: String,
     size: i64,
     staged: Option<StagedUpload>,
+    /// The staged bytes in the store, from [`BlobStaging::install`].
+    installed: Option<PreparedUpload>,
 }
 
 /// The blobs a restore needs, by their id in the snapshot. Bytes that the live workspace does
@@ -1355,6 +1359,7 @@ impl<'a> BlobStaging<'a> {
                 sha256: sha256.to_owned(),
                 size,
                 staged: None,
+                installed: None,
             };
             if live_blob(database.pool(), self.workspace_id, sha256, size)
                 .await?
@@ -1397,8 +1402,25 @@ impl<'a> BlobStaging<'a> {
         self.uploads.read_blob(storage_key).await.ok()
     }
 
-    /// The live blob of each snapshot blob, inside the write transaction: the workspace's blob of
-    /// the same bytes, or the staged bytes installed now. `None` for a file that is left out.
+    /// Writes the staged bytes to the store. Run it before the write transaction: the store can be
+    /// slow, and nothing may wait for it under the write lock.
+    async fn install(
+        &mut self,
+        finalization: &orbit_platform::UploadFinalization<'_>,
+    ) -> Result<(), BackupItemError> {
+        for blob in self.blobs.values_mut() {
+            if blob.installed.is_none()
+                && let Some(staged) = &blob.staged
+            {
+                blob.installed = Some(finalization.prepare(staged).await?);
+            }
+        }
+        Ok(())
+    }
+
+    /// The live blob of each snapshot blob, inside the write transaction: the bytes that
+    /// [`Self::install`] stored, or the workspace's blob of the same bytes. `None` for a file that
+    /// is left out.
     async fn resolve(
         &mut self,
         finalization: &orbit_platform::UploadFinalization<'_>,
@@ -1407,27 +1429,25 @@ impl<'a> BlobStaging<'a> {
     ) -> Result<HashMap<String, Option<LiveBlob>>, BackupItemError> {
         let mut resolved = HashMap::with_capacity(self.blobs.len());
         for (id, blob) in &self.blobs {
-            let live =
-                match live_blob(&mut **tx, self.workspace_id, &blob.sha256, blob.size).await? {
-                    Some(live) => Some(LiveBlob {
+            let live = match (&blob.installed, &blob.staged) {
+                (Some(installed), Some(staged)) => {
+                    let installed = finalization
+                        .finalize_blob_in_transaction(tx, installed, now)
+                        .await?;
+                    Some(LiveBlob {
+                        id: installed.id,
+                        size: blob.size,
+                        detected: Some(staged.detected_media_type.clone()),
+                    })
+                }
+                _ => live_blob(&mut **tx, self.workspace_id, &blob.sha256, blob.size)
+                    .await?
+                    .map(|live| LiveBlob {
                         id: live,
                         size: blob.size,
                         detected: None,
                     }),
-                    None => match &blob.staged {
-                        Some(staged) => {
-                            let installed = finalization
-                                .finalize_blob_in_transaction(tx, staged, now)
-                                .await?;
-                            Some(LiveBlob {
-                                id: installed.id,
-                                size: blob.size,
-                                detected: Some(staged.detected_media_type.clone()),
-                            })
-                        }
-                        None => None,
-                    },
-                };
+            };
             resolved.insert(id.clone(), live);
         }
         Ok(resolved)

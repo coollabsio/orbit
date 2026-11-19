@@ -28,6 +28,10 @@ const OBJECT_BODY_BYTES: usize = 16 * 1024 * 1024;
 const LIST_BODY_BYTES: usize = 8 * 1024 * 1024;
 /// The whole of a request without a file body, also when the server sends slowly.
 const SMALL_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
+/// A DELETE or HEAD. Callers such as reconcile can hold the database write lock while they wait.
+const QUICK_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
+/// The size assumed for a download without a Content-Length: the largest single PUT S3 accepts.
+const UNKNOWN_OBJECT_BYTES: u64 = 5 * 1024 * 1024 * 1024;
 /// Reading an error body of a file transfer.
 const ERROR_BODY_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -122,6 +126,8 @@ pub enum S3Error {
     },
     #[error("object storage returned an invalid response: {0}")]
     Response(String),
+    #[error("object storage request timed out after {0:?}")]
+    Timeout(Duration),
 }
 
 impl S3Error {
@@ -134,6 +140,7 @@ impl S3Error {
             Self::Request(error) if error.is_timeout() => {
                 "the storage endpoint did not answer in time".to_owned()
             }
+            Self::Timeout(_) => "the storage endpoint did not answer in time".to_owned(),
             Self::Request(error) if error.is_connect() => {
                 "the connection to the storage endpoint failed".to_owned()
             }
@@ -298,6 +305,7 @@ impl S3Bucket {
             .request(Method::PUT, key, &[], &[])
             .header(CONTENT_LENGTH, length)
             .header(CONTENT_TYPE, "application/octet-stream")
+            .timeout(transfer_timeout(length))
             .body(reqwest::Body::wrap_stream(
                 tokio_util::io::ReaderStream::new(file),
             ))
@@ -341,20 +349,33 @@ impl S3Bucket {
 
     /// Downloads the object into `path` (created or truncated). Returns `false` when the object does not exist.
     pub async fn get_to_file(&self, key: &str, path: &Path) -> Result<bool, S3Error> {
-        let response = self.request(Method::GET, key, &[], &[]).send().await?;
+        let started = tokio::time::Instant::now();
+        // reqwest fixes a request's timeout before the Content-Length is known, so the body gets a deadline.
+        let response = tokio::time::timeout(
+            SMALL_REQUEST_TIMEOUT,
+            self.request(Method::GET, key, &[], &[]).send(),
+        )
+        .await
+        .map_err(|_| S3Error::Timeout(SMALL_REQUEST_TIMEOUT))??;
         if response.status() == StatusCode::NOT_FOUND {
             return Ok(false);
         }
         let mut response = expect_success(response).await?;
+        let limit = transfer_timeout(response.content_length().unwrap_or(UNKNOWN_OBJECT_BYTES));
         let io = |source| S3Error::Io {
             path: path.to_owned(),
             source,
         };
-        let mut file = tokio::fs::File::create(path).await.map_err(io)?;
-        while let Some(chunk) = response.chunk().await? {
-            file.write_all(&chunk).await.map_err(io)?;
-        }
-        file.sync_all().await.map_err(io)?;
+        let download = async {
+            let mut file = tokio::fs::File::create(path).await.map_err(io)?;
+            while let Some(chunk) = response.chunk().await? {
+                file.write_all(&chunk).await.map_err(io)?;
+            }
+            file.sync_all().await.map_err(io)
+        };
+        tokio::time::timeout_at(started + limit, download)
+            .await
+            .map_err(|_| S3Error::Timeout(limit))??;
         Ok(true)
     }
 
@@ -362,7 +383,7 @@ impl S3Bucket {
     pub async fn last_modified(&self, key: &str) -> Result<Option<i64>, S3Error> {
         let response = self
             .request(Method::HEAD, key, &[], &[])
-            .timeout(SMALL_REQUEST_TIMEOUT)
+            .timeout(QUICK_REQUEST_TIMEOUT)
             .send()
             .await?;
         if response.status() == StatusCode::NOT_FOUND {
@@ -424,7 +445,7 @@ impl S3Bucket {
     pub async fn delete(&self, key: &str) -> Result<(), S3Error> {
         let response = self
             .request(Method::DELETE, key, &[], &[])
-            .timeout(SMALL_REQUEST_TIMEOUT)
+            .timeout(QUICK_REQUEST_TIMEOUT)
             .send()
             .await?;
         if response.status() == StatusCode::NOT_FOUND {
@@ -579,6 +600,11 @@ impl S3Bucket {
         }
         builder.header(reqwest::header::AUTHORIZATION, authorization)
     }
+}
+
+/// The whole of a file transfer: 60 s plus 1 s per MiB.
+fn transfer_timeout(bytes: u64) -> Duration {
+    Duration::from_secs(60_u64.saturating_add(bytes.div_ceil(1024 * 1024)))
 }
 
 async fn expect_success(response: reqwest::Response) -> Result<reqwest::Response, S3Error> {

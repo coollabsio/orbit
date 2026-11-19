@@ -148,11 +148,17 @@ impl ChatRepository {
         let dimension =
             |value: Option<u32>| value.filter(|value| (1..=MAX_DIMENSION).contains(value));
         let finalization = self.uploads.begin_finalization().await;
+        // Checked again in the transaction; here it keeps a refused request from storing its bytes.
+        {
+            let mut conn = self.database.pool().acquire().await?;
+            load_actor(&mut conn, workspace_id, actor_id).await?;
+        }
+        let prepared = finalization.prepare(upload).await?;
         let now = self.database.database_now().await?;
         let mut tx = self.database.immediate_transaction().await?;
         load_actor(&mut tx, workspace_id, actor_id).await?;
         let blob = finalization
-            .finalize_blob_in_transaction(&mut tx, upload, now)
+            .finalize_blob_in_transaction(&mut tx, &prepared, now)
             .await?;
         let id = Id::new_v7();
         let size = i64::try_from(upload.size_bytes).map_err(|_| UploadError::SizeOverflow)?;

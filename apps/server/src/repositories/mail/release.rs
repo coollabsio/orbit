@@ -764,6 +764,19 @@ impl MailRepository {
 
         between.await;
         let finalization = self.uploads.begin_finalization().await;
+        // The sealed message goes to the blob store before the write transaction.
+        let receipt_id = Id::new_v7();
+        let (key_version, data_key) = {
+            let mut transaction = self.database.immediate_transaction().await?;
+            let key = self.keys.current(&mut transaction, workspace_id).await?;
+            transaction.commit().await?;
+            key
+        };
+        let sealed = seal_blob(&data_key, &receipt_aad(receipt_id), &signed)?;
+        drop(signed);
+        let prepared = finalization.prepare_bytes(workspace_id, &sealed).await?;
+        drop(sealed);
+        let released = async {
         let mut transaction = self.database.immediate_transaction().await?;
         let claimed = sqlx::query(
             "UPDATE mail_outbound SET status = 'released', hold_reason = NULL, updated_at = $1 \
@@ -779,14 +792,9 @@ impl MailRepository {
         if claimed != 1 {
             return Ok(None);
         }
-        let receipt_id = Id::new_v7();
-        let (key_version, data_key) = self.keys.current(&mut transaction, workspace_id).await?;
-        let sealed = seal_blob(&data_key, &receipt_aad(receipt_id), &signed)?;
-        drop(signed);
         let blob = finalization
-            .finalize_bytes_in_transaction(&mut transaction, workspace_id, &sealed, now)
+            .finalize_bytes_in_transaction(&mut transaction, &prepared)
             .await?;
-        drop(sealed);
         insert_receipt(
             &mut transaction,
             &NewReceipt {
@@ -949,8 +957,7 @@ impl MailRepository {
                 .await?;
         }
         transaction.commit().await?;
-        drop(finalization);
-        Ok(Some(Released {
+        Ok::<_, MailError>(Some(Released {
             outbound_id,
             workspace_id,
             mailbox_id,
@@ -959,6 +966,15 @@ impl MailRepository {
             new_thread: filed.new_thread,
             users: filed.users,
         }))
+        }
+        .await;
+        if !matches!(released, Ok(Some(_))) {
+            // Lost the claim or failed: the sealed bytes must not count toward the workspace's
+            // storage.
+            finalization.abandon(&prepared).await;
+        }
+        drop(finalization);
+        released
     }
 
     /// `mail.send_sweep`: queues `mail.send` again for held, due rows without a queued or

@@ -2343,9 +2343,13 @@ impl Fixture {
         revoked: Option<i64>,
     ) -> String {
         let finalization = self.uploads.begin_finalization().await;
+        let prepared = finalization
+            .prepare_bytes(self.workspace, bytes)
+            .await
+            .unwrap();
         let mut tx = self.database.immediate_transaction().await.unwrap();
         let blob = finalization
-            .finalize_bytes_in_transaction(&mut tx, self.workspace, bytes, TimestampMillis::now())
+            .finalize_bytes_in_transaction(&mut tx, &prepared)
             .await
             .unwrap();
         tx.commit().await.unwrap();
