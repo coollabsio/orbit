@@ -1632,6 +1632,17 @@ async fn release_without_active_key_stays_held() {
             .await
             .unwrap();
     assert_eq!(sent_receipts, 0, "Never sent unsigned");
+    // The author's Outbox hears of the hold (the new message has no thread yet).
+    let frames: Vec<String> = sqlx::query_scalar("SELECT frame FROM live_events")
+        .fetch_all(f.database.pool())
+        .await
+        .unwrap();
+    assert!(
+        frames
+            .iter()
+            .any(|frame| frame.contains("outbound.updated") && frame.contains(&id.to_string())),
+        "{frames:?}"
+    );
     // Undo still brings the draft back.
     let (status, _) = f
         .call(&f.ann, "POST", &format!("/outbound/{id}/cancel"), None)

@@ -77,6 +77,13 @@ impl Direct {
             }
         };
         let hello = hello_name(Some(hostname));
+        // Final outcomes (accepted or bounced); the deferred recipients, with their last
+        // deferral, try the next address or MX host, so an accepted one is never sent twice.
+        let mut finished: Vec<(String, RecipientOutcome)> = Vec::new();
+        let mut pending: Vec<(String, Option<RecipientOutcome>)> = recipients
+            .iter()
+            .map(|address| (address.clone(), None))
+            .collect();
         let mut temporary: Option<String> = None;
         let mut refused = false;
         let mut connections = 0;
@@ -118,19 +125,32 @@ impl Direct {
                     credentials: None,
                     mechanisms: &[],
                 };
-                let failure = match transaction(&target, outgoing, recipients).await {
-                    Ok(outcomes) => return outcomes,
+                let addresses: Vec<String> =
+                    pending.iter().map(|(address, _)| address.clone()).collect();
+                let result = match transaction(&target, outgoing, &addresses).await {
                     // A broken TLS handshake: plain text, as an MTA does.
                     Err(failure) if failure.tls_failed => {
                         target.mode = TlsMode::Plain;
-                        match transaction(&target, outgoing, recipients).await {
-                            Ok(outcomes) => return outcomes,
-                            Err(failure) => failure,
+                        transaction(&target, outgoing, &addresses).await
+                    }
+                    result => result,
+                };
+                match result {
+                    Ok(outcomes) => {
+                        pending.clear();
+                        for (address, outcome) in outcomes {
+                            if matches!(outcome, RecipientOutcome::Deferred { .. }) {
+                                pending.push((address, Some(outcome)));
+                            } else {
+                                finished.push((address, outcome));
+                            }
+                        }
+                        if pending.is_empty() {
+                            return finished;
                         }
                     }
-                    Err(failure) => failure,
-                };
-                temporary = Some(failure.response);
+                    Err(failure) => temporary = Some(failure.response),
+                }
             }
         }
         let outcome = match temporary {
@@ -146,7 +166,12 @@ impl Direct {
                 "5.4.4 The mail servers of {domain} have no address"
             )),
         };
-        all(recipients, &outcome)
+        finished.extend(
+            pending
+                .into_iter()
+                .map(|(address, last)| (address, last.unwrap_or_else(|| outcome.clone()))),
+        );
+        finished
     }
 }
 

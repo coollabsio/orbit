@@ -1,18 +1,25 @@
 import type { QueryClient } from '@tanstack/react-query'
 import { mailKeys } from './keys'
 
-/** What the `mail` topic of the live socket sends: a thread of a mailbox the user reads changed or arrived. */
-export interface MailLiveEvent {
-  type: 'thread.updated'
-  mailbox_id: string
-  thread_id: string
-}
+/**
+ * What the `mail` topic of the live socket sends: a thread of a mailbox the user reads changed or arrived, or a
+ * message of the user's that is not sent yet changed (a release failed; a new message has no thread yet).
+ */
+export type MailLiveEvent =
+  | { type: 'thread.updated'; mailbox_id: string; thread_id: string }
+  | { type: 'outbound.updated'; mailbox_id: string; outbound_id: string }
 
 export function parseMailEvent(value: unknown): MailLiveEvent | null {
   if (!value || typeof value !== 'object') return null
   const event = value as Record<string, unknown>
-  if (event.type !== 'thread.updated' || typeof event.mailbox_id !== 'string' || typeof event.thread_id !== 'string') return null
-  return { type: event.type, mailbox_id: event.mailbox_id, thread_id: event.thread_id }
+  if (typeof event.mailbox_id !== 'string') return null
+  if (event.type === 'thread.updated' && typeof event.thread_id === 'string') {
+    return { type: event.type, mailbox_id: event.mailbox_id, thread_id: event.thread_id }
+  }
+  if (event.type === 'outbound.updated' && typeof event.outbound_id === 'string') {
+    return { type: event.type, mailbox_id: event.mailbox_id, outbound_id: event.outbound_id }
+  }
+  return null
 }
 
 /** The first wait after a failed refresh; it doubles up to `MAX_RETRY_MS` (`.ai/lessons.md`, API retry load). */
@@ -22,6 +29,8 @@ const MAX_RETRY_MS = 30_000
 const MUTATING_WAIT_MS = 300
 
 interface Refresh {
+  /** An event came since the last refresh started. */
+  pending: boolean
   threads: Set<string>
   running: boolean
   timer: ReturnType<typeof setTimeout> | undefined
@@ -34,7 +43,7 @@ function refreshFor(queryClient: QueryClient, workspaceId: string): Refresh {
   let byWorkspace = refreshes.get(queryClient)
   if (!byWorkspace) refreshes.set(queryClient, (byWorkspace = new Map()))
   let refresh = byWorkspace.get(workspaceId)
-  if (!refresh) byWorkspace.set(workspaceId, (refresh = { threads: new Set(), running: false, timer: undefined, delay: FIRST_RETRY_MS }))
+  if (!refresh) byWorkspace.set(workspaceId, (refresh = { pending: false, threads: new Set(), running: false, timer: undefined, delay: FIRST_RETRY_MS }))
   return refresh
 }
 
@@ -46,12 +55,13 @@ function later(queryClient: QueryClient, workspaceId: string, refresh: Refresh, 
 }
 
 async function run(queryClient: QueryClient, workspaceId: string, refresh: Refresh) {
-  if (refresh.running || refresh.timer !== undefined || refresh.threads.size === 0) return
+  if (refresh.running || refresh.timer !== undefined || !refresh.pending) return
   if (queryClient.isMutating({ mutationKey: mailKeys.all(workspaceId) }) > 0) {
     later(queryClient, workspaceId, refresh, MUTATING_WAIT_MS)
     return
   }
   refresh.running = true
+  refresh.pending = false
   const threads = [...refresh.threads]
   refresh.threads.clear()
   let failed = false
@@ -69,6 +79,7 @@ async function run(queryClient: QueryClient, workspaceId: string, refresh: Refre
     refresh.delay = FIRST_RETRY_MS
   } catch {
     failed = true
+    refresh.pending = true
     for (const threadId of threads) refresh.threads.add(threadId)
   } finally {
     refresh.running = false
@@ -90,7 +101,8 @@ export function emitMailEvent(queryClient: QueryClient, workspaceId: string, val
   const event = parseMailEvent(value)
   if (!event) return
   const refresh = refreshFor(queryClient, workspaceId)
-  refresh.threads.add(event.thread_id)
+  refresh.pending = true
+  if (event.type === 'thread.updated') refresh.threads.add(event.thread_id)
   queueMicrotask(() => void run(queryClient, workspaceId, refresh))
 }
 

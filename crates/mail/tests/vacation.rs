@@ -192,19 +192,33 @@ fn envelope_authentication() {
             "{verdict:?}"
         );
     }
-    // DMARC pass with a From domain aligned with the envelope (same, parent or subdomain).
-    for envelope in ["example.org", "bounces.example.org"] {
+    // DMARC pass for the envelope's own domain as the From domain.
+    assert!(envelope_authenticated(
+        &auth(
+            Verdict::SoftFail,
+            Some("example.org"),
+            DmarcVerdict::Pass,
+            Some("Example.org")
+        ),
+        "example.org"
+    ));
+    // DMARC pass for a parent or a subdomain is not enough: the owner of `child.example.org`
+    // could forge `MAIL FROM:<victim@example.org>` (backscatter).
+    for (envelope, from) in [
+        ("example.org", "child.example.org"),
+        ("bounces.example.org", "example.org"),
+    ] {
         assert!(
-            envelope_authenticated(
+            !envelope_authenticated(
                 &auth(
-                    Verdict::SoftFail,
+                    Verdict::Fail,
                     Some(envelope),
                     DmarcVerdict::Pass,
-                    Some("example.org")
+                    Some(from)
                 ),
                 envelope
             ),
-            "{envelope}"
+            "{envelope} / {from}"
         );
     }
     // DMARC pass for an unrelated From domain proves nothing about the envelope.

@@ -213,7 +213,8 @@ function PlainBody({ text }: { text: string }) {
               •••
             </button>
           </Tip>
-          {open ? <div className="border-l-2 pl-3 text-muted-foreground">{quote}</div> : null}
+          {/* Folded only on screen: a printed message keeps its quote. */}
+          <div className={`border-l-2 pl-3 text-muted-foreground ${open ? '' : 'hidden print:block'}`}>{quote}</div>
         </>
       ) : null}
     </div>

@@ -45,10 +45,24 @@ test('thread.updated invalidates exactly the thread, the thread lists and the co
   ])
 })
 
+test('outbound.updated (a failed release) refreshes the outbound views without a thread', async () => {
+  const { client } = setup()
+  const invalidate = spyOn(client, 'invalidateQueries')
+  emitMailEvent(client, W, { type: 'outbound.updated', mailbox_id: 'mb1', outbound_id: 'o1' })
+  await settle()
+  expect(invalidate.mock.calls.map(([filters]) => filters?.queryKey)).toEqual([
+    mailKeys.lists(W),
+    mailKeys.counts(W),
+    mailKeys.outboundAll(W),
+    mailKeys.draftsAll(W),
+  ])
+})
+
 test('events of another kind or shape change nothing', async () => {
   const { client, invalidated } = setup()
   emitMailEvent(client, W, { type: 'thread.deleted', mailbox_id: 'mb1', thread_id: 't1' })
   emitMailEvent(client, W, { type: 'thread.updated', mailbox_id: 'mb1' })
+  emitMailEvent(client, W, { type: 'outbound.updated', mailbox_id: 'mb1' })
   emitMailEvent(client, W, null)
   await settle()
   expect(invalidated()).toEqual([])

@@ -21,23 +21,11 @@ pub struct VacationInput<'a> {
     pub replied_within_7_days: bool,
 }
 
-/// Whether `domain` and `other` are the same domain or one is a subdomain of the other (DMARC's
-/// relaxed alignment, without the public suffix list: a match on a public suffix alone needs a
-/// sender at a bare suffix, which no reply can reach).
-fn relaxed_aligned(domain: &str, other: &str) -> bool {
-    let domain = domain.trim_end_matches('.').to_ascii_lowercase();
-    let other = other.trim_end_matches('.').to_ascii_lowercase();
-    if domain.is_empty() || other.is_empty() {
-        return false;
-    }
-    domain == other
-        || domain.ends_with(&format!(".{other}"))
-        || other.ends_with(&format!(".{domain}"))
-}
-
 /// Whether the envelope sender's domain (`MAIL FROM`) is authenticated: SPF passed for that very
-/// domain, or DMARC passed for a `From` domain aligned with it. Only then may an automatic reply
-/// go to the envelope sender (no backscatter to a forged address).
+/// domain, or DMARC passed for that very domain as the `From` domain. Relaxed alignment is not
+/// enough: a sender who controls `child.example.org` passes DMARC for it and could forge
+/// `MAIL FROM:<victim@example.org>`. Only then may an automatic reply go to the envelope sender
+/// (no backscatter to a forged address).
 #[must_use]
 pub fn envelope_authenticated(auth: &AuthOutcome, envelope_domain: &str) -> bool {
     let envelope = envelope_domain.trim_end_matches('.');
@@ -50,7 +38,7 @@ pub fn envelope_authenticated(auth: &AuthOutcome, envelope_domain: &str) -> bool
         && auth
             .aligned_domain
             .as_deref()
-            .is_some_and(|domain| relaxed_aligned(domain, envelope));
+            .is_some_and(|domain| domain.trim_end_matches('.').eq_ignore_ascii_case(envelope));
     spf || dmarc
 }
 

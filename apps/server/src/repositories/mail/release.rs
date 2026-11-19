@@ -54,6 +54,8 @@ use orbit_mail::{
 use orbit_platform::{BlobStoreError, Id, JobKind, Row, S3Error, TimestampMillis, UploadError};
 use sha2::{Digest, Sha256};
 
+use crate::live::{LiveHub, NewEvent, Recipients};
+
 use super::contacts::upsert_contacts;
 use super::domains::parse_id;
 use super::drafts::{Draft, DraftMode, load_draft};
@@ -1137,8 +1139,9 @@ impl MailRepository {
         Ok(rows.len() as u64)
     }
 
-    /// Keeps a held message waiting with `reason` (shown in the Outbox) after a release failed.
-    /// Undo still brings its draft back. The first `release_failed` is remembered
+    /// Keeps a held message waiting with `reason` (shown in the Outbox) after a release failed,
+    /// and tells its author with `outbound.updated` (a new message has no thread yet). Undo
+    /// still brings its draft back. The first `release_failed` is remembered
     /// (`release_failed_at`): the sweep gives up a day after it.
     pub async fn hold_release(
         &self,
@@ -1146,7 +1149,7 @@ impl MailRepository {
         reason: &str,
         now: TimestampMillis,
     ) -> Result<(), MailError> {
-        sqlx::query(
+        let changed = sqlx::query(
             "UPDATE mail_outbound SET hold_reason = $1, updated_at = $2, \
              release_failed_at = CASE WHEN $1 = 'release_failed' \
              THEN COALESCE(release_failed_at, $2) ELSE NULL END \
@@ -1156,8 +1159,57 @@ impl MailRepository {
         .bind(now.as_millis())
         .bind(outbound_id.to_string())
         .execute(self.database.pool())
-        .await?;
+        .await?
+        .rows_affected();
+        if changed > 0 {
+            self.announce_to_author(outbound_id).await;
+        }
         Ok(())
+    }
+
+    /// `outbound.updated` to the author of a message (their Outbox and Scheduled views); none
+    /// when the author left. A failure is logged: the hold is stored either way.
+    async fn announce_to_author(&self, outbound_id: Id) {
+        let author = sqlx::query(
+            "SELECT o.workspace_id, o.mailbox_id, m.user_id FROM mail_outbound o \
+             JOIN memberships m ON m.id = o.membership_id WHERE o.id = $1",
+        )
+        .bind(outbound_id.to_string())
+        .fetch_optional(self.database.pool())
+        .await;
+        let row = match author {
+            Ok(Some(row)) => row,
+            Ok(None) => return,
+            Err(error) => {
+                tracing::warn!(error = %error, outbound_id = %outbound_id, "mail outbound author");
+                return;
+            }
+        };
+        let ids = (|| -> Result<(Id, Id, Id), MailError> {
+            Ok((
+                parse_id(&row.try_get::<String, _>("workspace_id")?)?,
+                parse_id(&row.try_get::<String, _>("mailbox_id")?)?,
+                parse_id(&row.try_get::<String, _>("user_id")?)?,
+            ))
+        })();
+        let Ok((workspace_id, mailbox_id, user_id)) = ids else {
+            return;
+        };
+        let events = [NewEvent {
+            recipients: Recipients::Users(vec![user_id]),
+            topic: super::MAIL_TOPIC,
+            event: serde_json::json!({
+                "type": "outbound.updated",
+                "mailbox_id": mailbox_id.to_string(),
+                "outbound_id": outbound_id.to_string(),
+            }),
+        }];
+        if let Err(error) = LiveHub::of(&self.database)
+            .publish(workspace_id, &events)
+            .await
+        {
+            tracing::warn!(error = %error, "mail events for the live socket");
+        }
     }
 
     /// A held message whose draft is gone cannot be built: it is cancelled.

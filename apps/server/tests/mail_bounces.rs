@@ -1351,6 +1351,48 @@ async fn failed_dsn_with_temporary_status_gives_up_without_suppressing() {
     assert_eq!(f.thread_state(id).await, ("inbox".to_owned(), false));
 }
 
+async fn set_recipient_status(f: &Fixture, recipient: Id, status: &str) {
+    sqlx::query("UPDATE mail_outbound_recipients SET status = $1 WHERE id = $2")
+        .bind(status)
+        .bind(recipient.to_string())
+        .execute(f.database.pool())
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn dsn_while_recipient_is_sending_is_refused_for_later() {
+    let f = Fixture::new().await;
+    let id = f.send(&["bob@out.test"]).await;
+    let bob = f.recipient(id, "bob@out.test").await;
+    let reports = orbit_mail::parse_dsn(&dsn(
+        "x",
+        "bob@out.test",
+        "failed",
+        "5.1.1",
+        "550 5.1.1 User unknown",
+    ))
+    .unwrap();
+    // The attempt has not recorded its result yet: a temporary error, nothing changes.
+    set_recipient_status(&f, bob, "sending").await;
+    assert!(
+        f.mail
+            .process_dsn(bob, &reports, TimestampMillis::now())
+            .await
+            .is_err()
+    );
+    assert_eq!(f.state_of(bob).await.0, "sending");
+    // The reporter sends it again after the result: it applies.
+    set_recipient_status(&f, bob, "delivered").await;
+    assert!(
+        f.mail
+            .process_dsn(bob, &reports, TimestampMillis::now())
+            .await
+            .unwrap()
+    );
+    assert_eq!(f.state_of(bob).await.0, "bounced");
+}
+
 #[tokio::test]
 async fn late_dsn_after_retry_is_ignored() {
     let f = Fixture::new().await;

@@ -382,7 +382,9 @@ impl MailRepository {
     /// the attempt, so after **Retry** a DSN may be about the send before it and is ignored.
     /// Then the suppression rule ([`suppresses`]), the thread to the Inbox unread, and
     /// `thread.updated`. `delayed` and `delivered` reports change nothing (a deferred recipient
-    /// stays deferred). Returns whether the recipient changed.
+    /// stays deferred). A failure report for a recipient that is still `sending` is an error (the
+    /// intake answers with a temporary failure and the reporter retries). Returns whether the
+    /// recipient changed.
     pub async fn process_dsn(
         &self,
         recipient_id: Id,
@@ -419,7 +421,15 @@ impl MailRepository {
         else {
             return Ok(false);
         };
-        if !matches!(status.as_str(), "delivered" | "deferred") || retried.is_some() {
+        if retried.is_some() {
+            return Ok(false);
+        }
+        if status == "sending" {
+            // The DSN came before the attempt recorded its result (it may still wait for QUIT):
+            // refuse it for now (a 4xx), so the reporting server sends it again later.
+            return Err(MailError::Conflict("the recipient is still being sent"));
+        }
+        if !matches!(status.as_str(), "delivered" | "deferred") {
             return Ok(false);
         }
         let outbound_id = parse_id(&row.try_get::<String, _>("outbound_id")?)?;
