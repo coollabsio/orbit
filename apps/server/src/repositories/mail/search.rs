@@ -146,6 +146,19 @@ pub(super) enum Folders {
     One(MailFolder),
     /// Inbox and Archive: everything but Spam and Trash.
     Kept,
+    /// Sent (spec §5.10): threads with a message sent from the mailbox, except Trash, by the
+    /// time of the last one sent.
+    Sent,
+}
+
+impl Folders {
+    /// The column the list is ordered by (and its cursor holds).
+    fn order_column(self) -> &'static str {
+        match self {
+            Self::Sent => "t.last_sent_at",
+            _ => "t.last_message_at",
+        }
+    }
 }
 
 /// The threads one query reads, always among the mailboxes the caller is a member of.
@@ -245,8 +258,8 @@ pub(super) async fn select_threads(
     limit: usize,
 ) -> Result<(Vec<MailThreadSummary>, bool), MailError> {
     let mut sql = SqlBuilder::new(
-        "SELECT t.id, t.mailbox_id, t.subject, t.snippet, t.last_message_at, t.message_count, \
-         t.has_attachments, t.folder, \
+        "SELECT t.id, t.mailbox_id, t.subject, t.snippet, t.last_message_at, t.last_sent_at, \
+         t.message_count, t.has_attachments, t.folder, \
          (s.last_read_at IS NULL OR s.last_read_at < t.last_message_at) AS unread, \
          COALESCE(s.starred, 0) AS starred \
          FROM mail_threads t \
@@ -276,9 +289,16 @@ pub(super) async fn select_threads(
         Folders::Any => {}
         Folders::One(folder) => {
             sql.push(" AND t.folder = ").push_bind(folder.as_str());
+            if folder == MailFolder::Archive {
+                // A thread the mailbox only sent to is in Sent, not in Archive.
+                sql.push(" AND t.last_incoming_at IS NOT NULL");
+            }
         }
         Folders::Kept => {
             sql.push(" AND t.folder IN ('inbox', 'archive')");
+        }
+        Folders::Sent => {
+            sql.push(" AND t.last_sent_at IS NOT NULL AND t.folder <> 'trash'");
         }
     }
     if let Some(label_id) = selection.label_id {
@@ -356,16 +376,17 @@ pub(super) async fn select_threads(
                 .push(")");
         }
     }
+    let order = selection.folders.order_column();
     if let Some(cursor) = cursor {
-        sql.push(" AND (t.last_message_at < ")
+        sql.push(format!(" AND ({order} < "))
             .push_bind(cursor.last_message_at)
-            .push(" OR (t.last_message_at = ")
+            .push(format!(" OR ({order} = "))
             .push_bind(cursor.last_message_at)
             .push(" AND t.id < ")
             .push_bind(cursor.id.to_string())
             .push("))");
     }
-    sql.push(" ORDER BY t.last_message_at DESC, t.id DESC LIMIT ")
+    sql.push(format!(" ORDER BY {order} DESC, t.id DESC LIMIT "))
         .push_bind(i64::try_from(limit + 1).unwrap_or(i64::MAX));
     let mut rows = sql.build().fetch_all(&mut **transaction).await?;
     let more = rows.len() > limit;
@@ -381,15 +402,25 @@ pub(super) async fn select_threads(
             snippet: row.try_get("snippet")?,
             from: Vec::new(),
             last_message_at: TimestampMillis::from_millis(row.try_get("last_message_at")?),
+            last_sent_at: row
+                .try_get::<Option<i64>, _>("last_sent_at")?
+                .map(TimestampMillis::from_millis),
             message_count: row.try_get("message_count")?,
             unread: row.try_get("unread")?,
             starred: row.try_get("starred")?,
             labels: Vec::new(),
             has_attachments: row.try_get("has_attachments")?,
             folder: MailFolder::parse(&folder).ok_or(MailError::Invalid { field: "folder" })?,
+            sent_to: Vec::new(),
+            sent_to_more: 0,
         });
     }
-    hydrate(transaction, &mut threads).await?;
+    hydrate(
+        transaction,
+        &mut threads,
+        matches!(selection.folders, Folders::Sent),
+    )
+    .await?;
     Ok((threads, more))
 }
 
@@ -397,6 +428,7 @@ pub(super) async fn select_threads(
 async fn hydrate(
     transaction: &mut Transaction<'_, Any>,
     threads: &mut [MailThreadSummary],
+    sent: bool,
 ) -> Result<(), MailError> {
     if threads.is_empty() {
         return Ok(());
@@ -439,8 +471,40 @@ async fn hydrate(
             .or_default()
             .push(parse_id(&row.try_get::<String, _>("label_id")?)?);
     }
+    // Sent rows show whom the newest message sent from the mailbox went to.
+    let mut sent_to: HashMap<String, Vec<String>> = HashMap::new();
+    if sent {
+        let mut recipients = SqlBuilder::new(
+            "SELECT tm.thread_id, m.to_addrs, m.cc_addrs FROM mail_thread_messages tm \
+             JOIN mail_messages m ON m.id = tm.message_id \
+             WHERE tm.outgoing = 1 AND tm.thread_id IN (",
+        );
+        let mut list = recipients.separated(", ");
+        for thread in threads.iter() {
+            list.push_bind(thread.id.to_string());
+        }
+        recipients.push(") ORDER BY m.received_at, m.id");
+        for row in recipients.build().fetch_all(&mut **transaction).await? {
+            let mut addresses: Vec<String> = Vec::new();
+            for column in ["to_addrs", "cc_addrs"] {
+                for person in people(&row.try_get::<String, _>(column)?) {
+                    if !addresses.contains(&person.address) {
+                        addresses.push(person.address);
+                    }
+                }
+            }
+            // later rows are newer: the last message wins
+            sent_to.insert(row.try_get("thread_id")?, addresses);
+        }
+    }
     for thread in threads {
         let key = thread.id.to_string();
+        if let Some(mut addresses) = sent_to.remove(&key) {
+            thread.sent_to_more =
+                i64::try_from(addresses.len().saturating_sub(LIST_SENDERS)).unwrap_or(i64::MAX);
+            addresses.truncate(LIST_SENDERS);
+            thread.sent_to = addresses;
+        }
         thread.from = from.remove(&key).unwrap_or_default();
         thread.labels = by_thread.remove(&key).unwrap_or_default();
     }

@@ -198,3 +198,6 @@
   "Asset not found: _expo/static/js/web/__common-….js". `apps/mobile/metro.config.js` sets `EXPO_NO_BUNDLE_SPLITTING`
   so every Expo command makes one bundle for each DOM component; keep it. A stale shared Metro cache gives a different
   error (the DOM entry points at another checkout's path): run the export once with `--clear`.
+
+## Building and testing the server on a small box
+- Compiling `orbit-server` needs about 4.5 GB of free RAM. Use `CARGO_BUILD_JOBS=1 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0`, cap the run (`systemd-run --user --scope -p MemoryMax=5500M`), and always set `TMPDIR` to a directory on disk: `/tmp` can be RAM, and test databases go to `TMPDIR`. Keep the same env each time so the build cache is reused (2026-11-15).

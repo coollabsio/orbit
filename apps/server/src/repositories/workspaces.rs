@@ -36,6 +36,18 @@ const INVITATION_LIFETIME_MILLIS: i64 = 7 * 24 * 60 * 60 * 1_000;
 const WORKSPACE_TRASH_RETENTION_MILLIS: i64 = 30 * 24 * 60 * 60 * 1_000;
 const SESSION_IDLE_RETENTION_MILLIS: i64 = 30 * 24 * 60 * 60 * 1_000;
 const AUDIT_RETENTION_MILLIS: i64 = 365 * 24 * 60 * 60 * 1_000;
+/// Items deleted per write transaction of the retention purge when one item takes several statements or
+/// cascades: the transaction holds every writer of the cluster.
+const PURGE_BATCH: i64 = 200;
+/// The same for rows that go with one plain delete each.
+const PURGE_ROW_BATCH: i64 = 2_000;
+
+/// The one parameter of a batched retention delete.
+#[derive(Clone, Copy)]
+enum PurgeKey<'a> {
+    Millis(i64),
+    Id(&'a str),
+}
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
 pub struct WorkspaceRecord {
@@ -390,7 +402,8 @@ impl WorkspaceRepository {
             .into_iter()
             .map(workspace_from_row)
             .collect::<Result<Vec<_>, _>>()?;
-        self.add_project_permissions(user_id, &mut workspaces).await?;
+        self.add_project_permissions(user_id, &mut workspaces)
+            .await?;
         Ok(workspaces)
     }
 
@@ -401,7 +414,10 @@ impl WorkspaceRepository {
         user_id: Id,
         workspaces: &mut [WorkspaceRecord],
     ) -> Result<(), WorkspaceError> {
-        if workspaces.iter().all(|workspace| workspace.role != WorkspaceRole::Member) {
+        if workspaces
+            .iter()
+            .all(|workspace| workspace.role != WorkspaceRole::Member)
+        {
             return Ok(());
         }
         let rows: Vec<(String, String, String)> = sqlx::query_as(
@@ -419,15 +435,24 @@ impl WorkspaceRepository {
         .fetch_all(self.database.pool())
         .await?;
         for (workspace_id, project_id, permission) in rows {
-            let (Ok(workspace_id), Ok(project_id), Some(permission)) =
-                (workspace_id.parse::<Id>(), project_id.parse::<Id>(), Permission::parse(&permission))
+            let (Ok(workspace_id), Ok(project_id), Some(permission)) = (
+                workspace_id.parse::<Id>(),
+                project_id.parse::<Id>(),
+                Permission::parse(&permission),
+            ) else {
+                continue;
+            };
+            let Some(workspace) = workspaces
+                .iter_mut()
+                .find(|workspace| workspace.id == workspace_id)
             else {
                 continue;
             };
-            let Some(workspace) = workspaces.iter_mut().find(|workspace| workspace.id == workspace_id) else {
-                continue;
-            };
-            match workspace.project_permissions.iter_mut().find(|held| held.project_id == project_id) {
+            match workspace
+                .project_permissions
+                .iter_mut()
+                .find(|held| held.project_id == project_id)
+            {
                 Some(held) => held.permissions.push(permission),
                 None => workspace.project_permissions.push(ProjectPermissions {
                     project_id,
@@ -552,7 +577,8 @@ impl WorkspaceRepository {
         .await?
         .ok_or(WorkspaceError::NotFound)?;
         let mut workspaces = [workspace_from_row(row)?];
-        self.add_project_permissions(actor_id, &mut workspaces).await?;
+        self.add_project_permissions(actor_id, &mut workspaces)
+            .await?;
         let [workspace] = workspaces;
         Ok(workspace)
     }
@@ -2127,9 +2153,11 @@ impl WorkspaceRepository {
     }
 
     pub(crate) async fn run_retention_maintenance(&self) -> Result<(), WorkspaceError> {
-        let _mutation = self.attachment_mutations.begin().await;
-        let now = self.database.database_now().await?;
-        self.purge_retention(now).await?;
+        {
+            let _mutation = self.attachment_mutations.begin().await;
+            let now = self.database.database_now().await?;
+            self.purge_retention(now).await?;
+        }
         self.purge_attachment_files().await?;
         Ok(())
     }
@@ -2211,275 +2239,412 @@ impl WorkspaceRepository {
         .await
     }
 
+    /// Runs as many short write transactions, so none holds the write lock of the whole cluster for long.
+    /// Everything it deletes is expired, and a restore refuses an expired item, so each transaction leaves a
+    /// valid state and a run that stops midway is finished by the next one.
     pub async fn purge_retention(
         &self,
         now: TimestampMillis,
     ) -> Result<MaintenanceSummary, WorkspaceError> {
-        let mut transaction = self.database.immediate_transaction().await?;
+        let mut summary = MaintenanceSummary {
+            workspaces_purged: 0,
+            audit_events_purged: 0,
+            attachment_references_purged: 0,
+            attachment_blobs_purged: 0,
+            pending_uploads_purged: 0,
+            files_purged: 0,
+            occurred_at: now,
+        };
+        let outcome = self.purge_expired(now, &mut summary).await;
+        let purged_any = summary.workspaces_purged
+            + summary.audit_events_purged
+            + summary.attachment_references_purged
+            + summary.attachment_blobs_purged
+            + summary.pending_uploads_purged
+            != 0;
+        match outcome {
+            Ok(()) => {
+                self.record_maintenance(&summary).await?;
+                Ok(summary)
+            }
+            Err(error) => {
+                // What a failed run deleted stays deleted, so its counts are recorded too.
+                if purged_any && let Err(error) = self.record_maintenance(&summary).await {
+                    tracing::warn!(%error, "the counts of a failed retention run were not recorded");
+                }
+                Err(error)
+            }
+        }
+    }
+
+    async fn purge_expired(
+        &self,
+        now: TimestampMillis,
+        summary: &mut MaintenanceSummary,
+    ) -> Result<(), WorkspaceError> {
+        const LIVE_WORKSPACES: &str = "SELECT id FROM workspaces WHERE deleted_at IS NULL";
+        let trash_cutoff = now
+            .as_millis()
+            .saturating_sub(WORKSPACE_TRASH_RETENTION_MILLIS);
         // Chat files that were uploaded and never sent with a message.
-        sqlx::query("DELETE FROM chat_message_files WHERE message_id IS NULL AND created_at <= $1")
-            .bind(now.as_millis().saturating_sub(24 * 60 * 60 * 1000))
-            .execute(&mut *transaction)
-            .await?;
+        self.delete_in_batches(
+            "chat_message_files",
+            "message_id IS NULL AND created_at <= $1",
+            PurgeKey::Millis(now.as_millis().saturating_sub(24 * 60 * 60 * 1000)),
+            PURGE_ROW_BATCH,
+        )
+        .await?;
         // Sessions not used for 30 days, revoked or not. Their push subscriptions cascade.
-        sqlx::query("DELETE FROM sessions WHERE last_activity_at <= $1")
-            .bind(
+        self.delete_in_batches(
+            "sessions",
+            "last_activity_at <= $1",
+            PurgeKey::Millis(
                 now.as_millis()
                     .saturating_sub(SESSION_IDLE_RETENTION_MILLIS),
-            )
-            .execute(&mut *transaction)
-            .await?;
+            ),
+            PURGE_ROW_BATCH,
+        )
+        .await?;
         let expired = sqlx::query_scalar::<_, String>(
             "SELECT id FROM workspaces WHERE deleted_at IS NOT NULL AND deleted_at <= $1 \
              ORDER BY deleted_at, id",
         )
-        .bind(
-            now.as_millis()
-                .saturating_sub(WORKSPACE_TRASH_RETENTION_MILLIS),
-        )
-        .fetch_all(&mut *transaction)
+        .bind(trash_cutoff)
+        .fetch_all(self.database.pool())
         .await?;
-        let mut workspaces_purged = 0_u64;
-        let mut attachment_references_purged = 0_u64;
-        let mut attachment_blobs_purged = 0_u64;
-        let mut pending_uploads_purged = 0_u64;
-        let task_ids = sqlx::query_scalar::<_, String>(
-            "SELECT tasks.id FROM tasks LEFT JOIN projects ON projects.id = tasks.project_id \
-             JOIN workspaces ON workspaces.id = tasks.workspace_id \
-             WHERE workspaces.deleted_at IS NULL AND (tasks.deleted_at <= $1 OR projects.deleted_at <= $2) \
-             ORDER BY tasks.id",
-        )
-        .bind(
-            now.as_millis()
-                .saturating_sub(WORKSPACE_TRASH_RETENTION_MILLIS),
-        )
-        .bind(
-            now.as_millis()
-                .saturating_sub(WORKSPACE_TRASH_RETENTION_MILLIS),
-        )
-        .fetch_all(&mut *transaction)
-        .await?;
-        for task_id in task_ids {
-            let (references, blobs) =
-                super::tasks::purge_task_in_tx(&mut transaction, &task_id, now)
-                    .await
-                    .map_err(|error| match error {
-                        TaskError::Unavailable(error) => WorkspaceError::Unavailable(error),
-                        _ => WorkspaceError::Conflict,
-                    })?;
-            attachment_references_purged += references;
-            attachment_blobs_purged += blobs;
-        }
-        // A trashed subtree shares one deleted_at, so it expires together; pages.parent_id is
-        // ON DELETE SET NULL, so the delete order inside the batch does not matter.
-        sqlx::query(
-            "DELETE FROM pages WHERE deleted_at <= $1 AND workspace_id IN \
-             (SELECT id FROM workspaces WHERE deleted_at IS NULL)",
-        )
-        .bind(
-            now.as_millis()
-                .saturating_sub(WORKSPACE_TRASH_RETENTION_MILLIS),
-        )
-        .execute(&mut *transaction)
-        .await?;
-        // Page history: all of the last 30 days, then one per day up to a year, newest 20 always.
-        page_versions::thin_versions(&mut transaction, now).await?;
-        let expired_projects = "SELECT id FROM projects WHERE deleted_at <= $1 AND workspace_id IN \
-             (SELECT id FROM workspaces WHERE deleted_at IS NULL)";
-        // API token grants hold their projects with ON DELETE RESTRICT.
-        for sql in [
-            format!("DELETE FROM api_token_projects WHERE project_id IN ({expired_projects})"),
-            format!(
-                "UPDATE api_tokens SET project_id = NULL WHERE project_id IN ({expired_projects})"
-            ),
-            format!("DELETE FROM projects WHERE id IN ({expired_projects})"),
-        ] {
-            sqlx::query(sqlx::AssertSqlSafe(sql))
-                .bind(
-                    now.as_millis()
-                        .saturating_sub(WORKSPACE_TRASH_RETENTION_MILLIS),
-                )
-                .execute(&mut *transaction)
-                .await?;
-        }
-        for workspace_id in expired {
-            let blob_rows =
-                sqlx::query("SELECT id, storage_key FROM attachment_blobs WHERE workspace_id = $1")
-                    .bind(&workspace_id)
-                    .fetch_all(&mut *transaction)
-                    .await?;
-            let pending_paths = sqlx::query_scalar::<_, String>(
-                "SELECT temporary_path FROM pending_uploads WHERE workspace_id = $1",
+        loop {
+            let mut transaction = self.database.immediate_transaction().await?;
+            let task_ids = sqlx::query_scalar::<_, String>(
+                "SELECT tasks.id FROM tasks LEFT JOIN projects ON projects.id = tasks.project_id \
+                 JOIN workspaces ON workspaces.id = tasks.workspace_id \
+                 WHERE workspaces.deleted_at IS NULL AND (tasks.deleted_at <= $1 OR projects.deleted_at <= $2) \
+                 ORDER BY tasks.id LIMIT $3",
             )
-            .bind(&workspace_id)
+            .bind(trash_cutoff)
+            .bind(trash_cutoff)
+            .bind(PURGE_BATCH)
             .fetch_all(&mut *transaction)
             .await?;
-            attachment_references_purged +=
-                sqlx::query("DELETE FROM attachment_references WHERE workspace_id = $1")
-                    .bind(&workspace_id)
-                    .execute(&mut *transaction)
-                    .await?
-                    .rows_affected();
-            // Page files, chat files and mail receipts hold their blobs with ON DELETE RESTRICT,
-            // so they go before the blobs. A receipt takes its parsed messages along.
-            for table in ["page_files", "chat_message_files", "mail_receipts"] {
-                attachment_references_purged += sqlx::query(sqlx::AssertSqlSafe(format!(
-                    "DELETE FROM {table} WHERE workspace_id = $1"
-                )))
-                .bind(&workspace_id)
-                .execute(&mut *transaction)
-                .await?
-                .rows_affected();
+            if task_ids.is_empty() {
+                break;
             }
-            for row in blob_rows {
-                let blob_id: String = row.get("id");
-                let references: i64 = sqlx::query_scalar(BLOB_REFERENCE_COUNT)
-                    .bind(&blob_id)
-                    .bind(&blob_id)
-                    .fetch_one(&mut *transaction)
+            for task_id in &task_ids {
+                let (references, blobs) =
+                    super::tasks::purge_task_in_tx(&mut transaction, task_id, now)
+                        .await
+                        .map_err(|error| match error {
+                            TaskError::Unavailable(error) => WorkspaceError::Unavailable(error),
+                            _ => WorkspaceError::Conflict,
+                        })?;
+                summary.attachment_references_purged += references;
+                summary.attachment_blobs_purged += blobs;
+            }
+            transaction.commit().await?;
+        }
+        // A trashed subtree shares one deleted_at, so it expires together; pages.parent_id is
+        // ON DELETE SET NULL, so the delete order does not matter, also across batches.
+        self.delete_in_batches(
+            "pages",
+            &format!("deleted_at <= $1 AND workspace_id IN ({LIVE_WORKSPACES})"),
+            PurgeKey::Millis(trash_cutoff),
+            PURGE_BATCH,
+        )
+        .await?;
+        // Page history: all of the last 30 days, then one per day up to a year, newest 20 always.
+        let mut transaction = self.database.immediate_transaction().await?;
+        page_versions::thin_versions(&mut transaction, now).await?;
+        transaction.commit().await?;
+        loop {
+            let mut transaction = self.database.immediate_transaction().await?;
+            let project_ids = sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(format!(
+                "SELECT id FROM projects WHERE deleted_at <= $1 AND workspace_id IN ({LIVE_WORKSPACES}) \
+                 ORDER BY id LIMIT $2"
+            )))
+            .bind(trash_cutoff)
+            .bind(PURGE_BATCH)
+            .fetch_all(&mut *transaction)
+            .await?;
+            if project_ids.is_empty() {
+                break;
+            }
+            for project_id in &project_ids {
+                // API token grants hold their projects with ON DELETE RESTRICT.
+                for sql in [
+                    "DELETE FROM api_token_projects WHERE project_id = $1",
+                    "UPDATE api_tokens SET project_id = NULL WHERE project_id = $1",
+                    "DELETE FROM projects WHERE id = $1",
+                ] {
+                    sqlx::query(sql)
+                        .bind(project_id)
+                        .execute(&mut *transaction)
+                        .await?;
+                }
+            }
+            transaction.commit().await?;
+        }
+        for workspace_id in expired {
+            let of_workspace = PurgeKey::Id(&workspace_id);
+            summary.attachment_references_purged += self
+                .delete_in_batches(
+                    "attachment_references",
+                    "workspace_id = $1",
+                    of_workspace,
+                    PURGE_ROW_BATCH,
+                )
+                .await?;
+            // Page files, chat files, mail receipts and the files of outgoing mail hold their
+            // blobs with ON DELETE RESTRICT, so they go before the blobs. A receipt takes its
+            // parsed messages along.
+            for (table, batch) in [
+                ("page_files", PURGE_ROW_BATCH),
+                ("chat_message_files", PURGE_ROW_BATCH),
+                ("mail_receipts", PURGE_BATCH),
+                ("mail_file_links", PURGE_ROW_BATCH),
+                ("mail_draft_files", PURGE_ROW_BATCH),
+            ] {
+                summary.attachment_references_purged += self
+                    .delete_in_batches(table, "workspace_id = $1", of_workspace, batch)
                     .await?;
-                if references == 0 {
+            }
+            // A blob that something still references stays, so the batches go on from the last id.
+            let mut after = String::new();
+            loop {
+                let mut transaction = self.database.immediate_transaction().await?;
+                let blob_rows = sqlx::query(
+                    "SELECT id, storage_key FROM attachment_blobs \
+                     WHERE workspace_id = $1 AND id > $2 ORDER BY id LIMIT $3",
+                )
+                .bind(&workspace_id)
+                .bind(&after)
+                .bind(PURGE_BATCH)
+                .fetch_all(&mut *transaction)
+                .await?;
+                let Some(last) = blob_rows.last() else {
+                    break;
+                };
+                after = last.get("id");
+                for row in &blob_rows {
+                    let blob_id: String = row.get("id");
+                    let references: i64 = sqlx::query_scalar(BLOB_REFERENCE_COUNT)
+                        .bind(&blob_id)
+                        .bind(&blob_id)
+                        .fetch_one(&mut *transaction)
+                        .await?;
+                    if references == 0 {
+                        sqlx::query(
+                            "INSERT INTO attachment_file_deletions \
+                             (id, path_kind, path, created_at) VALUES ($1, 'blob', $2, $3) \
+                             ON CONFLICT DO NOTHING",
+                        )
+                        .bind(Id::new_v7().to_string())
+                        .bind(row.get::<String, _>("storage_key"))
+                        .bind(now.as_millis())
+                        .execute(&mut *transaction)
+                        .await?;
+                        summary.attachment_blobs_purged +=
+                            sqlx::query("DELETE FROM attachment_blobs WHERE id = $1")
+                                .bind(blob_id)
+                                .execute(&mut *transaction)
+                                .await?
+                                .rows_affected();
+                    }
+                }
+                transaction.commit().await?;
+            }
+            loop {
+                let mut transaction = self.database.immediate_transaction().await?;
+                let pending = sqlx::query(
+                    "SELECT id, temporary_path FROM pending_uploads WHERE workspace_id = $1 \
+                     ORDER BY id LIMIT $2",
+                )
+                .bind(&workspace_id)
+                .bind(PURGE_BATCH)
+                .fetch_all(&mut *transaction)
+                .await?;
+                if pending.is_empty() {
+                    break;
+                }
+                for row in &pending {
                     sqlx::query(
                         "INSERT INTO attachment_file_deletions \
-                         (id, path_kind, path, created_at) VALUES ($1, 'blob', $2, $3) \
+                         (id, path_kind, path, created_at) VALUES ($1, 'temporary', $2, $3) \
                          ON CONFLICT DO NOTHING",
                     )
                     .bind(Id::new_v7().to_string())
-                    .bind(row.get::<String, _>("storage_key"))
+                    .bind(row.get::<String, _>("temporary_path"))
                     .bind(now.as_millis())
                     .execute(&mut *transaction)
                     .await?;
-                    attachment_blobs_purged +=
-                        sqlx::query("DELETE FROM attachment_blobs WHERE id = $1")
-                            .bind(blob_id)
+                    summary.pending_uploads_purged +=
+                        sqlx::query("DELETE FROM pending_uploads WHERE id = $1")
+                            .bind(row.get::<String, _>("id"))
                             .execute(&mut *transaction)
                             .await?
                             .rows_affected();
                 }
+                transaction.commit().await?;
             }
-            for path in pending_paths {
-                sqlx::query(
-                    "INSERT INTO attachment_file_deletions \
-                     (id, path_kind, path, created_at) VALUES ($1, 'temporary', $2, $3) \
-                     ON CONFLICT DO NOTHING",
-                )
-                .bind(Id::new_v7().to_string())
-                .bind(path)
-                .bind(now.as_millis())
-                .execute(&mut *transaction)
-                .await?;
-            }
-            pending_uploads_purged +=
-                sqlx::query("DELETE FROM pending_uploads WHERE workspace_id = $1")
-                    .bind(&workspace_id)
-                    .execute(&mut *transaction)
-                    .await?
-                    .rows_affected();
             // Tasks go before the workspace cascade: tasks.status_id is ON DELETE RESTRICT, and
             // SQLite may cascade into task_statuses first (it was rebuilt after tasks in 0021).
-            sqlx::query("DELETE FROM tasks WHERE workspace_id = $1")
-                .bind(&workspace_id)
-                .execute(&mut *transaction)
-                .await?;
             // Pages before teamspaces (pages.teamspace_id cascades), teamspaces before the
             // workspace, so no cascade order is left to SQLite.
-            sqlx::query("DELETE FROM pages WHERE workspace_id = $1")
-                .bind(&workspace_id)
-                .execute(&mut *transaction)
-                .await?;
+            for table in ["tasks", "pages"] {
+                self.delete_in_batches(table, "workspace_id = $1", of_workspace, PURGE_BATCH)
+                    .await?;
+            }
+            let mut transaction = self.database.immediate_transaction().await?;
             sqlx::query("DELETE FROM teamspaces WHERE workspace_id = $1")
                 .bind(&workspace_id)
                 .execute(&mut *transaction)
                 .await?;
-            workspaces_purged += sqlx::query("DELETE FROM workspaces WHERE id = $1")
-                .bind(workspace_id)
+            summary.workspaces_purged += sqlx::query("DELETE FROM workspaces WHERE id = $1")
+                .bind(&workspace_id)
                 .execute(&mut *transaction)
                 .await?
                 .rows_affected();
+            transaction.commit().await?;
         }
-        sqlx::query("DELETE FROM outbox_events WHERE created_at < $1")
-            .bind(now.as_millis() - 7 * 24 * 60 * 60 * 1000)
-            .execute(&mut *transaction)
+        self.delete_in_batches(
+            "outbox_events",
+            "created_at < $1",
+            PurgeKey::Millis(now.as_millis() - 7 * 24 * 60 * 60 * 1000),
+            PURGE_ROW_BATCH,
+        )
+        .await?;
+        let audit_cutoff = now.as_millis().saturating_sub(AUDIT_RETENTION_MILLIS);
+        summary.audit_events_purged += self
+            .delete_in_batches(
+                "audit_events",
+                "occurred_at < $1",
+                PurgeKey::Millis(audit_cutoff),
+                PURGE_ROW_BATCH,
+            )
             .await?;
-        let audit_events_purged = sqlx::query("DELETE FROM audit_events WHERE occurred_at < $1")
-            .bind(now.as_millis().saturating_sub(AUDIT_RETENTION_MILLIS))
-            .execute(&mut *transaction)
-            .await?
-            .rows_affected();
+        let mut transaction = self.database.immediate_transaction().await?;
         sqlx::query("DELETE FROM security_probe_summaries WHERE last_attempt_at < $1")
-            .bind(now.as_millis().saturating_sub(AUDIT_RETENTION_MILLIS))
+            .bind(audit_cutoff)
             .execute(&mut *transaction)
             .await?;
+        transaction.commit().await?;
+        Ok(())
+    }
+
+    /// Deletes the rows of `table` that match `predicate` (its one parameter is `key`), `batch` rows per write
+    /// transaction; returns how many rows went.
+    async fn delete_in_batches(
+        &self,
+        table: &str,
+        predicate: &str,
+        key: PurgeKey<'_>,
+        batch: i64,
+    ) -> Result<u64, WorkspaceError> {
+        let sql = format!(
+            "DELETE FROM {table} WHERE id IN (SELECT id FROM {table} WHERE {predicate} LIMIT $2)"
+        );
+        let mut deleted = 0_u64;
+        loop {
+            let mut transaction = self.database.immediate_transaction().await?;
+            let query = sqlx::query(sqlx::AssertSqlSafe(sql.clone()));
+            let query = match key {
+                PurgeKey::Millis(millis) => query.bind(millis),
+                PurgeKey::Id(id) => query.bind(id.to_owned()),
+            };
+            let rows = query
+                .bind(batch)
+                .execute(&mut *transaction)
+                .await?
+                .rows_affected();
+            transaction.commit().await?;
+            deleted += rows;
+            if rows < batch as u64 {
+                return Ok(deleted);
+            }
+        }
+    }
+
+    async fn record_maintenance(&self, summary: &MaintenanceSummary) -> Result<(), WorkspaceError> {
+        let mut transaction = self.database.immediate_transaction().await?;
         sqlx::query(
             "INSERT INTO maintenance_summaries (id, kind, workspaces_purged, audit_events_purged, \
              attachment_references_purged, attachment_blobs_purged, pending_uploads_purged, files_purged, occurred_at) \
              VALUES ($1, 'workspace.retention', $2, $3, $4, $5, $6, 0, $7)",
         )
         .bind(Id::new_v7().to_string())
-        .bind(workspaces_purged as i64)
-        .bind(audit_events_purged as i64)
-        .bind(attachment_references_purged as i64)
-        .bind(attachment_blobs_purged as i64)
-        .bind(pending_uploads_purged as i64)
-        .bind(now.as_millis())
+        .bind(summary.workspaces_purged as i64)
+        .bind(summary.audit_events_purged as i64)
+        .bind(summary.attachment_references_purged as i64)
+        .bind(summary.attachment_blobs_purged as i64)
+        .bind(summary.pending_uploads_purged as i64)
+        .bind(summary.occurred_at.as_millis())
         .execute(&mut *transaction)
         .await?;
         transaction.commit().await?;
-        Ok(MaintenanceSummary {
-            workspaces_purged,
-            audit_events_purged,
-            attachment_references_purged,
-            attachment_blobs_purged,
-            pending_uploads_purged,
-            files_purged: 0,
-            occurred_at: now,
-        })
+        Ok(())
     }
 
+    /// Calls the store with no write transaction open: a release waits on S3, up to a minute per bucket, and
+    /// the write lock is one for the whole cluster. The queue row goes first, in a short transaction that also
+    /// reads whether the file is in use again; the store is called after the commit.
+    ///
+    /// An upload of the same bytes can claim the storage key between that commit and the release. In S3 that
+    /// is harmless: a release only refreshes the object there. A store without S3 deletes the file, so each row
+    /// holds the blob operation lock that uploads also take (a store without S3 has one server).
     async fn purge_attachment_files(&self) -> Result<u64, WorkspaceError> {
         let store = &self.blob_store;
         let rows = sqlx::query(
-            "SELECT id, path_kind, path FROM attachment_file_deletions ORDER BY created_at, id",
+            "SELECT id, path_kind, path, created_at FROM attachment_file_deletions ORDER BY created_at, id",
         )
         .fetch_all(self.database.pool())
         .await?;
         let mut purged = 0_u64;
+        let mut failure = None;
         for row in rows {
             let id: String = row.get("id");
             let path: String = row.get("path");
-            let mut transaction = self.database.immediate_transaction().await?;
-            match row.get::<String, _>("path_kind").as_str() {
-                "blob" => {
-                    let live: i64 = sqlx::query_scalar(
-                        "SELECT COUNT(*) FROM attachment_blobs WHERE storage_key = $1",
-                    )
-                    .bind(&path)
-                    .fetch_one(&mut *transaction)
-                    .await?;
-                    if live == 0 {
-                        store.release(&path).await?;
-                    }
-                }
+            let path_kind: String = row.get("path_kind");
+            let live_sql = match path_kind.as_str() {
+                "blob" => "SELECT COUNT(*) FROM attachment_blobs WHERE storage_key = $1",
                 "temporary" => {
-                    let live: i64 = sqlx::query_scalar(
-                        "SELECT COUNT(*) FROM pending_uploads WHERE temporary_path = $1 \
-                         AND state IN ('receiving', 'staged')",
-                    )
-                    .bind(&path)
-                    .fetch_one(&mut *transaction)
-                    .await?;
-                    if live == 0 {
-                        store.delete_temporary(std::path::Path::new(&path)).await?;
-                    }
+                    "SELECT COUNT(*) FROM pending_uploads WHERE temporary_path = $1 \
+                     AND state IN ('receiving', 'staged')"
                 }
                 _ => continue,
-            }
-            purged += sqlx::query("DELETE FROM attachment_file_deletions WHERE id = $1")
-                .bind(id)
+            };
+            let _operation = self.attachment_mutations.begin_operation().await;
+            let mut transaction = self.database.immediate_transaction().await?;
+            let live: i64 = sqlx::query_scalar(live_sql)
+                .bind(&path)
+                .fetch_one(&mut *transaction)
+                .await?;
+            let removed = sqlx::query("DELETE FROM attachment_file_deletions WHERE id = $1")
+                .bind(&id)
                 .execute(&mut *transaction)
                 .await?
                 .rows_affected();
             transaction.commit().await?;
+            if removed == 0 {
+                continue;
+            }
+            if live == 0 {
+                let released = match path_kind.as_str() {
+                    "blob" => store.release(&path).await,
+                    _ => store.delete_temporary(std::path::Path::new(&path)).await,
+                };
+                if let Err(error) = released {
+                    // The row goes back, so the next run tries again. If that fails too, the file is untracked
+                    // and reconcile deletes it.
+                    let created_at: i64 = row.get("created_at");
+                    if let Err(error) = self
+                        .requeue_file_deletion(&id, &path_kind, &path, created_at)
+                        .await
+                    {
+                        tracing::warn!(%error, path, "a file deletion was not queued again");
+                    }
+                    failure = Some(error);
+                    break;
+                }
+            }
+            purged += removed;
         }
         if purged != 0 {
             sqlx::query(
@@ -2491,7 +2656,32 @@ impl WorkspaceRepository {
             .execute(self.database.pool())
             .await?;
         }
-        Ok(purged)
+        match failure {
+            Some(error) => Err(error.into()),
+            None => Ok(purged),
+        }
+    }
+
+    async fn requeue_file_deletion(
+        &self,
+        id: &str,
+        path_kind: &str,
+        path: &str,
+        created_at: i64,
+    ) -> Result<(), WorkspaceError> {
+        let mut transaction = self.database.immediate_transaction().await?;
+        sqlx::query(
+            "INSERT INTO attachment_file_deletions (id, path_kind, path, created_at) \
+             VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING",
+        )
+        .bind(id)
+        .bind(path_kind)
+        .bind(path)
+        .bind(created_at)
+        .execute(&mut *transaction)
+        .await?;
+        transaction.commit().await?;
+        Ok(())
     }
 }
 
@@ -2664,9 +2854,10 @@ fn custom_role_ref(
     let id = row.get::<Option<String>, _>("custom_role_id");
     let name = row.get::<Option<String>, _>("custom_role_name");
     match (id, name) {
-        (Some(id), Some(name)) if role == WorkspaceRole::Member => {
-            Ok(Some(CustomRoleRef { id: parse_id(id)?, name }))
-        }
+        (Some(id), Some(name)) if role == WorkspaceRole::Member => Ok(Some(CustomRoleRef {
+            id: parse_id(id)?,
+            name,
+        })),
         _ => Ok(None),
     }
 }

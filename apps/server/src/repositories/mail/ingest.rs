@@ -3,9 +3,10 @@
 //!
 //! The raw message is read and parsed before the transaction; the message, its attachments, the
 //! threads, the search rows and the receipt's `ingested` mark are written in one
-//! `immediate_transaction()`. A re-run is safe: the message is unique for its receipt and each
-//! mailbox gets the same bytes once (`mail_thread_messages (mailbox_id, raw_sha256)`), so a retry
-//! after any failure adds nothing twice. Live events go out after the commit.
+//! `workspace_transaction` of the receipt's workspace (every mailbox it delivers to is in that
+//! workspace). A re-run is safe: the message is unique for its receipt and each mailbox gets the
+//! same bytes once (`mail_thread_messages (mailbox_id, raw_sha256)`), so a retry after any
+//! failure adds nothing twice. Live events go out after the commit.
 
 use std::borrow::Cow;
 
@@ -27,6 +28,16 @@ use crate::live::{LiveHub, NewEvent, Recipients};
 pub const PURGE_JOB: &str = "mail.purge";
 /// How long a thread stays in Trash (spec §6.4: 30 days).
 pub const TRASH_RETENTION_MS: i64 = 30 * 24 * 60 * 60 * 1000;
+/// How long a cancelled message to send, and a revoked file link, are kept (spec §6).
+const SEND_CANCELLED_RETENTION_MS: i64 = 24 * 60 * 60 * 1000;
+/// How long a vacation reply is remembered (one reply to a sender in 7 days).
+const VACATION_REPLY_RETENTION_MS: i64 = 7 * 24 * 60 * 60 * 1000;
+/// How long the recipient rows of a sent message are kept; then `delivery_summary` is all there is.
+const RECIPIENT_RETENTION_MS: i64 = 90 * 24 * 60 * 60 * 1000;
+/// Rows removed by one statement, so one run does not hold the writer for long.
+const PURGE_BATCH: i64 = 1000;
+/// Sent messages whose recipients one transaction purges.
+const SUMMARY_BATCH: i64 = 100;
 /// The live socket topic of mail events.
 pub const MAIL_TOPIC: &str = "mail";
 /// The plain-text body kept for a message that did not parse (the raw message stays).
@@ -69,6 +80,13 @@ pub struct PurgeResult {
     pub threads: u64,
     pub messages: u64,
     pub receipts: u64,
+    /// Cancelled messages to send.
+    pub outbound: u64,
+    /// Expired or revoked file links.
+    pub file_links: u64,
+    pub vacation_replies: u64,
+    /// Recipient rows of old sent messages (their `delivery_summary` stays).
+    pub recipients: u64,
 }
 
 struct Receipt {
@@ -83,13 +101,13 @@ struct Receipt {
 }
 
 /// The parsed message, or the raw text with a warning when it did not parse.
-struct Content {
-    parsed: ParsedMessage,
+pub(super) struct Content {
+    pub(super) parsed: ParsedMessage,
     warning: Option<&'static str>,
 }
 
 impl Content {
-    fn of(raw: &[u8]) -> Self {
+    pub(super) fn of(raw: &[u8]) -> Self {
         match parse(raw, &ParseLimits::default()) {
             Ok(parsed) => Self {
                 parsed,
@@ -105,7 +123,7 @@ impl Content {
         }
     }
 
-    fn has_attachments(&self) -> bool {
+    pub(super) fn has_attachments(&self) -> bool {
         self.parsed
             .attachments
             .iter()
@@ -113,7 +131,7 @@ impl Content {
     }
 
     /// `In-Reply-To` and `References`, without duplicates.
-    fn thread_ids(&self) -> Vec<String> {
+    pub(super) fn thread_ids(&self) -> Vec<String> {
         let mut ids: Vec<String> = Vec::new();
         for id in self
             .parsed
@@ -166,7 +184,7 @@ fn snippet(text: &str) -> String {
 }
 
 /// Postgres text cannot hold NUL; mail text can.
-fn clean(text: &str) -> Cow<'_, str> {
+pub(super) fn clean(text: &str) -> Cow<'_, str> {
     if text.contains('\0') {
         Cow::Owned(text.replace('\0', ""))
     } else {
@@ -242,7 +260,7 @@ impl MailRepository {
             .is_ok_and(|auth| matches!(auth.dmarc, DmarcVerdict::Fail { .. }));
 
         let workspace_id = receipt.workspace_id;
-        let mut transaction = self.database.immediate_transaction().await?;
+        let mut transaction = self.database.workspace_transaction(workspace_id).await?;
         // Another server may have finished it meanwhile.
         let status: Option<String> =
             sqlx::query_scalar("SELECT status FROM mail_receipts WHERE id = $1")
@@ -254,8 +272,14 @@ impl MailRepository {
             Some("ingested") => return Ok(IngestOutcome::AlreadyIngested),
             Some(_) => {}
         }
-        let message_id =
-            insert_message(&mut transaction, receipt_id, &receipt, &content, now).await?;
+        let stored = Stored {
+            receipt_id,
+            workspace_id: receipt.workspace_id,
+            raw_sha256: &receipt.raw_sha256,
+            size: receipt.size,
+            received_at: receipt.received_at,
+        };
+        let message_id = insert_message(&mut transaction, &stored, &content, now).await?;
         let domains: Vec<String> = sqlx::query_scalar(
             "SELECT name FROM mail_domains WHERE workspace_id = $1 \
              AND status IN ('verified', 'suspended')",
@@ -337,6 +361,16 @@ impl MailRepository {
         {
             // The mail is stored; the clients see it on their next refresh.
             tracing::warn!(error = %error, "mail events for the live socket");
+        }
+        // Vacation replies, after the commit and each in its own transaction: a failure to queue
+        // one never fails the ingest (the message is filed and the receipt is done).
+        for delivery in &deliveries {
+            if let Err(error) = self
+                .maybe_vacation_reply(delivery.mailbox_id, delivery.thread_id, message_id, now)
+                .await
+            {
+                tracing::warn!(error = %error, "mail vacation reply");
+            }
         }
         Ok(IngestOutcome::Ingested {
             message_id,
@@ -445,11 +479,134 @@ impl MailRepository {
         .await?
         .rows_affected();
         transaction.commit().await?;
-        Ok(PurgeResult {
+        let mut result = PurgeResult {
             threads,
             messages,
             receipts,
-        })
+            ..PurgeResult::default()
+        };
+        self.purge_send(now, &mut result).await?;
+        Ok(result)
+    }
+
+    /// Deletes send data nothing needs any more, in batches of one transaction each. Held,
+    /// released and sending messages, and recipients a sweep may still send to, stay.
+    async fn purge_send(
+        &self,
+        now: TimestampMillis,
+        result: &mut PurgeResult,
+    ) -> Result<(), MailError> {
+        let now = now.as_millis();
+        // Cancelled messages (their recipients and links go with them).
+        let cancelled = "SELECT id FROM mail_outbound WHERE status = 'cancelled' \
+             AND updated_at <= $1 ORDER BY id LIMIT $2";
+        loop {
+            let mut transaction = self.database.immediate_transaction().await?;
+            for table in ["mail_outbound_recipients", "mail_file_links"] {
+                sqlx::query(sqlx::AssertSqlSafe(format!(
+                    "DELETE FROM {table} WHERE outbound_id IN ({cancelled})"
+                )))
+                .bind(now - SEND_CANCELLED_RETENTION_MS)
+                .bind(PURGE_BATCH)
+                .execute(&mut *transaction)
+                .await?;
+            }
+            let deleted = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "DELETE FROM mail_outbound WHERE id IN ({cancelled})"
+            )))
+            .bind(now - SEND_CANCELLED_RETENTION_MS)
+            .bind(PURGE_BATCH)
+            .execute(&mut *transaction)
+            .await?
+            .rows_affected();
+            transaction.commit().await?;
+            result.outbound += deleted;
+            if deleted < PURGE_BATCH as u64 {
+                break;
+            }
+        }
+        // Expired links, and revoked ones after a day: the blob reference goes away.
+        loop {
+            let mut transaction = self.database.immediate_transaction().await?;
+            let deleted = sqlx::query(
+                "DELETE FROM mail_file_links WHERE id IN (SELECT id FROM mail_file_links \
+                 WHERE expires_at <= $1 OR (revoked_at IS NOT NULL AND revoked_at <= $2) \
+                 ORDER BY id LIMIT $3)",
+            )
+            .bind(now)
+            .bind(now - SEND_CANCELLED_RETENTION_MS)
+            .bind(PURGE_BATCH)
+            .execute(&mut *transaction)
+            .await?
+            .rows_affected();
+            transaction.commit().await?;
+            result.file_links += deleted;
+            if deleted < PURGE_BATCH as u64 {
+                break;
+            }
+        }
+        loop {
+            let mut transaction = self.database.immediate_transaction().await?;
+            let deleted = sqlx::query(
+                "DELETE FROM mail_vacation_replies WHERE (mailbox_id, sender) IN \
+                 (SELECT mailbox_id, sender FROM mail_vacation_replies WHERE replied_at <= $1 \
+                 ORDER BY mailbox_id, sender LIMIT $2)",
+            )
+            .bind(now - VACATION_REPLY_RETENTION_MS)
+            .bind(PURGE_BATCH)
+            .execute(&mut *transaction)
+            .await?
+            .rows_affected();
+            transaction.commit().await?;
+            result.vacation_replies += deleted;
+            if deleted < PURGE_BATCH as u64 {
+                break;
+            }
+        }
+        // Recipients of a finished message, all in a final status and sent over 90 days ago:
+        // the summary is written (when `done` did not) and the rows go.
+        loop {
+            let mut transaction = self.database.immediate_transaction().await?;
+            let ids: Vec<String> = sqlx::query_scalar(
+                "SELECT o.id FROM mail_outbound o WHERE o.status = 'done' \
+                 AND EXISTS (SELECT 1 FROM mail_outbound_recipients r WHERE r.outbound_id = o.id) \
+                 AND NOT EXISTS (SELECT 1 FROM mail_outbound_recipients r WHERE r.outbound_id = o.id \
+                 AND (r.status NOT IN ('delivered', 'bounced', 'suppressed', 'cancelled') \
+                 OR COALESCE(r.released_at, r.updated_at) > $1)) ORDER BY o.id LIMIT $2",
+            )
+            .bind(now - RECIPIENT_RETENTION_MS)
+            .bind(SUMMARY_BATCH)
+            .fetch_all(&mut *transaction)
+            .await?;
+            for id in &ids {
+                let outbound_id = parse_id(id)?;
+                let summary: Option<String> =
+                    sqlx::query_scalar("SELECT delivery_summary FROM mail_outbound WHERE id = $1")
+                        .bind(id)
+                        .fetch_one(&mut *transaction)
+                        .await?;
+                if summary.is_none() {
+                    let summary =
+                        super::outbound::delivery_summary(&mut transaction, outbound_id).await?;
+                    sqlx::query("UPDATE mail_outbound SET delivery_summary = $1 WHERE id = $2")
+                        .bind(summary)
+                        .bind(id)
+                        .execute(&mut *transaction)
+                        .await?;
+                }
+                result.recipients +=
+                    sqlx::query("DELETE FROM mail_outbound_recipients WHERE outbound_id = $1")
+                        .bind(id)
+                        .execute(&mut *transaction)
+                        .await?
+                        .rows_affected();
+            }
+            transaction.commit().await?;
+            if (ids.len() as i64) < SUMMARY_BATCH {
+                break;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -516,15 +673,24 @@ async fn load_receipt(pool: &sqlx::AnyPool, receipt_id: Id) -> Result<Option<Rec
     }))
 }
 
+/// The receipt a message is read from.
+pub(super) struct Stored<'a> {
+    pub(super) receipt_id: Id,
+    pub(super) workspace_id: Id,
+    pub(super) raw_sha256: &'a str,
+    pub(super) size: i64,
+    pub(super) received_at: TimestampMillis,
+}
+
 /// Inserts the receipt's message (once: a re-run reads the existing one) and, the first time,
 /// its attachments. Returns the message id.
-async fn insert_message(
+pub(super) async fn insert_message(
     transaction: &mut Transaction<'_, Any>,
-    receipt_id: Id,
-    receipt: &Receipt,
+    receipt: &Stored<'_>,
     content: &Content,
     now: TimestampMillis,
 ) -> Result<Id, MailError> {
+    let receipt_id = receipt.receipt_id;
     let parsed = &content.parsed;
     let message_id = Id::new_v7();
     let from = parsed.from.as_ref();
@@ -538,7 +704,7 @@ async fn insert_message(
     .bind(message_id.to_string())
     .bind(receipt.workspace_id.to_string())
     .bind(receipt_id.to_string())
-    .bind(&receipt.raw_sha256)
+    .bind(receipt.raw_sha256)
     .bind(clean_opt(parsed.message_id.as_deref()))
     .bind(clean_opt(parsed.in_reply_to.first().map(String::as_str)))
     .bind(

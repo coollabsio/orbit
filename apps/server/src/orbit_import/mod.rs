@@ -35,7 +35,7 @@ use std::time::Duration;
 use orbit_domain::Permission;
 use orbit_platform::{
     Backend, Database, Id, Job, JobError, JobKind, JobKindRegistrationError, JobQueue, JobStore,
-    ObjectStorage, Row, TimestampMillis, UploadService, Worker,
+    ObjectStorage, Row, SqlBuilder, TimestampMillis, UploadService, Worker,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -441,6 +441,9 @@ struct Item {
     orbit_id: Option<Id>,
     state: String,
 }
+
+/// Rows per plan INSERT: 7 binds each, far below SQLite's 32,766 and Postgres's 65,535 limits.
+const PLAN_INSERT_ROWS: usize = 500;
 
 const ITEM_KINDS: [&str; 5] = ["teamspace", "project", "task", "page", "channel"];
 
@@ -1440,21 +1443,36 @@ impl OrbitImportService {
                 MAX_SELECTED * 10
             )));
         }
+        let import_id = run.import_id.to_string();
         let mut tx = self.database().immediate_transaction().await?;
-        for (position, item) in items.iter().enumerate() {
-            sqlx::query(
-                "INSERT INTO orbit_import_items (import_id, kind, source_id, parent_id, path, position, title) \
-                 VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (import_id, kind, source_id) DO NOTHING",
-            )
-            .bind(run.import_id.to_string())
-            .bind(item.kind)
-            .bind(&item.source_id)
-            .bind(item.parent_id.as_deref())
-            .bind(&item.path)
-            .bind(position as i64)
-            .bind(&item.title)
-            .execute(&mut *tx)
-            .await?;
+        for (chunk_index, chunk) in items.chunks(PLAN_INSERT_ROWS).enumerate() {
+            let mut query = SqlBuilder::new(
+                "INSERT INTO orbit_import_items (import_id, kind, source_id, parent_id, path, position, title) VALUES ",
+            );
+            for (offset, item) in chunk.iter().enumerate() {
+                if offset > 0 {
+                    query.push(", ");
+                }
+                let position = (chunk_index * PLAN_INSERT_ROWS + offset) as i64;
+                query
+                    .push("(")
+                    .push_bind(import_id.as_str())
+                    .push(", ")
+                    .push_bind(item.kind)
+                    .push(", ")
+                    .push_bind(item.source_id.as_str())
+                    .push(", ")
+                    .push_bind(item.parent_id.as_deref())
+                    .push(", ")
+                    .push_bind(item.path.as_str())
+                    .push(", ")
+                    .push_bind(position)
+                    .push(", ")
+                    .push_bind(item.title.as_str())
+                    .push(")");
+            }
+            query.push(" ON CONFLICT (import_id, kind, source_id) DO NOTHING");
+            query.build().execute(&mut *tx).await?;
         }
         sqlx::query("UPDATE orbit_imports SET total = $1, updated_at = $2 WHERE id = $3")
             .bind(items.len() as i64)

@@ -16,6 +16,11 @@
 #
 # URL: when Tailscale runs, the web port is published with `tailscale serve` over HTTPS on the
 # machine's tailnet name, and Orbit uses that origin. Otherwise the origin is http://127.0.0.1:<web>.
+#
+# Network: ORBIT_DEV_HOST is the address the web server listens on (default 127.0.0.1; 0.0.0.0 opens it
+# to the local network). The API always stays on 127.0.0.1: Orbit refuses another address in
+# development, and the web server proxies /api to it. ORBIT_DEV_PUBLIC_HOST, when set, is the host of the origin
+# (http://<host>:<web>) instead of the tailnet name or 127.0.0.1. Set both in your shell, not in git.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -68,12 +73,15 @@ tailnet_host() {
         python3 -c 'import json, sys; print(json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))' 2>/dev/null || true
 }
 
-# Prints the directory of the process that listens on 127.0.0.1 at the port, and fails when the port is free there.
-# `tailscale serve` also listens on the port, but only on the tailnet address.
+# Prints the directory of the process that listens on the port on the loopback or on all addresses
+# (`0.0.0.0`, `*`, `[::]`), and fails when the port is free there. `tailscale serve` also listens on
+# the port, but only on the tailnet address, so it does not count.
 port_owner() {
-    local pid
-    [[ -n "$(ss -ltnH "src 127.0.0.1:$1" 2>/dev/null)" ]] || return 1
-    pid="$(ss -ltnpH "src 127.0.0.1:$1" 2>/dev/null | grep -oE 'pid=[0-9]+' | head -n1 | cut -d= -f2)"
+    local line pid
+    line="$(ss -ltnpH "sport = :$1" 2>/dev/null |
+        awk '$4 ~ /^(127\.0\.0\.1|0\.0\.0\.0|\*|\[::\]|\[::1\]):[0-9]+$/' | head -n1)"
+    [[ -n "$line" ]] || return 1
+    pid="$(grep -oE 'pid=[0-9]+' <<<"$line" | head -n1 | cut -d= -f2)"
     readlink "/proc/${pid:-0}/cwd" 2>/dev/null || echo "an unknown process"
 }
 
@@ -93,7 +101,9 @@ cmd_run() {
         fi
     done
     host="$(tailnet_host)"
-    if [[ -n "$host" ]]; then
+    if [[ -n "${ORBIT_DEV_PUBLIC_HOST:-}" ]]; then
+        origin="http://${ORBIT_DEV_PUBLIC_HOST}:${web}"
+    elif [[ -n "$host" ]]; then
         origin="https://${host}:${web}"
         tailscale serve --bg --https="$web" "http://127.0.0.1:${web}" >/dev/null
         trap 'tailscale serve --https='"$web"' off >/dev/null 2>&1 || true' EXIT

@@ -1,5 +1,9 @@
-//! The threads of a mailbox (spec §6.3): which thread a new message joins, how it is filed, the
-//! thread's counts and its search row. Everything runs in the ingest's transaction.
+//! The threads of a mailbox (spec §6.3, §5.10): which thread a new message joins, how it is
+//! filed, the thread's counts and its search row. Everything runs in the transaction of the
+//! ingest (received mail, [`file`]) or of the release (sent mail, [`file_outgoing`]).
+//!
+//! `last_incoming_at` and `last_sent_at` keep the newest received and sent message of a thread:
+//! Sent lists threads by `last_sent_at`, and Archive leaves out threads with nothing received.
 
 use std::collections::BTreeSet;
 
@@ -66,13 +70,28 @@ pub(super) async fn file(
     let found = find_thread(transaction, workspace_id, mailbox_id, message).await?;
     let (thread_id, new_thread, external) = match found {
         Some(thread_id) => {
-            let first_inside = first_sender(transaction, thread_id)
-                .await?
-                .is_some_and(|address| is_inside(&address, domains));
-            (thread_id, false, first_inside && !message.sender_inside)
+            let external = match first_message(transaction, thread_id).await? {
+                // A thread the mailbox started by sending: a message from outside the
+                // workspace's domains is external unless its sender is someone the mailbox
+                // wrote to (`To` or `Cc` of one of its sent messages). Being in the thread
+                // through a received message is not enough, so an outsider who joined once is
+                // marked every time.
+                Some((Some(address), true)) if is_inside(&address, domains) => {
+                    !message.sender_inside
+                        && match message.sender {
+                            Some(sender) => !written_to(transaction, thread_id, sender).await?,
+                            None => true,
+                        }
+                }
+                Some((Some(address), false)) => {
+                    is_inside(&address, domains) && !message.sender_inside
+                }
+                _ => false,
+            };
+            (thread_id, false, external)
         }
         None => (
-            create_thread(transaction, workspace_id, mailbox_id, message, now).await?,
+            create_thread(transaction, workspace_id, mailbox_id, message, false, now).await?,
             true,
             false,
         ),
@@ -188,39 +207,83 @@ async fn is_participant(
     Ok(false)
 }
 
-/// The `From` address of the thread's first message.
-async fn first_sender(
+/// Whether `address` is in `To` or `Cc` of a message the mailbox sent in the thread.
+async fn written_to(
     transaction: &mut Transaction<'_, Any>,
     thread_id: Id,
-) -> Result<Option<String>, MailError> {
-    let address: Option<Option<String>> = sqlx::query_scalar(
-        "SELECT m.from_addr FROM mail_thread_messages tm JOIN mail_messages m ON m.id = tm.message_id \
+    address: &str,
+) -> Result<bool, MailError> {
+    let rows = sqlx::query(
+        "SELECT m.to_addrs, m.cc_addrs FROM mail_thread_messages tm \
+         JOIN mail_messages m ON m.id = tm.message_id \
+         WHERE tm.thread_id = $1 AND tm.outgoing = 1 LIMIT $2",
+    )
+    .bind(thread_id.to_string())
+    .bind(THREAD_MESSAGES_READ)
+    .fetch_all(&mut **transaction)
+    .await?;
+    for row in rows {
+        for column in ["to_addrs", "cc_addrs"] {
+            let list: String = row.try_get(column)?;
+            if addresses(&list).any(|found| found.eq_ignore_ascii_case(address)) {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
+/// The `From` address of the thread's first message, and whether the mailbox sent it.
+async fn first_message(
+    transaction: &mut Transaction<'_, Any>,
+    thread_id: Id,
+) -> Result<Option<(Option<String>, bool)>, MailError> {
+    let row = sqlx::query(
+        "SELECT m.from_addr, tm.outgoing FROM mail_thread_messages tm \
+         JOIN mail_messages m ON m.id = tm.message_id \
          WHERE tm.thread_id = $1 ORDER BY m.received_at, m.id LIMIT 1",
     )
     .bind(thread_id.to_string())
     .fetch_optional(&mut **transaction)
     .await?;
-    Ok(address.flatten())
+    row.map(|row| {
+        Ok((
+            row.try_get::<Option<String>, _>("from_addr")?,
+            row.try_get::<i64, _>("outgoing")? != 0,
+        ))
+    })
+    .transpose()
 }
 
-/// A new thread holding `message`: in Spam when DMARC failed, else in the inbox.
+/// A new thread holding `message`. A received message goes to the inbox (to Spam when DMARC
+/// failed); a sent one to the archive, so it is not in the inbox until someone answers.
 async fn create_thread(
     transaction: &mut Transaction<'_, Any>,
     workspace_id: Id,
     mailbox_id: Id,
     message: &Incoming<'_>,
+    outgoing: bool,
     now: TimestampMillis,
 ) -> Result<Id, MailError> {
     let thread_id = Id::new_v7();
-    let (folder, spam_reason) = if message.dmarc_failed {
+    let (folder, spam_reason) = if outgoing {
+        ("archive", None)
+    } else if message.dmarc_failed {
         ("spam", Some("dmarc_fail"))
     } else {
         ("inbox", None)
     };
+    let at = message.received_at.as_millis();
+    let (last_sent_at, last_incoming_at) = if outgoing {
+        (Some(at), None)
+    } else {
+        (None, Some(at))
+    };
     sqlx::query(
         "INSERT INTO mail_threads (id, workspace_id, mailbox_id, subject, normalized_subject, folder, \
-         spam_reason, last_message_at, message_count, has_attachments, snippet, created_at, updated_at) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1, $9, $10, $11, $12)",
+         spam_reason, last_message_at, message_count, has_attachments, snippet, last_sent_at, \
+         last_incoming_at, created_at, updated_at) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1, $9, $10, $11, $12, $13, $14)",
     )
     .bind(thread_id.to_string())
     .bind(workspace_id.to_string())
@@ -229,9 +292,11 @@ async fn create_thread(
     .bind(message.normalized_subject)
     .bind(folder)
     .bind(spam_reason)
-    .bind(message.received_at.as_millis())
+    .bind(at)
     .bind(i64::from(message.has_attachments))
     .bind(message.snippet)
+    .bind(last_sent_at)
+    .bind(last_incoming_at)
     .bind(now.as_millis())
     .bind(now.as_millis())
     .execute(&mut **transaction)
@@ -239,8 +304,8 @@ async fn create_thread(
     Ok(thread_id)
 }
 
-/// Counts, snippet and time of a thread that got `message`. A new message brings an archived
-/// thread back to the inbox; a thread in Spam or Trash stays there.
+/// Counts, snippet and time of a thread that got the received `message`. A new message brings
+/// an archived thread back to the inbox; a thread in Spam or Trash stays there.
 async fn add_to_thread(
     transaction: &mut Transaction<'_, Any>,
     thread_id: Id,
@@ -254,18 +319,106 @@ async fn add_to_thread(
          last_message_at = CASE WHEN $3 > last_message_at THEN $4 ELSE last_message_at END, \
          has_attachments = CASE WHEN $5 = 1 THEN 1 ELSE has_attachments END, \
          folder = CASE WHEN folder = 'archive' THEN 'inbox' ELSE folder END, \
-         updated_at = $6 WHERE id = $7",
+         last_incoming_at = CASE WHEN last_incoming_at IS NULL OR $6 > last_incoming_at \
+         THEN $7 ELSE last_incoming_at END, \
+         updated_at = $8 WHERE id = $9",
     )
     .bind(message.received_at.as_millis())
     .bind(message.snippet)
     .bind(message.received_at.as_millis())
     .bind(message.received_at.as_millis())
     .bind(i64::from(message.has_attachments))
+    .bind(message.received_at.as_millis())
+    .bind(message.received_at.as_millis())
     .bind(now.as_millis())
     .bind(thread_id.to_string())
     .execute(&mut **transaction)
     .await?;
     Ok(())
+}
+
+/// Files a message the mailbox sent (spec §5.10): a reply joins `thread_id` (when the thread is
+/// still the mailbox's) and leaves the thread in its folder; a new message starts a thread in
+/// the archive. The message is marked `outgoing`; the thread's `last_sent_at` moves. `None` when
+/// the mailbox already has these bytes.
+pub(super) async fn file_outgoing(
+    transaction: &mut Transaction<'_, Any>,
+    workspace_id: Id,
+    mailbox_id: Id,
+    thread_id: Option<Id>,
+    message: &Incoming<'_>,
+    now: TimestampMillis,
+) -> Result<Option<Filed>, MailError> {
+    let delivered: Option<i64> = sqlx::query_scalar(
+        "SELECT 1 FROM mail_thread_messages WHERE mailbox_id = $1 AND raw_sha256 = $2",
+    )
+    .bind(mailbox_id.to_string())
+    .bind(message.raw_sha256)
+    .fetch_optional(&mut **transaction)
+    .await?;
+    if delivered.is_some() {
+        return Ok(None);
+    }
+    let existing = match thread_id {
+        Some(thread_id) => sqlx::query_scalar::<_, String>(
+            "SELECT id FROM mail_threads WHERE id = $1 AND mailbox_id = $2",
+        )
+        .bind(thread_id.to_string())
+        .bind(mailbox_id.to_string())
+        .fetch_optional(&mut **transaction)
+        .await?
+        .map(|id| parse_id(&id))
+        .transpose()?,
+        None => None,
+    };
+    let (thread_id, new_thread) = match existing {
+        Some(thread_id) => (thread_id, false),
+        None => (
+            create_thread(transaction, workspace_id, mailbox_id, message, true, now).await?,
+            true,
+        ),
+    };
+    sqlx::query(
+        "INSERT INTO mail_thread_messages (thread_id, message_id, mailbox_id, raw_sha256, external, \
+         outgoing, created_at) VALUES ($1, $2, $3, $4, 0, 1, $5)",
+    )
+    .bind(thread_id.to_string())
+    .bind(message.message_id.to_string())
+    .bind(mailbox_id.to_string())
+    .bind(message.raw_sha256)
+    .bind(now.as_millis())
+    .execute(&mut **transaction)
+    .await?;
+    if !new_thread {
+        let at = message.received_at.as_millis();
+        sqlx::query(
+            "UPDATE mail_threads SET message_count = message_count + 1, \
+             snippet = CASE WHEN $1 >= last_message_at THEN $2 ELSE snippet END, \
+             last_message_at = CASE WHEN $3 > last_message_at THEN $4 ELSE last_message_at END, \
+             has_attachments = CASE WHEN $5 = 1 THEN 1 ELSE has_attachments END, \
+             last_sent_at = CASE WHEN last_sent_at IS NULL OR $6 > last_sent_at \
+             THEN $7 ELSE last_sent_at END, \
+             updated_at = $8 WHERE id = $9",
+        )
+        .bind(at)
+        .bind(message.snippet)
+        .bind(at)
+        .bind(at)
+        .bind(i64::from(message.has_attachments))
+        .bind(at)
+        .bind(at)
+        .bind(now.as_millis())
+        .bind(thread_id.to_string())
+        .execute(&mut **transaction)
+        .await?;
+    }
+    index_thread(transaction, thread_id).await?;
+    let users = mailbox_users(transaction, mailbox_id).await?;
+    Ok(Some(Filed {
+        thread_id,
+        new_thread,
+        users,
+    }))
 }
 
 /// Replaces the thread's search row: its subject, the names and addresses of the people, and

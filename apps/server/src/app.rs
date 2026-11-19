@@ -43,6 +43,7 @@ use crate::mail_dns::{DnsChecker, DnsLookup, HickoryDns};
 use crate::mail_intake::MailIntake;
 use crate::mail_listener::{MailListener, MailListenerStatus, TRACE_HEADROOM};
 use crate::mail_routes::{MailSettings, MailState};
+use crate::mail_send::{run_send_job, send_job_outbound};
 use crate::metrics::Metrics;
 use crate::notion::client::NotionClientConfig;
 use crate::notion::import::{NotionImportService, NotionImportSettings};
@@ -56,8 +57,9 @@ use crate::page_routes::PageState;
 use crate::repositories::api_tokens::ApiTokenRepository;
 use crate::repositories::identity::IdentityRepository;
 use crate::repositories::mail::{
-    DNS_CHECK_JOB, MailRepository, PENDING_CHECK_MS, PURGE_JOB, dns_check_kind, mail_ingest_kind,
-    mail_purge_kind, run_ingest_job,
+    DNS_CHECK_JOB, MailRepository, PENDING_CHECK_MS, PURGE_JOB, SEND_POLICY_JOB, SEND_SWEEP_JOB,
+    SEND_SWEEP_MS, dns_check_kind, mail_ingest_kind, mail_purge_kind, mail_send_kind,
+    mail_send_sweep_kind, run_ingest_job, send_policy_kind,
 };
 use crate::repositories::page_files::PageFileRepository;
 use crate::repositories::tasks::TaskRepository;
@@ -335,11 +337,18 @@ impl App {
         // `validate` requires the app key.
         let mail_key =
             app_key.ok_or_else(|| AppError::Config("ORBIT_APP_KEY is required".to_owned()))?;
-        let mail = Arc::new(MailRepository::new(
-            database.clone(),
-            attachment_state.uploads.clone(),
-            mail_key,
-        ));
+        let mail = Arc::new(
+            MailRepository::new(database.clone(), attachment_state.uploads.clone(), mail_key)
+                .with_cloud(config.billing.is_some())
+                .with_link_origin(
+                    config
+                        .mail
+                        .content_origin
+                        .clone()
+                        .filter(|origin| !origin.trim().is_empty())
+                        .unwrap_or_else(|| config.http.public_origin.clone()),
+                ),
+        );
         let mail_listener = if config.mail.enabled {
             let intake = MailIntake::new(
                 Arc::clone(&mail),
@@ -388,6 +397,31 @@ impl App {
             config.mail.hostname.clone(),
             config.mail.mode,
         );
+        // One context for each `allow_private` (each has its own HTTP client): workspace routes
+        // and direct sending reach public addresses only; an instance relay may be private.
+        let send_resolver: Arc<dyn crate::mail_send::MxLookup> =
+            Arc::new(HickoryDns::new(config.mail.dns_resolver));
+        let send_jobs = crate::mail_send::SendJobState {
+            mail: Arc::clone(&mail),
+            delivery: crate::mail_send::DeliveryContext::new(
+                config.mail.hostname.clone(),
+                Arc::clone(&send_resolver),
+                false,
+            ),
+            instance_delivery: crate::mail_send::DeliveryContext::new(
+                config.mail.hostname.clone(),
+                send_resolver,
+                true,
+            ),
+            intake: MailIntake::new(
+                Arc::clone(&mail),
+                config.mail.max_message_bytes + TRACE_HEADROOM,
+            ),
+            live: crate::live::LiveHub::of(&database),
+            send_timeout: std::time::Duration::from_millis(
+                crate::mail_send::SEND_TIMEOUT_MS.unsigned_abs(),
+            ),
+        };
 
         let linear_imports = LinearImportService::new(
             database.clone(),
@@ -477,6 +511,7 @@ impl App {
             notion_imports.clone(),
             dns_checker,
             Arc::clone(&mail),
+            send_jobs,
             asana_imports.clone(),
             linear_imports.clone(),
             trello_imports.clone(),
@@ -883,6 +918,16 @@ impl App {
         spawn_service(&mut services, "object storage mover", mover);
         let attachments = self.attachments.clone();
         let token = service_shutdown.clone();
+        if self.database.backend() == orbit_platform::Backend::Postgres {
+            let monitor = orbit_platform::run_write_lock_monitor(
+                self.database.clone(),
+                service_shutdown.clone(),
+            );
+            spawn_service(&mut services, "write lock monitor", async move {
+                monitor.await;
+                Ok(())
+            });
+        }
         spawn_service(&mut services, "attachment reconciliation", async move {
             attachments
                 .run_reconciliation_service(token)
@@ -1196,6 +1241,7 @@ async fn initialize_production_services(
     notion_imports: NotionImportService,
     dns_checker: DnsChecker,
     mail: Arc<MailRepository>,
+    send_jobs: crate::mail_send::SendJobState,
     asana_imports: AsanaImportService,
     linear_imports: LinearImportService,
     trello_imports: TrelloImportService,
@@ -1370,6 +1416,58 @@ async fn initialize_production_services(
             })
         })
         .and_then(|worker| {
+            worker.with_handler(mail_send_kind(), move |context| {
+                let send = send_jobs.clone();
+                async move {
+                    let outbound_id = send_job_outbound(&context.job.payload)?;
+                    let now = send
+                        .mail
+                        .database()
+                        .database_now()
+                        .await
+                        .map_err(|error| JobError::Retryable(error.to_string()))?;
+                    run_send_job(&send, outbound_id, now).await
+                }
+            })
+        })
+        .and_then(|worker| {
+            let mail = Arc::clone(&mail);
+            worker.with_handler(mail_send_sweep_kind(), move |_| {
+                let mail = Arc::clone(&mail);
+                async move {
+                    let now = mail
+                        .database()
+                        .database_now()
+                        .await
+                        .map_err(|error| JobError::Retryable(error.to_string()))?;
+                    mail.sweep_releases(now)
+                        .await
+                        .map_err(|error| JobError::Retryable(error.to_string()))?;
+                    mail.sweep_deliveries(now)
+                        .await
+                        .map(|_| ())
+                        .map_err(|error| JobError::Retryable(error.to_string()))
+                }
+            })
+        })
+        .and_then(|worker| {
+            let mail = Arc::clone(&mail);
+            worker.with_handler(send_policy_kind(), move |_| {
+                let mail = Arc::clone(&mail);
+                async move {
+                    let now = mail
+                        .database()
+                        .database_now()
+                        .await
+                        .map_err(|error| JobError::Retryable(error.to_string()))?;
+                    mail.run_send_policy(now)
+                        .await
+                        .map(|_| ())
+                        .map_err(|error| JobError::Retryable(error.to_string()))
+                }
+            })
+        })
+        .and_then(|worker| {
             let mail = Arc::clone(&mail);
             worker.with_handler(mail_purge_kind(), move |_| {
                 let mail = Arc::clone(&mail);
@@ -1439,6 +1537,22 @@ async fn initialize_production_services(
         &scheduler,
         DNS_CHECK_JOB,
         Duration::from_millis(PENDING_CHECK_MS.unsigned_abs()),
+        now,
+    )
+    .await?;
+    // Stranded releases (a failed release, a DKIM key active again) every 5 minutes.
+    ensure_schedule(
+        &scheduler,
+        SEND_SWEEP_JOB,
+        Duration::from_millis(SEND_SWEEP_MS.unsigned_abs()),
+        now,
+    )
+    .await?;
+    // Promotes `new` workspaces that sent cleanly for 14 days.
+    ensure_schedule(
+        &scheduler,
+        SEND_POLICY_JOB,
+        Duration::from_secs(24 * 60 * 60),
         now,
     )
     .await?;

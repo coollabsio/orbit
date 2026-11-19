@@ -423,8 +423,8 @@ pub enum RowCapacityError {
 
 /// Inside the write transaction that makes `adding` rows of `database_id` live (create, restore,
 /// duplicate, backup restore): refuses when the database would then hold more than
-/// [`MAX_ROWS`] live rows. Writers serialize on `immediate_transaction`, so two of them cannot
-/// pass the cap together.
+/// [`MAX_ROWS`] live rows. Writers of one database hold its workspace lock or the global lock, so two of them
+/// cannot pass the cap together.
 pub(super) async fn ensure_row_capacity(
     tx: &mut Transaction<'_, Any>,
     database_id: Id,

@@ -18,7 +18,6 @@ use sqlx::{Any, Transaction};
 use utoipa::ToSchema;
 
 use super::domains::parse_id;
-use crate::repositories::membership::parse_permissions;
 use super::ingest::MAIL_TOPIC;
 use super::labels::{Label, load_labels};
 use super::mailboxes::{Mailbox, Scope, load_mailboxes};
@@ -26,6 +25,7 @@ use super::search::{Folders, Selection, ThreadCursor, people, select_threads};
 use super::threads::{is_inside, mailbox_users};
 use super::{MailError, MailQuery, MailRepository};
 use crate::live::{LiveHub, NewEvent, Recipients};
+use crate::repositories::membership::parse_permissions;
 
 /// Threads in a page when the caller names no limit.
 pub const THREAD_PAGE_DEFAULT: usize = 50;
@@ -86,6 +86,9 @@ pub struct MailThreadSummary {
     pub from: Vec<MailPerson>,
     #[schema(value_type = String, format = DateTime)]
     pub last_message_at: TimestampMillis,
+    /// The last message sent from the mailbox; null when it sent none (Sent is ordered by it).
+    #[schema(value_type = Option<String>, format = DateTime)]
+    pub last_sent_at: Option<TimestampMillis>,
     pub message_count: i64,
     /// A message arrived after the caller last read the thread.
     pub unread: bool,
@@ -96,6 +99,10 @@ pub struct MailThreadSummary {
     /// A message has an attachment that is not an inline image.
     pub has_attachments: bool,
     pub folder: MailFolder,
+    /// Sent view: the To and Cc addresses of the newest message sent (at most 5).
+    pub sent_to: Vec<String>,
+    /// Sent view: how many more recipients `sent_to` leaves out.
+    pub sent_to_more: i64,
 }
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
@@ -170,6 +177,18 @@ impl MailAuthSummary {
     fn of(auth: &str) -> Self {
         match serde_json::from_str::<AuthOutcome>(auth) {
             Ok(outcome) => Self::from_outcome(outcome),
+            // Local delivery (`{"local":true}`): signed by a domain of this instance, not checked.
+            Err(_)
+                if serde_json::from_str::<serde_json::Value>(auth)
+                    .is_ok_and(|value| value["local"] == serde_json::Value::Bool(true)) =>
+            {
+                Self {
+                    spf: MailAuthResult::None,
+                    dkim: MailAuthResult::Pass,
+                    dmarc: MailAuthResult::None,
+                    aligned_domain: None,
+                }
+            }
             Err(_) => Self {
                 spf: MailAuthResult::None,
                 dkim: MailAuthResult::None,
@@ -227,6 +246,10 @@ pub struct MailMessageView {
     pub lookalike_member: Option<String>,
     /// Why the message shows as plain text only (`parse_failed`, `limit`).
     pub warning: Option<String>,
+    /// The files this message sends as links: only for the member who sent it.
+    pub file_links: Vec<super::MailFileLinkView>,
+    /// How an outgoing message went, per recipient; null for received mail.
+    pub delivery: Option<super::MailDelivery>,
 }
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
@@ -273,6 +296,11 @@ pub struct ThreadListInput {
     pub folder: Option<MailFolder>,
     pub label_id: Option<Id>,
     pub starred: bool,
+    /// Only the threads the caller has not read (the folder's **Unread** switch).
+    pub unread: bool,
+    /// Sent (spec §5.10): threads with mail sent from the mailbox, by the last one sent, in
+    /// every folder but Trash. Not with `folder`.
+    pub sent: bool,
     pub cursor: Option<String>,
     pub limit: Option<usize>,
 }
@@ -361,10 +389,17 @@ fn page_limit(limit: Option<usize>) -> Result<usize, MailError> {
     }
 }
 
-fn page(threads: Vec<MailThreadSummary>, more: bool) -> MailThreadPage {
+/// A page of threads; the cursor holds the time the list is ordered by (`last_sent_at` for
+/// Sent).
+fn page(threads: Vec<MailThreadSummary>, more: bool, sent: bool) -> MailThreadPage {
     let cursor = threads.last().filter(|_| more).map(|thread| {
+        let at = if sent {
+            thread.last_sent_at.unwrap_or(thread.last_message_at)
+        } else {
+            thread.last_message_at
+        };
         ThreadCursor {
-            last_message_at: thread.last_message_at.as_millis(),
+            last_message_at: at.as_millis(),
             id: thread.id,
         }
         .encode()
@@ -445,7 +480,9 @@ impl MailRepository {
             .await?;
         }
         let folders = match input.folder {
+            Some(_) if input.sent => return Err(MailError::Invalid { field: "sent" }),
             Some(folder) => Folders::One(folder),
+            None if input.sent => Folders::Sent,
             None if input.label_id.is_some() || input.starred => Folders::Kept,
             None => Folders::One(MailFolder::Inbox),
         };
@@ -453,6 +490,7 @@ impl MailRepository {
         selection.mailbox_id = input.mailbox_id;
         selection.label_id = input.label_id;
         selection.query.starred = input.starred;
+        selection.query.unread = input.unread;
         let (threads, more) = select_threads(
             &mut transaction,
             self.postgres(),
@@ -464,7 +502,7 @@ impl MailRepository {
         )
         .await?;
         transaction.commit().await?;
-        Ok(page(threads, more))
+        Ok(page(threads, more, input.sent))
     }
 
     /// Search (spec §8.3) over the mailboxes the caller reads; an empty page when `q` names
@@ -482,7 +520,7 @@ impl MailRepository {
         let mut transaction = self.database.pool().begin().await?;
         let reader = reader(&mut transaction, workspace_id, user_id).await?;
         let Some(selection) = Selection::search(query, self.postgres()) else {
-            return Ok(page(Vec::new(), false));
+            return Ok(page(Vec::new(), false, false));
         };
         let (threads, more) = select_threads(
             &mut transaction,
@@ -495,7 +533,7 @@ impl MailRepository {
         )
         .await?;
         transaction.commit().await?;
-        Ok(page(threads, more))
+        Ok(page(threads, more, false))
     }
 
     /// A thread with its messages, oldest first.
@@ -597,6 +635,15 @@ impl MailRepository {
         .map(|(id, name, email)| Ok((parse_id(&id)?, name, email)))
         .collect::<Result<_, MailError>>()?;
 
+        let mut file_links: HashMap<String, Vec<super::MailFileLinkView>> = HashMap::new();
+        for (message, link) in
+            super::links::sender_links(&mut transaction, reader.membership_id, thread_id).await?
+        {
+            file_links.entry(message).or_default().push(link);
+        }
+        let now = self.database.database_now().await?;
+        let mut deliveries =
+            super::outbound::thread_deliveries(&mut transaction, thread_id, now).await?;
         let mut messages = Vec::with_capacity(rows.len());
         for row in &rows {
             let id: String = row.try_get("id")?;
@@ -635,6 +682,8 @@ impl MailRepository {
                 external: row.try_get("external")?,
                 lookalike_member,
                 warning: row.try_get("warning")?,
+                file_links: file_links.remove(&id).unwrap_or_default(),
+                delivery: deliveries.remove(&id),
                 id: parse_id(&id)?,
             });
         }
@@ -672,7 +721,7 @@ impl MailRepository {
             return Err(MailError::Invalid { field: "restore" });
         }
         let now = self.database.database_now().await?;
-        let mut transaction = self.database.immediate_transaction().await?;
+        let mut transaction = self.database.workspace_transaction(workspace_id).await?;
         let reader = reader(&mut transaction, workspace_id, user_id).await?;
         if !change.add_labels.is_empty() {
             let wanted: BTreeSet<Id> = change.add_labels.iter().copied().collect();
@@ -911,6 +960,7 @@ async fn unread_counts(
          JOIN mailbox_members mm ON mm.mailbox_id = t.mailbox_id AND mm.membership_id = $1 \
          LEFT JOIN mail_thread_user_state s ON s.thread_id = t.id AND s.membership_id = $2 \
          WHERE t.workspace_id = $3 AND (s.last_read_at IS NULL OR s.last_read_at < t.last_message_at) \
+         AND NOT (t.folder = 'archive' AND t.last_incoming_at IS NULL) \
          GROUP BY t.mailbox_id, t.folder",
     )
     .bind(membership_id.to_string())

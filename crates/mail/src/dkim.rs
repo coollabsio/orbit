@@ -1,5 +1,5 @@
 //! DKIM keys: RSA-2048 key generation and the DNS record text (spec §4.1, D5). Slice 1 only makes the first key so
-//! the setup page can show its record; signing comes in slice 2 (through `mail-auth`, which loads the PKCS#8 key).
+//! the setup page can show its record; signing is in `sign.rs` (through `mail-auth`, which loads the PKCS#8 key).
 //!
 //! The `rsa` crate is used for key generation only. RUSTSEC-2023-0071 (Marvin timing attack) affects decryption and
 //! signing with `rsa`, not key generation.

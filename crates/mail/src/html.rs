@@ -1,5 +1,6 @@
 //! The HTML view document: mail HTML sanitized on each view (no HTML is stored), wrapped in a full document with
-//! Orbit's nonce height script, and the CSP header that goes with it (spec §6.5).
+//! Orbit's base style sheet and nonce frame script (height, theme, quote folding), and the CSP header that goes
+//! with it (spec §6.5).
 //!
 //! `ammonia` removes every element and attribute that is not on the allow list. It cannot filter whole style sheets
 //! (<https://docs.rs/ammonia/4.2.4/ammonia/struct.Builder.html#method.filter_style_properties>), so the content of
@@ -83,30 +84,94 @@ pub fn render_document(html: &str, opts: &RenderOptions<'_>) -> Rendered {
         .clean(html)
         .to_string();
     let css = style_sheets(html);
+    let plain = is_plain(&css, &body);
+    let blocked = blocked.load(Ordering::Relaxed);
     Rendered {
-        html: document(&css, &body, opts.nonce),
-        blocked_remote_images: blocked.load(Ordering::Relaxed),
+        html: document(&css, &body, opts.nonce, plain, blocked),
+        blocked_remote_images: blocked,
     }
 }
 
-/// The view document for a message without an HTML part: `text` escaped in a `<pre>`.
+/// The view document for a message without an HTML part: `text` escaped in a `<pre>`. A trailing quote (the lines
+/// that start with `>`, with the "… wrote:" line before them) goes into a `.orbit-quote-text` block that the frame
+/// script folds. The text document is always plain: it follows the app theme.
 pub fn render_text_document(text: &str, nonce: &str) -> String {
-    let mut body = String::with_capacity(text.len() + 16);
+    let mut body = String::with_capacity(text.len() + 64);
     body.push_str("<pre>");
-    for character in text.chars() {
-        match character {
-            '&' => body.push_str("&amp;"),
-            '<' => body.push_str("&lt;"),
-            '>' => body.push_str("&gt;"),
-            other => body.push(other),
+    match text_quote_start(text) {
+        Some(start) => {
+            push_escaped(&mut body, text[..start].trim_end());
+            body.push_str("<div class=\"orbit-quote-text\">");
+            push_escaped(&mut body, text[start..].trim_end());
+            body.push_str("</div>");
         }
+        None => push_escaped(&mut body, text),
     }
     body.push_str("</pre>");
-    document(
-        "pre{white-space:pre-wrap;word-wrap:break-word}",
-        &body,
-        nonce,
-    )
+    document(TEXT_CSS, &body, nonce, true, 0)
+}
+
+/// The byte offset where the trailing quote of a plain-text message starts, or `None` when the text does not end
+/// with `>` lines or nothing but the quote would stay visible.
+fn text_quote_start(text: &str) -> Option<usize> {
+    let mut lines = Vec::new();
+    let mut offset = 0;
+    for line in text.split_inclusive('\n') {
+        lines.push((offset, line));
+        offset += line.len();
+    }
+    let blank = |line: &str| line.trim().is_empty();
+    let quoted = |line: &str| line.trim_start().starts_with('>');
+    let mut end = lines.len();
+    while end > 0 && blank(lines[end - 1].1) {
+        end -= 1;
+    }
+    let mut start = end;
+    while start > 0 && (quoted(lines[start - 1].1) || blank(lines[start - 1].1)) {
+        start -= 1;
+    }
+    while start < end && blank(lines[start].1) {
+        start += 1;
+    }
+    if start == end {
+        return None;
+    }
+    // "On …, Ann wrote:" in any language: a short line that ends with a colon, blank lines between allowed
+    let mut intro = start;
+    while intro > 0 && blank(lines[intro - 1].1) {
+        intro -= 1;
+    }
+    let mut fold = start;
+    if intro > 0 {
+        let line = lines[intro - 1].1.trim();
+        if line.ends_with(':') && line.chars().count() < 200 {
+            fold = intro - 1;
+        }
+    }
+    let visible = lines[..fold].iter().any(|(_, line)| !blank(line));
+    visible.then(|| lines[fold].0)
+}
+
+fn push_escaped(out: &mut String, text: &str) {
+    for character in text.chars() {
+        match character {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            other => out.push(other),
+        }
+    }
+}
+
+/// A document is plain when the mail brings no colours of its own: no style sheet and no `style`, `bgcolor` or
+/// `color` attribute in the sanitized body. A plain document follows the app theme; any other mail keeps the white
+/// page it was written for. The body is `ammonia`'s serialization, so every attribute is written as ` name="…"`
+/// and a `"` inside a value is `&quot;`; a match in the text only makes the document not plain, which is safe.
+fn is_plain(css: &str, body: &str) -> bool {
+    css.trim().is_empty()
+        && ![" style=\"", " bgcolor=\"", " color=\""]
+            .iter()
+            .any(|attribute| body.contains(attribute))
 }
 
 /// The `Content-Security-Policy` of the view document. `img_sources` is a space-separated source list (the image
@@ -127,16 +192,69 @@ pub fn csp_header(nonce: &str, img_sources: &str, frame_ancestors: &str) -> Stri
     )
 }
 
-fn document(css: &str, body: &str, nonce: &str) -> String {
-    let style = if css.is_empty() {
-        String::new()
-    } else {
-        format!("<style>{css}</style>")
-    };
-    format!(
-        "<!DOCTYPE html><html><head><meta charset=\"utf-8\">{style}<script nonce=\"{}\">new ResizeObserver(()=>parent.postMessage({{orbitMailHeight:document.documentElement.scrollHeight}},\"*\")).observe(document.documentElement)</script></head><body>{body}</body></html>",
-        clean_nonce(nonce)
-    )
+/// Orbit's base style sheet. It comes before the mail's own CSS and uses low-specificity selectors, so the mail's
+/// CSS wins. It has no `"`, nor has [`FRAME_SCRIPT`].
+const BASE_CSS: &str = "body{margin:0;padding:12px 16px;\
+font:14px/1.55 system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;color:#1f2328;overflow-wrap:anywhere}\
+img{max-width:100%;height:auto}\
+blockquote{margin:8px 0;padding-left:12px;border-left:2px solid #d0d7de;color:#59636e}\
+pre{white-space:pre-wrap}a{color:#0969da}[hidden]{display:none!important}\
+.orbit-fold{display:block;height:22px;margin:8px 0;padding:0 10px;border:1px solid #d0d7de;border-radius:999px;\
+background:#f6f8fa;color:#59636e;font:12px/1 system-ui,sans-serif;letter-spacing:1px;cursor:pointer}\
+.orbit-fold:hover{background:#eaeef2}";
+/// The app's dark theme, only in plain documents (the frame script sets `data-theme`).
+const DARK_CSS: &str = "html[data-theme=dark]{background:var(--orbit-bg,#0a0a0a);color-scheme:dark}\
+html[data-theme=dark] body{color:#e4e4e7}\
+html[data-theme=dark] blockquote{border-left-color:#3f3f46;color:#a1a1aa}\
+html[data-theme=dark] a{color:#8ab4f8}\
+html[data-theme=dark] .orbit-fold{border-color:#3f3f46;background:#27272a;color:#a1a1aa}\
+html[data-theme=dark] .orbit-fold:hover{background:#3f3f46}";
+/// The plain-text document: the same sans font as HTML mail, not monospace.
+const TEXT_CSS: &str = "pre{margin:0;font:inherit}";
+/// The frame's one script, at the end of the body. It folds the quoted part of a reply behind a "•••" button (the
+/// first `.orbit-quote-intro`, `.gmail_quote`, `blockquote.orbit-quote` or `.orbit-quote-text`, else a trailing
+/// `blockquote` with its "… wrote:" line; never when nothing is visible before it), takes the app theme
+/// (`{orbitMailTheme, orbitMailBackground}` from the parent only, `dark` or `light` and a colour), and posts
+/// `{orbitMailHeight, orbitMailPlain, orbitMailBlocked, orbitMailTheme}` on every size change and after each theme
+/// message: `orbitMailBlocked` is the server's count from `data-orbit-blocked`, and the theme is the one it shows, so
+/// the app keeps a plain frame hidden until it is in the app theme (no white flash). The height is the content's
+/// (`documentElement.scrollHeight` never drops below the frame's own height), so the frame shrinks again when the
+/// quote folds. Its own `<script>` element (the body's last child) never counts as visible text.
+const FRAME_SCRIPT: &str = r#"(()=>{const d=document,e=d.documentElement,b=d.body,p=e.hasAttribute('data-orbit-plain'),m=n=>n.nodeType==3?/\S/.test(n.data):n.nodeType==1&&n.nodeName!='SCRIPT'&&(/\S/.test(n.textContent)||n.matches('img')||!!n.querySelector('img')),z=n=>{while(n&&!m(n))n=n.previousSibling;return n};let s=b.querySelector('.orbit-quote-intro,.gmail_quote,blockquote.orbit-quote,.orbit-quote-text'),c=b,k;if(!s){while((k=z(c.lastChild))&&k.nodeName=='DIV')c=k;if(k&&k.nodeName=='BLOCKQUOTE'){s=k;const q=z(k.previousSibling),x=q?q.textContent.trim():'';if(x.length<200&&x.endsWith(':'))s=q}}if(s){let h=[],v=0;for(let a=s,o=s;a!=b;a=a.parentNode,o=a.nextSibling){for(let r=a.previousSibling;r;r=r.previousSibling)v|=m(r);for(;o;o=o.nextSibling)h.push(o)}if(v){h=h.flatMap(n=>{if(n.nodeType==1)return[n];if(!m(n))return[];const w=d.createElement('span');n.before(w);w.append(n);return[w]});const t=d.createElement('button'),f=x=>{t.setAttribute('aria-expanded',x);t.setAttribute('aria-label',(x?'Hide':'Show')+' quoted text');for(const n of h)n.hidden=!x};t.type='button';t.className='orbit-fold';t.textContent='\u2022\u2022\u2022';f(false);t.addEventListener('click',()=>f(t.getAttribute('aria-expanded')!='true'));h[0].before(t)}}const P=()=>parent.postMessage({orbitMailHeight:Math.max(e.offsetHeight,b.scrollHeight),orbitMailPlain:p,orbitMailBlocked:+(e.dataset.orbitBlocked||0),orbitMailTheme:e.dataset.theme||null},'*');addEventListener('message',ev=>{const g=ev.source==parent&&ev.data,t=g&&g.orbitMailTheme,c=g&&g.orbitMailBackground;if(t=='dark'||t=='light')e.dataset.theme=t;if(typeof c=='string'&&/^(#[0-9a-f]{3,8}|(rgba?|oklch|oklab|hsla?|lab|lch|color)\([0-9a-z.,%/ -]{1,80}\))$/i.test(c))e.style.setProperty('--orbit-bg',c);if(g)P()});const o=new ResizeObserver(P);o.observe(e);o.observe(b)})()"#;
+
+/// The full view document. The script goes at the end of the body, after the sanitized mail, because it needs the
+/// mail's DOM to fold the quote. `blocked` (the remote images the view removed) goes into `data-orbit-blocked` on the
+/// `<html>` element, for the script to post.
+fn document(css: &str, body: &str, nonce: &str, plain: bool, blocked: usize) -> String {
+    let mut out = String::with_capacity(
+        body.len() + css.len() + BASE_CSS.len() + DARK_CSS.len() + FRAME_SCRIPT.len() + 192,
+    );
+    out.push_str("<!DOCTYPE html><html");
+    if plain {
+        out.push_str(" data-orbit-plain");
+    }
+    if blocked > 0 {
+        out.push_str(&format!(" data-orbit-blocked=\"{blocked}\""));
+    }
+    out.push_str("><head><meta charset=\"utf-8\"><style>");
+    out.push_str(BASE_CSS);
+    if plain {
+        out.push_str(DARK_CSS);
+    }
+    out.push_str("</style>");
+    if !css.is_empty() {
+        out.push_str("<style>");
+        out.push_str(css);
+        out.push_str("</style>");
+    }
+    out.push_str("</head><body>");
+    out.push_str(body);
+    out.push_str("<script nonce=\"");
+    out.push_str(&clean_nonce(nonce));
+    out.push_str("\">");
+    out.push_str(FRAME_SCRIPT);
+    out.push_str("</script></body></html>");
+    out
 }
 
 /// Keeps only base64 characters, so a nonce can neither leave its attribute nor add a CSP directive.

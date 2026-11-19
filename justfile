@@ -21,6 +21,9 @@ dev:
     fi
     api_port="${ORBIT_DEV_API_PORT:-8080}"
     web_port="${ORBIT_DEV_WEB_PORT:-8888}"
+    # The address the web server listens on; `0.0.0.0` opens it to the local network. The API stays on
+    # 127.0.0.1 (Orbit refuses another address in development); the web server proxies it.
+    dev_host="${ORBIT_DEV_HOST:-127.0.0.1}"
     server_pid=""
     web_pid=""
     cleanup() {
@@ -35,7 +38,7 @@ dev:
     trap 'exit 0' INT TERM
     ORBIT_DEV_API_PORT="${api_port}" ORBIT_DEV_WEB_PORT="${web_port}" scripts/dev-server-watch.sh &
     server_pid=$!
-    (cd apps/web && VITE_API_PROXY="http://127.0.0.1:${api_port}" bun run dev -- --host 127.0.0.1 --port "${web_port}" --strictPort) &
+    (cd apps/web && VITE_API_PROXY="http://127.0.0.1:${api_port}" bun run dev -- --host "${dev_host}" --port "${web_port}" --strictPort) &
     web_pid=$!
     wait -n "$server_pid" "$web_pid"
 

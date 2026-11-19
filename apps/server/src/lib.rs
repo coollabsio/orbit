@@ -33,6 +33,7 @@ pub mod mail_image_proxy;
 pub mod mail_intake;
 pub mod mail_listener;
 pub mod mail_routes;
+pub mod mail_send;
 pub mod mcp;
 pub mod metrics;
 pub mod notion;

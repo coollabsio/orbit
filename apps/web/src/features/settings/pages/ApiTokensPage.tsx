@@ -20,6 +20,7 @@ import { FieldGrid, RequiredMark, RowIcon, SettingsRow } from '@/features/settin
 import { useApiTokens, useCreateApiToken, useRevokeApiToken } from '@/features/settings/api/apiTokens'
 import type { ApiTokenScope } from '@orbit/api/generated/types.gen'
 import { LoadingText } from '@/components/ui/spinner'
+import { writeClipboard } from '@/lib/clipboard'
 
 const EXPIRATION_OPTIONS = [
   { value: 'never', label: 'Never expires' },
@@ -151,7 +152,7 @@ export function ApiTokensPage() {
         {createToken.isError ? <p className="text-destructive" role="alert">The API token could not be created.</p> : null}
         </FieldGrid>
       </form>
-      {issuedToken ? <div className="mt-[18px] grid gap-2.5 rounded-lg border border-primary bg-primary/10 p-3 text-xs" role="status"><strong>Copy this token now. You cannot see it again.</strong><div className="flex items-center gap-2"><code className="min-w-0 flex-1 [overflow-wrap:anywhere] select-all">{issuedToken}</code><Button variant="outline" type="button" onClick={() => { void navigator.clipboard.writeText(issuedToken).then(() => { setCopied(true); toast('Token copied') }, () => toast.error('Could not copy the token.')) }}><Copy className="size-4" /> {copied ? 'Copied' : 'Copy'}</Button></div></div> : null}
+      {issuedToken ? <div className="mt-[18px] grid gap-2.5 rounded-lg border border-primary bg-primary/10 p-3 text-xs" role="status"><strong>Copy this token now. You cannot see it again.</strong><div className="flex items-center gap-2"><code className="min-w-0 flex-1 [overflow-wrap:anywhere] select-all">{issuedToken}</code><Button variant="outline" type="button" onClick={() => { void writeClipboard(issuedToken).then(() => { setCopied(true); toast('Token copied') }, () => toast.error('Could not copy the token.')) }}><Copy className="size-4" /> {copied ? 'Copied' : 'Copy'}</Button></div></div> : null}
     </SettingsCard>
     <SettingsCard title="Active API tokens" flush>
       <div className="flex flex-col divide-y">

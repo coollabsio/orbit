@@ -24,11 +24,12 @@ import { BotAvatar } from '@/features/chat/components/messages/BotAvatar'
 import { authorName, useChatPeople } from '@/features/chat/components/messages/people'
 import { relativeAgo } from '@/features/chat/lib/time'
 import { chatErrorMessage } from './channelLib'
+import { writeClipboard } from '@/lib/clipboard'
 
 const NAME_MAX = 80
 
 function copy(text: string, done: string) {
-  navigator.clipboard.writeText(text).then(
+  writeClipboard(text).then(
     () => toast.success(done),
     () => toast.error('Could not copy. Select the text and copy it.'),
   )

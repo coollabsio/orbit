@@ -3254,6 +3254,18 @@ pub(crate) struct ProblemBody {
     /// for `formula_invalid`.
     #[serde(skip_serializing_if = "Option::is_none")]
     formula: Option<crate::repositories::databases::FormulaProblem>,
+    /// A machine-readable reason, such as why a domain cannot send (`send_not_ready`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reason: Option<&'static str>,
+    /// The size limit, for `message_too_large`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    limit_bytes: Option<i64>,
+    /// The size of the message, for `message_too_large`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    size_bytes: Option<i64>,
+    /// The message that is being sent, for `draft_sending`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    outbound_id: Option<String>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -3311,9 +3323,32 @@ impl ApiError {
                 conflict: None,
                 path: None,
                 formula: None,
+                reason: None,
+                limit_bytes: None,
+                size_bytes: None,
+                outbound_id: None,
             }),
             cause: None,
         }
+    }
+
+    /// The same problem with a machine-readable `reason`.
+    pub(crate) fn with_reason(mut self, reason: &'static str) -> Self {
+        self.body.reason = Some(reason);
+        self
+    }
+
+    /// The same problem with the ID of the message that is being sent.
+    pub(crate) fn with_outbound_id(mut self, outbound_id: String) -> Self {
+        self.body.outbound_id = Some(outbound_id);
+        self
+    }
+
+    /// The same problem with the limit and the size of what was refused.
+    pub(crate) fn with_sizes(mut self, limit_bytes: i64, size_bytes: i64) -> Self {
+        self.body.limit_bytes = Some(limit_bytes);
+        self.body.size_bytes = Some(size_bytes);
+        self
     }
 
     /// 422 `formula_invalid`: a database formula that does not parse or type check.
@@ -3351,6 +3386,17 @@ impl ApiError {
         );
         error.body.detail = reached.detail().into();
         error
+    }
+
+    /// Adds the current state of the resource to a 409, as `conflict.current`.
+    pub(crate) fn with_current(mut self, current: Value) -> Self {
+        self.body.conflict = Some(ConflictBody {
+            current_version: current.get("version").and_then(Value::as_u64),
+            current: Some(current),
+            refresh: None,
+            field: None,
+        });
+        self
     }
 
     pub(crate) fn version_conflict(

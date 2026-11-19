@@ -22,6 +22,7 @@ import { useDeleteTaskComment, useUpdateTaskComment } from '@/features/tasks/api
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { agoLabel } from '@/features/tasks/tasksLib'
 import { ProfileTrigger } from '@/components/common/ProfileTrigger'
+import { writeClipboard } from '@/lib/clipboard'
 
 interface CommentItemProps {
   state: TaskViewState
@@ -100,7 +101,7 @@ export function CommentItem({ state, taskId, comment, reply }: CommentItemProps)
             {!editing ? (
               <div className="ml-auto flex shrink-0 items-center gap-px opacity-0 transition-opacity group-hover/comment:opacity-100 group-focus-within/comment:opacity-100 max-[899px]:opacity-100">
                 <Tip label="Copy text">
-                  <Button variant="ghost" size="icon-sm" className="size-6 text-muted-foreground/70" aria-label="Copy text" onClick={() => void navigator.clipboard.writeText(comment.body).then(() => toast('Text copied'), () => toast.error('Could not copy to the clipboard.'))}>
+                  <Button variant="ghost" size="icon-sm" className="size-6 text-muted-foreground/70" aria-label="Copy text" onClick={() => void writeClipboard(comment.body).then(() => toast('Text copied'), () => toast.error('Could not copy to the clipboard.'))}>
                     <Copy className="size-3.5" />
                   </Button>
                 </Tip>

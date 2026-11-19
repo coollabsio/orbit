@@ -1,10 +1,10 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode, type Ref } from 'react'
 import { Archive, ArrowLeft, DirectInbox, ShieldCross, Sms as Mail, Star, Tag, Trash, Undo } from 'reicon-react'
 import { Link } from 'react-router'
 import { cn } from 'cn'
 import type { MailLabel, MailThreadDetail } from '@orbit/api/generated/types.gen'
 import { ColorDot } from '@/components/common/ColorDot'
-import { PaneHeader, PaneTitle } from '@/components/common/Pane'
+import { PaneHeader } from '@/components/common/Pane'
 import { Tip } from '@/components/common/Tip'
 import { Alert, AlertAction, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -20,9 +20,13 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Skeleton } from '@/components/ui/skeleton'
 import { printPage } from '@/lib/print'
-import { folderLabel } from '@/features/mail/mailLib'
+import { folderLabel, foldedRange } from '@/features/mail/mailLib'
+import type { CommandId } from '@/shortcuts/commands'
+import { Shortcut } from '@/shortcuts/Shortcut'
+import { ThreadReply, type ThreadReplyHandle } from '@/features/mail/compose/ThreadReply'
 import { MailEmptyState } from './MailEmptyState'
 import { MessageItem } from './MessageItem'
+import { useMailAvatar } from './useMailAvatar'
 
 /** Which threads of a target have a label. */
 export type LabelState = 'all' | 'some' | 'none'
@@ -101,11 +105,13 @@ interface ThreadViewProps {
   actions: ThreadActions
   labelMenuOpen: boolean
   onLabelMenuOpenChange: (open: boolean) => void
+  /** R / A / F act on the reply at the end of the thread. */
+  replyRef?: Ref<ThreadReplyHandle>
 }
 
-function HeaderButton({ label, onClick, children, pressed }: { label: string; onClick: () => void; children: ReactNode; pressed?: boolean }) {
+function HeaderButton({ label, command, onClick, children, pressed }: { label: string; command?: CommandId; onClick: () => void; children: ReactNode; pressed?: boolean }) {
   return (
-    <Tip label={label} side="bottom">
+    <Tip label={command ? <span className="flex items-center gap-2">{label} <Shortcut id={command} /></span> : label} side="bottom">
       <Button variant="ghost" size="icon-sm" className="text-muted-foreground/70" aria-label={label} aria-pressed={pressed} onClick={onClick}>
         {children}
       </Button>
@@ -114,8 +120,21 @@ function HeaderButton({ label, onClick, children, pressed }: { label: string; on
 }
 
 /** The reading pane: the thread's actions, then its messages, oldest first; only the newest is open at first. */
-export function ThreadView({ detail, status, onRetry, labels, labelsById, canManage, onBack, actions, labelMenuOpen, onLabelMenuOpenChange }: ThreadViewProps) {
+export function ThreadView({ detail, status, onRetry, labels, labelsById, canManage, onBack, actions, labelMenuOpen, onLabelMenuOpenChange, replyRef }: ThreadViewProps) {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
+  /** The middle of a long thread is shown (it folds into "N more messages" at first). */
+  const [showAll, setShowAll] = useState(false)
+  // the fold button goes away on click: the focus moves to the first message it showed
+  const messagesRef = useRef<HTMLDivElement>(null)
+  const focusFrom = useRef<number | null>(null)
+  useEffect(() => {
+    if (!showAll || focusFrom.current === null) return
+    // the header of that message (its first `role=button`; the body may hold others)
+    const shown = messagesRef.current?.querySelectorAll('[data-slot="mail-message"]')[focusFrom.current]?.querySelector<HTMLElement>('[role="button"]')
+    focusFrom.current = null
+    shown?.focus()
+  }, [showAll])
+  const avatarOf = useMailAvatar()
   if (!detail) {
     return (
       <>
@@ -153,6 +172,9 @@ export function ThreadView({ detail, status, onRetry, labels, labelsById, canMan
   const chips = thread.labels.flatMap((id) => labelsById.get(id) ?? [])
   const inTrash = thread.folder === 'trash'
   const inSpam = thread.folder === 'spam'
+  const range = showAll ? null : foldedRange(messages.length)
+  // a message opened by hand stays out of the fold
+  const fold = range && !messages.slice(range[0], range[1]).some((message) => expanded[message.id]) ? range : null
 
   return (
     <>
@@ -160,12 +182,11 @@ export function ThreadView({ detail, status, onRetry, labels, labelsById, canMan
         <Button variant="ghost" size="icon-sm" className="hidden text-muted-foreground/70 max-[899px]:inline-flex" aria-label="Back" onClick={onBack}>
           <ArrowLeft className="size-4" />
         </Button>
-        <PaneTitle className="min-w-0 shrink">{subject}</PaneTitle>
         <span className="flex-1" />
-        <HeaderButton label={thread.starred ? 'Unstar' : 'Star'} pressed={thread.starred} onClick={actions.star}>
+        <HeaderButton label={thread.starred ? 'Unstar' : 'Star'} command="mail.star" pressed={thread.starred} onClick={actions.star}>
           <Star className={cn('size-4', thread.starred && 'fill-[#fcd452] text-[#fcd452]')} />
         </HeaderButton>
-        <HeaderButton label="Mark as unread" onClick={actions.markUnread}>
+        <HeaderButton label="Mark as unread" command="mail.read" onClick={actions.markUnread}>
           <Mail className="size-4" />
         </HeaderButton>
         <LabelMenu
@@ -177,16 +198,16 @@ export function ThreadView({ detail, status, onRetry, labels, labelsById, canMan
           canManage={canManage}
         />
         {thread.folder === 'archive' ? (
-          <HeaderButton label="Move to inbox" onClick={actions.archive}>
+          <HeaderButton label="Move to inbox" command="mail.archive" onClick={actions.archive}>
             <DirectInbox className="size-4" />
           </HeaderButton>
         ) : !inTrash && !inSpam ? (
-          <HeaderButton label="Archive" onClick={actions.archive}>
+          <HeaderButton label="Archive" command="mail.archive" onClick={actions.archive}>
             <Archive className="size-4" />
           </HeaderButton>
         ) : null}
         {!inTrash ? (
-          <HeaderButton label={inSpam ? 'Not spam' : 'Report spam'} onClick={actions.spam}>
+          <HeaderButton label={inSpam ? 'Not spam' : 'Report spam'} command="mail.spam" onClick={actions.spam}>
             {inSpam ? <DirectInbox className="size-4" /> : <ShieldCross className="size-4" />}
           </HeaderButton>
         ) : null}
@@ -195,13 +216,13 @@ export function ThreadView({ detail, status, onRetry, labels, labelsById, canMan
             <Undo className="size-4" />
           </HeaderButton>
         ) : (
-          <HeaderButton label="Move to trash" onClick={actions.trash}>
+          <HeaderButton label="Move to trash" command="mail.trash" onClick={actions.trash}>
             <Trash className="size-4" />
           </HeaderButton>
         )}
       </PaneHeader>
       <div data-print-root="" className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex max-w-[800px] flex-col px-5 pt-6 pb-8">
+        <div ref={messagesRef} className="mx-auto flex max-w-[800px] flex-col px-5 pt-6 pb-8">
           <div className="flex flex-wrap items-center gap-2.5 pb-2">
             <h1 className="m-0 text-xl font-semibold break-words text-foreground">{subject}</h1>
             <Badge variant="secondary">{folderLabel(thread.folder)}</Badge>
@@ -237,17 +258,40 @@ export function ThreadView({ detail, status, onRetry, labels, labelsById, canMan
             </Alert>
           ) : null}
           {messages.map((message, index) => {
+            // a long thread folds its middle (not the ones the user opened)
+            if (fold && index >= fold[0] && index < fold[1]) {
+              return index === fold[0] ? (
+                <button
+                  key="fold"
+                  type="button"
+                  data-slot="mail-thread-fold"
+                  data-print-hide=""
+                  className="group/fold relative my-1 flex h-8 w-full items-center justify-center text-xs text-muted-foreground outline-none before:absolute before:inset-x-0 before:top-1/2 before:border-t before:border-dashed hover:text-foreground focus-visible:text-foreground"
+                  onClick={() => {
+                    focusFrom.current = fold[0]
+                    setShowAll(true)
+                  }}
+                >
+                  <span className="relative rounded-full border bg-background px-3 py-1 transition-colors group-hover/fold:bg-muted group-focus-visible/fold:ring-2 group-focus-visible/fold:ring-ring/50">
+                    {fold[1] - fold[0]} more messages
+                  </span>
+                </button>
+              ) : null
+            }
             const open = expanded[message.id] ?? index === lastIndex
             return (
               <MessageItem
                 key={message.id}
+                threadId={thread.id}
                 message={message}
                 expanded={open}
+                avatarOf={avatarOf}
                 onToggle={() => setExpanded((previous) => ({ ...previous, [message.id]: !open }))}
                 onPrint={() => printPage(subject)}
               />
             )
           })}
+          <ThreadReply ref={replyRef} threadId={thread.id} last={messages.at(-1)} />
         </div>
       </div>
     </>

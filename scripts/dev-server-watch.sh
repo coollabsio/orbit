@@ -28,6 +28,9 @@ start_backend() {
         child_pid=""
         stop_child() {
             if [ -n "$child_pid" ]; then
+                # `cargo run` does not pass SIGTERM on: stop its child (the server) first, or the
+                # server keeps running alone and holds the database and the port.
+                pkill -TERM -P "$child_pid" 2>/dev/null || true
                 kill "$child_pid" 2>/dev/null || true
                 wait "$child_pid" 2>/dev/null || true
                 child_pid=""

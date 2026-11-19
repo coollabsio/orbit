@@ -35,6 +35,9 @@ const SCHEDULE_SLACK_MS: i64 = 60 * 1000;
 const FOUND_MAX_CHARS: usize = 512;
 /// The job kind of the DNS checks.
 pub const DNS_CHECK_JOB: &str = "mail.dns_check";
+/// A rotated-out DKIM key keeps signing nothing but stays published this long, for mail in
+/// transit, then it is retired and its private key is dropped.
+pub const RETIRING_KEY_MS: i64 = 7 * 24 * 60 * 60 * 1000;
 /// Audit requests of the DNS check job.
 const DNS_CHECK_REQUEST: &str = "mail.dns_check";
 
@@ -116,6 +119,14 @@ pub struct DnsReport {
     /// The `p=` of the DMARC record: `none`, `quarantine` or `reject`.
     #[serde(default)]
     pub dmarc_policy: Option<String>,
+    /// The DNS zone that holds the domain (`example.com` for `mail.example.com`); `None` when
+    /// its NS lookup found nothing.
+    #[serde(default)]
+    pub zone: Option<String>,
+    /// The NS hosts of `zone` (lower case, no trailing dot, sorted): the setup page names the
+    /// DNS host from them.
+    #[serde(default)]
+    pub nameservers: Vec<String>,
 }
 
 impl DnsReport {
@@ -129,6 +140,8 @@ impl DnsReport {
             spf: RecordStatus::Unknown,
             dmarc: RecordStatus::Unknown,
             dmarc_policy: None,
+            zone: None,
+            nameservers: Vec::new(),
         }
     }
 }
@@ -140,6 +153,63 @@ pub struct DkimPublic {
     /// Base64 DER (SPKI), the `p=` of the record.
     pub public_key: String,
     pub status: String,
+}
+
+/// A DKIM key as the rotation returns it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DkimKeyView {
+    pub selector: String,
+    /// Base64 DER (SPKI), the `p=` of the record.
+    pub public_key: String,
+    pub status: String,
+    pub created_at: TimestampMillis,
+}
+
+/// The route a domain sends through: its own, else the instance default.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DomainSendRoute {
+    pub id: Id,
+    pub kind: super::SendRouteKind,
+    /// The route's `spf` setting (an SPF include for a relay Orbit knows no include of).
+    pub spf: Option<String>,
+}
+
+/// Why a domain cannot send yet.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NotReadyReason {
+    /// The domain is not verified.
+    DomainUnverified,
+    /// The MX record of the last DNS check is not right, so replies could not arrive.
+    InboundNotLive,
+    /// No DKIM key is active: the record of the first key is not published yet.
+    DkimInactive,
+    /// Neither the domain nor the instance has a send route.
+    NoRoute,
+    /// The mailbox is suspended.
+    MailboxSuspended,
+}
+
+impl NotReadyReason {
+    /// The reason's code (as serialized), also the `hold_reason` of a held message that is
+    /// not ready at its release.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::DomainUnverified => "domain_unverified",
+            Self::InboundNotLive => "inbound_not_live",
+            Self::DkimInactive => "dkim_inactive",
+            Self::NoRoute => "no_route",
+            Self::MailboxSuspended => "mailbox_suspended",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "status", content = "reason", rename_all = "snake_case")]
+pub enum SendReadiness {
+    Ready,
+    NotReady(NotReadyReason),
 }
 
 #[derive(Clone, Debug)]
@@ -163,6 +233,12 @@ pub struct Domain {
     pub address_count: i64,
     /// The provider that receives the domain's mail; `None`: Orbit's own SMTP listener.
     pub provider: Option<DomainProvider>,
+    /// The route the domain sends through (its own, else the instance default).
+    pub send_route: Option<DomainSendRoute>,
+    /// The domain's own route; `None`: it follows the instance default.
+    pub own_send_route_id: Option<Id>,
+    /// A new DKIM key waits for its DNS record while another one is active.
+    pub dkim_rotating: bool,
 }
 
 /// The provider a domain is routed to, with the MX hosts it needs.
@@ -194,12 +270,19 @@ const DOMAIN_COLUMNS: &str = "d.id, d.workspace_id, d.name, d.status, d.verify_t
      (SELECT COUNT(*) FROM mail_addresses a WHERE a.domain_id = d.id) AS address_count, \
      k.selector AS dkim_selector, k.public_key AS dkim_public_key, k.status AS dkim_status, \
      d.provider_id, p.kind AS provider_kind, p.name AS provider_name, \
-     p.settings AS provider_settings, p.workspace_id AS provider_workspace_id";
+     p.settings AS provider_settings, p.workspace_id AS provider_workspace_id, \
+     r.id AS send_route_id, r.kind AS send_route_kind, r.settings AS send_route_settings, \
+     d.send_route_id AS own_send_route_id, \
+     (EXISTS (SELECT 1 FROM mail_dkim_keys x WHERE x.domain_id = d.id \
+     AND x.status = 'pending') AND EXISTS (SELECT 1 FROM mail_dkim_keys y \
+     WHERE y.domain_id = d.id AND y.status = 'active')) AS dkim_rotating";
 
 const DOMAIN_FROM: &str = "mail_domains d LEFT JOIN mail_dkim_keys k ON k.id = (\
      SELECT k2.id FROM mail_dkim_keys k2 WHERE k2.domain_id = d.id \
      AND k2.status IN ('pending', 'active') ORDER BY k2.created_at DESC, k2.id DESC LIMIT 1) \
-     LEFT JOIN mail_providers p ON p.id = d.provider_id";
+     LEFT JOIN mail_providers p ON p.id = d.provider_id \
+     LEFT JOIN mail_send_routes r ON r.id = COALESCE(d.send_route_id, \
+     (SELECT s.mail_send_route_id FROM instance_settings s WHERE s.id = 1))";
 
 pub(super) fn parse_id(value: &str) -> Result<Id, MailError> {
     value.parse().map_err(|_| MailError::NotFound)
@@ -244,6 +327,24 @@ fn domain(row: &AnyRow) -> Result<Domain, MailError> {
         }
         None => None,
     };
+    let send_route = match row.try_get::<Option<String>, _>("send_route_id")? {
+        Some(id) => {
+            let settings: Option<String> = row.try_get("send_route_settings")?;
+            let spf = settings
+                .and_then(|settings| serde_json::from_str::<serde_json::Value>(&settings).ok())
+                .and_then(|settings| settings.get("spf")?.as_str().map(str::to_owned))
+                .filter(|spf| !spf.trim().is_empty());
+            Some(DomainSendRoute {
+                id: parse_id(&id)?,
+                kind: row
+                    .try_get::<String, _>("send_route_kind")?
+                    .parse()
+                    .map_err(|()| MailError::Invalid { field: "kind" })?,
+                spf,
+            })
+        }
+        None => None,
+    };
     Ok(Domain {
         id: parse_id(&row.try_get::<String, _>("id")?)?,
         workspace_id: parse_id(&row.try_get::<String, _>("workspace_id")?)?,
@@ -262,6 +363,13 @@ fn domain(row: &AnyRow) -> Result<Domain, MailError> {
         dkim,
         address_count: row.try_get("address_count")?,
         provider,
+        send_route,
+        own_send_route_id: row
+            .try_get::<Option<String>, _>("own_send_route_id")?
+            .as_deref()
+            .map(parse_id)
+            .transpose()?,
+        dkim_rotating: row.try_get::<orbit_platform::Flag, _>("dkim_rotating")?.0,
     })
 }
 
@@ -755,13 +863,13 @@ impl MailRepository {
     pub async fn record_dns_report(
         &self,
         domain_id: Id,
-        report: DnsReport,
+        mut report: DnsReport,
         now: TimestampMillis,
     ) -> Result<Option<DomainStatus>, MailError> {
         let mut transaction = self.database.immediate_transaction().await?;
         let Some(row) = sqlx::query(
-            "SELECT workspace_id, status, verified_at, last_verified_at, suspended_at, checked_at \
-             FROM mail_domains WHERE id = $1",
+            "SELECT workspace_id, status, verified_at, last_verified_at, suspended_at, checked_at, \
+             dns_report FROM mail_domains WHERE id = $1",
         )
         .bind(domain_id.to_string())
         .fetch_optional(&mut *transaction)
@@ -775,6 +883,15 @@ impl MailRepository {
         let mut last_verified_at: Option<i64> = row.try_get("last_verified_at")?;
         let mut suspended_at: Option<i64> = row.try_get("suspended_at")?;
         let mut checked_at: Option<i64> = row.try_get("checked_at")?;
+        // A timed-out MX lookup says nothing: keep what the last check found, so a blip does
+        // not stop sending.
+        if report.mx == RecordStatus::Unknown
+            && let Some(previous) = row
+                .try_get::<Option<String>, _>("dns_report")?
+                .and_then(|text| serde_json::from_str::<DnsReport>(&text).ok())
+        {
+            report.mx = previous.mx;
+        }
         let verify_ok = report.verify == RecordStatus::Ok;
         let verify_failed = matches!(
             report.verify,
@@ -855,8 +972,247 @@ impl MailRepository {
         ids.iter().map(|id| parse_id(id)).collect()
     }
 
+    /// The key that signs the domain's outgoing mail: the active one, unsealed. `None` while no
+    /// key is active (the first key waits for its DNS record).
+    pub async fn active_signing_key(
+        &self,
+        domain_id: Id,
+    ) -> Result<Option<orbit_mail::SigningKey>, MailError> {
+        let Some(row) = sqlx::query(
+            "SELECT d.name, k.selector, k.private_sealed FROM mail_dkim_keys k \
+             JOIN mail_domains d ON d.id = k.domain_id \
+             WHERE k.domain_id = $1 AND k.status = 'active' \
+             ORDER BY k.created_at DESC, k.id DESC LIMIT 1",
+        )
+        .bind(domain_id.to_string())
+        .fetch_optional(self.database.pool())
+        .await?
+        else {
+            return Ok(None);
+        };
+        let selector: String = row.try_get("selector")?;
+        let sealed: Vec<u8> = row.try_get("private_sealed")?;
+        let pkcs8_der = secret_box::open(
+            &self.app_key,
+            dkim_aad(domain_id, &selector).as_bytes(),
+            &sealed,
+        )
+        .map_err(|()| MailError::Crypto)?;
+        Ok(Some(orbit_mail::SigningKey {
+            domain: row.try_get("name")?,
+            selector,
+            pkcs8_der,
+        }))
+    }
+
+    /// Makes a new DKIM key (`pending`) next to the active one. The setup page then asks for its
+    /// record; the DNS check switches to it once it is published. One rotation at a time:
+    /// `Conflict("rotation_pending")` while a key waits for its record.
+    pub async fn rotate_dkim(
+        &self,
+        workspace_id: Id,
+        actor_id: Id,
+        domain_id: Id,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<DkimKeyView, MailError> {
+        // RSA key generation takes a while: off the runtime and outside the writer transaction.
+        let mut transaction = self.database.pool().begin().await?;
+        manager(&mut transaction, workspace_id, actor_id).await?;
+        load(&mut *transaction, workspace_id, domain_id).await?;
+        transaction.rollback().await?;
+        let key = tokio::task::spawn_blocking(orbit_mail::generate_dkim_key)
+            .await
+            .map_err(|_| MailError::Crypto)?;
+
+        let mut transaction = self.database.immediate_transaction().await?;
+        manager(&mut transaction, workspace_id, actor_id).await?;
+        let found = load(&mut *transaction, workspace_id, domain_id).await?;
+        let pending: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM mail_dkim_keys WHERE domain_id = $1 AND status = 'pending'",
+        )
+        .bind(domain_id.to_string())
+        .fetch_one(&mut *transaction)
+        .await?;
+        if pending > 0 {
+            return Err(MailError::Conflict("rotation_pending"));
+        }
+        // The selector counts the year's keys, so a name is never used twice (`o2026b`, …).
+        let year = utc_year(now);
+        let made: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM mail_dkim_keys WHERE domain_id = $1 AND selector LIKE $2",
+        )
+        .bind(domain_id.to_string())
+        .bind(format!("o{year}%"))
+        .fetch_one(&mut *transaction)
+        .await?;
+        let mut index = u32::try_from(made).unwrap_or(u32::MAX);
+        let selector = loop {
+            let selector = orbit_mail::new_selector(year, index);
+            let taken: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM mail_dkim_keys WHERE domain_id = $1 AND selector = $2",
+            )
+            .bind(domain_id.to_string())
+            .bind(&selector)
+            .fetch_one(&mut *transaction)
+            .await?;
+            if taken == 0 {
+                break selector;
+            }
+            index = index.saturating_add(1);
+        };
+        let sealed = secret_box::seal(
+            &self.app_key,
+            dkim_aad(domain_id, &selector).as_bytes(),
+            &key.private_pkcs8_der,
+        )
+        .map_err(|()| MailError::Crypto)?;
+        let public_key = {
+            use base64::Engine;
+            base64::engine::general_purpose::STANDARD.encode(&key.public_der)
+        };
+        sqlx::query(
+            "INSERT INTO mail_dkim_keys (id, domain_id, selector, public_key, private_sealed, \
+             status, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, 'pending', $6, $6)",
+        )
+        .bind(Id::new_v7().to_string())
+        .bind(domain_id.to_string())
+        .bind(&selector)
+        .bind(&public_key)
+        .bind(sealed)
+        .bind(now.as_millis())
+        .execute(&mut *transaction)
+        .await?;
+        record_audit(
+            &mut transaction,
+            workspace_id,
+            Some(actor_id),
+            "mail.dkim_rotated",
+            domain_id,
+            request_id,
+            json!({ "name": found.name, "selector": selector }),
+            now,
+        )
+        .await?;
+        transaction.commit().await?;
+        Ok(DkimKeyView {
+            selector,
+            public_key,
+            status: "pending".to_owned(),
+            created_at: now,
+        })
+    }
+
+    /// Makes the `pending` key `selector` active, after its record was seen. The first key
+    /// becomes active; a rotated one replaces the active key, which keeps its record for
+    /// [`RETIRING_KEY_MS`] (`retiring`). Returns whether a key was activated.
+    pub async fn activate_dkim(
+        &self,
+        domain_id: Id,
+        selector: &str,
+        now: TimestampMillis,
+    ) -> Result<bool, MailError> {
+        let mut transaction = self.database.immediate_transaction().await?;
+        let activated = sqlx::query(
+            "UPDATE mail_dkim_keys SET status = 'active', updated_at = $1 \
+             WHERE domain_id = $2 AND selector = $3 AND status = 'pending'",
+        )
+        .bind(now.as_millis())
+        .bind(domain_id.to_string())
+        .bind(selector)
+        .execute(&mut *transaction)
+        .await?
+        .rows_affected();
+        if activated == 0 {
+            return Ok(false);
+        }
+        sqlx::query(
+            "UPDATE mail_dkim_keys SET status = 'retiring', updated_at = $1 \
+             WHERE domain_id = $2 AND selector <> $3 AND status = 'active'",
+        )
+        .bind(now.as_millis())
+        .bind(domain_id.to_string())
+        .bind(selector)
+        .execute(&mut *transaction)
+        .await?;
+        transaction.commit().await?;
+        Ok(true)
+    }
+
+    /// Retires the keys that were `retiring` for [`RETIRING_KEY_MS`] and drops their private
+    /// keys. Returns how many.
+    pub async fn retire_dkim_keys(
+        &self,
+        domain_id: Id,
+        now: TimestampMillis,
+    ) -> Result<u64, MailError> {
+        let mut transaction = self.database.immediate_transaction().await?;
+        let retired = sqlx::query(
+            "UPDATE mail_dkim_keys SET status = 'retired', private_sealed = $1, updated_at = $2 \
+             WHERE domain_id = $3 AND status = 'retiring' AND updated_at <= $4",
+        )
+        .bind(Vec::<u8>::new())
+        .bind(now.as_millis())
+        .bind(domain_id.to_string())
+        .bind(now.as_millis() - RETIRING_KEY_MS)
+        .execute(&mut *transaction)
+        .await?
+        .rows_affected();
+        transaction.commit().await?;
+        Ok(retired)
+    }
+
+    /// Whether mail can be sent from the domain, and if not, the first reason. Inbound is live
+    /// when the MX record of the last DNS check is right. Pass the sending `mailbox_id` to also
+    /// refuse a suspended mailbox.
+    pub async fn send_readiness(
+        &self,
+        domain_id: Id,
+        mailbox_id: Option<Id>,
+    ) -> Result<SendReadiness, MailError> {
+        use NotReadyReason::{
+            DkimInactive, DomainUnverified, InboundNotLive, MailboxSuspended, NoRoute,
+        };
+        let domain = self
+            .domain_for_check(domain_id)
+            .await?
+            .ok_or(MailError::NotFound)?;
+        if domain.status != DomainStatus::Verified {
+            return Ok(SendReadiness::NotReady(DomainUnverified));
+        }
+        if domain.report.as_ref().map(|report| &report.mx) != Some(&RecordStatus::Ok) {
+            return Ok(SendReadiness::NotReady(InboundNotLive));
+        }
+        let active: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM mail_dkim_keys WHERE domain_id = $1 AND status = 'active'",
+        )
+        .bind(domain_id.to_string())
+        .fetch_one(self.database.pool())
+        .await?;
+        if active == 0 {
+            return Ok(SendReadiness::NotReady(DkimInactive));
+        }
+        if domain.send_route.is_none() {
+            return Ok(SendReadiness::NotReady(NoRoute));
+        }
+        if let Some(mailbox_id) = mailbox_id {
+            let status: Option<String> =
+                sqlx::query_scalar("SELECT status FROM mailboxes WHERE id = $1")
+                    .bind(mailbox_id.to_string())
+                    .fetch_optional(self.database.pool())
+                    .await?;
+            match status.as_deref() {
+                Some("active") => {}
+                Some(_) => return Ok(SendReadiness::NotReady(MailboxSuspended)),
+                None => return Err(MailError::NotFound),
+            }
+        }
+        Ok(SendReadiness::Ready)
+    }
+
     /// Moves a domain to another workspace (instance admins). Only a domain without addresses
-    /// moves; its catch-all is cleared, as that mailbox stays behind.
+    /// moves; its catch-all is cleared, as that mailbox stays behind, and so are a send route and a provider of
+    /// the old workspace.
     pub async fn move_domain(
         &self,
         name: &str,
@@ -901,6 +1257,12 @@ impl MailRepository {
         .await?;
         sqlx::query(
             "UPDATE mail_domains SET workspace_id = $1, catch_all_mailbox_id = NULL, \
+             send_route_id = CASE WHEN send_route_id IN \
+                 (SELECT id FROM mail_send_routes WHERE workspace_id IS NOT NULL) \
+                 THEN NULL ELSE send_route_id END, \
+             provider_id = CASE WHEN provider_id IN \
+                 (SELECT id FROM mail_providers WHERE workspace_id IS NOT NULL) \
+                 THEN NULL ELSE provider_id END, \
              updated_at = $2 WHERE id = $3",
         )
         .bind(target_workspace_id.to_string())

@@ -358,6 +358,43 @@
 }
 
 /*
+ * Floating mail composer (§9.1 U2): opens in 200 ms on the strong ease-out, scale 0.98 → 1 and opacity, from the
+ * bottom right (its corner of the screen). `backwards`: no transform stays on it after the open (a transform would
+ * make it the containing block of fixed overlays). Reduced motion keeps only the fade (the global rule shortens it).
+ */
+@theme {
+  --animate-composer-window-enter: composer-window-enter 200ms cubic-bezier(0.23, 1, 0.32, 1) backwards;
+  --animate-composer-window-fade: composer-window-fade 200ms cubic-bezier(0.23, 1, 0.32, 1) backwards;
+
+  @keyframes composer-window-enter {
+    from {
+      opacity: 0;
+      transform: scale(0.98);
+    }
+  }
+
+  @keyframes composer-window-fade {
+    from {
+      opacity: 0;
+    }
+  }
+}
+
+/* "Message sent" toast: the bar runs out, linearly, when the message goes (its duration is set inline) */
+@theme {
+  --animate-undo-countdown: undo-countdown linear forwards;
+
+  @keyframes undo-countdown {
+    from {
+      transform: scaleX(1);
+    }
+    to {
+      transform: scaleX(0);
+    }
+  }
+}
+
+/*
  * Page print / "Save as PDF" (Docs page menu → Export → PDF, mail message menu → Print; `printPage` in lib/print.ts).
  * While <html> has [data-print-doc] only the open page's content ([data-print-root] in DocEditor) prints: the app
  * sidebar, docs tree, page header, menus and toasts are hidden; the content is full width, light-themed whatever the

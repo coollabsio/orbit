@@ -79,6 +79,30 @@ fn clean_name(name: &str) -> Result<String, ChatError> {
     }
 }
 
+/// The workspace has room for one more sticker and none has this name. `name` is NOCASE: the comparison
+/// ignores the case of ASCII letters.
+async fn require_sticker_slot(
+    conn: &mut AnyConnection,
+    workspace_id: Id,
+    name: &str,
+) -> Result<(), ChatError> {
+    let (count, Flag(taken)): (i64, Flag) = sqlx::query_as(
+        "SELECT COUNT(*), COALESCE(MAX(CASE WHEN lower(name) = lower($1) THEN 1 ELSE 0 END), 0) \
+         FROM custom_stickers WHERE workspace_id = $2",
+    )
+    .bind(name)
+    .bind(workspace_id.to_string())
+    .fetch_one(&mut *conn)
+    .await?;
+    if taken {
+        return Err(ChatError::StickerNameTaken);
+    }
+    if count >= MAX_STICKERS {
+        return Err(ChatError::StickerLimit);
+    }
+    Ok(())
+}
+
 fn require_manager(actor: Actor) -> Result<(), ChatError> {
     if actor.can(Permission::ChatManage) {
         Ok(())
@@ -147,30 +171,24 @@ impl ChatRepository {
         bytes: &[u8],
     ) -> Result<Written<CustomStickerRecord>, ChatError> {
         let finalization = self.uploads.begin_finalization().await;
-        let now = self.database.database_now().await?;
-        let mut tx = self.database.immediate_transaction().await?;
-        require_manager(load_actor(&mut tx, workspace_id, actor_id).await?)?;
+        // The checks run before the bytes are stored, so a refused request stores nothing, and again in the
+        // transaction, which decides.
+        self.authorize_sticker(workspace_id, actor_id).await?;
         let name = clean_name(name)?;
         if bytes.is_empty() || bytes.len() > STICKER_MAX_BYTES {
             return Err(ChatError::Invalid { field: "file" });
         }
-        // `name` is NOCASE: the comparison ignores the case of ASCII letters.
-        let (count, Flag(taken)): (i64, Flag) = sqlx::query_as(
-            "SELECT COUNT(*), COALESCE(MAX(CASE WHEN lower(name) = lower($1) THEN 1 ELSE 0 END), 0) \
-             FROM custom_stickers WHERE workspace_id = $2",
-        )
-        .bind(&name)
-        .bind(workspace_id.to_string())
-        .fetch_one(&mut *tx)
-        .await?;
-        if taken {
-            return Err(ChatError::StickerNameTaken);
+        {
+            let mut conn = self.database.pool().acquire().await?;
+            require_sticker_slot(&mut conn, workspace_id, &name).await?;
         }
-        if count >= MAX_STICKERS {
-            return Err(ChatError::StickerLimit);
-        }
+        let prepared = finalization.prepare_bytes(workspace_id, bytes).await?;
+        let now = self.database.database_now().await?;
+        let mut tx = self.database.immediate_transaction().await?;
+        require_manager(load_actor(&mut tx, workspace_id, actor_id).await?)?;
+        require_sticker_slot(&mut tx, workspace_id, &name).await?;
         let blob = finalization
-            .finalize_bytes_in_transaction(&mut tx, workspace_id, bytes, now)
+            .finalize_bytes_in_transaction(&mut tx, &prepared)
             .await?;
         let id = Id::new_v7();
         sqlx::query(

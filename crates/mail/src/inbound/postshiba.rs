@@ -94,15 +94,7 @@ pub fn verify_webhook(
     secret: &str,
     now: i64,
 ) -> Result<PostshibaEvent, InboundError> {
-    let (Some(timestamp), Some(signature)) = (timestamp, signature) else {
-        return Err(InboundError::Unauthorized);
-    };
-    let signature = signature.trim();
-    let signature = signature.strip_prefix("sha256=").unwrap_or(signature);
-    let mut signed = format!("{}.", timestamp.trim()).into_bytes();
-    signed.extend_from_slice(body);
-    verify_hex_hmac(secret.trim().as_bytes(), &signed, signature)?;
-    fresh(timestamp, now)?;
+    verify_capsule(timestamp, signature, body, secret, now)?;
 
     let payload: Payload =
         serde_json::from_slice(body).map_err(|_| InboundError::Malformed("json"))?;
@@ -137,4 +129,25 @@ pub fn verify_webhook(
         mail_from: address(envelope.mail_from.as_deref()),
         spf,
     })
+}
+
+/// Checks `X-Capsule-Signature` (`sha256=` and the hex HMAC-SHA256 of `{timestamp}.{body}`) and
+/// `X-Capsule-Timestamp` (within [`super::REPLAY_WINDOW_SECS`]). Inbox webhooks and delivery event
+/// webhooks are signed the same way, each with its own secret.
+pub(crate) fn verify_capsule(
+    timestamp: Option<&str>,
+    signature: Option<&str>,
+    body: &[u8],
+    secret: &str,
+    now: i64,
+) -> Result<(), InboundError> {
+    let (Some(timestamp), Some(signature)) = (timestamp, signature) else {
+        return Err(InboundError::Unauthorized);
+    };
+    let signature = signature.trim();
+    let signature = signature.strip_prefix("sha256=").unwrap_or(signature);
+    let mut signed = format!("{}.", timestamp.trim()).into_bytes();
+    signed.extend_from_slice(body);
+    verify_hex_hmac(secret.trim().as_bytes(), &signed, signature)?;
+    fresh(timestamp, now)
 }

@@ -16,6 +16,7 @@ import { useAuthOptions } from '@/features/auth/api'
 import { PROVIDER_NAMES } from '@/features/auth/providerSignIn'
 import { FieldGrid, RequiredMark } from '@/features/settings/components/SettingsParts'
 import { LoadingText } from '@/components/ui/spinner'
+import { writeClipboard } from '@/lib/clipboard'
 
 /** The providers an admin can save here; OpenID Connect is set by environment variables only. */
 type SavableProvider = Exclude<Provider, 'oidc'>
@@ -166,7 +167,7 @@ function CallbackUrlField({ id, url }: { id: string; url: string }) {
       <div className="flex items-center gap-2">
         <Input id={id} readOnly value={url} className="font-mono" onFocus={(event) => event.target.select()} />
         <Button type="button" variant="outline" size="icon" aria-label="Copy callback URL" onClick={() => {
-          void navigator.clipboard.writeText(url).then(() => toast('Copied'), () => toast.error('Could not copy. Select and copy it manually.'))
+          void writeClipboard(url).then(() => toast('Copied'), () => toast.error('Could not copy. Select and copy it manually.'))
         }}>
           <Copy />
         </Button>

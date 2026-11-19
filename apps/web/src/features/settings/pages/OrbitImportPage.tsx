@@ -33,6 +33,7 @@ import {
   useOrbitImports,
   useStartOrbitImport,
 } from '@/features/settings/api/orbitImports'
+import { writeClipboard } from '@/lib/clipboard'
 
 const ROOT = '/settings/import/orbit'
 const TITLE = 'Import from Orbit'
@@ -462,7 +463,7 @@ function ImportingStep({ workspaceId, item }: { workspaceId: string; item: Orbit
 }
 
 function copyImportLink() {
-  void navigator.clipboard.writeText(`${window.location.origin}${ROOT}`).then(
+  void writeClipboard(`${window.location.origin}${ROOT}`).then(
     () => toast('Link copied'),
     () => toast.error('Could not copy the link.'),
   )

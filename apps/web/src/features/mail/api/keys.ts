@@ -1,15 +1,22 @@
 import type { MailFolder, MailNamePattern } from '@orbit/api/generated/types.gen'
 
 /**
- * Which threads a list shows. Without `folder`: the inbox, or with `labelId` or `starred` the inbox and the archive.
- * Without `mailboxId`: every mailbox the user reads.
+ * Which threads a list shows. Without `folder`: the inbox, or with `labelId` or `starred` the inbox and the archive,
+ * or with `sent` every folder but the trash. Without `mailboxId`: every mailbox the user reads.
  */
 export interface ThreadFilter {
   mailboxId?: string
   folder?: MailFolder
   labelId?: string
   starred?: boolean
+  /** Sent: threads the mailbox sent mail in, every folder but the trash (not with `folder`). */
+  sent?: boolean
+  /** Only the threads the user has not read (the list's **Unread** switch). */
+  unread?: boolean
 }
+
+/** The outbound queue views the server lists (`GET mail/outbound?view=`). Sent is a thread list (`ThreadFilter.sent`). */
+export type OutboundView = 'scheduled' | 'outbox'
 
 /**
  * Deliberately outside the `['workspace', id]` prefix (like `chatKeys`): workspace events invalidate that whole
@@ -28,6 +35,26 @@ export const mailKeys = {
   /** Prefix of every open thread. */
   threadDetails: (workspaceId: string) => ['mail', workspaceId, 'thread'] as const,
   thread: (workspaceId: string, threadId: string) => ['mail', workspaceId, 'thread', threadId] as const,
+  /** The user's drafts (all mailboxes, or one). Not under `list`: they are not thread lists. */
+  drafts: (workspaceId: string, mailboxId?: string) => ['mail', workspaceId, 'drafts', mailboxId ?? null] as const,
+  /** Prefix of every draft read. */
+  draftsAll: (workspaceId: string) => ['mail', workspaceId, 'drafts'] as const,
+  draft: (workspaceId: string, draftId: string) => ['mail', workspaceId, 'draft', draftId] as const,
+  /** The suppressed recipients of a saved draft, for the recipients it had (`recipients`: sorted, joined). */
+  draftCheck: (workspaceId: string, draftId: string, recipients: string) => ['mail', workspaceId, 'draft-check', draftId, recipients] as const,
+  /** The addresses the user sends as; of a thread, the one that received it comes first. */
+  fromAddresses: (workspaceId: string, threadId?: string) => ['mail', workspaceId, 'from-addresses', threadId ?? null] as const,
+  /** Prefix of every outbound view (`scheduled`, `outbox`). */
+  outboundAll: (workspaceId: string) => ['mail', workspaceId, 'outbound'] as const,
+  outbound: (workspaceId: string, view: OutboundView, mailboxId?: string) => ['mail', workspaceId, 'outbound', view, mailboxId ?? null] as const,
+  contacts: (workspaceId: string, query: string) => ['mail', workspaceId, 'contacts', query] as const,
+  signatures: (workspaceId: string) => ['mail', workspaceId, 'signatures'] as const,
+  snippets: (workspaceId: string) => ['mail', workspaceId, 'snippets'] as const,
+  settingsMe: (workspaceId: string) => ['mail', workspaceId, 'settings-me'] as const,
+  vacation: (workspaceId: string, mailboxId: string) => ['mail', workspaceId, 'vacation', mailboxId] as const,
+  suppressions: (workspaceId: string) => ['mail', workspaceId, 'suppressions'] as const,
+  sendRoutes: (workspaceId: string) => ['mail', workspaceId, 'send-routes'] as const,
+  sendPolicy: (workspaceId: string) => ['mail', workspaceId, 'send-policy'] as const,
   domains: (workspaceId: string) => ['mail', workspaceId, 'domains'] as const,
   domain: (workspaceId: string, domainId: string) => ['mail', workspaceId, 'domains', domainId] as const,
   mailboxes: (workspaceId: string) => ['mail', workspaceId, 'mailboxes'] as const,

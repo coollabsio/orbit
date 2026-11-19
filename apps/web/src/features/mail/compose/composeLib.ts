@@ -1,0 +1,492 @@
+// The composer's rules, without React: pre-send checks (§9.1 U5), message size and file links (§5.9), the
+// recipient line and fields, send-later times, and where the signature sits in the text.
+
+export type Recipient = string | { address: string; name?: string | null }
+
+const addressOf = (recipient: Recipient) => (typeof recipient === 'string' ? recipient : recipient.address)
+const lower = (address: string) => address.trim().toLowerCase()
+const domainOf = (address: string) => lower(address).split('@').at(-1) ?? ''
+
+// Pre-send checks
+
+export type WarningKind = 'missing_attachment' | 'empty_subject' | 'placeholder' | 'new_outside_recipient' | 'reply_all_over_10' | 'suppressed'
+
+export interface Warning {
+  kind: WarningKind
+  message: string
+  /** The recipients it is about (outside or suppressed ones). */
+  addresses?: string[]
+  /** One line for each of them, when the message sums them up. */
+  details?: string[]
+}
+
+/** A recipient on the suppression list (`POST drafts/{id}/check`). */
+export interface SuppressedRecipient {
+  address: string
+  /** `hard_bounce`, `complaint` or `manual`. */
+  reason: string
+  since: string
+}
+
+export interface PreSendInput {
+  /** The text the user wrote (plain). */
+  text: string
+  subject: string
+  fileCount: number
+  /** `new`, `reply`, `reply_all`, `forward` or `forward_attached`. */
+  mode: string
+  to: readonly string[]
+  cc: readonly string[]
+  bcc: readonly string[]
+  /** Everyone on the thread so far (senders and recipients); `null` for a new message. */
+  threadAddresses: readonly string[] | null
+  /** The workspace's mail domains. */
+  workspaceDomains: readonly string[]
+  /** Recipients on the suppression list, as the server's check names them. */
+  suppressed: readonly SuppressedRecipient[]
+  /** For the dates in the messages; the user's own when absent. */
+  timeZone?: string
+}
+
+const ATTACHMENT_WORD = /\battach(ed|ment|ments)?\b/i
+const PLACEHOLDER = /\{[^}]+\}/
+/** Reply all to more people than this asks first. */
+export const REPLY_ALL_LIMIT = 10
+
+/** Distinct recipients in the order they were entered (the first spelling of each address). */
+function distinctRecipients(input: Pick<PreSendInput, 'to' | 'cc' | 'bcc'>): string[] {
+  const seen = new Set<string>()
+  return [...input.to, ...input.cc, ...input.bcc].filter((address) => {
+    const key = lower(address)
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+const people = (addresses: readonly string[]) => (addresses.length === 1 ? addresses[0] : `${addresses.length} people`)
+
+/**
+ * Checks shown above Send (not a dialog); sending again sends anyway. In the order: a missing attachment, an empty
+ * subject, a placeholder left from a snippet, a new outside recipient in a workspace-only thread, reply all to more
+ * than 10 people, a suppressed recipient.
+ */
+export function preSendWarnings(input: PreSendInput): Warning[] {
+  const warnings: Warning[] = []
+  const recipients = distinctRecipients(input)
+  if (ATTACHMENT_WORD.test(input.text) && input.fileCount === 0 && input.mode !== 'forward_attached') {
+    warnings.push({ kind: 'missing_attachment', message: 'You mention an attachment, but no file is attached.' })
+  }
+  if (input.subject.trim() === '') warnings.push({ kind: 'empty_subject', message: 'The subject is empty.' })
+  const placeholder = PLACEHOLDER.exec(input.text)?.[0] ?? PLACEHOLDER.exec(input.subject)?.[0]
+  if (placeholder) warnings.push({ kind: 'placeholder', message: `${placeholder} is still a placeholder.` })
+
+  if (input.threadAddresses && input.threadAddresses.length > 0) {
+    const domains = new Set(input.workspaceDomains.map((domain) => domain.toLowerCase()))
+    const inside = (address: string) => domains.has(domainOf(address))
+    const onThread = new Set(input.threadAddresses.map(lower))
+    if (input.threadAddresses.every(inside)) {
+      const outside = recipients.filter((address) => !inside(address) && !onThread.has(lower(address)))
+      if (outside.length > 0) {
+        warnings.push({
+          kind: 'new_outside_recipient',
+          message: `${people(outside)} ${outside.length === 1 ? 'is' : 'are'} outside the workspace. This thread had only workspace addresses.`,
+          addresses: outside,
+        })
+      }
+    }
+  }
+  if (input.mode === 'reply_all' && recipients.length > REPLY_ALL_LIMIT) {
+    warnings.push({ kind: 'reply_all_over_10', message: `Reply all goes to ${recipients.length} people.` })
+  }
+  const entries = new Map(input.suppressed.map((entry) => [lower(entry.address), entry]))
+  const suppressed = recipients.filter((address) => entries.has(lower(address)))
+  if (suppressed.length > 0) {
+    const details = suppressed.map((address) => {
+      const text = suppressionText(entries.get(lower(address))!, input.timeZone)
+      return `${address}: ${text.charAt(0).toLowerCase()}${text.slice(1)}`
+    })
+    warnings.push({
+      kind: 'suppressed',
+      message:
+        suppressed.length === 1
+          ? `${details[0]}. Orbit will skip it.`
+          : `${suppressed.length} recipients are on the suppression list. Orbit will skip them.`,
+      addresses: suppressed,
+      details: suppressed.length === 1 ? undefined : details,
+    })
+  }
+  return warnings
+}
+
+const SUPPRESSION_REASONS: Record<string, string> = {
+  hard_bounce: 'the address does not take mail',
+  complaint: 'marked the mail as spam',
+  manual: 'added by an admin',
+}
+
+/** Why and since when an address is suppressed: "Bounced on Nov 3, 2026: the address does not take mail". */
+export function suppressionText(entry: Pick<SuppressedRecipient, 'reason' | 'since'>, timeZone?: string): string {
+  const since = new Date(entry.since)
+  const reason = SUPPRESSION_REASONS[entry.reason]
+  if (Number.isNaN(since.getTime()) || !reason) return 'Bounced before'
+  const date = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone }).format(since)
+  return `Bounced on ${date}: ${reason}`
+}
+
+// Size and file links
+
+/** Line breaks in base64 (every 76 characters) add about 2 %. */
+const LINE_OVERHEAD = 1.02
+
+/** The size a file adds to the message once encoded: base64 (4 bytes for each 3) plus line breaks. */
+const encodedFileSize = (size: number) => Math.ceil(4 * Math.ceil(size / 3) * LINE_OVERHEAD)
+
+/** The encoded size of a message: the body as it is plus every file that is not sent as a link, in base64. */
+export function encodedSize(files: readonly { size: number; asLink: boolean }[], bodyBytes: number): number {
+  return files.reduce((total, file) => (file.asLink ? total : total + encodedFileSize(file.size)), bodyBytes)
+}
+
+/** Headers and the MIME structure, as the server counts them. */
+export const MESSAGE_OVERHEAD_BYTES = 4096
+
+export interface SizedFile {
+  id: string
+  size: number
+  asLink: boolean
+  /** Inline images and forwarded files must travel with the message. */
+  linkable: boolean
+}
+
+/** The files to send as links, largest first, until the message fits under `limit` (all of them when it never does). */
+export function suggestLinks(files: readonly SizedFile[], limit: number, bodyBytes = 0): string[] {
+  let size = encodedSize(files, bodyBytes)
+  const picked: string[] = []
+  const candidates = files.filter((file) => file.linkable && !file.asLink).sort((a, b) => b.size - a.size)
+  for (const file of candidates) {
+    if (size <= limit) break
+    picked.push(file.id)
+    size -= encodedFileSize(file.size)
+  }
+  return picked
+}
+
+/**
+ * Why a draft file cannot be sent as a link (the server answers `link_forwarded` / `link_inline`), or `null` when it
+ * can: a forwarded file and an image in the text must travel with the message.
+ */
+export function linkRefusal(file: { source_attachment_id?: string | null; content_id?: string | null }): string | null {
+  if (file.source_attachment_id) return 'A forwarded file travels with the message.'
+  if (file.content_id?.trim()) return 'An image in the text travels with the message.'
+  return null
+}
+
+/** The size limits of the send routes (bytes, encoded): Postmark, direct/SMTP/Mailgun/PostShiba, Cloudflare, SES. */
+export const ROUTE_LIMITS = [10_000_000, 25_000_000, 26_214_400, 40_000_000] as const
+
+/**
+ * The server says only that a message is too large for its route. The limit it was over is most likely the largest
+ * route limit below the message's size; linking files to fit under it, then sending again, converges.
+ */
+export function likelyLimit(size: number): number {
+  return ROUTE_LIMITS.filter((limit) => limit < size).at(-1) ?? ROUTE_LIMITS[0]
+}
+
+/** The message is too large: its size, the limit, and the files to send as links. */
+export interface TooLarge {
+  size: number
+  limit: number
+  suggestion: string[]
+}
+
+/**
+ * The files to offer as links when the message is too large: enough for `limit` (the route's, else the likely one),
+ * and at least the largest linkable file (an estimate can be off, and a link always makes the message smaller).
+ */
+export function offerLinks(files: readonly SizedFile[], bodyBytes: number, knownLimit?: number | null): TooLarge {
+  const size = encodedSize(files, bodyBytes)
+  const limit = knownLimit || likelyLimit(size)
+  const suggestion = suggestLinks(files, limit, bodyBytes)
+  if (suggestion.length === 0) {
+    const largest = files.filter((file) => file.linkable && !file.asLink).sort((a, b) => b.size - a.size)[0]
+    if (largest) suggestion.push(largest.id)
+  }
+  return { size, limit, suggestion }
+}
+
+/** Before sending: the message is over the route's limit of the From address (`null` without a limit or when it fits). */
+export function sizeCheck(files: readonly SizedFile[], bodyBytes: number, limit: number | null | undefined): TooLarge | null {
+  if (!limit || encodedSize(files, bodyBytes) <= limit) return null
+  return offerLinks(files, bodyBytes, limit)
+}
+
+/** An image uploaded into the text (not a forwarded one): it shows in the text, not as a file. */
+export const isInlineUpload = (file: { content_id?: string | null; source_attachment_id?: string | null }) =>
+  Boolean(file.content_id?.trim()) && !file.source_attachment_id
+
+/**
+ * Inline images uploaded into the text that the text no longer shows (the block was deleted): the server sends every
+ * inline file, so they are removed before sending. Forwarded inline images belong to the original and stay.
+ */
+export function unusedInlineFiles(files: readonly { id: string; content_id?: string | null; source_attachment_id?: string | null }[], html: string): string[] {
+  return files.filter((file) => isInlineUpload(file) && !html.includes(`cid:${file.content_id!.trim()}`)).map((file) => file.id)
+}
+
+// Recipients
+
+/** The recipients of a draft as one stable key (lower case, sorted), e.g. for the suppression check. */
+export const recipientsKey = (...lists: readonly (readonly string[])[]) => [...new Set(lists.flat().map(lower))].sort().join(',')
+
+/** A recipient list with the text still typed in its field added (split like a paste, no duplicates). */
+export function commitTyped(addresses: readonly string[], typed: string): string[] {
+  const next = [...addresses]
+  for (const entry of splitRecipients(typed)) {
+    if (!next.some((existing) => lower(existing) === lower(entry))) next.push(entry)
+  }
+  return next
+}
+
+/** The text of a draft's body on one line, for the "Draft" line of a thread and the Drafts list (browser only). */
+export function draftText(html: string): string {
+  if (!html) return ''
+  const text = new DOMParser().parseFromString(html, 'text/html').body.textContent ?? ''
+  return text.replace(/\s+/g, ' ').trim()
+}
+
+/** The one-line recipients of an inline reply: "To Andras +2". */
+export function recipientSummary(to: readonly Recipient[], cc: readonly Recipient[], bcc: readonly Recipient[]): string {
+  const [label, list] = to.length > 0 ? ['To', to] : cc.length > 0 ? ['Cc', cc] : bcc.length > 0 ? ['Bcc', bcc] : [null, []]
+  const first = list[0]
+  if (!label || first === undefined) return 'No recipients'
+  const name = typeof first === 'string' ? '' : (first.name?.trim().split(/\s+/)[0] ?? '')
+  const others = to.length + cc.length + bcc.length - 1
+  return `${label} ${name || addressOf(first)}${others > 0 ? ` +${others}` : ''}`
+}
+
+/**
+ * Typed or pasted text as recipients: commas, semicolons and line breaks separate them (not inside quotes or
+ * brackets), `Name <address>` keeps the address, and spaces separate bare addresses. Text without an address stays
+ * as one entry (shown as invalid).
+ */
+export function splitRecipients(text: string): string[] {
+  const pieces: string[] = []
+  let current = ''
+  let quoted = false
+  let bracketed = false
+  for (const char of text) {
+    if (char === '"') quoted = !quoted
+    else if (char === '<') bracketed = true
+    else if (char === '>') bracketed = false
+    if (!quoted && !bracketed && /[,;\n\r\t]/.test(char)) {
+      pieces.push(current)
+      current = ''
+    } else {
+      current += char
+    }
+  }
+  pieces.push(current)
+  return pieces.flatMap((piece) => {
+    const bracket = /<([^>]*)>/.exec(piece)
+    if (bracket) return [bracket[1]!.trim()].filter(Boolean)
+    const words = piece.trim().split(/\s+/).filter(Boolean)
+    const addresses = words.filter((word) => word.includes('@'))
+    if (addresses.length > 0) return addresses
+    const rest = piece.trim().replace(/^"|"$/g, '').trim()
+    return rest ? [rest] : []
+  })
+}
+
+const LOCAL_PART = /^[A-Za-z0-9.!#$&'*+/=?^_`{|}~-]+$/
+const DOMAIN = /^(?=.{1,253}$)([A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$/
+
+/** An address the server accepts: no name, quotes, routing (`%`, `!`) or spaces; a domain with a dot. */
+export function isValidAddress(address: string): boolean {
+  if (address.length > 254) return false
+  const parts = address.split('@')
+  if (parts.length !== 2) return false
+  const [local, domain] = parts as [string, string]
+  return local.length > 0 && local.length <= 64 && LOCAL_PART.test(local) && !/[%!]/.test(local) && DOMAIN.test(domain)
+}
+
+// Send later
+
+interface WallClock {
+  year: number
+  month: number
+  day: number
+  weekday: number
+}
+
+/** The calendar date and weekday (0 = Sunday) of `at` in `timeZone`. */
+function wallClock(at: Date, timeZone: string): WallClock {
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone, year: 'numeric', month: 'numeric', day: 'numeric', weekday: 'short' }).formatToParts(at)
+  const part = (type: string) => parts.find((entry) => entry.type === type)?.value ?? ''
+  const weekday = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(part('weekday'))
+  return { year: Number(part('year')), month: Number(part('month')), day: Number(part('day')), weekday }
+}
+
+/** How far `timeZone` is ahead of UTC at `at`, in ms. */
+function zoneOffset(at: Date, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: 'numeric',
+    second: 'numeric',
+  }).formatToParts(at)
+  const part = (type: string) => Number(parts.find((entry) => entry.type === type)?.value ?? 0)
+  const asUtc = Date.UTC(part('year'), part('month') - 1, part('day'), part('hour'), part('minute'), part('second'))
+  return asUtc - Math.floor(at.getTime() / 1000) * 1000
+}
+
+/** The instant a wall-clock time is in `timeZone` (days past the month's end roll over). */
+function zonedTime(year: number, month: number, day: number, hour: number, timeZone: string): Date {
+  const guess = Date.UTC(year, month - 1, day, hour)
+  const first = guess - zoneOffset(new Date(guess), timeZone)
+  // the offset can differ at the answer (a daylight saving change in between)
+  return new Date(guess - zoneOffset(new Date(first), timeZone))
+}
+
+export const SEND_LATER_HOUR = 8
+
+/** **Send later** choices in the user's time zone: tomorrow at 8:00 and the next Monday at 8:00 (in 7 days on a Monday). */
+export function sendLaterPresets(now: Date, timeZone: string): { label: string; at: Date }[] {
+  const today = wallClock(now, timeZone)
+  const toMonday = ((8 - today.weekday) % 7) || 7
+  return [
+    { label: `Tomorrow ${SEND_LATER_HOUR}:00`, at: zonedTime(today.year, today.month, today.day + 1, SEND_LATER_HOUR, timeZone) },
+    { label: `Monday ${SEND_LATER_HOUR}:00`, at: zonedTime(today.year, today.month, today.day + toMonday, SEND_LATER_HOUR, timeZone) },
+  ]
+}
+
+/** A calendar day (month 1–12). */
+export interface CalendarDay {
+  year: number
+  month: number
+  day: number
+}
+
+/** Today's date in `timeZone`. */
+export function dayIn(at: Date, timeZone: string): CalendarDay {
+  const { year, month, day } = wallClock(at, timeZone)
+  return { year, month, day }
+}
+
+/** The instant of a day and an `HH:MM` time in `timeZone` ("Pick date and time"); `null` for a time that is not one. */
+export function zonedDateTime(date: CalendarDay, time: string, timeZone: string): Date | null {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(time.trim())
+  if (!match) return null
+  const hour = Number(match[1])
+  const minute = Number(match[2])
+  if (hour > 23 || minute > 59) return null
+  return new Date(zonedTime(date.year, date.month, date.day, hour, timeZone).getTime() + minute * 60_000)
+}
+
+/**
+ * When a scheduled message goes, for people: "Today 16:30", "Tomorrow 8:00", "Thu, Nov 19, 8:00" (a year when not this
+ * one). `midSentence`: "today" and "tomorrow" in lower case ("Scheduled for tomorrow 8:00").
+ */
+export function sendTimeLabel(at: Date, now: Date, timeZone: string, midSentence = false): string {
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone, hour: 'numeric', minute: '2-digit', hourCycle: 'h23' }).formatToParts(at)
+  const part = (type: string) => parts.find((entry) => entry.type === type)?.value ?? '0'
+  // like the presets: 8:00, 16:30
+  const time = `${Number(part('hour'))}:${part('minute')}`
+  const day = dayIn(at, timeZone)
+  const today = dayIn(now, timeZone)
+  const dayNumber = (value: CalendarDay) => Date.UTC(value.year, value.month - 1, value.day) / 86_400_000
+  const days = dayNumber(day) - dayNumber(today)
+  if (days === 0) return `${midSentence ? 'today' : 'Today'} ${time}`
+  if (days === 1) return `${midSentence ? 'tomorrow' : 'Tomorrow'} ${time}`
+  const date = new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short', month: 'short', day: 'numeric', year: day.year === today.year ? undefined : 'numeric' }).format(at)
+  return `${date}, ${time}`
+}
+
+// Untouched drafts
+
+/** The draft as it was when the composer opened. */
+export interface OpenedDraft {
+  version: number
+  created_at: string
+  updated_at: string
+  to: readonly string[]
+  cc: readonly string[]
+  bcc: readonly string[]
+  subject: string
+  from_address_id: string
+}
+
+/** The composer now. `bodyWritten`: the text has more than the signature put in at the start. */
+export interface DraftNow {
+  to: readonly string[]
+  cc: readonly string[]
+  bcc: readonly string[]
+  subject: string
+  fromId: string
+  bodyWritten: boolean
+  /** Files attached or uploading. */
+  files: number
+}
+
+const sameList = (a: readonly string[], b: readonly string[]) => recipientsKey(a) === recipientsKey(b)
+
+/**
+ * A draft that can go when its composer closes: it was never saved (it was made just now, by R, C or Forward) and
+ * nothing changed since: the text has only its signature, and the subject, To, Cc, Bcc and From are what the server
+ * put in. A draft saved before (on another device, an earlier visit, given back by Undo) is always kept.
+ */
+export function isUntouchedDraft(opened: OpenedDraft, now: DraftNow): boolean {
+  const neverSaved = opened.version === 1 && opened.created_at === opened.updated_at
+  return (
+    neverSaved &&
+    !now.bodyWritten &&
+    now.files === 0 &&
+    now.subject === opened.subject &&
+    now.fromId === opened.from_address_id &&
+    sameList(now.to, opened.to) &&
+    sameList(now.cc, opened.cc) &&
+    sameList(now.bcc, opened.bcc)
+  )
+}
+
+// Signature
+
+const normalized = (text: string) => text.replace(/\s+/g, ' ').trim()
+
+/**
+ * Where the signature starts in the text's lines (one per block), or `null` when the text does not end with it (the
+ * user changed or removed it). Empty lines are ignored at the end and inside the signature.
+ */
+export function signatureStart(lines: readonly string[], signature: readonly string[]): number | null {
+  const wanted = signature.map(normalized).filter(Boolean)
+  if (wanted.length === 0) return null
+  let index = lines.length - 1
+  for (let at = wanted.length - 1; at >= 0; at--) {
+    while (index >= 0 && normalized(lines[index]!) === '') index--
+    if (index < 0 || normalized(lines[index]!) !== wanted[at]) return null
+    if (at > 0) index--
+  }
+  return index
+}
+
+// Send readiness
+
+/** Why Send is off for an address that is not ready (`MailFromAddress.not_ready_reason`). */
+export function notReadyText(reason: string | null | undefined): string {
+  switch (reason) {
+    case 'domain_unverified':
+      return 'The domain of this address is not verified yet.'
+    case 'inbound_not_live':
+      return 'Mail for this domain does not arrive at Orbit yet.'
+    case 'dkim_inactive':
+      return 'The DKIM record of this domain is not active yet.'
+    case 'no_route':
+      return 'This domain has no send route.'
+    case 'mailbox_suspended':
+      return 'This mailbox is suspended.'
+    default:
+      return 'This address cannot send yet.'
+  }
+}

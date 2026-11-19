@@ -132,7 +132,12 @@ pub const SNS_WINDOW_SECS: i64 = 2 * 60 * 60;
 /// The SNS `Timestamp` of `message` is within [`SNS_WINDOW_SECS`] of `now_secs`, so a captured
 /// request cannot be sent again later. Check it after the signature, which covers the timestamp.
 pub fn fresh(message: &SnsMessage, now_secs: i64) -> Result<(), InboundError> {
-    let sent = rfc3339_secs(&message.signed().timestamp).ok_or(InboundError::Replay)?;
+    fresh_signed(message.signed(), now_secs)
+}
+
+/// [`fresh`] for any SNS message.
+pub fn fresh_signed(signed: &Signed, now_secs: i64) -> Result<(), InboundError> {
+    let sent = rfc3339_secs(&signed.timestamp).ok_or(InboundError::Replay)?;
     if (now_secs - sent).abs() > SNS_WINDOW_SECS {
         Err(InboundError::Replay)
     } else {
@@ -182,8 +187,21 @@ fn rfc3339_secs(value: &str) -> Option<i64> {
     Some(days * 86_400 + hour * 3_600 + minute * 60 + second)
 }
 
-/// Reads an SNS message (not yet verified).
-pub fn parse_sns(body: &[u8]) -> Result<SnsMessage, InboundError> {
+/// An SNS message of any topic, before its signature is checked ([`verify_signed`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SnsEnvelope {
+    /// `Notification` or `SubscriptionConfirmation`.
+    pub kind: String,
+    /// The notification's `Message` (for SES, a JSON document).
+    pub message: String,
+    pub subscribe_url: Option<String>,
+    pub topic_arn: String,
+    pub signed: Signed,
+}
+
+/// Reads an SNS envelope (not yet verified): a `Notification` or a `SubscriptionConfirmation`,
+/// with the text its signature covers.
+pub fn parse_envelope(body: &[u8]) -> Result<SnsEnvelope, InboundError> {
     let envelope: Envelope =
         serde_json::from_slice(body).map_err(|_| InboundError::Malformed("json"))?;
     let signature = base64::engine::general_purpose::STANDARD
@@ -221,25 +239,36 @@ pub fn parse_sns(body: &[u8]) -> Result<SnsMessage, InboundError> {
         }
         _ => return Err(InboundError::Malformed("sns_type")),
     }
-    let signed = Signed {
-        text,
-        signature,
-        version: envelope.signature_version,
-        cert_url: envelope.signing_cert_url,
-        timestamp: envelope.timestamp,
-    };
+    Ok(SnsEnvelope {
+        kind: envelope.kind,
+        message: envelope.message,
+        subscribe_url: envelope.subscribe_url,
+        topic_arn: envelope.topic_arn,
+        signed: Signed {
+            text,
+            signature,
+            version: envelope.signature_version,
+            cert_url: envelope.signing_cert_url,
+            timestamp: envelope.timestamp,
+        },
+    })
+}
+
+/// Reads an SNS message (not yet verified).
+pub fn parse_sns(body: &[u8]) -> Result<SnsMessage, InboundError> {
+    let envelope = parse_envelope(body)?;
     match envelope.kind.as_str() {
         "SubscriptionConfirmation" => Ok(SnsMessage::SubscriptionConfirmation {
             subscribe_url: envelope
                 .subscribe_url
                 .ok_or(InboundError::Malformed("subscribe_url"))?,
             topic_arn: envelope.topic_arn,
-            signed,
+            signed: envelope.signed,
         }),
         _ => Ok(SnsMessage::Notification {
             ses: ses_receipt(&envelope.message)?,
             topic_arn: envelope.topic_arn,
-            signed,
+            signed: envelope.signed,
         }),
     }
 }
@@ -286,7 +315,11 @@ fn ses_receipt(message: &str) -> Result<SesReceipt, InboundError> {
 /// Verifies the message's signature with the PEM certificate from its `SigningCertURL` (the caller
 /// fetched it after [`cert_url_ok`]). Version 1 is RSA with SHA-1, version 2 with SHA-256.
 pub fn verify_sns(message: &SnsMessage, cert_pem: &[u8]) -> Result<(), InboundError> {
-    let signed = message.signed();
+    verify_signed(message.signed(), cert_pem)
+}
+
+/// [`verify_sns`] for any SNS message: the signature of `signed` with the PEM certificate.
+pub fn verify_signed(signed: &Signed, cert_pem: &[u8]) -> Result<(), InboundError> {
     let (_, pem) =
         x509_parser::pem::parse_x509_pem(cert_pem).map_err(|_| InboundError::Unauthorized)?;
     let cert = pem.parse_x509().map_err(|_| InboundError::Unauthorized)?;

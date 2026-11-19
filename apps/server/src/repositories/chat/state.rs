@@ -91,7 +91,7 @@ impl ChatRepository {
         actor_id: Id,
         conversation_id: Id,
     ) -> Result<Written<ConversationStateRecord>, ChatError> {
-        let mut tx = self.database.immediate_transaction().await?;
+        let mut tx = self.database.workspace_transaction(workspace_id).await?;
         let access = load_access(&mut tx, workspace_id, actor_id, conversation_id).await?;
         let member = access.require_member()?;
         let mut events = Events::default();
@@ -189,7 +189,7 @@ impl ChatRepository {
         actor_id: Id,
         root_id: Id,
     ) -> Result<Written<ThreadStateRecord>, ChatError> {
-        let mut tx = self.database.immediate_transaction().await?;
+        let mut tx = self.database.workspace_transaction(workspace_id).await?;
         let root = load_root(&mut tx, workspace_id, actor_id, root_id).await?;
         let following = load_thread_member(&mut tx, root_id, actor_id)
             .await?
@@ -432,7 +432,7 @@ impl ChatRepository {
         conversation_id: Id,
         update: StateUpdate,
     ) -> Result<Written<ConversationStateRecord>, ChatError> {
-        let mut tx = self.database.immediate_transaction().await?;
+        let mut tx = self.database.workspace_transaction(workspace_id).await?;
         let access = load_access(&mut tx, workspace_id, actor_id, conversation_id).await?;
         let member = access.require_member()?;
         sqlx::query(

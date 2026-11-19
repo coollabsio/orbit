@@ -264,7 +264,9 @@ fn collapse_whitespace(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-fn snippet(body_text: &str) -> String {
+/// The first [`SNIPPET_CHARS`] characters of a body, whitespace collapsed.
+#[must_use]
+pub fn snippet(body_text: &str) -> String {
     let mut snippet = String::new();
     let mut chars = 0;
     for word in body_text.split_whitespace() {

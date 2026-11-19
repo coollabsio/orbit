@@ -30,6 +30,9 @@ export const queryKeys = {
   /** The Admin mail page (switch and health card). Workspace mail keys are `mailKeys` in `features/mail/api/keys`. */
   adminMail: ['admin', 'mail'] as const,
   adminMailProviders: ['admin', 'mail', 'providers'] as const,
+  adminMailSendRoutes: ['admin', 'mail', 'send-routes'] as const,
+  adminMailSendPolicies: ['admin', 'mail', 'send-policies'] as const,
+  adminMailSendTiers: ['admin', 'mail', 'send-tiers'] as const,
   adminMailTest: (testId: string) => ['admin', 'mail', 'test', testId] as const,
   /** Public: what the sign-in pages offer (open registration, email). */
   authOptions: ['auth-options'] as const,

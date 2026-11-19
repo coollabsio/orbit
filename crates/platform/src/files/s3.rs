@@ -28,6 +28,10 @@ const OBJECT_BODY_BYTES: usize = 16 * 1024 * 1024;
 const LIST_BODY_BYTES: usize = 8 * 1024 * 1024;
 /// The whole of a request without a file body, also when the server sends slowly.
 const SMALL_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
+/// A DELETE or HEAD. Callers such as reconcile can hold the database write lock while they wait.
+const QUICK_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
+/// The size assumed for a download without a Content-Length: the largest single PUT S3 accepts.
+const UNKNOWN_OBJECT_BYTES: u64 = 5 * 1024 * 1024 * 1024;
 /// Reading an error body of a file transfer.
 const ERROR_BODY_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -122,6 +126,8 @@ pub enum S3Error {
     },
     #[error("object storage returned an invalid response: {0}")]
     Response(String),
+    #[error("object storage request timed out after {0:?}")]
+    Timeout(Duration),
 }
 
 impl S3Error {
@@ -134,6 +140,7 @@ impl S3Error {
             Self::Request(error) if error.is_timeout() => {
                 "the storage endpoint did not answer in time".to_owned()
             }
+            Self::Timeout(_) => "the storage endpoint did not answer in time".to_owned(),
             Self::Request(error) if error.is_connect() => {
                 "the connection to the storage endpoint failed".to_owned()
             }
@@ -298,6 +305,7 @@ impl S3Bucket {
             .request(Method::PUT, key, &[], &[])
             .header(CONTENT_LENGTH, length)
             .header(CONTENT_TYPE, "application/octet-stream")
+            .timeout(transfer_timeout(length))
             .body(reqwest::Body::wrap_stream(
                 tokio_util::io::ReaderStream::new(file),
             ))
@@ -341,20 +349,33 @@ impl S3Bucket {
 
     /// Downloads the object into `path` (created or truncated). Returns `false` when the object does not exist.
     pub async fn get_to_file(&self, key: &str, path: &Path) -> Result<bool, S3Error> {
-        let response = self.request(Method::GET, key, &[], &[]).send().await?;
+        let started = tokio::time::Instant::now();
+        // reqwest fixes a request's timeout before the Content-Length is known, so the body gets a deadline.
+        let response = tokio::time::timeout(
+            SMALL_REQUEST_TIMEOUT,
+            self.request(Method::GET, key, &[], &[]).send(),
+        )
+        .await
+        .map_err(|_| S3Error::Timeout(SMALL_REQUEST_TIMEOUT))??;
         if response.status() == StatusCode::NOT_FOUND {
             return Ok(false);
         }
         let mut response = expect_success(response).await?;
+        let limit = transfer_timeout(response.content_length().unwrap_or(UNKNOWN_OBJECT_BYTES));
         let io = |source| S3Error::Io {
             path: path.to_owned(),
             source,
         };
-        let mut file = tokio::fs::File::create(path).await.map_err(io)?;
-        while let Some(chunk) = response.chunk().await? {
-            file.write_all(&chunk).await.map_err(io)?;
-        }
-        file.sync_all().await.map_err(io)?;
+        let download = async {
+            let mut file = tokio::fs::File::create(path).await.map_err(io)?;
+            while let Some(chunk) = response.chunk().await? {
+                file.write_all(&chunk).await.map_err(io)?;
+            }
+            file.sync_all().await.map_err(io)
+        };
+        tokio::time::timeout_at(started + limit, download)
+            .await
+            .map_err(|_| S3Error::Timeout(limit))??;
         Ok(true)
     }
 
@@ -362,7 +383,7 @@ impl S3Bucket {
     pub async fn last_modified(&self, key: &str) -> Result<Option<i64>, S3Error> {
         let response = self
             .request(Method::HEAD, key, &[], &[])
-            .timeout(SMALL_REQUEST_TIMEOUT)
+            .timeout(QUICK_REQUEST_TIMEOUT)
             .send()
             .await?;
         if response.status() == StatusCode::NOT_FOUND {
@@ -424,7 +445,7 @@ impl S3Bucket {
     pub async fn delete(&self, key: &str) -> Result<(), S3Error> {
         let response = self
             .request(Method::DELETE, key, &[], &[])
-            .timeout(SMALL_REQUEST_TIMEOUT)
+            .timeout(QUICK_REQUEST_TIMEOUT)
             .send()
             .await?;
         if response.status() == StatusCode::NOT_FOUND {
@@ -581,6 +602,11 @@ impl S3Bucket {
     }
 }
 
+/// The whole of a file transfer: 60 s plus 1 s per MiB.
+fn transfer_timeout(bytes: u64) -> Duration {
+    Duration::from_secs(60_u64.saturating_add(bytes.div_ceil(1024 * 1024)))
+}
+
 async fn expect_success(response: reqwest::Response) -> Result<reqwest::Response, S3Error> {
     if response.status().is_success() {
         return Ok(response);
@@ -636,8 +662,7 @@ struct SigningKey<'a> {
     region: &'a str,
 }
 
-/// AWS Signature V4 for S3. Adds `x-amz-date` and `x-amz-content-sha256` to `headers` (which must contain
-/// `host`) and returns the `Authorization` value. `query` is already encoded and sorted.
+/// AWS Signature V4 for S3: [`sigv4_authorization`] for service `s3`.
 fn sign(
     key: &SigningKey<'_>,
     method: &str,
@@ -647,6 +672,62 @@ fn sign(
     payload_hash: &str,
     now: DateTime<Utc>,
 ) -> String {
+    sigv4_authorization(
+        "s3",
+        key.region,
+        &SigV4Credentials {
+            access_key_id: key.access_key_id,
+            secret_access_key: key.secret_access_key,
+        },
+        &SigV4Request {
+            method,
+            path,
+            query,
+            payload_hash,
+            now,
+        },
+        headers,
+    )
+}
+
+/// The access key that signs an AWS request.
+#[derive(Clone, Copy)]
+pub struct SigV4Credentials<'a> {
+    pub access_key_id: &'a str,
+    pub secret_access_key: &'a str,
+}
+
+/// What [`sigv4_authorization`] signs besides the headers.
+#[derive(Clone, Copy)]
+pub struct SigV4Request<'a> {
+    pub method: &'a str,
+    /// The URI-encoded path.
+    pub path: &'a str,
+    /// The query, already encoded and sorted; empty for none.
+    pub query: &'a str,
+    /// Lower-case hex SHA-256 of the body (or `UNSIGNED-PAYLOAD` where the service allows it).
+    pub payload_hash: &'a str,
+    pub now: DateTime<Utc>,
+}
+
+/// AWS Signature V4 for `service` (`s3`, `ses`, …) in `region`. Adds `x-amz-date` and
+/// `x-amz-content-sha256` to `headers` (which must contain `host`, exactly as the request sends
+/// it), lower-cases and sorts them, and returns the `Authorization` value. Every header in
+/// `headers` is signed, so the request must send each of them unchanged.
+pub fn sigv4_authorization(
+    service: &str,
+    region: &str,
+    credentials: &SigV4Credentials<'_>,
+    request: &SigV4Request<'_>,
+    headers: &mut Vec<(String, String)>,
+) -> String {
+    let SigV4Request {
+        method,
+        path,
+        query,
+        payload_hash,
+        now,
+    } = *request;
     let amz_date = now.format("%Y%m%dT%H%M%SZ").to_string();
     let date = now.format("%Y%m%d").to_string();
     headers.push(("x-amz-date".to_owned(), amz_date.clone()));
@@ -666,16 +747,16 @@ fn sign(
         .join(";");
     let canonical_request =
         format!("{method}\n{path}\n{query}\n{canonical_headers}\n{signed_headers}\n{payload_hash}");
-    let scope = format!("{date}/{}/s3/aws4_request", key.region);
+    let scope = format!("{date}/{region}/{service}/aws4_request");
     let string_to_sign = format!(
         "AWS4-HMAC-SHA256\n{amz_date}\n{scope}\n{:x}",
         Sha256::digest(canonical_request.as_bytes())
     );
     let mut signing_key = hmac(
-        format!("AWS4{}", key.secret_access_key).as_bytes(),
+        format!("AWS4{}", credentials.secret_access_key).as_bytes(),
         date.as_bytes(),
     );
-    for part in [key.region, "s3", "aws4_request"] {
+    for part in [region, service, "aws4_request"] {
         signing_key = hmac(&signing_key, part.as_bytes());
     }
     let signature: String = hmac(&signing_key, string_to_sign.as_bytes())
@@ -684,7 +765,7 @@ fn sign(
         .collect();
     format!(
         "AWS4-HMAC-SHA256 Credential={}/{scope}, SignedHeaders={signed_headers}, Signature={signature}",
-        key.access_key_id
+        credentials.access_key_id
     )
 }
 
