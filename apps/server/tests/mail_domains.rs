@@ -513,8 +513,12 @@ async fn verification_suspension_and_timeouts_follow_the_state_machine() {
         json!({ "status": "wrong", "found": "5 aspmx.l.google.com" })
     );
 
-    // Every record published: verified.
+    // Every record published: verified. The zone's name servers name the DNS host.
     publish_all(&fixture.dns, &domain);
+    fixture.dns.set_ns(
+        "example.com",
+        &["kim.ns.cloudflare.com", "bob.ns.cloudflare.com"],
+    );
     assert_eq!(
         fixture.check(&domain, at(start + 2 * MINUTE)).await,
         DomainStatus::Verified
@@ -525,6 +529,11 @@ async fn verification_suspension_and_timeouts_follow_the_state_machine() {
         assert_eq!(status(&read, kind), "ok", "{kind}");
     }
     assert_eq!(read["dmarc_policy"], "reject");
+    assert_eq!(read["dns_zone"], "example.com");
+    assert_eq!(
+        read["nameservers"],
+        json!(["bob.ns.cloudflare.com", "kim.ns.cloudflare.com"])
+    );
     let verified_at = read["verified_at"].clone();
     assert!(verified_at.is_string());
 
@@ -1589,4 +1598,47 @@ async fn new_secrets_replace_the_ones_orbit_made() {
         )
         .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn rotating_the_dkim_key_shows_the_new_record_once_at_a_time() {
+    let fixture = Fixture::new().await;
+    let domain = fixture.add(fixture.first, "example.com").await;
+    let old = record(&domain, "dkim")["name"].as_str().unwrap().to_owned();
+    publish_all(&fixture.dns, &domain);
+    fixture
+        .check(&domain, at(TimestampMillis::now().as_millis()))
+        .await;
+
+    let path = format!("/domains/{}/dkim/rotate", domain["id"].as_str().unwrap());
+    let member = fixture
+        .user("member", Some((fixture.first, "member")))
+        .await;
+    let (status, _) = fixture
+        .call(&member, fixture.first, "POST", &path, None)
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    let (status, rotated) = fixture
+        .call(&fixture.owner, fixture.first, "POST", &path, None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{rotated}");
+    assert_ne!(record(&rotated, "dkim")["name"].as_str().unwrap(), old);
+
+    let (status, refused) = fixture
+        .call(&fixture.owner, fixture.first, "POST", &path, None)
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(refused["code"], "rotation_pending");
+}
+
+#[tokio::test]
+async fn rotate_other_workspace_domain_404() {
+    let fixture = Fixture::new().await;
+    let domain = fixture.add(fixture.first, "example.com").await;
+    let path = format!("/domains/{}/dkim/rotate", domain["id"].as_str().unwrap());
+    let (status, _) = fixture
+        .call(&fixture.owner, fixture.second, "POST", &path, None)
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
 }

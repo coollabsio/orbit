@@ -37,6 +37,8 @@ const CERT_POLL: Duration = Duration::from_secs(60);
 pub const TRACE_HEADROOM: u64 = 16 * 1024;
 /// Marks a health test recipient in the session's opaque recipient ids.
 const HEALTH_TEST: &str = "health-test:";
+/// Marks a bounce recipient (a sent recipient's bounce address) in the same ids.
+const BOUNCE: &str = "bounce:";
 
 /// `554` at connect for a peer that is not a relay (relay mode).
 const NOT_A_RELAY: Reply = Reply {
@@ -413,7 +415,13 @@ impl SessionHandler for MailListener {
             Ok(RecipientLookup::HealthTest { test_id }) => {
                 accept(format!("{HEALTH_TEST}{test_id}"), String::new())
             }
-            Ok(RecipientLookup::UnknownUser) => RcptDecision::Reject(Reply::USER_UNKNOWN),
+            Ok(RecipientLookup::Bounce { recipient_id }) => {
+                accept(format!("{BOUNCE}{recipient_id}"), String::new())
+            }
+            // A forged or expired bounce address is refused like an unknown user.
+            Ok(RecipientLookup::UnknownUser | RecipientLookup::BadBounce) => {
+                RcptDecision::Reject(Reply::USER_UNKNOWN)
+            }
             Ok(RecipientLookup::NotLocal) => RcptDecision::Reject(Reply::RELAY_DENIED),
             Ok(RecipientLookup::DomainUnavailable) => {
                 RcptDecision::Reject(Reply::DOMAIN_UNAVAILABLE)
@@ -474,6 +482,12 @@ fn recipient(accepted: &AcceptedRecipient) -> Option<Recipient> {
     if let Some(test_id) = accepted.address_id.strip_prefix(HEALTH_TEST) {
         return Some(Recipient::HealthTest {
             test_id: test_id.parse().ok()?,
+            rcpt,
+        });
+    }
+    if let Some(recipient_id) = accepted.address_id.strip_prefix(BOUNCE) {
+        return Some(Recipient::Bounce {
+            recipient_id: recipient_id.parse().ok()?,
             rcpt,
         });
     }

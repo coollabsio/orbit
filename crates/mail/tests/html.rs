@@ -21,18 +21,42 @@ fn render(html: &str) -> Rendered {
     render_document(html, &options(false))
 }
 
-/// The document without Orbit's own height script, so assertions see only what came from the mail.
+/// The document without Orbit's own parts (the base style sheet and the frame script), so assertions see only what
+/// came from the mail.
 fn mail_part(html: &str) -> String {
     let rendered = render(html).html;
-    let script = height_script();
-    assert_eq!(rendered.matches(&script).count(), 1, "{rendered}");
-    rendered.replace(&script, "")
+    let script = frame_script(&rendered).to_owned();
+    let base = base_style(&rendered).to_owned();
+    rendered.replace(&script, "").replacen(&base, "", 1)
 }
 
-fn height_script() -> String {
-    format!(
-        "<script nonce=\"{NONCE}\">new ResizeObserver(()=>parent.postMessage({{orbitMailHeight:document.documentElement.scrollHeight}},\"*\")).observe(document.documentElement)</script>"
-    )
+/// Orbit's frame script element: exactly one, with the nonce, at the end of the body.
+fn frame_script(document: &str) -> &str {
+    let open = format!("<script nonce=\"{NONCE}\">");
+    assert_eq!(document.matches(&open).count(), 1, "{document}");
+    let start = document.find(&open).unwrap();
+    let end = start + document[start..].find("</script>").unwrap() + "</script>".len();
+    assert_eq!(&document[end..], "</body></html>", "{document}");
+    &document[start..end]
+}
+
+/// Orbit's base style sheet: the first `<style>` element, right after the charset.
+fn base_style(document: &str) -> &str {
+    let start = document.find("<style>").unwrap();
+    assert!(
+        document[..start].ends_with("<head><meta charset=\"utf-8\">"),
+        "{document}"
+    );
+    let end = start + document[start..].find("</style>").unwrap() + "</style>".len();
+    &document[start..end]
+}
+
+/// The `<pre>` of a text document.
+fn text_body(text: &str) -> String {
+    let out = render_text_document(text, NONCE);
+    let start = out.find("<body>").unwrap() + "<body>".len();
+    let end = out.find("<script nonce=").unwrap();
+    out[start..end].to_owned()
 }
 
 fn assert_absent(html: &str, needles: &[&str]) {
@@ -49,16 +73,186 @@ fn assert_absent(html: &str, needles: &[&str]) {
 // ---------------------------------------------------------------- document
 
 #[test]
-fn document_has_the_height_script_with_the_nonce() {
+fn document_has_the_frame_script_with_the_nonce() {
     let rendered = render("<p>Hello</p>");
     assert!(
         rendered.html.starts_with("<!DOCTYPE html>"),
         "{}",
         rendered.html
     );
-    assert!(rendered.html.contains(&height_script()));
-    assert!(rendered.html.contains("<p>Hello</p>"));
+    assert!(
+        rendered
+            .html
+            .contains("<body><p>Hello</p><script nonce=\"r4nd0mN0nce\">"),
+        "{}",
+        rendered.html
+    );
+    let script = frame_script(&rendered.html);
+    for needle in [
+        "orbitMailHeight:",
+        "orbitMailPlain:p",
+        "ev.source==parent",
+        "orbitMailTheme",
+        "t=='dark'||t=='light'",
+        "e.dataset.theme=t",
+        "'.orbit-quote-intro,.gmail_quote,blockquote.orbit-quote,.orbit-quote-text'",
+        "createElement('button')",
+        "t.type='button'",
+        "'aria-expanded'",
+        "' quoted text'",
+        "addEventListener('click'",
+        "new ResizeObserver(",
+        "orbitMailBlocked:+(e.dataset.orbitBlocked||0)",
+        // its own script element is not visible text (else a trailing blockquote never folds)
+        "n.nodeName!='SCRIPT'",
+        "orbitMailTheme:e.dataset.theme||null",
+        "if(g)P()",
+    ] {
+        assert!(script.contains(needle), "{needle:?} missing in {script}");
+    }
+    // one element: no quote can end an attribute, no handler attribute, no network load
+    let inner = &script[script.find('>').unwrap() + 1..script.len() - "</script>".len()];
+    for needle in [
+        "\"", "</", "<!--", "onclick", "fetch(", ".src", "src=", "import",
+    ] {
+        assert!(!inner.contains(needle), "{needle:?} in {inner}");
+    }
     assert_eq!(rendered.blocked_remote_images, 0);
+}
+
+#[test]
+fn base_style_sheet_comes_before_the_mail_css() {
+    let out = render("<style>body{color:red;font-family:Georgia}</style><p>x</p>").html;
+    let base = base_style(&out);
+    for needle in [
+        "body{margin:0;padding:12px 16px;font:14px/1.55 system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;",
+        "overflow-wrap:anywhere",
+        "img{max-width:100%;height:auto}",
+        "blockquote{margin:8px 0;padding-left:12px;border-left:2px solid",
+        "pre{white-space:pre-wrap}",
+        "a{color:",
+        "[hidden]{display:none!important}",
+        ".orbit-fold{display:block;height:22px;",
+        "border-radius:999px",
+    ] {
+        assert!(base.contains(needle), "{needle:?} missing in {base}");
+    }
+    let base_at = out.find(base).unwrap();
+    let mail_at = out
+        .find("<style>body{color:red;font-family:Georgia}</style>")
+        .unwrap();
+    assert!(
+        base_at < mail_at && mail_at < out.find("</head>").unwrap(),
+        "{out}"
+    );
+}
+
+#[test]
+fn mail_without_colours_is_plain_and_follows_the_theme() {
+    for html in [
+        "<p>Hello <b>there</b></p><blockquote>quote</blockquote>",
+        "<div class=\"x\"><font face=\"Arial\">Hi</font></div>",
+        // the only CSS is dropped by the filter
+        "<style>@import url(https://evil.test/a.css);</style><p>x</p>",
+    ] {
+        let out = render(html).html;
+        assert!(
+            out.starts_with("<!DOCTYPE html><html data-orbit-plain><head>"),
+            "{out}"
+        );
+        assert!(
+            base_style(&out).contains("html[data-theme=dark] body{color:"),
+            "{out}"
+        );
+        assert!(
+            base_style(&out).contains(
+                "html[data-theme=dark]{background:var(--orbit-bg,#0a0a0a);color-scheme:dark}"
+            ),
+            "{out}"
+        );
+    }
+    for html in [
+        "<style>p{margin:0}</style><p>x</p>",
+        "<p style=\"color:#333\">x</p>",
+        "<p style=\"padding:4px\">x</p>",
+        "<table bgcolor=\"#ffffff\"><tr><td>x</td></tr></table>",
+        "<font color=\"#333\">x</font>",
+    ] {
+        let out = render(html).html;
+        assert!(
+            out.starts_with("<!DOCTYPE html><html><head>"),
+            "{html}: {out}"
+        );
+        // no dark colours for mail that brings its own
+        assert!(!base_style(&out).contains("data-theme"), "{html}: {out}");
+    }
+}
+
+#[test]
+fn text_document_is_plain_with_the_sans_font() {
+    let out = render_text_document("Hello", NONCE);
+    assert!(
+        out.starts_with("<!DOCTYPE html><html data-orbit-plain><head>"),
+        "{out}"
+    );
+    assert!(base_style(&out).contains("html[data-theme=dark]"), "{out}");
+    assert!(
+        out.contains("</style><style>pre{margin:0;font:inherit}</style></head>"),
+        "{out}"
+    );
+    assert!(!out.contains("monospace"), "{out}");
+    assert_eq!(text_body("Hello"), "<pre>Hello</pre>");
+}
+
+#[test]
+fn text_document_folds_the_trailing_quote() {
+    assert_eq!(
+        text_body("Thanks!\n\nOn Mon, Ann <ann@x.test> wrote:\n> hi <b>\n>\n> & bye\n\n"),
+        "<pre>Thanks!<div class=\"orbit-quote-text\">On Mon, Ann &lt;ann@x.test&gt; wrote:\n\
+         &gt; hi &lt;b&gt;\n&gt;\n&gt; &amp; bye</div></pre>"
+    );
+    // any language, a blank line between the intro and the quote
+    assert_eq!(
+        text_body("Merci\nLe lun., Ann a écrit :\n\n> salut\n"),
+        "<pre>Merci<div class=\"orbit-quote-text\">Le lun., Ann a écrit :\n\n&gt; salut</div></pre>"
+    );
+    // no intro line: only the `>` lines fold
+    assert_eq!(
+        text_body("Yes.\n  > a\n> b"),
+        "<pre>Yes.<div class=\"orbit-quote-text\">  &gt; a\n&gt; b</div></pre>"
+    );
+    // a line of 200 characters is not an intro
+    let long = format!("{}:", "x".repeat(199));
+    assert_eq!(
+        text_body(&format!("Hi\n{long}\n> a")),
+        format!("<pre>Hi\n{long}<div class=\"orbit-quote-text\">&gt; a</div></pre>")
+    );
+}
+
+#[test]
+fn text_document_does_not_fold_without_a_trailing_quote_or_other_text() {
+    for text in [
+        "> a\n> b",
+        "\n  \nOn Mon, Ann wrote:\n> a\n",
+        "> quoted\nmy answer below the quote",
+        "no quote at all:",
+        "",
+    ] {
+        let body = text_body(text);
+        assert!(!body.contains("orbit-quote-text"), "{text:?}: {body}");
+    }
+}
+
+#[test]
+fn text_document_quote_cannot_break_out_of_the_fold() {
+    let body = text_body(
+        "hi\n> </div></pre><script>alert(1)</script>\n> <div class=\"orbit-quote-text\">",
+    );
+    assert_eq!(
+        body,
+        "<pre>hi<div class=\"orbit-quote-text\">&gt; &lt;/div&gt;&lt;/pre&gt;&lt;script&gt;alert(1)&lt;/script&gt;\n\
+         &gt; &lt;div class=\"orbit-quote-text\"&gt;</div></pre>"
+    );
 }
 
 #[test]
@@ -88,7 +282,8 @@ fn a_bad_nonce_cannot_break_out_of_the_attribute() {
         "{out}"
     );
     assert_eq!(out.matches("<img").count(), 0, "{out}");
-    assert_eq!(out.matches('"').count(), 6, "{out}");
+    // the charset and the nonce attribute; the base style sheet and the script have none
+    assert_eq!(out.matches('"').count(), 4, "{out}");
 }
 
 #[test]
@@ -100,7 +295,7 @@ fn text_document_escapes_the_body() {
         ),
         "{out}"
     );
-    assert!(out.contains(&height_script()));
+    frame_script(&out);
     assert_eq!(out.matches("<script").count(), 1);
 }
 
@@ -290,6 +485,15 @@ fn remote_images_are_removed_and_counted_without_a_proxy() {
     assert!(!rendered.html.contains("tracker.test"), "{}", rendered.html);
     assert!(!rendered.html.contains("local.png"), "{}", rendered.html);
     assert_eq!(rendered.blocked_remote_images, 3);
+    // the frame script posts the server's count: an image without a source that loading would not bring back (the
+    // relative one) does not count
+    assert!(
+        rendered
+            .html
+            .starts_with("<!DOCTYPE html><html data-orbit-plain data-orbit-blocked=\"3\"><head>"),
+        "{}",
+        rendered.html
+    );
 }
 
 #[test]
@@ -307,6 +511,11 @@ fn remote_images_go_through_the_proxy() {
     );
     assert!(!rendered.html.contains("tracker.test"), "{}", rendered.html);
     assert_eq!(rendered.blocked_remote_images, 0);
+    assert!(
+        !rendered.html.contains("data-orbit-blocked"),
+        "{}",
+        rendered.html
+    );
 }
 
 #[test]

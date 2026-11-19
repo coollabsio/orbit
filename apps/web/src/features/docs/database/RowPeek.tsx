@@ -16,6 +16,7 @@ import { useMovePageTo, type MoveDestination } from '@/features/docs/useMovePage
 import { useDatabase, useTrashRows } from './api'
 import { neighborRows } from './databaseLib'
 import { SaveAsTemplateItem, TemplateActions, TemplateBar } from './TemplatePeek'
+import { writeClipboard } from '@/lib/clipboard'
 
 interface RowPeekProps {
   workspaceId: string
@@ -89,7 +90,7 @@ export function RowPeek({ workspaceId, databaseId, rowId, viewId, order, focusTi
   }, [])
 
   const copyLink = () =>
-    void navigator.clipboard.writeText(window.location.href).then(
+    void writeClipboard(window.location.href).then(
       () => toast.success('Link to the row copied.'),
       () => toast.error('Could not copy the link.'),
     )

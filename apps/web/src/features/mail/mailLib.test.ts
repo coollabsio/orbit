@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test'
-import { frameHeight, mailThreadPath, mailViewPath, parseMailPath, searchSuggestions, threadFilterOf, type MailView } from './mailLib'
+import { ApiProblem } from '@orbit/api/problem'
+import { applyDraftConflict, backgroundBehind, frameHeight, frameMessage, frameThemeMessage, mailThreadPath, mailViewPath, parseMailPath, railFolders, searchSuggestions, sendingOutboundId, sentRecipients, threadFilterOf, type MailView } from './mailLib'
 
 test('a message frame takes only a finite height from its own window, clamped to 80–20,000 px', () => {
   const frame = { name: 'frame' }
@@ -14,6 +15,43 @@ test('a message frame takes only a finite height from its own window, clamped to
   for (const data of [{ orbitMailHeight: Number.NaN }, { orbitMailHeight: Infinity }, { orbitMailHeight: '300' }, 300, null, 'orbitMailHeight']) {
     expect(frameHeight({ source: frame, data }, frame)).toBeNull()
   }
+})
+
+test('a message frame says whether its mail is plain, only with a valid height from its own window', () => {
+  const frame = { name: 'frame' }
+  expect(frameMessage({ source: frame, data: { orbitMailHeight: 300, orbitMailPlain: true } }, frame)).toEqual({ height: 300, plain: true, blocked: null, theme: null })
+  expect(frameMessage({ source: frame, data: { orbitMailHeight: 300, orbitMailPlain: false } }, frame)).toEqual({ height: 300, plain: false, blocked: null, theme: null })
+  // only `true` is plain; an old frame without the flag is not
+  for (const flag of [undefined, 'true', 1, null]) {
+    expect(frameMessage({ source: frame, data: { orbitMailHeight: 12, orbitMailPlain: flag } }, frame)).toEqual({ height: 80, plain: false, blocked: null, theme: null })
+  }
+  // the count of removed remote images: a whole number, else unknown
+  expect(frameMessage({ source: frame, data: { orbitMailHeight: 300, orbitMailBlocked: 2 } }, frame)?.blocked).toBe(2)
+  expect(frameMessage({ source: frame, data: { orbitMailHeight: 300, orbitMailBlocked: 0 } }, frame)?.blocked).toBe(0)
+  // the theme the frame shows: only `dark` or `light`
+  expect(frameMessage({ source: frame, data: { orbitMailHeight: 300, orbitMailTheme: 'dark' } }, frame)?.theme).toBe('dark')
+  expect(frameMessage({ source: frame, data: { orbitMailHeight: 300, orbitMailTheme: 'blue' } }, frame)?.theme).toBeNull()
+  for (const count of [-1, 1.5, '2', Number.NaN]) expect(frameMessage({ source: frame, data: { orbitMailHeight: 300, orbitMailBlocked: count } }, frame)?.blocked).toBeNull()
+  expect(frameMessage({ source: { name: 'other' }, data: { orbitMailHeight: 300, orbitMailPlain: true } }, frame)).toBeNull()
+  expect(frameMessage({ source: frame, data: { orbitMailPlain: true } }, frame)).toBeNull()
+  expect(frameMessage({ source: null, data: { orbitMailHeight: 300, orbitMailPlain: true } }, null)).toBeNull()
+  expect(frameThemeMessage('dark')).toEqual({ orbitMailTheme: 'dark' })
+  expect(frameThemeMessage('light')).toEqual({ orbitMailTheme: 'light' })
+  expect(frameThemeMessage('dark', 'rgb(10, 10, 10)')).toEqual({ orbitMailTheme: 'dark', orbitMailBackground: 'rgb(10, 10, 10)' })
+})
+
+test('the colour behind a frame is the first one that is not transparent', () => {
+  const chain = (colors: string[]) => {
+    const nodes = colors.map((color) => ({ color, parentElement: null as unknown }))
+    nodes.forEach((node, index) => { node.parentElement = nodes[index + 1] ?? null })
+    return { first: nodes[0] as unknown as Element, colorOf: (node: Element) => (node as unknown as { color: string }).color }
+  }
+  const a = chain(['rgba(0, 0, 0, 0)', 'transparent', 'oklch(0.145 0 0)', 'rgb(255, 255, 255)'])
+  expect(backgroundBehind(a.first, a.colorOf)).toBe('oklch(0.145 0 0)')
+  const b = chain(['rgb(1 2 3 / 0)', 'rgb(20, 20, 20)'])
+  expect(backgroundBehind(b.first, b.colorOf)).toBe('rgb(20, 20, 20)')
+  expect(backgroundBehind(chain(['transparent']).first, chain(['transparent']).colorOf)).toBeNull()
+  expect(backgroundBehind(null, () => 'red')).toBeNull()
 })
 
 test('mail paths name a view and an open thread, both ways', () => {
@@ -32,7 +70,7 @@ test('mail paths name a view and an open thread, both ways', () => {
   }
   expect(mailViewPath({ kind: 'folder', folder: 'inbox' })).toBe('/mail')
   expect(mailThreadPath({ kind: 'folder', folder: 'inbox' }, 'th1')).toBe('/mail/t/th1')
-  for (const bad of ['sent', 'mb1/sent', 'label', 'starred/extra', 'a/b/c', 't']) expect(parseMailPath(bad)).toBeNull()
+  for (const bad of ['outgoing', 'mb1/outgoing', 'label', 'starred/extra', 'a/b/c', 't']) expect(parseMailPath(bad)).toBeNull()
 
   expect(threadFilterOf({ kind: 'folder', folder: 'spam', mailboxId: 'mb1' })).toEqual({ mailboxId: 'mb1', folder: 'spam' })
   expect(threadFilterOf({ kind: 'label', labelId: 'lb1' })).toEqual({ labelId: 'lb1' })
@@ -58,4 +96,53 @@ test('search completes the word being typed and keeps the rest of the query', ()
   expect(queries('before:2026')).toEqual([])
   // a quoted phrase is one word
   expect(queries('subject:"big news" i')).toEqual(['subject:"big news" in:', 'subject:"big news" is:'])
+})
+
+test('parses_new_folders', () => {
+  for (const folder of ['drafts', 'sent', 'scheduled', 'outbox'] as const) {
+    expect(parseMailPath(folder)).toEqual({ view: { kind: 'folder', folder }, threadId: null })
+    expect(parseMailPath(`${folder}/t/th1`)).toEqual({ view: { kind: 'folder', folder }, threadId: 'th1' })
+    expect(parseMailPath(`mb1/${folder}`)).toEqual({ view: { kind: 'folder', folder, mailboxId: 'mb1' }, threadId: null })
+    expect(parseMailPath(`mb1/${folder}/t/th1`)).toEqual({ view: { kind: 'folder', folder, mailboxId: 'mb1' }, threadId: 'th1' })
+    expect(mailViewPath({ kind: 'folder', folder })).toBe(`/mail/${folder}`)
+    expect(mailViewPath({ kind: 'folder', folder, mailboxId: 'mb1' })).toBe(`/mail/mb1/${folder}`)
+    // Sent is a thread list; the others are not
+    if (folder !== 'sent') expect(threadFilterOf({ kind: 'folder', folder })).toBeNull()
+  }
+  expect(threadFilterOf({ kind: 'folder', folder: 'sent' })).toEqual({ sent: true })
+  expect(threadFilterOf({ kind: 'folder', folder: 'sent', mailboxId: 'mb1' })).toEqual({ mailboxId: 'mb1', sent: true })
+})
+
+test('draft_conflict_keeps_local_text', () => {
+  const server = { subject: 'Server subject', body_html: '<p>server</p>', to: ['a@x.test'], version: 5 }
+  const local = { subject: 'Mine', body_html: '<p>mine</p>', to: ['b@x.test'], version: 3 }
+  const result = applyDraftConflict(local, server)
+  // the server copy replaces the draft, the unsaved text waits in the banner
+  expect(result.draft).toEqual(server)
+  expect(result.restore).toEqual({ subject: 'Mine', body_html: '<p>mine</p>', to: ['b@x.test'] })
+  // nothing differs: no banner
+  expect(applyDraftConflict({ ...server, version: 4 }, server).restore).toBeNull()
+})
+
+test('the rail shows the Outbox only while it has something', () => {
+  const names = (showOutbox: boolean) => railFolders(showOutbox).map(({ folder }) => folder)
+  expect(names(false)).toEqual(['drafts', 'sent', 'scheduled', 'archive', 'spam', 'trash'])
+  expect(names(true)).toEqual(['drafts', 'sent', 'scheduled', 'outbox', 'archive', 'spam', 'trash'])
+})
+
+test('a Sent row names the recipients of the newest message sent', () => {
+  const thread = (sent_to: string[], sent_to_more: number) => ({ sent_to, sent_to_more, from: [{ address: 'me@x.test', name: 'Me' }] })
+  expect(sentRecipients(thread(['ana@x.test'], 0))).toBe('To: ana@x.test')
+  expect(sentRecipients(thread(['ana@x.test', 'bob@x.test'], 3))).toBe('To: ana@x.test, bob@x.test +3')
+  // nothing sent (or not known): the senders, as in other lists
+  expect(sentRecipients(thread([], 0))).toBe('Me')
+})
+
+test('a reply being sent: the 409 names the message to undo', () => {
+  const problem = (code: string, extra: Record<string, unknown> = {}) =>
+    new ApiProblem({ type: 'about:blank', title: 'Conflict', status: 409, code, detail: 'x', instance: '/x', request_id: 'r', ...extra })
+  expect(sendingOutboundId(problem('draft_sending', { outbound_id: 'ob1' }))).toBe('ob1')
+  expect(sendingOutboundId(problem('draft_sending'))).toBeNull()
+  expect(sendingOutboundId(problem('draft_conflict', { outbound_id: 'ob1' }))).toBeNull()
+  expect(sendingOutboundId(new Error('x'))).toBeNull()
 })

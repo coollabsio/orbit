@@ -111,6 +111,10 @@ export default defineConfig({
       '/mcp': {
         target: process.env.VITE_API_PROXY ?? 'http://127.0.0.1:8080',
       },
+      // Large-file links of sent mail (`/mail/f/<token>`); the rest of `/mail` is the app.
+      '/mail/f/': {
+        target: process.env.VITE_API_PROXY ?? 'http://127.0.0.1:8080',
+      },
       '/api': {
         target: process.env.VITE_API_PROXY ?? 'http://127.0.0.1:8080',
         ws: true,

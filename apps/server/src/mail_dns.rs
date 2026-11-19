@@ -26,7 +26,7 @@ use thiserror::Error;
 use utoipa::ToSchema;
 
 use crate::repositories::mail::{
-    DnsReport, Domain, DomainStatus, MailError, MailRepository, RecordStatus,
+    DnsReport, Domain, DomainStatus, MailError, MailRepository, RecordStatus, SendRouteKind,
 };
 
 /// Longest wait for one lookup, on top of the resolver's own timeouts.
@@ -58,6 +58,8 @@ pub trait DnsLookup: Send + Sync {
     fn aaaa<'a>(&'a self, name: &'a str) -> BoxFuture<'a, Result<Vec<Ipv6Addr>, DnsError>>;
     /// The PTR names of `ip` (lower case, no trailing dot).
     fn ptr(&self, ip: IpAddr) -> BoxFuture<'_, Result<Vec<String>, DnsError>>;
+    /// The NS hosts of `name` (lower case, no trailing dot).
+    fn ns<'a>(&'a self, name: &'a str) -> BoxFuture<'a, Result<Vec<String>, DnsError>>;
 }
 
 /// Lookups through hickory, without a cache, so **Check now** sees a record that was just added.
@@ -217,6 +219,24 @@ impl DnsLookup for HickoryDns {
                 .collect())
         })
     }
+
+    fn ns<'a>(&'a self, name: &'a str) -> BoxFuture<'a, Result<Vec<String>, DnsError>> {
+        Box::pin(async move {
+            let resolver = self.resolver()?;
+            let lookup = tokio::time::timeout(LOOKUP_TIMEOUT, resolver.ns_lookup(absolute(name)?))
+                .await
+                .map_err(|_| DnsError::Timeout)?
+                .map_err(|error| net_error(&error))?;
+            Ok(lookup
+                .answers()
+                .iter()
+                .filter_map(|record| match &record.data {
+                    RData::NS(ns) => Some(host(&ns.0.to_lowercase().to_ascii())),
+                    _ => None,
+                })
+                .collect())
+        })
+    }
 }
 
 /// Lower case, without a trailing dot.
@@ -231,14 +251,16 @@ enum RecordType {
     A,
     Aaaa,
     Ptr,
+    Ns,
 }
 
-const RECORD_TYPES: [RecordType; 5] = [
+const RECORD_TYPES: [RecordType; 6] = [
     RecordType::Txt,
     RecordType::Mx,
     RecordType::A,
     RecordType::Aaaa,
     RecordType::Ptr,
+    RecordType::Ns,
 ];
 
 #[derive(Clone)]
@@ -248,6 +270,7 @@ enum Answer {
     A(Vec<Ipv4Addr>),
     Aaaa(Vec<Ipv6Addr>),
     Ptr(Vec<String>),
+    Ns(Vec<String>),
     Fail(DnsError),
 }
 
@@ -304,6 +327,12 @@ impl FakeDns {
     pub fn set_ptr(&self, ip: IpAddr, names: &[&str]) {
         let names = names.iter().map(|name| host(name)).collect();
         self.set(RecordType::Ptr, &ip.to_string(), Answer::Ptr(names));
+    }
+
+    /// Replaces the NS records of `name`.
+    pub fn set_ns(&self, name: &str, hosts: &[&str]) {
+        let hosts = hosts.iter().map(|name| host(name)).collect();
+        self.set(RecordType::Ns, name, Answer::Ns(hosts));
     }
 
     /// Makes every lookup of `name` (or of the address `name`) fail with `error`.
@@ -371,6 +400,16 @@ impl DnsLookup for FakeDns {
         Box::pin(async move {
             match self.get(RecordType::Ptr, &ip.to_string()) {
                 Some(Answer::Ptr(names)) => Ok(names),
+                Some(Answer::Fail(error)) => Err(error),
+                _ => Err(DnsError::NotFound),
+            }
+        })
+    }
+
+    fn ns<'a>(&'a self, name: &'a str) -> BoxFuture<'a, Result<Vec<String>, DnsError>> {
+        Box::pin(async move {
+            match self.get(RecordType::Ns, name) {
+                Some(Answer::Ns(hosts)) => Ok(hosts),
                 Some(Answer::Fail(error)) => Err(error),
                 _ => Err(DnsError::NotFound),
             }
@@ -549,7 +588,14 @@ pub fn expected_records(domain: &Domain, hostname: Option<&str>) -> Vec<Expected
         kind: RecordKind::Spf,
         record_type: "TXT",
         name: domain.name.clone(),
-        value: "v=spf1 mx ~all".to_owned(),
+        value: expected_spf(
+            domain.send_route.as_ref().map(|route| &route.kind),
+            hostname,
+            domain
+                .send_route
+                .as_ref()
+                .and_then(|route| route.spf.as_deref()),
+        ),
         priority: None,
     });
     records.push(ExpectedRecord {
@@ -560,6 +606,42 @@ pub fn expected_records(domain: &Domain, hostname: Option<&str>) -> Vec<Expected
         priority: None,
     });
     records
+}
+
+/// The SPF record the domain publishes for its send route. The domain's own MX hosts always
+/// stay allowed. Direct sending adds Orbit's host; a provider adds its include. `route_spf` is the
+/// route's `spf` setting for a relay Orbit knows no include of: a mechanism list such as
+/// `include:relay.example` (or a whole `v=spf1 …` record, used as it is).
+#[must_use]
+pub fn expected_spf(
+    route: Option<&SendRouteKind>,
+    hostname: Option<&str>,
+    route_spf: Option<&str>,
+) -> String {
+    let known = match route {
+        Some(SendRouteKind::Postmark) => Some("include:spf.mtasv.net"),
+        Some(SendRouteKind::Resend | SendRouteKind::Ses) => Some("include:amazonses.com"),
+        Some(SendRouteKind::Mailgun) => Some("include:mailgun.org"),
+        _ => None,
+    };
+    let route_spf = route_spf.map(str::trim).filter(|spf| !spf.is_empty());
+    if let (None, Some(spf)) = (known, route_spf)
+        && has_version(spf, "v=spf1")
+    {
+        return spf.to_owned();
+    }
+    let mut parts = vec!["v=spf1".to_owned()];
+    if let (Some(SendRouteKind::Direct), Some(hostname)) = (route, hostname) {
+        parts.push(format!("a:{}", host(hostname)));
+    }
+    parts.push("mx".to_owned());
+    match (known, route_spf) {
+        (Some(include), _) => parts.push(include.to_owned()),
+        (None, Some(spf)) => parts.push(spf.to_owned()),
+        (None, None) => {}
+    }
+    parts.push("~all".to_owned());
+    parts.join(" ")
 }
 
 /// `value` cut into the strings of one TXT record: at most 255 bytes each, on character
@@ -746,6 +828,26 @@ fn dmarc_status(result: Result<Vec<String>, DnsError>) -> (RecordStatus, Option<
     }
 }
 
+/// The DNS zone that holds `domain` and its NS hosts: the first of `domain` and its parents that
+/// has NS records (`mail.example.com` usually has none; `example.com` has). Stops before the last
+/// label, so a top-level domain is never taken. `None` when nothing was found or a lookup failed.
+pub async fn dns_zone(dns: &dyn DnsLookup, domain: &str) -> Option<(String, Vec<String>)> {
+    let mut name = domain.trim_end_matches('.');
+    while name.contains('.') {
+        match dns.ns(name).await {
+            Ok(mut hosts) if !hosts.is_empty() => {
+                hosts.sort();
+                hosts.dedup();
+                return Some((name.to_ascii_lowercase(), hosts));
+            }
+            Ok(_) | Err(DnsError::NotFound) => {}
+            Err(_) => return None,
+        }
+        name = name.split_once('.').map_or("", |(_, parent)| parent);
+    }
+    None
+}
+
 /// Looks up every record of `domain` and compares it with what Orbit expects.
 pub async fn inspect(
     dns: &dyn DnsLookup,
@@ -759,7 +861,7 @@ pub async fn inspect(
         .as_ref()
         .map(|dkim| format!("{}._domainkey.{}", dkim.selector, domain.name));
     let dmarc_name = format!("_dmarc.{}", domain.name);
-    let (verify, mx, spf, dmarc, dkim) = tokio::join!(
+    let (verify, mx, spf, dmarc, dkim, zone) = tokio::join!(
         dns.txt(&verify_name),
         dns.mx(&domain.name),
         dns.txt(&domain.name),
@@ -770,7 +872,9 @@ pub async fn inspect(
                 None => None,
             }
         },
+        dns_zone(dns, &domain.name),
     );
+    let (zone, nameservers) = zone.map_or((None, Vec::new()), |(zone, hosts)| (Some(zone), hosts));
     let (dmarc, dmarc_policy) = dmarc_status(dmarc);
     DnsReport {
         verify: verify_status(&domain.verify_token, verify),
@@ -790,6 +894,8 @@ pub async fn inspect(
         spf: spf_status(spf),
         dmarc,
         dmarc_policy,
+        zone,
+        nameservers,
     }
 }
 
@@ -834,9 +940,20 @@ impl DnsChecker {
             self.mode,
         )
         .await;
-        self.repository
+        let dkim_ok = report.dkim == RecordStatus::Ok;
+        let status = self
+            .repository
             .record_dns_report(domain_id, report, now)
-            .await
+            .await?;
+        // The record checked is the newest pending or active key's: when it is a pending key
+        // and its record is published, it takes over.
+        if dkim_ok && let Some(key) = domain.dkim.as_ref().filter(|key| key.status == "pending") {
+            self.repository
+                .activate_dkim(domain_id, &key.selector, now)
+                .await?;
+        }
+        self.repository.retire_dkim_keys(domain_id, now).await?;
+        Ok(status)
     }
 
     /// Checks every domain that is due at `now`; returns how many were checked.
@@ -880,6 +997,34 @@ impl DnsChecker {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn dns_zone_walks_up_to_the_zone() {
+        let dns = FakeDns::new();
+        dns.set_ns("example.com", &["ns2.example.net.", "NS1.example.net"]);
+        dns.set_ns("com", &["a.gtld-servers.net"]);
+        let zone = |name: &str| {
+            (
+                name.to_owned(),
+                vec!["ns1.example.net".to_owned(), "ns2.example.net".to_owned()],
+            )
+        };
+        // the zone's own hosts, sorted and lower case
+        assert_eq!(
+            dns_zone(&dns, "example.com").await,
+            Some(zone("example.com"))
+        );
+        // a subdomain without its own NS records is in its parent's zone
+        assert_eq!(
+            dns_zone(&dns, "mail.example.com").await,
+            Some(zone("example.com"))
+        );
+        // never the top-level domain
+        assert_eq!(dns_zone(&dns, "other.com").await, None);
+        // a failed lookup gives nothing, not a guess from a parent
+        dns.fail("eu.example.com", DnsError::Timeout);
+        assert_eq!(dns_zone(&dns, "eu.example.com").await, None);
+    }
 
     #[test]
     fn txt_strings_are_at_most_255_bytes() {

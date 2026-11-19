@@ -53,6 +53,9 @@ import { MailProvidersPage } from '@/features/settings/pages/mail/MailProvidersP
 import { MailMailboxesPage } from '@/features/settings/pages/mail/MailMailboxesPage'
 import { MailLabelsPage } from '@/features/settings/pages/mail/MailLabelsPage'
 import { FailedMailPage } from '@/features/settings/pages/mail/FailedMailPage'
+import { MailSendingPage } from '@/features/settings/pages/mail/MailSendingPage'
+import { MailSuppressionsPage } from '@/features/settings/pages/mail/MailSuppressionsPage'
+import { MyMailPage } from '@/features/settings/pages/mail/MyMailPage'
 import { MailPage } from '@/features/mail/pages/MailPage'
 import { WebhooksPage } from '@/features/settings/pages/WebhooksPage'
 import { MailGate } from '@/features/mail/MailGate'
@@ -207,6 +210,9 @@ export default function App() {
                     <Route path="mail/mailboxes" element={<MailMailboxesPage />} />
                     <Route path="mail/labels" element={<MailLabelsPage />} />
                     <Route path="mail/failed" element={<FailedMailPage />} />
+                    <Route path="mail/sending" element={<MailSendingPage />} />
+                    <Route path="mail/suppressions" element={<MailSuppressionsPage />} />
+                    <Route path="mail/me" element={<MyMailPage />} />
                   </Route>
                   <Route path="webhooks" element={<WebhooksPage />} />
                   <Route path="file-storage" element={<FileStoragePage />} />

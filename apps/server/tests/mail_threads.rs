@@ -1099,6 +1099,44 @@ async fn bulk_star_read_and_labels_with_live_events() {
 }
 
 #[tokio::test]
+async fn the_unread_switch_lists_only_unread_threads() {
+    let fixture = Fixture::new().await;
+    let read = fixture
+        .deliver(
+            fixture.shared,
+            &mail("Carl <carl@sender.test>", "u1", "Read", "First."),
+        )
+        .await;
+    let unread = fixture
+        .deliver(
+            fixture.shared,
+            &mail("Carl <carl@sender.test>", "u2", "Unread", "Second."),
+        )
+        .await;
+    fixture
+        .ok(
+            &fixture.ann,
+            "POST",
+            "/threads/bulk",
+            Some(json!({ "ids": [read.to_string()], "read": true })),
+        )
+        .await;
+    assert_eq!(
+        fixture.ids(&fixture.ann, "/threads?unread=true").await,
+        vec![unread.to_string()]
+    );
+    // the read state is the caller's: for the owner both are still unread
+    assert_eq!(
+        fixture
+            .ids(&fixture.owner, "/threads?unread=true")
+            .await
+            .len(),
+        2
+    );
+    assert_eq!(fixture.ids(&fixture.ann, "/threads").await.len(), 2);
+}
+
+#[tokio::test]
 async fn a_member_name_from_outside_is_a_lookalike() {
     let fixture = Fixture::new().await;
     let forged = fixture

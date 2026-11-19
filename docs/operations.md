@@ -471,7 +471,7 @@ Workspace owners and admins can connect their own bucket in **Settings → File 
 - When a workspace is deleted for good, its files in its own bucket stay there.
 ## Mail
 
-Orbit is its own mail server for incoming mail. Mail for the verified domains of the workspaces arrives in one of two ways: at Orbit's own SMTP listener, or through a mail provider that sends each message to Orbit over HTTPS (no port 25 on this server; see [Receive through a provider](#receive-through-a-provider)). Members read it in **Mail**. Outgoing mail is not in this release.
+Orbit is its own mail server: it receives mail for the verified domains of the workspaces and sends mail from them. Mail for the verified domains of the workspaces arrives in one of two ways: at Orbit's own SMTP listener, or through a mail provider that sends each message to Orbit over HTTPS (no port 25 on this server; see [Receive through a provider](#receive-through-a-provider)). Members read it in **Mail**, and write, reply and forward there (see [Sending](#sending)).
 
 ### Settings
 
@@ -489,7 +489,7 @@ Orbit is its own mail server for incoming mail. Mail for the verified domains of
 | `ORBIT_MAIL_DNS_RESOLVER` | system | A resolver address (`ip:port`) for the SPF, DKIM, DMARC and domain checks. |
 | `ORBIT_MAIL_CONTENT_ORIGIN` | public origin | An optional separate origin for mail HTML and its images. When set, only this host serves them; the public origin answers 404. Point it at the same server and keep the original `Host` header in the proxy. |
 
-Mail is off by default. The root user turns it on with the **Mail** switch in **Admin → Inbound mail**. Until then, no one sees the Mail app, its menu items, its shortcuts or **Settings → Mail**, and the workspace mail API answers `403 mail_disabled`. When the switch is on, workspace admins add domains and mailboxes in **Settings → Mail**. If you turn it off again, mail for the domains that were added before still arrives, and it shows again when you turn Mail on.
+Mail is off by default. The root user turns it on with the **Mail** switch in **Admin → Mail**. Until then, no one sees the Mail app, its menu items, its shortcuts or **Settings → Mail**, and the workspace mail API answers `403 mail_disabled`. When the switch is on, workspace admins add domains and mailboxes in **Settings → Mail**. If you turn it off again, mail for the domains that were added before still arrives, and it shows again when you turn Mail on.
 
 ### Modes
 
@@ -521,6 +521,117 @@ The domain's MX points to a mail provider, and the provider sends each message t
 | Resend | the host Resend shows (enter it in the provider) | A webhook for `email.received`; its signing secret and an API key that can read received emails. | Resend keeps its own copy of each message; Orbit cannot delete it. |
 | Amazon SES | `inbound-smtp.<region>.amazonaws.com` | A receipt rule that stores the message in an S3 bucket and notifies an SNS topic with an HTTPS subscription to Orbit's URL. Enter the region, bucket, prefix and topic ARN. | Orbit confirms the subscription, refuses other topics, and deletes each message from the bucket once stored. The IAM user needs `s3:GetObject` and `s3:DeleteObject` on the bucket. As a backstop, add a bucket lifecycle rule that deletes objects after a few days. |
 
+### Sending
+
+Members send, reply and forward from **Mail**. The message leaves from an address of a mailbox they belong to, on a verified domain. Orbit signs it with the DKIM key of the domain and sends it through a **send route**. Managers set routes in **Settings → Mail → Sending**. The root user sets routes for the whole instance, and the default route, in **Admin → Mail**.
+
+A domain uses its own route when it has one, else the instance default. A workspace can add its own routes only while the root user leaves **Workspaces can add their own providers** on (the same switch as for receiving). Off stops new ones; existing ones keep sending. Orbit Cloud keeps it off.
+
+| Kind | How Orbit sends | At the provider | Records at the domain |
+|---|---|---|---|
+| `direct` | Orbit looks up the MX of each recipient domain and sends on port 25 (STARTTLS when offered). | Nothing. See [Direct sending](#direct-sending). | SPF `v=spf1 a:<ORBIT_MAIL_HOSTNAME> mx ~all` |
+| `smtp` | Any relay, with TLS or STARTTLS (no plain text, except on a root route to a private address). | The relay's host, port and login. | SPF with the include or IPs you enter on the route |
+| `postshiba` | The PostShiba SMTP service (port 587, STARTTLS). | A sending domain and an API key. | The return path CNAME and the DKIM records that PostShiba shows; SPF with its include |
+| `postmark` | `smtp.postmarkapp.com` (port 587). | A server token and a message stream. | The return path CNAME `pm-bounces`, Postmark's DKIM; SPF `include:spf.mtasv.net` |
+| `resend` | `smtp.resend.com` (port 587). | An API key. | The `send.<domain>` records and Resend's DKIM; SPF `include:amazonses.com` |
+| `mailgun` | The Mailgun HTTP API (US, EU or AU). | The API key, the sending domain and the region. | Mailgun's DKIM and return path records; SPF `include:mailgun.org` |
+| `ses` | The Amazon SES API (SigV4), 50 recipients each call. | An IAM user that can send, the region, and an SNS topic ARN for events. | Easy DKIM CNAMEs and the custom MAIL FROM records; SPF `include:amazonses.com` |
+| `cloudflare` (Beta) | The Cloudflare Email Sending API, 50 recipients each call. | An account ID and an API token. Needs Workers Paid. | The records that Cloudflare shows; return path `cf-bounce.<domain>` |
+
+Each route page and the domain page show the exact records. Orbit also signs with its own DKIM key (`o<year><letters>._domainkey.<domain>`, for example `o2026a`), next to the provider's. Orbit's key is the one DMARC aligns on. Slice 1's fixed SPF record is gone: the SPF row of the domain follows its route. A provider keeps its own secrets only as Orbit seals them with the app key.
+
+Orbit never turns on open or click tracking, and it turns it off at the providers that have it. Orbit does not read or store reads.
+
+#### Send readiness
+
+A domain can send when all are true: the domain is verified, its inbound mail is live (the MX check passes), its DKIM key is **active** (the DNS record matches), and a send route is set. If not, **Send** answers `409 send_not_ready` with a reason (`domain_unverified`, `inbound_not_live`, `dkim_inactive`, `no_route`, `mailbox_suspended`), and the domain page lists what to fix. Messages waiting for a DKIM key that is not active yet go out when the key becomes active (a sweep runs every 5 minutes).
+
+**Send test** on a route sends a message to an address you type and shows the result of each step (DNS, connect, login, send). It does not count in the limits.
+
+#### Direct sending
+
+Direct sending needs these:
+
+- `ORBIT_MAIL_HOSTNAME` is set. Orbit uses it as the EHLO name. Without it, you cannot make a `direct` route.
+- The A or AAAA record of that name points to the address that Orbit sends from, and the PTR (reverse DNS) record of that address is the same name. Many receivers refuse mail without it.
+- The hosting provider allows outgoing port 25. Many do not.
+- In a cluster, every server must send from the same public IP address (for example through one NAT gateway). Otherwise SPF fails on some messages.
+
+Direct delivery refuses recipient servers with a private, loopback, link-local or Orbit's own address. A `smtp` route made by a workspace refuses such hosts too; only a route of the root user can use one (for example Mailpit at `127.0.0.1` in development).
+
+#### Undo send and scheduled send
+
+**Send** does not send at once. The server holds the message for the **undo delay** of the member (0, 5, 10, 20 or 30 seconds; the default is 10) and shows **Undo**. The member can also pick a send time. The hold lives on the server: closing the browser or the computer does not stop the send. During the hold, the draft is locked (`409 draft_sending`) until the member clicks **Undo**. A message that is held or scheduled shows in **Outbox** and **Scheduled**. At its time, Orbit checks the domain and the mailbox again: a message whose domain or mailbox is no longer ready (for example suspended since a scheduled send) waits in **Outbox** with the reason and goes once they are ready again. When a member leaves the workspace, their held and scheduled messages are not sent (their drafts go with them); messages already released are still delivered, and their delivery status stays visible to the mailbox's members.
+
+#### Retries
+
+Orbit tries each recipient again after a temporary failure (a 4xx reply or a network error). The steps are 1 minute, 5 minutes, 15 minutes, 30 minutes, 1 hour, 2 hours, 4 hours, 8 hours, 12 hours, then 24 hours three times. After 4 hours the recipient shows **Delayed**. After 5 days without success, the recipient is **not delivered** ("Gave up after 5 days"). A problem with the route itself (a wrong password, a refused login, a provider outage) does not count as a bounce: the message waits and the route shows its last error. Orbit sends from a message at least once: in rare cases, such as a crash at the moment the next server accepts the message, a recipient can get it twice.
+
+#### Bounces and complaints
+
+- **Direct and smtp routes:** Orbit uses the envelope sender `bounce+<token>@<domain>`. The token names one recipient and is valid for 7 days. A returned message (DSN) goes to this address: the SMTP listener or the provider intake accepts it only with a valid token, parses it (RFC 3464) and does not file it into a mailbox. `bounce` is a reserved local part: nobody can make a mailbox or alias with it. For this, the MX of the domain must reach Orbit.
+- **Provider routes:** the provider sends bounce, complaint and delivery events to Orbit (see below).
+- A bounce marks the recipient **not delivered**. The thread moves to the Inbox as unread, and the message shows "Not delivered to <address>" with the reason and **Retry**. After a Retry, older DSNs and provider events for that recipient are ignored.
+- **Suppression:** Orbit adds an address to the suppression list of the workspace after a hard bounce that means the address is bad (`5.1.x`, `5.2.1`, or a `550`, `551` or `553` reply without an enhanced status) and after a spam complaint. It does not suppress for blocks that are not about the address (`5.7.x` policy or spam, `5.3.x`, `5.6.x`, a message too large) or for temporary failures. The composer warns before the send; **Send anyway** sends to the other recipients, and the server skips the suppressed address (it shows **Suppressed**). Only **Retry** on that recipient removes the entry and sends again. Managers see and remove entries in **Settings → Mail → Suppressions**.
+- Orbit never sends a bounce message of its own to a remote sender. Bounces show in Orbit only.
+
+#### Provider events
+
+Each provider route has an events URL, shown on the route page: `https://<public origin>/api/v1/mail/events/<kind>/<route id>`. Set it at the provider. Orbit refuses an event without a valid signature or credentials, and an event older than 5 minutes (SES: 2 hours, because SNS repeats a message with its first signature). An unknown or old event answers `200` and is ignored.
+
+| Kind | What to set at the provider | How Orbit checks it |
+|---|---|---|
+| PostShiba | The events webhook URL and its signing secret. | HMAC-SHA256 over `<timestamp>.<body>`. |
+| Mailgun | A webhook for bounces, complaints and delivered with the URL; the HTTP webhook signing key. | HMAC-SHA256 over `<timestamp><token>`, within 5 minutes. Orbit does not remember the tokens of events (it does for inbound mail), so a captured event can be sent again within those 5 minutes; applying an event twice changes nothing. |
+| Resend | A webhook for `email.delivered`, `email.bounced`, `email.complained` and `email.delivery_delayed`; its signing secret. | Svix signature (`svix-id`, `svix-timestamp`, `svix-signature`). |
+| Amazon SES | A configuration set with an SNS topic for bounce, complaint and delivery, and an HTTPS subscription to the URL. Enter the topic ARN on the route. | SNS signature (version 2), and the topic must be the ARN on the route. Until the ARN is set, events answer `401`. |
+| Postmark | A bounce and a spam complaint webhook with the URL. Orbit makes a login and a password and shows them once; use them as the webhook's HTTP Basic auth. | HTTP Basic auth. Postmark does not sign. |
+| Cloudflare | Cloudflare gives events through a queue. Deploy the Worker from the route page, bind it to the queue, and set the variable `ORBIT_EVENTS_URL` and the secret `ORBIT_EVENT_SECRET` (Orbit makes it and shows it once). | The Worker signs each batch with HMAC-SHA256. It uses `ORBIT_EVENT_SECRET`, or `ORBIT_SIGNING_SECRET` when the route was made from a Cloudflare receiving provider. |
+
+#### Limits and tiers
+
+Orbit counts each recipient (Bcc too) when the message is released, in a sliding window. A message over a limit is not refused: it waits in **Outbox** with the reason and goes when the window allows it. The one exception is a message with more recipients than the tier allows: that is refused.
+
+| Tier | Each member | Each workspace | Recipients in one message |
+|---|---|---|---|
+| `new` | 30 per hour, 100 per day | 60 per hour, 200 per day | 50 |
+| `standard` | 500 per hour, 2,000 per day | 2,000 per hour, 10,000 per day | 100 |
+| `custom` | set by the root user | set by the root user | set by the root user |
+
+- **Orbit Cloud** starts every workspace at `new`. **Self-hosted** starts at `standard`. The root user changes the numbers of `new` and `standard` in **Admin → Mail → Tier limits**.
+- A daily job moves a `new` workspace to `standard` when its first release was at least 14 days ago, it was never paused, its hard bounce rate is under 2 % and its complaint rate is under 0.1 %.
+- **Pause:** after each bounce or complaint, Orbit looks at the last 7 days. With at least 100 recipients and a hard bounce rate over 5 % or a complaint rate over 0.3 %, Orbit pauses the sending of the workspace. A new Send answers `409 sending_paused`, and messages already released wait in **Outbox** as **Paused**. Owners and admins see a banner. Only the root user resumes sending, in **Admin → Mail** (**Workspaces**, **Resume**). After a resume, the rates count only recipients released after it, so the bounces that paused the workspace do not pause it again at once. A resumed workspace is not promoted. Vacation replies never count toward the rates, and their bounces do not move the thread to the Inbox.
+- A message has a size limit that depends on the route (encoded size): Postmark 10 MB, Mailgun 25 MB, Cloudflare 25 MiB, SES 40 MB, direct, smtp and PostShiba 25 MB. A route page can set a lower number.
+
+#### Large files as links
+
+When the files make a message too large, the composer offers **Send as a link** for the largest files. The file stays in Orbit storage, and the message gets a block with the name, size and expiry date. The link is `https://<content origin>/mail/f/<token>`, so set `ORBIT_MAIL_CONTENT_ORIGIN` when you use a separate origin. The token is 32 random bytes; Orbit stores only its SHA-256. A link expires after 30 days (**Settings → Mail → Sending**, 1 to 365 days) or when the sender revokes it on the sent message. The download is always an attachment, never shown in the browser, and it is rate limited for each address and for each link. Orbit deletes an expired link when the purge job runs, and a revoked link after one day.
+
+#### Vacation reply
+
+A mailbox can have a vacation reply (**Settings → Mail → My mail**: dates, subject, text, and optionally only for contacts). Orbit replies only when all are true: the message is in the Inbox (not Spam), DMARC did not fail, the envelope sender is authenticated (SPF passed for its domain, or DMARC passed with that same domain as the From domain, or it was sent from a mailbox of this Orbit), the sender is not empty (`<>`), the message has no `Auto-Submitted` header other than `no`, no `Precedence: bulk`, `list` or `junk`, and no `List-Id` or `List-Unsubscribe`, the mailbox address is in To or Cc, the sender is not a mailbox of the same workspace, and the mailbox did not reply to this sender in the last 7 days. The reply has `Auto-Submitted: auto-replied` and goes through the normal send path, so it is signed and counted in the limits.
+
+#### Purge
+
+The `mail.purge` job runs every day. It deletes:
+
+- threads in Trash after 30 days (as before) and the messages and receipts nothing refers to;
+- cancelled (undone) outbound messages after 1 day;
+- expired file links, and revoked links 1 day after the revoke;
+- vacation reply records after 7 days;
+- the delivery rows of each recipient 90 days after the send. A summary of the delivery stays on the message, so the thread still shows "Delivered" or "Not delivered", but **Retry** is no longer possible.
+
+#### DKIM key rotation
+
+On the domain page, managers click **Rotate key**. Orbit makes a new key with the next selector and shows its TXT record. Publish it. When the record matches (the domain check runs every 10 minutes while a key waits), the new key becomes **active** and the old one **retiring**, which still signs nothing but is kept for 7 days, so mail in transit can still be checked. Then it is retired and its private key is deleted. Remove the old record from DNS then; the page tells you. Only one key waits at a time.
+
+#### Not checked with real services
+
+- PostShiba has an HTTP inject for raw messages. Orbit does not use it, because it may run a template engine over the content. Orbit sends through PostShiba SMTP. Ask PostShiba whether inject sends a raw message unchanged.
+- The Postmark and Resend routes send a raw message through SMTP. Their handling of tracking headers and raw content is not in their docs, and no real account has checked it.
+- Cloudflare Email Sending is in beta. The route is marked **Beta**.
+- No delivery to Gmail or Outlook has been checked for any route.
+
 ### Port 25 and the client address
 
 The container runs without capabilities, so the listener uses port 2525. The Compose file maps host port 25 to it (`ports: ['25:2525']`, commented out in [`deploy/compose.yaml`](../deploy/compose.yaml)).
@@ -544,8 +655,8 @@ Get a certificate for `ORBIT_MAIL_HOSTNAME` (for example with certbot) and mount
 |---|---|---|---|
 | TXT | `_orbit-verify.<domain>` | `orbit-verify=<token>` | Required. Proves that the workspace owns the domain. |
 | MX | `<domain>` | `10 <ORBIT_MAIL_HOSTNAME>` | Required in direct mode. In relay mode, the MX points to the relay, and Orbit accepts any MX. |
-| TXT | `<selector>._domainkey.<domain>` | `v=DKIM1; k=rsa; p=…` | Recommended. For sending in a later release. The value is longer than 255 bytes: zone files need it as several strings, and the page shows them. |
-| TXT | `<domain>` | `v=spf1 mx ~all` | Recommended. |
+| TXT | `<selector>._domainkey.<domain>` | `v=DKIM1; k=rsa; p=…` | Required for sending. Orbit signs every message with it, and a key becomes active only when the record matches. The value is longer than 255 bytes: zone files need it as several strings, and the page shows them. |
+| TXT | `<domain>` | `v=spf1 a:<ORBIT_MAIL_HOSTNAME> mx ~all` for a direct route; a provider route adds its `include:` | Recommended. The value follows the send route of the domain. Routes of a provider also need its return path and DKIM records; the page shows them. |
 | TXT | `_dmarc.<domain>` | `v=DMARC1; p=none` | Recommended. |
 
 The domain check runs every 10 minutes for a pending domain (for 72 hours) and once a day for a verified domain. **Check now** runs it at once.

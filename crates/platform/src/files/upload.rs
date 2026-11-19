@@ -21,7 +21,7 @@ static SHRINKING: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
 const QUARANTINE_MILLIS: i64 = 24 * HOUR_MILLIS;
 const SNIFF_BYTES: usize = 8 * 1024;
 /// References to one blob (bind its id twice): task/comment attachments, docs page files, chat
-/// files, profile pictures, custom emoji, stickers and received mail. The second parameter is used
+/// files, profile pictures, custom emoji, stickers, received mail and the files of outgoing mail. The second parameter is used
 /// for all of the newer tables.
 pub const BLOB_REFERENCE_COUNT: &str = "SELECT (SELECT COUNT(*) FROM attachment_references WHERE blob_id = $1) \
      + (SELECT COUNT(*) FROM page_files WHERE blob_id = $2) \
@@ -29,9 +29,11 @@ pub const BLOB_REFERENCE_COUNT: &str = "SELECT (SELECT COUNT(*) FROM attachment_
      + (SELECT COUNT(*) FROM user_avatars WHERE blob_id = $2) \
      + (SELECT COUNT(*) FROM custom_emoji WHERE blob_id = $2) \
      + (SELECT COUNT(*) FROM custom_stickers WHERE blob_id = $2) \
-     + (SELECT COUNT(*) FROM mail_receipts WHERE blob_id = $2)";
+     + (SELECT COUNT(*) FROM mail_receipts WHERE blob_id = $2) \
+     + (SELECT COUNT(*) FROM mail_file_links WHERE blob_id = $2) \
+     + (SELECT COUNT(*) FROM mail_draft_files WHERE blob_id = $2)";
 /// Every table that references blobs by `blob_id`.
-const BLOB_REFERENCE_TABLES: [&str; 7] = [
+const BLOB_REFERENCE_TABLES: [&str; 9] = [
     "attachment_references",
     "page_files",
     "chat_message_files",
@@ -39,6 +41,8 @@ const BLOB_REFERENCE_TABLES: [&str; 7] = [
     "custom_emoji",
     "custom_stickers",
     "mail_receipts",
+    "mail_file_links",
+    "mail_draft_files",
 ];
 /// Raster image types that are served inline. Video, audio and plain text are inline too
 /// (`serves_inline`). SVG, HTML and PDF stay attachments: a same-origin viewer could run their content.
@@ -837,6 +841,11 @@ impl UploadService {
         .rows_affected();
         transaction.commit().await?;
         Ok(deleted == 1)
+    }
+
+    /// A reader of a blob's stored bytes (stream them; do not buffer a big file).
+    pub async fn open_blob(&self, storage_key: &str) -> Result<BlobReader, UploadError> {
+        Ok(self.store.open(storage_key).await?)
     }
 
     /// The stored bytes of a blob, from the local disk or S3.

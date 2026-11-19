@@ -32,6 +32,7 @@ import { LoadingText } from '@/components/ui/spinner'
 import { GuestBadge } from '@/components/common/GuestBadge'
 import { GuestChannelsField } from '@/features/settings/components/GuestChannelsField'
 import { INVITABLE_ROLES, invitationRequest, type InvitableRole } from '@/features/settings/lib/invitation'
+import { writeClipboard } from '@/lib/clipboard'
 
 type Role = User['role']
 type Sort = 'name_asc' | 'name_desc' | 'email_asc' | 'role'
@@ -144,7 +145,7 @@ export function MembersPage() {
   const copyLink = async () => {
     if (!inviteLink) return
     try {
-      await navigator.clipboard.writeText(inviteLink.url)
+      await writeClipboard(inviteLink.url)
       setCopied(true)
       setCopyError(false)
       toast('Invitation link copied')

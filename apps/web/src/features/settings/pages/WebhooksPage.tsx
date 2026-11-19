@@ -21,6 +21,7 @@ import { useCan } from '@/features/workspaces/permissions'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { RequiredMark, RowIcon, SettingsRow } from '@/features/settings/components/SettingsParts'
 import { useCreateWebhook, useDeleteWebhook, useRetryWebhookDelivery, useRotateWebhookSecret, useUpdateWebhook, useWebhookDeliveries, useWebhooks } from '@/features/settings/api/webhooks'
+import { writeClipboard } from '@/lib/clipboard'
 
 const EVENT_TYPES: { value: WebhookEventType; label: string }[] = [
   { value: 'task.created', label: 'Task created' },
@@ -86,7 +87,7 @@ export function WebhooksPage() {
         <strong>Copy the signing secret of {secret.name} now. You cannot see it again.</strong>
         <div className="flex items-center gap-2">
           <code className="min-w-0 flex-1 [overflow-wrap:anywhere] select-all">{secret.value}</code>
-          <Button variant="outline" type="button" onClick={() => { void navigator.clipboard.writeText(secret.value).then(() => { setCopied(true); toast('Secret copied') }, () => toast.error('Could not copy the secret.')) }}><Copy className="size-4" /> {copied ? 'Copied' : 'Copy'}</Button>
+          <Button variant="outline" type="button" onClick={() => { void writeClipboard(secret.value).then(() => { setCopied(true); toast('Secret copied') }, () => toast.error('Could not copy the secret.')) }}><Copy className="size-4" /> {copied ? 'Copied' : 'Copy'}</Button>
         </div>
       </div> : <p className="m-0 text-muted-foreground">Check each request with its <code>webhook-signature</code> header, as the docs on webhooks describe.</p>}
     </SettingsCard>

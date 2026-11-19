@@ -11,7 +11,7 @@ use utoipa::ToSchema;
 use super::{Call, MailState, RequestIdExtension};
 use crate::repositories::mail::{
     AddressKind, MailAddress, Mailbox, MailboxKind, MailboxStatus, NamePattern, NewMailbox,
-    Proposal,
+    Proposal, Vacation, VacationChange,
 };
 use crate::task_routes::{ApiError, ApiJson};
 
@@ -463,4 +463,107 @@ pub(crate) async fn create_personal_mailboxes(
         created: result.created.into_iter().map(view).collect(),
         conflicts: result.conflicts,
     }))
+}
+
+#[derive(Serialize, ToSchema)]
+pub(crate) struct MailVacation {
+    enabled: bool,
+    /// The first moment a reply is sent (inclusive); `null` is open.
+    #[schema(value_type = Option<String>, format = DateTime)]
+    starts_at: Option<TimestampMillis>,
+    /// The first moment no reply is sent (exclusive); `null` is open.
+    #[schema(value_type = Option<String>, format = DateTime)]
+    ends_at: Option<TimestampMillis>,
+    /// Empty: `Re:` and the subject of the message.
+    subject: String,
+    body_html: String,
+    /// Reply only to people the mailbox's members wrote to.
+    contacts_only: bool,
+    /// The time zone that dates without an offset are read in.
+    timezone: String,
+}
+
+fn vacation_view(vacation: Vacation) -> MailVacation {
+    MailVacation {
+        enabled: vacation.enabled,
+        starts_at: vacation.starts_at,
+        ends_at: vacation.ends_at,
+        subject: vacation.subject,
+        body_html: vacation.body_html,
+        contacts_only: vacation.contacts_only,
+        timezone: vacation.timezone,
+    }
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct PutMailVacationBody {
+    enabled: bool,
+    /// An RFC 3339 time, a date (`2026-11-20`) or a date and time without an offset
+    /// (`2026-11-20T09:00`) in the owner's time zone. Inclusive. Empty: no start.
+    starts_at: Option<String>,
+    /// As `starts_at`. Exclusive, and after `starts_at`. Empty: no end.
+    ends_at: Option<String>,
+    /// Up to 200 characters. Empty: `Re:` and the subject of the message.
+    #[serde(default)]
+    subject: String,
+    /// Sanitized on save; up to 20,000 bytes; required when `enabled`.
+    #[serde(default)]
+    body_html: String,
+    #[serde(default)]
+    contacts_only: bool,
+}
+
+/// The vacation reply of a mailbox: the owner of a personal mailbox, and the members of a shared
+/// one, read it.
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/mail/mailboxes/{mailbox_id}/vacation", params(("workspace_id" = String, Path), ("mailbox_id" = String, Path)), responses((status = 200, body = MailVacation)))]
+pub(crate) async fn get_mailbox_vacation(
+    State(state): State<MailState>,
+    Path((workspace, mailbox)): Path<(String, String)>,
+    headers: HeaderMap,
+    uri: Uri,
+    request_id: RequestIdExtension,
+) -> Result<Json<MailVacation>, ApiError> {
+    let call = Call::enter(&state, &headers, &uri, &workspace, &request_id).await?;
+    let mailbox_id = call.id(&mailbox)?;
+    let vacation = state
+        .mail
+        .vacation(call.workspace_id, call.actor_id, mailbox_id)
+        .await
+        .map_err(|error| call.problem(error))?;
+    Ok(Json(vacation_view(vacation)))
+}
+
+/// Sets the vacation reply: the owner of a personal mailbox, or a member with `mail.manage`
+/// for a shared one.
+#[utoipa::path(put, path = "/api/v1/workspaces/{workspace_id}/mail/mailboxes/{mailbox_id}/vacation", params(("workspace_id" = String, Path), ("mailbox_id" = String, Path)), request_body = PutMailVacationBody, responses((status = 200, body = MailVacation)))]
+pub(crate) async fn put_mailbox_vacation(
+    State(state): State<MailState>,
+    Path((workspace, mailbox)): Path<(String, String)>,
+    headers: HeaderMap,
+    uri: Uri,
+    request_id: RequestIdExtension,
+    ApiJson(body): ApiJson<PutMailVacationBody>,
+) -> Result<Json<MailVacation>, ApiError> {
+    let call = Call::enter(&state, &headers, &uri, &workspace, &request_id).await?;
+    let mailbox_id = call.id(&mailbox)?;
+    let vacation = state
+        .mail
+        .put_vacation(
+            call.workspace_id,
+            call.actor_id,
+            mailbox_id,
+            VacationChange {
+                enabled: body.enabled,
+                starts_at: body.starts_at,
+                ends_at: body.ends_at,
+                subject: body.subject,
+                body_html: body.body_html,
+                contacts_only: body.contacts_only,
+            },
+            TimestampMillis::now(),
+        )
+        .await
+        .map_err(|error| call.problem(error))?;
+    Ok(Json(vacation_view(vacation)))
 }

@@ -13,13 +13,18 @@ import { fullDate, timeOfDay } from '@/lib/format'
 import { useSetSenderPref } from '@/features/mail/api/mutations'
 import { useRawMessage } from '@/features/mail/api/queries'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
-import { firstLine, mailAttachment, personName, problemText, rawMessageUrl } from '@/features/mail/mailLib'
+import { firstLine, mailAttachment, personName, problemText, rawMessageUrl, splitTextQuote } from '@/features/mail/mailLib'
+import { DeliveryStatus } from './DeliveryStatus'
+import { FileLinks } from './FileLinks'
 import { MailHtmlFrame } from './MailHtmlFrame'
 import { SafetyBanner } from './SafetyBanner'
+import type { AvatarOf } from './useMailAvatar'
 
 interface MessageItemProps {
+  threadId: string
   message: MailMessageView
   expanded: boolean
+  avatarOf: AvatarOf
   onToggle: () => void
   onPrint: () => void
 }
@@ -58,21 +63,23 @@ function OriginalMessage({ messageId, onClose }: { messageId: string; onClose: (
 }
 
 /** One message of a thread: a header that expands it, then the warnings, the body and the attachments. */
-export function MessageItem({ message, expanded, onToggle, onPrint }: MessageItemProps) {
+export function MessageItem({ threadId, message, expanded, avatarOf, onToggle, onPrint }: MessageItemProps) {
   const { workspace } = useWorkspace()
   const [imagesLoaded, setImagesLoaded] = useState(false)
   const [originalOpen, setOriginalOpen] = useState(false)
+  /** Remote images the view removed, as the frame says (`null` until it does). */
+  const [blocked, setBlocked] = useState<number | null>(null)
   const senderPref = useSetSenderPref()
   const loadImages = imagesLoaded || message.load_images_default
   const address = message.from?.address
   const name = personName(message.from)
   const date = message.sent_at ?? message.received_at
   const files = message.attachments.filter((attachment) => !attachment.inline).map((attachment) => mailAttachment(workspace.id, attachment))
-  // the view cannot tell how many remote images it removed, so every HTML message offers them until they load
-  const offerImages = message.has_html && !loadImages
+  // the frame counts the remote images the view removed: no offer for a message without any
+  const offerImages = message.has_html && !loadImages && (blocked ?? 0) > 0
 
   return (
-    <div data-slot="mail-message" className="py-4 [[data-slot=mail-message]+&]:border-t" data-expanded={expanded || undefined}>
+    <div data-slot="mail-message" className={`${expanded ? 'py-4' : 'py-2.5'} [[data-slot=mail-message]+&]:border-t`} data-expanded={expanded || undefined}>
       <div className="flex items-center gap-1">
         <div
           className="-m-1 flex min-w-0 flex-1 cursor-pointer items-center gap-2.5 rounded-md p-1 transition-colors outline-none hover:bg-muted/45 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset"
@@ -86,10 +93,12 @@ export function MessageItem({ message, expanded, onToggle, onPrint }: MessageIte
             onToggle()
           }}
         >
-          <UserAvatar user={null} name={name} size={32} />
+          <UserAvatar user={avatarOf(message.from, name, Boolean(message.delivery) || Boolean(message.auth.aligned_domain))} size={32} />
           <div className="flex min-w-0 flex-col">
             <span className="truncate text-[0.8125rem] font-semibold text-foreground">{name}</span>
-            <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground/70">
+            {/* folded: the first line of the text in place of the address */}
+            {expanded ? null : <span className="truncate text-[0.8125rem] text-muted-foreground">{firstLine(message.body_text)}</span>}
+            <span className={expanded ? 'flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground/70' : 'hidden'}>
               <span className="truncate">{address}</span>
               {message.auth.aligned_domain ? (
                 <span className="inline-flex shrink-0 items-center gap-0.5 text-muted-foreground" title="DMARC confirmed that the message comes from this domain.">
@@ -135,6 +144,7 @@ export function MessageItem({ message, expanded, onToggle, onPrint }: MessageIte
             {message.cc.length > 0 ? <span className="truncate">Cc: {people(message.cc)}</span> : null}
             {message.sender ? <span className="truncate">Sent by {message.sender}</span> : null}
           </div>
+          {message.delivery ? <DeliveryStatus outboundId={message.delivery.outbound_id} recipients={message.delivery.recipients} /> : null}
           <SafetyBanner message={message} />
           {offerImages ? (
             <div data-print-hide="" className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border px-2.5 py-1.5 text-[0.8125rem] text-muted-foreground">
@@ -168,17 +178,45 @@ export function MessageItem({ message, expanded, onToggle, onPrint }: MessageIte
           ) : null}
           <div className="mt-3">
             {message.has_html ? (
-              <MailHtmlFrame messageId={message.id} loadImages={loadImages} title={message.subject || 'Message'} />
+              <MailHtmlFrame messageId={message.id} loadImages={loadImages} title={message.subject || 'Message'} onBlockedImages={setBlocked} />
             ) : (
-              <div className="text-sm leading-[1.6] break-words whitespace-pre-wrap text-foreground">{message.body_text}</div>
+              <PlainBody text={message.body_text} />
             )}
           </div>
           {files.length > 0 ? <Attachments attachments={files} /> : null}
+          <FileLinks threadId={threadId} messageId={message.id} links={message.file_links} />
         </div>
-      ) : (
-        <div className="mt-1.5 truncate pl-[42px] text-[0.8125rem] text-muted-foreground">{firstLine(message.body_text)}</div>
-      )}
+      ) : null}
       {originalOpen ? <OriginalMessage messageId={message.id} onClose={() => setOriginalOpen(false)} /> : null}
+    </div>
+  )
+}
+
+/** A plain-text body; its trailing quote folds behind "•••", as in the HTML view. */
+function PlainBody({ text }: { text: string }) {
+  const [open, setOpen] = useState(false)
+  const { body, quote } = splitTextQuote(text)
+  return (
+    <div className="flex flex-col items-start gap-2 text-sm leading-[1.6] break-words whitespace-pre-wrap text-foreground">
+      <div>{body}</div>
+      {quote ? (
+        <>
+          <Tip label={open ? 'Hide quoted text' : 'Show quoted text'}>
+            <button
+              type="button"
+              aria-expanded={open}
+              aria-label={open ? 'Hide quoted text' : 'Show quoted text'}
+              data-print-hide=""
+              className="h-[22px] rounded-full border bg-muted/50 px-2.5 text-xs leading-none tracking-widest text-muted-foreground transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none"
+              onClick={() => setOpen((value) => !value)}
+            >
+              •••
+            </button>
+          </Tip>
+          {/* Folded only on screen: a printed message keeps its quote. */}
+          <div className={`border-l-2 pl-3 text-muted-foreground ${open ? '' : 'hidden print:block'}`}>{quote}</div>
+        </>
+      ) : null}
     </div>
   )
 }

@@ -25,6 +25,7 @@ import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { taskPath } from '@/lib/taskLinks'
 import { focusTaskRow, focusedTaskId, useTaskTarget } from '@/shortcuts/taskTarget'
 import { useCommand } from '@/shortcuts/useCommand'
+import { writeClipboard } from '@/lib/clipboard'
 
 type TaskField = 'status' | 'priority' | 'assignee' | 'labels' | 'dueDate' | 'project' | 'milestone' | 'cycle' | 'estimate'
 
@@ -81,7 +82,7 @@ export function TaskCommands({ tasks, users, labels, statuses, groupContext, cur
   const oneProject = () => available() && sharedProjectId(targets()) !== null
   // one task only: these have no form for several tasks
   const single = () => targets().length === 1
-  const copy = (text: string, done: string) => void navigator.clipboard.writeText(text).then(() => toast(done), () => toast.error('Could not copy to the clipboard.'))
+  const copy = (text: string, done: string) => void writeClipboard(text).then(() => toast(done), () => toast.error('Could not copy to the clipboard.'))
 
   useCommand('task.setStatus', open('status'), { available })
   useCommand('task.setPriority', open('priority'), { available })

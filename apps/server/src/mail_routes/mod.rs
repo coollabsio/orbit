@@ -3,18 +3,24 @@
 //! is for instance admins only.
 
 pub(crate) mod admin;
+pub(crate) mod compose;
 pub(crate) mod content;
 pub(crate) mod domains;
+pub(crate) mod drafts;
+pub(crate) mod events;
 pub(crate) mod inbound;
 pub(crate) mod labels;
 pub(crate) mod mailboxes;
 pub(crate) mod providers;
+pub(crate) mod send;
+pub(crate) mod send_routes;
+pub(crate) mod suppressions;
 pub(crate) mod threads;
 
 use std::sync::Arc;
 
 use axum::Router;
-use axum::extract::Extension;
+use axum::extract::{DefaultBodyLimit, Extension};
 use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::routing::{delete, get, patch, post, put};
 use orbit_platform::{Id, MailMode, RequestId};
@@ -28,7 +34,7 @@ use crate::mail_image_proxy::ImageProxy;
 use crate::mail_listener::MailListenerStatus;
 use crate::repositories::identity::IdentityRepository;
 use crate::repositories::instance_settings::InstanceSettingsRepository;
-use crate::repositories::mail::{MailError, MailRepository};
+use crate::repositories::mail::{MailError, MailRepository, NotReadyReason};
 use crate::task_routes::{ApiError, authenticate_session, request_id_value, validation};
 
 /// What the setup page needs from the mail configuration.
@@ -166,6 +172,11 @@ pub fn mail_router(state: MailState) -> Router {
             "/api/v1/mail/inbound/{kind}/{provider_id}/mime",
             post(inbound::post_inbound),
         )
+        // the handler reads the body itself, with a limit for each provider kind
+        .route(
+            "/api/v1/mail/events/{kind}/{route_id}",
+            post(events::post_mail_events),
+        )
         .route(
             "/api/v1/workspaces/{workspace_id}/mail/domains",
             get(domains::list_mail_domains).post(domains::create_mail_domain),
@@ -179,12 +190,60 @@ pub fn mail_router(state: MailState) -> Router {
             post(domains::check_mail_domain),
         )
         .route(
+            "/api/v1/workspaces/{workspace_id}/mail/domains/{domain_id}/dkim/rotate",
+            post(domains::rotate_mail_domain_dkim),
+        )
+        .route(
             "/api/v1/workspaces/{workspace_id}/mail/domains/{domain_id}/catch-all",
             put(domains::set_mail_domain_catch_all),
         )
         .route(
             "/api/v1/workspaces/{workspace_id}/mail/domains/{domain_id}/route",
             put(domains::set_mail_domain_route),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/domains/{domain_id}/send-route",
+            put(domains::set_mail_domain_send_route),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/send-routes",
+            get(send_routes::list_workspace_mail_send_routes)
+                .post(send_routes::create_workspace_mail_send_route),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/send-routes/{route_id}",
+            patch(send_routes::update_workspace_mail_send_route)
+                .delete(send_routes::delete_workspace_mail_send_route),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/send-routes/{route_id}/test",
+            post(send_routes::test_workspace_mail_send_route),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/providers/{provider_id}/send-route",
+            post(send_routes::create_workspace_mail_provider_send_route),
+        )
+        .route(
+            "/api/v1/admin/mail/send-routes",
+            get(send_routes::list_instance_mail_send_routes)
+                .post(send_routes::create_instance_mail_send_route),
+        )
+        .route(
+            "/api/v1/admin/mail/send-routes/{route_id}",
+            patch(send_routes::update_instance_mail_send_route)
+                .delete(send_routes::delete_instance_mail_send_route),
+        )
+        .route(
+            "/api/v1/admin/mail/send-routes/{route_id}/test",
+            post(send_routes::test_instance_mail_send_route),
+        )
+        .route(
+            "/api/v1/admin/mail/send-default",
+            put(send_routes::set_mail_send_default),
+        )
+        .route(
+            "/api/v1/admin/mail/providers/{provider_id}/send-route",
+            post(send_routes::create_instance_mail_provider_send_route),
         )
         .route(
             "/api/v1/workspaces/{workspace_id}/mail/providers",
@@ -229,6 +288,18 @@ pub fn mail_router(state: MailState) -> Router {
                 .delete(mailboxes::delete_mailbox),
         )
         .route(
+            "/api/v1/workspaces/{workspace_id}/mail/mailboxes/{mailbox_id}/vacation",
+            get(mailboxes::get_mailbox_vacation).put(mailboxes::put_mailbox_vacation),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/contacts",
+            get(compose::search_mail_contacts),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/contacts/{address}",
+            delete(compose::delete_mail_contact),
+        )
+        .route(
             "/api/v1/workspaces/{workspace_id}/mail/mailboxes/{mailbox_id}/status",
             put(mailboxes::set_mailbox_status),
         )
@@ -247,6 +318,63 @@ pub fn mail_router(state: MailState) -> Router {
         .route(
             "/api/v1/workspaces/{workspace_id}/mail/mailboxes/{mailbox_id}/addresses/{address_id}",
             delete(mailboxes::remove_mailbox_address),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/drafts",
+            get(drafts::list_mail_drafts).post(drafts::create_mail_draft),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/drafts/{draft_id}",
+            get(drafts::get_mail_draft)
+                .patch(drafts::update_mail_draft)
+                .delete(drafts::delete_mail_draft),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/drafts/{draft_id}/files",
+            // Multipart stays streaming; this bounds boundaries, headers and ignored fields too.
+            post(drafts::upload_mail_draft_file).layer(DefaultBodyLimit::max(
+                usize::try_from(state.mail.uploads().limits().max_request_bytes())
+                    .unwrap_or(usize::MAX),
+            )),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/drafts/{draft_id}/send",
+            post(send::send_mail_draft),
+        )
+        .route("/mail/f/{token}", get(content::download_mail_file))
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/threads/{thread_id}/messages/{message_id}/file-links/{link_id}/revoke",
+            post(content::revoke_mail_file_link),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/outbound/{outbound_id}/cancel",
+            post(send::cancel_mail_outbound),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/outbound",
+            get(send::list_mail_outbound),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/outbound/{outbound_id}/recipients/{recipient_id}/retry",
+            post(suppressions::retry_mail_recipient),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/suppressions",
+            get(suppressions::list_mail_suppressions),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/suppressions/{address}",
+            delete(suppressions::delete_mail_suppression),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/drafts/{draft_id}/files/{file_id}",
+            get(drafts::get_mail_draft_file)
+                .patch(drafts::update_mail_draft_file)
+                .delete(drafts::delete_mail_draft_file),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/drafts/{draft_id}/check",
+            post(drafts::check_mail_draft),
         )
         .route(
             "/api/v1/workspaces/{workspace_id}/mail/labels",
@@ -279,6 +407,28 @@ pub fn mail_router(state: MailState) -> Router {
         .route(
             "/api/v1/workspaces/{workspace_id}/mail/me",
             get(threads::get_mail_me),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/from-addresses",
+            get(compose::list_from_addresses),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/signatures/{address_id}",
+            get(compose::get_mail_signature)
+                .put(compose::put_mail_signature)
+                .delete(compose::delete_mail_signature),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/snippets",
+            get(compose::list_mail_snippets).post(compose::create_mail_snippet),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/snippets/{snippet_id}",
+            patch(compose::update_mail_snippet).delete(compose::delete_mail_snippet),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/settings/me",
+            get(compose::get_mail_settings).put(compose::put_mail_settings),
         )
         .route(
             "/api/v1/workspaces/{workspace_id}/mail/messages/{message_id}/view-url",
@@ -316,6 +466,26 @@ pub fn mail_router(state: MailState) -> Router {
         .route(
             "/api/v1/admin/mail",
             get(admin::get_mail_admin).put(admin::set_mail_admin),
+        )
+        .route(
+            "/api/v1/admin/mail/send-tiers",
+            get(admin::get_mail_send_tiers).put(admin::set_mail_send_tiers),
+        )
+        .route(
+            "/api/v1/admin/mail/send-policies",
+            get(admin::list_mail_send_policies),
+        )
+        .route(
+            "/api/v1/admin/mail/send-policies/{workspace_id}",
+            get(admin::get_mail_send_policy_admin).put(admin::set_mail_send_policy),
+        )
+        .route(
+            "/api/v1/admin/mail/send-policies/{workspace_id}/resume",
+            post(admin::resume_mail_sending),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/send-policy",
+            get(admin::get_mail_send_policy),
         )
         .route(
             "/api/v1/admin/mail/test-address",
@@ -430,8 +600,71 @@ fn detail(code: &'static str) -> &'static str {
         "workspace_providers_disabled" => {
             "This Orbit server does not let workspaces add their own mail providers. An instance admin can turn it on."
         }
+        "rotation_pending" => {
+            "A new DKIM key waits for its DNS record. Publish it, or wait for the check, first."
+        }
+        "route_is_default" => "Choose another default route, or clear it, first.",
+        "route_in_use" => "Use another route on the domains that use this one first.",
+        "hostname_required" => {
+            "Sending directly needs the mail server's host name (ORBIT_MAIL_HOSTNAME)."
+        }
+        "private_host_refused" => {
+            "This host is on a private network or is not a public address. A workspace route can only use a public mail server."
+        }
+        "plain_smtp_refused" => {
+            "A connection without TLS is only possible for an instance route to a host on a private network."
+        }
+        "draft_conflict" => "The draft changed after it was read. Refresh and try again.",
+        "draft_files_limit" => "A draft can have up to 50 files.",
+        "sending_paused" => {
+            "Sending is paused for this workspace because of bounces or complaints. The root user can resume it."
+        }
+        "draft_sending" => {
+            "This message is waiting to be sent. Undo or cancel the send to change the draft."
+        }
+        "send_as_denied" => "You cannot send as this address.",
+        "already_sent" => "This message has been sent already, so it cannot be undone.",
+        "invalid_address" => "A recipient is not a valid email address.",
+        "no_recipients" => "Add at least one recipient.",
+        "too_many_recipients" => {
+            "This message has more recipients than the workspace may send to at once."
+        }
+        "message_too_large" => {
+            "This message is too large for the send route. Send big files as a link."
+        }
         "provider_in_use" => "Route the domains that use this provider elsewhere first.",
+        "recipient_not_failed" => "Only a recipient that was not delivered can be retried.",
+        "link_forwarded" => "A forwarded file cannot be sent as a link. Remove it or attach it.",
+        "link_inline" => "An image in the message body cannot be sent as a link.",
+        "link_origin_missing" => {
+            "File links need a public address for this Orbit server (ORBIT_PUBLIC_ORIGIN or ORBIT_MAIL_CONTENT_ORIGIN)."
+        }
+        "inline_not_image" => "Only a PNG, JPEG, GIF or WebP image can go in the message body.",
+        "reserved_address" => "This address is reserved for bounces. Choose another one.",
         _ => "This action is not possible.",
+    }
+}
+
+/// The snake_case name of a reason, as in the `not_ready_reason` of a From address.
+fn not_ready_code(reason: NotReadyReason) -> &'static str {
+    match reason {
+        NotReadyReason::DomainUnverified => "domain_unverified",
+        NotReadyReason::InboundNotLive => "inbound_not_live",
+        NotReadyReason::DkimInactive => "dkim_inactive",
+        NotReadyReason::NoRoute => "no_route",
+        NotReadyReason::MailboxSuspended => "mailbox_suspended",
+    }
+}
+
+fn not_ready_detail(reason: NotReadyReason) -> &'static str {
+    match reason {
+        NotReadyReason::DomainUnverified => "The domain is not verified yet.",
+        NotReadyReason::InboundNotLive => {
+            "The domain's MX record is not set up yet, so replies could not arrive."
+        }
+        NotReadyReason::DkimInactive => "The domain's DKIM record is not published yet.",
+        NotReadyReason::NoRoute => "The domain has no send route.",
+        NotReadyReason::MailboxSuspended => "The mailbox is suspended.",
     }
 }
 
@@ -465,12 +698,55 @@ pub(crate) fn problem(
             instance,
             request_id,
         ),
+        MailError::NotReady(reason) => ApiError::new(
+            StatusCode::CONFLICT,
+            "send_not_ready",
+            "Conflict",
+            not_ready_detail(reason),
+            instance,
+            request_id,
+        )
+        .with_reason(not_ready_code(reason)),
         MailError::Invalid { field } => validation(field, instance, request_id),
+        MailError::Unprocessable(code) => ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            code,
+            "Unprocessable",
+            detail(code),
+            instance,
+            request_id,
+        ),
+        MailError::MessageTooLarge { limit, size } => ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "message_too_large",
+            "Unprocessable",
+            detail("message_too_large"),
+            instance,
+            request_id,
+        )
+        .with_sizes(limit, size),
+        MailError::DraftSending { outbound_id } => ApiError::new(
+            StatusCode::CONFLICT,
+            "draft_sending",
+            "Conflict",
+            "This reply is being sent. Undo the send to edit it.",
+            instance,
+            request_id,
+        )
+        .with_outbound_id(outbound_id.to_string()),
         MailError::QuotaExceeded => ApiError::new(
             StatusCode::PAYLOAD_TOO_LARGE,
             "storage_quota_exceeded",
             "Storage quota exceeded",
             "The workspace is over its storage quota.",
+            instance,
+            request_id,
+        ),
+        MailError::RateLimited => ApiError::new(
+            StatusCode::TOO_MANY_REQUESTS,
+            "rate_limited",
+            "Too many requests",
+            "Too many downloads. Try again later.",
             instance,
             request_id,
         ),

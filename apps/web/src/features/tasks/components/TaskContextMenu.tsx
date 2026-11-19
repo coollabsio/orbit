@@ -46,6 +46,7 @@ import { DueDateDialog } from './DueDateDialog'
 import { PriorityIcon } from './PriorityIcon'
 import { LabelPill } from './TaskLabels'
 import { TaskPickerDialog } from './TaskPickerDialog'
+import { writeClipboard } from '@/lib/clipboard'
 
 interface TaskContextMenuProps {
   /** The tasks in view. */
@@ -110,7 +111,7 @@ export function TaskContextMenu({ tasks, users, labels, statuses, groupContext, 
     if (updates.length > 0) bulkTasks.mutate(updates)
   }
   const setDue = (start: string | null, end: string | null) => mutate(dueUpdates(targets, start, end))
-  const copy = (text: string, done: string) => void navigator.clipboard.writeText(text).then(() => toast(done), () => toast.error('Could not copy to the clipboard.'))
+  const copy = (text: string, done: string) => void writeClipboard(text).then(() => toast(done), () => toast.error('Could not copy to the clipboard.'))
   const statusOptions = groupTasks([], 'status', { ...groupContext, showEmpty: true }).filter((group) => !group.value?.startsWith('duplicate:'))
   const closeDialog = () => setDialog(null)
 

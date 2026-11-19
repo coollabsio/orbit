@@ -2392,12 +2392,15 @@ impl WorkspaceRepository {
                     PURGE_ROW_BATCH,
                 )
                 .await?;
-            // Page files, chat files and mail receipts hold their blobs with ON DELETE RESTRICT,
-            // so they go before the blobs. A receipt takes its parsed messages along.
+            // Page files, chat files, mail receipts and the files of outgoing mail hold their
+            // blobs with ON DELETE RESTRICT, so they go before the blobs. A receipt takes its
+            // parsed messages along.
             for (table, batch) in [
                 ("page_files", PURGE_ROW_BATCH),
                 ("chat_message_files", PURGE_ROW_BATCH),
                 ("mail_receipts", PURGE_BATCH),
+                ("mail_file_links", PURGE_ROW_BATCH),
+                ("mail_draft_files", PURGE_ROW_BATCH),
             ] {
                 summary.attachment_references_purged += self
                     .delete_in_batches(table, "workspace_id = $1", of_workspace, batch)

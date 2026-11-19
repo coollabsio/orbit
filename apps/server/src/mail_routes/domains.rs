@@ -11,7 +11,7 @@ use utoipa::ToSchema;
 use super::{Call, MailState, RequestIdExtension, problem};
 use crate::mail_dns::{RecordKind, expected_records, txt_strings};
 use crate::repositories::mail::{
-    Domain, DomainProvider, DomainStatus, MailError, ProviderKind, RecordStatus,
+    Domain, DomainProvider, DomainStatus, MailError, ProviderKind, RecordStatus, SendRouteKind,
 };
 use crate::task_routes::{ApiError, ApiJson, request_id_value};
 
@@ -42,10 +42,24 @@ pub(crate) struct MailDomain {
     address_count: i64,
     /// The `p=` of the domain's DMARC record at the last check.
     dmarc_policy: Option<String>,
+    /// The DNS zone that holds the domain at the last check (`example.com` for
+    /// `mail.example.com`): DNS panels want record names relative to it. `null` before the first
+    /// check or when its NS lookup found nothing.
+    dns_zone: Option<String>,
+    /// The NS hosts of `dns_zone` (the setup page names the DNS host from them); empty before the
+    /// first check or when none were found.
+    nameservers: Vec<String>,
     /// The records to publish, each with its status at the last check.
     records: Vec<MailDnsRecord>,
     /// The provider that receives the domain's mail; `null`: this server's SMTP listener.
     provider: Option<MailDomainRoute>,
+    /// The send route the domain uses: its own, else the instance default; `null`: none.
+    send_route: Option<MailDomainSendRoute>,
+    /// The domain's own send route; `null`: it follows the instance default.
+    #[schema(value_type = Option<String>)]
+    own_send_route_id: Option<Id>,
+    /// A new DKIM key waits for its DNS record while another one is active.
+    dkim_rotating: bool,
     #[schema(value_type = String, format = DateTime)]
     created_at: TimestampMillis,
 }
@@ -60,6 +74,15 @@ pub(crate) struct MailDomainRoute {
     name: String,
     /// An instance provider (set up by the root user).
     instance: bool,
+}
+
+/// The route a domain sends through.
+#[derive(Serialize, ToSchema)]
+pub(crate) struct MailDomainSendRoute {
+    #[schema(value_type = String)]
+    id: Id,
+    #[schema(value_type = String)]
+    kind: SendRouteKind,
 }
 
 #[derive(Serialize, ToSchema)]
@@ -142,6 +165,12 @@ fn view(domain: Domain, hostname: Option<&str>) -> MailDomain {
         })
         .collect();
     MailDomain {
+        own_send_route_id: domain.own_send_route_id,
+        dkim_rotating: domain.dkim_rotating,
+        send_route: domain.send_route.as_ref().map(|route| MailDomainSendRoute {
+            id: route.id,
+            kind: route.kind,
+        }),
         grace_ends_at: domain.grace_ends_at(),
         id: domain.id,
         name: domain.name,
@@ -152,6 +181,11 @@ fn view(domain: Domain, hostname: Option<&str>) -> MailDomain {
         checked_at: domain.checked_at,
         catch_all_mailbox_id: domain.catch_all_mailbox_id,
         address_count: domain.address_count,
+        dns_zone: report.as_ref().and_then(|report| report.zone.clone()),
+        nameservers: report
+            .as_ref()
+            .map(|report| report.nameservers.clone())
+            .unwrap_or_default(),
         dmarc_policy: report.and_then(|report| report.dmarc_policy),
         records,
         provider: domain
@@ -182,6 +216,13 @@ pub(crate) struct CreateMailDomainBody {
 pub(crate) struct MailDomainRouteBody {
     /// An instance provider or one of the workspace; `null`: this server's SMTP listener.
     provider_id: Option<String>,
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct MailDomainSendRouteBody {
+    /// An instance send route or one of the workspace; `null`: the instance default.
+    route_id: Option<String>,
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -355,6 +396,44 @@ pub(crate) async fn check_mail_domain(
     Ok(StatusCode::ACCEPTED)
 }
 
+/// Starts a DKIM key rotation: makes a new key and returns the domain with its record to
+/// publish. The DNS check switches to the new key once the record is seen. `409
+/// rotation_pending` while an earlier key still waits for its record.
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/mail/domains/{domain_id}/dkim/rotate", params(("workspace_id" = String, Path), ("domain_id" = String, Path)), responses((status = 200, body = MailDomain)))]
+pub(crate) async fn rotate_mail_domain_dkim(
+    State(state): State<MailState>,
+    Path((workspace, domain)): Path<(String, String)>,
+    headers: HeaderMap,
+    uri: Uri,
+    request_id: RequestIdExtension,
+) -> Result<Json<MailDomain>, ApiError> {
+    let call = Call::enter(&state, &headers, &uri, &workspace, &request_id).await?;
+    let domain_id = call.id(&domain)?;
+    let now = state
+        .mail
+        .database()
+        .database_now()
+        .await
+        .map_err(|error| call.problem(error.into()))?;
+    state
+        .mail
+        .rotate_dkim(
+            call.workspace_id,
+            call.actor_id,
+            domain_id,
+            call.request_id(),
+            now,
+        )
+        .await
+        .map_err(|error| call.problem(error))?;
+    let domain = state
+        .mail
+        .get_domain(call.workspace_id, call.actor_id, domain_id)
+        .await
+        .map_err(|error| call.problem(error))?;
+    Ok(Json(view(domain, state.settings.hostname.as_deref())))
+}
+
 /// Sets the mailbox that receives mail for unknown addresses of the domain, or clears it.
 #[utoipa::path(put, path = "/api/v1/workspaces/{workspace_id}/mail/domains/{domain_id}/catch-all", params(("workspace_id" = String, Path), ("domain_id" = String, Path)), request_body = MailDomainCatchAllBody, responses((status = 200, body = MailDomain)))]
 pub(crate) async fn set_mail_domain_catch_all(
@@ -411,6 +490,43 @@ pub(crate) async fn set_mail_domain_route(
             call.actor_id,
             domain_id,
             provider_id,
+            call.request_id(),
+        )
+        .await
+        .map_err(|error| call.problem(error))?;
+    let domain = state
+        .mail
+        .get_domain(call.workspace_id, call.actor_id, domain_id)
+        .await
+        .map_err(|error| call.problem(error))?;
+    Ok(Json(view(domain, state.settings.hostname.as_deref())))
+}
+
+/// The send route of the domain: an instance route or one of the workspace, or `null` for the
+/// instance default.
+#[utoipa::path(put, path = "/api/v1/workspaces/{workspace_id}/mail/domains/{domain_id}/send-route", params(("workspace_id" = String, Path), ("domain_id" = String, Path)), request_body = MailDomainSendRouteBody, responses((status = 200, body = MailDomain)))]
+pub(crate) async fn set_mail_domain_send_route(
+    State(state): State<MailState>,
+    Path((workspace, domain)): Path<(String, String)>,
+    headers: HeaderMap,
+    uri: Uri,
+    request_id: RequestIdExtension,
+    ApiJson(body): ApiJson<MailDomainSendRouteBody>,
+) -> Result<Json<MailDomain>, ApiError> {
+    let call = Call::enter(&state, &headers, &uri, &workspace, &request_id).await?;
+    let domain_id = call.id(&domain)?;
+    let route_id = body
+        .route_id
+        .as_deref()
+        .map(|id| call.body_id(id, "route_id"))
+        .transpose()?;
+    state
+        .mail
+        .set_domain_send_route(
+            call.workspace_id,
+            call.actor_id,
+            domain_id,
+            route_id,
             call.request_id(),
         )
         .await
@@ -508,6 +624,9 @@ mod tests {
                 status: "pending".to_owned(),
             }),
             address_count: 0,
+            send_route: None,
+            own_send_route_id: None,
+            dkim_rotating: false,
         };
         let view = view(domain, Some("mx.orbit.test"));
         let dkim = view

@@ -18,7 +18,9 @@ pub use fake_s3::start_fake_s3;
 pub use image_shrink::{SHRINK_MIN_BYTES, shrink_image};
 pub use local::LocalBlobStore;
 pub(crate) use local::TEMPORARY_DIRECTORY;
-pub use s3::{S3Bucket, S3Config, S3Error, S3Object};
+pub use s3::{
+    S3Bucket, S3Config, S3Error, S3Object, SigV4Credentials, SigV4Request, sigv4_authorization,
+};
 pub use tiered::{
     BlobMoveStatus, ObjectStorage, ObjectStorageState, S3_DELETE_DELAY_MILLIS, TieredBlobStore,
     WorkspaceBucket,

@@ -18,6 +18,7 @@ import { useAuthOptions, useCurrentUser } from '@/features/auth/api'
 import { useIsRoot } from '@/features/workspaces/permissions'
 import { SettingsRow } from '@/features/settings/components/SettingsParts'
 import { useDebouncedValue } from '@/lib/useDebouncedValue'
+import { writeClipboard } from '@/lib/clipboard'
 
 function failure(error: unknown, fallback: string) {
   return error instanceof ApiProblem ? error.problem.detail : fallback
@@ -254,7 +255,7 @@ function RecoveryLinkDialog({ user, url, expiresAt, onClose }: { user: AdminUser
   const [copied, setCopied] = useState(false)
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(url)
+      await writeClipboard(url)
       setCopied(true)
       toast('Recovery link copied')
     } catch {

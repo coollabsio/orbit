@@ -30,6 +30,7 @@ import { canEdit, canForward } from '../../lib/forward'
 import { decodeMentions } from '../../lib/mentionTokens'
 import { useChatNavigation } from '../../useChatNavigation'
 import { useChatPeople } from './people'
+import { writeClipboard } from '@/lib/clipboard'
 import { useBlockPerson } from './useBlockPerson'
 
 export type MenuAnchor = NonNullable<ComponentProps<typeof DropdownMenuContent>['anchor']>
@@ -105,7 +106,7 @@ export function useMessageActions({ inThread, onReply, onForward, onAddReaction,
   }
 
   function copy(text: string, done: string) {
-    navigator.clipboard.writeText(text).then(
+    writeClipboard(text).then(
       () => toast.success(done),
       () => toast.error('Could not copy. Try again.'),
     )

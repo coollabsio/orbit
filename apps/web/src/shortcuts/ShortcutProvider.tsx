@@ -7,9 +7,10 @@ import { BindingsContext, CommandStore, CommandStoreContext, PendingSequenceCont
 /** Longest pause between the two keys of a sequence. */
 const SEQUENCE_TIMEOUT_MS = 1000
 
-const OPEN_POPUP = '[role="menu"]:not([data-closed]), [role="dialog"]:not([data-closed]), [role="alertdialog"]:not([data-closed])'
+const OPEN_POPUP = '[role="menu"]:not([data-closed]), [role="dialog"]:not([data-closed]):not([hidden]):not([aria-modal="false"]), [role="alertdialog"]:not([data-closed])'
 /** An open menu or dialog owns the keyboard. A list does so only while the focus is in it: a list can be a
- *  lasting part of a page (the page history), and then it must not switch every shortcut off. */
+ *  lasting part of a page (the page history), and then it must not switch every shortcut off. A non-modal dialog
+ *  (a floating mail composer, `aria-modal="false"`) sits beside the page and leaves its keys alone. */
 const popupOpen = () => document.querySelector(OPEN_POPUP) !== null || document.activeElement?.closest('[role="listbox"]') != null
 const MODIFIER_KEYS = ['Shift', 'Control', 'Alt', 'Meta', 'AltGraph']
 

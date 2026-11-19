@@ -167,7 +167,7 @@ function ProviderRow({
           </div>
         ) : null}
       </div>
-      {open && provider.setup ? <ProviderSetup setup={provider.setup} /> : null}
+      {open && provider.setup ? <ProviderSetup setup={provider.setup} provider={provider} scope={scope} /> : null}
     </div>
   )
 }

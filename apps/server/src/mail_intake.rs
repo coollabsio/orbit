@@ -7,7 +7,9 @@
 //! `immediate_transaction()` for all workspaces. Any failure rolls back every workspace, so the
 //! reply is all or nothing; a file installed for a rolled-back receipt has no blob row, and the
 //! blob reconcile removes it. A health test recipient gets no receipt: its result is recorded in
-//! the same transaction and the bytes are dropped.
+//! the same transaction and the bytes are dropped. A bounce recipient gets no receipt either: the
+//! delivery status notification is applied to its sent recipient before anything else is stored
+//! (`MailRepository::process_dsn`), and the bytes are dropped.
 
 use std::net::IpAddr;
 use std::sync::Arc;
@@ -26,11 +28,15 @@ use crate::repositories::mail::{
 
 pub type ReceiptId = Id;
 
-/// How a message arrived: Orbit's SMTP listener, or a provider's webhook (provider intake).
+/// How a message arrived: Orbit's SMTP listener, a provider's webhook (provider intake), or a
+/// message sent from this instance to one of its own domains (local delivery, spec D11).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Source {
     Smtp,
     Provider(ProviderKind),
+    /// Sent by a mailbox of this instance: no SMTP peer and no checks. The receipt's `auth` is
+    /// `{"local":true}` (shown as DKIM pass); `InboundMessage::auth` is not stored.
+    Local,
 }
 
 impl Source {
@@ -39,6 +45,7 @@ impl Source {
         match self {
             Self::Smtp => "smtp",
             Self::Provider(kind) => kind.as_str(),
+            Self::Local => "local",
         }
     }
 }
@@ -54,6 +61,12 @@ pub enum Recipient {
     },
     HealthTest {
         test_id: Id,
+        rcpt: String,
+    },
+    /// A valid bounce address: the message is a delivery status notification for this sent
+    /// recipient (spec §5.7). It is applied and dropped, never stored.
+    Bounce {
+        recipient_id: Id,
         rcpt: String,
     },
 }
@@ -145,7 +158,17 @@ impl MailIntake {
         if u64::try_from(message.raw.len()).map_or(true, |size| size > self.max_message_bytes) {
             return Err(IntakeError::TooLarge);
         }
-        let (workspaces, tests) = group(&message.recipients);
+        let (workspaces, tests, bounces) = group(&message.recipients);
+        if !bounces.is_empty() {
+            // First, so a failure stores nothing and the sender retries; applying a DSN again
+            // changes nothing.
+            let now = self.repo.database().database_now().await?;
+            if let Some(reports) = orbit_mail::parse_dsn(&message.raw) {
+                for recipient_id in &bounces {
+                    self.repo.process_dsn(*recipient_id, &reports, now).await?;
+                }
+            }
+        }
         if workspaces.is_empty() && tests.is_empty() {
             return Ok(Vec::new());
         }
@@ -157,7 +180,10 @@ impl MailIntake {
             .as_ref()
             .map(serde_json::to_string)
             .transpose()?;
-        let auth = serde_json::to_string(&message.auth)?;
+        let auth = match message.source {
+            Source::Local => json!({ "local": true }).to_string(),
+            Source::Smtp | Source::Provider(_) => serde_json::to_string(&message.auth)?,
+        };
         let peer_ip = message.peer_ip.to_string();
 
         let database = self.repo.database();
@@ -258,11 +284,13 @@ impl MailIntake {
     }
 }
 
-/// Mailbox recipients by workspace (first-appearance order) and the health test ids.
+/// Mailbox recipients by workspace (first-appearance order), the health test ids and the bounce
+/// recipients.
 #[allow(clippy::type_complexity)]
-fn group(recipients: &[Recipient]) -> (Vec<(Id, Vec<(Id, &str)>)>, Vec<Id>) {
+fn group(recipients: &[Recipient]) -> (Vec<(Id, Vec<(Id, &str)>)>, Vec<Id>, Vec<Id>) {
     let mut workspaces: Vec<(Id, Vec<(Id, &str)>)> = Vec::new();
     let mut tests = Vec::new();
+    let mut bounces = Vec::new();
     for recipient in recipients {
         match recipient {
             Recipient::Mailbox {
@@ -281,7 +309,12 @@ fn group(recipients: &[Recipient]) -> (Vec<(Id, Vec<(Id, &str)>)>, Vec<Id>) {
                     tests.push(*test_id);
                 }
             }
+            Recipient::Bounce { recipient_id, .. } => {
+                if !bounces.contains(recipient_id) {
+                    bounces.push(*recipient_id);
+                }
+            }
         }
     }
-    (workspaces, tests)
+    (workspaces, tests, bounces)
 }

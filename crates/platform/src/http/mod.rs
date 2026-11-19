@@ -21,6 +21,7 @@ use crate::{Database, Problem, RateLimitConfig};
 use rate_limit::RateLimiter;
 
 pub use limits::{HttpLimits, LargeUpload};
+pub use rate_limit::rate_limit_ip;
 pub use request_id::RequestId;
 pub use security::{ClientIp, OriginPolicy, RequestTransport, bearer_token};
 

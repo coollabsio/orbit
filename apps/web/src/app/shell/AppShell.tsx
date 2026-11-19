@@ -11,6 +11,7 @@ import { ChatProvider } from '@/features/chat/api/ChatProvider'
 import { emitMailEvent, resyncMail } from '@/features/mail/api/events'
 import { useMailInboxUnread } from '@/features/mail/api/queries'
 import { useMailEnabled } from '@/features/mail/enabled'
+import { ComposerDock, ComposerDockError } from '@/features/mail/compose/ComposerDock'
 import { useChatBadges } from '@/features/chat/api/queries'
 import { useHasUnreadNotifications } from '@/features/inbox/api'
 import { startPushWorker } from '@/features/realtime/push'
@@ -240,6 +241,12 @@ function Shell() {
       {helpOpen ? <ShortcutHelpDialog onClose={() => setHelpOpen(false)} mailEnabled={mailEnabled} /> : null}
       <NavigationCommands />
       <SequenceHint />
+      {/* the floating mail composers stay open on every page (Mail on; a guest has no mailbox) */}
+      {mailEnabled && !guest ? (
+        <ErrorBoundary resetKey={workspace.id} fallback={<ComposerDockError />}>
+          <ComposerDock key={workspace.id} />
+        </ErrorBoundary>
+      ) : null}
     </div>
     </SidebarSlotContext>
     </NewTaskProvider>

@@ -38,6 +38,7 @@ import { GripIcon } from './GripIcon'
 import { NewRowButton } from './NewRowButton'
 import { PROPERTY_TYPES } from './propertyMeta'
 import { SortPopover } from './SortPopover'
+import { writeClipboard } from '@/lib/clipboard'
 
 interface ViewToolbarProps {
   properties: Property[]
@@ -73,7 +74,7 @@ export function ViewToolbar({ properties, config, onConfig, onAddFilter, onAdvan
   const sorts = config.sorts.length
 
   const copyLink = () => {
-    void navigator.clipboard.writeText(new URL(viewLink, window.location.origin).toString()).then(
+    void writeClipboard(new URL(viewLink, window.location.origin).toString()).then(
       () => toast.success('Link to the view copied.'),
       () => toast.error('Could not copy the link.'),
     )

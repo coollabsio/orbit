@@ -4,11 +4,16 @@
 
 mod address;
 mod auth;
+mod bounce;
+mod compose;
 mod dkim;
+pub mod events;
 mod html;
 pub mod inbound;
 mod parse;
+mod sign;
 mod smtp;
+mod vacation;
 
 pub use address::{
     Address, AddressError, MAX_ADDRESS_LEN, base_local, normalize_address, normalize_domain,
@@ -17,6 +22,14 @@ pub use auth::{
     AuthError, AuthOutcome, Authenticator, DmarcPolicy, DmarcVerdict, ProviderSpf, SpfHeader,
     StaticDns, Verdict, authentication_results, provider_spf, strip_auth_results,
     trusted_relay_results,
+};
+pub use bounce::{
+    DsnAction, DsnRecipient, bounce_local_part, is_hard, parse_bounce_local_part, parse_dsn,
+};
+pub use compose::{
+    ComposeError, Composed, ComposedAddress, ComposedFile, ComposedFileKind, build_message,
+    clean_html, clean_outgoing_html, forward_block, html_to_text, new_message_id, quote_reply,
+    trim_references,
 };
 pub use dkim::{DkimKey, dkim_txt, generate_dkim_key, new_selector};
 pub use html::{
@@ -27,8 +40,9 @@ pub use html::{
 pub use mail_auth::hickory_resolver;
 pub use parse::{
     AttachmentInfo, Mailbox, ParseError, ParseLimits, ParsedMessage, normalize_subject, parse,
-    part_bytes, sniff_image,
+    part_bytes, sniff_image, snippet,
 };
+pub use sign::{SIGNED_HEADERS, SignError, SigningKey, sign_message};
 pub use smtp::{
     AcceptedRecipient, CERT_EXPIRY_WARNING, CertInfo, ConnLimiter, ConnPermit,
     DOCKER_DEFAULT_GATEWAY, DataDecision, Envelope, MAX_COMMAND_LINE, MAX_TEXT_LINE, NoTls,
@@ -36,3 +50,4 @@ pub use smtp::{
     StartTls, TARPIT_DELAY, TlsAcceptorHandle, TlsError, TlsInfo, is_docker_bridge, read_proxy_v2,
     run_session,
 };
+pub use vacation::{VacationInput, envelope_authenticated, vacation_allowed};

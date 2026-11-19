@@ -8,7 +8,7 @@ const W = 'w1'
 
 const summary = (id: string, overrides: Partial<MailThreadSummary> = {}): MailThreadSummary => ({
   id, mailbox_id: 'mb1', folder: 'inbox', from: [], has_attachments: false, labels: [], last_message_at: '2026-10-23T10:00:00Z',
-  message_count: 1, snippet: '', starred: false, subject: id, unread: false, ...overrides,
+  message_count: 1, sent_to: [], sent_to_more: 0, snippet: '', starred: false, subject: id, unread: false, ...overrides,
 })
 const pages = (...items: MailThreadSummary[]): InfiniteData<MailThreadPage> => ({
   pages: [{ items, cursor: null }],
@@ -62,4 +62,15 @@ test('unstarring leaves the starred list; a restore leaves the trash list', () =
   applyThreadChange(client, W, ['t3'], { restore: true })
   expect(ids(mailKeys.threads(W, { starred: true }))).toEqual([])
   expect(ids(mailKeys.threads(W, { folder: 'trash' }))).toEqual([])
+})
+
+test('the Sent list keeps sent threads in every folder but the trash', () => {
+  const { client, ids } = setup()
+  const sent = { last_sent_at: '2026-10-23T10:00:00Z' }
+  client.setQueryData(mailKeys.threads(W, { sent: true }), pages(summary('t4', sent), summary('t5', { ...sent, folder: 'archive' })))
+  applyThreadChange(client, W, ['t4'], { folder: 'archive' })
+  applyThreadChange(client, W, ['t5'], { starred: true })
+  expect(ids(mailKeys.threads(W, { sent: true }))).toEqual(['t4', 't5'])
+  applyThreadChange(client, W, ['t4'], { folder: 'trash' })
+  expect(ids(mailKeys.threads(W, { sent: true }))).toEqual(['t5'])
 })
