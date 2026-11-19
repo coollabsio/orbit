@@ -18,7 +18,6 @@ use sqlx::{Any, Transaction};
 use utoipa::ToSchema;
 
 use super::domains::parse_id;
-use crate::repositories::membership::parse_permissions;
 use super::ingest::MAIL_TOPIC;
 use super::labels::{Label, load_labels};
 use super::mailboxes::{Mailbox, Scope, load_mailboxes};
@@ -26,6 +25,7 @@ use super::search::{Folders, Selection, ThreadCursor, people, select_threads};
 use super::threads::{is_inside, mailbox_users};
 use super::{MailError, MailQuery, MailRepository};
 use crate::live::{LiveHub, NewEvent, Recipients};
+use crate::repositories::membership::parse_permissions;
 
 /// Threads in a page when the caller names no limit.
 pub const THREAD_PAGE_DEFAULT: usize = 50;
@@ -672,7 +672,7 @@ impl MailRepository {
             return Err(MailError::Invalid { field: "restore" });
         }
         let now = self.database.database_now().await?;
-        let mut transaction = self.database.immediate_transaction().await?;
+        let mut transaction = self.database.workspace_transaction(workspace_id).await?;
         let reader = reader(&mut transaction, workspace_id, user_id).await?;
         if !change.add_labels.is_empty() {
             let wanted: BTreeSet<Id> = change.add_labels.iter().copied().collect();

@@ -100,7 +100,7 @@ impl DatabaseRepository {
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<DatabaseRow, DatabaseError> {
-        let mut tx = self.database.immediate_transaction().await?;
+        let mut tx = self.database.workspace_transaction(workspace_id).await?;
         let row = Self::insert_row_in_tx(
             &self.database,
             &mut tx,
@@ -256,7 +256,7 @@ impl DatabaseRepository {
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<DatabaseRow, DatabaseError> {
-        let mut tx = self.database.immediate_transaction().await?;
+        let mut tx = self.database.workspace_transaction(workspace_id).await?;
         open(&mut tx, workspace_id, database_id, actor_id).await?;
         // A template's values are written here too (its "me" and "today" kept aside).
         let children = templates::child_kind(&mut tx, database_id, row_id)
@@ -392,7 +392,7 @@ impl DatabaseRepository {
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<DatabaseRow, DatabaseError> {
-        let mut tx = self.database.immediate_transaction().await?;
+        let mut tx = self.database.workspace_transaction(workspace_id).await?;
         let page = open(&mut tx, workspace_id, database_id, actor_id).await?;
         require_row(&mut tx, database_id, row_id).await?;
         if !values.is_empty() {

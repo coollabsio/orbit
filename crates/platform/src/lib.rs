@@ -35,9 +35,10 @@ pub use config::{
 };
 pub use db::{
     Access, Backend, Column, Database, DatabaseConfig, DatabaseError, Flag, GuardedMigrationError,
-    Migration, MigrationError, MigrationRunner, NotBool, POSTGRES_WRITE_LOCK, PendingMigration,
-    Row, Separated, Singleton, SqlBuilder, TestDatabase, TestDatabaseError,
-    is_transient_lock_error, lock_database_ownership, run_guarded_migrations, testing_postgres,
+    Migration, MigrationError, MigrationRunner, NotBool, PendingMigration, Row, Separated,
+    Singleton, SqlBuilder, TestDatabase, TestDatabaseError, WriteLockMode, WriteScope,
+    begin_write_transaction, is_transient_lock_error, lock_database_ownership,
+    run_guarded_migrations, run_write_lock_monitor, testing_postgres, write_lock_sql,
 };
 #[cfg(any(test, feature = "test-support"))]
 pub use files::start_fake_s3;

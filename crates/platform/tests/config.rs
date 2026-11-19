@@ -377,6 +377,27 @@ fn postgres_database_url_comes_from_environment_and_is_redacted() {
     assert!(load([("ORBIT_DATABASE_URL", "mysql://x")]).is_err());
 }
 
+#[test]
+fn write_lock_comes_from_environment() {
+    use orbit_platform::{DatabaseConfig, WriteLockMode};
+
+    let default = load([]).unwrap();
+    assert_eq!(default.data.write_lock, WriteLockMode::Workspace);
+    let global = load([("ORBIT_WRITE_LOCK", "global")]).unwrap();
+    assert_eq!(
+        DatabaseConfig::for_data(&global.data).write_lock,
+        WriteLockMode::Global
+    );
+    assert_eq!(
+        load([("ORBIT_WRITE_LOCK", "workspace")])
+            .unwrap()
+            .data
+            .write_lock,
+        WriteLockMode::Workspace
+    );
+    assert!(load([("ORBIT_WRITE_LOCK", "none")]).is_err());
+}
+
 const STRIPE: [(&str, &str); 3] = [
     ("ORBIT_STRIPE_SECRET_KEY", "sk_test_123"),
     ("ORBIT_STRIPE_WEBHOOK_SECRET", "whsec_123"),

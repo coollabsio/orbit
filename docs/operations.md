@@ -20,6 +20,7 @@ Orbit reads its configuration only from environment variables that start with `O
 | `ORBIT_DATABASE_PATH` | `data/orbit.sqlite` | The SQLite database file. Keep the database, attachment directory and backup directory separate. |
 | `ORBIT_DATABASE_URL` | none | Postgres instead of SQLite, for example `postgres://orbit:password@db.internal:5432/orbit`. See [Postgres](#postgres). |
 | `ORBIT_DATABASE_MAX_CONNECTIONS` | `5` (SQLite), `20` (Postgres) | 1 to 500. The size of each database pool. On Postgres, a server opens two pools of this size. See [Orbit Cloud](#deployment). |
+| `ORBIT_WRITE_LOCK` | `workspace` | Postgres only. `workspace`: writes in different workspaces can run at the same time. `global`: all writes run one at a time. See [Orbit Cloud](#deployment). |
 | `ORBIT_ATTACHMENTS_PATH` | `data/attachments` | |
 | `ORBIT_BACKUPS_PATH` | `backups` | Must be outside the attachment directory. |
 | `ORBIT_JOBS_CONCURRENCY` | `4` | |
@@ -305,7 +306,7 @@ A request, a live socket or a co-editing socket can go to any server; sticky ses
 - **Upgrades:** run `orbit migrate run` once (or let the first new server do it; a lock makes the others wait), then replace the servers one at a time. A migration must keep the previous release working until all servers run the new one: old servers stay ready on a newer schema, but an old server cannot start on it. Exception: stop every server before the upgrade to migration 0066 (see [Upgrade to migration 0066 (API token scopes)](#upgrade-to-migration-0066-api-token-scopes)).
 - **CLI on a running cluster:** `root`, `recovery-link`, `setup-token`, `migrate status` and `backup create` work while the servers run. They refuse a database that needs migrations (run `orbit migrate run`). `backup restore`, `migrate run --reset`, `db-reset` and `attachments compress` need every server stopped.
 - **Restore:** stop every server before `backup restore` (see [Restore rollback or ownership error](#restore-rollback-or-ownership-error)). This is a full outage; choose the backup schedule for it.
-- **Write throughput:** every write transaction takes one Postgres advisory lock, so writes run one at a time for the whole database. More servers give more read and socket capacity and availability, not more write capacity.
+- **Write throughput:** each write transaction takes Postgres advisory locks. The most frequent writes to one workspace (chat messages, reactions and read state, page and comment edits, co-editing, task and database row edits, mail reading and delivery) take the lock of that workspace, so writes to different workspaces can run at the same time. Writes to the same workspace run one at a time. The job queue has its own lock. Other writes (for example sign-in, administration, imports and migrations) take the global lock: they run one at a time, and no workspace or job write runs at the same time. Set `ORBIT_WRITE_LOCK=global` on all servers to make each write take the global lock, as before workspace locks. One server examines the locks each second. It logs a warning (`slow write transaction holds a write lock`) for each transaction that is older than 2 seconds and holds a lock. The `application_name` field of the warning gives the source file and the line that started the transaction. The warning `slow write transaction ended` gives the full duration.
 
 ### How the servers share state
 

@@ -1091,7 +1091,9 @@ impl PageRepository {
             reconciled = live;
             changes.content = Some(content);
         }
-        let mut tx = self.database.immediate_transaction().await?;
+        // Workspace scope: every row is of this page, and `page_in_tx` finds the page only in
+        // `workspace_id`, so the collab log is written under the lock of its room's workspace.
+        let mut tx = self.database.workspace_transaction(workspace_id).await?;
         require_access_tx(&mut tx, workspace_id, actor_id).await?;
         let current = page_in_tx(&mut tx, workspace_id, page_id, actor_id, false).await?;
         let edit = changes.title.is_some()
