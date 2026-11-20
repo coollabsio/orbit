@@ -8,7 +8,7 @@ import { ActionSheet, type SheetAction } from '../../../components/settings/Dial
 import { folderLabel, foldedRange, threadActions, type ThreadChange } from '../../../data/mail'
 import { useMailMe, useStartDraft, useThread, useUpdateThread } from '../../../hooks/mail'
 import { errorMessage } from '../../../session-context'
-import { alpha, starColor, useTheme } from '../../../theme'
+import { alpha, useTheme } from '../../../theme'
 import { Button, EmptyState, IconButton, LoadingView, PaneHeader, SafeAreaView, Text } from '../../../ui'
 
 /** One conversation (the web's reading pane at phone size): its actions, its messages oldest first, and Reply. */
@@ -21,7 +21,8 @@ export default function MailThreadScreen() {
   const start = useStartDraft()
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [showAll, setShowAll] = useState(false)
-  const [labelsOpen, setLabelsOpen] = useState(false)
+  // one sheet: the "…" actions, or the labels it opens (a second Modal would not open while the first closes)
+  const [sheet, setSheet] = useState<'actions' | 'labels' | null>(null)
   const muted = alpha(colors.mutedForeground, 0.7)
   const back = () => (router.canGoBack() ? router.back() : router.replace('/mail'))
 
@@ -71,25 +72,31 @@ export default function MailThreadScreen() {
       })
     : [{ label: me.data?.can_manage ? 'Create labels in Settings → Mail on the web' : 'No labels yet', disabled: true, onPress: () => {} }]
 
+  const menuActions: SheetAction[] = [
+    { label: thread.starred ? 'Unstar' : 'Star', icon: thread.starred ? 'starFilled' : 'star', onPress: () => change({ starred: !thread.starred }, false) },
+    { label: 'Mark as unread', icon: 'mail', onPress: () => change({ read: false }, true) },
+    { label: 'Labels', icon: 'tag', onPress: () => setSheet('labels') },
+  ]
+  if (actions.archive) {
+    const archive = actions.archive === 'archive'
+    menuActions.push({ label: archive ? 'Archive' : 'Move to inbox', icon: archive ? 'archive' : 'directInbox', onPress: () => change({ folder: archive ? 'archive' : 'inbox' }, true) })
+  }
+  if (actions.spam) {
+    const spam = actions.spam === 'spam'
+    menuActions.push({ label: spam ? 'Report spam' : 'Not spam', icon: spam ? 'shieldCross' : 'directInbox', onPress: () => change({ folder: spam ? 'spam' : 'inbox' }, true) })
+  }
+  menuActions.push(
+    actions.trash === 'trash'
+      ? { label: 'Move to trash', icon: 'trash', destructive: true, onPress: () => change({ folder: 'trash' }, true) }
+      : { label: 'Restore', icon: 'undo', onPress: () => change({ restore: true }, true) },
+  )
+
   return (
     <SafeAreaView edges={['left', 'right']} className="flex-1 bg-background">
       <PaneHeader className="px-2 gap-0.5">
         <IconButton icon="back" label="Back" onPress={back} />
         <View className="flex-1" />
-        <IconButton icon={thread.starred ? 'starFilled' : 'star'} label={thread.starred ? 'Unstar' : 'Star'} color={thread.starred ? starColor : muted} onPress={() => change({ starred: !thread.starred }, false)} />
-        <IconButton icon="mail" label="Mark as unread" color={muted} onPress={() => change({ read: false }, true)} />
-        <IconButton icon="tag" label="Labels" color={muted} onPress={() => setLabelsOpen(true)} />
-        {actions.archive ? (
-          <IconButton icon={actions.archive === 'archive' ? 'archive' : 'directInbox'} label={actions.archive === 'archive' ? 'Archive' : 'Move to inbox'} color={muted} onPress={() => change({ folder: actions.archive === 'archive' ? 'archive' : 'inbox' }, true)} />
-        ) : null}
-        {actions.spam ? (
-          <IconButton icon={actions.spam === 'spam' ? 'shieldCross' : 'directInbox'} label={actions.spam === 'spam' ? 'Report spam' : 'Not spam'} color={muted} onPress={() => change({ folder: actions.spam === 'spam' ? 'spam' : 'inbox' }, true)} />
-        ) : null}
-        {actions.trash === 'trash' ? (
-          <IconButton icon="trash" label="Move to trash" color={muted} onPress={() => change({ folder: 'trash' }, true)} />
-        ) : (
-          <IconButton icon="undo" label="Restore" color={muted} onPress={() => change({ restore: true }, true)} />
-        )}
+        <IconButton icon="more" label="Thread actions" color={muted} onPress={() => setSheet('actions')} />
       </PaneHeader>
       <ScrollView contentContainerClassName="px-4 pt-5 pb-8">
         <View className="flex-row flex-wrap items-center gap-2.5 pb-2">
@@ -131,7 +138,12 @@ export default function MailThreadScreen() {
         </View>
       </ScrollView>
       <UndoSendBar />
-      <ActionSheet visible={labelsOpen} title="Labels" actions={labelActions} onClose={() => setLabelsOpen(false)} />
+      <ActionSheet
+        visible={sheet !== null}
+        title={sheet === 'labels' ? 'Labels' : undefined}
+        actions={sheet === 'labels' ? labelActions : menuActions}
+        onClose={() => setSheet(null)}
+      />
     </SafeAreaView>
   )
 }

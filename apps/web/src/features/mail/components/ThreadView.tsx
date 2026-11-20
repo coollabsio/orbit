@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode, type Ref } from 'react'
-import { Archive, ArrowLeft, DirectInbox, ShieldCross, Sms as Mail, Star, Tag, Trash, Undo } from 'reicon-react'
+import { Archive, ArrowLeft, DirectInbox, More, ShieldCross, Sms as Mail, Star, Tag, Trash, Undo } from 'reicon-react'
 import { Link } from 'react-router'
 import { cn } from 'cn'
 import type { MailLabel, MailThreadDetail } from '@orbit/api/generated/types.gen'
@@ -16,6 +16,10 @@ import {
   DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -119,6 +123,71 @@ function HeaderButton({ label, command, onClick, children, pressed }: { label: s
   )
 }
 
+/** On phones, the thread's actions in one "…" menu: a row of icons does not fit next to Back. */
+function PhoneThreadMenu({ thread, labels, canManage, actions }: { thread: MailThreadDetail['thread']; labels: MailLabel[]; canManage: boolean; actions: ThreadActions }) {
+  const inTrash = thread.folder === 'trash'
+  const inSpam = thread.folder === 'spam'
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" className="hidden text-muted-foreground/70 max-[899px]:inline-flex" aria-label="Thread actions" />}>
+        <More className="size-4" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-auto min-w-48">
+        <DropdownMenuItem onClick={actions.star}>
+          <Star className={cn(thread.starred && 'fill-[#fcd452] text-[#fcd452]')} /> {thread.starred ? 'Unstar' : 'Star'}
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={actions.markUnread}>
+          <Mail /> Mark as unread
+        </DropdownMenuItem>
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger>
+            <Tag /> Labels
+          </DropdownMenuSubTrigger>
+          <DropdownMenuSubContent className="w-auto min-w-44">
+            {labels.map((label) => (
+              <DropdownMenuCheckboxItem key={label.id} checked={thread.labels.includes(label.id)} onCheckedChange={() => actions.toggleLabel(label.id)}>
+                <ColorDot color={label.color} className="size-2" />
+                {label.name}
+              </DropdownMenuCheckboxItem>
+            ))}
+            {labels.length === 0 ? (
+              canManage ? (
+                <DropdownMenuItem render={<Link to="/settings/mail/labels" />}>Create labels in Settings</DropdownMenuItem>
+              ) : (
+                <DropdownMenuItem disabled>No labels yet</DropdownMenuItem>
+              )
+            ) : null}
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
+        <DropdownMenuSeparator />
+        {thread.folder === 'archive' ? (
+          <DropdownMenuItem onClick={actions.archive}>
+            <DirectInbox /> Move to inbox
+          </DropdownMenuItem>
+        ) : !inTrash && !inSpam ? (
+          <DropdownMenuItem onClick={actions.archive}>
+            <Archive /> Archive
+          </DropdownMenuItem>
+        ) : null}
+        {!inTrash ? (
+          <DropdownMenuItem onClick={actions.spam}>
+            {inSpam ? <DirectInbox /> : <ShieldCross />} {inSpam ? 'Not spam' : 'Report spam'}
+          </DropdownMenuItem>
+        ) : null}
+        {inTrash ? (
+          <DropdownMenuItem onClick={actions.restore}>
+            <Undo /> Restore
+          </DropdownMenuItem>
+        ) : (
+          <DropdownMenuItem variant="destructive" onClick={actions.trash}>
+            <Trash /> Move to trash
+          </DropdownMenuItem>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
 /** The reading pane: the thread's actions, then its messages, oldest first; only the newest is open at first. */
 export function ThreadView({ detail, status, onRetry, labels, labelsById, canManage, onBack, actions, labelMenuOpen, onLabelMenuOpenChange, replyRef }: ThreadViewProps) {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
@@ -183,6 +252,7 @@ export function ThreadView({ detail, status, onRetry, labels, labelsById, canMan
           <ArrowLeft className="size-4" />
         </Button>
         <span className="flex-1" />
+        <div className="contents max-[899px]:hidden">
         <HeaderButton label={thread.starred ? 'Unstar' : 'Star'} command="mail.star" pressed={thread.starred} onClick={actions.star}>
           <Star className={cn('size-4', thread.starred && 'fill-[#fcd452] text-[#fcd452]')} />
         </HeaderButton>
@@ -220,6 +290,8 @@ export function ThreadView({ detail, status, onRetry, labels, labelsById, canMan
             <Trash className="size-4" />
           </HeaderButton>
         )}
+        </div>
+        <PhoneThreadMenu thread={thread} labels={labels} canManage={canManage} actions={actions} />
       </PaneHeader>
       <div data-print-root="" className="min-h-0 flex-1 overflow-y-auto">
         <div ref={messagesRef} className="mx-auto flex max-w-[800px] flex-col px-5 pt-6 pb-8">
