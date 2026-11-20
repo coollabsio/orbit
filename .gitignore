@@ -11,6 +11,7 @@ todo.md
 
 # Local production domain/image selection
 deploy/.env
+deploy/compose.override.yaml
 
 node_modules
 
