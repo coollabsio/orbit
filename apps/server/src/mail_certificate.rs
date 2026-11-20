@@ -25,7 +25,7 @@ use orbit_mail::{TlsAcceptorHandle, pem_cert_info};
 use orbit_platform::{Id, MailConfig, TimestampMillis};
 use tokio_util::sync::CancellationToken;
 
-use crate::mail_dns::DnsLookup;
+use crate::mail_dns::{DnsLookup, ZoneLookup};
 use crate::repositories::mail::{
     CertificateState, ChallengeMethod, MailError, MailRepository, NewCert, PendingOrder,
 };
@@ -202,8 +202,8 @@ impl MailCertificates {
         else {
             return Err(CertificateError::NoDnsOrder);
         };
-        let found = self
-            .dns
+        let found = ZoneLookup::new(self.dns.as_ref(), &hostname)
+            .await
             .txt(&name)
             .await
             .is_ok_and(|records| records.iter().any(|record| record.trim() == value));

@@ -21,6 +21,7 @@ import { mailKeys } from '@/features/mail/api/keys'
 import { useCheckDomain, useCreateDomain, useDeleteDomain, useRotateDkim, useSetCatchAll, useSetDomainEnabled } from '@/features/mail/api/mutations'
 import { useMailboxes, useMailDomain, useMailDomains, useMailProviders, useSendRoutes } from '@/features/mail/api/queries'
 import { SettingsRow } from '@/features/settings/components/SettingsParts'
+import { saveBlob } from '@/features/docs/pageExport'
 import { useCan } from '@/features/workspaces/permissions'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { writeClipboard } from '@/lib/clipboard'
@@ -278,6 +279,10 @@ function DomainCard({
     )
   }
 
+  function downloadZoneFile() {
+    saveBlob(new Blob([zoneFile(domain)], { type: 'text/plain' }), `${domain.name}.zone`)
+  }
+
   const health = domainHealth(domain)
   const zone = zoneOf(domain)
   const checked = Boolean(domain.checked_at)
@@ -317,18 +322,29 @@ function DomainCard({
 
   return (
     <section ref={card} className="m-0 flex w-full min-w-0 scroll-mt-4 flex-col rounded-lg bg-card shadow-[0_0_0_1px_var(--border)]">
-      <button
-        type="button"
-        aria-expanded={open}
-        aria-controls={`mail-domain-${domain.id}`}
-        onClick={() => setOpen((value) => !value)}
-        className={cn('flex min-h-12 w-full items-center gap-2 py-2 pr-3 pl-3 text-left text-sm font-medium text-foreground hover:bg-muted/40', open ? 'rounded-t-lg' : 'rounded-lg')}
-      >
-        <ChevronRight aria-hidden className={cn('size-4 shrink-0 text-muted-foreground transition-transform duration-[120ms]', open && 'rotate-90')} />
-        <span className="min-w-0 flex-1 truncate">{domain.name}</span>
-        {actionable && domain.status !== 'disabled' ? <StepDots steps={steps.filter((step) => step.state !== 'blocked')} /> : null}
-        <Badge variant={health.variant} title={health.hint}>{health.label}</Badge>
-      </button>
+      <div className={cn('flex min-h-12 w-full items-center gap-3 pr-3 hover:bg-muted/40', open ? 'rounded-t-lg' : 'rounded-lg')}>
+        <button
+          type="button"
+          aria-expanded={open}
+          aria-controls={`mail-domain-${domain.id}`}
+          onClick={() => setOpen((value) => !value)}
+          className="flex min-h-12 min-w-0 flex-1 items-center gap-2 py-2 pl-3 text-left text-sm font-medium text-foreground"
+        >
+          <ChevronRight aria-hidden className={cn('size-4 shrink-0 text-muted-foreground transition-transform duration-[120ms]', open && 'rotate-90')} />
+          <span className="min-w-0 flex-1 truncate">{domain.name}</span>
+          {actionable && domain.status !== 'disabled' ? <StepDots steps={steps.filter((step) => step.state !== 'blocked')} /> : null}
+          <Badge variant={health.variant} title={health.hint}>{health.label}</Badge>
+        </button>
+        <Switch
+          aria-label={`Receive mail for ${domain.name}`}
+          title={domain.status === 'disabled' ? 'Mail off: Orbit refuses all mail for this domain' : 'Mail on'}
+          checked={domain.status !== 'disabled'}
+          disabled={setEnabled.isPending}
+          onCheckedChange={(enabled: boolean) => setEnabled.mutate({ domainId: domain.id, enabled }, {
+            onError: (error) => toast.error(mailProblem(error, 'The domain could not be changed.')),
+          })}
+        />
+      </div>
       {open ? (
         <div id={`mail-domain-${domain.id}`} className="relative min-w-0 overflow-hidden rounded-b-lg border-t bg-background">
           <div className="flex flex-col divide-y">
@@ -359,6 +375,7 @@ function DomainCard({
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end" className="w-auto min-w-56">
                     <DropdownMenuItem onClick={copyZoneFile}><Copy /> Copy records as zone file</DropdownMenuItem>
+                    <DropdownMenuItem onClick={downloadZoneFile}><DocumentDownload /> Download zone file</DropdownMenuItem>
                     <DropdownMenuItem disabled={!domain.records.some((record) => record.kind === 'dkim') || domain.dkim_rotating || rotate.isPending} onClick={() => void rotateKey()}>
                       <Refresh2 /> {domain.dkim_rotating ? 'New DKIM key waits for its record' : 'Make a new DKIM key'}
                     </DropdownMenuItem>
@@ -401,24 +418,10 @@ function DomainCard({
                 {statusText(domain)}
                 <InfoTip text={`Orbit checks the DNS every 10 minutes for 72 hours after you add a domain, then less often. While this page is open, it also checks when you come back to it. DNS changes can take a few minutes to show.`} />
               </span>
-              <Button type="button" variant="ghost" size="sm" className="shrink-0 text-muted-foreground" onClick={copyZoneFile}>
+              <Button type="button" variant="ghost" size="sm" className="shrink-0 text-muted-foreground" onClick={downloadZoneFile}>
                 <DocumentDownload />
-                Copy as zone file
+                Download zone file
               </Button>
-            </SettingsRow>
-            <SettingsRow className="flex-nowrap">
-              <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[0.8125rem] font-medium text-foreground">
-                Mail on
-                <InfoTip text={`Off: Orbit refuses all mail for ${domain.name}. Mailboxes and their mail stay.`} />
-              </span>
-              <Switch
-                aria-label={`Receive mail for ${domain.name}`}
-                checked={domain.status !== 'disabled'}
-                disabled={setEnabled.isPending}
-                onCheckedChange={(enabled: boolean) => setEnabled.mutate({ domainId: domain.id, enabled }, {
-                  onError: (error) => toast.error(mailProblem(error, 'The domain could not be changed.')),
-                })}
-              />
             </SettingsRow>
             <SettingsRow className="flex-nowrap">
               <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[0.8125rem] font-medium text-foreground">

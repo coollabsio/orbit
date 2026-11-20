@@ -699,7 +699,7 @@ local file; operator guide `docs/operations.md#mail`, section Sending). Server:
 
 Web: the composer (inline reply, floating windows with a dock, full screen; BlockNote body, inline images, Cc/Bcc,
 send-as, size and suppression warnings, Send as a link), Drafts, Scheduled and Outbox folders, delivery status for each
-recipient with Retry, undo toast, vacation reply, signatures, undo delay in **Settings → Mail → My mail**, incoming
+recipient with Retry, undo toast, vacation reply, signatures, undo delay in **Settings → Mail → Mail preferences**, incoming
 providers and outgoing routes in one Providers card (**Add provider** → Incoming / Outgoing) in **Settings → Mail → Providers** and Admin → Mail (**Set as default** on a route), suppressions and tier limits in **Settings → Mail → Sending**, Admin → Limits → Email (tier limits,
 sending by workspace with Resume). Admin → Limits has its own sidebar menu (Workspaces, Email). Shortcuts (listed in the shortcut help, from `shortcuts/commands.ts`): `c`, `r`, `a`, `f`,
 `⌘Enter` send, `⌘⇧Enter` send and archive, `⌘⇧E` pop out, `Esc` minimize, global "New email" in ⌘K.

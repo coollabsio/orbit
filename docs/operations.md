@@ -611,7 +611,7 @@ When the files make a message too large, the composer offers **Send as a link** 
 
 #### Vacation reply
 
-A mailbox can have a vacation reply (**Settings → Mail → My mail**: dates, subject, text, and optionally only for contacts). Orbit replies only when all are true: the message is in the Inbox (not Spam), DMARC did not fail, the envelope sender is authenticated (SPF passed for its domain, or DMARC passed with that same domain as the From domain, or it was sent from a mailbox of this Orbit), the sender is not empty (`<>`), the message has no `Auto-Submitted` header other than `no`, no `Precedence: bulk`, `list` or `junk`, and no `List-Id` or `List-Unsubscribe`, the mailbox address is in To or Cc, the sender is not a mailbox of the same workspace, and the mailbox did not reply to this sender in the last 7 days. The reply has `Auto-Submitted: auto-replied` and goes through the normal send path, so it is signed and counted in the limits.
+A mailbox can have a vacation reply (**Settings → Mail → Mail preferences**: dates, subject, text, and optionally only for contacts). Orbit replies only when all are true: the message is in the Inbox (not Spam), DMARC did not fail, the envelope sender is authenticated (SPF passed for its domain, or DMARC passed with that same domain as the From domain, or it was sent from a mailbox of this Orbit), the sender is not empty (`<>`), the message has no `Auto-Submitted` header other than `no`, no `Precedence: bulk`, `list` or `junk`, and no `List-Id` or `List-Unsubscribe`, the mailbox address is in To or Cc, the sender is not a mailbox of the same workspace, and the mailbox did not reply to this sender in the last 7 days. The reply has `Auto-Submitted: auto-replied` and goes through the normal send path, so it is signed and counted in the limits.
 
 #### Purge
 
@@ -677,7 +677,7 @@ In both cases, if a new certificate cannot be loaded, Orbit keeps the last good 
 | TXT | `<domain>` | `v=spf1 a:<ORBIT_MAIL_HOSTNAME> mx ~all` for a direct route; a provider route adds its `include:` | Recommended. The value follows the send route of the domain. Routes of a provider also need its return path and DKIM records; the page shows them. |
 | TXT | `_dmarc.<domain>` | `v=DMARC1; p=none` | Recommended. |
 
-The domain check runs every 10 minutes for a pending domain (for 72 hours) and once a day for a verified domain. **Check now** runs it at once.
+The domain check runs every 10 minutes for a pending domain (for 72 hours) and once a day for a verified domain. **Check now** runs it at once. The check asks the domain's own name servers and the resolver (`ORBIT_MAIL_DNS_RESOLVER` or the system's) at the same time. When the name servers have the record, Orbit uses their answer, so an old negative answer in the resolver's cache does not hide a new record. Otherwise Orbit uses the resolver's answer (for example, for a CNAME to another zone, or when a firewall blocks port 53).
 
 - **Pending → verified:** the verify record has the token.
 - **Verified → suspended:** the verify record is gone. A suspended domain receives mail for 7 days, then refuses it. When the record is back, the domain is verified again.

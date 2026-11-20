@@ -13,8 +13,8 @@ use orbit_server::mail_dns::{
 use orbit_server::repositories::identity::{IdentityRepository, SetupRequest};
 use orbit_server::repositories::instance_settings::InstanceSettingsRepository;
 use orbit_server::repositories::mail::{
-    Domain, MailError, MailRepository, NotReadyReason, RETIRING_KEY_MS, SendReadiness,
-    SendRouteKind,
+    Domain, MailError, MailRepository, NotReadyReason, RETIRING_KEY_MS, RecordStatus,
+    SendReadiness, SendRouteKind,
 };
 
 const APP_KEY: [u8; 32] = [9; 32];
@@ -611,5 +611,70 @@ async fn dns_timeout_does_not_change_keys() {
     assert_eq!(
         fixture.key_status(&domain, &rotated.selector).await,
         "pending"
+    );
+}
+
+/// The verify record of `domain` as the last check saw it.
+async fn verify_status(fixture: &Fixture, domain: &Domain) -> RecordStatus {
+    fixture.get(domain).await.report.unwrap().verify
+}
+
+/// Gives `example.com` a name server, and returns the fake answers of that server.
+fn zone_server(fixture: &Fixture) -> FakeDns {
+    fixture.dns.set_ns("example.com", &["ns1.dns.test"]);
+    fixture
+        .dns
+        .set_a("ns1.dns.test", &["192.0.2.53".parse().unwrap()]);
+    let authoritative = FakeDns::new();
+    fixture.dns.set_authoritative(authoritative.clone());
+    authoritative
+}
+
+#[tokio::test]
+async fn zone_server_answer_wins_over_a_negative_resolver_answer() {
+    let fixture = Fixture::new().await;
+    let domain = fixture.add("example.com").await;
+    let authoritative = zone_server(&fixture);
+    // The resolver keeps "no such record" in its cache; the zone's server has the record.
+    authoritative.set_txt(
+        "_orbit-verify.example.com",
+        &[&format!("orbit-verify={}", domain.verify_token)],
+    );
+    fixture
+        .check(&domain, TimestampMillis::now().as_millis())
+        .await;
+    assert_eq!(verify_status(&fixture, &domain).await, RecordStatus::Ok);
+}
+
+#[tokio::test]
+async fn resolver_answer_used_when_the_zone_server_has_none() {
+    let fixture = Fixture::new().await;
+    let domain = fixture.add("example.com").await;
+    // A CNAME out of the zone: the zone's server has no TXT record, the resolver follows it.
+    zone_server(&fixture);
+    fixture.publish_base(&domain);
+    fixture
+        .check(&domain, TimestampMillis::now().as_millis())
+        .await;
+    assert_eq!(verify_status(&fixture, &domain).await, RecordStatus::Ok);
+}
+
+#[tokio::test]
+async fn resolver_answer_used_without_zone_servers() {
+    let fixture = Fixture::new().await;
+    let domain = fixture.add("example.com").await;
+    fixture.publish_base(&domain);
+    fixture
+        .check(&domain, TimestampMillis::now().as_millis())
+        .await;
+    assert_eq!(verify_status(&fixture, &domain).await, RecordStatus::Ok);
+
+    fixture.dns.remove("_orbit-verify.example.com");
+    fixture
+        .check(&domain, TimestampMillis::now().as_millis() + 1)
+        .await;
+    assert_eq!(
+        verify_status(&fixture, &domain).await,
+        RecordStatus::Missing
     );
 }

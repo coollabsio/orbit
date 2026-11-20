@@ -4,16 +4,18 @@
 //! Lookups go through [`DnsLookup`]: [`HickoryDns`] in the server (the hickory resolver that
 //! `mail-auth` uses, so there is one version of it) and [`FakeDns`] in tests. A missing name and
 //! a name without records of the type are both [`DnsError::NotFound`]; a timeout or another
-//! failure makes the result `unknown`, which changes nothing.
+//! failure makes the result `unknown`, which changes nothing. [`ZoneLookup`] asks the zone's own
+//! name servers as well as the resolver, so a negative answer that the resolver keeps in its cache
+//! does not hide a record that was just published.
 //!
 //! [`check_ptr`] is the health card's reverse DNS check of `ORBIT_MAIL_HOSTNAME`.
 
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Once};
 use std::time::Duration;
 
-use futures_util::future::BoxFuture;
+use futures_util::future::{BoxFuture, join_all};
 use orbit_mail::hickory_resolver::TokioResolver;
 use orbit_mail::hickory_resolver::config::{NameServerConfig, ResolverConfig};
 use orbit_mail::hickory_resolver::net::NetError;
@@ -31,6 +33,9 @@ use crate::repositories::mail::{
 
 /// Longest wait for one lookup, on top of the resolver's own timeouts.
 const LOOKUP_TIMEOUT: Duration = Duration::from_secs(15);
+/// Wait for one try of a lookup at a zone's own name servers: a firewall that blocks port 53 to
+/// the internet makes these lookups time out, and the resolver's answer is used.
+const AUTHORITATIVE_TIMEOUT: Duration = Duration::from_secs(5);
 /// Largest string in a TXT record (RFC 1035 §3.3.14).
 pub const TXT_STRING_MAX: usize = 255;
 /// MX preference Orbit suggests.
@@ -60,9 +65,15 @@ pub trait DnsLookup: Send + Sync {
     fn ptr(&self, ip: IpAddr) -> BoxFuture<'_, Result<Vec<String>, DnsError>>;
     /// The NS hosts of `name` (lower case, no trailing dot).
     fn ns<'a>(&'a self, name: &'a str) -> BoxFuture<'a, Result<Vec<String>, DnsError>>;
+    /// The same lookups sent to `servers` (a zone's own name servers, port 53) instead of the
+    /// resolver. `None` when such a lookup cannot be set up.
+    fn at_servers(&self, servers: &[IpAddr]) -> Option<Arc<dyn DnsLookup>>;
 }
 
 /// Lookups through hickory, without a cache, so **Check now** sees a record that was just added.
+/// The resolver (the system's, or `ORBIT_MAIL_DNS_RESOLVER`) can still keep an old answer in its
+/// own cache, so the checks of a mail domain go through [`ZoneLookup`], which also asks the
+/// domain's own name servers ([`DnsLookup::at_servers`]).
 pub struct HickoryDns {
     resolver: Result<TokioResolver, String>,
 }
@@ -120,6 +131,33 @@ fn absolute(name: &str) -> Result<Name, DnsError> {
 }
 
 impl DnsLookup for HickoryDns {
+    fn at_servers(&self, servers: &[IpAddr]) -> Option<Arc<dyn DnsLookup>> {
+        let config = ResolverConfig::from_name_servers(
+            servers
+                .iter()
+                .map(|ip| NameServerConfig::udp_and_tcp(*ip))
+                .collect(),
+        );
+        let mut builder =
+            TokioResolver::builder_with_config(config, TokioRuntimeProvider::default());
+        let options = builder.options_mut();
+        options.cache_size = 0;
+        options.timeout = AUTHORITATIVE_TIMEOUT;
+        options.attempts = 1;
+        match builder.build() {
+            Ok(resolver) => Some(Arc::new(Self {
+                resolver: Ok(resolver),
+            })),
+            Err(error) => {
+                static WARNED: Once = Once::new();
+                WARNED.call_once(|| {
+                    tracing::warn!(%error, "the DNS lookup at a zone's name servers could not be set up; mail domain checks use the resolver only");
+                });
+                None
+            }
+        }
+    }
+
     fn txt<'a>(&'a self, name: &'a str) -> BoxFuture<'a, Result<Vec<String>, DnsError>> {
         Box::pin(async move {
             let resolver = self.resolver()?;
@@ -276,10 +314,12 @@ enum Answer {
 
 /// Answers from a table, for tests. A name that is not in the table is [`DnsError::NotFound`].
 /// Clones share the table, so a test can change the records between checks. PTR records are
-/// kept under the address's text (`192.0.2.1`).
+/// kept under the address's text (`192.0.2.1`). [`set_authoritative`](Self::set_authoritative)
+/// gives the answers of the zones' own name servers; without it there are none.
 #[derive(Clone, Default)]
 pub struct FakeDns {
     answers: Arc<Mutex<HashMap<(RecordType, String), Answer>>>,
+    authoritative: Arc<Mutex<Option<FakeDns>>>,
 }
 
 impl FakeDns {
@@ -353,9 +393,26 @@ impl FakeDns {
     fn get(&self, kind: RecordType, name: &str) -> Option<Answer> {
         self.table().get(&(kind, host(name))).cloned()
     }
+
+    /// Makes [`DnsLookup::at_servers`] answer from `dns`, whatever the servers.
+    pub fn set_authoritative(&self, dns: FakeDns) {
+        *self
+            .authoritative
+            .lock()
+            .expect("the fake DNS table is not poisoned") = Some(dns);
+    }
 }
 
 impl DnsLookup for FakeDns {
+    fn at_servers(&self, _servers: &[IpAddr]) -> Option<Arc<dyn DnsLookup>> {
+        let authoritative = self
+            .authoritative
+            .lock()
+            .expect("the fake DNS table is not poisoned")
+            .clone();
+        authoritative.map(|dns| Arc::new(dns) as Arc<dyn DnsLookup>)
+    }
+
     fn txt<'a>(&'a self, name: &'a str) -> BoxFuture<'a, Result<Vec<String>, DnsError>> {
         Box::pin(async move {
             match self.get(RecordType::Txt, name) {
@@ -848,6 +905,82 @@ pub async fn dns_zone(dns: &dyn DnsLookup, domain: &str) -> Option<(String, Vec<
     None
 }
 
+/// Lookups of names in one DNS zone. Each lookup goes to the resolver and, at the same time, to
+/// the zone's own name servers; the zone's answer wins when it has records. Else the resolver's
+/// answer is used: a zone's server does not follow a CNAME out of its zone, and a firewall can
+/// block port 53 to the internet.
+pub struct ZoneLookup<'a> {
+    resolver: &'a dyn DnsLookup,
+    authoritative: Option<Arc<dyn DnsLookup>>,
+    /// The zone and its NS hosts, as [`dns_zone`] found them.
+    pub zone: Option<(String, Vec<String>)>,
+}
+
+impl<'a> ZoneLookup<'a> {
+    /// Finds the zone of `name` and the addresses of its name servers through `dns`.
+    pub async fn new(dns: &'a dyn DnsLookup, name: &str) -> Self {
+        let zone = dns_zone(dns, name).await;
+        let servers = match &zone {
+            Some((_, hosts)) => name_server_addresses(dns, hosts).await,
+            None => Vec::new(),
+        };
+        let authoritative = if servers.is_empty() {
+            None
+        } else {
+            dns.at_servers(&servers)
+        };
+        Self {
+            resolver: dns,
+            authoritative,
+            zone,
+        }
+    }
+
+    pub async fn txt(&self, name: &str) -> Result<Vec<String>, DnsError> {
+        combine(
+            self.resolver.txt(name),
+            self.authoritative.as_ref().map(|dns| dns.txt(name)),
+        )
+        .await
+    }
+
+    pub async fn mx(&self, name: &str) -> Result<Vec<(u16, String)>, DnsError> {
+        combine(
+            self.resolver.mx(name),
+            self.authoritative.as_ref().map(|dns| dns.mx(name)),
+        )
+        .await
+    }
+}
+
+/// The zone's answer when it has records, else the resolver's. Both lookups run at once.
+async fn combine<T>(
+    resolver: BoxFuture<'_, Result<Vec<T>, DnsError>>,
+    authoritative: Option<BoxFuture<'_, Result<Vec<T>, DnsError>>>,
+) -> Result<Vec<T>, DnsError> {
+    let Some(authoritative) = authoritative else {
+        return resolver.await;
+    };
+    match tokio::join!(resolver, authoritative) {
+        (_, Ok(records)) if !records.is_empty() => Ok(records),
+        (resolver, _) => resolver,
+    }
+}
+
+/// The IPv4 and IPv6 addresses of `hosts`; a host whose lookup fails adds none.
+async fn name_server_addresses(dns: &dyn DnsLookup, hosts: &[String]) -> Vec<IpAddr> {
+    let lookups = hosts.iter().map(|host| async move {
+        let (v4, v6) = tokio::join!(dns.a(host), dns.aaaa(host));
+        let v4 = v4.unwrap_or_default().into_iter().map(IpAddr::V4);
+        let v6 = v6.unwrap_or_default().into_iter().map(IpAddr::V6);
+        v4.chain(v6).collect::<Vec<_>>()
+    });
+    let mut addresses: Vec<IpAddr> = join_all(lookups).await.into_iter().flatten().collect();
+    addresses.sort();
+    addresses.dedup();
+    addresses
+}
+
 /// Looks up every record of `domain` and compares it with what Orbit expects.
 pub async fn inspect(
     dns: &dyn DnsLookup,
@@ -861,20 +994,22 @@ pub async fn inspect(
         .as_ref()
         .map(|dkim| format!("{}._domainkey.{}", dkim.selector, domain.name));
     let dmarc_name = format!("_dmarc.{}", domain.name);
-    let (verify, mx, spf, dmarc, dkim, zone) = tokio::join!(
-        dns.txt(&verify_name),
-        dns.mx(&domain.name),
-        dns.txt(&domain.name),
-        dns.txt(&dmarc_name),
+    let lookup = ZoneLookup::new(dns, &domain.name).await;
+    let (verify, mx, spf, dmarc, dkim) = tokio::join!(
+        lookup.txt(&verify_name),
+        lookup.mx(&domain.name),
+        lookup.txt(&domain.name),
+        lookup.txt(&dmarc_name),
         async {
             match &dkim_name {
-                Some(name) => Some(dns.txt(name).await),
+                Some(name) => Some(lookup.txt(name).await),
                 None => None,
             }
         },
-        dns_zone(dns, &domain.name),
     );
-    let (zone, nameservers) = zone.map_or((None, Vec::new()), |(zone, hosts)| (Some(zone), hosts));
+    let (zone, nameservers) = lookup
+        .zone
+        .map_or((None, Vec::new()), |(zone, hosts)| (Some(zone), hosts));
     let (dmarc, dmarc_policy) = dmarc_status(dmarc);
     DnsReport {
         verify: verify_status(&domain.verify_token, verify),

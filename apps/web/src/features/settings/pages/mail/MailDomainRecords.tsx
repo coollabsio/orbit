@@ -94,7 +94,7 @@ function recordResult(record: MailDnsRecord, checked: boolean): { text: string; 
 
 /**
  * One record to publish: its type, its host relative to `zone` and its value, each to copy. `own`: the record's own
- * result is shown (the step has several records; with one, the step's summary says it).
+ * result is shown, found or not (the step has several records; with one, the step's summary says it).
  */
 function RecordCard({ record, zone, checked, own }: { record: MailDnsRecord; zone: string; checked: boolean; own: boolean }) {
   const host = relativeHost(record.name, zone)
@@ -114,10 +114,10 @@ function RecordCard({ record, zone, checked, own }: { record: MailDnsRecord; zon
       </div>
       <span className="pt-1 text-muted-foreground">Value</span>
       <CopyField label="Value" text={record.value} long={record.value.length > LONG_VALUE} />
-      {record.status.status === 'wrong' || (own && record.status.status !== 'ok') ? (
+      {record.status.status === 'wrong' || own ? (
         <>
           <span aria-hidden />
-          <span className={cn('break-all', result.tone === 'problem' ? 'text-destructive' : 'text-muted-foreground')}>{result.text}</span>
+          <span className={cn('break-all', result.tone === 'problem' ? 'text-destructive' : result.tone === 'ok' ? 'text-emerald-600 dark:text-emerald-400' : 'text-muted-foreground')}>{result.text}</span>
         </>
       ) : null}
     </div>

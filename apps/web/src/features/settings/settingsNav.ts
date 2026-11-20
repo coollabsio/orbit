@@ -67,7 +67,7 @@ const AREAS: Record<SettingsAreaName, SettingsArea> = {
           { to: '/settings/mail/suppressions', label: 'Suppressions', icon: ShieldCross, permission: 'mail.manage', mail: true },
           { to: '/settings/mail/failed', label: 'Failed messages', icon: SmsTracking, permission: 'mail.manage', mail: true },
           // every member's own: signatures, undo send, snippets, vacation reply
-          { to: '/settings/mail/me', label: 'My mail', icon: Mail, mail: true },
+          { to: '/settings/mail/me', label: 'Mail preferences', icon: Mail, mail: true },
         ],
       },
       {

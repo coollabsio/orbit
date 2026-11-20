@@ -18,7 +18,7 @@ import { SettingsRow } from '@/features/settings/components/SettingsParts'
 import { mailProblem, UNDO_SECONDS } from './mailSettingsLib'
 import { MailBodyField, VacationForm } from './VacationForm'
 
-/** Settings → Mail → My mail: each member's signatures, undo send delay, snippets and vacation reply. */
+/** Settings → Mail → Mail preferences: each member's signatures, undo send delay, snippets and vacation reply. */
 export function MyMailPage() {
   return (
     <>

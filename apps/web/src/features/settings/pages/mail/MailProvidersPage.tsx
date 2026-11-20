@@ -96,9 +96,7 @@ function IncomingProviders({ scope, adding, onAddClose }: { scope: ProviderScope
           <Button variant="ghost" onClick={() => void providers.refetch()}>Retry</Button>
         </p>
       ) : null}
-      {providers.data?.providers.length === 0 ? (
-        <p className="m-0 px-4 py-3 text-sm text-muted-foreground">No incoming providers. Mail for your domains arrives through this server's SMTP listener.</p>
-      ) : null}
+      {providers.data ? <ListenerRow running={providers.data.listener.running} hostname={providers.data.listener.hostname} /> : null}
       {providers.data?.providers.map((provider) => (
         <ProviderRow
           key={provider.id}
@@ -118,6 +116,24 @@ function IncomingProviders({ scope, adding, onAddClose }: { scope: ProviderScope
         </Modal>
       ) : null}
     </>
+  )
+}
+
+/** This server's SMTP listener: domains without an incoming provider receive through it. */
+function ListenerRow({ running, hostname }: { running: boolean; hostname?: string | null }) {
+  return (
+    <div className="flex flex-col gap-0.5 px-4 py-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-[0.8125rem] font-medium text-foreground">SMTP listener</span>
+        <Badge variant="secondary">Server</Badge>
+        <Badge variant={running ? 'outline' : 'destructive'}>{running ? 'Running' : 'Off'}</Badge>
+      </div>
+      <span className="text-xs text-muted-foreground">
+        {running
+          ? `Receives mail for domains without an incoming provider${hostname ? ` (MX: ${hostname})` : ''}.`
+          : 'This server does not receive mail itself. Domains need an incoming provider.'}
+      </span>
+    </div>
   )
 }
 

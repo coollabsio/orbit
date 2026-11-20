@@ -60,7 +60,7 @@ export function setupSteps(domain: DomainForSetup): SetupStep[] {
   }
   const mx = of('mx')
   const dkim = of('dkim')
-  const send = step('send', 'Send mail', 'Orbit signs every message it sends with this DKIM key. Without the record, mail from this domain is not sent.', dkim, false, dkim.length === 0 ? 'No DKIM key yet' : null)
+  const send = step('send', 'Send mail', 'Needed to send mail that you write in Orbit. Orbit signs each message with this DKIM key, whichever send route delivers it: Orbit itself, an SMTP relay or a provider. Without the record, Orbit does not send mail from this domain. Skip this step if you write mail only in another mail service, or if the domain only receives mail.', dkim, false, dkim.length === 0 ? 'No DKIM key yet' : null)
   return [
     step('verify', 'Verify the domain', `Proves that ${domain.name} is yours. Orbit receives mail for it once this record is found.`, of('verify')),
     // without a provider, the MX record names this server, which is known only with ORBIT_MAIL_HOSTNAME

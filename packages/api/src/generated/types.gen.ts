@@ -4443,6 +4443,20 @@ export type MailLabel = {
 };
 
 /**
+ * This server's SMTP listener, as the providers list shows it.
+ */
+export type MailListenerSummary = {
+    /**
+     * `ORBIT_MAIL_HOSTNAME`: the MX target of the domains.
+     */
+    hostname?: string | null;
+    /**
+     * It accepts connections now.
+     */
+    running: boolean;
+};
+
+/**
  * This server's SMTP listener. With several servers, each one reports its own.
  */
 export type MailListenerView = {
@@ -4659,6 +4673,10 @@ export type MailPerson = {
 export type MailProviderKind = 'postshiba' | 'cloudflare' | 'postmark' | 'mailgun' | 'resend' | 'ses';
 
 export type MailProviderList = {
+    /**
+     * This server's SMTP listener: it receives mail for domains without an incoming provider.
+     */
+    listener: MailListenerSummary;
     providers: Array<MailProviderView>;
     /**
      * Whether workspaces may add their own providers (the instance switch).

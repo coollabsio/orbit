@@ -139,6 +139,24 @@ pub(crate) struct MailProviderList {
     providers: Vec<MailProviderView>,
     /// Whether workspaces may add their own providers (the instance switch).
     workspace_providers_enabled: bool,
+    /// This server's SMTP listener: it receives mail for domains without an incoming provider.
+    listener: MailListenerSummary,
+}
+
+/// This server's SMTP listener, as the providers list shows it.
+#[derive(Serialize, ToSchema)]
+pub(crate) struct MailListenerSummary {
+    /// It accepts connections now.
+    running: bool,
+    /// `ORBIT_MAIL_HOSTNAME`: the MX target of the domains.
+    hostname: Option<String>,
+}
+
+fn listener_summary(state: &MailState) -> MailListenerSummary {
+    MailListenerSummary {
+        running: state.listener.running(),
+        hostname: state.settings.hostname.clone(),
+    }
 }
 
 /// The secrets a provider gives (PostShiba, Mailgun, Resend, SES); Orbit makes Cloudflare's and Postmark's.
@@ -502,6 +520,7 @@ pub(crate) async fn list_instance_mail_providers(
         .await
         .map_err(|error| problem(error, &instance, request_id))?;
     Ok(Json(MailProviderList {
+        listener: listener_summary(&state),
         workspace_providers_enabled: workspace_providers_enabled(&state, &instance, request_id)
             .await?,
         providers: providers
@@ -596,6 +615,7 @@ pub(crate) async fn list_workspace_mail_providers(
         .await
         .map_err(|error| call.problem(error))?;
     Ok(Json(MailProviderList {
+        listener: listener_summary(&state),
         workspace_providers_enabled: workspace_providers_enabled(
             &state,
             &call.instance,

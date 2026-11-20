@@ -90524,6 +90524,26 @@
           }
         }
       },
+      "MailListenerSummary": {
+        "type": "object",
+        "description": "This server's SMTP listener, as the providers list shows it.",
+        "required": [
+          "running"
+        ],
+        "properties": {
+          "hostname": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`ORBIT_MAIL_HOSTNAME`: the MX target of the domains."
+          },
+          "running": {
+            "type": "boolean",
+            "description": "It accepts connections now."
+          }
+        }
+      },
       "MailListenerView": {
         "type": "object",
         "description": "This server's SMTP listener. With several servers, each one reports its own.",
@@ -91011,9 +91031,14 @@
         "type": "object",
         "required": [
           "providers",
-          "workspace_providers_enabled"
+          "workspace_providers_enabled",
+          "listener"
         ],
         "properties": {
+          "listener": {
+            "$ref": "#/components/schemas/MailListenerSummary",
+            "description": "This server's SMTP listener: it receives mail for domains without an incoming provider."
+          },
           "providers": {
             "type": "array",
             "items": {
