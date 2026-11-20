@@ -27,6 +27,8 @@ export const cssColors = { black: '#000000', white: '#ffffff' } as const
 
 /** Tailwind green-500, amber-500 and red-500: the web `StatusMark` draws presence with these in both themes. */
 export const presenceColors = { online: '#00c950', idle: '#fe9a00', dnd: '#fb2c36' } as const
+/** A starred conversation's star (the web's `fill-[#fcd452]` in the mail list and thread). */
+export const starColor = '#fcd452'
 
 export { alpha, mix }
 

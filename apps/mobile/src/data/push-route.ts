@@ -3,6 +3,7 @@
  * `data` on Android); the app opens the screen that shows the same thing. No React.
  */
 
+import { mailRoute } from './mail'
 import { pullRoute } from './pull-route'
 
 /** The `/profile/*` pages the app has, under Settings. */
@@ -10,7 +11,7 @@ const ACCOUNT_PAGES = new Set(['notifications', 'security', 'sessions', 'appeara
 
 /**
  * The app route for a web path: `/chat/<id>?thread=<root>` → `/chat/thread/<root>`, `/views/<view>/<task>` →
- * `/tasks/<task>`, `/profile/notifications` → `/settings/notifications`. `null` for a path the app has no screen for.
+ * `/tasks/<task>`, `/profile/notifications` → `/settings/notifications`, `/mail/…/t/<thread>` → `/mail/<thread>`. `null` for a path the app has no screen for.
  */
 export function pushRoute(url: string): string | null {
   const match = /^(?:[a-z]+:\/\/[^/]+)?(\/[^?#]*)?(?:\?([^#]*))?/i.exec(url.trim())
@@ -45,6 +46,8 @@ export function pushRoute(url: string): string | null {
       return second ? `/tasks/${second}` : '/tasks'
     case 'docs':
       return first && first !== 'import' ? (first === 'trash' ? '/docs/trash' : `/docs/${first}`) : '/docs'
+    case 'mail':
+      return mailRoute(parts.slice(1))
     case 'activity':
     case 'inbox':
       return '/activity'

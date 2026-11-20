@@ -45,3 +45,11 @@ test('pull request paths open the pull request screens', () => {
   expect(pushRoute('/tasks/projects/p1/settings')).toBe('/tasks')
   expect(pushRoute('/tasks/pulls/acme')).toBe('/tasks')
 })
+
+test('maps mail threads and folders', () => {
+  expect(pushRoute('/mail')).toBe('/mail')
+  expect(pushRoute('https://orbit.test/mail/t/th1')).toBe('/mail/th1')
+  expect(pushRoute('/mail/m1/inbox/t/th2')).toBe('/mail/th2')
+  expect(pushRoute('/mail/search/t/th3?q=from%3Aana')).toBe('/mail/th3')
+  expect(pushRoute('/mail/archive')).toBe('/mail?tab=archive')
+})

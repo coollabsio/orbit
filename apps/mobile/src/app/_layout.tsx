@@ -121,6 +121,7 @@ function RootNavigator({ fontsReady }: { fontsReady: boolean }) {
         <Stack.Screen name="chat/unreads" />
         <Stack.Screen name="chat/threads" />
         <Stack.Screen name="chat/browse" />
+        <Stack.Screen name="mail/compose" options={{ presentation: 'fullScreenModal' }} />
         {/* a pull request opens over the tab it came from (chat, inbox, a task), like the web's overlay */}
         <Stack.Screen name="pulls" options={{ presentation: 'fullScreenModal' }} />
       </Stack.Protected>

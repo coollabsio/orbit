@@ -34,6 +34,7 @@ export default function TabsLayout() {
         <Tabs.Screen name="tasks" />
         <Tabs.Screen name="docs" />
         <Tabs.Screen name="chat" />
+        <Tabs.Screen name="mail" />
         <Tabs.Screen name="settings" />
         {/* reached from the drawer, like the web's Activity: no dock item */}
         <Tabs.Screen name="activity" />

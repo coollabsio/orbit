@@ -5,16 +5,18 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { useIsGuest } from '../orbit-context'
 import { guestSettings } from '../data/guest'
+import { useMailBadge, useMailEnabled } from '../hooks/mail'
 import { useChatBadge } from '../queries'
 import { useTheme } from '../theme'
 import { CountBadge, Icon, type IconName, Text } from '../ui'
 
-/** The web `MobileDock`: the tab routes in its order. Mail is left out until it is ready (App Store guideline 2.1 refuses "coming soon" items). */
+/** The web `MobileDock`: the tab routes in its order. Mail shows only while it is on for the server: the web shows it disabled, and App Store guideline 2.1 refuses "coming soon" items. */
 const ITEMS: { route: string; href: Href; label: string; icon: IconName }[] = [
   { route: 'index', href: '/', label: 'Home', icon: 'home' },
   { route: 'tasks', href: '/tasks', label: 'Tasks', icon: 'tasks' },
   { route: 'docs', href: '/docs', label: 'Docs', icon: 'docs' },
   { route: 'chat', href: '/chat', label: 'Chat', icon: 'chat' },
+  { route: 'mail', href: '/mail', label: 'Mail', icon: 'mail' },
   { route: 'settings', href: '/settings', label: 'Settings', icon: 'settings' },
 ]
 
@@ -25,7 +27,9 @@ const GUEST_ITEMS = ITEMS.filter((item) => item.route === 'chat' || item.route =
 
 export function Dock({ state }: BottomTabBarProps) {
   const { colors } = useTheme()
-  const items = useIsGuest() ? GUEST_ITEMS : ITEMS
+  const mailEnabled = useMailEnabled()
+  const mailBadge = useMailBadge()
+  const items = useIsGuest() ? GUEST_ITEMS : ITEMS.filter((item) => item.route !== 'mail' || mailEnabled)
   const insets = useSafeAreaInsets()
   const chatBadge = useChatBadge()
   const current = state.routes[state.index]?.name
@@ -33,7 +37,7 @@ export function Dock({ state }: BottomTabBarProps) {
     <View accessibilityRole="tablist" className="flex-row min-h-14 pt-3 bg-background" style={{ paddingBottom: insets.bottom }}>
       {items.map((item) => {
         const active = item.route === current
-        const count = item.route === 'chat' ? chatBadge.count : 0
+        const count = item.route === 'chat' ? chatBadge.count : item.route === 'mail' ? mailBadge : 0
         // a dot when chat is unread but nothing counts, like a channel message that does not mention you
         const dot = item.route === 'chat' && count === 0 && chatBadge.unread
         const color = active ? colors.primary : colors.mutedForeground

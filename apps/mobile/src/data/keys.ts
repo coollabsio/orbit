@@ -32,6 +32,37 @@ export const keys = {
   database: (workspaceId: string, databaseId: string, linkId = '') => (linkId ? ['database', workspaceId, databaseId, linkId] : ['database', workspaceId, databaseId]),
 }
 
+/** Which threads a list shows (the web's `ThreadFilter`): without `folder`, the inbox; `starred` the inbox and archive; `sent` every folder but the trash. */
+export interface ThreadFilter {
+  folder?: 'inbox' | 'archive' | 'spam' | 'trash'
+  starred?: boolean
+  sent?: boolean
+  unread?: boolean
+}
+
+/**
+ * Mail's keys, as on the web: outside the `[resource, workspaceId]` prefixes the workspace events socket refreshes,
+ * because mail has its own live topic. Every list (folders and searches) sits under `lists`.
+ */
+export const mailKeys = {
+  all: (workspaceId: string) => ['mail', workspaceId] as const,
+  me: (workspaceId: string) => ['mail', workspaceId, 'me'] as const,
+  counts: (workspaceId: string) => ['mail', workspaceId, 'counts'] as const,
+  lists: (workspaceId: string) => ['mail', workspaceId, 'list'] as const,
+  threads: (workspaceId: string, filter: ThreadFilter) => ['mail', workspaceId, 'list', 'threads', filter] as const,
+  search: (workspaceId: string, query: string) => ['mail', workspaceId, 'list', 'search', query] as const,
+  thread: (workspaceId: string, threadId: string) => ['mail', workspaceId, 'thread', threadId] as const,
+  drafts: (workspaceId: string) => ['mail', workspaceId, 'drafts'] as const,
+  draft: (workspaceId: string, draftId: string) => ['mail', workspaceId, 'draft', draftId] as const,
+  outbound: (workspaceId: string, view: 'scheduled' | 'outbox') => ['mail', workspaceId, 'outbound', view] as const,
+  outboundAll: (workspaceId: string) => ['mail', workspaceId, 'outbound'] as const,
+  fromAddresses: (workspaceId: string, threadId?: string) => ['mail', workspaceId, 'from-addresses', threadId ?? null] as const,
+  contacts: (workspaceId: string, query: string) => ['mail', workspaceId, 'contacts', query] as const,
+  sendPolicy: (workspaceId: string) => ['mail', workspaceId, 'send-policy'] as const,
+  /** Outside `all`: a resync must not fetch a new document for a message on screen. */
+  view: (workspaceId: string, messageId: string, loadImages: boolean) => ['mail-view', workspaceId, messageId, loadImages ? 'images' : 'blocked'] as const,
+}
+
 export type QueryKey = readonly string[]
 
 /**

@@ -3,7 +3,8 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useEffect } from 'react'
 import { AppState, Platform } from 'react-native'
 
-import { keys } from './data/keys'
+import { keys, mailKeys } from './data/keys'
+import { mailEventKeys } from './data/mail'
 import { chatResyncKeys, githubPullKeys, LiveCursor, parseLiveFrame, parseWorkspaceEvent, socketUrl, workspaceEventKeys } from './data/live'
 import { reconnectingSocket, type SocketLike } from './data/socket'
 import { applyChatEvents } from './chat-cache'
@@ -18,7 +19,7 @@ const isChatEvent = (value: unknown): value is ChatEvent => typeof value === 'ob
 
 /**
  * Keeps the workspace's queries fresh while the app is open: the workspace events socket marks task, project and inbox
- * queries stale, and the live socket patches chat in place. Both send the session as a bearer token in the upgrade.
+ * queries stale, and the live socket patches chat in place and marks mail stale on its `mail` events. Both send the session as a bearer token in the upgrade.
  * In the background both close; back in the foreground they connect at once and resume where they stopped.
  */
 export function useLiveUpdates() {
@@ -63,7 +64,14 @@ export function useLiveUpdates() {
         const frame = parseLiveFrame(raw)
         if (!frame) return
         cursor.read(frame)
-        if (frame.type === 'resync') invalidate(chatResyncKeys(workspaceId))
+        if (frame.type === 'resync') {
+          invalidate(chatResyncKeys(workspaceId))
+          void queryClient.invalidateQueries({ queryKey: mailKeys.all(workspaceId) })
+        }
+        // mail has its own topic, as on the web: the changed thread, the lists, the counts and the send views
+        if (frame.type === 'event' && frame.topic === 'mail') {
+          for (const queryKey of mailEventKeys(frame.event, workspaceId)) void queryClient.invalidateQueries({ queryKey })
+        }
         if (frame.type === 'event' && frame.topic === 'chat' && isChatEvent(frame.event)) {
           applyChatEvents(queryClient, workspaceId, [frame.event])
         }

@@ -68,7 +68,7 @@ const output = resolve(import.meta.dir, '../src/ui/icons.gen.ts')
 const reicon = dirname(createRequire(import.meta.url).resolve('reicon-react/package.json'))
 
 /** Icons the web also draws with `weight="Filled"`, as `<name>Filled`. */
-const FILLED = { hashtagFilled: 'Hashtag', lockFilled: 'Lock' } as const
+const FILLED = { hashtagFilled: 'Hashtag', lockFilled: 'Lock', starFilled: 'Star' } as const
 
 function outline(component: string, weight: 'O' | 'F' = 'O'): string {
   const source = readFileSync(resolve(reicon, 'icons', `${component}.js`), 'utf8')

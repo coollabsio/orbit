@@ -8,6 +8,7 @@ import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg'
 import { useAuthOptions } from '../hooks/account'
 import { useGithubSettings } from '../hooks/workspace-settings'
 import { useOrbit } from '../orbit-context'
+import { useMailBadge, useMailEnabled } from '../hooks/mail'
 import { useChatBadge, useProjects } from '../queries'
 import { splitAlpha } from '../data/color'
 import { customSidebarTheme } from '../data/custom-theme'
@@ -185,6 +186,8 @@ function DrawerPanel({ mounted, width, onClose }: { mounted: boolean; width: num
   const pathname = usePathname()
   const { view, project } = useGlobalSearchParams<{ view?: string; project?: string }>()
   const chatBadge = useChatBadge()
+  const mailEnabled = useMailEnabled()
+  const mailBadge = useMailBadge()
   // a guest has Chat and its account settings only
   const guest = isGuestRole(workspace.role)
   const reduceMotion = useReduceMotion()
@@ -276,6 +279,7 @@ function DrawerPanel({ mounted, width, onClose }: { mounted: boolean; width: num
               ))}
               <NavRow link={{ label: 'Docs', icon: 'docs', href: '/docs', active: pathname.startsWith('/docs') }} onPress={() => go('/docs')} />
               <NavRow link={{ label: 'Chat', icon: 'chat', href: '/chat', active: pathname.startsWith('/chat'), badge: chatBadge.count, dot: chatBadge.unread }} onPress={() => go('/chat')} />
+              {mailEnabled ? <NavRow link={{ label: 'Mail', icon: 'mail', href: '/mail', active: pathname.startsWith('/mail'), badge: mailBadge }} onPress={() => go('/mail')} /> : null}
               <Section label="Manage" />
               <NavRow link={{ label: 'Settings', icon: 'settings', href: '/settings', active: onSettings && !onAdmin }} onPress={() => setOpenedArea('workspace')} />
               {user.installation_admin ? (
