@@ -166,7 +166,7 @@ fn mail_without_colours_is_plain_and_follows_the_theme() {
         );
         assert!(
             base_style(&out).contains(
-                "html[data-theme=dark]{background:var(--orbit-bg,#0a0a0a);color-scheme:dark}"
+                "html[data-theme=dark]{background-color:#0a0a0a;background-image:linear-gradient(var(--orbit-bg,#0a0a0a),var(--orbit-bg,#0a0a0a));color-scheme:dark}"
             ),
             "{out}"
         );

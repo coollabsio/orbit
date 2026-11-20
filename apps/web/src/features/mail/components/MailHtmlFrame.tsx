@@ -99,8 +99,13 @@ export function MailHtmlFrame({
       sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"
       referrerPolicy="no-referrer"
       onLoad={postTheme}
-      // mail with its own colours is written for a white page, also in the dark theme
-      className={cn('block w-full rounded-md border-0', plain ? 'bg-transparent' : 'bg-white [color-scheme:light]', !ready && 'invisible')}
+      // mail with its own colours is written for a white page, also in the dark theme. A plain frame takes the theme's
+      // colour scheme: when the frame and its page differ, the browser paints an opaque (white) backdrop behind it.
+      className={cn(
+        'block w-full rounded-md border-0',
+        plain ? cn('bg-transparent', theme === 'dark' ? '[color-scheme:dark]' : '[color-scheme:light]') : 'bg-white [color-scheme:light]',
+        !ready && 'invisible',
+      )}
       style={{ height }}
       />
     </div>

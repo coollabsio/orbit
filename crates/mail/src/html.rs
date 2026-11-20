@@ -202,8 +202,10 @@ pre{white-space:pre-wrap}a{color:#0969da}[hidden]{display:none!important}\
 .orbit-fold{display:block;height:22px;margin:8px 0;padding:0 10px;border:1px solid #d0d7de;border-radius:999px;\
 background:#f6f8fa;color:#59636e;font:12px/1 system-ui,sans-serif;letter-spacing:1px;cursor:pointer}\
 .orbit-fold:hover{background:#eaeef2}";
-/// The app's dark theme, only in plain documents (the frame script sets `data-theme`).
-const DARK_CSS: &str = "html[data-theme=dark]{background:var(--orbit-bg,#0a0a0a);color-scheme:dark}\
+/// The app's dark theme, only in plain documents (the frame script sets `data-theme`). The page colour is a gradient
+/// over an opaque base, so a see-through or bad `--orbit-bg` never lets a white backdrop show under the light text.
+const DARK_CSS: &str = "html[data-theme=dark]{background-color:#0a0a0a;\
+background-image:linear-gradient(var(--orbit-bg,#0a0a0a),var(--orbit-bg,#0a0a0a));color-scheme:dark}\
 html[data-theme=dark] body{color:#e4e4e7}\
 html[data-theme=dark] blockquote{border-left-color:#3f3f46;color:#a1a1aa}\
 html[data-theme=dark] a{color:#8ab4f8}\
