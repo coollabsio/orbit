@@ -24,7 +24,7 @@ import { AdminAuditPage } from '@/features/admin/pages/AdminAuditPage'
 import { AdminBackupsPage } from '@/features/admin/pages/AdminBackupsPage'
 import { AdminEmailPage } from '@/features/admin/pages/AdminEmailPage'
 import { AdminJobsPage } from '@/features/admin/pages/AdminJobsPage'
-import { AdminLimitsPage } from '@/features/admin/pages/AdminLimitsPage'
+import { AdminEmailLimitsPage, AdminLimitsPage } from '@/features/admin/pages/AdminLimitsPage'
 import { AdminStoragePage } from '@/features/admin/pages/AdminStoragePage'
 import { AdminSettingsPage } from '@/features/admin/pages/AdminSettingsPage'
 import { AdminSignInProvidersPage } from '@/features/admin/pages/AdminSignInProvidersPage'
@@ -179,7 +179,11 @@ export default function App() {
                   <Route path="users" element={<AdminUsersPage />} />
                   <Route path="email" element={<AdminEmailPage />} />
                   <Route path="sign-in-providers" element={<AdminSignInProvidersPage />} />
-                  <Route path="limits" element={<AdminLimitsPage />} />
+                  <Route path="limits">
+                    <Route index element={<Navigate to="workspaces" replace />} />
+                    <Route path="workspaces" element={<AdminLimitsPage />} />
+                    <Route path="email" element={<AdminEmailLimitsPage />} />
+                  </Route>
                   <Route path="audit" element={<AdminAuditPage />} />
                   <Route path="storage" element={<AdminStoragePage />} />
                   <Route path="backups" element={<AdminBackupsPage />} />

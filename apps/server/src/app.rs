@@ -500,7 +500,7 @@ impl App {
             .is_none()
         {
             tracing::warn!(
-                "Orbit Cloud has no mail server: email change, invitations by email, password reset and sign-up do not work until one is saved in Admin → Email"
+                "Orbit Cloud has no mail server: email change, invitations by email, password reset and sign-up do not work until one is saved in Admin → System email"
             );
         }
         let production_services = initialize_production_services(

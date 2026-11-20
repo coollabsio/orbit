@@ -3,12 +3,15 @@ import type { MailProviderKind, MailProviderSecretsBody, MailProviderSettings, M
 import { Modal } from '@/components/common/Modal'
 import { Button } from '@/components/ui/button'
 import { DialogClose, DialogFooter } from '@/components/ui/dialog'
-import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
+import { InfoTip } from '@/components/common/InfoTip'
+import { TagInput } from '@/components/common/TagInput'
+import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useCreateProvider, useUpdateProvider } from '@/features/mail/api/mutations'
 import type { ProviderScope } from '@/features/mail/api/queries'
-import { mailProblem, PROVIDER_LABELS } from './mailSettingsLib'
+import { defaultMxHosts, mailProblem, PROVIDER_LABELS } from './mailSettingsLib'
+import { ProviderLinks } from './ProviderLinks'
 
 const RECOMMENDED: MailProviderKind = 'postshiba'
 const KIND_OPTIONS = (Object.keys(PROVIDER_LABELS) as MailProviderKind[]).map((kind) => ({
@@ -24,24 +27,21 @@ const MAILGUN_REGIONS = [
 /** The secrets each kind needs from its provider; Orbit makes Cloudflare's and Postmark's. */
 const SECRET_FIELDS: Record<MailProviderKind, { name: keyof MailProviderSecretsBody; label: string; hint?: string }[]> = {
   postshiba: [
-    { name: 'api_key', label: 'API key', hint: 'A key of a team admin: Orbit reads the raw message with it.' },
-    { name: 'webhook_secret', label: 'Inbox signing secret', hint: 'In the inbox’s Webhook dialog.' },
+    { name: 'api_key', label: 'API key', hint: 'Create it in PostShiba while signed in as a team admin: a key of another role cannot read received messages. Orbit only uses it to read the raw message of each received email.' },
+    { name: 'webhook_secret', label: 'Inbox signing secret', hint: 'In PostShiba, open the inbox of the domain, then its Webhook dialog (webhook URL: the one Orbit shows after you add the provider; format: PostShiba JSON). Copy the signing secret from there.' },
   ],
   cloudflare: [],
   postmark: [],
-  mailgun: [{ name: 'signing_key', label: 'HTTP webhook signing key' }],
+  mailgun: [{ name: 'signing_key', label: 'HTTP webhook signing key', hint: 'Mailgun → Settings → API Security → HTTP webhook signing key. One key for the whole account; it is not the API key.' }],
   resend: [
-    { name: 'api_key', label: 'API key', hint: 'A key that can read received emails.' },
-    { name: 'webhook_secret', label: 'Webhook signing secret', hint: 'whsec_…' },
+    { name: 'api_key', label: 'API key', hint: 'Resend → API keys → Create, with permission Full access. A Sending access key cannot read received emails.' },
+    { name: 'webhook_secret', label: 'Webhook signing secret', hint: 'Resend → Webhooks → add a webhook for the email.received event with the URL that Orbit shows after you add the provider. Its signing secret starts with whsec_.' },
   ],
   ses: [
-    { name: 'access_key_id', label: 'Access key ID', hint: 'An IAM user with s3:GetObject and s3:DeleteObject on the bucket.' },
+    { name: 'access_key_id', label: 'Access key ID', hint: 'An access key of an IAM user whose policy allows s3:GetObject and s3:DeleteObject on the bucket (arn:aws:s3:::<bucket>/*). It needs no other permission.' },
     { name: 'secret_access_key', label: 'Secret access key' },
   ],
 }
-
-const hostsText = (hosts: string[]) => hosts.join(', ')
-const hostsList = (text: string) => text.split(/[\s,]+/).map((host) => host.trim()).filter(Boolean)
 
 /** Add a provider (kind, name, its secrets and settings), or change one: secrets left empty stay as they are. */
 export function ProviderForm({
@@ -62,7 +62,7 @@ export function ProviderForm({
   const [name, setName] = useState(provider?.name ?? '')
   const [secrets, setSecrets] = useState<MailProviderSecretsBody>({})
   const [settings, setSettings] = useState<MailProviderSettings>(provider?.settings ?? { mx_hosts: [] })
-  const [mx, setMx] = useState(hostsText(provider?.settings.mx_hosts ?? []))
+  const [mx, setMx] = useState<string[]>(provider?.settings.mx_hosts ?? [])
   const saving = create.isPending || update.isPending
   const error = create.error ?? update.error
   const fields = SECRET_FIELDS[kind]
@@ -74,7 +74,7 @@ export function ProviderForm({
   function submit(event: FormEvent) {
     event.preventDefault()
     if (saving) return
-    const body = { name: name.trim() || PROVIDER_LABELS[kind], settings: { ...settings, mx_hosts: hostsList(mx) } }
+    const body = { name: name.trim() || PROVIDER_LABELS[kind], settings: { ...settings, mx_hosts: mx } }
     if (provider) {
       update.mutate(
         { providerId: provider.id, body: { ...body, secrets: secretsTouched ? secrets : null } },
@@ -91,8 +91,8 @@ export function ProviderForm({
   const ready = provider ? !secretsTouched || secretsGiven : secretsGiven
   return (
     <Modal
-      title={provider ? `Change ${provider.name}` : 'Add a mail provider'}
-      description="The provider receives the domain's mail and sends each message to Orbit over HTTPS: this server needs no open port 25."
+      title={provider ? `Change ${provider.name}` : 'Add an incoming provider'}
+      description="Incoming mail: the provider receives the domain's mail and sends each message to Orbit over HTTPS: this server needs no open port 25."
       onClose={onClose}
       dismissible={!saving}
     >
@@ -112,12 +112,16 @@ export function ProviderForm({
             <Input id={`${ids}-name`} autoComplete="off" placeholder={PROVIDER_LABELS[kind]} value={name} onChange={(event) => setName(event.target.value)} />
           </Field>
         </div>
+        <ProviderLinks kind={kind} purpose="receive" />
         {fields.length === 0 && !provider ? (
           <p className="m-0 text-[0.8125rem] text-muted-foreground">Orbit makes the secret for this provider and shows it once, after you add it.</p>
         ) : null}
         {fields.map((field) => (
           <Field key={field.name}>
-            <FieldLabel htmlFor={`${ids}-${field.name}`}>{field.label}</FieldLabel>
+            <FieldLabel htmlFor={`${ids}-${field.name}`}>
+              {field.label}
+              {field.hint ? <InfoTip text={field.hint} /> : null}
+            </FieldLabel>
             <Input
               id={`${ids}-${field.name}`}
               type="password"
@@ -126,7 +130,7 @@ export function ProviderForm({
               value={secrets[field.name] ?? ''}
               onChange={(event) => setSecrets((current) => ({ ...current, [field.name]: event.target.value }))}
             />
-            {field.hint ? <FieldDescription>{field.hint}</FieldDescription> : null}
+            <ProviderLinks kind={kind} purpose="receive" field={field.name} />
           </Field>
         ))}
         {kind === 'mailgun' ? (
@@ -161,9 +165,11 @@ export function ProviderForm({
           </div>
         ) : null}
         <Field>
-          <FieldLabel htmlFor={`${ids}-mx`}>MX hosts</FieldLabel>
-          <Input id={`${ids}-mx`} autoComplete="off" placeholder={kind === 'resend' ? 'The MX host that Resend shows' : 'Empty: the provider’s usual hosts'} value={mx} onChange={(event) => setMx(event.target.value)} />
-          <FieldDescription>Domains routed to this provider must point their MX to one of these. Separate them with commas.</FieldDescription>
+          <FieldLabel htmlFor={`${ids}-mx`}>
+            MX hosts
+            <InfoTip text="The provider’s mail server hostnames, not your domains. Domains routed to this provider must point their MX record to these hosts. Leave empty to use the provider’s usual hosts. Press Enter after each host." />
+          </FieldLabel>
+          <TagInput id={`${ids}-mx`} placeholder={kind === 'resend' ? 'The MX host that Resend shows' : `Empty: ${defaultMxHosts(kind, settings.region).join(', ')}`} values={mx} onChange={setMx} />
         </Field>
         {error ? <p role="alert" className="text-sm text-destructive">{mailProblem(error, 'The provider was not saved.')}</p> : null}
         <DialogFooter>

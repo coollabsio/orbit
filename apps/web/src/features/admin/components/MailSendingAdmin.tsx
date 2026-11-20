@@ -11,45 +11,10 @@ import { DialogClose, DialogFooter } from '@/components/ui/dialog'
 import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { useResumeSending, useSetSendDefault, useSetSendPolicy, useSetSendTiers } from '@/features/mail/api/mutations'
-import { useSendPolicies, useSendRoutes, useSendTiers } from '@/features/mail/api/queries'
-import { SettingsRow } from '@/features/settings/components/SettingsParts'
+import { useResumeSending, useSetSendPolicy, useSetSendTiers } from '@/features/mail/api/mutations'
+import { useSendPolicies, useSendTiers } from '@/features/mail/api/queries'
 import { useBillingEnabled } from '@/features/workspaces/billing'
-import { count, limitRows, mailProblem, percent, routeLabel, since, TIER_LABELS } from '@/features/settings/pages/mail/mailSettingsLib'
-
-const NO_DEFAULT = 'none'
-
-/** The instance route that domains without a route of their own use. */
-export function DefaultRouteCard() {
-  const routes = useSendRoutes('instance')
-  const save = useSetSendDefault()
-  const own = routes.data?.routes.filter((route) => route.scope === 'instance') ?? []
-  const options = [{ value: NO_DEFAULT, label: 'None: such domains cannot send' }, ...own.map((route) => ({ value: route.id, label: `${route.name} (${routeLabel(route.kind)})` }))]
-  return (
-    <SettingsCard title="Default route" flush>
-      <SettingsRow className="flex-nowrap">
-        <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[0.8125rem] font-medium text-foreground">
-          Domains without a route send through
-          <InfoTip text="Workspaces can pick another route for each domain. A route cannot be removed while it is the default." />
-        </span>
-        <Select
-          items={options}
-          value={routes.data ? (routes.data.default_route_id ?? NO_DEFAULT) : null}
-          disabled={!routes.data || save.isPending}
-          onValueChange={(value) => save.mutate(value === NO_DEFAULT ? null : (value as string), {
-            onSuccess: () => toast('Default route saved'),
-            onError: (error) => toast.error(mailProblem(error, 'The default route could not be saved.')),
-          })}
-        >
-          <SelectTrigger aria-label="Default send route" className="w-72 max-w-[50vw]"><SelectValue placeholder="…" /></SelectTrigger>
-          <SelectContent>
-            {options.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
-          </SelectContent>
-        </Select>
-      </SettingsRow>
-    </SettingsCard>
-  )
-}
+import { count, limitRows, mailProblem, percent, since, TIER_LABELS } from '@/features/settings/pages/mail/mailSettingsLib'
 
 const LIMIT_FIELDS: { name: keyof Limits; label: string }[] = [
   { name: 'per_user_hour', label: 'Each member, an hour' },
@@ -142,8 +107,8 @@ function TierForm({ saved }: { saved: TierLimits }) {
   return (
     <form className="flex flex-col gap-4" onSubmit={submit}>
       {(['new', 'standard'] as const).map((tier) => (
-        <fieldset key={tier} className="m-0 flex flex-col gap-2 border-0 p-0">
-          <legend className="mb-2 text-[0.8125rem] font-medium text-foreground">{TIER_LABELS[tier]}</legend>
+        <fieldset key={tier} className="m-0 flex flex-col gap-2 border-0 p-0 not-first:border-t not-first:pt-4">
+          <legend className="float-left mb-1 w-full p-0 text-base font-semibold text-foreground">{TIER_LABELS[tier]}</legend>
           <LimitInputs id={`${ids}-${tier}`} texts={texts[tier]} onChange={(changedTexts) => setTexts((current) => ({ ...current, [tier]: changedTexts }))} />
         </fieldset>
       ))}
@@ -161,7 +126,7 @@ export function SendPoliciesCard() {
   const [editing, setEditing] = useState<MailSendPolicy | null>(null)
   return (
     <>
-      <SettingsCard title="Workspaces" description="What each workspace sent: recipients in the last hour and day, and its rates over 7 days. Paused workspaces come first." flush>
+      <SettingsCard title="Sending by workspace" description="What each workspace sent: recipients in the last hour and day, and its rates over 7 days. Paused workspaces come first." flush>
         {policies.isPending ? <p role="status" className="m-0 p-4 text-sm text-muted-foreground">Loading workspaces…</p> : null}
         {policies.isError ? (
           <p role="alert" className="m-0 p-4 text-sm text-destructive">
@@ -256,7 +221,7 @@ function LimitsForm({ policy, onClose }: { policy: MailSendPolicy; onClose: () =
         <Field>
           <FieldLabel htmlFor={`${ids}-tier`}>
             Tier
-            <InfoTip text="New and Standard use the tier limits below on this page. A workspace on Custom keeps its own numbers: Orbit does not promote it." />
+            <InfoTip text="New and Standard use the tier limits above on this page. A workspace on Custom keeps its own numbers: Orbit does not promote it." />
           </FieldLabel>
           <Select items={TIER_OPTIONS} value={tier} onValueChange={(value) => setTier(value as SendTier)}>
             <SelectTrigger id={`${ids}-tier`} className="w-48"><SelectValue /></SelectTrigger>

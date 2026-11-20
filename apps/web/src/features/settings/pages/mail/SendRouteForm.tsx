@@ -15,6 +15,7 @@ import { useCreateProviderSendRoute, useCreateSendRoute, useUpdateSendRoute } fr
 import type { ProviderScope } from '@/features/mail/api/queries'
 import { RequiredMark } from '@/features/settings/components/SettingsParts'
 import { CopyButton } from './MailDomainRecords'
+import { ProviderLinks } from './ProviderLinks'
 import {
   CLOUDFLARE_EVENTS_WORKER,
   defaultMaxBytes,
@@ -54,6 +55,7 @@ function kindHelp(kind: SendRouteKind): string | null {
 
 /** The inputs of `fields`; secret inputs stay empty, and a set secret says so. */
 function RouteFields({
+  kind,
   ids,
   fields,
   settings,
@@ -62,6 +64,7 @@ function RouteFields({
   onSetting,
   onSecret,
 }: {
+  kind: SendRouteKind
   ids: string
   fields: FieldSpec[]
   settings: FormValues
@@ -94,6 +97,7 @@ function RouteFields({
                   {options.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
                 </SelectContent>
               </Select>
+              <ProviderLinks kind={kind} purpose="send" field={field.name} />
             </Field>
           )
         }
@@ -109,6 +113,7 @@ function RouteFields({
               value={values[field.name] ?? ''}
               onChange={(event) => set(field.name, event.target.value)}
             />
+            <ProviderLinks kind={kind} purpose="send" field={field.name} />
           </Field>
         )
       })}
@@ -213,8 +218,8 @@ export function SendRouteForm({
 
   return (
     <Modal
-      title={route ? `Change ${route.name}` : 'Add a send route'}
-      description="How Orbit sends the mail of the domains that use this route."
+      title={route ? `Change ${route.name}` : 'Add an outgoing provider'}
+      description="Outgoing mail: how Orbit sends the mail of the domains that use it."
       onClose={onClose}
       dismissible={!saving}
     >
@@ -239,7 +244,9 @@ export function SendRouteForm({
             <Input id={`${ids}-name`} autoComplete="off" maxLength={80} placeholder={ROUTE_LABELS[kind]} value={name} onChange={(event) => setName(event.target.value)} />
           </Field>
         </div>
+        <ProviderLinks kind={kind} purpose="send" />
         <RouteFields
+          kind={kind}
           ids={ids}
           fields={fields}
           settings={settings}
@@ -257,7 +264,7 @@ export function SendRouteForm({
         {error ? <p role="alert" className="text-sm text-destructive">{mailProblem(error, 'The route was not saved.')}</p> : null}
         <DialogFooter>
           <DialogClose render={<Button type="button" variant="outline" />}>Cancel</DialogClose>
-          <Button type="submit" disabled={saving || !ready}>{saving ? 'Saving…' : route ? 'Save' : 'Add route'}</Button>
+          <Button type="submit" disabled={saving || !ready}>{saving ? 'Saving…' : route ? 'Save' : 'Add provider'}</Button>
         </DialogFooter>
       </form>
     </Modal>
@@ -303,6 +310,7 @@ export function ProviderSendRouteForm({
     >
       <form className="grid gap-4" onSubmit={submit}>
         <RouteFields
+          kind={kind}
           ids={ids}
           fields={fields}
           settings={settings}

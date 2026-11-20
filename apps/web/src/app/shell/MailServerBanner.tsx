@@ -19,7 +19,7 @@ export function MailServerBanner() {
         Orbit Cloud has no mail server. Email change, invitations by email, password reset and sign-up do not work.
       </span>
       <Link to="/admin/email" className="shrink-0 font-semibold text-destructive underline underline-offset-4">
-        Set it in Admin → Email
+        Set it in Admin → System email
       </Link>
     </div>
   )

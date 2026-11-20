@@ -30,8 +30,8 @@ function problemText(error: unknown, fallback: string) {
 /** The mail server for invitations, sign-up and password reset. */
 export function AdminEmailPage() {
   const settings = useInstanceSettings()
-  if (settings.isPending) return <SettingsCard title="Email"><p><LoadingText>Loading settings…</LoadingText></p></SettingsCard>
-  if (settings.isError) return <SettingsCard title="Email"><p role="alert">Settings could not be loaded. <Button variant="ghost" onClick={() => void settings.refetch()}>Retry</Button></p></SettingsCard>
+  if (settings.isPending) return <SettingsCard title="System email"><p><LoadingText>Loading settings…</LoadingText></p></SettingsCard>
+  if (settings.isError) return <SettingsCard title="System email"><p role="alert">Settings could not be loaded. <Button variant="ghost" onClick={() => void settings.refetch()}>Retry</Button></p></SettingsCard>
   const smtp = settings.data.smtp ?? null
   // Remount on save so the form shows what the server stored.
   return <EmailCard key={JSON.stringify(smtp)} smtp={smtp} locked={settings.data.environment.smtp} />
@@ -89,8 +89,8 @@ function EmailCard({ smtp, locked }: { smtp: SmtpView | null; locked: boolean })
   return (
     <form onSubmit={submit}>
       <SettingsCard
-        title="Email"
-        description="The SMTP server for invitations, sign-up links, password reset links and email changes. Orbit sends no other email."
+        title="System email"
+        description="The SMTP server for Orbit's own messages: invitations, sign-up links, password reset links and email changes. The Mail app uses Admin → Mail."
         actions={smtp ? (
           <>
             <Button type="button" variant="outline" disabled={test.isPending} onClick={() => test.mutate(undefined, {

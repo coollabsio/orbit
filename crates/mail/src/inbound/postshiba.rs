@@ -3,9 +3,9 @@
 //! (`GET /api/v1/inboxes/{inbox_id}/inbound_messages/{id}`, `raw`). The JSON webhook has no raw
 //! message, and PostShiba keeps `raw` only until the webhook succeeds, so the fetch happens while
 //! the webhook waits for its answer.
-//! <https://www.postshiba.com/docs/webhooks/verify-webhooks-requests.md>
-//! <https://www.postshiba.com/docs/dashboard/receiving/get-email-content.md>
-//! <https://www.postshiba.com/docs/api-reference/messages.md>
+//! <https://www.postshiba.com/docs/webhooks/verify-webhooks-requests>
+//! <https://www.postshiba.com/docs/dashboard/receiving/get-email-content>
+//! <https://www.postshiba.com/docs/api-reference/messages>
 
 use serde::Deserialize;
 

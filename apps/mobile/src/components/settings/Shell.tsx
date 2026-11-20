@@ -64,7 +64,7 @@ export const ACCOUNT_NAV: readonly SettingsNavItem[] = [
 export const ADMIN_NAV: readonly SettingsNavItem[] = [
   { href: '/settings/admin', label: 'General', icon: 'settings' },
   { href: '/settings/admin/users', label: 'Users', icon: 'people' },
-  { href: '/settings/admin/email', label: 'Email', icon: 'mail' },
+  { href: '/settings/admin/email', label: 'System email', icon: 'mail' },
   { href: '/settings/admin/sign-in-providers', label: 'Sign-in providers', icon: 'login' },
   { href: '/settings/admin/limits', label: 'Limits', icon: 'chart' },
   { href: '/settings/admin/storage', label: 'Storage', icon: 'cloudConnection' },

@@ -8,6 +8,8 @@ import { InfoTip } from '@/components/common/InfoTip'
 import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { useInstanceSettings, useSaveLimits } from '@/features/admin/api'
+import { SendPoliciesCard, TierDefaultsCard } from '@/features/admin/components/MailSendingAdmin'
+import { useMailEnabled } from '@/features/mail/enabled'
 import { FieldGrid } from '@/features/settings/components/SettingsParts'
 import { LoadingText } from '@/components/ui/spinner'
 
@@ -15,13 +17,24 @@ function problemText(error: unknown, fallback: string) {
   return error instanceof ApiProblem ? error.detail : fallback
 }
 
-/** What one account and one workspace may use. */
+/** Limits → Workspaces: what one account and one workspace may use. */
 export function AdminLimitsPage() {
   const settings = useInstanceSettings()
   if (settings.isPending) return <SettingsCard title="Limits"><p><LoadingText>Loading settings…</LoadingText></p></SettingsCard>
   if (settings.isError) return <SettingsCard title="Limits"><p role="alert">Settings could not be loaded. <Button variant="ghost" onClick={() => void settings.refetch()}>Retry</Button></p></SettingsCard>
   // Remount on save so the form shows what the server stored.
   return <LimitsCard key={JSON.stringify(settings.data.limits)} limits={settings.data.limits} />
+}
+
+/** Limits → Email: the send limits of the tiers and of each workspace. */
+export function AdminEmailLimitsPage() {
+  if (!useMailEnabled()) return <SettingsCard title="Email"><p className="m-0 text-sm text-muted-foreground">Mail is off. Enable it in Admin → Mail to set send limits.</p></SettingsCard>
+  return (
+    <>
+      <TierDefaultsCard />
+      <SendPoliciesCard />
+    </>
+  )
 }
 
 const BYTES_PER_GB = 1_000_000_000

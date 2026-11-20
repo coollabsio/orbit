@@ -1,6 +1,6 @@
 //! Send route events (spec §5.5, §5.7): each provider's request is authenticated first, then read
 //! into events. The payloads follow each provider's documented examples:
-//! - PostShiba: <https://www.postshiba.com/docs/webhooks/event-types.md>
+//! - PostShiba: <https://www.postshiba.com/docs/webhooks/event-types>
 //! - Mailgun: <https://documentation.mailgun.com/docs/mailgun/user-manual/webhooks/webhook-payloads>
 //! - Resend: <https://resend.com/docs/webhooks/emails/bounced>
 //! - Postmark: <https://postmarkapp.com/developer/webhooks/bounce-webhook>,

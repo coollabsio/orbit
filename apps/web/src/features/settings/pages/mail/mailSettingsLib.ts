@@ -44,6 +44,24 @@ export const PROVIDER_LABELS: Record<MailProviderKind, string> = {
 }
 
 /** The route value for this server's own SMTP listener. */
+/** The MX hosts the server uses when the list is empty (mirrors `ProviderKind::default_mx_hosts`). */
+export function defaultMxHosts(kind: MailProviderKind, region?: string | null): string[] {
+  switch (kind) {
+    case 'postshiba':
+      return ['inbound.postshiba.com']
+    case 'cloudflare':
+      return ['route1', 'route2', 'route3'].map((host) => `${host}.mx.cloudflare.net`)
+    case 'postmark':
+      return ['inbound.postmarkapp.com']
+    case 'mailgun':
+      return region === 'eu' ? ['mxa.eu.mailgun.org', 'mxb.eu.mailgun.org'] : ['mxa.mailgun.org', 'mxb.mailgun.org']
+    case 'ses':
+      return [`inbound-smtp.${region || 'us-east-1'}.amazonaws.com`]
+    case 'resend':
+      return []
+  }
+}
+
 export const DIRECT = 'direct'
 
 /** "Directly (MX to this server)", then each provider the workspace may use. */
@@ -194,8 +212,8 @@ export function routeFields(kind: SendRouteKind): FieldSpec[] {
       ]
     case 'resend':
       return [
-        secret('api_key', 'API key', 'A key with sending access.'),
-        secret('webhook_secret', 'Webhook signing secret', 'whsec_…, shown on the webhook you add for Orbit.'),
+        secret('api_key', 'API key', 'Resend → API keys → Create. Sending access is enough; Full access also works.'),
+        secret('webhook_secret', 'Webhook signing secret', 'Resend → Webhooks → add a webhook for email.delivered, email.bounced, email.complained and email.delivery_delayed with the events URL Orbit shows after you add the route. Its signing secret starts with whsec_.'),
       ]
     case 'mailgun':
       return [
@@ -209,13 +227,13 @@ export function routeFields(kind: SendRouteKind): FieldSpec[] {
           defaultValue: 'us',
         }),
         secret('api_key', 'API key', 'A sending key of the domain, or an account API key.'),
-        secret('webhook_signing_key', 'HTTP webhook signing key'),
+        secret('webhook_signing_key', 'HTTP webhook signing key', 'Mailgun → Settings → API Security → HTTP webhook signing key. One key for the whole account; it is not the API key.'),
         setting('base_url', 'API base URL', { instanceOnly: true, placeholder: 'https://api.mailgun.net', help: 'Empty: the region’s URL. HTTPS only.' }),
       ]
     case 'ses':
       return [
         setting('region', 'AWS region', { required: true, placeholder: 'us-east-1' }),
-        secret('access_key_id', 'Access key ID', 'An IAM user with ses:SendEmail.'),
+        secret('access_key_id', 'Access key ID', 'An access key of an IAM user whose policy allows ses:SendEmail and ses:SendRawEmail (AWS advises both).'),
         secret('secret_access_key', 'Secret access key'),
         setting('topic_arn', 'SNS topic ARN', {
           placeholder: 'arn:aws:sns:…',
@@ -225,7 +243,7 @@ export function routeFields(kind: SendRouteKind): FieldSpec[] {
     case 'cloudflare':
       return [
         setting('account_id', 'Account ID', { required: true, help: 'The 32-character ID in the Cloudflare dashboard URL.' }),
-        secret('api_token', 'API token', 'A token with Email Sending: Edit.'),
+        secret('api_token', 'API token', 'My Profile → API Tokens → Create token, with the account permission Email Sending: Edit.'),
         SPF_FIELD,
       ]
   }

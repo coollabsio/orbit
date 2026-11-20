@@ -1,14 +1,14 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { Add, InfoCircle, Routing } from 'reicon-react'
+import { Add, DirectInbox, InfoCircle, Send2 } from 'reicon-react'
 import type { MailProviderView } from '@orbit/api/generated/types.gen'
 import { confirmAction } from '@/components/common/confirmAction'
-import { EmptyState } from '@/components/common/EmptyState'
 import { Modal } from '@/components/common/Modal'
 import { SettingsCard } from '@/components/common/SettingsCard'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { useDeleteProvider, useUpdateProvider } from '@/features/mail/api/mutations'
 import { useMailProviders, type ProviderScope } from '@/features/mail/api/queries'
 import { useCan } from '@/features/workspaces/permissions'
@@ -16,28 +16,29 @@ import { MailManagersOnly } from './MailDomainsPage'
 import { count, mailProblem, PROVIDER_LABELS, since } from './mailSettingsLib'
 import { ProviderForm } from './ProviderForm'
 import { ProviderSetup } from './ProviderSetup'
+import { OutgoingRoutes } from './MailSendingPage'
 
-/** Settings → Mail → Providers: the workspace's own providers, and the instance's ones it may use. */
+/** Settings → Mail → Providers: the workspace's incoming providers and outgoing routes, and the server's ones it may use. */
 export function MailProvidersPage() {
-  if (!useCan('mail.manage')) return <MailManagersOnly title="Mail providers" />
-  return <MailProviders scope="workspace" />
+  if (!useCan('mail.manage')) return <MailManagersOnly title="Providers" />
+  return <MailConnections scope="workspace" />
 }
 
+type Direction = 'incoming' | 'outgoing'
+
 /**
- * The mail providers of `scope` (Admin → Mail for `instance`): a provider receives a domain's mail and sends it to
- * Orbit over HTTPS. Each own provider shows what to set up at the provider; secrets Orbit makes show once.
+ * One card for the providers of `scope` (Admin → Mail for `instance`): incoming providers receive a domain's mail and
+ * pass it to Orbit, outgoing routes send it. **Add provider** asks which one. `hostname` fills the SPF of a direct route.
  */
-export function MailProviders({ scope }: { scope: ProviderScope }) {
+export function MailConnections({ scope, hostname }: { scope: ProviderScope; hostname?: string | null }) {
   const providers = useMailProviders(scope)
-  const [adding, setAdding] = useState(false)
-  const [editing, setEditing] = useState<MailProviderView | null>(null)
-  // a provider with secrets that Orbit just made: shown once
-  const [shown, setShown] = useState<{ provider: MailProviderView; title: string } | null>(null)
+  const [adding, setAdding] = useState<Direction | null>(null)
+  const turnedOff = scope === 'workspace' && providers.data !== undefined && !providers.data.workspace_providers_enabled
   const canAdd = scope === 'instance' || providers.data?.workspace_providers_enabled === true
 
   return (
     <>
-      {scope === 'workspace' && providers.data && !providers.data.workspace_providers_enabled ? (
+      {turnedOff ? (
         <Alert>
           <InfoCircle />
           <AlertTitle>Your server admin has turned off workspace providers.</AlertTitle>
@@ -45,39 +46,70 @@ export function MailProviders({ scope }: { scope: ProviderScope }) {
         </Alert>
       ) : null}
       <SettingsCard
-        title="Mail providers"
+        title="Providers"
         description={
           scope === 'instance'
-            ? 'Providers that every workspace can route its domains to. Use one when this server cannot receive on port 25.'
-            : 'Receive a domain through your own account at PostShiba, Cloudflare, Postmark, Mailgun, Resend or Amazon SES, when this server cannot receive on port 25.'
+            ? 'Incoming providers receive mail for the domains and pass it to Orbit: use one when this server cannot receive on port 25. Outgoing providers send mail: directly from this server, through an SMTP relay or through a provider. Every workspace can pick these for its domains. Domains without an outgoing provider send through the default one; without a default, they cannot send.'
+            : 'Incoming providers receive mail for your domains through your own account, when this server cannot receive on port 25. Outgoing providers send it. Pick them for each domain on its card in Domains; without an outgoing one, a domain uses the server’s default.'
         }
-        actions={canAdd ? <Button type="button" onClick={() => setAdding(true)}><Add />Add provider</Button> : undefined}
+        actions={
+          canAdd ? (
+            <DropdownMenu modal={false}>
+              <DropdownMenuTrigger render={<Button type="button"><Add />Add provider</Button>} />
+              <DropdownMenuContent align="end" className="w-auto min-w-56">
+                <DropdownMenuItem onClick={() => setAdding('incoming')}><DirectInbox />Incoming: receive mail</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setAdding('outgoing')}><Send2 />Outgoing: send mail</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : undefined
+        }
         flush
       >
-        {providers.isPending ? <p role="status" className="m-0 p-4 text-sm text-muted-foreground">Loading providers…</p> : null}
-        {providers.isError ? (
-          <p role="alert" className="m-0 p-4 text-sm text-destructive">
-            {mailProblem(providers.error, 'The providers could not be loaded.')}{' '}
-            <Button variant="ghost" onClick={() => void providers.refetch()}>Retry</Button>
-          </p>
-        ) : null}
-        {providers.data?.providers.length === 0 ? (
-          <EmptyState icon={Routing} title="No providers yet" description="Without a provider, mail for your domains arrives through this server's SMTP listener." />
-        ) : null}
         <div className="flex flex-col divide-y">
-          {providers.data?.providers.map((provider) => (
-            <ProviderRow
-              key={provider.id}
-              scope={scope}
-              provider={provider}
-              onEdit={() => setEditing(provider)}
-              onNewSecret={(changed) => setShown({ provider: changed, title: `New secret for ${changed.name}` })}
-            />
-          ))}
+          <SectionHeading>Incoming</SectionHeading>
+          <IncomingProviders scope={scope} adding={adding === 'incoming'} onAddClose={() => setAdding(null)} />
+          <SectionHeading>Outgoing</SectionHeading>
+          <OutgoingRoutes scope={scope} hostname={hostname} adding={adding === 'outgoing'} onAddClose={() => setAdding(null)} />
         </div>
       </SettingsCard>
+    </>
+  )
+}
+
+function SectionHeading({ children }: { children: string }) {
+  return <h3 className="m-0 bg-muted/40 px-4 py-2 text-xs font-medium text-muted-foreground">{children}</h3>
+}
+
+/** The incoming providers of `scope`. Each own provider shows what to set up at the provider; secrets Orbit makes show once. */
+function IncomingProviders({ scope, adding, onAddClose }: { scope: ProviderScope; adding: boolean; onAddClose: () => void }) {
+  const providers = useMailProviders(scope)
+  const [editing, setEditing] = useState<MailProviderView | null>(null)
+  // a provider with secrets that Orbit just made: shown once
+  const [shown, setShown] = useState<{ provider: MailProviderView; title: string } | null>(null)
+
+  return (
+    <>
+      {providers.isPending ? <p role="status" className="m-0 p-4 text-sm text-muted-foreground">Loading providers…</p> : null}
+      {providers.isError ? (
+        <p role="alert" className="m-0 p-4 text-sm text-destructive">
+          {mailProblem(providers.error, 'The providers could not be loaded.')}{' '}
+          <Button variant="ghost" onClick={() => void providers.refetch()}>Retry</Button>
+        </p>
+      ) : null}
+      {providers.data?.providers.length === 0 ? (
+        <p className="m-0 px-4 py-3 text-sm text-muted-foreground">No incoming providers. Mail for your domains arrives through this server's SMTP listener.</p>
+      ) : null}
+      {providers.data?.providers.map((provider) => (
+        <ProviderRow
+          key={provider.id}
+          scope={scope}
+          provider={provider}
+          onEdit={() => setEditing(provider)}
+          onNewSecret={(changed) => setShown({ provider: changed, title: `New secret for ${changed.name}` })}
+        />
+      ))}
       {adding ? (
-        <ProviderForm scope={scope} onClose={() => setAdding(false)} onCreated={(created) => setShown({ provider: created, title: `Set up ${created.name}` })} />
+        <ProviderForm scope={scope} onClose={onAddClose} onCreated={(created) => setShown({ provider: created, title: `Set up ${created.name}` })} />
       ) : null}
       {editing ? <ProviderForm scope={scope} provider={editing} onClose={() => setEditing(null)} /> : null}
       {shown?.provider.setup ? (

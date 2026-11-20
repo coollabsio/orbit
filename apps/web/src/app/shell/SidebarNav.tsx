@@ -21,7 +21,7 @@ import { NewProjectModal } from '@/features/tasks/components/NewProjectModal'
 import { savedViewsQueryOptions } from '@/features/views/api/views'
 import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
 import { useIsGuest } from '@/features/workspaces/permissions'
-import { phonePath, settingsAreaOf, useSettingsArea, type SettingsAreaName } from '@/features/settings/settingsNav'
+import { isAdminLimitsPath, phonePath, settingsAreaOf, useAdminLimitsItems, useSettingsArea, type SettingsAreaName } from '@/features/settings/settingsNav'
 import { useIsPhone } from '@/features/chat/pages/useChatViewport'
 import { chatEnabled, docsHidden } from './productNavigation'
 import { hostsPageList } from './sidebarSlot'
@@ -192,10 +192,10 @@ const isTasksPath = (pathname: string) => /^\/(tasks|tasks-trash|tasks-import|vi
 
 /** The area whose links or list replace the app links: a settings area, Tasks, or a page with its own list. */
 function areaOf(pathname: string): string | null {
-  return settingsAreaOf(pathname) ?? linkArea(pathname) ?? (hostsPageList(pathname) ? pathname.split('/')[1] : null)
+  return (isAdminLimitsPath(pathname) ? 'admin-limits' : null) ?? settingsAreaOf(pathname) ?? linkArea(pathname) ?? (hostsPageList(pathname) ? pathname.split('/')[1] : null)
 }
 
-type SidebarArea = SettingsAreaName | 'tasks' | 'project-settings'
+type SidebarArea = SettingsAreaName | 'tasks' | 'project-settings' | 'admin-limits'
 
 /** A project's settings sit inside Tasks but have their own links, so Back from them returns to Tasks. */
 const linkArea = (pathname: string): 'tasks' | 'project-settings' | null =>
@@ -463,6 +463,19 @@ function ProjectSettingsAreaNav({ onNavigate, onBack }: { onNavigate?: () => voi
   )
 }
 
+/** Admin → Limits: Back to Admin, then a page for each kind of limit. */
+function AdminLimitsAreaNav({ onNavigate }: { onNavigate?: () => void }) {
+  return (
+    <>
+      {/* Back always opens Admin, also in the drawer: Admin is the menu above this one */}
+      <BackToApp label="Limits" fallback="/admin" onNavigate={onNavigate} />
+      {useAdminLimitsItems().map((item) => (
+        <SidebarNavItem key={item.to} to={item.to} icon={item.icon} label={item.label} onClick={onNavigate} />
+      ))}
+    </>
+  )
+}
+
 /** Coolify's content-aware sidebar: inside Settings, Account settings or Admin, the area's links replace the app links. */
 function SettingsAreaNav({ area, onNavigate, onBack }: { area: SettingsAreaName; onNavigate?: () => void; onBack?: () => void }) {
   const { title } = useSettingsArea(area)
@@ -524,7 +537,7 @@ export function SidebarNav({
   // inside Tasks, Settings, Account settings or Admin the area's links and Back replace the app links;
   // a guest has Chat and its account settings only (`GuestWorkspaceGate`)
   const guest = useIsGuest()
-  const pageArea: SidebarArea | null = settingsAreaOf(location.pathname) ?? (guest ? null : linkArea(location.pathname))
+  const pageArea: SidebarArea | null = (isAdminLimitsPath(location.pathname) ? 'admin-limits' : null) ?? settingsAreaOf(location.pathname) ?? (guest ? null : linkArea(location.pathname))
   // the area whose Back was pressed in the drawer: the main menu shows until the page moves to another area
   const [mainMenuFor, setMainMenuFor] = useState<SidebarArea | null>(null)
   const area = pageArea && pageArea === mainMenuFor ? null : pageArea
@@ -605,7 +618,7 @@ export function SidebarNav({
             </>
           ) : (
             <div className="-mx-1 flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto overscroll-contain px-1 pb-2">
-              {area === 'tasks' ? <TasksAreaNav onNavigate={onNavigate} onBack={backShowsMenu ? () => setMainMenuFor(area) : undefined} /> : area === 'project-settings' ? <ProjectSettingsAreaNav onNavigate={onNavigate} onBack={backShowsMenu ? () => setMainMenuFor(area) : undefined} /> : area ? <SettingsAreaNav area={area} onNavigate={onNavigate} onBack={backShowsMenu ? () => setMainMenuFor(area) : undefined} /> : guest ? (
+              {area === 'tasks' ? <TasksAreaNav onNavigate={onNavigate} onBack={backShowsMenu ? () => setMainMenuFor(area) : undefined} /> : area === 'project-settings' ? <ProjectSettingsAreaNav onNavigate={onNavigate} onBack={backShowsMenu ? () => setMainMenuFor(area) : undefined} /> : area === 'admin-limits' ? <AdminLimitsAreaNav onNavigate={onNavigate} /> : area ? <SettingsAreaNav area={area} onNavigate={onNavigate} onBack={backShowsMenu ? () => setMainMenuFor(area) : undefined} /> : guest ? (
                 <>
                   <SidebarNavItem to="/chat" icon={MessageSquare} label="Chat" badge={chatBadge} unread={chatUnread} onClick={onNavigate} />
                   {isRoot ? (

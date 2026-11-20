@@ -17,14 +17,14 @@ const SECURITY_OPTIONS = [
   { value: 'none', label: 'None (local relay only)' },
 ] as const
 
-/** The web's Admin → Email: the mail server for invitations, sign-up and password reset. */
+/** The web's Admin → System email: the mail server for invitations, sign-up and password reset. */
 export default function AdminEmailScreen() {
   const settings = useInstanceSettings()
   return (
     <AdminShell onRefresh={() => settings.refetch()}>
-      {settings.isPending ? <SettingsCard title="Email"><Note loading>Loading settings…</Note></SettingsCard> : null}
+      {settings.isPending ? <SettingsCard title="System email"><Note loading>Loading settings…</Note></SettingsCard> : null}
       {settings.isError ? (
-        <SettingsCard title="Email">
+        <SettingsCard title="System email">
           <View className="flex-row items-center gap-2">
             <Note error>Settings could not be loaded.</Note>
             <Button label="Retry" variant="ghost" onPress={() => void settings.refetch()} />
@@ -56,8 +56,8 @@ function EmailCard({ smtp, locked }: { smtp: SmtpView | null; locked: boolean })
 
   return (
     <SettingsCard
-      title="Email"
-      description="The SMTP server for invitations, sign-up links, password reset links and email changes. Orbit sends no other email."
+      title="System email"
+      description="The SMTP server for Orbit's own messages: invitations, sign-up links, password reset links and email changes. The Mail app uses Admin → Mail."
       actions={
         smtp ? (
           <>

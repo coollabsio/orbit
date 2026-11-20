@@ -16,8 +16,8 @@
 //! (opens, `processed`, unsubscribes, …) gives no event, so the server answers 200.
 //!
 //! Sources (2026-11):
-//! - PostShiba: <https://www.postshiba.com/docs/webhooks/event-types.md>,
-//!   <https://www.postshiba.com/docs/webhooks/verify-webhooks-requests.md>
+//! - PostShiba: <https://www.postshiba.com/docs/webhooks/event-types>,
+//!   <https://www.postshiba.com/docs/webhooks/verify-webhooks-requests>
 //! - Mailgun: <https://documentation.mailgun.com/docs/mailgun/user-manual/webhooks/webhook-payloads>,
 //!   <https://documentation.mailgun.com/docs/mailgun/user-manual/webhooks/securing-webhooks>
 //! - Resend: <https://resend.com/docs/webhooks/emails/bounced>,

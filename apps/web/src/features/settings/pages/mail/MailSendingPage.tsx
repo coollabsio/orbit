@@ -1,9 +1,8 @@
 import { useId, useState, type FormEvent } from 'react'
 import { toast } from 'sonner'
-import { Add, CloseCircle, InfoCircle, MinusCircle, PauseCircle, Send2, TickCircle } from 'reicon-react'
+import { CloseCircle, MinusCircle, PauseCircle, TickCircle } from 'reicon-react'
 import type { MailSendPolicy, MailSendRouteTest, MailSendRouteView } from '@orbit/api/generated/types.gen'
 import { confirmAction } from '@/components/common/confirmAction'
-import { EmptyState } from '@/components/common/EmptyState'
 import { InfoTip } from '@/components/common/InfoTip'
 import { Modal } from '@/components/common/Modal'
 import { SettingsCard } from '@/components/common/SettingsCard'
@@ -11,7 +10,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { useDeleteSendRoute, useTestSendRoute } from '@/features/mail/api/mutations'
+import { useDeleteSendRoute, useSetSendDefault, useTestSendRoute } from '@/features/mail/api/mutations'
 import { useSendPolicy, useSendRoutes, type ProviderScope } from '@/features/mail/api/queries'
 import { SettingsRow } from '@/features/settings/components/SettingsParts'
 import { useBillingEnabled } from '@/features/workspaces/billing'
@@ -20,13 +19,12 @@ import { MailManagersOnly } from './MailDomainsPage'
 import { count, dateTime, defaultMaxBytes, isSendRouteKind, limitRows, mailProblem, megabytes, percent, routeLabel, since, spfHint, TIER_LABELS } from './mailSettingsLib'
 import { RouteSetup, SendRouteForm } from './SendRouteForm'
 
-/** Settings → Mail → Sending: the workspace's routes (when allowed), its tier and limits, and a paused banner. */
+/** Settings → Mail → Sending: the workspace's tier and limits, and a paused banner. Its routes are in Providers. */
 export function MailSendingPage() {
   if (!useCan('mail.manage')) return <MailManagersOnly title="Sending" />
   return (
     <>
       <PausedAlert />
-      <SendRoutes scope="workspace" />
       <SendLimitsCard />
     </>
   )
@@ -101,54 +99,34 @@ export function PolicyRows({ policy }: { policy: MailSendPolicy }) {
 }
 
 /**
- * The send routes of `scope` (Admin → Mail for `instance`). A workspace lists the server's routes too, read only. Each
- * own route has its setup, **Send test**, **Change** and **Remove**. `hostname` (the root user knows it) fills the
- * SPF of a direct route.
+ * The outgoing routes of `scope`, a section of the Providers card. A workspace lists the server's routes too, read
+ * only. Each own route has its setup, **Send test**, **Change** and **Remove**. `hostname` (the root user knows it)
+ * fills the SPF of a direct route.
  */
-export function SendRoutes({ scope, hostname }: { scope: ProviderScope; hostname?: string | null }) {
+export function OutgoingRoutes({ scope, hostname, adding, onAddClose }: { scope: ProviderScope; hostname?: string | null; adding: boolean; onAddClose: () => void }) {
   const routes = useSendRoutes(scope)
-  const [adding, setAdding] = useState(false)
   const [editing, setEditing] = useState<MailSendRouteView | null>(null)
   const [created, setCreated] = useState<MailSendRouteView | null>(null)
-  const canAdd = scope === 'instance' || routes.data?.workspace_providers_enabled === true
   const directAvailable = routes.data?.direct_available ?? false
 
   return (
     <>
-      {scope === 'workspace' && routes.data && !routes.data.workspace_providers_enabled ? (
-        <Alert>
-          <InfoCircle />
-          <AlertTitle>Your server admin has turned off workspace routes.</AlertTitle>
-          <AlertDescription>Your domains send through the routes your server admin set up, listed below.</AlertDescription>
-        </Alert>
+      {routes.isPending ? <p role="status" className="m-0 p-4 text-sm text-muted-foreground">Loading routes…</p> : null}
+      {routes.isError ? (
+        <p role="alert" className="m-0 p-4 text-sm text-destructive">
+          {mailProblem(routes.error, 'The routes could not be loaded.')}{' '}
+          <Button variant="ghost" onClick={() => void routes.refetch()}>Retry</Button>
+        </p>
       ) : null}
-      <SettingsCard
-        title="Send routes"
-        description={
-          scope === 'instance'
-            ? 'How Orbit sends mail: directly from this server, through an SMTP relay or through a provider. Every workspace can pick these routes for its domains.'
-            : 'How Orbit sends your domains’ mail. Pick a route for each domain on its card in Domains; without one, a domain uses the server’s default route.'
-        }
-        actions={canAdd ? <Button type="button" onClick={() => setAdding(true)}><Add />Add route</Button> : undefined}
-        flush
-      >
-        {routes.isPending ? <p role="status" className="m-0 p-4 text-sm text-muted-foreground">Loading routes…</p> : null}
-        {routes.isError ? (
-          <p role="alert" className="m-0 p-4 text-sm text-destructive">
-            {mailProblem(routes.error, 'The routes could not be loaded.')}{' '}
-            <Button variant="ghost" onClick={() => void routes.refetch()}>Retry</Button>
-          </p>
-        ) : null}
-        {routes.data?.routes.length === 0 ? (
-          <EmptyState icon={Send2} title="No send routes yet" description={scope === 'instance' ? 'Without a route, no workspace can send mail.' : 'Your server admin has not set up a route either, so your domains cannot send yet.'} />
-        ) : null}
-        <div className="flex flex-col divide-y">
-          {routes.data?.routes.map((route) => (
-            <SendRouteRow key={route.id} scope={scope} route={route} hostname={hostname} onEdit={() => setEditing(route)} />
-          ))}
-        </div>
-      </SettingsCard>
-      {adding ? <SendRouteForm scope={scope} directAvailable={directAvailable} onClose={() => setAdding(false)} onCreated={setCreated} /> : null}
+      {routes.data?.routes.length === 0 ? (
+        <p className="m-0 px-4 py-3 text-sm text-muted-foreground">
+          {scope === 'instance' ? 'No outgoing providers. Without one, no workspace can send mail.' : 'No outgoing providers. Your server admin has not set one up either, so your domains cannot send yet.'}
+        </p>
+      ) : null}
+      {routes.data?.routes.map((route) => (
+        <SendRouteRow key={route.id} scope={scope} route={route} hostname={hostname} onEdit={() => setEditing(route)} />
+      ))}
+      {adding ? <SendRouteForm scope={scope} directAvailable={directAvailable} onClose={onAddClose} onCreated={setCreated} /> : null}
       {editing ? <SendRouteForm scope={scope} route={editing} directAvailable={directAvailable} onClose={() => setEditing(null)} /> : null}
       {created ? <RouteCreatedModal created={created} onClose={() => setCreated(null)} /> : null}
     </>
@@ -166,6 +144,7 @@ export function RouteCreatedModal({ created, onClose }: { created: MailSendRoute
 
 function SendRouteRow({ scope, route, hostname, onEdit }: { scope: ProviderScope; route: MailSendRouteView; hostname?: string | null; onEdit: () => void }) {
   const remove = useDeleteSendRoute(scope)
+  const setDefault = useSetSendDefault()
   const [open, setOpen] = useState<'setup' | 'test' | null>(null)
   // a server route listed to a workspace: its name and kind only
   const own = route.settings !== null && route.settings !== undefined
@@ -184,6 +163,15 @@ function SendRouteRow({ scope, route, hostname, onEdit }: { scope: ProviderScope
     remove.mutate(route.id, {
       onSuccess: () => toast(`${route.name} removed`),
       onError: (error) => toast.error(mailProblem(error, 'The route could not be removed.')),
+    })
+  }
+
+  // only the server's own routes can be the default, and only Admin → Mail sets it
+  const canSetDefault = own && scope === 'instance' && route.scope === 'instance'
+  function saveDefault(routeId: string | null) {
+    setDefault.mutate(routeId, {
+      onSuccess: () => toast(routeId ? `${route.name} is the default route` : 'No default route'),
+      onError: (error) => toast.error(mailProblem(error, 'The default route could not be saved.')),
     })
   }
 
@@ -213,6 +201,11 @@ function SendRouteRow({ scope, route, hostname, onEdit }: { scope: ProviderScope
           <div className="flex flex-wrap items-center gap-1">
             <Button type="button" variant="outline" size="sm" aria-expanded={open === 'test'} onClick={() => toggle('test')}>Send test</Button>
             <Button type="button" variant="ghost" size="sm" aria-expanded={open === 'setup'} onClick={() => toggle('setup')}>{open === 'setup' ? 'Hide setup' : 'Setup'}</Button>
+            {canSetDefault ? (
+              <Button type="button" variant="ghost" size="sm" disabled={setDefault.isPending} onClick={() => saveDefault(route.is_default ? null : route.id)}>
+                {route.is_default ? 'Unset default' : 'Set as default'}
+              </Button>
+            ) : null}
             <Button type="button" variant="ghost" size="sm" onClick={onEdit}>Change</Button>
             <Button type="button" variant="ghost" size="sm" className="text-destructive" disabled={remove.isPending} onClick={() => void removeRoute()}>Remove</Button>
           </div>

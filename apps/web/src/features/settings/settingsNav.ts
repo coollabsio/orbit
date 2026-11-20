@@ -133,10 +133,15 @@ const AREAS: Record<SettingsAreaName, SettingsArea> = {
         items: [
           { to: '/admin', label: 'General', icon: Settings, end: true },
           { to: '/admin/users', label: 'Users', icon: Users },
-          { to: '/admin/email', label: 'Email', icon: Mail },
-          { to: '/admin/mail', label: 'Mail', icon: DirectInbox },
+          { to: '/admin/email', label: 'System email', icon: Mail },
           { to: '/admin/sign-in-providers', label: 'Sign-in providers', icon: Login },
           { to: '/admin/limits', label: 'Limits', icon: Chart },
+        ],
+      },
+      {
+        label: 'Apps',
+        items: [
+          { to: '/admin/mail', label: 'Mail', icon: DirectInbox },
         ],
       },
       {
@@ -164,6 +169,21 @@ const AREAS: Record<SettingsAreaName, SettingsArea> = {
 export const phonePath = (item: SettingsNavItem) => (item.end ? `${item.to}/general` : item.to)
 
 const under = (pathname: string, root: string) => pathname === root || pathname.startsWith(`${root}/`)
+
+/** Admin → Limits has its own sidebar menu: one page for each kind of limit. */
+export const ADMIN_LIMITS_ITEMS: SettingsNavItem[] = [
+  { to: '/admin/limits/workspaces', label: 'Workspaces', icon: Users },
+  { to: '/admin/limits/email', label: 'Email', icon: Mail, mail: true },
+]
+
+/** The path opens a page of Admin → Limits. */
+export const isAdminLimitsPath = (pathname: string) => under(pathname, '/admin/limits')
+
+/** The Limits pages this server has: Email only while Mail is on. */
+export function useAdminLimitsItems(): SettingsNavItem[] {
+  const mail = useMailEnabled()
+  return ADMIN_LIMITS_ITEMS.filter((item) => !item.mail || mail)
+}
 
 /** The settings area a route belongs to; the sidebar shows that area's links instead of the app links. */
 export function settingsAreaOf(pathname: string): SettingsAreaName | null {

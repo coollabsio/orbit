@@ -2,19 +2,19 @@ import type { ReactNode } from 'react'
 import { toast } from 'sonner'
 import { CloseCircle, InfoCircle, TickCircle, Warning } from 'reicon-react'
 import type { MailAdmin, PtrStatus } from '@orbit/api/generated/types.gen'
+import { confirmAction } from '@/components/common/confirmAction'
 import { InfoTip } from '@/components/common/InfoTip'
 import { SettingsCard } from '@/components/common/SettingsCard'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { Switch } from '@/components/ui/switch'
 import { useSetAdminMail } from '@/features/mail/api/mutations'
 import { useAdminMail, useMailProviders } from '@/features/mail/api/queries'
 import { SettingsRow } from '@/features/settings/components/SettingsParts'
 import { dateTime, mailProblem } from '@/features/settings/pages/mail/mailSettingsLib'
 import { MailTestCard } from '@/features/admin/components/MailTestCard'
-import { MailProviders } from '@/features/settings/pages/mail/MailProvidersPage'
-import { SendRoutes } from '@/features/settings/pages/mail/MailSendingPage'
-import { DefaultRouteCard, SendPoliciesCard, TierDefaultsCard } from '@/features/admin/components/MailSendingAdmin'
+import { MailConnections } from '@/features/settings/pages/mail/MailProvidersPage'
 
 type HealthState = 'ok' | 'warning' | 'error' | 'info'
 
@@ -27,11 +27,12 @@ interface HealthItem {
 }
 
 const STATE_ICONS: Record<HealthState, typeof TickCircle> = { ok: TickCircle, warning: Warning, error: CloseCircle, info: InfoCircle }
+const STATE_ICON_COLORS = 'text-muted-foreground group-data-[state=error]:text-destructive group-data-[state=ok]:text-emerald-600 group-data-[state=warning]:text-amber-600 dark:group-data-[state=ok]:text-emerald-400 dark:group-data-[state=warning]:text-amber-400'
 const STATE_WORDS: Record<HealthState, string> = { ok: 'OK', warning: 'Warning', error: 'Problem', info: 'Note' }
 
 /**
- * The instance's mail: the switches, receiving (providers, the listener's health, a test message) and sending (routes,
- * the default route, the tier limits and each workspace's sending).
+ * The instance's mail: the switches with the health button, receiving (providers, a test message) and sending (routes
+ * with the default route). The send limits are on the Limits page.
  */
 export function AdminMailPage() {
   const admin = useAdminMail()
@@ -43,38 +44,55 @@ export function AdminMailPage() {
   }
   return (
     <>
-      <DomainsCard admin={admin.data} />
-      <MailProviders scope="instance" />
-      <HealthCard admin={admin.data} hasProviders={hasProviders} refreshing={admin.isFetching} onRefresh={() => void admin.refetch()} />
-      <MailTestCard admin={admin.data} />
-      <SendRoutes scope="instance" hostname={admin.data.hostname} />
-      <DefaultRouteCard />
-      <TierDefaultsCard />
-      <SendPoliciesCard />
+      <DomainsCard
+        admin={admin.data}
+        health={<HealthButton admin={admin.data} hasProviders={hasProviders} refreshing={admin.isFetching} onRefresh={() => void admin.refetch()} />}
+      />
+      <MailConnections scope="instance" hostname={admin.data.hostname} />
+      <MailTestCard admin={admin.data} hasProviders={hasProviders} />
     </>
   )
 }
 
-function DomainsCard({ admin }: { admin: MailAdmin }) {
+function DomainsCard({ admin, health }: { admin: MailAdmin; health: ReactNode }) {
   const save = useSetAdminMail()
+  const enabled = admin.mail_enabled
+  const toggle = (
+    <Button
+      type="button"
+      variant={enabled ? 'outline' : 'default'}
+      disabled={save.isPending}
+      onClick={async () => {
+        const confirmed = await confirmAction(enabled
+          ? {
+              title: 'Disable Mail?',
+              description: 'Mail is hidden for everyone and the workspace mail API refuses. Mail for domains added before still arrives and shows again when you enable it.',
+              confirmLabel: 'Disable',
+              danger: true,
+            }
+          : {
+              title: 'Enable Mail?',
+              description: 'Every workspace gets the Mail app and its settings.',
+              confirmLabel: 'Enable',
+            })
+        if (!confirmed) return
+        save.mutate({ mail_enabled: !enabled }, {
+          onSuccess: () => toast(enabled ? 'Mail is off' : 'Mail is on'),
+          onError: (error) => toast.error(mailProblem(error, 'The setting could not be saved.')),
+        })
+      }}
+    >
+      {enabled ? 'Disable' : 'Enable'}
+    </Button>
+  )
   return (
-    <SettingsCard title="Mail" description="Orbit receives and sends mail for the verified domains of each workspace, through its own SMTP listener or through a mail provider." flush>
+    <SettingsCard
+      title="Mail (Beta)"
+      description="Orbit receives and sends mail for the verified domains of each workspace, through its own SMTP listener or through a mail provider. Enabled: every workspace gets the Mail app and its settings. Disabled: Mail is hidden for everyone and the workspace mail API refuses. Mail for domains added before still arrives and shows again when you enable it."
+      actions={<div className="flex items-center gap-2">{health}{toggle}</div>}
+      flush
+    >
       <div className="flex flex-col divide-y">
-        <SettingsRow className="flex-nowrap">
-          <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[0.8125rem] font-medium text-foreground">
-            Mail (Beta)
-            <InfoTip text="On: every workspace gets the Mail app and its settings. Off: Mail is hidden for everyone and the workspace mail API refuses. Mail for domains added before still arrives and shows again when you turn it on." />
-          </span>
-          <Switch
-            aria-label="Mail"
-            checked={admin.mail_enabled}
-            disabled={save.isPending}
-            onCheckedChange={(checked: boolean) => save.mutate({ mail_enabled: checked }, {
-              onSuccess: () => toast(checked ? 'Mail is on' : 'Mail is off'),
-              onError: (error) => toast.error(mailProblem(error, 'The setting could not be saved.')),
-            })}
-          />
-        </SettingsRow>
         <SettingsRow className="flex-nowrap">
           <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[0.8125rem] font-medium text-foreground">
             Workspaces can add their own providers
@@ -143,7 +161,7 @@ function healthItems(admin: MailAdmin, hasProviders: boolean): HealthItem[] {
       label: 'Mail on this server',
       state: 'info',
       detail: 'The SMTP listener is off.',
-      fix: 'Add a mail provider above (no port 25 needed), or set ORBIT_MAIL_ENABLED=true and ORBIT_MAIL_HOSTNAME and restart Orbit. See the operations guide.',
+      fix: 'Add an incoming provider in Providers (no port 25 needed), or set ORBIT_MAIL_ENABLED=true and ORBIT_MAIL_HOSTNAME and restart Orbit. See the operations guide.',
     }]
   }
   const { listener } = admin
@@ -180,36 +198,47 @@ function healthItems(admin: MailAdmin, hasProviders: boolean): HealthItem[] {
   return items
 }
 
-function HealthCard({ admin, hasProviders, refreshing, onRefresh }: { admin: MailAdmin; hasProviders: boolean; refreshing: boolean; onRefresh: () => void }) {
+const STATE_ORDER: HealthState[] = ['error', 'warning', 'info', 'ok']
+
+/** The header button shows the worst state; the dialog lists every check. */
+function HealthButton({ admin, hasProviders, refreshing, onRefresh }: { admin: MailAdmin; hasProviders: boolean; refreshing: boolean; onRefresh: () => void }) {
   const items = healthItems(admin, hasProviders)
+  const worst = STATE_ORDER.find((state) => items.some((item) => item.state === state)) ?? 'ok'
+  const WorstIcon = STATE_ICONS[worst]
   return (
-    <SettingsCard
-      title="Health"
-      description="This server's listener, certificate, client address and reverse DNS. With several servers, each one reports its own."
-      actions={<Button type="button" variant="outline" disabled={refreshing} onClick={onRefresh}>{refreshing ? 'Checking…' : 'Check again'}</Button>}
-      flush
-    >
-      <ul className="m-0 flex list-none flex-col divide-y p-0">
-        {items.map((item) => {
-          const Icon = STATE_ICONS[item.state]
-          return (
-            <li key={item.label} data-slot="health-item" data-state={item.state} className="group flex items-start gap-3 px-4 py-3">
-              <Icon
-                aria-hidden
-                className="mt-0.5 size-4.5 shrink-0 text-muted-foreground group-data-[state=error]:text-destructive group-data-[state=ok]:text-emerald-600 group-data-[state=warning]:text-amber-600 dark:group-data-[state=ok]:text-emerald-400 dark:group-data-[state=warning]:text-amber-400"
-              />
-              <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-[0.8125rem]">
-                <span className="font-medium text-foreground">
-                  {item.label}
-                  <span className="sr-only">: {STATE_WORDS[item.state]}</span>
-                </span>
-                <span className="text-xs break-words text-muted-foreground">{item.detail}</span>
-                {item.fix && item.state !== 'ok' ? <span className="text-xs text-foreground">{item.fix}</span> : null}
-              </div>
-            </li>
-          )
-        })}
-      </ul>
-    </SettingsCard>
+    <Dialog>
+      <DialogTrigger render={<Button type="button" variant="outline" data-state={worst} className="group" />}>
+        <WorstIcon aria-hidden className={STATE_ICON_COLORS} />
+        Health
+        <span className="sr-only">: {STATE_WORDS[worst]}</span>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Health</DialogTitle>
+          <DialogDescription>This server's listener, certificate, client address and reverse DNS. With several servers, each one reports its own.</DialogDescription>
+        </DialogHeader>
+        <ul className="-mx-4 my-0 flex list-none flex-col divide-y border-t p-0">
+          {items.map((item) => {
+            const Icon = STATE_ICONS[item.state]
+            return (
+              <li key={item.label} data-slot="health-item" data-state={item.state} className="group flex items-start gap-3 px-4 py-3">
+                <Icon aria-hidden className={`mt-0.5 size-4.5 shrink-0 ${STATE_ICON_COLORS}`} />
+                <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-[0.8125rem]">
+                  <span className="font-medium text-foreground">
+                    {item.label}
+                    <span className="sr-only">: {STATE_WORDS[item.state]}</span>
+                  </span>
+                  <span className="text-xs break-words text-muted-foreground">{item.detail}</span>
+                  {item.fix && item.state !== 'ok' ? <span className="text-xs text-foreground">{item.fix}</span> : null}
+                </div>
+              </li>
+            )
+          })}
+        </ul>
+        <DialogFooter>
+          <Button type="button" variant="outline" disabled={refreshing} onClick={onRefresh}>{refreshing ? 'Checking…' : 'Check again'}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }

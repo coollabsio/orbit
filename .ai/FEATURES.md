@@ -699,9 +699,9 @@ local file; operator guide `docs/operations.md#mail`, section Sending). Server:
 
 Web: the composer (inline reply, floating windows with a dock, full screen; BlockNote body, inline images, Cc/Bcc,
 send-as, size and suppression warnings, Send as a link), Drafts, Scheduled and Outbox folders, delivery status for each
-recipient with Retry, undo toast, vacation reply, signatures, undo delay in **Settings → Mail → My mail**, sending
-routes, suppressions and tier limits in **Settings → Mail → Sending**, Admin → Mail (default route, tier limits,
-workspaces with Resume). Shortcuts (listed in the shortcut help, from `shortcuts/commands.ts`): `c`, `r`, `a`, `f`,
+recipient with Retry, undo toast, vacation reply, signatures, undo delay in **Settings → Mail → My mail**, incoming
+providers and outgoing routes in one Providers card (**Add provider** → Incoming / Outgoing) in **Settings → Mail → Providers** and Admin → Mail (**Set as default** on a route), suppressions and tier limits in **Settings → Mail → Sending**, Admin → Limits → Email (tier limits,
+sending by workspace with Resume). Admin → Limits has its own sidebar menu (Workspaces, Email). Shortcuts (listed in the shortcut help, from `shortcuts/commands.ts`): `c`, `r`, `a`, `f`,
 `⌘Enter` send, `⌘⇧Enter` send and archive, `⌘⇧E` pop out, `Esc` minimize, global "New email" in ⌘K.
 
 Not done yet (mail stays **Beta** until slices 1 to 5 are done):
@@ -819,9 +819,9 @@ turns its routes, navigation and shortcuts off.
   shows "Sent to …" (web toast, mobile note) instead of the link dialog, and without SMTP the three items are disabled
   with "Needs a mail server on Orbit Cloud" (mobile `adminActionBlocked`).
 - Orbit Cloud always needs a mail server (`repositories/instance_settings.rs`): `DELETE /api/v1/admin/settings/smtp`
-  answers 409 `smtp_required` and Admin → Email hides Remove (web and mobile; saving a replacement works), and
+  answers 409 `smtp_required` and Admin → System email hides Remove (web and mobile; saving a replacement works), and
   opening registration needs SMTP even with a sign-in provider (409 `email_not_configured`). While Cloud has no mail
-  server (right after setup), installation admins see a red banner linking to Admin → Email (web `MailServerBanner`
+  server (right after setup), installation admins see a red banner linking to Admin → System email (web `MailServerBanner`
   above the top bar, mobile above the dock; computed from `billing_enabled` and `email_enabled` in `/api/v1/auth/options`),
   and the server logs one `warn!` at startup. Self-hosted servers keep "SMTP or provider" and can remove SMTP.
 - Account → Profile → Delete account (`DELETE /api/v1/auth/me`, typed email + password or fresh sign-in) anonymizes the

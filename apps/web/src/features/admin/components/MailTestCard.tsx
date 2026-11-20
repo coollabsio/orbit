@@ -22,15 +22,16 @@ function AuthBadge({ check, result }: { check: string; result: MailAuthResult })
  * **Test message**: a one-time address `check-…@<verified domain>`, valid for an hour. Mail sent to it from outside
  * proves MX, port 25, TLS and the checks; the card asks for the result every 3 s until it arrives or expires.
  */
-export function MailTestCard({ admin }: { admin: MailAdmin }) {
+export function MailTestCard({ admin, hasProviders }: { admin: MailAdmin; hasProviders: boolean }) {
   const create = useCreateTestAddress()
   const [domainId, setDomainId] = useState(admin.test_domains[0]?.id ?? '')
   const [test, setTest] = useState<MailTestAddress | null>(null)
   const result = useTestAddress(test?.id)
   const options = admin.test_domains.map((domain) => ({ value: domain.id, label: domain.name }))
   const chosen = options.some((option) => option.value === domainId) ? domainId : (options[0]?.value ?? '')
-  const unavailable = !admin.enabled
-    ? 'Turn mail on for this server first (ORBIT_MAIL_ENABLED).'
+  // mail from a provider reaches the test address too, so the listener is needed only without one
+  const unavailable = !admin.enabled && !hasProviders
+    ? 'Add an incoming provider above, or turn on this server’s SMTP listener (ORBIT_MAIL_ENABLED=true and ORBIT_MAIL_HOSTNAME, then restart Orbit).'
     : options.length === 0
       ? 'No workspace has a verified domain yet. Add one in Settings → Mail → Domains of a workspace.'
       : null
