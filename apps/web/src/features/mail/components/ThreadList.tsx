@@ -132,7 +132,7 @@ export function ThreadList({
   return (
     <section
       aria-label={title}
-      className="flex h-full w-[360px] shrink-0 flex-col border-l bg-background max-[1199px]:w-[300px] max-[899px]:w-auto max-[899px]:flex-1 max-[899px]:border-l-0 max-[899px]:group-data-[view=thread]/mail:hidden"
+      className="flex h-full w-[360px] shrink-0 flex-col border-l bg-background max-[1199px]:w-[300px] max-[899px]:w-auto max-[899px]:min-w-0 max-[899px]:flex-1 max-[899px]:border-l-0 max-[899px]:group-data-[view=thread]/mail:hidden"
     >
       {bulkBar ?? (
         <PaneHeader>
