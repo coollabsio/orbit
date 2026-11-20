@@ -56,6 +56,7 @@ function CommandDialog({
         <DialogDescription>{description}</DialogDescription>
       </DialogHeader>
       <DialogContent
+        mobileSheet={false}
         className={cn(
           // a column, so the list inside can shrink and scroll when the entries outgrow the dialog's max height.
           // The entrance is short and small (150ms, from 97%): the menu opens many times a day.

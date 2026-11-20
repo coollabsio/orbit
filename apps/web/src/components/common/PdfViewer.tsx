@@ -86,6 +86,7 @@ export function PdfViewer({ attachment, onClose }: { attachment: Attachment; onC
       }}
     >
       <DialogContent
+        mobileSheet={false}
         showCloseButton={false}
         aria-label={attachment.fileName}
         className="top-0 right-0 left-0 z-[100] flex h-[var(--app-height,100svh)] max-h-[var(--app-height,100svh)] w-full max-w-none translate-x-0 translate-y-0 flex-col gap-0 overflow-hidden rounded-none bg-black/90 p-0 pt-[env(safe-area-inset-top,0px)] pr-[env(safe-area-inset-right,0px)] pb-[env(safe-area-inset-bottom,0px)] pl-[env(safe-area-inset-left,0px)] text-white ring-0 backdrop-blur-sm duration-150 motion-reduce:animate-none sm:max-w-none"

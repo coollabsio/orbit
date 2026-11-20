@@ -124,6 +124,7 @@ export function ImageViewer({ attachment, onClose }: { attachment: Attachment; o
       }}
     >
       <DialogContent
+        mobileSheet={false}
         showCloseButton={false}
         aria-label={attachment.fileName}
         onKeyDown={handleKeyDown}

@@ -17,7 +17,7 @@ export function DueDateDialog({ tasks, onPick, onClose }: { tasks: Task[]; onPic
       if (picked) onPick(picked.start, picked.end)
       else onClose()
     }}>
-      <DialogContent showCloseButton={false} className="top-1/3 w-auto translate-y-0 gap-0 overflow-hidden p-0 duration-150 data-open:zoom-in-97! data-closed:zoom-out-97! sm:max-w-none">
+      <DialogContent mobileSheet={false} showCloseButton={false} className="top-1/3 w-auto translate-y-0 gap-0 overflow-hidden p-0 duration-150 data-open:zoom-in-97! data-closed:zoom-out-97! sm:max-w-none">
         <DialogHeader className="sr-only">
           <DialogTitle>Set due date</DialogTitle>
           <DialogDescription>{tasks.length === 1 ? first.identifier : `${tasks.length} tasks`}</DialogDescription>

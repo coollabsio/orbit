@@ -38,6 +38,7 @@ export function TaskPickerDialog({ open, onOpenChange, title, statuses, excludeI
       onOpenChangeComplete={(next) => { if (!next) onOpenChange(false) }}
     >
       <DialogContent
+        mobileSheet={false}
         showCloseButton={false}
         className="top-[12vh] max-h-[min(60vh,28rem)] translate-y-0 gap-0 overflow-hidden p-0 sm:max-w-[576px]"
       >

@@ -29,7 +29,7 @@ export function EditChannelDialog({ conversationId, open, onOpenChange }: EditCh
   const conversation = useConversation(conversationId).data
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="overflow-y-auto sm:max-w-lg">
+      <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Edit channel</DialogTitle>
         </DialogHeader>
