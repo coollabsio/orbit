@@ -1,3 +1,10 @@
 {$ORBIT_DOMAIN} {
     reverse_proxy orbit:8080
 }
+
+# The HTTP check (HTTP-01) for the mail listener's certificate from Admin → Mail. Let's Encrypt fetches it over
+# plain HTTP on port 80. Caddy keeps the Host header. Without ORBIT_MAIL_HOSTNAME, this site is never used.
+http://{$ORBIT_MAIL_HOSTNAME:mail.invalid} {
+    reverse_proxy /.well-known/acme-challenge/* orbit:8080
+    respond 404
+}

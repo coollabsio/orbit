@@ -4074,6 +4074,65 @@ export type MailCertView = {
     names: Array<string>;
 };
 
+/**
+ * The SMTP listener's certificate.
+ */
+export type MailCertificate = {
+    active?: null | MailCertificateActive;
+    /**
+     * `ORBIT_MAIL_HOSTNAME`: the name the certificate is for.
+     */
+    hostname?: string | null;
+    last_attempt_at?: string | null;
+    /**
+     * Why the last request or renewal failed; cleared by the next success.
+     */
+    last_error?: string | null;
+    pending?: null | MailCertificatePending;
+    /**
+     * When Orbit renews it (HTTP-01, daily check). `null` unless Orbit got it.
+     */
+    renew_after?: string | null;
+    source: MailCertificateSourceView;
+};
+
+/**
+ * The certificate in use.
+ */
+export type MailCertificateActive = {
+    /**
+     * One of `names` matches `ORBIT_MAIL_HOSTNAME`.
+     */
+    covers_hostname: boolean;
+    /**
+     * `null` for a certificate from files.
+     */
+    issued_at?: string | null;
+    method?: null | MailCertificateMethod;
+    /**
+     * DNS names, lower case.
+     */
+    names: Array<string>;
+    not_after: string;
+};
+
+export type MailCertificateMethod = 'http' | 'dns';
+
+/**
+ * An order that waits for its challenge.
+ */
+export type MailCertificatePending = {
+    /**
+     * DNS-01: the TXT record to add.
+     */
+    dns_name?: string | null;
+    dns_value?: string | null;
+    method: MailCertificateMethod;
+    started_at: string;
+};
+
+export type MailCertificateSourceView = 'environment' | 'orbit' | 'none';
+
 export type MailContact = {
     address: string;
     /**
@@ -8984,6 +9043,10 @@ export type StartLinearImportBody = {
      * Teams of the scan tree to import (each becomes a new Orbit project).
      */
     team_ids: Array<string>;
+};
+
+export type StartMailCertificateBody = {
+    method: MailCertificateMethod;
 };
 
 export type StartNotionImportBody = {
@@ -15289,6 +15352,214 @@ export type SetMailAdminResponses = {
 };
 
 export type SetMailAdminResponse = SetMailAdminResponses[keyof SetMailAdminResponses];
+
+export type GetMailCertificateData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/admin/mail/certificate';
+};
+
+export type GetMailCertificateErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type GetMailCertificateError = GetMailCertificateErrors[keyof GetMailCertificateErrors];
+
+export type GetMailCertificateResponses = {
+    200: MailCertificate;
+};
+
+export type GetMailCertificateResponse = GetMailCertificateResponses[keyof GetMailCertificateResponses];
+
+export type StartMailCertificateData = {
+    body: StartMailCertificateBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/admin/mail/certificate';
+};
+
+export type StartMailCertificateErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * hostname_required
+     */
+    422: unknown;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type StartMailCertificateError = StartMailCertificateErrors[keyof StartMailCertificateErrors];
+
+export type StartMailCertificateResponses = {
+    200: MailCertificate;
+};
+
+export type StartMailCertificateResponse = StartMailCertificateResponses[keyof StartMailCertificateResponses];
+
+export type CancelMailCertificateOrderData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/admin/mail/certificate/order';
+};
+
+export type CancelMailCertificateOrderErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type CancelMailCertificateOrderError = CancelMailCertificateOrderErrors[keyof CancelMailCertificateOrderErrors];
+
+export type CancelMailCertificateOrderResponses = {
+    200: MailCertificate;
+};
+
+export type CancelMailCertificateOrderResponse = CancelMailCertificateOrderResponses[keyof CancelMailCertificateOrderResponses];
+
+export type VerifyMailCertificateData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/admin/mail/certificate/verify';
+};
+
+export type VerifyMailCertificateErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type VerifyMailCertificateError = VerifyMailCertificateErrors[keyof VerifyMailCertificateErrors];
+
+export type VerifyMailCertificateResponses = {
+    200: MailCertificate;
+};
+
+export type VerifyMailCertificateResponse = VerifyMailCertificateResponses[keyof VerifyMailCertificateResponses];
 
 export type MoveMailDomainData = {
     body: MoveMailDomainBody;

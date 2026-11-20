@@ -13,6 +13,7 @@ import { useSetAdminMail } from '@/features/mail/api/mutations'
 import { useAdminMail, useMailProviders } from '@/features/mail/api/queries'
 import { SettingsRow } from '@/features/settings/components/SettingsParts'
 import { dateTime, mailProblem } from '@/features/settings/pages/mail/mailSettingsLib'
+import { MailCertificateCard } from '@/features/admin/components/MailCertificateCard'
 import { MailTestCard } from '@/features/admin/components/MailTestCard'
 import { MailConnections } from '@/features/settings/pages/mail/MailProvidersPage'
 
@@ -48,6 +49,7 @@ export function AdminMailPage() {
         admin={admin.data}
         health={<HealthButton admin={admin.data} hasProviders={hasProviders} refreshing={admin.isFetching} onRefresh={() => void admin.refetch()} />}
       />
+      {admin.data.enabled ? <MailCertificateCard /> : null}
       <MailConnections scope="instance" hostname={admin.data.hostname} />
       <MailTestCard admin={admin.data} hasProviders={hasProviders} />
     </>
@@ -173,12 +175,12 @@ function healthItems(admin: MailAdmin, hasProviders: boolean): HealthItem[] {
   const cert = listener.cert
   if (!cert) {
     items.push(admin.mode === 'direct'
-      ? { label: 'Certificate', state: 'error', detail: 'No certificate is loaded.', fix: 'Set ORBIT_MAIL_TLS_CERT and ORBIT_MAIL_TLS_KEY to PEM files that UID 65532 can read.' }
-      : { label: 'Certificate', state: 'info', detail: 'None: Orbit offers no STARTTLS. That is fine when the relay is on a private network.', fix: 'Optional in relay mode: set ORBIT_MAIL_TLS_CERT and ORBIT_MAIL_TLS_KEY.' })
+      ? { label: 'Certificate', state: 'error', detail: 'No certificate is loaded.', fix: 'Click Get certificate in the Certificate card, or set ORBIT_MAIL_TLS_CERT and ORBIT_MAIL_TLS_KEY to PEM files that UID 65532 can read.' }
+      : { label: 'Certificate', state: 'info', detail: 'None: Orbit offers no STARTTLS. That is fine when the relay is on a private network.', fix: 'Optional in relay mode: get one in the Certificate card, or set ORBIT_MAIL_TLS_CERT and ORBIT_MAIL_TLS_KEY.' })
   } else if (!cert.covers_hostname) {
-    items.push({ label: 'Certificate', state: 'error', detail: `Names ${cert.names.join(', ')}, not ${admin.hostname}.`, fix: `Get a certificate for ${admin.hostname}, for example with certbot. Orbit loads new files within a minute.` })
+    items.push({ label: 'Certificate', state: 'error', detail: `Names ${cert.names.join(', ')}, not ${admin.hostname}.`, fix: `Get a certificate for ${admin.hostname} in the Certificate card, or with certbot for the files. Orbit loads a new certificate within a minute.` })
   } else if (cert.expires_soon) {
-    items.push({ label: 'Certificate', state: 'warning', detail: `Expires ${dateTime(cert.expires_at)}.`, fix: 'Renew it. Orbit loads the new files within a minute, without a restart.' })
+    items.push({ label: 'Certificate', state: 'warning', detail: `Expires ${dateTime(cert.expires_at)}.`, fix: 'Renew it in the Certificate card, or renew the files. Orbit loads the new certificate within a minute, without a restart.' })
   } else {
     items.push({ label: 'Certificate', state: 'ok', detail: `Covers ${admin.hostname}, expires ${dateTime(cert.expires_at)}.` })
   }

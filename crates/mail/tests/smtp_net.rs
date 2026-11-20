@@ -240,7 +240,7 @@ fn load_reports_names_and_not_after() {
     let cert = make_cert(&[HOST, "Mail.Orbit.Test"], 2030);
     let dir = CertDir::new(&cert);
     let handle = dir.load();
-    let info = handle.info();
+    let info = handle.info().unwrap();
     assert_eq!(
         info.names,
         vec![HOST.to_owned(), "mail.orbit.test".to_owned()]
@@ -252,6 +252,7 @@ fn load_reports_names_and_not_after() {
 fn cert_info_covers_names_and_wildcards() {
     let info = CertInfo {
         names: vec!["*.orbit.test".into(), "orbit.example".into()],
+        not_before: 0,
         not_after: 0,
     };
     assert!(info.covers("mx.orbit.test"));
@@ -266,6 +267,7 @@ fn cert_info_covers_names_and_wildcards() {
 fn cert_info_expiry_warning() {
     let info = CertInfo {
         names: vec![],
+        not_before: 0,
         not_after: NOT_AFTER_2030,
     };
     let day = 24 * 60 * 60;
@@ -300,7 +302,7 @@ fn reload_picks_up_a_new_certificate() {
     dir.write(&make_cert(&["mx2.orbit.test"], 2031));
     let info = handle.reload().unwrap();
     assert_eq!(info.names, vec!["mx2.orbit.test".to_owned()]);
-    assert_eq!(handle.info(), info);
+    assert_eq!(handle.info().unwrap(), info);
 }
 
 #[tokio::test]
@@ -308,7 +310,7 @@ async fn reload_with_a_broken_file_keeps_the_old_certificate() {
     let cert = make_cert(&[HOST], 2030);
     let dir = CertDir::new(&cert);
     let handle = dir.load();
-    let before = handle.info();
+    let before = handle.info().unwrap();
 
     fs::write(
         &dir.cert,
@@ -316,17 +318,45 @@ async fn reload_with_a_broken_file_keeps_the_old_certificate() {
     )
     .unwrap();
     assert!(handle.reload().is_err());
-    assert_eq!(handle.info(), before);
+    assert_eq!(handle.info().unwrap(), before);
 
     // A new certificate with the old key (a half-finished renewal) is refused too.
     let other = make_cert(&["mx2.orbit.test"], 2031);
     fs::write(&dir.cert, &other.cert_pem).unwrap();
     let mismatch = handle.reload();
     assert!(matches!(mismatch, Err(TlsError::Rustls(_))), "{mismatch:?}");
-    assert_eq!(handle.info(), before);
+    assert_eq!(handle.info().unwrap(), before);
 
     // Handshakes still use the old certificate.
     let (_, ctx) = deliver_over_tls(handle, &cert.der, rustls::ALL_VERSIONS).await;
+    assert!(ctx.tls.is_some());
+}
+
+#[tokio::test]
+async fn replace_loads_pem_bytes_and_keeps_the_last_good_pair() {
+    let handle = Arc::new(TlsAcceptorHandle::empty());
+    assert_eq!(handle.info(), None);
+    assert!(!handle.is_loaded());
+
+    let first = make_cert(&[HOST], 2030);
+    let info = handle
+        .replace(first.cert_pem.as_bytes(), first.key_pem.as_bytes())
+        .unwrap();
+    assert_eq!(info.names, vec![HOST.to_owned()]);
+    assert!(handle.is_loaded());
+
+    let other = make_cert(&["mx2.orbit.test"], 2031);
+    let broken = handle.replace(b"not a certificate", other.key_pem.as_bytes());
+    assert!(
+        matches!(broken, Err(TlsError::NoCertificate(_))),
+        "{broken:?}"
+    );
+    let mismatch = handle.replace(other.cert_pem.as_bytes(), first.key_pem.as_bytes());
+    assert!(matches!(mismatch, Err(TlsError::Rustls(_))), "{mismatch:?}");
+    assert_eq!(handle.info().unwrap().names, vec![HOST.to_owned()]);
+    assert!(matches!(handle.reload(), Err(TlsError::NoFiles)));
+
+    let (_, ctx) = deliver_over_tls(handle, &first.der, rustls::ALL_VERSIONS).await;
     assert!(ctx.tls.is_some());
 }
 
@@ -344,7 +374,7 @@ async fn watcher_reloads_when_the_files_change() {
     let renewed = make_cert(&["mx2.orbit.test"], 2031);
     dir.write(&renewed);
     let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
-    while handle.info().names != ["mx2.orbit.test"] {
+    while handle.info().unwrap().names != ["mx2.orbit.test"] {
         assert!(
             tokio::time::Instant::now() < deadline,
             "watcher did not reload"
@@ -355,7 +385,7 @@ async fn watcher_reloads_when_the_files_change() {
     // A broken write is ignored; the renewed certificate stays.
     fs::write(&dir.cert, "broken").unwrap();
     tokio::time::sleep(Duration::from_millis(100)).await;
-    assert_eq!(handle.info().names, ["mx2.orbit.test"]);
+    assert_eq!(handle.info().unwrap().names, ["mx2.orbit.test"]);
 
     cancel.cancel();
     tokio::time::timeout(Duration::from_secs(5), watcher)

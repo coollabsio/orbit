@@ -27,6 +27,7 @@ pub mod linear_import_routes;
 pub mod link_preview;
 pub mod live;
 pub mod mail;
+pub mod mail_certificate;
 pub mod mail_delivery;
 pub mod mail_dns;
 pub mod mail_image_proxy;

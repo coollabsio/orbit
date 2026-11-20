@@ -5,6 +5,7 @@ import {
   getMailDraftFile,
   createMailViewUrl,
   getMailAdmin,
+  getMailCertificate,
   getMailboxVacation,
   getMailDraft,
   getMailSendPolicy,
@@ -294,6 +295,18 @@ export function useAdminMail() {
   return useQuery({
     queryKey: queryKeys.adminMail,
     queryFn: async () => required((await getMailAdmin({ client: apiClient, throwOnError: true })).data),
+  })
+}
+
+/**
+ * The SMTP listener's certificate: its source, the pending ACME order and the last result. Root only. Asked for every
+ * 3 s while an HTTP check runs (it can outlast the request that started it).
+ */
+export function useMailCertificate() {
+  return useQuery({
+    queryKey: queryKeys.adminMailCertificate,
+    queryFn: async () => required((await getMailCertificate({ client: apiClient, throwOnError: true })).data),
+    refetchInterval: (query) => (query.state.data?.pending?.method === 'http' ? TEST_POLL_MS : false),
   })
 }
 

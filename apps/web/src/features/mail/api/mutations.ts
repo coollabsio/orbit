@@ -3,6 +3,9 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { apiClient } from '@/api/client'
 import {
   addMailboxAlias,
+  cancelMailCertificateOrder,
+  startMailCertificate,
+  verifyMailCertificate,
   addMailboxMember,
   cancelMailOutbound,
   createMailDraft,
@@ -80,6 +83,8 @@ import type {
   CreatePersonalMailboxesBody,
   MailboxAliasBody,
   MailboxStatus,
+  MailCertificate,
+  MailCertificateMethod,
   MailSenderPrefBody,
   MailThreadSummary,
   SetMailAdminBody,
@@ -476,6 +481,32 @@ export function useSetAdminMail() {
       void queryClient.invalidateQueries({ queryKey: queryKeys.authOptions })
     },
   })
+}
+
+/** Requests, verifies or cancels the listener's certificate. Each answers with the new state; the health card reloads. */
+function useCertificateMutation<T>(request: (input: T) => Promise<MailCertificate | undefined>) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (input: T) => required(await request(input)),
+    onSuccess: (certificate) => {
+      queryClient.setQueryData(queryKeys.adminMailCertificate, certificate)
+      void queryClient.invalidateQueries({ queryKey: queryKeys.adminMail, exact: true })
+    },
+  })
+}
+
+/** `http` validates and issues in the request (up to about a minute); `dns` answers with the TXT record to add. */
+export function useStartMailCertificate() {
+  return useCertificateMutation(async (method: MailCertificateMethod) =>
+    (await startMailCertificate({ client: apiClient, body: { method }, throwOnError: true })).data)
+}
+
+export function useVerifyMailCertificate() {
+  return useCertificateMutation(async () => (await verifyMailCertificate({ client: apiClient, throwOnError: true })).data)
+}
+
+export function useCancelMailCertificateOrder() {
+  return useCertificateMutation(async () => (await cancelMailCertificateOrder({ client: apiClient, throwOnError: true })).data)
 }
 
 // Providers (instance: root user; workspace: owners and admins)

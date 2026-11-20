@@ -1,8 +1,10 @@
 //! The STARTTLS acceptor with a reloadable certificate (spec §4.5, direct mode).
 //!
-//! The certificate chain and key are PEM files (`ORBIT_MAIL_TLS_CERT` / `ORBIT_MAIL_TLS_KEY`). A watcher polls their
-//! modification times and reloads them when they change; a pair that cannot be read or does not match keeps the last
-//! good configuration. rustls with the `ring` provider, TLS 1.2 and 1.3 only.
+//! The certificate chain and key come from PEM files (`ORBIT_MAIL_TLS_CERT` / `ORBIT_MAIL_TLS_KEY`), whose
+//! modification times a watcher polls, or from PEM bytes that the server swaps in (a certificate from Admin → Mail).
+//! A pair that cannot be read or does not match keeps the last good configuration. A handle can start empty: then
+//! the listener offers no `STARTTLS` until a certificate is loaded. rustls with the `ring` provider, TLS 1.2 and 1.3
+//! only.
 
 use std::fs;
 use std::io;
@@ -30,14 +32,16 @@ pub const CERT_EXPIRY_WARNING: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 pub enum TlsError {
     #[error("cannot read {path}: {source}")]
     Read { path: PathBuf, source: io::Error },
-    #[error("cannot parse {path}: {source}")]
-    Pem { path: PathBuf, source: pem::Error },
+    #[error("cannot parse {origin}: {source}")]
+    Pem { origin: String, source: pem::Error },
     #[error("no certificate in {0}")]
-    NoCertificate(PathBuf),
+    NoCertificate(String),
     #[error("no private key in {0}")]
-    NoKey(PathBuf),
-    #[error("bad certificate in {path}: {reason}")]
-    Certificate { path: PathBuf, reason: String },
+    NoKey(String),
+    #[error("bad certificate in {origin}: {reason}")]
+    Certificate { origin: String, reason: String },
+    #[error("the certificate does not come from files")]
+    NoFiles,
     #[error("TLS configuration refused: {0}")]
     Rustls(#[from] rustls::Error),
 }
@@ -47,6 +51,8 @@ pub enum TlsError {
 pub struct CertInfo {
     /// DNS names from the subject alternative names (the subject CN when there are none), lowercased.
     pub names: Vec<String>,
+    /// Unix seconds.
+    pub not_before: i64,
     /// Unix seconds.
     pub not_after: i64,
 }
@@ -74,19 +80,25 @@ struct Loaded {
     info: CertInfo,
 }
 
-/// The rustls acceptor behind `STARTTLS`. Cheap to read on every handshake; [`reload`](Self::reload) swaps the
-/// configuration for new connections only.
+#[derive(Debug)]
+struct CertFiles {
+    cert: PathBuf,
+    key: PathBuf,
+}
+
+/// The rustls acceptor behind `STARTTLS`. Cheap to read on every handshake; [`reload`](Self::reload) and
+/// [`replace`](Self::replace) swap the configuration for new connections only.
 pub struct TlsAcceptorHandle {
-    cert_path: PathBuf,
-    key_path: PathBuf,
-    current: RwLock<Loaded>,
+    /// `None`: the certificate comes from [`replace`](Self::replace).
+    files: Option<CertFiles>,
+    /// `None` until a first certificate is loaded; never empty again after that.
+    current: RwLock<Option<Loaded>>,
 }
 
 impl std::fmt::Debug for TlsAcceptorHandle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TlsAcceptorHandle")
-            .field("cert_path", &self.cert_path)
-            .field("key_path", &self.key_path)
+            .field("files", &self.files)
             .field("info", &self.info())
             .finish()
     }
@@ -97,22 +109,54 @@ impl TlsAcceptorHandle {
     pub fn load(cert: &Path, key: &Path) -> Result<Self, TlsError> {
         let loaded = read_pair(cert, key)?;
         Ok(Self {
-            cert_path: cert.to_owned(),
-            key_path: key.to_owned(),
-            current: RwLock::new(loaded),
+            files: Some(CertFiles {
+                cert: cert.to_owned(),
+                key: key.to_owned(),
+            }),
+            current: RwLock::new(Some(loaded)),
         })
+    }
+
+    /// A handle without a certificate, for [`replace`](Self::replace).
+    #[must_use]
+    pub fn empty() -> Self {
+        Self {
+            files: None,
+            current: RwLock::new(None),
+        }
     }
 
     /// Reads the files again. On error the current configuration stays in use.
     pub fn reload(&self) -> Result<CertInfo, TlsError> {
-        let loaded = read_pair(&self.cert_path, &self.key_path)?;
+        let files = self.files.as_ref().ok_or(TlsError::NoFiles)?;
+        self.swap(read_pair(&files.cert, &files.key)?)
+    }
+
+    /// Loads a PEM certificate chain (leaf first) and private key from memory. On error the current configuration
+    /// stays in use.
+    pub fn replace(&self, cert_pem: &[u8], key_pem: &[u8]) -> Result<CertInfo, TlsError> {
+        self.swap(parse_pair(
+            cert_pem,
+            key_pem,
+            "the stored certificate",
+            "the stored key",
+        )?)
+    }
+
+    fn swap(&self, loaded: Loaded) -> Result<CertInfo, TlsError> {
         let info = loaded.info.clone();
-        *self.current.write().unwrap_or_else(PoisonError::into_inner) = loaded;
+        *self.current.write().unwrap_or_else(PoisonError::into_inner) = Some(loaded);
         Ok(info)
     }
 
-    pub fn info(&self) -> CertInfo {
-        self.read().info.clone()
+    /// The loaded certificate; `None` before the first one.
+    pub fn info(&self) -> Option<CertInfo> {
+        self.read().as_ref().map(|loaded| loaded.info.clone())
+    }
+
+    /// Whether a certificate is loaded, so `STARTTLS` can be offered.
+    pub fn is_loaded(&self) -> bool {
+        self.read().is_some()
     }
 
     /// Polls the files' modification times every `every` (the listener uses 60 s) and reloads when either
@@ -123,7 +167,9 @@ impl TlsAcceptorHandle {
         cancel: CancellationToken,
     ) -> JoinHandle<()> {
         tokio::spawn(async move {
-            warn_if_expiring(&self.info());
+            if let Some(info) = self.info() {
+                warn_if_expiring(&info);
+            }
             let mut seen = self.mtimes();
             let mut tick = tokio::time::interval(every);
             tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -160,11 +206,13 @@ impl TlsAcceptorHandle {
     }
 
     fn mtimes(&self) -> [Option<SystemTime>; 2] {
-        [&self.cert_path, &self.key_path]
-            .map(|path| fs::metadata(path).and_then(|m| m.modified()).ok())
+        let Some(files) = &self.files else {
+            return [None, None];
+        };
+        [&files.cert, &files.key].map(|path| fs::metadata(path).and_then(|m| m.modified()).ok())
     }
 
-    fn read(&self) -> std::sync::RwLockReadGuard<'_, Loaded> {
+    fn read(&self) -> std::sync::RwLockReadGuard<'_, Option<Loaded>> {
         self.current.read().unwrap_or_else(PoisonError::into_inner)
     }
 }
@@ -179,7 +227,10 @@ impl StartTls for TlsAcceptorHandle {
     where
         S: AsyncRead + AsyncWrite + Unpin + Send,
     {
-        let acceptor = TlsAcceptor::from(self.read().config.clone());
+        let config = self.read().as_ref().map(|loaded| loaded.config.clone());
+        let config = config
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no TLS certificate loaded"))?;
+        let acceptor = TlsAcceptor::from(config);
         let stream = acceptor.accept(stream).await?;
         let (_, conn) = stream.get_ref();
         let version = match conn.protocol_version() {
@@ -212,23 +263,37 @@ fn warn_if_expiring(info: &CertInfo) {
 fn read_pair(cert_path: &Path, key_path: &Path) -> Result<Loaded, TlsError> {
     let cert_pem = read_file(cert_path)?;
     let key_pem = read_file(key_path)?;
-    let chain = CertificateDer::pem_slice_iter(&cert_pem)
+    parse_pair(
+        &cert_pem,
+        &key_pem,
+        &cert_path.display().to_string(),
+        &key_path.display().to_string(),
+    )
+}
+
+fn parse_pair(
+    cert_pem: &[u8],
+    key_pem: &[u8],
+    cert_origin: &str,
+    key_origin: &str,
+) -> Result<Loaded, TlsError> {
+    let chain = CertificateDer::pem_slice_iter(cert_pem)
         .collect::<Result<Vec<_>, _>>()
         .map_err(|source| TlsError::Pem {
-            path: cert_path.to_owned(),
+            origin: cert_origin.to_owned(),
             source,
         })?;
     let Some(leaf) = chain.first() else {
-        return Err(TlsError::NoCertificate(cert_path.to_owned()));
+        return Err(TlsError::NoCertificate(cert_origin.to_owned()));
     };
     let info = cert_info(leaf).map_err(|reason| TlsError::Certificate {
-        path: cert_path.to_owned(),
+        origin: cert_origin.to_owned(),
         reason,
     })?;
-    let key = PrivateKeyDer::from_pem_slice(&key_pem).map_err(|source| match source {
-        pem::Error::NoItemsFound => TlsError::NoKey(key_path.to_owned()),
+    let key = PrivateKeyDer::from_pem_slice(key_pem).map_err(|source| match source {
+        pem::Error::NoItemsFound => TlsError::NoKey(key_origin.to_owned()),
         source => TlsError::Pem {
-            path: key_path.to_owned(),
+            origin: key_origin.to_owned(),
             source,
         },
     })?;
@@ -242,6 +307,22 @@ fn read_pair(cert_path: &Path, key_path: &Path) -> Result<Loaded, TlsError> {
     Ok(Loaded {
         config: Arc::new(config),
         info,
+    })
+}
+
+/// What the leaf (first) certificate of a PEM chain covers.
+pub fn pem_cert_info(cert_pem: &[u8]) -> Result<CertInfo, TlsError> {
+    let origin = "the certificate";
+    let leaf = CertificateDer::pem_slice_iter(cert_pem)
+        .next()
+        .ok_or_else(|| TlsError::NoCertificate(origin.to_owned()))?
+        .map_err(|source| TlsError::Pem {
+            origin: origin.to_owned(),
+            source,
+        })?;
+    cert_info(&leaf).map_err(|reason| TlsError::Certificate {
+        origin: origin.to_owned(),
+        reason,
     })
 }
 
@@ -276,6 +357,7 @@ fn cert_info(der: &CertificateDer<'_>) -> Result<CertInfo, String> {
     }
     Ok(CertInfo {
         names,
+        not_before: cert.validity().not_before.timestamp(),
         not_after: cert.validity().not_after.timestamp(),
     })
 }

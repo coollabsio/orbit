@@ -41,6 +41,7 @@ use crate::linear_import_routes::LinearImportState;
 use crate::mail_delivery::ProviderIntake;
 use crate::mail_dns::{DnsChecker, DnsLookup, HickoryDns};
 use crate::mail_intake::MailIntake;
+use crate::mail_certificate::{MailCertificates, RENEW_JOB as MAIL_CERTIFICATE_RENEW};
 use crate::mail_listener::{MailListener, MailListenerStatus, TRACE_HEADROOM};
 use crate::mail_routes::{MailSettings, MailState};
 use crate::mail_send::{run_send_job, send_job_outbound};
@@ -109,6 +110,7 @@ pub struct App {
     /// Built when `ORBIT_MAIL_ENABLED=true`; `serve` binds and runs it.
     mail_listener: Option<MailListener>,
     mail_status: Arc<MailListenerStatus>,
+    mail_certificates: Arc<MailCertificates>,
 }
 
 struct ProductionServices {
@@ -365,6 +367,18 @@ impl App {
             .as_ref()
             .map_or_else(Arc::default, MailListener::status);
         let mail_dns: Arc<dyn DnsLookup> = Arc::new(HickoryDns::new(config.mail.dns_resolver));
+        let mail_certificates = Arc::new(
+            MailCertificates::new(
+                Arc::clone(&mail),
+                &config.mail,
+                Arc::clone(&mail_dns),
+                mail_listener.as_ref().and_then(MailListener::tls_handle),
+            )
+            .map_err(|error| AppError::Config(format!("mail certificate: {error}")))?,
+        );
+        if let Err(error) = mail_certificates.reload_if_changed().await {
+            tracing::warn!(%error, "stored mail TLS certificate not loaded; retrying in the background");
+        }
         // Mail from providers' webhooks works without the listener: no port 25 on this server.
         let provider_intake = match config.mail.dns_resolver {
             Some(resolver) => orbit_mail::Authenticator::with_resolver(resolver),
@@ -511,6 +525,7 @@ impl App {
             notion_imports.clone(),
             dns_checker,
             Arc::clone(&mail),
+            Arc::clone(&mail_certificates),
             send_jobs,
             asana_imports.clone(),
             linear_imports.clone(),
@@ -715,6 +730,7 @@ impl App {
                     config.mail.content_origin.clone(),
                 )
                 .with_health(Arc::clone(&mail_status), mail_dns)
+                .with_certificates(Arc::clone(&mail_certificates))
                 .with_inbound_opt(provider_intake),
                 webhooks: crate::webhooks::routes::WebhookState::new(
                     Arc::clone(&identity),
@@ -758,6 +774,7 @@ impl App {
             draining,
             mail_listener,
             mail_status,
+            mail_certificates,
         })
     }
 
@@ -933,6 +950,11 @@ impl App {
                 .run_reconciliation_service(token)
                 .await
                 .map_err(|error| error.to_string())
+        });
+        let certificates = Arc::clone(&self.mail_certificates);
+        let token = service_shutdown.clone();
+        spawn_service(&mut services, "mail certificate reload", async move {
+            certificates.run_reloader(token).await
         });
         if let Some(mail) = self.mail_listener.take() {
             let address = SocketAddr::new(self.config.mail.smtp_bind, self.config.mail.smtp_port);
@@ -1241,6 +1263,7 @@ async fn initialize_production_services(
     notion_imports: NotionImportService,
     dns_checker: DnsChecker,
     mail: Arc<MailRepository>,
+    mail_certificates: Arc<MailCertificates>,
     send_jobs: crate::mail_send::SendJobState,
     asana_imports: AsanaImportService,
     linear_imports: LinearImportService,
@@ -1483,6 +1506,17 @@ async fn initialize_production_services(
                 }
             })
         })
+        .and_then(|worker| {
+            worker.with_handler(maintenance_kind(MAIL_CERTIFICATE_RENEW), move |_| {
+                let certificates = Arc::clone(&mail_certificates);
+                async move {
+                    certificates
+                        .renew_if_due()
+                        .await
+                        .map_err(|error| JobError::Retryable(error.to_string()))
+                }
+            })
+        })
         .and_then(|worker| crate::workspace_export::register_job(worker, workspace_exports))
         .and_then(|worker| crate::import_people::register_job(worker, database.clone()))
         .and_then(|worker| crate::webhooks::delivery::register_job(worker, webhooks))
@@ -1559,6 +1593,13 @@ async fn initialize_production_services(
     ensure_schedule(
         &scheduler,
         PURGE_JOB,
+        Duration::from_secs(24 * 60 * 60),
+        now,
+    )
+    .await?;
+    ensure_schedule(
+        &scheduler,
+        MAIL_CERTIFICATE_RENEW,
         Duration::from_secs(24 * 60 * 60),
         now,
     )

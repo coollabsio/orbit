@@ -1501,6 +1501,7 @@ fn redacted_mail_config(mail: &orbit_platform::MailConfig) -> Vec<String> {
         format!("ORBIT_MAIL_RELAY_CIDRS={}", cidrs(&mail.relay_cidrs)),
         format!("ORBIT_MAIL_PROXY_CIDRS={}", cidrs(&mail.proxy_cidrs)),
         format!("ORBIT_MAIL_MAX_MESSAGE_BYTES={}", mail.max_message_bytes),
+        format!("ORBIT_MAIL_ACME_DIRECTORY={}", mail.acme_directory),
     ];
     let optional = [
         ("ORBIT_MAIL_HOSTNAME", mail.hostname.clone()),
@@ -1523,6 +1524,12 @@ fn redacted_mail_config(mail: &orbit_platform::MailConfig) -> Vec<String> {
             mail.dns_resolver.map(|address| address.to_string()),
         ),
         ("ORBIT_MAIL_CONTENT_ORIGIN", mail.content_origin.clone()),
+        (
+            "ORBIT_MAIL_ACME_ROOT_CA",
+            mail.acme_root_ca
+                .as_ref()
+                .map(|path| path.display().to_string()),
+        ),
     ];
     lines.extend(
         optional

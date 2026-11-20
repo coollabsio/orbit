@@ -15,13 +15,14 @@ services:
       # Caddy, and loopback for the image healthcheck.
       ORBIT_TRUSTED_PROXIES: 127.0.0.1/32,172.30.0.2/32
       ORBIT_APP_KEY: ${ORBIT_APP_KEY:?Set ORBIT_APP_KEY in deploy/.env}
-      # Mail (see docs/operations.md#mail). Uncomment these lines, the mail port and the certificate volume.
+      # Mail (see docs/operations.md#mail). Uncomment these lines and the mail port. Get the certificate in
+      # Admin → Mail, or set the certificate files and their volume.
       # ORBIT_MAIL_ENABLED: 'true'
       # ORBIT_MAIL_HOSTNAME: mx.example.com
       # ORBIT_MAIL_MODE: relay                        # or direct
       # ORBIT_MAIL_RELAY_CIDRS: 203.0.113.10/32       # relay mode: the relay's addresses
       # ORBIT_MAIL_RELAY_AUTHSERV_ID: mx.relay.example # relay mode: its Authentication-Results ID
-      # ORBIT_MAIL_TLS_CERT: /etc/orbit/mail-tls/fullchain.pem # required in direct mode
+      # ORBIT_MAIL_TLS_CERT: /etc/orbit/mail-tls/fullchain.pem # optional: files win over Admin → Mail
       # ORBIT_MAIL_TLS_KEY: /etc/orbit/mail-tls/privkey.pem
     # The container runs without capabilities, so the listener uses port 2525 and the host maps port 25 to it.
     # Docker must keep the client IP: set "userland-proxy": false in /etc/docker/daemon.json, or run this
@@ -38,6 +39,10 @@ services:
     restart: unless-stopped
     environment:
       ORBIT_DOMAIN: ${ORBIT_DOMAIN:?Set ORBIT_DOMAIN in deploy/.env}
+      # Mail: the same value as for Orbit. Caddy then sends the HTTP check of the mail certificate from
+      # Admin → Mail (http://<ORBIT_MAIL_HOSTNAME>/.well-known/acme-challenge/) to Orbit. Port 80 must be open.
+      # ORBIT_MAIL_HOSTNAME: mx.example.com
+    # Port 80: Caddy's own certificates, and the HTTP check of the mail certificate.
     ports: ['80:80', '443:443']
     # The admin API answers on localhost:2019 once Caddy has loaded its configuration.
     healthcheck:

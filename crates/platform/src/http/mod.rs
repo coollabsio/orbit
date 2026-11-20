@@ -101,6 +101,9 @@ impl HttpPlatformLayer {
     }
 }
 
+/// HTTP-01 challenge answers: the only path served without HTTPS in production.
+const ACME_CHALLENGE_PREFIX: &str = "/.well-known/acme-challenge/";
+
 impl<S> Layer<S> for HttpPlatformLayer {
     type Service = HttpPlatformService<S>;
 
@@ -216,7 +219,11 @@ where
                 }
             };
 
-            if secure_transport_required && !transport.is_secure() {
+            // The ACME CA fetches HTTP-01 challenges over plain HTTP (RFC 8555 §8.3).
+            if secure_transport_required
+                && !transport.is_secure()
+                && !request.uri().path().starts_with(ACME_CHALLENGE_PREFIX)
+            {
                 return Ok(finish_response(
                     problem_response(
                         StatusCode::BAD_REQUEST,

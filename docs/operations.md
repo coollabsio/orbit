@@ -484,7 +484,9 @@ Orbit is its own mail server: it receives mail for the verified domains of the w
 | `ORBIT_MAIL_RELAY_CIDRS` | none | Relay mode: required. The relay's addresses. Orbit refuses `/0` and any range that contains the Docker gateway `172.17.0.1`. |
 | `ORBIT_MAIL_RELAY_AUTHSERV_ID` | none | Relay mode: required. The `authserv-id` of the relay's `Authentication-Results` header. |
 | `ORBIT_MAIL_PROXY_CIDRS` | none | Sources (a TCP load balancer) that can send a PROXY protocol v2 header. Orbit then uses the client address from the header. |
-| `ORBIT_MAIL_TLS_CERT` / `ORBIT_MAIL_TLS_KEY` | none | PEM files. Direct mode: required. Relay mode: optional; with them, Orbit offers STARTTLS. |
+| `ORBIT_MAIL_TLS_CERT` / `ORBIT_MAIL_TLS_KEY` | none | PEM files, set both or neither. When set, they win over the certificate from **Admin → Mail**. See [Certificate](#certificate). |
+| `ORBIT_MAIL_ACME_DIRECTORY` | Let's Encrypt | The ACME directory for the certificate from **Admin → Mail**. The default is `https://acme-v02.api.letsencrypt.org/directory`. Must be `https`. |
+| `ORBIT_MAIL_ACME_ROOT_CA` | none | A PEM file with an extra trusted root for the ACME directory, for a private CA. |
 | `ORBIT_MAIL_MAX_MESSAGE_BYTES` | `52428800` (50 MB) | The raw size limit, at least 1 MiB. 50 MB holds about 37 MB of attachments. |
 | `ORBIT_MAIL_DNS_RESOLVER` | system | A resolver address (`ip:port`) for the SPF, DKIM, DMARC and domain checks. |
 | `ORBIT_MAIL_CONTENT_ORIGIN` | public origin | An optional separate origin for mail HTML and its images. When set, only this host serves them; the public origin answers 404. Point it at the same server and keep the original `Host` header in the proxy. |
@@ -645,7 +647,23 @@ Orbit logs a warning and the health card shows an error when clients connect fro
 
 ### Certificate
 
-Get a certificate for `ORBIT_MAIL_HOSTNAME` (for example with certbot) and mount it read-only. UID 65532 must be able to read both files. Orbit checks the files every 60 seconds and loads them again when they change, without a restart. If a new file cannot be read, Orbit keeps the last good certificate. Orbit logs a warning 7 days before the certificate expires.
+The listener offers STARTTLS only when it has a certificate for `ORBIT_MAIL_HOSTNAME`. Direct mode needs one. You can get it in **Admin → Mail**, or give Orbit certificate files.
+
+**From Admin → Mail (Let's Encrypt).** In the **Certificate** card, click **Get certificate**. Orbit asks Let's Encrypt for a certificate with the HTTP check (HTTP-01):
+
+1. Point an A (and AAAA) record of `ORBIT_MAIL_HOSTNAME` to the server.
+2. Let port 80 of `ORBIT_MAIL_HOSTNAME` reach the reverse proxy.
+3. Send `http://<ORBIT_MAIL_HOSTNAME>/.well-known/acme-challenge/*` to Orbit, and keep the `Host` header. `deploy/Caddyfile` does this when the proxy service gets `ORBIT_MAIL_HOSTNAME` (see the comments in `deploy/compose.yaml`).
+
+Orbit answers this one path over plain HTTP, also in production. The check takes up to one minute. If it fails, the card shows the error.
+
+When port 80 cannot reach Orbit, click **Use a DNS record** (DNS-01). The card shows a TXT record at `_acme-challenge.<ORBIT_MAIL_HOSTNAME>`. Add it at your DNS provider, then click **Verify**. Orbit looks up the record first and asks Let's Encrypt only when the record is there. You must add a new TXT record for each renewal with DNS.
+
+Orbit stores the certificate in the database and seals its key with `ORBIT_APP_KEY`. The listener loads it without a restart. Each server checks for a new certificate every 60 seconds, so every server of a cluster loads it within a minute. A daily job renews the certificate with the HTTP check after 2/3 of its lifetime, or 30 days before it expires, whichever comes first, but not before half of its lifetime. If the renewal fails, the card shows the error and you can use a DNS record.
+
+**From files.** Set `ORBIT_MAIL_TLS_CERT` and `ORBIT_MAIL_TLS_KEY` to a certificate for `ORBIT_MAIL_HOSTNAME` (for example from certbot) and mount it read-only. The files win: the **Certificate** card is then read only. UID 65532 must be able to read both files. Orbit checks the files every 60 seconds and loads them again when they change, without a restart.
+
+In both cases, if a new certificate cannot be loaded, Orbit keeps the last good certificate. Orbit logs a warning 7 days before the certificate expires.
 
 ### DNS records
 

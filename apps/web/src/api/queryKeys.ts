@@ -29,6 +29,8 @@ export const queryKeys = {
   adminJobLimits: ['admin', 'job-limits'] as const,
   /** The Admin mail page (switch and health card). Workspace mail keys are `mailKeys` in `features/mail/api/keys`. */
   adminMail: ['admin', 'mail'] as const,
+  /** The SMTP listener's certificate (ACME). */
+  adminMailCertificate: ['admin', 'mail', 'certificate'] as const,
   adminMailProviders: ['admin', 'mail', 'providers'] as const,
   adminMailSendRoutes: ['admin', 'mail', 'send-routes'] as const,
   adminMailSendPolicies: ['admin', 'mail', 'send-policies'] as const,

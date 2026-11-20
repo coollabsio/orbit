@@ -22,7 +22,7 @@ pub use conn_limit::{ConnLimiter, ConnPermit};
 pub use limits::{MAX_COMMAND_LINE, MAX_TEXT_LINE, SessionLimits, TARPIT_DELAY};
 pub use proxy::{DOCKER_DEFAULT_GATEWAY, ProxyError, is_docker_bridge, read_proxy_v2};
 pub use session::run_session;
-pub use tls::{CERT_EXPIRY_WARNING, CertInfo, TlsAcceptorHandle, TlsError};
+pub use tls::{CERT_EXPIRY_WARNING, CertInfo, TlsAcceptorHandle, TlsError, pem_cert_info};
 
 /// One SMTP reply: `code enhanced text`. An empty `enhanced` writes no enhanced status code (RFC 2034 leaves it out
 /// of the greeting, the EHLO answer and `354`).

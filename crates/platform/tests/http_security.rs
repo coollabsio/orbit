@@ -874,6 +874,45 @@ async fn production_boundary_rejects_requests_without_verified_https_transport()
 }
 
 #[tokio::test]
+async fn production_boundary_serves_only_acme_challenges_over_plain_http() {
+    let app = Router::new()
+        .route(
+            "/.well-known/acme-challenge/{token}",
+            get(|| async { "key-authorization" }),
+        )
+        .route("/.well-known/other", get(|| async { StatusCode::OK }))
+        .layer(
+            HttpPlatformLayer::new(
+                OriginPolicy::new("https://orbit.test")
+                    .trust_proxy(IpNet::from_str("127.0.0.1/32").unwrap()),
+            )
+            .require_secure_transport(),
+        );
+    let plain = |path: &str| {
+        Request::get(path)
+            .header("host", "mx.orbit.test")
+            .extension(ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 4567))))
+            .body(Body::empty())
+            .unwrap()
+    };
+
+    let response = app
+        .clone()
+        .oneshot(plain("/.well-known/acme-challenge/abc"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        to_bytes(response.into_body(), usize::MAX).await.unwrap(),
+        "key-authorization"
+    );
+
+    let response = app.oneshot(plain("/.well-known/other")).await.unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(body_json(response).await["code"], "https_required");
+}
+
+#[tokio::test]
 async fn production_transport_ignores_absolute_https_targets_from_cleartext_peers() {
     let app = Router::new()
         .route("/api/v1/probe", post(|| async { StatusCode::NO_CONTENT }))

@@ -724,14 +724,19 @@ fn mail_relay_needs_cidrs_and_authserv_id() {
 }
 
 #[test]
-fn mail_direct_needs_tls_files() {
+fn mail_direct_takes_tls_files_as_a_pair() {
     let base = [
         ("ORBIT_MAIL_ENABLED", "true"),
         ("ORBIT_MAIL_HOSTNAME", "mx.example.com"),
         ("ORBIT_MAIL_MODE", "direct"),
     ];
-    let error = load(base).unwrap_err();
-    assert_eq!(invalid_key(error), "ORBIT_MAIL_TLS_CERT");
+    // Without files, the certificate comes from Admin → Mail.
+    let mail = load(base).unwrap().mail;
+    assert_eq!(mail.tls_cert, None);
+    assert_eq!(
+        mail.acme_directory,
+        "https://acme-v02.api.letsencrypt.org/directory"
+    );
 
     let error = load([base[0], base[1], base[2], ("ORBIT_MAIL_TLS_CERT", "/c.pem")]).unwrap_err();
     assert_eq!(invalid_key(error), "ORBIT_MAIL_TLS_KEY");
@@ -747,6 +752,14 @@ fn mail_direct_needs_tls_files() {
     .mail;
     assert_eq!(mail.mode, orbit_platform::MailMode::Direct);
     assert_eq!(mail.tls_key, Some(PathBuf::from("/k.pem")));
+
+    let error = load([
+        base[0],
+        base[1],
+        ("ORBIT_MAIL_ACME_DIRECTORY", "http://pebble/dir"),
+    ])
+    .unwrap_err();
+    assert_eq!(invalid_key(error), "ORBIT_MAIL_ACME_DIRECTORY");
 }
 
 #[test]

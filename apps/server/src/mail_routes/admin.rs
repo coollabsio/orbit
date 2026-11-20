@@ -94,7 +94,7 @@ pub(crate) struct MailListenerView {
     last_peer_ip: Option<String>,
     /// Connections that came from a Docker bridge gateway since the start.
     bridge_peers: u64,
-    /// `null` without `ORBIT_MAIL_TLS_CERT`.
+    /// `null` while no certificate is loaded (no `STARTTLS`).
     cert: Option<MailCertView>,
 }
 

@@ -50,6 +50,10 @@ const MAIL_TLS_KEY_ENV: &str = "ORBIT_MAIL_TLS_KEY";
 const MAIL_MAX_MESSAGE_BYTES_ENV: &str = "ORBIT_MAIL_MAX_MESSAGE_BYTES";
 const MAIL_DNS_RESOLVER_ENV: &str = "ORBIT_MAIL_DNS_RESOLVER";
 const MAIL_CONTENT_ORIGIN_ENV: &str = "ORBIT_MAIL_CONTENT_ORIGIN";
+const MAIL_ACME_DIRECTORY_ENV: &str = "ORBIT_MAIL_ACME_DIRECTORY";
+const MAIL_ACME_ROOT_CA_ENV: &str = "ORBIT_MAIL_ACME_ROOT_CA";
+/// Let's Encrypt production.
+const DEFAULT_ACME_DIRECTORY: &str = "https://acme-v02.api.letsencrypt.org/directory";
 /// The default Docker bridge gateway: every container on the bridge seems to connect from it.
 const DOCKER_GATEWAY: IpAddr = IpAddr::V4(Ipv4Addr::new(172, 17, 0, 1));
 const CLOUD_ENV: &str = "ORBIT_CLOUD";
@@ -329,8 +333,13 @@ pub struct MailConfig {
     pub relay_authserv_id: Option<String>,
     /// Sources that can send a PROXY protocol v2 header.
     pub proxy_cidrs: Vec<IpNet>,
+    /// The listener's certificate files. Without them, the certificate comes from Admin → Mail (ACME).
     pub tls_cert: Option<PathBuf>,
     pub tls_key: Option<PathBuf>,
+    /// The ACME directory for the listener's certificate.
+    pub acme_directory: String,
+    /// An extra trusted root (PEM file) for the ACME directory: a private CA, or Pebble in tests.
+    pub acme_root_ca: Option<PathBuf>,
     /// The raw message size limit.
     pub max_message_bytes: u64,
     /// The DNS resolver for the checks; the system resolver when not set.
@@ -352,6 +361,8 @@ impl Default for MailConfig {
             proxy_cidrs: Vec::new(),
             tls_cert: None,
             tls_key: None,
+            acme_directory: DEFAULT_ACME_DIRECTORY.to_owned(),
+            acme_root_ca: None,
             max_message_bytes: 50 * 1024 * 1024,
             dns_resolver: None,
             content_origin: None,
@@ -391,6 +402,18 @@ impl MailConfig {
                 "cannot contain the Docker gateway 172.17.0.1: every container would count as the relay",
             );
         }
+        match (&self.tls_cert, &self.tls_key) {
+            (Some(_), None) => {
+                return invalid(MAIL_TLS_KEY_ENV, "is required with ORBIT_MAIL_TLS_CERT");
+            }
+            (None, Some(_)) => {
+                return invalid(MAIL_TLS_CERT_ENV, "is required with ORBIT_MAIL_TLS_KEY");
+            }
+            _ => {}
+        }
+        if !self.acme_directory.starts_with("https://") {
+            return invalid(MAIL_ACME_DIRECTORY_ENV, "must be an https URL");
+        }
         if !self.enabled {
             return Ok(());
         }
@@ -406,12 +429,6 @@ impl MailConfig {
             }
             MailMode::Relay if self.relay_authserv_id.as_deref().is_none_or(str::is_empty) => {
                 invalid(MAIL_RELAY_AUTHSERV_ID_ENV, "is required in relay mode")
-            }
-            MailMode::Direct if self.tls_cert.is_none() => {
-                invalid(MAIL_TLS_CERT_ENV, "is required in direct mode")
-            }
-            MailMode::Direct if self.tls_key.is_none() => {
-                invalid(MAIL_TLS_KEY_ENV, "is required in direct mode")
             }
             _ => Ok(()),
         }
@@ -1147,6 +1164,11 @@ fn apply_environment(
             config.mail.dns_resolver = Some(parse_environment(key, value)?);
         } else if key == MAIL_CONTENT_ORIGIN_ENV {
             config.mail.content_origin = Some(value.clone());
+        } else if key == MAIL_ACME_DIRECTORY_ENV {
+            config.mail.acme_directory = value.trim().to_owned();
+        } else if key == MAIL_ACME_ROOT_CA_ENV {
+            config.mail.acme_root_ca =
+                Some(PathBuf::from(value)).filter(|path| !path.as_os_str().is_empty());
         } else if key == APP_KEY_ENV {
             config.app_key = Some(parse_app_key(value)?);
         } else if key == APP_KEY_FILE_ENV {

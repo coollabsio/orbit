@@ -81,7 +81,7 @@ impl MailListenerStatus {
     /// The loaded certificate (the last good one after a failed reload).
     #[must_use]
     pub fn cert(&self) -> Option<CertInfo> {
-        self.tls.as_ref().map(|tls| tls.info())
+        self.tls.as_ref().and_then(|tls| tls.info())
     }
 
     /// Connections that came from a Docker bridge gateway (the client address was lost).
@@ -127,7 +127,11 @@ pub struct MailListener {
     repo: Arc<MailRepository>,
     /// Direct mode only: relay mode trusts the relay's results.
     auth: Option<Authenticator>,
-    tls: Option<Arc<TlsAcceptorHandle>>,
+    /// Empty until a certificate is loaded: then the listener offers no `STARTTLS`.
+    tls: Arc<TlsAcceptorHandle>,
+    /// The certificate comes from `ORBIT_MAIL_TLS_CERT` / `ORBIT_MAIL_TLS_KEY`, which a watcher polls. Otherwise
+    /// the certificate from Admin → Mail is swapped into [`Self::tls_handle`].
+    tls_files: bool,
     limiter: ConnLimiter,
     limits: SessionLimits,
     /// Docker gateways besides `172.17.0.1` (this host's default routes).
@@ -136,7 +140,7 @@ pub struct MailListener {
 }
 
 impl MailListener {
-    /// Loads the certificate (when configured) and, in direct mode, the system or configured DNS
+    /// Loads the certificate files (when configured) and, in direct mode, the system or configured DNS
     /// resolver. `config` must be valid and enabled.
     pub fn new(
         config: MailConfig,
@@ -147,22 +151,24 @@ impl MailListener {
             .hostname
             .clone()
             .ok_or("ORBIT_MAIL_HOSTNAME is required")?;
-        let tls = match (&config.tls_cert, &config.tls_key) {
-            (Some(cert), Some(key)) => Some(Arc::new(
+        let (tls, tls_files) = match (&config.tls_cert, &config.tls_key) {
+            (Some(cert), Some(key)) => (
                 TlsAcceptorHandle::load(cert, key).map_err(|error| error.to_string())?,
-            )),
-            _ => None,
+                true,
+            ),
+            _ => (TlsAcceptorHandle::empty(), false),
         };
         if config.mode == MailMode::Direct
-            && let Some(tls) = &tls
-            && !tls.info().covers(&hostname)
+            && let Some(info) = tls.info()
+            && !info.covers(&hostname)
         {
             tracing::warn!(
                 hostname,
-                names = ?tls.info().names,
+                names = ?info.names,
                 "the mail TLS certificate does not cover ORBIT_MAIL_HOSTNAME"
             );
         }
+        let tls = Arc::new(tls);
         let auth = match config.mode {
             MailMode::Relay => None,
             MailMode::Direct => Some(
@@ -177,13 +183,14 @@ impl MailListener {
             max_message_bytes: config.max_message_bytes,
             ..SessionLimits::default()
         };
-        let status = Arc::new(MailListenerStatus::new(tls.clone()));
+        let status = Arc::new(MailListenerStatus::new(Some(Arc::clone(&tls))));
         Ok(Self {
             hostname,
             intake,
             repo,
             auth,
             tls,
+            tls_files,
             limiter: ConnLimiter::default(),
             limits,
             gateways: default_gateways(),
@@ -195,6 +202,12 @@ impl MailListener {
     #[must_use]
     pub fn status(&self) -> Arc<MailListenerStatus> {
         Arc::clone(&self.status)
+    }
+
+    /// The handle to load the certificate from Admin → Mail into; `None` when the certificate files win.
+    #[must_use]
+    pub fn tls_handle(&self) -> Option<Arc<TlsAcceptorHandle>> {
+        (!self.tls_files).then(|| Arc::clone(&self.tls))
     }
 
     /// Replaces the direct mode checker (tests use fixed DNS answers).
@@ -221,9 +234,8 @@ impl MailListener {
         let this = Arc::new(self);
         let sessions = TaskTracker::new();
         let watcher = this
-            .tls
-            .as_ref()
-            .map(|tls| Arc::clone(tls).spawn_watcher(CERT_POLL, cancel.clone()));
+            .tls_files
+            .then(|| Arc::clone(&this.tls).spawn_watcher(CERT_POLL, cancel.clone()));
         this.status.set_running(Some(address));
         tracing::info!(%address, mode = ?this.config.mode, "mail listener started");
         loop {
@@ -311,31 +323,28 @@ impl MailListener {
             helo: None,
             tls: None,
         };
-        let result = match &self.tls {
-            Some(tls) => {
-                run_session(
-                    stream,
-                    ctx,
-                    self,
-                    &self.limits,
-                    &self.hostname,
-                    Some(&**tls),
-                    cancel,
-                )
-                .await
-            }
-            None => {
-                run_session(
-                    stream,
-                    ctx,
-                    self,
-                    &self.limits,
-                    &self.hostname,
-                    None::<&NoTls>,
-                    cancel,
-                )
-                .await
-            }
+        let result = if self.tls.is_loaded() {
+            run_session(
+                stream,
+                ctx,
+                self,
+                &self.limits,
+                &self.hostname,
+                Some(&*self.tls),
+                cancel,
+            )
+            .await
+        } else {
+            run_session(
+                stream,
+                ctx,
+                self,
+                &self.limits,
+                &self.hostname,
+                None::<&NoTls>,
+                cancel,
+            )
+            .await
         };
         if let Err(error) = result {
             tracing::debug!(%ip, %error, "mail session ended with an error");

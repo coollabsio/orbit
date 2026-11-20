@@ -3,6 +3,7 @@
 //! is for instance admins only.
 
 pub(crate) mod admin;
+pub(crate) mod certificate;
 pub(crate) mod compose;
 pub(crate) mod content;
 pub(crate) mod domains;
@@ -28,6 +29,7 @@ use orbit_platform::{Id, MailMode, RequestId};
 pub use content::{ViewGrant, ViewKey, ViewPurpose};
 
 use crate::auth_routes::CookieMode;
+use crate::mail_certificate::MailCertificates;
 use crate::mail_delivery::ProviderIntake;
 use crate::mail_dns::{DnsLookup, HickoryDns};
 use crate::mail_image_proxy::ImageProxy;
@@ -66,6 +68,8 @@ pub struct MailState {
     pub(crate) dns: Arc<dyn DnsLookup>,
     /// Mail from providers' webhooks; `None`: the route answers 503.
     pub(crate) inbound: Option<Arc<ProviderIntake>>,
+    /// The listener's certificate from Admin → Mail; `None`: its routes answer 404.
+    pub(crate) certificates: Option<Arc<MailCertificates>>,
 }
 
 impl MailState {
@@ -88,7 +92,14 @@ impl MailState {
             listener: Arc::default(),
             dns: Arc::new(HickoryDns::new(None)),
             inbound: None,
+            certificates: None,
         }
+    }
+
+    #[must_use]
+    pub fn with_certificates(mut self, certificates: Arc<MailCertificates>) -> Self {
+        self.certificates = Some(certificates);
+        self
     }
 
     /// Receives mail from providers' webhooks.
@@ -466,6 +477,22 @@ pub fn mail_router(state: MailState) -> Router {
         .route(
             "/api/v1/admin/mail",
             get(admin::get_mail_admin).put(admin::set_mail_admin),
+        )
+        .route(
+            "/api/v1/admin/mail/certificate",
+            get(certificate::get_mail_certificate).post(certificate::start_mail_certificate),
+        )
+        .route(
+            "/api/v1/admin/mail/certificate/verify",
+            post(certificate::verify_mail_certificate),
+        )
+        .route(
+            "/api/v1/admin/mail/certificate/order",
+            delete(certificate::cancel_mail_certificate_order),
+        )
+        .route(
+            "/.well-known/acme-challenge/{token}",
+            get(certificate::acme_http_challenge),
         )
         .route(
             "/api/v1/admin/mail/send-tiers",

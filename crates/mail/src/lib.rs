@@ -47,7 +47,7 @@ pub use smtp::{
     AcceptedRecipient, CERT_EXPIRY_WARNING, CertInfo, ConnLimiter, ConnPermit,
     DOCKER_DEFAULT_GATEWAY, DataDecision, Envelope, MAX_COMMAND_LINE, MAX_TEXT_LINE, NoTls,
     ProxyError, RcptDecision, Reply, SessionContext, SessionError, SessionHandler, SessionLimits,
-    StartTls, TARPIT_DELAY, TlsAcceptorHandle, TlsError, TlsInfo, is_docker_bridge, read_proxy_v2,
-    run_session,
+    StartTls, TARPIT_DELAY, TlsAcceptorHandle, TlsError, TlsInfo, is_docker_bridge, pem_cert_info,
+    read_proxy_v2, run_session,
 };
 pub use vacation::{VacationInput, envelope_authenticated, vacation_allowed};
