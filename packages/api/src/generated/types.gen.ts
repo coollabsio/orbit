@@ -3982,6 +3982,10 @@ export type MailAddressKind = 'primary' | 'alias';
  */
 export type MailAdmin = {
     /**
+     * A send route sends directly from this installation, so recipients check the PTR.
+     */
+    direct_sending: boolean;
+    /**
      * `ORBIT_MAIL_ENABLED` on this server.
      */
     enabled: boolean;
@@ -7225,8 +7229,8 @@ export type PtrAddress = {
 export type PtrState = 'ok' | 'mismatch' | 'no_address' | 'unknown' | 'no_hostname';
 
 /**
- * Reverse DNS of the mail hostname: receivers of Orbit's mail (a later slice) and some
- * senders' checks expect the PTR of each address to name the hostname.
+ * Reverse DNS of the mail hostname: receivers of directly sent mail expect the PTR of each
+ * address to name the hostname. Receiving does not need it.
  */
 export type PtrStatus = {
     /**

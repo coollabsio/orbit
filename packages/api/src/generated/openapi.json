@@ -89476,9 +89476,14 @@
           "mode",
           "listener",
           "ptr",
+          "direct_sending",
           "test_domains"
         ],
         "properties": {
+          "direct_sending": {
+            "type": "boolean",
+            "description": "A send route sends directly from this installation, so recipients check the PTR."
+          },
           "enabled": {
             "type": "boolean",
             "description": "`ORBIT_MAIL_ENABLED` on this server."
@@ -97394,7 +97399,7 @@
       },
       "PtrStatus": {
         "type": "object",
-        "description": "Reverse DNS of the mail hostname: receivers of Orbit's mail (a later slice) and some\nsenders' checks expect the PTR of each address to name the hostname.",
+        "description": "Reverse DNS of the mail hostname: receivers of directly sent mail expect the PTR of each\naddress to name the hostname. Receiving does not need it.",
         "required": [
           "status",
           "addresses"

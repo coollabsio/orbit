@@ -490,8 +490,8 @@ pub enum PtrState {
     NoHostname,
 }
 
-/// Reverse DNS of the mail hostname: receivers of Orbit's mail (a later slice) and some
-/// senders' checks expect the PTR of each address to name the hostname.
+/// Reverse DNS of the mail hostname: receivers of directly sent mail expect the PTR of each
+/// address to name the hostname. Receiving does not need it.
 #[derive(Clone, Debug, Serialize, ToSchema)]
 pub struct PtrStatus {
     pub status: PtrState,

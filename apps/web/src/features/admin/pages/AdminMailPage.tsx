@@ -151,12 +151,14 @@ function ptrItem(ptr: PtrStatus, hostname: string | null | undefined): HealthIte
 }
 
 function healthItems(admin: MailAdmin, hasProviders: boolean): HealthItem[] {
+  // only directly sent mail leaves from this server's address, so only then do receivers check its PTR
+  const ptr = admin.direct_sending ? ptrItem(admin.ptr, admin.hostname) : null
   if (!admin.enabled && hasProviders) {
     return [{
       label: 'Mail on this server',
       state: 'info',
-      detail: 'Mail arrives through providers. The SMTP listener is off, so port 25, the certificate and reverse DNS do not matter here.',
-    }]
+      detail: 'Mail arrives through providers. The SMTP listener is off, so port 25 and the certificate do not matter here.',
+    }, ...(ptr ? [ptr] : [])]
   }
   if (!admin.enabled) {
     return [{
@@ -164,7 +166,7 @@ function healthItems(admin: MailAdmin, hasProviders: boolean): HealthItem[] {
       state: 'info',
       detail: 'The SMTP listener is off.',
       fix: 'Add an incoming provider in Providers (no port 25 needed), or set ORBIT_MAIL_ENABLED=true and ORBIT_MAIL_HOSTNAME and restart Orbit. See the operations guide.',
-    }]
+    }, ...(ptr ? [ptr] : [])]
   }
   const { listener } = admin
   const items: HealthItem[] = [
@@ -196,7 +198,7 @@ function healthItems(admin: MailAdmin, hasProviders: boolean): HealthItem[] {
   } else {
     items.push({ label: 'Client address', state: 'info', detail: 'No client has connected since the start.', fix: 'Send a test message below to check it.' })
   }
-  items.push(ptrItem(admin.ptr, admin.hostname))
+  items.push(ptr ?? { label: 'Reverse DNS (PTR)', state: 'info', detail: 'Not needed: no outgoing provider sends directly from this server.' })
   return items
 }
 

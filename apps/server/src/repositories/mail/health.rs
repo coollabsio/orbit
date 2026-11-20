@@ -67,6 +67,16 @@ fn test_local_part() -> String {
 }
 
 impl MailRepository {
+    /// A send route of any scope sends directly from this installation.
+    pub async fn has_direct_route(&self) -> Result<bool, MailError> {
+        let found: orbit_platform::Flag = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM mail_send_routes WHERE kind = 'direct')",
+        )
+        .fetch_one(self.database.pool())
+        .await?;
+        Ok(found.0)
+    }
+
     /// The verified domains of all workspaces, by name.
     pub async fn test_domains(&self) -> Result<Vec<TestDomain>, MailError> {
         let rows = sqlx::query(

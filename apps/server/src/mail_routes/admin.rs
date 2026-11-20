@@ -123,6 +123,8 @@ pub(crate) struct MailAdmin {
     listener: MailListenerView,
     /// Looked up on each request.
     ptr: PtrStatus,
+    /// A send route sends directly from this installation, so recipients check the PTR.
+    direct_sending: bool,
     /// The verified domains of all workspaces, by name.
     test_domains: Vec<MailTestDomain>,
 }
@@ -154,6 +156,7 @@ async fn admin_view(
         .await
         .map_err(|error| fail(MailError::Unavailable(error)))?;
     let test_domains = state.mail.test_domains().await.map_err(fail)?;
+    let direct_sending = state.mail.has_direct_route().await.map_err(fail)?;
     let hostname = state.settings.hostname.clone();
     let now_secs = TimestampMillis::now().as_millis() / 1000;
     let listener = &state.listener;
@@ -180,6 +183,7 @@ async fn admin_view(
             cert,
         },
         ptr,
+        direct_sending,
         hostname,
         test_domains: test_domains
             .into_iter()

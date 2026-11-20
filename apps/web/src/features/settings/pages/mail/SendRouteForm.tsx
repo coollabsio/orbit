@@ -44,7 +44,7 @@ import {
 function kindHelp(kind: SendRouteKind): string | null {
   switch (kind) {
     case 'direct':
-      return 'Orbit delivers to each recipient’s mail server on port 25. This server must be allowed to send on port 25, with a PTR record for its address.'
+      return 'Orbit delivers to each recipient’s mail server on port 25. This server must be allowed to send on port 25, and the PTR record of its address must name the mail hostname, or receivers mark the mail as spam. The Health button on Admin → Mail checks it.'
     default: {
       const made = generatedSecrets(kind).map((name) => (SECRET_LABELS[name] ?? name).toLowerCase())
       if (made.length === 0) return null
