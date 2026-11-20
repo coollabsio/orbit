@@ -286,20 +286,32 @@ fn forwarded_transport(headers: &HeaderMap) -> Result<Option<RequestTransport>, 
     Ok(transport)
 }
 
-pub(crate) fn add_security_headers(
-    headers: &mut HeaderMap,
-    secure: bool,
-    csp_script_hash: Option<&str>,
-) {
-    let script_source = csp_script_hash
+/// The sources the app's own policy adds for this server: its script hash, and the origin of the mail view documents
+/// when it differs from the app's.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct CspSources {
+    pub(crate) script_hash: Option<String>,
+    pub(crate) frame_source: Option<String>,
+}
+
+pub(crate) fn add_security_headers(headers: &mut HeaderMap, secure: bool, csp: &CspSources) {
+    let script_source = csp
+        .script_hash
+        .as_deref()
         .map(|hash| format!("script-src 'self' '{hash}'; "))
         .unwrap_or_else(|| "script-src 'self'; ".to_owned());
     // The style-src hash is the empty string's: it allows only an empty `<style>`, which BlockNote's placeholder
     // plugin creates and then fills through the CSSOM (`insertRule`), which CSP does not restrict.
-    // `frame-src` `blob:` is the PDF preview (the file URL itself cannot be framed). Vimeo joins YouTube.
+    // `frame-src` `'self'` (or the mail content origin) is the sandboxed mail view document; `blob:` is the PDF
+    // preview (the file URL itself cannot be framed). Vimeo joins YouTube.
+    let frame_source = csp
+        .frame_source
+        .as_deref()
+        .map(|origin| format!(" {origin}"))
+        .unwrap_or_default();
     // `media-src` `https:` lets a document play an audio or video file the page links to.
     let policy = format!(
-        "default-src 'self'; {script_source}style-src 'self' 'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='; style-src-attr 'unsafe-inline'; img-src 'self' data: blob: https:; frame-src blob: https://www.youtube-nocookie.com https://player.vimeo.com; media-src 'self' https:; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'self' https://github.com"
+        "default-src 'self'; {script_source}style-src 'self' 'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='; style-src-attr 'unsafe-inline'; img-src 'self' data: blob: https:; frame-src 'self'{frame_source} blob: https://www.youtube-nocookie.com https://player.vimeo.com; media-src 'self' https:; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'self' https://github.com"
     );
     // A handler that sets its own policy keeps it (the sandboxed mail view document).
     let handler_policy = headers.contains_key(CONTENT_SECURITY_POLICY);
@@ -362,12 +374,12 @@ mod tests {
     use axum::http::header::{AUTHORIZATION, COOKIE, ORIGIN, UPGRADE};
     use axum::http::{HeaderMap, Method, Uri};
 
-    use super::{OriginPolicy, add_security_headers, bearer_token};
+    use super::{CspSources, OriginPolicy, add_security_headers, bearer_token};
 
     #[test]
     fn responses_refuse_framing_and_isolate_the_opener() {
         let mut headers = HeaderMap::new();
-        add_security_headers(&mut headers, true, None);
+        add_security_headers(&mut headers, true, &CspSources::default());
         assert_eq!(headers["x-frame-options"], "DENY");
         assert_eq!(headers["cross-origin-opener-policy"], "same-origin");
     }

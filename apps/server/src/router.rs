@@ -75,6 +75,7 @@ pub fn production_router(
     require_secure_transport: bool,
 ) -> Router {
     let csp_script_hash = assets.csp_script_hash().to_owned();
+    let mail_content_origin = api.mail.content_origin.clone();
     let session_cookie = api.auth.cookie_mode().session_cookie_name();
     let database = api.auth.database().clone();
     let realtime = crate::realtime::router(api.tasks.clone());
@@ -142,6 +143,10 @@ pub fn production_router(
             .with_session_cookie(session_cookie)
             .with_shared_rate_limits(database)
             .with_csp_script_hash(csp_script_hash);
+        let layer = match mail_content_origin {
+            Some(origin) => layer.with_csp_frame_source(origin),
+            None => layer,
+        };
         if require_secure_transport {
             layer.require_secure_transport()
         } else {

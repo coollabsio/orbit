@@ -841,7 +841,29 @@ async fn csp_allows_only_the_verified_bootstrap_hash_and_local_image_variants() 
     assert!(!csp.contains("http:"));
     assert_eq!(
         csp,
-        "default-src 'self'; script-src 'self' 'sha256-YWJj'; style-src 'self' 'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='; style-src-attr 'unsafe-inline'; img-src 'self' data: blob: https:; frame-src blob: https://www.youtube-nocookie.com https://player.vimeo.com; media-src 'self' https:; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'self' https://github.com"
+        "default-src 'self'; script-src 'self' 'sha256-YWJj'; style-src 'self' 'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='; style-src-attr 'unsafe-inline'; img-src 'self' data: blob: https:; frame-src 'self' blob: https://www.youtube-nocookie.com https://player.vimeo.com; media-src 'self' https:; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'self' https://github.com"
+    );
+}
+
+/// The app frames the sandboxed mail view document: from its own origin, or from `ORBIT_MAIL_CONTENT_ORIGIN`.
+#[tokio::test]
+async fn csp_frames_the_mail_content_origin() {
+    let app = Router::new()
+        .route("/", get(|| async { StatusCode::OK }))
+        .layer(
+            HttpPlatformLayer::new(OriginPolicy::new("https://orbit.test"))
+                .with_csp_frame_source("https://mail.orbit-content.test"),
+        );
+    let response = app
+        .oneshot(Request::get("/").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let csp = response.headers()[CONTENT_SECURITY_POLICY]
+        .to_str()
+        .unwrap();
+    assert!(
+        csp.contains("frame-src 'self' https://mail.orbit-content.test blob: "),
+        "{csp}"
     );
 }
 
