@@ -129,6 +129,35 @@ pub struct SavedSignInProvider {
     pub provider: Provider,
     pub client_id: String,
     pub client_secret: Vec<u8>,
+    /// Set for [`Provider::Oidc`] only.
+    pub oidc: Option<OidcSettings>,
+}
+
+/// The OpenID Connect provider's settings besides its client.
+#[derive(Clone, Debug)]
+pub struct OidcSettings {
+    /// Discovery reads `{issuer}/.well-known/openid-configuration`.
+    pub issuer: url::Url,
+    /// "Continue with {display_name}".
+    pub display_name: String,
+}
+
+/// A `sign_in_providers` row; `None` for an unknown provider or an OpenID Connect row without a valid issuer.
+fn saved_provider(row: &sqlx::any::AnyRow) -> Option<SavedSignInProvider> {
+    let provider = Provider::parse(&row.get::<String, _>("provider"))?;
+    let oidc = match provider {
+        Provider::Oidc => Some(OidcSettings {
+            issuer: url::Url::parse(&row.get::<Option<String>, _>("issuer")?).ok()?,
+            display_name: row.get::<Option<String>, _>("display_name")?,
+        }),
+        Provider::Google | Provider::Github => None,
+    };
+    Some(SavedSignInProvider {
+        provider,
+        client_id: row.get("client_id"),
+        client_secret: row.get("client_secret"),
+        oidc,
+    })
 }
 
 #[derive(Debug, Error)]
@@ -265,10 +294,18 @@ impl IdentityRepository {
             }
             _ => None,
         };
+        // A first OpenID Connect sign-in may create an account also when registration is closed: the identity
+        // provider decides who can sign in.
         let registration_open = owner.is_none()
             && email_account.is_none()
-            && super::environment_settings::registration_open(self.database(), &mut transaction)
-                .await?;
+            && (super::environment_settings::registration_open(self.database(), &mut transaction)
+                .await?
+                || (profile.provider == Provider::Oidc
+                    && super::environment_settings::oidc_provision(
+                        self.database(),
+                        &mut transaction,
+                    )
+                    .await?));
         let route = sign_in_route(
             owner,
             profile.verified_email.is_some(),
@@ -562,18 +599,13 @@ impl IdentityRepository {
 impl InstanceSettingsRepository {
     pub async fn sign_in_providers(&self) -> Result<Vec<SavedSignInProvider>, sqlx::Error> {
         let rows = sqlx::query(
-            "SELECT provider, client_id, client_secret FROM sign_in_providers ORDER BY provider",
+            "SELECT provider, client_id, client_secret, issuer, display_name FROM sign_in_providers \
+             ORDER BY provider",
         )
         .fetch_all(self.database.pool())
         .await?;
         let environment = EnvironmentSettings::of(&self.database);
-        let saved = rows.into_iter().filter_map(|row| {
-            Some(SavedSignInProvider {
-                provider: Provider::parse(&row.get::<String, _>("provider"))?,
-                client_id: row.get("client_id"),
-                client_secret: row.get("client_secret"),
-            })
-        });
+        let saved = rows.iter().filter_map(saved_provider);
         let mut providers = environment.sign_in_providers.clone();
         providers
             .extend(saved.filter(|saved| environment.sign_in_provider(saved.provider).is_none()));
@@ -589,49 +621,56 @@ impl InstanceSettingsRepository {
             return Ok(Some(saved.clone()));
         }
         let row = sqlx::query(
-            "SELECT client_id, client_secret FROM sign_in_providers WHERE provider = $1",
+            "SELECT provider, client_id, client_secret, issuer, display_name FROM sign_in_providers \
+             WHERE provider = $1",
         )
         .bind(provider.as_str())
         .fetch_optional(self.database.pool())
         .await?;
-        Ok(row.map(|row| SavedSignInProvider {
-            provider,
-            client_id: row.get("client_id"),
-            client_secret: row.get("client_secret"),
-        }))
+        Ok(row.as_ref().and_then(saved_provider))
     }
 
-    /// Saves the OAuth client. `client_secret: None` keeps the saved secret.
+    /// Saves the OAuth client. `client_secret: None` keeps the saved secret. `oidc` is set for
+    /// [`Provider::Oidc`] only.
     pub async fn save_sign_in_provider(
         &self,
         actor_id: Id,
         provider: Provider,
         client_id: &str,
         client_secret: Option<Vec<u8>>,
+        oidc: Option<&OidcSettings>,
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<(), SaveSignInProviderError> {
+        let issuer = oidc.map(|oidc| oidc.issuer.as_str().trim_end_matches('/').to_owned());
+        let display_name = oidc.map(|oidc| oidc.display_name.clone());
         let mut transaction = self.database.immediate_transaction().await?;
         match client_secret {
             Some(secret) => {
                 sqlx::query(
-                    "INSERT INTO sign_in_providers (provider, client_id, client_secret, created_at, updated_at) \
-                     VALUES ($1, $2, $3, $4, $4) ON CONFLICT (provider) DO UPDATE SET \
+                    "INSERT INTO sign_in_providers (provider, client_id, client_secret, issuer, display_name, \
+                     created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $6) ON CONFLICT (provider) DO UPDATE SET \
                      client_id = excluded.client_id, client_secret = excluded.client_secret, \
+                     issuer = excluded.issuer, display_name = excluded.display_name, \
                      updated_at = excluded.updated_at",
                 )
                 .bind(provider.as_str())
                 .bind(client_id)
                 .bind(secret)
+                .bind(issuer)
+                .bind(display_name)
                 .bind(now.as_millis())
                 .execute(&mut *transaction)
                 .await?;
             }
             None => {
                 let updated = sqlx::query(
-                    "UPDATE sign_in_providers SET client_id = $1, updated_at = $2 WHERE provider = $3",
+                    "UPDATE sign_in_providers SET client_id = $1, issuer = $2, display_name = $3, updated_at = $4 \
+                     WHERE provider = $5",
                 )
                 .bind(client_id)
+                .bind(issuer)
+                .bind(display_name)
                 .bind(now.as_millis())
                 .bind(provider.as_str())
                 .execute(&mut *transaction)

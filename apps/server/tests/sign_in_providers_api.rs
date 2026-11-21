@@ -458,6 +458,40 @@ impl Fixture {
         .await
     }
 
+    /// Sets the OpenID Connect provider at `{fake_url}/oidc` as `ORBIT_OIDC_*` and `ORBIT_OIDC_PROVISION` would.
+    fn install_oidc(&self, oidc_provision: Option<bool>) -> String {
+        let issuer = format!("{}/oidc", self.fake_url);
+        orbit_server::repositories::environment_settings::EnvironmentSettings::from_config(
+            &orbit_platform::InstanceConfig {
+                oidc: Some(orbit_platform::OidcConfig {
+                    issuer: issuer.clone(),
+                    client: orbit_platform::OAuthClientConfig {
+                        client_id: "oidc-client".to_owned(),
+                        client_secret: orbit_platform::Secret::new(CLIENT_SECRET.to_owned()),
+                    },
+                    display_name: "Pocket ID".to_owned(),
+                }),
+                oidc_provision,
+                ..orbit_platform::InstanceConfig::default()
+            },
+            &APP_KEY,
+        )
+        .unwrap()
+        .install(&self.database);
+        issuer
+    }
+
+    async fn set_oidc_provision(&self, on: bool) -> Reply {
+        self.send(
+            "PUT",
+            "/api/v1/admin/settings/oidc-provision",
+            Some(&self.owner_cookie),
+            true,
+            Some(json!({"on": on})),
+        )
+        .await
+    }
+
     /// Signs up a new account with Google (registration open) and returns its session cookie.
     async fn provider_only_account(&self, sub: &'static str, email: &'static str) -> String {
         self.database
@@ -514,9 +548,9 @@ async fn admin_saves_providers_with_an_encrypted_secret_that_an_empty_save_keeps
     assert_eq!(
         saved.body["sign_in_providers"],
         json!([
-            {"provider": "github", "client_id": "github-client", "issuer": null, "secret_set": true,
+            {"provider": "github", "client_id": "github-client", "issuer": null, "display_name": null, "secret_set": true,
              "callback_url": "https://orbit.test/api/v1/auth/providers/github/callback"},
-            {"provider": "google", "client_id": "google-client-2", "issuer": null, "secret_set": true,
+            {"provider": "google", "client_id": "google-client-2", "issuer": null, "display_name": null, "secret_set": true,
              "callback_url": "https://orbit.test/api/v1/auth/providers/google/callback"},
         ])
     );
@@ -1511,23 +1545,7 @@ async fn five_wrong_passwords_end_the_link_step() {
 #[tokio::test]
 async fn openid_connect_comes_from_the_environment_and_keys_links_by_issuer_and_subject() {
     let fixture = Fixture::new().await;
-    let issuer = format!("{}/oidc", fixture.fake_url);
-    orbit_server::repositories::environment_settings::EnvironmentSettings::from_config(
-        &orbit_platform::InstanceConfig {
-            oidc: Some(orbit_platform::OidcConfig {
-                issuer: issuer.clone(),
-                client: orbit_platform::OAuthClientConfig {
-                    client_id: "oidc-client".to_owned(),
-                    client_secret: orbit_platform::Secret::new(CLIENT_SECRET.to_owned()),
-                },
-                display_name: "Pocket ID".to_owned(),
-            }),
-            ..orbit_platform::InstanceConfig::default()
-        },
-        &APP_KEY,
-    )
-    .unwrap()
-    .install(&fixture.database);
+    let issuer = fixture.install_oidc(None);
 
     let options = fixture
         .send("GET", "/api/v1/auth/options", None, false, None)
@@ -1553,7 +1571,7 @@ async fn openid_connect_comes_from_the_environment_and_keys_links_by_issuer_and_
     );
     assert_eq!(
         settings.body["sign_in_providers"][2],
-        json!({"provider": "oidc", "client_id": "oidc-client", "issuer": issuer, "secret_set": true,
+        json!({"provider": "oidc", "client_id": "oidc-client", "issuer": issuer, "display_name": "Pocket ID", "secret_set": true,
                "callback_url": "https://orbit.test/api/v1/auth/providers/oidc/callback"})
     );
     let save = fixture
@@ -1620,4 +1638,235 @@ async fn openid_connect_comes_from_the_environment_and_keys_links_by_issuer_and_
         .await;
     assert_eq!(unverified.status, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(unverified.code(), "provider_email_unverified");
+}
+
+#[tokio::test]
+async fn oidc_provision_creates_accounts_with_registration_closed_and_only_for_openid_connect() {
+    let fixture = Fixture::new().await;
+    let refused = fixture.set_oidc_provision(true).await;
+    assert_eq!(refused.status, StatusCode::CONFLICT);
+    assert_eq!(refused.code(), "oidc_not_configured");
+
+    fixture.install_oidc(None);
+    let closed = fixture
+        .flow(
+            "oidc",
+            "sign_in",
+            FakeUser::Oidc {
+                sub: "a1",
+                email: "first@example.com",
+                verified: true,
+            },
+            None,
+        )
+        .await;
+    assert_eq!(closed.code(), "registration_closed");
+
+    let on = fixture.set_oidc_provision(true).await;
+    assert_eq!(on.status, StatusCode::OK, "{}", on.body);
+    assert_eq!(on.body["oidc_provision"], true);
+    assert_eq!(on.body["registration_open"], false);
+    assert_eq!(on.body["environment"]["oidc_provision"], false);
+    assert_eq!(
+        fixture
+            .scalar_i64(
+                "SELECT COUNT(*) FROM audit_events WHERE action = 'instance.oidc_provision_enabled'"
+            )
+            .await,
+        1
+    );
+    let options = fixture
+        .send("GET", "/api/v1/auth/options", None, false, None)
+        .await;
+    assert_eq!(options.body["oidc_provision"], true);
+    assert_eq!(options.body["provider_registration_open"], false);
+
+    let created = fixture
+        .flow(
+            "oidc",
+            "sign_in",
+            FakeUser::Oidc {
+                sub: "a1",
+                email: "First@Example.com",
+                verified: true,
+            },
+            None,
+        )
+        .await;
+    assert_eq!(created.status, StatusCode::OK, "{}", created.body);
+    assert_eq!(created.body["user"]["email"], "first@example.com");
+    assert_eq!(created.body["user"]["has_password"], false);
+    let unverified = fixture
+        .flow(
+            "oidc",
+            "sign_in",
+            FakeUser::Oidc {
+                sub: "b2",
+                email: "unverified@example.com",
+                verified: false,
+            },
+            None,
+        )
+        .await;
+    assert_eq!(unverified.code(), "provider_email_unverified");
+    let github = fixture
+        .flow("github", "sign_in", github(8, "octo@example.com"), None)
+        .await;
+    assert_eq!(github.code(), "registration_closed");
+
+    let off = fixture.set_oidc_provision(false).await;
+    assert_eq!(off.body["oidc_provision"], false);
+    let closed_again = fixture
+        .flow(
+            "oidc",
+            "sign_in",
+            FakeUser::Oidc {
+                sub: "c3",
+                email: "second@example.com",
+                verified: true,
+            },
+            None,
+        )
+        .await;
+    assert_eq!(closed_again.code(), "registration_closed");
+    assert_eq!(fixture.scalar_i64("SELECT COUNT(*) FROM users").await, 2);
+}
+
+#[tokio::test]
+async fn oidc_provision_from_the_environment_cannot_change_in_admin() {
+    let fixture = Fixture::new().await;
+    fixture.install_oidc(Some(true));
+    let settings = fixture
+        .send(
+            "GET",
+            "/api/v1/admin/settings",
+            Some(&fixture.owner_cookie),
+            true,
+            None,
+        )
+        .await;
+    assert_eq!(settings.body["oidc_provision"], true);
+    assert_eq!(settings.body["environment"]["oidc_provision"], true);
+    let locked = fixture.set_oidc_provision(false).await;
+    assert_eq!(locked.status, StatusCode::CONFLICT);
+    assert_eq!(locked.code(), "set_by_environment");
+    let created = fixture
+        .flow(
+            "oidc",
+            "sign_in",
+            FakeUser::Oidc {
+                sub: "e1",
+                email: "env@example.com",
+                verified: true,
+            },
+            None,
+        )
+        .await;
+    assert_eq!(created.status, StatusCode::OK, "{}", created.body);
+}
+
+#[tokio::test]
+async fn admin_saves_openid_connect_with_its_issuer_and_people_sign_in_with_it() {
+    let fixture = Fixture::new().await;
+    let issuer = format!("{}/oidc", fixture.fake_url);
+    for (body, detail) in [
+        (
+            json!({"client_id": "oidc-client", "client_secret": CLIENT_SECRET}),
+            "issuer",
+        ),
+        (
+            json!({"client_id": "oidc-client", "client_secret": CLIENT_SECRET, "issuer": "https://idp.example/?realm=x"}),
+            "issuer",
+        ),
+        (
+            json!({"client_id": "oidc-client", "client_secret": CLIENT_SECRET, "issuer": issuer, "display_name": "x".repeat(51)}),
+            "display_name",
+        ),
+    ] {
+        let refused = fixture.admin_save("oidc", body).await;
+        assert_eq!(refused.status, StatusCode::UNPROCESSABLE_ENTITY, "{detail}");
+        assert!(
+            refused.body["detail"].as_str().unwrap().starts_with(detail),
+            "{}",
+            refused.body
+        );
+    }
+    let google = fixture
+        .admin_save(
+            "google",
+            json!({"client_id": "google-client", "issuer": "https://idp.example"}),
+        )
+        .await;
+    assert_eq!(google.code(), "invalid_sign_in_provider");
+
+    let saved = fixture
+        .admin_save(
+            "oidc",
+            json!({"client_id": "oidc-client", "client_secret": CLIENT_SECRET, "issuer": format!("{issuer}/")}),
+        )
+        .await;
+    assert_eq!(saved.status, StatusCode::OK, "{}", saved.body);
+    assert_eq!(
+        saved.body["sign_in_providers"][2],
+        json!({"provider": "oidc", "client_id": "oidc-client", "issuer": issuer, "display_name": "SSO",
+               "secret_set": true, "callback_url": "https://orbit.test/api/v1/auth/providers/oidc/callback"})
+    );
+    assert_eq!(saved.body["environment"]["sign_in_providers"], json!([]));
+    // A save without a secret keeps it and can rename the button.
+    let renamed = fixture
+        .admin_save(
+            "oidc",
+            json!({"client_id": "oidc-client", "issuer": issuer, "display_name": "Authentik"}),
+        )
+        .await;
+    assert_eq!(renamed.status, StatusCode::OK, "{}", renamed.body);
+    let options = fixture
+        .send("GET", "/api/v1/auth/options", None, false, None)
+        .await;
+    assert_eq!(
+        options.body["providers"],
+        json!(["github", "google", "oidc"])
+    );
+    assert_eq!(options.body["oidc_name"], "Authentik");
+
+    let on = fixture.set_oidc_provision(true).await;
+    assert_eq!(on.status, StatusCode::OK, "{}", on.body);
+    let created = fixture
+        .flow(
+            "oidc",
+            "sign_in",
+            FakeUser::Oidc {
+                sub: "s1",
+                email: "saved@example.com",
+                verified: true,
+            },
+            None,
+        )
+        .await;
+    assert_eq!(created.status, StatusCode::OK, "{}", created.body);
+    assert_eq!(
+        fixture
+            .database
+            .scalar::<String>("SELECT subject FROM user_identities WHERE provider = 'oidc'")
+            .await
+            .unwrap(),
+        format!("{issuer} s1")
+    );
+
+    let removed = fixture
+        .send(
+            "DELETE",
+            "/api/v1/admin/settings/sign-in-providers/oidc",
+            Some(&fixture.owner_cookie),
+            true,
+            None,
+        )
+        .await;
+    assert_eq!(removed.status, StatusCode::OK);
+    let options = fixture
+        .send("GET", "/api/v1/auth/options", None, false, None)
+        .await;
+    assert_eq!(options.body["providers"], json!(["github", "google"]));
+    assert_eq!(options.body["oidc_provision"], false);
+    assert_eq!(options.body["oidc_name"], Value::Null);
 }

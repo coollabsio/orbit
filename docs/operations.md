@@ -80,9 +80,10 @@ The variables of one group are set together. For example, `ORBIT_SMTP_HOST` need
 | `ORBIT_OPEN_REGISTRATION` | saved value | `true` or `false`. `true` requires `ORBIT_SMTP_*` or a provider variable below. On Orbit Cloud, it requires `ORBIT_SMTP_*`. |
 | `ORBIT_GOOGLE_CLIENT_ID`, `ORBIT_GOOGLE_CLIENT_SECRET`, `ORBIT_GOOGLE_CLIENT_SECRET_FILE` | none | The Google OAuth client. Set the ID and the secret together. See [Sign in with Google and GitHub](#sign-in-with-google-and-github). |
 | `ORBIT_GITHUB_CLIENT_ID`, `ORBIT_GITHUB_CLIENT_SECRET`, `ORBIT_GITHUB_CLIENT_SECRET_FILE` | none | The GitHub OAuth client. Set the ID and the secret together. |
-| `ORBIT_OIDC_ISSUER` | none | The issuer URL of an OpenID Connect provider, for example `https://auth.example.com/application/o/orbit/`. Requires `ORBIT_OIDC_CLIENT_ID` and `ORBIT_OIDC_CLIENT_SECRET`. See [Sign in with OpenID Connect](#sign-in-with-openid-connect). |
+| `ORBIT_OIDC_ISSUER` | saved provider | The issuer URL of an OpenID Connect provider, for example `https://auth.example.com/application/o/orbit/`. Requires `ORBIT_OIDC_CLIENT_ID` and `ORBIT_OIDC_CLIENT_SECRET`. See [Sign in with OpenID Connect](#sign-in-with-openid-connect). |
 | `ORBIT_OIDC_CLIENT_ID`, `ORBIT_OIDC_CLIENT_SECRET`, `ORBIT_OIDC_CLIENT_SECRET_FILE` | none | The client that the provider issued to Orbit. |
 | `ORBIT_OIDC_DISPLAY_NAME` | `SSO` | The name on the sign-in button ("Continue with SSO"), at most 50 characters. |
+| `ORBIT_OIDC_PROVISION` | saved value (`false`) | `true` or `false`. `true`: a first OpenID Connect sign-in creates an account, also when open registration is off. It has no effect without an OpenID Connect provider. See [Create accounts at the first sign-in](#create-accounts-at-the-first-sign-in). |
 
 Orbit does not test the `ORBIT_S3_*` bucket at startup, as Admin does when it saves one. An unreachable bucket shows up as a move error on **Admin → Storage** and as failed backups. Orbit refuses to start when a workspace's own bucket overlaps the `ORBIT_S3_*` bucket.
 
@@ -257,20 +258,28 @@ Orbit uses these rules:
 
 ## Sign in with OpenID Connect
 
-People can sign in with your own identity provider, for example Authentik, Keycloak, Authelia, Zitadel or Pocket ID. Orbit supports one OpenID Connect provider. Only the `ORBIT_OIDC_*` variables configure it, so **Admin → Sign-in providers** shows it read-only.
+People can sign in with your own identity provider, for example Authentik, Keycloak, Authelia, Zitadel or Pocket ID. Orbit supports one OpenID Connect provider. Save it in **Admin → Sign-in providers → OpenID Connect**, or set it with the `ORBIT_OIDC_*` variables. When the variables are set, they replace the saved provider, and Admin shows it read-only.
 
 1. At the identity provider, create a confidential client (an OAuth2/OpenID Connect application with a client secret) that uses the authorization code flow.
 2. Add this redirect URI: `{ORBIT_PUBLIC_ORIGIN}/api/v1/auth/providers/oidc/callback`.
 3. Allow the scopes `openid`, `email` and `profile`.
-4. Set `ORBIT_OIDC_ISSUER`, `ORBIT_OIDC_CLIENT_ID` and `ORBIT_OIDC_CLIENT_SECRET` (or `ORBIT_OIDC_CLIENT_SECRET_FILE`). Optionally, set `ORBIT_OIDC_DISPLAY_NAME`. Restart Orbit.
+4. In **Admin → Sign-in providers → OpenID Connect**, enter the issuer, the client ID and the client secret, and optionally a display name. Then click **Save OpenID Connect**. Or set `ORBIT_OIDC_ISSUER`, `ORBIT_OIDC_CLIENT_ID` and `ORBIT_OIDC_CLIENT_SECRET` (or `ORBIT_OIDC_CLIENT_SECRET_FILE`), optionally `ORBIT_OIDC_DISPLAY_NAME`, and restart Orbit.
 
-`ORBIT_OIDC_ISSUER` must be the `issuer` value of the provider's `{issuer}/.well-known/openid-configuration` document; Orbit refuses a document that names another issuer. Orbit reads this document at each sign-in, so it gets the endpoints of the provider, and a provider that is not available at startup does not stop Orbit. The provider must have a userinfo endpoint. Orbit sends the client secret with HTTP Basic authentication (`client_secret_basic`). It uses `client_secret_post` only when the provider does not support Basic.
+The issuer must be the `issuer` value of the provider's `{issuer}/.well-known/openid-configuration` document; Orbit refuses a document that names another issuer. Orbit reads this document at each sign-in, so it gets the endpoints of the provider, and a provider that is not available at startup does not stop Orbit. The provider must have a userinfo endpoint. Orbit sends the client secret with HTTP Basic authentication (`client_secret_basic`). It uses `client_secret_post` only when the provider does not support Basic.
 
 The rules of [Sign in with Google and GitHub](#sign-in-with-google-and-github) apply, with these details:
 
-- Orbit identifies an account by the issuer and the `sub` claim together. If you change `ORBIT_OIDC_ISSUER`, the existing connections do not apply. At the next sign-in, people connect again with a verified email.
+- Orbit identifies an account by the issuer and the `sub` claim together. If you change the issuer, the existing connections do not apply. At the next sign-in, people connect again with a verified email.
 - A first sign-in connects to an existing account only when the provider sends `email_verified` as `true`. Some providers send `false` until you configure email verification. Then Orbit refuses the first sign-in because the email is not verified.
 - A security confirmation asks the provider for a new sign-in (`prompt=login`, `max_age=0`). A normal sign-in uses the provider's session, so people who are signed in to the provider continue without a new sign-in.
+
+### Create accounts at the first sign-in
+
+By default, a first sign-in creates an account only when open registration is on, and open registration also lets people sign up with an emailed link. To let only your identity provider create accounts, turn on **Create accounts at first sign-in** in **Admin → Sign-in providers → OpenID Connect**, or set `ORBIT_OIDC_PROVISION=true`. When the variable is set, Admin shows the setting read-only.
+
+- A first OpenID Connect sign-in with a verified email then creates an account, also when open registration is off.
+- Email sign-up, Google and GitHub do not change: they still need open registration.
+- Anyone who can sign in at the identity provider gets an account. If the provider lets people sign up themselves, this is the same as open registration. Limit who can use the Orbit client at the provider.
 
 ### Native app redirects
 

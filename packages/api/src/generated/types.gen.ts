@@ -459,10 +459,14 @@ export type AuthOptions = {
      */
     mail_enabled: boolean;
     /**
-     * The label of the OpenID Connect provider on the sign-in buttons ("Continue with {oidc_name}"), from
-     * `ORBIT_OIDC_DISPLAY_NAME`. `null` when it is not set up.
+     * The label of the OpenID Connect provider on the sign-in buttons ("Continue with {oidc_name}"). `null` when it
+     * is not set up.
      */
     oidc_name?: string | null;
+    /**
+     * A first sign-in with OpenID Connect creates an account, also when registration is closed.
+     */
+    oidc_provision: boolean;
     /**
      * People can add passkeys and sign in with them (the public origin is a domain name).
      */
@@ -2657,6 +2661,10 @@ export type EnvironmentView = {
      */
     backups_in_s3: boolean;
     /**
+     * `ORBIT_OIDC_PROVISION`.
+     */
+    oidc_provision: boolean;
+    /**
      * `ORBIT_OPEN_REGISTRATION`.
      */
     registration_open: boolean;
@@ -3343,6 +3351,11 @@ export type InstanceSettingsView = {
     environment: EnvironmentView;
     limits: LimitsView;
     mail: InstanceMailView;
+    /**
+     * A first OpenID Connect sign-in creates an account, also when registration is closed. No effect without an
+     * OpenID Connect provider.
+     */
+    oidc_provision: boolean;
     registration_open: boolean;
     /**
      * Registration can open: a mail server or (not on Orbit Cloud) a sign-in provider confirms new emails.
@@ -6639,6 +6652,10 @@ export type ObsidianSkippedFiles = {
      * Files no note links to or embeds.
      */
     unreferenced: number;
+};
+
+export type OidcProvisionBody = {
+    on: boolean;
 };
 
 /**
@@ -10818,13 +10835,22 @@ export type SignInIntent = 'sign_in' | 'connect' | 'confirm';
 
 export type SignInProviderBody = {
     /**
-     * The OAuth client ID from Google Cloud or the GitHub OAuth App.
+     * The OAuth client ID from Google Cloud, the GitHub OAuth App or the OpenID Connect provider.
      */
     client_id: string;
     /**
      * Absent or empty: keep the saved secret. Required the first time.
      */
     client_secret?: string | null;
+    /**
+     * OpenID Connect only: the name on the sign-in button, at most 50 characters. Absent or empty: "SSO".
+     */
+    display_name?: string | null;
+    /**
+     * OpenID Connect only, and required there: the `issuer` of the provider's
+     * `{issuer}/.well-known/openid-configuration`, an http(s) URL without query or fragment.
+     */
+    issuer?: string | null;
 };
 
 export type SignInProviderView = {
@@ -10834,7 +10860,11 @@ export type SignInProviderView = {
     callback_url: string;
     client_id: string;
     /**
-     * The OpenID Connect issuer (`ORBIT_OIDC_ISSUER`); `null` for Google and GitHub.
+     * The name on the OpenID Connect sign-in button ("Continue with {display_name}"); `null` for Google and GitHub.
+     */
+    display_name?: string | null;
+    /**
+     * The OpenID Connect issuer; `null` for Google and GitHub.
      */
     issuer?: string | null;
     provider: Provider;
@@ -27984,6 +28014,58 @@ export type SaveLimitsResponses = {
 };
 
 export type SaveLimitsResponse = SaveLimitsResponses[keyof SaveLimitsResponses];
+
+export type SetOidcProvisionData = {
+    body: OidcProvisionBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/admin/settings/oidc-provision';
+};
+
+export type SetOidcProvisionErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden, installation_admin_required
+     */
+    403: WorkspaceProblem;
+    /**
+     * contract_mismatch, oidc_not_configured, set_by_environment
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type SetOidcProvisionError = SetOidcProvisionErrors[keyof SetOidcProvisionErrors];
+
+export type SetOidcProvisionResponses = {
+    200: InstanceSettingsView;
+};
+
+export type SetOidcProvisionResponse = SetOidcProvisionResponses[keyof SetOidcProvisionResponses];
 
 export type SetRegistrationData = {
     body: RegistrationBody;

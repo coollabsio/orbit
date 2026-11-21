@@ -1,7 +1,7 @@
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/api/client'
 import { queryKeys } from '@/api/queryKeys'
-import { changeUserEmail, getAdminUserSummary, createBackup, createRecoveryLink, deleteBackup, getInstanceSettings, getJobLimits, saveJobLimits, listAdminUsers, listBackupItems, listBackups, listBackupWorkspaces, restoreBackupItem, listGlobalAudit, removeS3, removeSignInProvider, removeSmtp, resetTwoFactor, saveLimits, saveS3, saveSignInProvider, saveStorageOptions, setInstanceAdmin, startImageCompression, saveSmtp, sendTestEmail, setAccountSuspension, setRegistration } from '@orbit/api/generated/sdk.gen'
+import { changeUserEmail, getAdminUserSummary, createBackup, createRecoveryLink, deleteBackup, getInstanceSettings, getJobLimits, saveJobLimits, listAdminUsers, listBackupItems, listBackups, listBackupWorkspaces, restoreBackupItem, listGlobalAudit, removeS3, removeSignInProvider, removeSmtp, resetTwoFactor, saveLimits, saveS3, saveSignInProvider, saveStorageOptions, setInstanceAdmin, startImageCompression, saveSmtp, sendTestEmail, setAccountSuspension, setOidcProvision, setRegistration } from '@orbit/api/generated/sdk.gen'
 import type { BackupItemKind, InstanceSettingsView, JobLimitsBody, LimitsView, Provider, S3Body, SignInProviderBody, SmtpBody, StorageOptionsBody } from '@orbit/api/generated/types.gen'
 
 /** How many results the user search shows; more matches ask for a longer search. */
@@ -210,6 +210,13 @@ function useSettingsWrite<T>(write: (input: T) => Promise<InstanceSettingsView>)
 export function useSetRegistration() {
   return useSettingsWrite(async (open: boolean) => {
     const { data } = await setRegistration({ client: apiClient, throwOnError: true, body: { open } })
+    return data
+  })
+}
+
+export function useSetOidcProvision() {
+  return useSettingsWrite(async (on: boolean) => {
+    const { data } = await setOidcProvision({ client: apiClient, throwOnError: true, body: { on } })
     return data
   })
 }

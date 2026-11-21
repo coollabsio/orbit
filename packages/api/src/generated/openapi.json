@@ -33180,6 +33180,123 @@
         ]
       }
     },
+    "/api/v1/admin/settings/oidc-provision": {
+      "put": {
+        "tags": [
+          "crate::workspace_routes"
+        ],
+        "summary": "Turns on or off that a first OpenID Connect sign-in creates an account, also when registration is closed. Turning\nit on needs an OpenID Connect provider, saved here or set with `ORBIT_OIDC_*` (409 `oidc_not_configured`).",
+        "operationId": "set_oidc_provision",
+        "parameters": [
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OidcProvisionBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstanceSettingsView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden, installation_admin_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch, oidc_not_configured, set_by_environment",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/settings/registration": {
       "put": {
         "tags": [
@@ -101167,6 +101284,7 @@
           "mail_enabled",
           "providers",
           "provider_registration_open",
+          "oidc_provision",
           "version"
         ],
         "properties": {
@@ -101187,7 +101305,11 @@
               "string",
               "null"
             ],
-            "description": "The label of the OpenID Connect provider on the sign-in buttons (\"Continue with {oidc_name}\"), from\n`ORBIT_OIDC_DISPLAY_NAME`. `null` when it is not set up."
+            "description": "The label of the OpenID Connect provider on the sign-in buttons (\"Continue with {oidc_name}\"). `null` when it\nis not set up."
+          },
+          "oidc_provision": {
+            "type": "boolean",
+            "description": "A first sign-in with OpenID Connect creates an account, also when registration is closed."
           },
           "passkeys_enabled": {
             "type": "boolean",
@@ -106341,6 +106463,7 @@
         "description": "`true` for each setting that an environment variable sets.",
         "required": [
           "registration_open",
+          "oidc_provision",
           "smtp",
           "s3",
           "attachments_in_s3",
@@ -106361,6 +106484,10 @@
           "backups_in_s3": {
             "type": "boolean",
             "description": "`ORBIT_S3_BACKUPS`."
+          },
+          "oidc_provision": {
+            "type": "boolean",
+            "description": "`ORBIT_OIDC_PROVISION`."
           },
           "registration_open": {
             "type": "boolean",
@@ -107885,6 +108012,7 @@
         "type": "object",
         "required": [
           "registration_open",
+          "oidc_provision",
           "registration_ready",
           "storage",
           "limits",
@@ -107902,6 +108030,10 @@
           },
           "mail": {
             "$ref": "#/components/schemas/InstanceMailView"
+          },
+          "oidc_provision": {
+            "type": "boolean",
+            "description": "A first OpenID Connect sign-in creates an account, also when registration is closed. No effect without an\nOpenID Connect provider."
           },
           "registration_open": {
             "type": "boolean"
@@ -116154,6 +116286,18 @@
             "minimum": 0
           }
         }
+      },
+      "OidcProvisionBody": {
+        "type": "object",
+        "required": [
+          "on"
+        ],
+        "properties": {
+          "on": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
       },
       "OrbitImport": {
         "type": "object",
@@ -125749,7 +125893,7 @@
         "properties": {
           "client_id": {
             "type": "string",
-            "description": "The OAuth client ID from Google Cloud or the GitHub OAuth App."
+            "description": "The OAuth client ID from Google Cloud, the GitHub OAuth App or the OpenID Connect provider."
           },
           "client_secret": {
             "type": [
@@ -125757,6 +125901,20 @@
               "null"
             ],
             "description": "Absent or empty: keep the saved secret. Required the first time."
+          },
+          "display_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "OpenID Connect only: the name on the sign-in button, at most 50 characters. Absent or empty: \"SSO\"."
+          },
+          "issuer": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "OpenID Connect only, and required there: the `issuer` of the provider's\n`{issuer}/.well-known/openid-configuration`, an http(s) URL without query or fragment."
           }
         },
         "additionalProperties": false
@@ -125777,12 +125935,19 @@
           "client_id": {
             "type": "string"
           },
+          "display_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The name on the OpenID Connect sign-in button (\"Continue with {display_name}\"); `null` for Google and GitHub."
+          },
           "issuer": {
             "type": [
               "string",
               "null"
             ],
-            "description": "The OpenID Connect issuer (`ORBIT_OIDC_ISSUER`); `null` for Google and GitHub."
+            "description": "The OpenID Connect issuer; `null` for Google and GitHub."
           },
           "provider": {
             "$ref": "#/components/schemas/Provider"

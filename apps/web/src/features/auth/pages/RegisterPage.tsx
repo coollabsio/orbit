@@ -18,7 +18,8 @@ function RequestRegistration() {
   const [email, setEmail] = useState('')
   if (mutation.isSuccess) return <AuthMessage title="Check your email" detail={`${mutation.data.detail} The link expires in 60 minutes.`} />
   // A provider can create the account without a mail server, so email sign-up may be off while providers are on.
-  const providers = options.data?.provider_registration_open ? options.data.providers : []
+  // OpenID Connect can create accounts also when registration is closed (Admin → Sign-in providers).
+  const providers = options.data?.provider_registration_open ? options.data.providers : options.data?.oidc_provision ? ['oidc' as const] : []
   if (options.data && !options.data.registration_open && providers.length === 0) {
     return <AuthMessage title="Registration is closed" detail="This Orbit does not accept new accounts. Ask an administrator for an invitation." />
   }

@@ -38,6 +38,7 @@ const OIDC_ISSUER: &str = "ORBIT_OIDC_ISSUER";
 const OIDC_CLIENT_ID: &str = "ORBIT_OIDC_CLIENT_ID";
 const OIDC_CLIENT_SECRET: &str = "ORBIT_OIDC_CLIENT_SECRET";
 const OIDC_DISPLAY_NAME: &str = "ORBIT_OIDC_DISPLAY_NAME";
+const OIDC_PROVISION: &str = "ORBIT_OIDC_PROVISION";
 
 const SECRETS: [&str; 5] = [
     SMTP_PASSWORD,
@@ -64,7 +65,7 @@ const S3_KEYS: [&str; 7] = [
     S3_SECRET_ACCESS_KEY,
     S3_PATH_STYLE,
 ];
-const OTHER_KEYS: [&str; 13] = [
+const OTHER_KEYS: [&str; 14] = [
     OPEN_REGISTRATION,
     AUTOMATIC_BACKUPS,
     S3_ATTACHMENTS,
@@ -78,6 +79,7 @@ const OTHER_KEYS: [&str; 13] = [
     OIDC_CLIENT_ID,
     OIDC_CLIENT_SECRET,
     OIDC_DISPLAY_NAME,
+    OIDC_PROVISION,
 ];
 
 /// The variable is read by [`InstanceConfig::from_environment`].
@@ -202,6 +204,8 @@ pub struct InstanceConfig {
     pub google: Option<OAuthClientConfig>,
     pub github: Option<OAuthClientConfig>,
     pub oidc: Option<OidcConfig>,
+    /// A first OpenID Connect sign-in creates an account, also when registration is closed.
+    pub oidc_provision: Option<bool>,
 }
 
 impl InstanceConfig {
@@ -262,6 +266,7 @@ impl InstanceConfig {
             google: oauth_client(&values, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET)?,
             github: oauth_client(&values, GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET)?,
             oidc: oidc(&values)?,
+            oidc_provision: values.flag(OIDC_PROVISION)?,
         };
         if config.registration_open == Some(true)
             && config.smtp.is_none()
@@ -335,6 +340,9 @@ impl InstanceConfig {
             push(OIDC_CLIENT_ID, &oidc.client.client_id);
             push(OIDC_CLIENT_SECRET, "[REDACTED]");
             push(OIDC_DISPLAY_NAME, &oidc.display_name);
+        }
+        if let Some(provision) = self.oidc_provision {
+            push(OIDC_PROVISION, &provision.to_string());
         }
         lines
     }
@@ -549,8 +557,31 @@ fn oauth_client(
     }))
 }
 
-/// `ORBIT_OIDC_ISSUER` is an `http(s)` URL without query or fragment (OpenID Connect Discovery 1.0, section 2),
-/// at most 255 characters: the identity key is the issuer and `sub` together.
+/// The issuer of an OpenID Connect provider without a trailing `/`, or `None` when it is not an `http(s)` URL without
+/// query or fragment (OpenID Connect Discovery 1.0, section 2) of at most 255 characters: the identity key is the
+/// issuer and `sub` together.
+#[must_use]
+pub fn oidc_issuer(value: &str) -> Option<String> {
+    let issuer = value.trim().trim_end_matches('/');
+    let valid = url::Url::parse(issuer).is_ok_and(|url| {
+        matches!(url.scheme(), "https" | "http")
+            && url.host().is_some()
+            && url.query().is_none()
+            && url.fragment().is_none()
+    });
+    (valid && issuer.len() <= 255).then(|| issuer.to_owned())
+}
+
+/// The name on the OpenID Connect sign-in button: "SSO" when empty, `None` when longer than 50 characters.
+#[must_use]
+pub fn oidc_display_name(value: Option<&str>) -> Option<String> {
+    let name = value
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .unwrap_or("SSO");
+    (name.chars().count() <= 50).then(|| name.to_owned())
+}
+
 fn oidc(values: &Values<'_>) -> Result<Option<OidcConfig>, ConfigError> {
     let keys = [
         OIDC_ISSUER,
@@ -561,29 +592,16 @@ fn oidc(values: &Values<'_>) -> Result<Option<OidcConfig>, ConfigError> {
     if !values.any(&keys) {
         return Ok(None);
     }
-    let issuer = required(values, OIDC_ISSUER, "ORBIT_OIDC_*")?
-        .trim_end_matches('/')
-        .to_owned();
-    let valid = url::Url::parse(&issuer).is_ok_and(|url| {
-        matches!(url.scheme(), "https" | "http")
-            && url.host().is_some()
-            && url.query().is_none()
-            && url.fragment().is_none()
-    });
-    if !valid || issuer.len() > 255 {
-        return Err(invalid(
+    let issuer = oidc_issuer(&required(values, OIDC_ISSUER, "ORBIT_OIDC_*")?).ok_or_else(|| {
+        invalid(
             OIDC_ISSUER,
             "must be an http(s) issuer URL without query or fragment, at most 255 characters",
-        ));
-    }
+        )
+    })?;
     let client = oauth_client(values, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET)?
         .ok_or_else(|| invalid(OIDC_CLIENT_ID, "is required with ORBIT_OIDC_ISSUER"))?;
-    let display_name = values
-        .text(OIDC_DISPLAY_NAME)
-        .unwrap_or_else(|| "SSO".to_owned());
-    if display_name.chars().count() > 50 {
-        return Err(invalid(OIDC_DISPLAY_NAME, "must be at most 50 characters"));
-    }
+    let display_name = oidc_display_name(values.text(OIDC_DISPLAY_NAME).as_deref())
+        .ok_or_else(|| invalid(OIDC_DISPLAY_NAME, "must be at most 50 characters"))?;
     Ok(Some(OidcConfig {
         issuer,
         client,
@@ -810,6 +828,35 @@ mod tests {
                 (OIDC_DISPLAY_NAME, "Keycloak"),
             ])
             .is_ok()
+        );
+    }
+
+    #[test]
+    fn oidc_provision_is_a_flag_also_without_oidc_variables() {
+        assert_eq!(
+            invalid_key(parse(&[(OIDC_PROVISION, "yes")])),
+            OIDC_PROVISION
+        );
+        assert_eq!(
+            parse(&[(OIDC_PROVISION, "true")]).unwrap().oidc_provision,
+            Some(true)
+        );
+        assert_eq!(
+            parse(&[(OIDC_PROVISION, "false")]).unwrap().oidc_provision,
+            Some(false)
+        );
+        let config = parse(&[
+            (OIDC_PROVISION, "true"),
+            (OIDC_ISSUER, "https://idp.example"),
+            (OIDC_CLIENT_ID, "orbit"),
+            (OIDC_CLIENT_SECRET, "secret"),
+        ])
+        .unwrap();
+        assert_eq!(config.oidc_provision, Some(true));
+        assert!(
+            config
+                .redacted_lines()
+                .contains(&"ORBIT_OIDC_PROVISION=true".to_owned())
         );
     }
 }

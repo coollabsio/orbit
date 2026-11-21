@@ -120,6 +120,7 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::workspace_routes::get_admin_user_summary,
         crate::workspace_routes::get_instance_settings,
         crate::workspace_routes::set_registration,
+        crate::workspace_routes::set_oidc_provision,
         crate::workspace_routes::save_smtp,
         crate::workspace_routes::remove_smtp,
         crate::workspace_routes::send_test_email,
@@ -1755,6 +1756,11 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             add_code(&mut responses, "403", "installation_admin_required");
             add_code(&mut responses, "409", "email_not_configured");
         }
+        "set_oidc_provision" => {
+            add_code(&mut responses, "403", "installation_admin_required");
+            add_code(&mut responses, "409", "oidc_not_configured");
+            add_code(&mut responses, "409", "set_by_environment");
+        }
         "save_smtp" => {
             add_code(&mut responses, "403", "installation_admin_required");
             add_code(&mut responses, "422", "invalid_smtp_settings");
@@ -2021,6 +2027,7 @@ fn invalid_request_operation(operation_id: &str) -> bool {
             | "registration_request"
             | "registration_complete"
             | "set_registration"
+            | "set_oidc_provision"
             | "save_smtp"
             | "save_s3"
             | "save_sign_in_provider"

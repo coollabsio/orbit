@@ -59,7 +59,7 @@ export function LoginPage() {
         Sign in with a passkey
       </Button> : null}
       <ProviderButtons providers={options.data?.providers ?? []} returnTo={params.get('return_to')} disabled={mutation.isPending || passkey.isPending} />
-    </>} footer={options.data?.registration_open || options.data?.provider_registration_open ? <>New to Orbit? <Link to="/register" className="font-medium text-foreground">Create an account</Link></> : undefined}>
+    </>} footer={options.data?.registration_open || options.data?.provider_registration_open || options.data?.oidc_provision ? <>New to Orbit? <Link to="/register" className="font-medium text-foreground">Create an account</Link></> : undefined}>
       <AuthInput label="Email" type="email" value={email} onChange={setEmail} />
       <AuthInput label="Password" type="password" value={password} onChange={setPassword} />
       <Link to="/recovery" className="justify-self-end text-[0.8125rem] text-muted-foreground hover:text-foreground">Forgot password?</Link>

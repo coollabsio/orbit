@@ -25,7 +25,7 @@ export function offeredProviders(providers: readonly Provider[], os: string): Pr
   return os === 'ios' ? providers.filter((provider) => provider === 'oidc') : [...providers]
 }
 
-/** A provider's label: the OpenID Connect one is the server's `oidc_name` (`ORBIT_OIDC_DISPLAY_NAME`) from its auth options. */
+/** A provider's label: the OpenID Connect one is the server's `oidc_name` (Admin → Sign-in providers or `ORBIT_OIDC_DISPLAY_NAME`) from its auth options. */
 export function providerLabel(provider: Provider, oidcName?: string | null): string {
   return (provider === 'oidc' && oidcName) || PROVIDER_LABEL[provider]
 }

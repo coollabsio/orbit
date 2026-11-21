@@ -40,7 +40,7 @@ use crate::repositories::instance_settings::{
     PasswordChange, S3Settings, SmtpSecurity, SmtpSettings, StorageSettingsError,
     adjustable_job_kinds, can_confirm_sign_up,
 };
-use crate::repositories::sign_in_providers::SaveSignInProviderError;
+use crate::repositories::sign_in_providers::{OidcSettings, SaveSignInProviderError};
 use crate::repositories::workspace_roles::{MemberProjectGrant, ProjectGrant, WorkspaceRoleRecord};
 use crate::repositories::workspace_storage::{WorkspaceStorageError, WorkspaceStorageRepository};
 use crate::repositories::workspaces::{InvitationDelivery, WorkspaceError, WorkspaceRepository};
@@ -266,6 +266,10 @@ pub fn workspace_router(state: WorkspaceState) -> Router {
         )
         .route("/api/v1/admin/settings", get(get_instance_settings))
         .route("/api/v1/admin/settings/registration", put(set_registration))
+        .route(
+            "/api/v1/admin/settings/oidc-provision",
+            put(set_oidc_provision),
+        )
         .route(
             "/api/v1/admin/settings/smtp",
             put(save_smtp).delete(remove_smtp),
@@ -2117,6 +2121,9 @@ struct StorageView {
 #[derive(Serialize, ToSchema)]
 struct InstanceSettingsView {
     registration_open: bool,
+    /// A first OpenID Connect sign-in creates an account, also when registration is closed. No effect without an
+    /// OpenID Connect provider.
+    oidc_provision: bool,
     /// Registration can open: a mail server or (not on Orbit Cloud) a sign-in provider confirms new emails.
     registration_ready: bool,
     /// `null` until a mail server is saved.
@@ -2137,6 +2144,8 @@ struct InstanceSettingsView {
 struct EnvironmentView {
     /// `ORBIT_OPEN_REGISTRATION`.
     registration_open: bool,
+    /// `ORBIT_OIDC_PROVISION`.
+    oidc_provision: bool,
     /// `ORBIT_SMTP_*`.
     smtp: bool,
     /// `ORBIT_S3_*`: the bucket.
@@ -2157,6 +2166,7 @@ impl From<&EnvironmentSettings> for EnvironmentView {
     fn from(environment: &EnvironmentSettings) -> Self {
         Self {
             registration_open: environment.registration_open.is_some(),
+            oidc_provision: environment.oidc_provision.is_some(),
             smtp: environment.smtp.is_some(),
             s3: environment.s3.is_some(),
             attachments_in_s3: environment.attachments_in_s3.is_some(),
@@ -2202,8 +2212,10 @@ struct InstanceMailView {
 struct SignInProviderView {
     provider: Provider,
     client_id: String,
-    /// The OpenID Connect issuer (`ORBIT_OIDC_ISSUER`); `null` for Google and GitHub.
+    /// The OpenID Connect issuer; `null` for Google and GitHub.
     issuer: Option<String>,
+    /// The name on the OpenID Connect sign-in button ("Continue with {display_name}"); `null` for Google and GitHub.
+    display_name: Option<String>,
     /// A client secret is saved. The secret itself is never returned.
     secret_set: bool,
     /// The redirect URI to register at the provider.
@@ -2261,18 +2273,15 @@ async fn settings_view(
         settings.smtp.is_some(),
         !sign_in_providers.is_empty(),
     );
-    let environment = EnvironmentSettings::of(state.identity.database());
     let sign_in_providers = sign_in_providers
         .into_iter()
         .map(|saved| SignInProviderView {
             provider: saved.provider,
-            issuer: match saved.provider {
-                Provider::Oidc => environment
-                    .oidc
-                    .as_ref()
-                    .map(|oidc| oidc.issuer.as_str().trim_end_matches('/').to_owned()),
-                Provider::Google | Provider::Github => None,
-            },
+            issuer: saved
+                .oidc
+                .as_ref()
+                .map(|oidc| oidc.issuer.as_str().trim_end_matches('/').to_owned()),
+            display_name: saved.oidc.as_ref().map(|oidc| oidc.display_name.clone()),
             client_id: saved.client_id,
             secret_set: !saved.client_secret.is_empty(),
             callback_url: saved.provider.callback_url(&state.public_origin),
@@ -2308,6 +2317,7 @@ async fn settings_view(
         limits: limits.into(),
         mail: InstanceMailView { mail_enabled },
         registration_open: settings.registration_open,
+        oidc_provision: settings.oidc_provision,
         registration_ready,
         smtp: settings.smtp.map(|smtp| SmtpView {
             host: smtp.host,
@@ -2519,7 +2529,63 @@ async fn set_registration(
             InstanceSettingsError::Unavailable(error) => {
                 internal(instance, request_id.as_ref()).cause(error)
             }
-            error @ InstanceSettingsError::SmtpRequired => {
+            error @ (InstanceSettingsError::SmtpRequired
+            | InstanceSettingsError::OidcNotConfigured) => {
+                internal(instance, request_id.as_ref()).cause(error)
+            }
+        })?;
+    settings_view(&state, instance, request_id.as_ref()).await
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+struct OidcProvisionBody {
+    on: bool,
+}
+
+/// Turns on or off that a first OpenID Connect sign-in creates an account, also when registration is closed. Turning
+/// it on needs an OpenID Connect provider, saved here or set with `ORBIT_OIDC_*` (409 `oidc_not_configured`).
+#[utoipa::path(put, path = "/api/v1/admin/settings/oidc-provision", request_body = OidcProvisionBody, responses((status = 200, body = InstanceSettingsView)))]
+async fn set_oidc_provision(
+    State(state): State<WorkspaceState>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<OidcProvisionBody>,
+) -> Result<Json<InstanceSettingsView>, ApiError> {
+    let instance = "/api/v1/admin/settings/oidc-provision";
+    let session = require_root(&state, &headers, instance, request_id.as_ref()).await?;
+    if EnvironmentSettings::of(state.identity.database())
+        .oidc_provision
+        .is_some()
+    {
+        return Err(set_by_environment(
+            "ORBIT_OIDC_PROVISION",
+            instance,
+            request_id.as_ref(),
+        ));
+    }
+    InstanceSettingsRepository::new(state.identity.database().clone())
+        .set_oidc_provision(
+            session.user.id,
+            body.on,
+            request_id_value(request_id.as_ref()),
+            TimestampMillis::now(),
+        )
+        .await
+        .map_err(|error| match error {
+            InstanceSettingsError::OidcNotConfigured => ApiError::new(
+                StatusCode::CONFLICT,
+                "oidc_not_configured",
+                "OpenID Connect is not set up",
+                "Set the ORBIT_OIDC_* environment variables first.",
+                instance,
+                request_id.as_ref(),
+            ),
+            InstanceSettingsError::Unavailable(error) => {
+                internal(instance, request_id.as_ref()).cause(error)
+            }
+            error @ (InstanceSettingsError::EmailNotConfigured
+            | InstanceSettingsError::SmtpRequired) => {
                 internal(instance, request_id.as_ref()).cause(error)
             }
         })?;
@@ -2674,7 +2740,8 @@ async fn remove_smtp(
             InstanceSettingsError::Unavailable(error) => {
                 internal(instance, request_id.as_ref()).cause(error)
             }
-            error @ InstanceSettingsError::EmailNotConfigured => {
+            error @ (InstanceSettingsError::EmailNotConfigured
+            | InstanceSettingsError::OidcNotConfigured) => {
                 internal(instance, request_id.as_ref()).cause(error)
             }
         })?;
@@ -2771,10 +2838,15 @@ async fn reload_storage(
 #[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 struct SignInProviderBody {
-    /// The OAuth client ID from Google Cloud or the GitHub OAuth App.
+    /// The OAuth client ID from Google Cloud, the GitHub OAuth App or the OpenID Connect provider.
     client_id: String,
     /// Absent or empty: keep the saved secret. Required the first time.
     client_secret: Option<String>,
+    /// OpenID Connect only, and required there: the `issuer` of the provider's
+    /// `{issuer}/.well-known/openid-configuration`, an http(s) URL without query or fragment.
+    issuer: Option<String>,
+    /// OpenID Connect only: the name on the sign-in button, at most 50 characters. Absent or empty: "SSO".
+    display_name: Option<String>,
 }
 
 fn invalid_sign_in_provider(
@@ -2806,8 +2878,7 @@ fn sign_in_provider_not_found(
     )
 }
 
-/// 409 `set_by_environment` for a provider the environment sets, and 422 `invalid_sign_in_provider` for OpenID
-/// Connect, which only `ORBIT_OIDC_*` sets.
+/// 409 `set_by_environment` for a provider the environment sets.
 fn only_saved_here(
     database: &orbit_platform::Database,
     provider: Provider,
@@ -2824,13 +2895,6 @@ fn only_saved_here(
         .is_some()
     {
         return Err(set_by_environment(variables, instance, request_id));
-    }
-    if provider == Provider::Oidc {
-        return Err(invalid_sign_in_provider(
-            "OpenID Connect is set with the ORBIT_OIDC_* environment variables, not here.",
-            instance,
-            request_id,
-        ));
     }
     Ok(())
 }
@@ -2859,6 +2923,40 @@ async fn save_sign_in_provider(
             rid,
         ));
     }
+    let oidc = match provider {
+        Provider::Oidc => {
+            let issuer = body
+                .issuer
+                .as_deref()
+                .and_then(orbit_platform::oidc_issuer)
+                .and_then(|issuer| url::Url::parse(&issuer).ok())
+                .ok_or_else(|| {
+                    invalid_sign_in_provider(
+                        "issuer: enter the issuer URL (http or https, without query or fragment, at most 255 characters).",
+                        instance,
+                        rid,
+                    )
+                })?;
+            let display_name = orbit_platform::oidc_display_name(body.display_name.as_deref())
+                .ok_or_else(|| {
+                    invalid_sign_in_provider("display_name: at most 50 characters.", instance, rid)
+                })?;
+            Some(OidcSettings {
+                issuer,
+                display_name,
+            })
+        }
+        Provider::Google | Provider::Github => {
+            if body.issuer.is_some() || body.display_name.is_some() {
+                return Err(invalid_sign_in_provider(
+                    "issuer and display_name are for OpenID Connect only.",
+                    instance,
+                    rid,
+                ));
+            }
+            None
+        }
+    };
     let key = state
         .mailer
         .as_ref()
@@ -2885,6 +2983,7 @@ async fn save_sign_in_provider(
             provider,
             client_id,
             encrypted,
+            oidc.as_ref(),
             request_id_value(rid),
             TimestampMillis::now(),
         )

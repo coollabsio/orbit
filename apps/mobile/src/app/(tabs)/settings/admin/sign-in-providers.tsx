@@ -1,26 +1,21 @@
 import * as Clipboard from 'expo-clipboard'
-import { useState } from 'react'
+import { type ReactNode, useState } from 'react'
 import { View } from 'react-native'
 
 import { ConfirmDialog, type ConfirmRequest } from '../../../../components/settings/Dialog'
-import { AdminShell, Note, SetByEnvironment, SettingsCard } from '../../../../components/settings/Shell'
+import { AdminShell, Note, OptionHint, OptionText, SetByEnvironment, SettingsCard, Toggle } from '../../../../components/settings/Shell'
 import type { InstanceSettingsView, SignInProviderView } from '../../../../data/admin-api'
 import { PROVIDER_LABEL, type Provider } from '../../../../data/sign-in-provider'
-import { useAuthOptions } from '../../../../hooks/account'
-import { useInstanceSettings, useRemoveSignInProvider, useSaveSignInProvider } from '../../../../hooks/admin'
+import { useInstanceSettings, useRemoveSignInProvider, useSaveSignInProvider, useSetOidcProvision } from '../../../../hooks/admin'
 import { useOrbit } from '../../../../orbit-context'
 import { errorMessage } from '../../../../session-context'
 import { Button, Input, Text } from '../../../../ui'
 
-/** The providers an admin can save here; OpenID Connect is set by environment variables only. */
-type SavableProvider = Exclude<Provider, 'oidc'>
-
-const PROVIDERS: { provider: SavableProvider; variable: string; description: string }[] = [
-  { provider: 'google', variable: 'ORBIT_GOOGLE_*', description: 'Create a client of type "Web application" in Google Cloud Console (APIs & Services → Credentials) and add the callback URL as an authorized redirect URI.' },
-  { provider: 'github', variable: 'ORBIT_GITHUB_*', description: 'Register an app in GitHub (Settings → Developer settings → OAuth Apps) with the callback URL as its authorization callback URL.' },
+const PROVIDERS: { provider: Provider; title: string; variable: string; description: string }[] = [
+  { provider: 'google', title: 'Google', variable: 'ORBIT_GOOGLE_*', description: 'Create a client of type "Web application" in Google Cloud Console (APIs & Services → Credentials) and add the callback URL as an authorized redirect URI.' },
+  { provider: 'github', title: 'GitHub', variable: 'ORBIT_GITHUB_*', description: 'Register an app in GitHub (Settings → Developer settings → OAuth Apps) with the callback URL as its authorization callback URL.' },
+  { provider: 'oidc', title: 'OpenID Connect', variable: 'ORBIT_OIDC_*', description: 'Sign in with your own identity provider (Authentik, Keycloak, Authelia, Zitadel, Pocket ID…). Register Orbit as a confidential client with the callback URL as its redirect URI, and the scopes openid, email and profile.' },
 ]
-
-const OIDC_VARIABLES = ['ORBIT_OIDC_ISSUER', 'ORBIT_OIDC_CLIENT_ID', 'ORBIT_OIDC_CLIENT_SECRET', 'ORBIT_OIDC_DISPLAY_NAME']
 
 /** The server reports the callback URL of saved providers only; before that it is the server's own. */
 function useCallbackUrl(provider: Provider, saved: SignInProviderView | null) {
@@ -44,40 +39,64 @@ export default function AdminSignInProvidersScreen() {
       ) : null}
       {settings.data ? (
         <>
-          {PROVIDERS.map(({ provider, variable, description }) => {
+          {PROVIDERS.map(({ provider, title, variable, description }) => {
             const saved = settings.data.sign_in_providers.find((item) => item.provider === provider) ?? null
             const lockedBy = settings.data.environment.sign_in_providers.includes(provider) ? variable : null
-            return <ProviderCard key={provider} provider={provider} description={description} saved={saved} lockedBy={lockedBy} />
+            return (
+              <ProviderCard key={provider} provider={provider} title={title} description={description} saved={saved} lockedBy={lockedBy}>
+                {provider === 'oidc' && saved ? <ProvisionSwitch on={settings.data.oidc_provision} locked={settings.data.environment.oidc_provision} /> : null}
+              </ProviderCard>
+            )
           })}
-          <OidcCard configured={settings.data.environment.sign_in_providers.includes('oidc')} saved={settings.data.sign_in_providers.find((item) => item.provider === 'oidc') ?? null} />
         </>
       ) : null}
     </AdminShell>
   )
 }
 
-/** `lockedBy`: the environment variables that set this provider. */
-function ProviderCard({ provider, description, saved, lockedBy }: { provider: SavableProvider; description: string; saved: SignInProviderView | null; lockedBy: string | null }) {
+/** `lockedBy`: the environment variables that set this provider. OpenID Connect also has an issuer and a button name. */
+function ProviderCard({ provider, title, description, saved, lockedBy, children }: { provider: Provider; title: string; description: string; saved: SignInProviderView | null; lockedBy: string | null; children?: ReactNode }) {
   const locked = lockedBy != null
   const save = useSaveSignInProvider()
   const remove = useRemoveSignInProvider()
   const [clientId, setClientId] = useState(saved?.client_id ?? '')
   const [secret, setSecret] = useState('')
+  const [issuer, setIssuer] = useState(saved?.issuer ?? '')
+  const [displayName, setDisplayName] = useState(saved?.display_name ?? '')
   const [confirm, setConfirm] = useState<ConfirmRequest | null>(null)
-  const name = PROVIDER_LABEL[provider]
-  const ready = clientId.trim() !== '' && (saved?.secret_set || secret !== '')
+  const oidc = provider === 'oidc'
+  const name = oidc ? title : PROVIDER_LABEL[provider]
+  const ready = clientId.trim() !== '' && (saved?.secret_set || secret !== '') && (!oidc || issuer.trim() !== '')
   // after a save or a removal the form shows what the server stored
   const stored = {
     onSuccess: (settings: InstanceSettingsView) => {
-      setClientId(settings.sign_in_providers.find((item) => item.provider === provider)?.client_id ?? '')
+      const stored = settings.sign_in_providers.find((item) => item.provider === provider)
+      setClientId(stored?.client_id ?? '')
+      setIssuer(stored?.issuer ?? '')
+      setDisplayName(stored?.display_name ?? '')
       setSecret('')
     },
   }
 
   return (
-    <SettingsCard title={name} description={description}>
+    <SettingsCard title={title} description={description}>
       <View className="gap-4">
         <CallbackUrlField url={useCallbackUrl(provider, saved)} />
+        {oidc ? (
+          <Input
+            label="Issuer"
+            required
+            help="The issuer URL of the provider, for example https://auth.example.com/application/o/orbit/. Orbit reads {issuer}/.well-known/openid-configuration. If you change it later, people connect their accounts again."
+            keyboardType="url"
+            editable={!locked}
+            value={issuer}
+            onChangeText={setIssuer}
+            autoCapitalize="none"
+            autoCorrect={false}
+            autoComplete="off"
+            spellCheck={false}
+          />
+        ) : null}
         <Input label="Client ID" required editable={!locked} value={clientId} onChangeText={setClientId} autoCapitalize="none" autoCorrect={false} autoComplete="off" spellCheck={false} />
         <Input
           label="Client secret"
@@ -90,6 +109,8 @@ function ProviderCard({ provider, description, saved, lockedBy }: { provider: Sa
           value={secret}
           onChangeText={setSecret}
         />
+        {oidc ? <Input label="Display name" help={'The sign-in button reads "Continue with" and this name. Empty: SSO.'} placeholder="SSO" maxLength={50} editable={!locked} value={displayName} onChangeText={setDisplayName} /> : null}
+        {children}
         {lockedBy ? <SetByEnvironment variable={lockedBy} /> : null}
         {save.isError ? <Note error>{errorMessage(save.error)}</Note> : null}
         {remove.isError ? <Note error>{errorMessage(remove.error)}</Note> : null}
@@ -117,7 +138,8 @@ function ProviderCard({ provider, description, saved, lockedBy }: { provider: Sa
           ) : null}
           <Button label={save.isPending ? 'Saving…' : `Save ${name}`} disabled={locked || save.isPending || !ready} onPress={() => {
               remove.reset()
-              save.mutate({ provider, body: { client_id: clientId.trim(), client_secret: secret || null } }, stored)
+              const body = { client_id: clientId.trim(), client_secret: secret || null }
+              save.mutate({ provider, body: oidc ? { ...body, issuer: issuer.trim(), display_name: displayName.trim() || null } : body }, stored)
             }}
           />
         </View>
@@ -127,38 +149,17 @@ function ProviderCard({ provider, description, saved, lockedBy }: { provider: Sa
   )
 }
 
-/** A generic OpenID Connect provider (Authentik, Keycloak, …). Only `ORBIT_OIDC_*` sets it, so the card shows the values without letting Admin change them. */
-function OidcCard({ configured, saved }: { configured: boolean; saved: SignInProviderView | null }) {
-  const displayName = useAuthOptions().data?.oidc_name ?? ''
+/** Whether a first OpenID Connect sign-in creates an account, also when open registration is off. */
+function ProvisionSwitch({ on, locked }: { on: boolean; locked: boolean }) {
+  const setProvision = useSetOidcProvision()
   return (
-    <SettingsCard
-      title="OpenID Connect"
-      description="Sign in with your own identity provider (Authentik, Keycloak, Authelia, Zitadel, Pocket ID…). Register Orbit as a confidential client with the callback URL as its redirect URI, and the scopes openid, email and profile."
-    >
-      <View className="gap-4">
-        <CallbackUrlField url={useCallbackUrl('oidc', saved)} />
-        {configured ? (
-          <>
-            <Input label="Issuer" editable={false} value={saved?.issuer ?? ''} />
-            <Input label="Client ID" editable={false} value={saved?.client_id ?? ''} />
-            <Input label="Client secret" editable={false} value={saved?.secret_set ? 'Set' : 'Not set'} />
-            <Input label="Display name" help={'The sign-in button reads "Continue with" and this name.'} editable={false} value={displayName} />
-            <SetByEnvironment variable="ORBIT_OIDC_*" />
-          </>
-        ) : (
-          <Text className="text-[12px] leading-[17px] text-muted-foreground">
-            Off. To turn it on, set{' '}
-            {OIDC_VARIABLES.map((variable, index) => (
-              <Text key={variable} className="text-[12px] leading-[17px] text-muted-foreground">
-                {index === 0 ? '' : index === OIDC_VARIABLES.length - 1 ? ' and ' : ', '}
-                <Text className="font-mono text-[12px] leading-[17px] text-muted-foreground">{variable}</Text>
-              </Text>
-            ))}{' '}
-            on the server, then restart Orbit.
-          </Text>
-        )}
-      </View>
-    </SettingsCard>
+    <View className="flex-row items-center gap-3">
+      <OptionText title="Create accounts at first sign-in" help="On: anyone who can sign in at your identity provider gets an Orbit account at their first sign-in, also when open registration is off. Email sign-up does not change. Off: a first sign-in creates an account only when registration is open.">
+        {locked ? <SetByEnvironment variable="ORBIT_OIDC_PROVISION" /> : null}
+        {setProvision.isError ? <OptionHint error>{errorMessage(setProvision.error)}</OptionHint> : null}
+      </OptionText>
+      <Toggle label="Create accounts at first sign-in" value={on} disabled={locked || setProvision.isPending} onChange={(checked) => setProvision.mutate(checked)} />
+    </View>
   )
 }
 

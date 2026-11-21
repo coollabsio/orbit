@@ -24,7 +24,6 @@ use super::{
     last_sign_in_method, passkeys, request_id_value, signed_in_response,
 };
 use crate::audit::AuditOutcome;
-use crate::repositories::environment_settings::EnvironmentSettings;
 use crate::repositories::instance_settings::InstanceSettingsRepository;
 use crate::repositories::sign_in_providers::{
     ConnectedAccount, IdentityChangeError, ProviderSignInError, SavedSignInProvider, SignInRefusal,
@@ -76,19 +75,15 @@ pub(super) struct ProviderFlow {
 
 /// The configured providers whose secret this server can open. None without an app key, and none whose secret was
 /// saved under another key, so the sign-in page never offers a button that cannot work.
-pub(super) async fn configured(state: &AuthState) -> Result<Vec<Provider>, sqlx::Error> {
+pub(super) async fn configured(state: &AuthState) -> Result<Vec<SavedSignInProvider>, sqlx::Error> {
     let Some(app_key) = state.app_key.as_ref() else {
         return Ok(Vec::new());
     };
-    let environment = EnvironmentSettings::of(state.database());
     Ok(InstanceSettingsRepository::new(state.database().clone())
         .sign_in_providers()
         .await?
         .into_iter()
-        .filter_map(|saved| {
-            let provider = saved.provider;
-            open(app_key, &environment, saved).map(|_| provider)
-        })
+        .filter(|saved| open(app_key, saved.clone()).is_some())
         .collect())
 }
 
@@ -103,19 +98,11 @@ async fn credentials(
     let saved = InstanceSettingsRepository::new(state.database().clone())
         .sign_in_provider(provider)
         .await?;
-    let environment = EnvironmentSettings::of(state.database());
-    Ok(saved.and_then(|saved| open(app_key, &environment, saved)))
+    Ok(saved.and_then(|saved| open(app_key, saved)))
 }
 
-fn open(
-    app_key: &[u8; 32],
-    environment: &EnvironmentSettings,
-    saved: SavedSignInProvider,
-) -> Option<ProviderCredentials> {
-    let issuer = match saved.provider {
-        Provider::Oidc => Some(environment.oidc.as_ref()?.issuer.clone()),
-        Provider::Google | Provider::Github => None,
-    };
+fn open(app_key: &[u8; 32], saved: SavedSignInProvider) -> Option<ProviderCredentials> {
+    let issuer = saved.oidc.map(|oidc| oidc.issuer);
     let client_secret = decrypt_secret(app_key, &saved.client_secret).ok()?;
     Some(ProviderCredentials {
         client_id: saved.client_id,

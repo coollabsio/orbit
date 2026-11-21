@@ -31,7 +31,7 @@ pub use config::{
     ApnsConfig, AppKey, BackupSchedule, BillingConfig, Config, ConfigError, DataConfig,
     EnvironmentMode, FcmConfig, HttpConfig, InstanceConfig, JobsConfig, MailConfig, MailMode,
     MetricsConfig, OAuthClientConfig, OidcConfig, Plan, RateLimitConfig, Secret, SmtpConfig,
-    SmtpSecurity, TrialConfig, UploadConfig, redact_database_url,
+    SmtpSecurity, TrialConfig, UploadConfig, oidc_display_name, oidc_issuer, redact_database_url,
 };
 pub use db::{
     Access, Backend, Column, Database, DatabaseConfig, DatabaseError, Flag, GuardedMigrationError,

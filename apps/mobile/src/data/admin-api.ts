@@ -30,6 +30,7 @@ import {
   sendTestEmail as sendTestEmailRequest,
   setAccountSuspension,
   setInstanceAdmin,
+  setOidcProvision as setOidcProvisionRequest,
   setRegistration as setRegistrationRequest,
   startImageCompression as startImageCompressionRequest,
 } from '@orbit/api/generated/sdk.gen'
@@ -187,6 +188,10 @@ export async function setRegistration(client: OrbitClient, open: boolean): Promi
   return (await setRegistrationRequest({ client, body: { open }, throwOnError: true })).data
 }
 
+export async function setOidcProvision(client: OrbitClient, on: boolean): Promise<InstanceSettingsView> {
+  return (await setOidcProvisionRequest({ client, body: { on }, throwOnError: true })).data
+}
+
 export async function saveSmtp(client: OrbitClient, body: SmtpBody): Promise<InstanceSettingsView> {
   return (await saveSmtpRequest({ client, body, throwOnError: true })).data
 }
@@ -196,11 +201,11 @@ export async function removeSmtp(client: OrbitClient): Promise<InstanceSettingsV
 }
 
 /** Google or GitHub; OpenID Connect is set by environment variables only. */
-export async function saveSignInProvider(client: OrbitClient, { provider, body }: { provider: Exclude<Provider, 'oidc'>; body: SignInProviderBody }): Promise<InstanceSettingsView> {
+export async function saveSignInProvider(client: OrbitClient, { provider, body }: { provider: Provider; body: SignInProviderBody }): Promise<InstanceSettingsView> {
   return (await saveSignInProviderRequest({ client, path: { provider }, body, throwOnError: true })).data
 }
 
-export async function removeSignInProvider(client: OrbitClient, provider: Exclude<Provider, 'oidc'>): Promise<InstanceSettingsView> {
+export async function removeSignInProvider(client: OrbitClient, provider: Provider): Promise<InstanceSettingsView> {
   return (await removeSignInProviderRequest({ client, path: { provider }, throwOnError: true })).data
 }
 

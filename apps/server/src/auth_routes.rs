@@ -1700,8 +1700,10 @@ struct AuthOptions {
     providers: Vec<crate::sign_in_providers::Provider>,
     /// A first sign-in with one of `providers` creates an account (registration is open; no mail server needed).
     provider_registration_open: bool,
-    /// The label of the OpenID Connect provider on the sign-in buttons ("Continue with {oidc_name}"), from
-    /// `ORBIT_OIDC_DISPLAY_NAME`. `null` when it is not set up.
+    /// A first sign-in with OpenID Connect creates an account, also when registration is closed.
+    oidc_provision: bool,
+    /// The label of the OpenID Connect provider on the sign-in buttons ("Continue with {oidc_name}"). `null` when it
+    /// is not set up.
     oidc_name: Option<String>,
     /// The Orbit release this server runs, from `[workspace.package] version` in `Cargo.toml` (for example `0.1.0`).
     version: &'static str,
@@ -1724,6 +1726,9 @@ async fn auth_options(
     let providers = providers::configured(&state).await.map_err(|error| {
         ApiError::internal("/api/v1/auth/options", request_id.as_ref()).cause(error)
     })?;
+    let oidc_name = providers
+        .iter()
+        .find_map(|saved| Some(saved.oidc.as_ref()?.display_name.clone()));
     Ok(Json(AuthOptions {
         registration_open: email_enabled && settings.registration_open,
         email_enabled,
@@ -1731,18 +1736,9 @@ async fn auth_options(
         billing_enabled: state.billing_enabled,
         mail_enabled,
         provider_registration_open: settings.registration_open && !providers.is_empty(),
-        oidc_name: providers
-            .contains(&crate::sign_in_providers::Provider::Oidc)
-            .then(|| {
-                crate::repositories::environment_settings::EnvironmentSettings::of(
-                    state.repository.database(),
-                )
-                .oidc
-                .as_ref()
-                .map(|oidc| oidc.display_name.clone())
-            })
-            .flatten(),
-        providers,
+        oidc_provision: settings.oidc_provision && oidc_name.is_some(),
+        oidc_name,
+        providers: providers.iter().map(|saved| saved.provider).collect(),
         version: env!("CARGO_PKG_VERSION"),
     }))
 }

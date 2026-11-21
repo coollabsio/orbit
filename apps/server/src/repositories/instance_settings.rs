@@ -10,6 +10,7 @@ use thiserror::Error;
 
 use super::environment_settings::EnvironmentSettings;
 use crate::audit::{self, AuditOutcome};
+use crate::sign_in_providers::Provider;
 
 /// The saved mail server. `password` is encrypted under the app key.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -26,6 +27,9 @@ pub struct SmtpSettings {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct InstanceSettings {
     pub registration_open: bool,
+    /// A first OpenID Connect sign-in creates an account, also when registration is closed. It has no effect while
+    /// no OpenID Connect provider is set up.
+    pub oidc_provision: bool,
     pub smtp: Option<SmtpSettings>,
 }
 
@@ -111,6 +115,8 @@ pub enum InstanceSettingsError {
     EmailNotConfigured,
     #[error("Orbit Cloud needs a mail server")]
     SmtpRequired,
+    #[error("OpenID Connect is not set up")]
+    OidcNotConfigured,
     #[error("instance settings are unavailable")]
     Unavailable(#[from] sqlx::Error),
 }
@@ -161,7 +167,7 @@ impl InstanceSettingsRepository {
 
     pub async fn get(&self) -> Result<InstanceSettings, sqlx::Error> {
         let row = sqlx::query(
-            "SELECT registration_open, smtp_host, smtp_port, smtp_security, smtp_username, smtp_password, \
+            "SELECT registration_open, oidc_provision, smtp_host, smtp_port, smtp_security, smtp_username, smtp_password, \
              smtp_from_address, smtp_from_name FROM instance_settings WHERE id = 1",
         )
         .fetch_one(self.database.pool())
@@ -190,6 +196,9 @@ impl InstanceSettingsRepository {
             registration_open: environment
                 .registration_open
                 .unwrap_or(row.get::<i64, _>("registration_open") == 1),
+            oidc_provision: environment
+                .oidc_provision
+                .unwrap_or(row.get::<i64, _>("oidc_provision") == 1),
             smtp: environment.smtp.clone().or(smtp),
         })
     }
@@ -239,6 +248,56 @@ impl InstanceSettingsRepository {
                 "instance.registration_opened"
             } else {
                 "instance.registration_closed"
+            },
+            AuditOutcome::Success,
+            "installation",
+            None,
+            request_id,
+            serde_json::json!({}),
+            now,
+        )
+        .await?;
+        transaction.commit().await?;
+        Ok(())
+    }
+
+    /// Turns on or off that a first OpenID Connect sign-in creates an account. Turning it on needs the provider, saved
+    /// in Admin or set with `ORBIT_OIDC_*`.
+    pub async fn set_oidc_provision(
+        &self,
+        actor_id: Id,
+        on: bool,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<(), InstanceSettingsError> {
+        let mut transaction = self.database.immediate_transaction().await?;
+        if on
+            && EnvironmentSettings::of(&self.database)
+                .sign_in_provider(Provider::Oidc)
+                .is_none()
+            && sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM sign_in_providers WHERE provider = 'oidc'",
+            )
+            .fetch_one(&mut *transaction)
+            .await?
+                == 0
+        {
+            return Err(InstanceSettingsError::OidcNotConfigured);
+        }
+        sqlx::query(
+            "UPDATE instance_settings SET oidc_provision = $1, updated_at = $2 WHERE id = 1",
+        )
+        .bind(i64::from(on))
+        .bind(now.as_millis())
+        .execute(&mut *transaction)
+        .await?;
+        audit::record_global(
+            &mut transaction,
+            Some(actor_id),
+            if on {
+                "instance.oidc_provision_enabled"
+            } else {
+                "instance.oidc_provision_disabled"
             },
             AuditOutcome::Success,
             "installation",

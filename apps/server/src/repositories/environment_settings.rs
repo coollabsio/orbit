@@ -11,7 +11,7 @@ use sqlx::{Any, Transaction};
 use super::instance_settings::{
     BackupSchedule, BucketLocation, InstanceSettingsRepository, S3Settings, SmtpSettings,
 };
-use super::sign_in_providers::SavedSignInProvider;
+use super::sign_in_providers::{OidcSettings, SavedSignInProvider};
 use super::workspace_storage::WorkspaceStorageRepository;
 use crate::object_storage::Owner;
 use crate::secret_box::encrypt_secret;
@@ -28,17 +28,10 @@ pub struct EnvironmentSettings {
     pub backups_in_s3: Option<bool>,
     pub backup_schedule: Option<BackupSchedule>,
     pub s3_keep_deleted_days: Option<u32>,
+    /// `ORBIT_GOOGLE_*`, `ORBIT_GITHUB_*` and `ORBIT_OIDC_*`.
     pub sign_in_providers: Vec<SavedSignInProvider>,
-    /// `ORBIT_OIDC_*`; its client is in `sign_in_providers`.
-    pub oidc: Option<OidcSettings>,
-}
-
-/// The OpenID Connect provider's settings besides its client.
-#[derive(Debug)]
-pub struct OidcSettings {
-    pub issuer: url::Url,
-    /// "Continue with {display_name}".
-    pub display_name: String,
+    /// `ORBIT_OIDC_PROVISION`.
+    pub oidc_provision: Option<bool>,
 }
 
 impl EnvironmentSettings {
@@ -98,25 +91,22 @@ impl EnvironmentSettings {
                     provider,
                     client_id: client.client_id.clone(),
                     client_secret: seal(client.client_secret.expose())?,
+                    oidc: None,
                 });
             }
         }
-        let oidc = config
-            .oidc
-            .as_ref()
-            .map(|oidc| -> Result<OidcSettings, String> {
-                sign_in_providers.push(SavedSignInProvider {
-                    provider: Provider::Oidc,
-                    client_id: oidc.client.client_id.clone(),
-                    client_secret: seal(oidc.client.client_secret.expose())?,
-                });
-                Ok(OidcSettings {
+        if let Some(oidc) = &config.oidc {
+            sign_in_providers.push(SavedSignInProvider {
+                provider: Provider::Oidc,
+                client_id: oidc.client.client_id.clone(),
+                client_secret: seal(oidc.client.client_secret.expose())?,
+                oidc: Some(OidcSettings {
                     issuer: url::Url::parse(&oidc.issuer)
                         .map_err(|_| "ORBIT_OIDC_ISSUER must be a URL".to_owned())?,
                     display_name: oidc.display_name.clone(),
-                })
-            })
-            .transpose()?;
+                }),
+            });
+        }
         Ok(Self {
             registration_open: config.registration_open,
             smtp,
@@ -126,7 +116,7 @@ impl EnvironmentSettings {
             backup_schedule: config.backup_schedule,
             s3_keep_deleted_days: config.s3_keep_deleted_days,
             sign_in_providers,
-            oidc,
+            oidc_provision: config.oidc_provision,
         })
     }
 
@@ -233,4 +223,19 @@ pub(crate) async fn registration_open(
         .fetch_one(&mut **transaction)
         .await?;
     Ok(row.get::<i64, _>("registration_open") == 1)
+}
+
+/// Whether a first OpenID Connect sign-in creates an account, read in the caller's transaction unless
+/// `ORBIT_OIDC_PROVISION` sets it.
+pub(crate) async fn oidc_provision(
+    database: &Database,
+    transaction: &mut Transaction<'_, Any>,
+) -> Result<bool, sqlx::Error> {
+    if let Some(provision) = EnvironmentSettings::of(database).oidc_provision {
+        return Ok(provision);
+    }
+    let row = sqlx::query("SELECT oidc_provision FROM instance_settings WHERE id = 1")
+        .fetch_one(&mut **transaction)
+        .await?;
+    Ok(row.get::<i64, _>("oidc_provision") == 1)
 }
