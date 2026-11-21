@@ -14,7 +14,7 @@ import { Button } from '@/components/ui/button'
 import { relativeTime } from '@/lib/format'
 import { useCancelOutbound, useDeleteDraft } from '@/features/mail/api/mutations'
 import { draftText, recipientSummary, sendTimeLabel } from '@/features/mail/compose/composeLib'
-import { reopenDraft, useComposerDock } from '@/features/mail/compose/useComposerDock'
+import { useComposerDock } from '@/features/mail/compose/useComposerDock'
 import { useMailTimeZone } from '@/features/mail/compose/useMailTimeZone'
 import { problemText } from '@/features/mail/mailLib'
 import { outboxStatus } from '@/features/mail/mailStatus'
@@ -48,7 +48,7 @@ function DraftRow({ draft, focused, onFocus }: { draft: MailDraft; focused: bool
   const row = useFocusedRow(focused)
   const open = () => {
     onFocus(draft.id)
-    reopenDraft(draft, store, 'inline', { animate: true })
+    store.open(draft.id, { animate: true })
   }
   return (
     <div

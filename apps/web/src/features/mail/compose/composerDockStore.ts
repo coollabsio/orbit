@@ -72,9 +72,6 @@ function show(state: DockState, draftId: string, as: 'open' | 'full', options: O
 /** Opens a draft as a window (a new one, a pill, or a full screen one going back to a window). */
 export const openWindow = (state: DockState, draftId: string, options: OpenOptions = {}): DockState => show(state, draftId, 'open', options)
 
-/** The inline reply moves to a window. */
-export const popOutWindow = openWindow
-
 /** Full screen (adds the draft when it is not in the dock). */
 export const expandWindow = (state: DockState, draftId: string): DockState => show(state, draftId, 'full', {})
 
@@ -198,7 +195,6 @@ export function createComposerDockStore({ workspaceId, storage }: { workspaceId:
     restoredIds: () => restoredIds,
     has: (draftId: string) => state.windows.some((window) => window.draftId === draftId),
     open: (draftId: string, options?: OpenOptions) => set(openWindow(state, draftId, options)),
-    popOut: (draftId: string, options?: OpenOptions) => set(popOutWindow(state, draftId, options)),
     expand: (draftId: string) => set(expandWindow(state, draftId)),
     minimize: (draftId: string) => set(minimizeWindow(state, draftId)),
     close: (draftId: string) => set(closeWindow(state, draftId)),

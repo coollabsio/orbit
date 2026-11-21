@@ -156,7 +156,7 @@ test('dock capacity follows the viewport width', () => {
 
 test('only a click animates the open; keys and full screen and back do not', () => {
   const animated = (state: DockState, id: string) => state.windows.find((window) => window.draftId === id)?.animate
-  // a click (a pill, Show, Pop out)
+  // a click (a pill, Show, Reply)
   let state = openWindow(EMPTY_DOCK, 'a', { animate: true })
   expect(animated(state, 'a')).toBe(true)
   // a key (C, ⌘K, R, Undo): no options

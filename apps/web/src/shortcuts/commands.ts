@@ -135,7 +135,7 @@ const REGISTRY = [
   // the composer's own keys (they work while typing, so they are fixed): listed in the help, handled by the composer
   { id: 'mail.send', title: 'Send', group: 'Mail', keys: 'Mod+Enter', context: 'composer', fixed: true },
   { id: 'mail.sendArchive', title: 'Send, archive and open the next conversation', group: 'Mail', keys: 'Mod+Shift+Enter', context: 'composer', fixed: true },
-  { id: 'mail.popOut', title: 'Pop out or expand the composer', group: 'Mail', keys: 'Mod+Shift+E', context: 'composer', fixed: true },
+  { id: 'mail.popOut', title: 'Full screen composer (and back)', group: 'Mail', keys: 'Mod+Shift+E', context: 'composer', fixed: true },
   { id: 'mail.minimize', title: 'Minimize the composer (the draft is kept)', group: 'Mail', keys: 'Escape', context: 'composer', fixed: true },
 ] as const satisfies readonly Command[]
 

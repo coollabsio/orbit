@@ -1,8 +1,7 @@
-// The mail composer (§9.1): one draft, saved on the server as the user types. `inline` is the reply at the end of a
-// thread (recipients as one line until clicked, U1), `window` the floating composer and `full` its expanded form
-// (U2, both placed by the dock). ⌘Enter sends; the pre-send checks show above Send and ⌘Enter again sends anyway (U5).
-// ⌘⇧Enter sends and archives the thread, ⌘⇧E pops out (or expands), Esc closes the inline reply or minimizes a window;
-// the draft is kept, unless nothing was written in it.
+// The mail composer (§9.1): one draft, saved on the server as the user types. `window` is the floating composer and
+// `full` its expanded form (U2, both placed by the dock); new messages, replies and forwards all open there.
+// ⌘Enter sends; the pre-send checks show above Send and ⌘Enter again sends anyway (U5). ⌘⇧Enter sends and archives
+// the thread, ⌘⇧E expands (and back), Esc minimizes a window; the draft is kept, unless nothing was written in it.
 import {
   lazy,
   Suspense,
@@ -18,7 +17,7 @@ import {
   type ReactNode,
   type Ref,
 } from 'react'
-import { ChevronDown, Danger, Export, Paperclip2, TextBlock, Trash, Xmark as X } from 'reicon-react'
+import { Danger, Paperclip2, TextBlock, Trash, Xmark as X } from 'reicon-react'
 import { toast } from 'sonner'
 import { cn } from 'cn'
 import type { MailDraft, MailDraftFile, MailFromAddress, MailSnippet } from '@orbit/api/generated/types.gen'
@@ -36,7 +35,7 @@ import { fetchDraftFile, useDraft, useDraftCheck, useFromAddresses, useSnippets,
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { useQueryClient } from '@tanstack/react-query'
 import { mailKeys } from '../api/keys'
-import { isUntouchedDraft, notReadyText, recipientSummary, recipientsKey, type SuppressedRecipient } from './composeLib'
+import { isUntouchedDraft, notReadyText, recipientsKey, type SuppressedRecipient } from './composeLib'
 import { createInlineImages } from './inlineImages'
 import { ComposerFiles, type PendingUpload } from './ComposerFiles'
 import { FromPicker } from './FromPicker'
@@ -48,14 +47,12 @@ import { useComposerSend, type SentHandler } from './useComposerSend'
 /** BlockNote is about 1 MB: the editor loads on first use (the app preloads it when idle). */
 const LazyMailEditor = lazy(() => import('./MailEditor').then((module) => ({ default: module.MailEditor })))
 
-export type ComposerPlacement = 'inline' | 'window' | 'full'
+export type ComposerPlacement = 'window' | 'full'
 
 /** What a host can ask of an open composer. */
 export interface ComposerHandle {
   /** Puts the focus back in the composer (the text, or To when there is nobody to send to). */
   focus: () => void
-  /** Saves everything typed so far and waits for it: another composer of this draft can start from the server copy. */
-  handOff: () => Promise<void>
 }
 
 export interface ComposerProps {
@@ -64,15 +61,15 @@ export interface ComposerProps {
   /**
    * Close the composer; the draft stays (what is not saved yet is saved on the way out). An untouched draft
    * (`isUntouchedDraft`: made just now, nothing changed) is deleted first: a reply opened by mistake leaves no "Draft"
-   * behind. The inline reply also deletes it when it goes away without Close (R, then J to the next thread).
+   * behind.
    */
   onClose: () => void
   /** The server took the message (it waits for the undo time or its scheduled time). Without it a toast says so. */
   onSent?: SentHandler
   /** Esc (when no menu in the composer takes it). Without it, Esc closes the composer like `onClose`. */
   onEscape?: () => void
-  /** ⌘⇧E (`key`) or the Pop out button (`click`): the inline reply to a window, or a window to full screen and back. */
-  onPopOut?: (how: 'key' | 'click') => void
+  /** ⌘⇧E: a window to full screen and back. */
+  onPopOut?: () => void
   /** Focus the text (or To) when the composer opens. Off for windows brought back by a reload. */
   autoFocus?: boolean
   handleRef?: Ref<ComposerHandle>
@@ -82,7 +79,6 @@ export interface ComposerProps {
 }
 
 const ROOT_CLASS: Record<ComposerPlacement, string> = {
-  inline: 'rounded-xl border bg-card shadow-xs',
   // on a phone the window fills the screen, as the full form does
   window: 'h-full min-h-0 overflow-hidden rounded-xl border bg-popover shadow-2xl max-[899px]:rounded-none max-[899px]:border-0 max-[899px]:bg-background max-[899px]:shadow-none',
   full: 'h-full min-h-0 bg-background',
@@ -191,14 +187,6 @@ interface BodyProps extends ComposerProps {
   onRestore: () => void
 }
 
-// Untouched inline drafts are deleted a moment after their composer goes; one that mounts again at once (React's
-// development double mount) keeps its draft.
-const pendingDeletes = new Map<string, ReturnType<typeof setTimeout>>()
-const keepDraft = (draftId: string) => {
-  clearTimeout(pendingDeletes.get(draftId))
-  pendingDeletes.delete(draftId)
-}
-
 /** Exporting the body to HTML walks the whole document: it waits for a pause in typing. */
 const BODY_EXPORT_MS = 400
 
@@ -233,8 +221,6 @@ function ComposerBody({
   const [showCc, setShowCc] = useState(initial.cc.length > 0)
   const [showBcc, setShowBcc] = useState(initial.bcc.length > 0)
   const noRecipients = initial.to.length + initial.cc.length + initial.bcc.length === 0
-  // inline: one recipients line until clicked (U1); open at once when there is nobody to send to (a forward)
-  const [fieldsOpen, setFieldsOpen] = useState(placement !== 'inline' || noRecipients)
   const [learnedNames, setLearnedNames] = useState<ReadonlyMap<string, string>>(new Map())
   const [pending, setPending] = useState<PendingUpload[]>([])
   const [busy, setBusy] = useState<ReadonlySet<string>>(new Set())
@@ -246,8 +232,6 @@ function ComposerBody({
   const bccField = useRef<RecipientFieldHandle>(null)
   const fileInput = useRef<HTMLInputElement>(null)
   const mounted = useRef(true)
-  /** Set when the composer goes on purpose (closed, sent, popped out, deleted): its unmount deletes nothing. */
-  const leaving = useRef(false)
   const workspaceId = useWorkspace().workspace.id
   const queryClient = useQueryClient()
   // previews of the images in the text; the object URLs go when the composer closes
@@ -361,15 +345,10 @@ function ComposerBody({
     removeFiles: (ids) => Promise.all(ids.map((id) => removeFile.mutateAsync(id))),
     draftFiles: () => queryClient.getQueryData<MailDraft>(mailKeys.draft(workspaceId, draftId))?.files ?? draft.files,
     onRecipientProblem: () => {
-      setFieldsOpen(true)
       requestAnimationFrame(() => toField.current?.focus())
     },
     onSent,
-    // sent: the composer goes on purpose, its unmount deletes nothing
-    onClose: () => {
-      leaving.current = true
-      onClose()
-    },
+    onClose,
   })
   const { send, sending, warnings, notice, tooLarge, clearTooLarge: dismissTooLarge, recheck } = composer
 
@@ -500,7 +479,6 @@ function ComposerBody({
 
   const discard = async () => {
     if (written() && !(await confirmAction({ title: 'Delete this draft?', description: 'Its text and files are deleted.', confirmLabel: 'Delete', danger: true }))) return
-    leaving.current = true
     saver.stop()
     deleteDraft.mutate(draftId, {
       onSuccess: () => {
@@ -516,7 +494,6 @@ function ComposerBody({
 
   /** Closes the composer, deleting an untouched draft on the way. */
   const close = () => {
-    leaving.current = true
     if (untouched()) {
       saver.stop()
       deleteUntouched()
@@ -524,39 +501,10 @@ function ComposerBody({
     onClose()
   }
 
-  // R, then J to the next thread: the inline reply goes without Close. An untouched draft goes with it.
-  const onUnmount = useRef<() => void>(() => {})
-  useEffect(() => {
-    onUnmount.current = () => {
-      if (placement !== 'inline' || leaving.current || isReloading() || !untouched()) return
-      // The saver stops only when the delete really runs: a body that mounts again at once (React's StrictMode
-      // check, a remount while the composer stays) cancels the delete in `keepDraft` and must still save and send.
-      pendingDeletes.set(draftId, setTimeout(() => {
-        pendingDeletes.delete(draftId)
-        saver.stop()
-        deleteUntouched()
-      }, 0))
-    }
-  })
-  useLayoutEffect(() => {
-    keepDraft(draftId)
-    const current = onUnmount
-    return () => current.current()
-  }, [draftId])
-
   useImperativeHandle(handleRef, () => ({
     focus: () => {
-      if (fieldsOpen && to.length + cc.length + bcc.length === 0) toField.current?.focus()
+      if (to.length + cc.length + bcc.length === 0) toField.current?.focus()
       else editor.current?.focus()
-    },
-    handOff: async () => {
-      leaving.current = true
-      // typed recipients become chips (their change is saved), then the text, then everything at once
-      toField.current?.commit()
-      ccField.current?.commit()
-      bccField.current?.commit()
-      saveBody()
-      await saver.flush()
     },
   }))
 
@@ -571,7 +519,7 @@ function ComposerBody({
     } else if (mod && event.shiftKey && event.code === 'KeyE') {
       event.preventDefault()
       event.stopPropagation()
-      onPopOut?.('key')
+      onPopOut?.()
     }
   }
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -616,9 +564,8 @@ function ComposerBody({
     },
   }
 
-  const inline = placement === 'inline'
   // a phone shows the composer full screen, as the native app does: Close on the left, Send on the right
-  const phone = useIsPhone() && !inline
+  const phone = useIsPhone()
   const title = subject.trim() || (draft.mode === 'new' ? 'New message' : draft.mode.startsWith('forward') ? 'Forward' : 'Reply')
   const showFrom = phone || fromAddresses.length > 1 || (fromAddress !== undefined && fromAddress.ready !== 'ready')
   const ccToggles = (
@@ -635,7 +582,6 @@ function ComposerBody({
       ) : null}
     </span>
   )
-  const named = (address: string) => ({ address, name: names.get(lower(address)) })
 
   return (
     <div data-slot="composer" data-placement={placement} className={cn('relative', className)} onKeyDownCapture={onKeyDownCapture} onKeyDown={onKeyDown} {...drag}>
@@ -648,7 +594,7 @@ function ComposerBody({
           {headerActions}
           <SendButton blocked={blocked} sending={sending} anyway={warnings.length > 0} inThread={Boolean(draft.thread_id)} onSend={(options) => void send(options)} />
         </header>
-      ) : !inline ? (
+      ) : (
         <header className="flex h-10 shrink-0 items-center gap-1 border-b border-border/60 pr-1.5 pl-3">
           <h2 className="min-w-0 flex-1 truncate text-[0.8125rem] font-semibold">{title}</h2>
           {headerActions}
@@ -658,7 +604,7 @@ function ComposerBody({
             </Button>
           </Tip>
         </header>
-      ) : null}
+      )}
 
       {saver.problem === 'sending' ? (
         <Banner>This draft is being sent from another window. Your changes are kept.</Banner>
@@ -679,7 +625,8 @@ function ComposerBody({
         </Banner>
       ) : null}
 
-      {fieldsOpen ? (
+      {/* full screen: the fields, the text and the buttons in one centered column (the header spans the screen) */}
+      <div className={cn('flex min-h-0 flex-1 flex-col', placement === 'full' && 'mx-auto w-full max-w-3xl')}>
         <div className="shrink-0">
           {showFrom ? <FromPicker addresses={fromAddresses} value={fromId} onChange={changeFrom} /> : null}
           <RecipientField
@@ -705,130 +652,107 @@ function ComposerBody({
             />
           </div>
         </div>
-      ) : (
-        <button
-          type="button"
-          className="flex h-9 shrink-0 items-center gap-1.5 border-b border-border/60 px-3 text-left text-[0.8125rem] text-muted-foreground transition-colors duration-100 outline-none hover:text-foreground focus-visible:bg-muted/50"
-          onClick={() => setFieldsOpen(true)}
-          aria-label="Edit recipients"
-        >
-          <span className="min-w-0 truncate">{recipientSummary(to.map(named), cc.map(named), bcc.map(named))}</span>
-          <ChevronDown className="size-3.5 shrink-0" />
-        </button>
-      )}
 
-      <div
-        className={cn('min-h-0 cursor-text px-3 py-3', inline ? 'min-h-32' : 'flex-1 overflow-y-auto overscroll-contain', placement === 'full' && 'mx-auto w-full max-w-3xl')}
-        onMouseDown={(event) => {
-          // a press in the padding or below the text goes to the text
-          if (event.target !== event.currentTarget) return
-          event.preventDefault()
-          editor.current?.focus()
-        }}
-      >
-        <Suspense fallback={<EditorFallback />}>
-          <LazyMailEditor
-            ref={editor}
-            initialHtml={initial.body_html}
-            signatureHtml={signatureOf(initial.from_address_id)}
-            snippets={snippets.data ?? NO_SNIPPETS}
-            onChange={onBodyChange}
-            onPasteFiles={addToText}
-            resolveImage={inlineImages.resolve}
-            autoFocus={autoFocus && !noRecipients}
-            editable={!sending}
-            className={inline ? 'min-h-24' : 'min-h-full'}
-          />
-        </Suspense>
-      </div>
-
-      {phone && draft.mode !== 'new' ? (
-        <p className="shrink-0 px-3 pb-2 text-xs text-muted-foreground">
-          {draft.mode.startsWith('forward') ? 'The forwarded message goes below your text.' : 'The message you answer is quoted below your text.'}
-        </p>
-      ) : null}
-
-      <ComposerFiles files={files} pending={pending} busy={busy} tooLarge={tooLarge} onRemove={dropFile} onToggleLink={toggleLink} onLinkSuggested={linkSuggested} />
-
-      {warnings.length > 0 ? (
-        <div role="status" className="mx-3 mb-2 flex flex-col gap-1 rounded-lg border border-amber-500/30 bg-amber-500/8 px-2.5 py-2 text-[0.8125rem]">
-          {warnings.map((warning) => (
-            <p key={warning.kind} className="flex items-start gap-2">
-              <Danger className="mt-0.5 size-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
-              <span className="min-w-0">
-                {warning.message}
-                {warning.details ? (
-                  <span className="mt-0.5 flex flex-col text-xs text-muted-foreground">
-                    {warning.details.map((line) => (
-                      <span key={line}>{line}</span>
-                    ))}
-                  </span>
-                ) : null}
-              </span>
-            </p>
-          ))}
-          <p className="flex items-center gap-1.5 pl-5.5 text-xs text-muted-foreground">
-            {phone ? 'Tap Send anyway to send it.' : <>Press <ShortcutKeys keys="Mod+Enter" /> again to send anyway.</>}
-          </p>
-        </div>
-      ) : null}
-
-      <footer className="flex shrink-0 items-center gap-1 px-3 pb-3">
-        {phone ? null : <SendButton blocked={blocked} sending={sending} anyway={warnings.length > 0} inThread={Boolean(draft.thread_id)} onSend={(options) => void send(options)} />}
-        <Tip label="Attach files">
-          <Button variant="ghost" size="icon-sm" className="text-muted-foreground" aria-label="Attach files" onClick={() => fileInput.current?.click()}>
-            <Paperclip2 />
-          </Button>
-        </Tip>
-        {(snippets.data?.length ?? 0) > 0 ? (
-          <Tip
-            label={
-              <span className="flex items-center gap-2">
-                Snippets <ShortcutKeys keys=";" />
-              </span>
-            }
-          >
-            <Button variant="ghost" size="icon-sm" className="text-muted-foreground" aria-label="Insert a snippet" onClick={() => editor.current?.openSnippets()}>
-              <TextBlock />
-            </Button>
-          </Tip>
-        ) : null}
-        <input
-          ref={fileInput}
-          type="file"
-          multiple
-          hidden
-          onChange={(event) => {
-            addFiles([...(event.target.files ?? [])])
-            event.target.value = ''
+        <div
+          className="min-h-0 flex-1 cursor-text overflow-y-auto overscroll-contain px-3 py-3"
+          onMouseDown={(event) => {
+            // a press in the padding or below the text goes to the text
+            if (event.target !== event.currentTarget) return
+            event.preventDefault()
+            editor.current?.focus()
           }}
-        />
-        <p role="alert" className="min-w-0 flex-1 truncate px-1.5 text-xs text-destructive">
-          {notice}
-        </p>
-        <SaveState saving={saver.saving} failed={saver.problem === 'error'} onRetry={() => {
-            saveBody()
-            void saver.flush()
-          }} />
-        {inline && onPopOut ? (
-          <Tip
-            label={
-              <span className="flex items-center gap-2">
-                Pop out <ShortcutKeys keys="Mod+Shift+E" />
-              </span>
-            }
-          >
-            <Button variant="ghost" size="icon-sm" className="text-muted-foreground" aria-label="Pop out" onClick={() => onPopOut('click')}>
-              <Export />
+        >
+          <Suspense fallback={<EditorFallback />}>
+            <LazyMailEditor
+              ref={editor}
+              initialHtml={initial.body_html}
+              signatureHtml={signatureOf(initial.from_address_id)}
+              snippets={snippets.data ?? NO_SNIPPETS}
+              onChange={onBodyChange}
+              onPasteFiles={addToText}
+              resolveImage={inlineImages.resolve}
+              autoFocus={autoFocus && !noRecipients}
+              editable={!sending}
+              className="min-h-full"
+            />
+          </Suspense>
+        </div>
+
+        {phone && draft.mode !== 'new' ? (
+          <p className="shrink-0 px-3 pb-2 text-xs text-muted-foreground">
+            {draft.mode.startsWith('forward') ? 'The forwarded message goes below your text.' : 'The message you answer is quoted below your text.'}
+          </p>
+        ) : null}
+
+        <ComposerFiles files={files} pending={pending} busy={busy} tooLarge={tooLarge} onRemove={dropFile} onToggleLink={toggleLink} onLinkSuggested={linkSuggested} />
+
+        {warnings.length > 0 ? (
+          <div role="status" className="mx-3 mb-2 flex flex-col gap-1 rounded-lg border border-amber-500/30 bg-amber-500/8 px-2.5 py-2 text-[0.8125rem]">
+            {warnings.map((warning) => (
+              <p key={warning.kind} className="flex items-start gap-2">
+                <Danger className="mt-0.5 size-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
+                <span className="min-w-0">
+                  {warning.message}
+                  {warning.details ? (
+                    <span className="mt-0.5 flex flex-col text-xs text-muted-foreground">
+                      {warning.details.map((line) => (
+                        <span key={line}>{line}</span>
+                      ))}
+                    </span>
+                  ) : null}
+                </span>
+              </p>
+            ))}
+            <p className="flex items-center gap-1.5 pl-5.5 text-xs text-muted-foreground">
+              {phone ? 'Tap Send anyway to send it.' : <>Press <ShortcutKeys keys="Mod+Enter" /> again to send anyway.</>}
+            </p>
+          </div>
+        ) : null}
+
+        <footer className="flex shrink-0 items-center gap-1 px-3 pb-3">
+          {phone ? null : <SendButton blocked={blocked} sending={sending} anyway={warnings.length > 0} inThread={Boolean(draft.thread_id)} onSend={(options) => void send(options)} />}
+          <Tip label="Attach files">
+            <Button variant="ghost" size="icon-sm" className="text-muted-foreground" aria-label="Attach files" onClick={() => fileInput.current?.click()}>
+              <Paperclip2 />
             </Button>
           </Tip>
-        ) : null}
-        <Tip label="Delete draft">
-          <Button variant="ghost" size="icon-sm" className="text-muted-foreground hover:text-destructive" aria-label="Delete draft" onClick={() => void discard()}>
-            <Trash />
-          </Button>
-        </Tip>
-      </footer>
+          {(snippets.data?.length ?? 0) > 0 ? (
+            <Tip
+              label={
+                <span className="flex items-center gap-2">
+                  Snippets <ShortcutKeys keys=";" />
+                </span>
+              }
+            >
+              <Button variant="ghost" size="icon-sm" className="text-muted-foreground" aria-label="Insert a snippet" onClick={() => editor.current?.openSnippets()}>
+                <TextBlock />
+              </Button>
+            </Tip>
+          ) : null}
+          <input
+            ref={fileInput}
+            type="file"
+            multiple
+            hidden
+            onChange={(event) => {
+              addFiles([...(event.target.files ?? [])])
+              event.target.value = ''
+            }}
+          />
+          <p role="alert" className="min-w-0 flex-1 truncate px-1.5 text-xs text-destructive">
+            {notice}
+          </p>
+          <SaveState saving={saver.saving} failed={saver.problem === 'error'} onRetry={() => {
+              saveBody()
+              void saver.flush()
+            }} />
+          <Tip label="Delete draft">
+            <Button variant="ghost" size="icon-sm" className="text-muted-foreground hover:text-destructive" aria-label="Delete draft" onClick={() => void discard()}>
+              <Trash />
+            </Button>
+          </Tip>
+        </footer>
+      </div>
 
       {dragging ? (
         <div className="pointer-events-none absolute inset-1 z-10 flex items-center justify-center rounded-[10px] border-2 border-dashed border-primary/50 bg-background/85 text-sm font-medium text-primary animate-in fade-in-0 duration-150 motion-reduce:animate-none">

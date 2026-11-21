@@ -1,4 +1,5 @@
 mod cli;
+mod dev_mail_seed;
 
 use std::future::Future;
 use std::process::ExitCode;

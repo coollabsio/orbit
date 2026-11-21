@@ -16,7 +16,7 @@ import { draftsQuery, useDraft, useMailMe } from '../api/queries'
 import { Composer, type ComposerHandle } from './Composer'
 import { dockCapacity, layoutDock, type ComposerDockStore, type DockWindow } from './composerDockStore'
 import { useAnnounceSent, useUndoSendShortcut } from './undoSend'
-import { reopenDraft, useArchiveAfterSend, useComposerDock, useNewEmail } from './useComposerDock'
+import { useArchiveAfterSend, useComposerDock, useNewEmail } from './useComposerDock'
 import type { SentHandler } from './useComposerSend'
 
 const subscribeResize = (onChange: () => void) => {
@@ -192,7 +192,7 @@ function DockWindowFrame({
     const undoArchive = archive && draft.thread_id ? archiveAfterSend(draft.thread_id) : undefined
     announce(outbound, (restored) => {
       undoArchive?.()
-      reopenDraft(restored, store, 'window')
+      store.open(restored.id)
     })
   }
 

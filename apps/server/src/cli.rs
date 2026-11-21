@@ -430,7 +430,7 @@ async fn migrate(config: Config, command: &MigrateCommand) -> Result<String, Cli
     let mut output = format!("applied {count} migration(s)");
     if seed {
         output.push('\n');
-        output.push_str(&install_seed_data(database, app_key_bytes(&config)).await?);
+        output.push_str(&install_seed_data(database, app_key_bytes(&config), &config.data.attachments).await?);
     }
     Ok(output)
 }
@@ -655,7 +655,7 @@ async fn seed(config: Config) -> Result<String, CliError> {
     require_development(&config)?;
     let database = open_database(&config.data).await?;
     migrate_implicitly(&config, &database).await?;
-    install_seed_data(database, app_key_bytes(&config)).await
+    install_seed_data(database, app_key_bytes(&config), &config.data.attachments).await
 }
 
 async fn root(config: Config, command: &RootCommand) -> Result<String, CliError> {
@@ -934,6 +934,7 @@ fn app_key_bytes(config: &Config) -> Option<[u8; 32]> {
 async fn install_seed_data(
     database: Database,
     app_key: Option<[u8; 32]>,
+    attachments: &Path,
 ) -> Result<String, CliError> {
     const EMAIL: &str = "test@example.com";
     const SECOND_EMAIL: &str = "member@example.com";
@@ -1097,6 +1098,11 @@ async fn install_seed_data(
     .await
     .map_err(operation)?;
     seed_chat(&database, workspace_id, user_id, member_id).await?;
+    if let Some(key) = app_key {
+        crate::dev_mail_seed::seed_mail(&database, key, attachments, workspace_id, user_id, member_id)
+            .await
+            .map_err(|error| CliError::Operation(format!("mail seed: {error}")))?;
+    }
     // Development mail goes to the local Mailpit (AGENTS.md), unless a mail server is set already.
     sqlx::query(
         "UPDATE instance_settings SET smtp_host = $1, smtp_port = $2, smtp_security = 'none', \
@@ -1158,6 +1164,13 @@ async fn install_seed_data(
     }
     let mut output = "development seed data installed\nusers: test@example.com, member@example.com\npassword: password\nregistration: open\nmail: Mailpit at 127.0.0.1:11025 unless a mail server is set"
         .to_owned();
+    output.push_str(&match app_key {
+        Some(_) => format!(
+            "\nmailboxes: dev@, member@ and support@{} (sample mail in each)",
+            crate::dev_mail_seed::DOMAIN
+        ),
+        None => "\nmailboxes: skipped, they need ORBIT_APP_KEY".to_owned(),
+    });
     if orbit_server::github::demo::enabled() {
         output.push_str(&match app_key {
             Some(key) => match orbit_server::github::demo::seed_demo(
@@ -2175,11 +2188,15 @@ mod tests {
     async fn migrate_run_seed_installs_exact_credentials_and_preserves_edits() {
         let root = tempfile::TempDir::new().unwrap();
         let database = root.path().join("orbit.sqlite");
+        // the mail seed stores its sample messages as files
+        let attachments = root.path().join("attachments");
         let args = || {
             Cli::try_parse_from([
                 "orbit",
                 "--database",
                 database.to_str().unwrap(),
+                "--attachments",
+                attachments.to_str().unwrap(),
                 "migrate",
                 "run",
                 "--seed",
@@ -2389,10 +2406,13 @@ mod tests {
         drop(identity);
         drop(database);
 
+        let attachments = root.path().join("attachments");
         let cli = Cli::try_parse_from([
             "orbit",
             "--database",
             database_path.to_str().unwrap(),
+            "--attachments",
+            attachments.to_str().unwrap(),
             "migrate",
             "run",
             "--seed",

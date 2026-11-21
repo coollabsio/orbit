@@ -1,15 +1,14 @@
-// The dock's state for the rest of the app: the store of each workspace, opening a new message, and where Undo
-// brings a draft back.
+// The dock's state for the rest of the app: the store of each workspace and opening a new message.
 import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import type { MailDraft, MailFolder, MailThreadDetail } from '@orbit/api/generated/types.gen'
+import type { MailFolder, MailThreadDetail } from '@orbit/api/generated/types.gen'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { mailKeys } from '../api/keys'
 import { useCreateDraft, useUpdateThread } from '../api/mutations'
 import { fromAddressesQuery } from '../api/queries'
 import { problemText } from '../mailLib'
-import { createComposerDockStore, type ComposerDockStore, type OpenOptions } from './composerDockStore'
+import { createComposerDockStore, type ComposerDockStore } from './composerDockStore'
 
 // One dock for each workspace, shared by the shell (which shows it) and the mail page (which opens windows in it).
 const stores = new Map<string, ComposerDockStore>()
@@ -36,36 +35,6 @@ export function useComposerDock() {
   const store = dockStoreFor(useWorkspace().workspace.id)
   const state = useSyncExternalStore(store.subscribe, store.getSnapshot)
   return { state, store }
-}
-
-// The inline replies on screen, by thread: Undo brings a reply back where it was written when that thread is still
-// open, and in a window otherwise.
-const inlineHosts = new Map<string, (draftId: string) => void>()
-
-/** Registers the inline reply of `threadId` while it is mounted. */
-export function useInlineReplyHost(threadId: string, show: (draftId: string) => void) {
-  const latest = useRef(show)
-  useEffect(() => {
-    latest.current = show
-  })
-  useEffect(() => {
-    const host = (draftId: string) => latest.current(draftId)
-    inlineHosts.set(threadId, host)
-    return () => {
-      if (inlineHosts.get(threadId) === host) inlineHosts.delete(threadId)
-    }
-  }, [threadId])
-}
-
-/**
- * Shows a draft where it belongs: a reply goes to its thread's inline reply when that thread is on screen (else to
- * a window); a window's draft goes back to a window. Undo gives no `animate` (a key or a toast button, not a click on
- * the window); a click on a row of the Drafts list does.
- */
-export function reopenDraft(draft: MailDraft, store: ComposerDockStore, from: 'inline' | 'window', options?: OpenOptions) {
-  const host = from === 'inline' && draft.thread_id && !store.has(draft.id) ? inlineHosts.get(draft.thread_id) : undefined
-  if (host) host(draft.id)
-  else store.open(draft.id, options)
 }
 
 // The mail page's open thread: ⌘⇧Enter on a reply to it archives it and opens the next one there.

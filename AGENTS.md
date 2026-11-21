@@ -113,7 +113,9 @@ docker start orbit-mailpit 2>/dev/null || docker run -d --name orbit-mailpit --r
   -p 127.0.0.1:11025:1025 -p 127.0.0.1:18026:8025 axllent/mailpit
 ```
 
-Without Mailpit, sending fails. A mail server set in **Admin → System email** stays: the seed does not change it. If the
+The seed also adds the domain `orbit.test` (marked verified, as it has no DNS), the mailboxes `dev@`, `member@` and
+`support@orbit.test` with sample mail, and an instance SMTP route "Mailpit (development)" for that domain. Thus
+replies from these addresses land in Mailpit. Without Mailpit, sending fails. A mail server set in **Admin → System email** stays: the seed does not change it. If the
 container runs but `docker port orbit-mailpit` prints nothing, it lost its network (seen on 2026-11-04): run
 `docker network connect bridge orbit-mailpit && docker restart orbit-mailpit`.
 

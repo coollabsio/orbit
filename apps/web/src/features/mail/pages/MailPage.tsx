@@ -17,7 +17,7 @@ import { MailSearch } from '@/features/mail/components/MailSearch'
 import { DraftList, OutboundList } from '@/features/mail/components/SendLists'
 import { ThreadList } from '@/features/mail/components/ThreadList'
 import { LabelMenu, ThreadView, type LabelState } from '@/features/mail/components/ThreadView'
-import { reopenDraft, useArchiveNextHost, useComposerDock, useNewEmail } from '@/features/mail/compose/useComposerDock'
+import { useArchiveNextHost, useComposerDock, useNewEmail } from '@/features/mail/compose/useComposerDock'
 import type { ReplyMode, ThreadReplyHandle } from '@/features/mail/compose/ThreadReply'
 import {
   FOLDERS,
@@ -216,7 +216,7 @@ function MailApp({ view, threadId }: { view: MailView; threadId: string | null }
   // rows open nothing
   const focusedDraft = sendView === 'drafts' ? scopedDrafts.find((draft) => draft.id === focusedId) : undefined
   const openFocused = () => {
-    if (focusedDraft) reopenDraft(focusedDraft, dock, 'inline')
+    if (focusedDraft) dock.open(focusedDraft.id)
     else if (!sendView && focusedId) open(focusedId)
   }
   const canOpenFocused = () => (sendView ? focusedDraft !== undefined : focusedId !== null)
@@ -265,7 +265,7 @@ function MailApp({ view, threadId }: { view: MailView; threadId: string | null }
     setPendingReply(null)
   }, [pendingReply, threadId, detail.data])
 
-  // ⌘⇧Enter on a reply to the open thread (inline or in a window): it is archived and the next one opens (the one
+  // ⌘⇧Enter on a reply to the open thread: it is archived and the next one opens (the one
   // below, else above; else the list). Registered for the open thread only: a send that ends after the page moved on
   // only archives.
   useArchiveNextHost(threadId, () => {
