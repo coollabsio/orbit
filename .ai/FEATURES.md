@@ -661,7 +661,7 @@ Web client (`/mail`, sidebar entry with a **Beta** tag):
   selects, and a bulk bar archives, moves to spam or trash, restores, marks read or unread, stars and labels.
 - Opening a thread marks it read; only the newest message is expanded. HTML shows in a sandboxed iframe from a
   short-lived `view-url` (height from the frame's own `postMessage`, 80–20,000 px); plain text renders as text.
-- Banners: Failed authentication (DMARC fail), Lookalike name, Outside reply (`external`), External sender, plain
+- Banners: Failed authentication (DMARC fail), Lookalike name, Outside reply (`external`), plain
   text after a parse warning; In Spam (Not spam) and In Trash (Restore). The sender line shows the address and the
   DMARC-aligned domain.
 - Remote images stay off until **Load images** (offered on every HTML message whose sender has no preference, since

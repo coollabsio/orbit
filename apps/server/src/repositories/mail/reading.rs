@@ -235,7 +235,7 @@ pub struct MailMessageView {
     pub has_html: bool,
     pub attachments: Vec<MailAttachmentView>,
     pub auth: MailAuthSummary,
-    /// The sender's domain is not a domain of the workspace: the **External** banner.
+    /// The sender's domain is not a domain of the workspace.
     pub from_external: bool,
     /// Came from outside the workspace into a thread that started inside it.
     pub external: bool,

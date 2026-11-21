@@ -146,7 +146,7 @@ function Banner({ icon, title, danger = false, children }: { icon: IconName; tit
 
 /**
  * The warnings over a message (the web's `SafetyBanner`): failed DMARC, a sender with a member's name, an outside reply
- * in an inside thread, an external sender, and a message shown as plain text only.
+ * in an inside thread, and a message shown as plain text only.
  */
 function SafetyBanners({ message }: { message: MailMessageView }) {
   const address = message.from?.address
@@ -160,8 +160,6 @@ function SafetyBanners({ message }: { message: MailMessageView }) {
   }
   if (message.external) {
     banners.push({ key: 'joined', icon: 'danger', title: 'Outside reply', text: 'This message came from outside the workspace into a conversation that started inside it. Check the sender before you act on it.' })
-  } else if (message.from_external) {
-    banners.push({ key: 'external', icon: 'global', title: 'External sender', text: `${domain || 'The sender'} is outside this workspace. Be careful with links and attachments.` })
   }
   if (message.warning) {
     banners.push({

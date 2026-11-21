@@ -4568,7 +4568,7 @@ export type MailMessageView = {
     file_links: Array<MailFileLinkView>;
     from?: null | MailPerson;
     /**
-     * The sender's domain is not a domain of the workspace: the **External** banner.
+     * The sender's domain is not a domain of the workspace.
      */
     from_external: boolean;
     /**

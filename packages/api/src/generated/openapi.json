@@ -91216,7 +91216,7 @@
           },
           "from_external": {
             "type": "boolean",
-            "description": "The sender's domain is not a domain of the workspace: the **External** banner."
+            "description": "The sender's domain is not a domain of the workspace."
           },
           "has_html": {
             "type": "boolean",
