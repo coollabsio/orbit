@@ -2,7 +2,7 @@ import { MoreH } from 'reicon-react'
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb'
 import { Button } from '@/components/ui/button'
 import { Tip } from '@/components/common/Tip'
-import { ColorDot } from '@/components/common/ColorDot'
+import { ProjectMark } from '@/components/common/ProjectMark'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { refIdentifier, type Project, type TaskKeyRef } from '@/features/tasks/api/models'
 import { breadcrumbParts } from '@/features/tasks/subIssuesLib'
@@ -43,7 +43,7 @@ export function TaskBreadcrumb({ project, ancestors, identifier, onOpen, onOpenP
                   render={<Button type="button" variant="link" onClick={() => onOpenProject?.(project.id)} />}
                   className="h-auto min-w-0 gap-1.5 p-0 text-xs font-medium text-foreground"
                 >
-                  <ColorDot color={project.color} />
+                  <ProjectMark project={project} iconClassName="size-3.5" />
                   <span className="max-w-48 truncate max-[899px]:max-w-28">{project.name}</span>
                 </BreadcrumbLink>
               </Tip>

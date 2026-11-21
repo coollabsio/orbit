@@ -53,7 +53,7 @@ import { TaskList } from '@/features/tasks/components/TaskList'
 import { TaskSearchBox } from '@/features/tasks/components/TaskSearchBox'
 import { NewProjectModal } from '@/features/tasks/components/NewProjectModal'
 import { ProjectLock } from '@/features/tasks/components/ProjectLock'
-import { ColorDot } from '@/components/common/ColorDot'
+import { ProjectMark } from '@/components/common/ProjectMark'
 import { taskUnavailableDescription } from '@/features/tasks/taskAvailability'
 import { quickSearchTasks, resolveStatusId } from '@/features/tasks/tasksLib'
 import { TaskTimeline, type TimelineHandle } from '@/features/tasks/timeline/TaskTimeline'
@@ -414,7 +414,7 @@ function WorkspaceTasksPage() {
                   <DropdownMenuTrigger
                     render={
                       <Button type="button" variant="ghost" className="min-w-0 gap-[7px] px-[7px] font-normal text-muted-foreground max-[899px]:max-w-[30vw]" aria-label="Select project">
-                        {activeProject ? <ColorDot color={activeProject.color} /> : null}
+                        {activeProject ? <ProjectMark project={activeProject} /> : null}
                         <span className="truncate">{activeProject?.name ?? 'All projects'}</span>{activeProject ? <ProjectLock project={activeProject} /> : null}<ChevronDown className="size-3.5 shrink-0" />
                       </Button>
                     }
@@ -423,7 +423,7 @@ function WorkspaceTasksPage() {
                     <DropdownMenuItem className="data-active:bg-accent data-active:font-medium" data-active={projectFilter === null || undefined} onClick={() => setProjectFilter(null)}><SquareCheck />All projects</DropdownMenuItem>
                     {projects.map((project) => <div key={project.id} className="relative flex items-center">
                       <DropdownMenuItem className="min-w-0 flex-1 pr-8 data-active:bg-accent data-active:font-medium" data-active={project.id === projectFilter || undefined} onClick={() => setProjectFilter(project.id)}>
-                        <ColorDot color={project.color} />
+                        <ProjectMark project={project} />
                         <span className="min-w-0 flex-1 truncate">{project.name}</span>
                         <ProjectLock project={project} />
                       </DropdownMenuItem>

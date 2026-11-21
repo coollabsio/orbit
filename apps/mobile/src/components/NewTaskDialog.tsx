@@ -34,6 +34,7 @@ import { Avatar, Button, Icon, IconButton, type IconName, KeyboardSpace, Priorit
 import { type FileSource, pickFiles } from './tasks/files'
 import { CycleChoices, Dot, DueDateChoices, EstimateChoices, LabelChoices, MenuChoices, MilestoneChoices, PeopleChoices, PriorityChoices, StatusChoices, TaskChoices } from './tasks/pickers'
 import { Sheet, SheetList, SheetRow, useSheet } from './tasks/Sheet'
+import { ProjectMark } from '../ui/ProjectMark'
 
 /** Relations a new task can have: a duplicate needs a canonical task, which it cannot be marked as before it exists. */
 type PendingKind = Exclude<RelationKind, 'duplicate'>
@@ -194,7 +195,7 @@ export function NewTaskDialog({ defaults, onClose }: { defaults: NewTaskDefaults
                 onPress={() => sheets.open({ kind: 'project' })}
                 className="h-6 flex-row items-center gap-1 px-2 rounded-md border border-input bg-input/30" style={{ boxShadow: `0 2px 0 ${alpha(scheme === 'dark' ? cssColors.white : cssColors.black, scheme === 'dark' ? 0.08 : 0.22)}` }}
               >
-                {project ? <Dot color={project.color} size={6} /> : null}
+                {project ? <ProjectMark project={project} className="size-1.5 rounded-full" iconSize={14} /> : null}
                 <Text numberOfLines={1} className="text-[12px] leading-[16px] max-w-42.5">
                   {project?.name ?? 'No project'}
                 </Text>
@@ -343,7 +344,7 @@ export function NewTaskDialog({ defaults, onClose }: { defaults: NewTaskDefaults
                 key={item.id}
                 label={item.name}
                 subtitle={item.key}
-                leading={<Dot color={item.color} />}
+                leading={<ProjectMark project={item} />}
                 checked={item.id === project?.id}
                 onPress={() => {
                   sheets.close()

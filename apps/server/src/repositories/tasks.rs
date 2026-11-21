@@ -28,6 +28,9 @@ use crate::export::markdown::{KeepLinks, blocks_to_markdown};
 
 mod cycles;
 mod milestones;
+mod project_icons;
+
+pub use project_icons::{ProjectIconError, project_icon_url};
 
 pub use cycles::{CycleChanges, CycleMoveOutcome, CycleRecord};
 pub use milestones::{MilestoneChanges, MilestoneRecord};
@@ -90,6 +93,9 @@ pub struct ProjectRecord {
     /// Only the project's members, and workspace owners and admins, see a private project and
     /// what is in it. Everyone else gets the answers of a missing project.
     pub private: bool,
+    /// The project's own icon image (`GET`), when it has one; apps show the colour otherwise. The URL changes
+    /// with every new image.
+    pub icon_url: Option<String>,
     pub version: u64,
     #[schema(value_type = Option<String>, format = DateTime)]
     pub deleted_at: Option<TimestampMillis>,
@@ -874,7 +880,7 @@ impl TaskRepository {
             return Ok(Vec::new());
         }
         let mut query = SqlBuilder::new(
-            "SELECT id, workspace_id, name, project_key, color, auto_close_parent, auto_close_sub_issues, private, version, deleted_at, created_at, updated_at FROM projects WHERE deleted_at IS NULL AND workspace_id = ",
+            "SELECT id, workspace_id, name, project_key, color, auto_close_parent, auto_close_sub_issues, private, version, deleted_at, created_at, updated_at, (SELECT updated_at FROM project_icons WHERE project_icons.project_id = projects.id) AS icon_updated_at FROM projects WHERE deleted_at IS NULL AND workspace_id = ",
         );
         query
             .push_bind(workspace_id.to_string())
@@ -908,7 +914,7 @@ impl TaskRepository {
         let fingerprint = format!("projects:{workspace_id}");
         let after = cursor_pair(cursor, &fingerprint)?;
         let mut query = SqlBuilder::new(
-            "SELECT id, workspace_id, name, project_key, color, auto_close_parent, auto_close_sub_issues, private, version, deleted_at, created_at, updated_at \
+            "SELECT id, workspace_id, name, project_key, color, auto_close_parent, auto_close_sub_issues, private, version, deleted_at, created_at, updated_at, (SELECT updated_at FROM project_icons WHERE project_icons.project_id = projects.id) AS icon_updated_at \
              FROM projects WHERE workspace_id = ",
         );
         query
@@ -1037,6 +1043,7 @@ impl TaskRepository {
             auto_close_parent: true,
             auto_close_sub_issues: true,
             private,
+            icon_url: None,
             version: 0,
             deleted_at: None,
             created_at: now,
@@ -1263,7 +1270,7 @@ impl TaskRepository {
         let fingerprint = format!("project-trash:{workspace_id}");
         let after = cursor_i64_pair(cursor, &fingerprint)?;
         let mut query = SqlBuilder::new(
-            "SELECT id, workspace_id, name, COALESCE(restore_project_key, project_key) AS project_key, color, auto_close_parent, auto_close_sub_issues, private, version, deleted_at, created_at, updated_at \
+            "SELECT id, workspace_id, name, COALESCE(restore_project_key, project_key) AS project_key, color, auto_close_parent, auto_close_sub_issues, private, version, deleted_at, created_at, updated_at, (SELECT updated_at FROM project_icons WHERE project_icons.project_id = projects.id) AS icon_updated_at \
              FROM projects WHERE workspace_id = ",
         );
         query
@@ -3534,7 +3541,7 @@ impl TaskRepository {
             ProjectScope::of(&require_access(self.database.pool(), workspace_id, actor_id).await?);
         self.require_granted_project(project_id)?;
         let row = sqlx::query(sqlx::AssertSqlSafe(format!(
-            "SELECT id, workspace_id, name, COALESCE(restore_project_key, project_key) AS project_key, color, auto_close_parent, auto_close_sub_issues, private, version, deleted_at, created_at, updated_at \
+            "SELECT id, workspace_id, name, COALESCE(restore_project_key, project_key) AS project_key, color, auto_close_parent, auto_close_sub_issues, private, version, deleted_at, created_at, updated_at, (SELECT updated_at FROM project_icons WHERE project_icons.project_id = projects.id) AS icon_updated_at \
              FROM projects WHERE id = $1 AND workspace_id = $2 AND deleted_at > $3 AND {}",
             scope.project("projects.id")
         )))
@@ -5516,7 +5523,7 @@ pub(super) async fn project_in_tx(
     deleted: bool,
 ) -> Result<ProjectRecord, TaskError> {
     let row = sqlx::query(sqlx::AssertSqlSafe(format!(
-        "SELECT id, workspace_id, name, COALESCE(restore_project_key, project_key) AS project_key, color, auto_close_parent, auto_close_sub_issues, private, version, deleted_at, created_at, updated_at \
+        "SELECT id, workspace_id, name, COALESCE(restore_project_key, project_key) AS project_key, color, auto_close_parent, auto_close_sub_issues, private, version, deleted_at, created_at, updated_at, (SELECT updated_at FROM project_icons WHERE project_icons.project_id = projects.id) AS icon_updated_at \
          FROM projects WHERE id = $1 AND workspace_id = $2 AND (($3 = 1 AND deleted_at IS NOT NULL) OR ($4 = 0 AND deleted_at IS NULL)) AND {}",
         scope.project("projects.id")
     )))
@@ -5674,6 +5681,11 @@ fn project_from_row(row: sqlx::any::AnyRow) -> Result<ProjectRecord, TaskError> 
         auto_close_parent: row.get("auto_close_parent"),
         auto_close_sub_issues: row.get("auto_close_sub_issues"),
         private: row.get("private"),
+        icon_url: project_icon_url(
+            parse_id(row.get("workspace_id"))?,
+            parse_id(row.get("id"))?,
+            row.get("icon_updated_at"),
+        ),
         version: parse_version(row.get("version"))?,
         deleted_at: row
             .get::<Option<i64>, _>("deleted_at")

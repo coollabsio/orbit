@@ -24,10 +24,14 @@ import {
   targetDay,
   targetValue,
 } from '../../../../data/tasks'
-import { useCycleWrites, useMilestoneWrites } from '../../../../hooks/tasks'
+import { pickImage } from '../../../../hooks/account'
+import { useCycleWrites, useMilestoneWrites, useSetProjectIcon } from '../../../../hooks/tasks'
+import type { ProjectRecord } from '../../../../data/orbit'
+import { errorMessage } from '../../../../session-context'
 import { useCycles, useMilestones, useProjects } from '../../../../queries'
 import { alpha, useTheme } from '../../../../theme'
 import { Button, Icon, IconButton, Input, KeyboardSpace, PaneHeader, PullRefresh, SafeAreaView, Text } from '../../../../ui'
+import { ProjectMark } from '../../../../ui/ProjectMark'
 
 const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? '' : 's'}`
 const longDate = (date: Date) => date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
@@ -137,7 +141,7 @@ export default function ProjectSettingsScreen() {
       <PaneHeader className="min-h-12 px-3">
         <IconButton icon="back" label="Back to tasks" color={alpha(colors.mutedForeground, 0.7)} onPress={back} />
         <View className="flex-1 flex-row items-center gap-1.5 min-w-0">
-          {project ? <View className="size-1.5 rounded-full" style={{ backgroundColor: project.color }} /> : null}
+          {project ? <ProjectMark project={project} className="size-1.5 rounded-full" iconSize={14} /> : null}
           <Text numberOfLines={1} className="font-noto-medium text-[13px] shrink text-muted-foreground">
             {project?.name ?? 'Project'}
           </Text>
@@ -153,6 +157,7 @@ export default function ProjectSettingsScreen() {
           keyboardShouldPersistTaps="handled"
           refreshControl={<PullRefresh onRefresh={() => Promise.all([milestones.refetch(), cycles.refetch()])} />}
         >
+          {project ? <ProjectIconCard project={project} /> : null}
           <SettingsCard
             title="Milestones"
             description="Steps toward the project's goal, in order. Progress counts the done tasks of each."
@@ -236,6 +241,33 @@ export default function ProjectSettingsScreen() {
 }
 
 /** Shows a write's error under the form and keeps it open; closes it once the write is done. */
+/** The web's project Icon field: shown in place of the colour, cropped to a square, saved at once (like the profile picture). */
+function ProjectIconCard({ project }: { project: ProjectRecord }) {
+  const setIcon = useSetProjectIcon(project.id)
+  const [pickError, setPickError] = useState<string | null>(null)
+  const choose = () => {
+    setPickError(null)
+    setIcon.reset()
+    pickImage({ square: true, maxBytes: 512 * 1024 }).then(
+      (file) => file && setIcon.mutate(file),
+      (error: unknown) => setPickError(errorMessage(error)),
+    )
+  }
+  const error = pickError ?? (setIcon.isError ? errorMessage(setIcon.error) : null)
+  return (
+    <SettingsCard title="Icon" description="Shown in place of the color in the sidebar and on tasks. Cropped to a square.">
+      <View className="flex-row flex-wrap items-center gap-3">
+        <View className="size-9 items-center justify-center rounded-md border border-border">
+          <ProjectMark project={project} className="size-3 rounded-[3px]" iconSize={34} />
+        </View>
+        <Button label={setIcon.isPending ? 'Saving…' : project.icon_url ? 'Change icon' : 'Upload icon'} variant="outline" disabled={setIcon.isPending} onPress={choose} />
+        {project.icon_url ? <Button label="Remove" variant="ghost" disabled={setIcon.isPending} onPress={() => setIcon.mutate(null)} /> : null}
+      </View>
+      {error ? <Text className="mt-2 text-[12px] leading-[16px] text-destructive">{error}</Text> : null}
+    </SettingsCard>
+  )
+}
+
 function useSubmit(save: () => Promise<unknown>, onClose: () => void, message: (error: unknown) => string) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)

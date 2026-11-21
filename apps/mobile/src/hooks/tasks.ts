@@ -170,6 +170,19 @@ export function useCreateTask() {
  * Create, edit, reorder and delete of a project's milestones. Each refreshes the list; a delete also refreshes the
  * tasks, which lose the milestone. The caller shows the errors (`milestoneErrorMessage`).
  */
+/** Uploads (an image) or removes (`null`) a project's icon; the project list shows it at once. */
+export function useSetProjectIcon(projectId: string) {
+  const { client, workspaceId } = useOrbit()
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (file: Parameters<typeof taskApi.setProjectIcon>[3]) => taskApi.setProjectIcon(client, workspaceId, projectId, file),
+    onSuccess: (record: api.ProjectRecord) => {
+      queryClient.setQueryData(keys.projects(workspaceId), (current: api.ProjectRecord[] | undefined) => current?.map((project) => (project.id === record.id ? record : project)))
+      void queryClient.invalidateQueries({ queryKey: keys.projects(workspaceId) })
+    },
+  })
+}
+
 export function useMilestoneWrites(projectId: string) {
   const { client, workspaceId } = useOrbit()
   const queryClient = useQueryClient()

@@ -2392,9 +2392,18 @@ impl WorkspaceRepository {
                     PURGE_ROW_BATCH,
                 )
                 .await?;
-            // Page files, chat files, mail receipts and the files of outgoing mail hold their
-            // blobs with ON DELETE RESTRICT, so they go before the blobs. A receipt takes its
-            // parsed messages along.
+            // Page files, chat files, project icons, mail receipts and the files of outgoing mail
+            // hold their blobs with ON DELETE RESTRICT, so they go before the blobs. A receipt
+            // takes its parsed messages along. A workspace has few project icons (one per
+            // project), so they go in one statement.
+            let mut transaction = self.database.immediate_transaction().await?;
+            summary.attachment_references_purged +=
+                sqlx::query("DELETE FROM project_icons WHERE workspace_id = $1")
+                    .bind(&workspace_id)
+                    .execute(&mut *transaction)
+                    .await?
+                    .rows_affected();
+            transaction.commit().await?;
             for (table, batch) in [
                 ("page_files", PURGE_ROW_BATCH),
                 ("chat_message_files", PURGE_ROW_BATCH),

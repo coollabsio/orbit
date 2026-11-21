@@ -20,6 +20,7 @@ import { Switch } from '@/components/ui/switch'
 import { clipboardFiles } from '@/lib/attachmentLib'
 import type { CreateTaskBody, TaskRecord } from '@orbit/api/generated/types.gen'
 import { ColorDot } from '@/components/common/ColorDot'
+import { ProjectMark } from '@/components/common/ProjectMark'
 import { DatePicker } from '@/components/common/DatePicker'
 import { SearchPicker } from '@/components/common/SearchPicker'
 import { UserAvatarStack } from '@/components/common/UserAvatar'
@@ -258,7 +259,7 @@ export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescrip
               onSelect={(id) => setDraft((current) => ({ ...current, projectId: id, statusId: resolveStatusId(statuses, id, status ? statusKeyOf(status) : null) }))}
               trigger={
                 <Button type="button" variant="outline" size="xs" className="max-w-48 font-normal" aria-label={`Project: ${project?.name ?? 'none'}`}>
-                  <ColorDot color={project?.color} />
+                  <ProjectMark project={project} iconClassName="size-3.5" />
                   <span className="truncate">{project?.name ?? 'No project'}</span>
                 </Button>
               }

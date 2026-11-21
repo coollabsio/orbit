@@ -18,6 +18,8 @@ import {
   putProjectOrder,
   listStatuses,
   purgeProject,
+  removeProjectIcon,
+  uploadProjectIcon,
   removeProjectMember,
   reorderStatuses,
   restoreProject,
@@ -162,6 +164,26 @@ export function useUpdateProject(workspaceId: string, projectId: string) {
     // Write the returned record into the list cache synchronously: callers that key a follow-up
     // mutation off `project.version` (e.g. the sub-issue automation switches) must see the bumped
     // version immediately, not after the async refetch below lands.
+    onSuccess: (record: ProjectRecord) => {
+      queryClient.setQueryData(queryKeys.projects(workspaceId), (current: ProjectRecord[] | undefined) =>
+        current?.map((project) => (project.id === record.id ? record : project)),
+      )
+      void queryClient.invalidateQueries({ queryKey: queryKeys.projects(workspaceId) })
+    },
+  })
+}
+
+/** Upload (a 256 px square from `avatarImage`) or remove (`null`) the project's icon. */
+export function useSetProjectIcon(workspaceId: string, projectId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (image: Blob | null) => {
+      const path = { workspace_id: workspaceId, project_id: projectId }
+      const { data } = image
+        ? await uploadProjectIcon({ client: apiClient, path, body: { file: image }, throwOnError: true })
+        : await removeProjectIcon({ client: apiClient, path, throwOnError: true })
+      return required(data, 'Project icon response was empty.')
+    },
     onSuccess: (record: ProjectRecord) => {
       queryClient.setQueryData(queryKeys.projects(workspaceId), (current: ProjectRecord[] | undefined) =>
         current?.map((project) => (project.id === record.id ? record : project)),

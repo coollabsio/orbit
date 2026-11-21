@@ -22,6 +22,7 @@ import { moveProject, orderProjects } from '@orbit/api/projectOrder'
 import { DRAWER_AREA_TITLES, type DrawerArea, drawerAreaOf, drawerSections, TASK_PRESETS, tasksHref } from './drawerAreas'
 import { ACCOUNT_NAV, ADMIN_NAV, allowedNav, WORKSPACE_NAV } from './settings/Shell'
 import { guestSettings, isGuestRole } from '../data/guest'
+import { ProjectMark } from '../ui/ProjectMark'
 
 const DrawerContext = createContext<(() => void) | null>(null)
 
@@ -116,8 +117,8 @@ export function DrawerProvider({ children }: { children: ReactNode }) {
 interface NavLink {
   label: string
   icon: IconName
-  /** A project's colour: a dot replaces the icon tile. */
-  color?: string
+  /** A project's colour and icon: its mark replaces the icon tile. */
+  project?: { color: string; icon_url?: string | null }
   /** A private project: a lock follows the label. */
   locked?: boolean
   href: Href
@@ -330,7 +331,7 @@ function TasksArea({ view, project, onTasks, onBack, go }: { view?: string; proj
           <Section label="Projects" />
           {row({ label: 'All projects', icon: 'folder', href: tasksHref(current, { project: null }), active: onTasks && !project })}
           {projects.map((item) => {
-            const link: NavLink = { label: item.name, icon: 'folder', color: item.color, locked: item.private, href: tasksHref(current, { project: item.id }), active: onTasks && project === item.id }
+            const link: NavLink = { label: item.name, icon: 'folder', project: item, locked: item.private, href: tasksHref(current, { project: item.id }), active: onTasks && project === item.id }
             return <NavRow key={item.id} link={link} onPress={() => go(link.href)} onLongPress={() => setMoving({ id: item.id, name: item.name })} />
           })}
           {/* the open project's pull requests, when it has a GitHub repository (the web's hover link on the project) */}
@@ -417,10 +418,10 @@ function NavRow({ link, onPress, onLongPress, tone = 'brand' }: { link: NavLink;
     >
       {({ pressed }) => (
         <>
-          {link.color ? (
+          {link.project ? (
             // the web's `dotIcon`: the project's colour where the icon would be, as wide as the icon or tile
             <View className={`items-center justify-center ${flat ? 'w-[18px]' : 'w-[30px]'}`}>
-              <View className="size-2.5 rounded-[3px]" style={{ backgroundColor: link.color }} />
+              <ProjectMark project={link.project} className="size-2.5 rounded-[3px]" />
             </View>
           ) : flat ? (
             <Icon name={link.icon} size={18} color={alpha(link.active || pressed ? colors.sidebarNavActive : colors.sidebarNav, 0.9)} />

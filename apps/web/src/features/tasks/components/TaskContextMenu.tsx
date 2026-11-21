@@ -3,7 +3,7 @@ import { toast } from 'sonner'
 import { ArrowUpRightSquare, Calendar, Clipboard, Copy, Diamonds, Flag, Folder, Hierarchy2, LinkBroken, RecordCircle, RefreshCircle, Tag, Trash, Triangle, User as UserIcon, UserAdd } from 'reicon-react'
 import type { BulkItem, LabelRecord } from '@orbit/api/generated/types.gen'
 import { ProjectLock } from '@/features/tasks/components/ProjectLock'
-import { ColorDot } from '@/components/common/ColorDot'
+import { ProjectMark } from '@/components/common/ProjectMark'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import {
   ContextMenu,
@@ -282,7 +282,7 @@ export function TaskContextMenu({ tasks, users, labels, statuses, groupContext, 
               <ContextMenuSubContent className="min-w-52">
                 {projects.map((project) => (
                   <ContextMenuCheckboxItem key={project.id} checked={targets.every((task) => task.projectId === project.id)} closeOnClick onCheckedChange={() => moveToProject(targets, project)}>
-                    <ColorDot color={project.color} className="size-2" />
+                    <ProjectMark project={project} className="size-2" />
                     <span className="flex-1 truncate">{project.name}</span>
                     <ProjectLock project={project} />
                     <span className="text-xs text-muted-foreground tabular-nums">{project.key}</span>

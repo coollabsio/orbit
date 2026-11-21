@@ -9,7 +9,7 @@ import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { Tip } from '@/components/common/Tip'
-import { ColorDot } from '@/components/common/ColorDot'
+import { ProjectMark } from '@/components/common/ProjectMark'
 import { useQuery } from '@tanstack/react-query'
 import { useProjectOrder, useProjects, useSetProjectOrder } from '@/features/tasks/api/projects'
 import { moveProject, orderProjects } from '@orbit/api/projectOrder'
@@ -210,13 +210,14 @@ const TASK_PRESETS = [
   { view: 'due_soon', label: 'Due soon', icon: Timer },
 ] as const
 
-// One icon component per colour, so a project's tile keeps its identity between renders.
-const dotIcons = new Map<string, SidebarNavIcon>()
-function dotIcon(color: string): SidebarNavIcon {
-  let icon = dotIcons.get(color)
+// One icon component per colour and image, so a project's tile keeps its identity between renders.
+const projectIcons = new Map<string, SidebarNavIcon>()
+function projectIcon({ color, icon_url }: Pick<ProjectRecord, 'color' | 'icon_url'>): SidebarNavIcon {
+  const key = icon_url ?? color
+  let icon = projectIcons.get(key)
   if (!icon) {
-    icon = ({ className }) => <ColorDot color={color} className={cn('size-2.5 rounded-[3px]', className)} />
-    dotIcons.set(color, icon)
+    icon = ({ className }) => <ProjectMark project={{ color, icon_url }} className={cn('size-2.5 rounded-[3px]', className)} />
+    projectIcons.set(key, icon)
   }
   return icon
 }
@@ -355,7 +356,7 @@ function ProjectLinks({ workspaceId, projects, selected, pathOf, onNavigate }: {
         <SidebarNavItem
           to={pathOf(item.id)}
           active={selected === item.id}
-          icon={dotIcon(item.color)}
+          icon={projectIcon(item)}
           label={item.name}
           aria-label={item.private ? `${item.name}, private` : item.name}
           trailing={item.private ? <ProjectLock project={item} className="text-sidebar-nav" /> : undefined}

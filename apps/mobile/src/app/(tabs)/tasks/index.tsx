@@ -29,6 +29,7 @@ import { useOrbit } from '../../../orbit-context'
 import { useCycles, useLabels, useMilestones, usePeople, useProjects, useStatuses } from '../../../queries'
 import { useTheme } from '../../../theme'
 import { EmptyState, ErrorView, HeaderTitle, Icon, IconButton, LoadingView, PaneHeader, PullRefresh, PickerSheet, SafeAreaView, StatusIcon, Text } from '../../../ui'
+import { ProjectMark } from '../../../ui/ProjectMark'
 
 type Sheet = 'project' | 'display'
 type Grouping = 'status' | 'none'
@@ -114,7 +115,7 @@ export default function TasksScreen() {
           // the web's max-w-[30vw]: a share of the window, not of the padded header
           style={{ maxWidth: windowWidth * 0.3 }}
         >
-          {project ? <View className="size-2 rounded-full" style={{ backgroundColor: project.color }} /> : null}
+          {project ? <ProjectMark project={project} /> : null}
           <Text numberOfLines={1} className="text-[14px] leading-[20px] shrink text-muted-foreground">
             {project?.name ?? 'All projects'}
           </Text>

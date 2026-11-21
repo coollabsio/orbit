@@ -9,7 +9,7 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, patch, post};
 use axum::{Json, Router};
-use orbit_platform::{Id, RequestId, Row, TimestampMillis};
+use orbit_platform::{Id, RequestId, Row, TimestampMillis, UploadService};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -37,11 +37,13 @@ use crate::socket_ticket::SocketTickets;
 #[derive(Clone)]
 pub struct TaskState {
     pub(crate) identity: Arc<IdentityRepository>,
-    tasks: Arc<TaskRepository>,
+    pub(crate) tasks: Arc<TaskRepository>,
     pub(crate) views: Arc<ViewRepository>,
     pub(crate) cookie_mode: CookieMode,
     /// Verifies the tickets of co-editing sockets; `None` refuses every ticket.
     socket_tickets: Option<SocketTickets>,
+    /// Stores project icons; `None` answers their routes with an internal error.
+    pub(crate) uploads: Option<UploadService>,
 }
 
 impl TaskState {
@@ -54,7 +56,14 @@ impl TaskState {
             identity,
             cookie_mode,
             socket_tickets: None,
+            uploads: None,
         }
+    }
+
+    #[must_use]
+    pub fn with_uploads(mut self, uploads: UploadService) -> Self {
+        self.uploads = Some(uploads);
+        self
     }
 
     #[must_use]
@@ -75,6 +84,7 @@ impl TaskState {
             tasks,
             cookie_mode,
             socket_tickets: None,
+            uploads: None,
         }
     }
 }
@@ -92,6 +102,10 @@ pub fn task_router(state: TaskState) -> Router {
         .route(
             "/api/v1/workspaces/{workspace_id}/projects/{project_id}",
             patch(update_project).delete(delete_project),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/projects/{project_id}/icon",
+            crate::project_icon_routes::routes(),
         )
         .route(
             "/api/v1/workspaces/{workspace_id}/projects/{project_id}/members",

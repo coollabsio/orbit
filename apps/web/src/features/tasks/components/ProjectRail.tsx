@@ -4,6 +4,7 @@ import { useState, type ComponentProps } from 'react'
 import { cn } from 'cn'
 import type { Project } from '@/features/tasks/api/models'
 import { Button } from '@/components/ui/button'
+import { ProjectMark } from '@/components/common/ProjectMark'
 import { Tip } from '@/components/common/Tip'
 import { PaneHeader, PaneTitle } from '@/components/common/Pane'
 import { NewProjectModal } from './NewProjectModal'
@@ -32,7 +33,7 @@ export function ProjectRail({ projects, projectId, onSelect }: ProjectRailProps)
         {projects.map((project) => (
           <div key={project.id} className="relative flex items-center">
             <RailItem className="flex-1 pr-8" active={project.id === projectId} onClick={() => onSelect(project.id)}>
-              <span className="mx-[5px] size-2 shrink-0 rounded-[2px]" style={{ background: project.color }} />
+              <ProjectMark project={project} className="mx-[5px] size-2 rounded-[2px]" iconClassName="mx-px size-4" />
               <span className="min-w-0 flex-1 truncate">{project.name}</span>
             </RailItem>
             <Tip label="Project settings">

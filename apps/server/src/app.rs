@@ -642,7 +642,8 @@ impl App {
                     cookie_mode,
                 ),
                 tasks: TaskState::new(Arc::clone(&identity), cookie_mode)
-                    .with_socket_tickets(app_key.as_ref().map(SocketTickets::new)),
+                    .with_socket_tickets(app_key.as_ref().map(SocketTickets::new))
+                    .with_uploads(attachment_state.uploads.clone()),
                 pages: PageState::new(Arc::clone(&identity), cookie_mode)
                     .with_socket_tickets(app_key.as_ref().map(SocketTickets::new)),
                 page_comments: PageCommentState::new(Arc::clone(&identity), cookie_mode),

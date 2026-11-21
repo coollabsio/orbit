@@ -4,7 +4,7 @@ import type { Cycle, Milestone, Project, Task, TaskStatusDef } from '@/features/
 import { cycleName, estimateLabel, estimateShortLabel, isMilestoneLate } from '@/features/tasks/planningLib'
 import { isOverdue } from '@/features/tasks/timeline/timelineLib'
 import { fullDate, shortDate } from '@/lib/format'
-import { ColorDot } from '@/components/common/ColorDot'
+import { ProjectMark } from '@/components/common/ProjectMark'
 
 /**
  * Quiet due-date chip; open tasks past their day turn destructive, and a repeating task shows a repeat glyph instead of
@@ -30,7 +30,7 @@ export function ProjectChip({ project, className }: { project: Project | undefin
   if (!project) return null
   return (
     <span data-property="project" title={project.name} className={cn('inline-flex max-w-[140px] min-w-0 shrink-0 items-center gap-1.5 text-muted-foreground', className)}>
-      <ColorDot color={project.color} />
+      <ProjectMark project={project} iconClassName="size-3.5" />
       <span className="truncate">{project.name}</span>
     </span>
   )

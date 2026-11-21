@@ -5,6 +5,8 @@
  */
 import {
   createCycle,
+  removeProjectIcon,
+  uploadProjectIcon,
   createLabel,
   createMilestone,
   createTask,
@@ -56,6 +58,7 @@ import type {
 
 import type { LabelRecord, OrbitClient, ProjectRecord, TaskRecord } from './orbit'
 import type { PickedFile } from './tasks'
+import { multipart, type UploadFile } from './account-api'
 
 export type {
   AttachmentRecord,
@@ -254,6 +257,14 @@ export function projectTrash(client: OrbitClient, workspaceId: string): Promise<
 /** Tasks in the trash of live projects, newest first. */
 export function taskTrash(client: OrbitClient, workspaceId: string): Promise<TaskRecord[]> {
   return allPages(async (cursor) => (await listTaskTrash({ client, path: { workspace_id: workspaceId }, query: { limit: 100, cursor }, throwOnError: true })).data)
+}
+
+/** Sets (a file) or removes (`null`) the project's icon. */
+export async function setProjectIcon(client: OrbitClient, workspaceId: string, projectId: string, file: UploadFile | null): Promise<ProjectRecord> {
+  const path = { workspace_id: workspaceId, project_id: projectId }
+  return file
+    ? (await uploadProjectIcon({ client, path, body: { file: file as Blob }, bodySerializer: multipart(file), throwOnError: true })).data
+    : (await removeProjectIcon({ client, path, throwOnError: true })).data
 }
 
 export async function restoreTrashedProject(client: OrbitClient, workspaceId: string, project: Pick<ProjectRecord, 'id' | 'version'>): Promise<ProjectRecord> {

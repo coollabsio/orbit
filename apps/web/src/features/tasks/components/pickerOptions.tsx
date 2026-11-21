@@ -1,4 +1,4 @@
-import { ColorDot } from '@/components/common/ColorDot'
+import { ProjectMark } from '@/components/common/ProjectMark'
 import type { SearchPickerOption } from '@/components/common/SearchPicker'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import type { Project } from '@/features/tasks/api/models'
@@ -17,6 +17,6 @@ export const projectOption = (project: Project): SearchPickerOption => ({
   value: project.id,
   label: project.name,
   keywords: [project.key],
-  icon: <ColorDot color={project.color} className="size-2" />,
+  icon: <ProjectMark project={project} className="size-2" />,
   hint: project.key,
 })

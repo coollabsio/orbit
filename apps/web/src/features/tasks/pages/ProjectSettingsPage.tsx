@@ -23,7 +23,7 @@ import { CATEGORY_LABEL, CATEGORY_ORDER, PROJECT_COLORS, STATUS_COLORS, defaultS
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { canIn } from '@/features/workspaces/permissions'
 import type { Project, StatusCategory, TaskStatusDef } from '@/features/tasks/api/models'
-import { useAddProjectMembers, useCreateStatus, useDeleteProject, useDeleteStatus, useProjectMembers, useProjectStatuses, useProjects, useRemoveProjectMember, useReorderStatuses, useUpdateProject, useUpdateStatus } from '@/features/tasks/api/projects'
+import { useAddProjectMembers, useCreateStatus, useDeleteProject, useDeleteStatus, useProjectMembers, useProjectStatuses, useProjects, useRemoveProjectMember, useReorderStatuses, useSetProjectIcon, useUpdateProject, useUpdateStatus } from '@/features/tasks/api/projects'
 import { ProjectVisibilityChoice } from '@/features/tasks/components/ProjectVisibilityChoice'
 import { useCurrentUser } from '@/features/auth/api'
 import { useTeamMembers } from '@/features/workspaces/api'
@@ -35,6 +35,9 @@ import { useTasks } from '@/features/tasks/api/tasks'
 import { ConfirmDeleteModal } from '@/components/common/ConfirmDeleteModal'
 import { SettingsCard } from '@/components/common/SettingsCard'
 import { ColorSwatch, CustomColorSwatch } from '@/components/common/ColorSwatch'
+import { ProjectMark } from '@/components/common/ProjectMark'
+import { avatarImage } from '@/features/profile/avatarImage'
+import { ApiProblem } from '@orbit/api/problem'
 import { ProjectGithubCard, type PendingProjectSave } from '@/features/tasks/components/ProjectGithubCard'
 import { useSlowPending } from '@/lib/useDebouncedValue'
 import { loadFailed } from '@/lib/connection'
@@ -440,10 +443,70 @@ function ProjectGeneralCard({ project, readOnly, onPendingChange }: { project: P
               <CustomColorSwatch value={draft.color} onChange={(color) => setDraft((d) => ({ ...d, color }))} />
             </fieldset>
           </div>
+          <div className="col-span-2 w-full min-w-0 max-[899px]:col-span-1">
+            <span className="mb-1.5 flex items-center gap-1 text-[0.8125rem] leading-none font-medium text-muted-foreground">
+              Icon
+              <InfoTip text="Shown in place of the color in the sidebar and on tasks. Cropped to a square." />
+            </span>
+            <ProjectIconField project={project} readOnly={readOnly} />
+          </div>
         </div>
       </SettingsCard>
       {updateProject.isError ? <p role="alert" className="text-destructive">Project update failed. <Button variant="ghost" onClick={() => updateProject.variables && updateProject.mutate(updateProject.variables)}>Retry</Button></p> : null}
     </>
+  )
+}
+
+/** The project's icon with upload and remove, saved at once (like the profile picture). The image is cropped and scaled in the browser first. */
+function ProjectIconField({ project, readOnly }: { project: Project; readOnly: boolean }) {
+  const { workspace } = useWorkspace()
+  const setIcon = useSetProjectIcon(workspace.id, project.id)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const [readError, setReadError] = useState<string | null>(null)
+
+  const pick = async (file: File | undefined) => {
+    if (!file) return
+    setReadError(null)
+    setIcon.reset()
+    let image: Blob
+    try {
+      image = await avatarImage(file)
+    } catch {
+      setReadError('This image could not be read. Use a PNG, JPEG or WebP file.')
+      return
+    }
+    setIcon.mutate(image)
+  }
+
+  const error = readError ?? (setIcon.isError ? (setIcon.error instanceof ApiProblem ? setIcon.error.detail : 'The icon could not be saved.') : null)
+  return (
+    <div className="flex flex-col gap-2 pt-1.5">
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="flex size-9 shrink-0 items-center justify-center rounded-md border">
+          <ProjectMark project={project} className="size-3 rounded-[3px]" iconClassName="size-full rounded-md" />
+        </span>
+        <Button type="button" variant="outline" disabled={readOnly || setIcon.isPending} onClick={() => inputRef.current?.click()}>
+          {setIcon.isPending ? 'Saving…' : project.icon_url ? 'Change icon' : 'Upload icon'}
+        </Button>
+        {project.icon_url ? (
+          <Button type="button" variant="ghost" disabled={readOnly || setIcon.isPending} onClick={() => setIcon.mutate(null)}>
+            Remove
+          </Button>
+        ) : null}
+      </div>
+      {error ? <p className="text-xs text-destructive" role="alert">{error}</p> : null}
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/png,image/jpeg,image/webp"
+        className="hidden"
+        aria-label="Project icon"
+        onChange={(event) => {
+          void pick(event.target.files?.[0])
+          event.target.value = ''
+        }}
+      />
+    </div>
   )
 }
 

@@ -48,6 +48,7 @@ pub mod orbit_import_routes;
 pub mod page_comment_routes;
 pub mod page_file_routes;
 pub mod page_routes;
+pub mod project_icon_routes;
 pub mod public_api;
 pub mod push;
 pub mod repositories;

@@ -41,7 +41,7 @@ import { pickerTitle, relatedTaskIds, type RelationKind } from '@/features/tasks
 import { useDuplicateActions } from '@/features/tasks/useDuplicateActions'
 import { useParentActions } from '@/features/tasks/useParentActions'
 import { useMoveToProject } from '@/features/tasks/useMoveToProject'
-import { ColorDot } from '@/components/common/ColorDot'
+import { ProjectMark } from '@/components/common/ProjectMark'
 import { descendantCount, parentPickerTitle, trashConfirmDescription } from '@/features/tasks/subIssuesLib'
 import { TaskPickerDialog } from './TaskPickerDialog'
 import { AddRelationMenu, DuplicateBanner, TaskRelationsSection } from './TaskRelations'
@@ -441,7 +441,7 @@ export function TaskDetail({ task, project, state, onClose, onOpenTask, onOpenPr
                   trigger={
                     // the pill is the trigger, like "Add label": a ghost button around a badge reads as two controls
                     <Button variant="outline" size="xs" className="h-5 max-w-full rounded-full font-medium" aria-label={`Project: ${project?.name ?? 'none'}`}>
-                      {project ? <ColorDot color={project.color} /> : null}
+                      {project ? <ProjectMark project={project} iconClassName="size-3.5" /> : null}
                       <span className="truncate">{project?.name ?? 'Set project'}</span>
                     </Button>
                   }
