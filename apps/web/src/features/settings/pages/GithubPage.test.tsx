@@ -117,5 +117,25 @@ test('an app from before PR review offers managers to re-create it', async () =>
   globalThis.fetch = (async () => Response.json({ app_slug: 'orbit-test', install_url: null, repositories: [], can_manage: true, key_configured: true, needs_recreate: true })) as unknown as typeof fetch
   const view = renderPage()
   expect(await view.findByRole('button', { name: 'Re-create GitHub App' })).toBeTruthy()
-  expect(view.getByText(/Re-create it to review pull requests in Orbit/)).toBeTruthy()
+})
+
+test('a manager upgrades an app from before PR review with its OAuth client', async () => {
+  let sent: { method: string; path: string; body: unknown } | undefined
+  let upgraded = false
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const request = input as Request
+    if (request.method === 'PUT') {
+      sent = { method: request.method, path: new URL(request.url).pathname, body: await request.json() }
+      upgraded = true
+      return new Response(null, { status: 204 })
+    }
+    return Response.json({ app_slug: 'orbit-test', install_url: null, repositories: [], can_manage: true, key_configured: true, needs_recreate: !upgraded })
+  }) as typeof fetch
+  const view = renderPage()
+  await userEvent.type(await view.findByLabelText('Client ID'), ' Iv23liAbc ')
+  await userEvent.type(view.getByLabelText('Client secret'), 'f00d')
+  await userEvent.click(view.getByRole('button', { name: 'Upgrade GitHub App' }))
+
+  await waitForAbsence(() => view.queryByRole('alert'))
+  expect(sent).toEqual({ method: 'PUT', path: '/api/v1/workspaces/workspace-1/github/client', body: { client_id: 'Iv23liAbc', client_secret: 'f00d' } })
 })

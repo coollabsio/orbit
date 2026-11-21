@@ -2822,6 +2822,14 @@ export type GithubActor = {
     login: string;
 };
 
+/**
+ * The OAuth client of an app from before PR review, copied from the app's settings on GitHub.
+ */
+export type GithubAppClientBody = {
+    client_id: string;
+    client_secret: string;
+};
+
 export type GithubCheckRun = {
     name: string;
     /**
@@ -2992,7 +3000,7 @@ export type GithubProjectSettings = {
     key_configured: boolean;
     label?: string | null;
     /**
-     * The app is from before PR review (no OAuth client): an admin must re-create it.
+     * The app is from before PR review (no OAuth client): an admin must upgrade or re-create it.
      */
     needs_recreate: boolean;
     repositories: Array<GithubRepositoryOption>;
@@ -3183,7 +3191,7 @@ export type GithubWorkspaceSettings = {
     install_url?: string | null;
     key_configured: boolean;
     /**
-     * The app is from before PR review (no OAuth client): an admin must re-create it.
+     * The app is from before PR review (no OAuth client): an admin must upgrade or re-create it.
      */
     needs_recreate: boolean;
     repositories: Array<GithubRepositoryOption>;
@@ -39408,6 +39416,75 @@ export type GithubWorkspaceSettingsResponses = {
 };
 
 export type GithubWorkspaceSettingsResponse = GithubWorkspaceSettingsResponses[keyof GithubWorkspaceSettingsResponses];
+
+export type SaveGithubAppClientData = {
+    body: GithubAppClientBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/github/client';
+};
+
+export type SaveGithubAppClientErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden, github_manager_required
+     */
+    403: WorkspaceProblem;
+    /**
+     * github_workspace_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch, github_client_not_needed
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * github_https_required, invalid_github_client
+     */
+    422: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * app_key_missing
+     */
+    503: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type SaveGithubAppClientError = SaveGithubAppClientErrors[keyof SaveGithubAppClientErrors];
+
+export type SaveGithubAppClientResponses = {
+    /**
+     * OAuth client saved
+     */
+    204: void;
+};
+
+export type SaveGithubAppClientResponse = SaveGithubAppClientResponses[keyof SaveGithubAppClientResponses];
 
 export type StartGithubManifestData = {
     body: GithubManifestBody;

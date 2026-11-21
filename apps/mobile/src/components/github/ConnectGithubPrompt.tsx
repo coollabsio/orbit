@@ -20,7 +20,7 @@ export function ConnectGithubPrompt({ status }: { status: GithubConnection['stat
       {canManage ? <Button label="Open GitHub settings" variant="outline" onPress={() => router.push('/settings/github')} /> : null}
     </View>
   )
-  if (status === 'needs_recreate') return askAdmin('To review pull requests in Orbit, re-create the GitHub App of this workspace.')
+  if (status === 'needs_recreate') return askAdmin('To review pull requests in Orbit, upgrade the GitHub App of this workspace.')
   if (status === 'unavailable') return askAdmin('This workspace has no GitHub App yet.')
   const broken = status === 'broken'
   const outcome = connect.data

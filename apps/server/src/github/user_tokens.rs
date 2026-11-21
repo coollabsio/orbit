@@ -59,8 +59,8 @@ impl TokenError {
             ),
             Self::NeedsRecreate => (
                 "github_app_recreate",
-                "Re-create the GitHub App",
-                "This workspace's GitHub App is from an older Orbit version. Ask an admin to re-create it.",
+                "Upgrade the GitHub App",
+                "This workspace's GitHub App is from an older Orbit version. Ask an admin to upgrade it.",
             ),
             Self::Github(error) => return error.into_api(request_id),
             Self::Database => return ApiError::internal(request_id),

@@ -17,7 +17,7 @@ export function ConnectGithubPrompt({ workspaceId }: { workspaceId: string }) {
     {canManage ? <Link className={buttonVariants({ variant: 'outline' })} to="/settings/github">Open GitHub settings</Link> : null}
   </div>
 
-  if (status === 'needs_recreate') return askAdmin('To review pull requests in Orbit, re-create the GitHub App of this workspace.')
+  if (status === 'needs_recreate') return askAdmin('To review pull requests in Orbit, upgrade the GitHub App of this workspace.')
   if (status === 'unavailable') return askAdmin('This workspace has no GitHub App yet.')
   const broken = status === 'broken'
   return <div className="flex flex-col items-center gap-3 py-10 text-center">

@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/api/client'
-import { deleteGithubProjectConnection, githubProjectSettings, githubWorkspaceSettings, saveGithubProjectConnection, startGithubManifest } from '@orbit/api/generated/sdk.gen'
+import { deleteGithubProjectConnection, githubProjectSettings, githubWorkspaceSettings, saveGithubAppClient, saveGithubProjectConnection, startGithubManifest } from '@orbit/api/generated/sdk.gen'
 import type { GithubProjectConnectionBody } from '@orbit/api/generated/types.gen'
 import { queryKeys } from '@/api/queryKeys'
 
@@ -36,6 +36,17 @@ export function useStartGithubManifest(workspaceId: string) {
       if (!data) throw new Error('GitHub registration response was empty.')
       return data
     },
+  })
+}
+
+/** Upgrades an app from before PR review in place with the OAuth client from its settings on GitHub. */
+export function useSaveGithubAppClient(workspaceId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (body: { client_id: string; client_secret: string }) => {
+      await saveGithubAppClient({ client: apiClient, path: { workspace_id: workspaceId }, body, throwOnError: true })
+    },
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: queryKeys.workspace(workspaceId) }),
   })
 }
 

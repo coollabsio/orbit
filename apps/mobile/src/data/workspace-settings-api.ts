@@ -1,5 +1,5 @@
 /** The workspace's GitHub App, API tokens and exports (the web's GitHub, API tokens and Export pages). No React. */
-import { createApiToken, createWorkspaceExport, githubWorkspaceSettings, listApiTokens, listWorkspaceExports, revokeApiToken, startGithubManifest } from '@orbit/api/generated/sdk.gen'
+import { createApiToken, createWorkspaceExport, githubWorkspaceSettings, listApiTokens, listWorkspaceExports, revokeApiToken, saveGithubAppClient, startGithubManifest } from '@orbit/api/generated/sdk.gen'
 import type { ApiTokenRecord, ApiTokenScope, GithubManifestStart, GithubWorkspaceSettings, IssuedApiToken, WorkspaceExport } from '@orbit/api/generated/types.gen'
 
 import type { OrbitClient } from './orbit'
@@ -17,6 +17,11 @@ export async function githubSettings(client: OrbitClient, workspaceId: string): 
 /** The GitHub form to post for a new App; a blank `organization` registers a personal App. */
 export async function githubManifest(client: OrbitClient, workspaceId: string, organization: string): Promise<GithubManifestStart> {
   return (await startGithubManifest({ client, path: { workspace_id: workspaceId }, body: { organization: organization || null }, throwOnError: true })).data
+}
+
+/** Upgrades an app from before PR review in place with the OAuth client from its settings on GitHub. */
+export async function githubAppClient(client: OrbitClient, workspaceId: string, body: { client_id: string; client_secret: string }): Promise<void> {
+  await saveGithubAppClient({ client, path: { workspace_id: workspaceId }, body, throwOnError: true })
 }
 
 export async function apiTokens(client: OrbitClient, workspaceId: string): Promise<ApiTokenRecord[]> {

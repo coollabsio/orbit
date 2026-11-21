@@ -210,6 +210,10 @@ pub fn integration_router(state: IntegrationState) -> Router {
             post(start_github_manifest),
         )
         .route(
+            "/api/v1/workspaces/{workspace_id}/github/client",
+            axum::routing::put(save_github_app_client),
+        )
+        .route(
             "/api/v1/workspaces/{workspace_id}/github/me",
             get(github_connection)
                 .post(start_github_connection)
@@ -305,7 +309,7 @@ pub struct GithubProjectSettings {
     repositories: Vec<GithubRepositoryOption>,
     can_manage: bool,
     key_configured: bool,
-    /// The app is from before PR review (no OAuth client): an admin must re-create it.
+    /// The app is from before PR review (no OAuth client): an admin must upgrade or re-create it.
     needs_recreate: bool,
 }
 
@@ -318,7 +322,7 @@ pub struct GithubWorkspaceSettings {
     repositories: Vec<GithubRepositoryOption>,
     can_manage: bool,
     key_configured: bool,
-    /// The app is from before PR review (no OAuth client): an admin must re-create it.
+    /// The app is from before PR review (no OAuth client): an admin must upgrade or re-create it.
     needs_recreate: bool,
 }
 
@@ -326,6 +330,14 @@ pub struct GithubWorkspaceSettings {
 pub struct GithubManifestStart {
     action: String,
     manifest: Value,
+}
+
+/// The OAuth client of an app from before PR review, copied from the app's settings on GitHub.
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct GithubAppClientBody {
+    client_id: String,
+    client_secret: String,
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -821,6 +833,67 @@ pub(crate) async fn start_github_manifest(
             ]
         }),
     }))
+}
+
+/// Upgrades an app from before PR review in place: the admin gives the OAuth client from the app's settings on
+/// GitHub, so the installations and project connections stay.
+#[utoipa::path(put, path = "/api/v1/workspaces/{workspace_id}/github/client", params(("workspace_id" = String, Path)), request_body = GithubAppClientBody, responses((status = 204, description = "OAuth client saved")))]
+pub(crate) async fn save_github_app_client(
+    State(state): State<IntegrationState>,
+    Path(workspace): Path<String>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<GithubAppClientBody>,
+) -> Result<StatusCode, ApiError> {
+    let id = request_id.as_ref().map(|Extension(id)| id);
+    let settings = github_settings_context(&state, id)?;
+    let key = app_key(settings, id)?;
+    let (_, can_manage) = github_workspace_access(&state, &headers, &workspace, id).await?;
+    require_github_manager(can_manage, id)?;
+    let origin = github_registration_origin(settings, &headers, id)?;
+    let client_id = body.client_id.trim();
+    let client_secret = body.client_secret.trim();
+    let token = |value: &str, max: usize| {
+        !value.is_empty()
+            && value.len() <= max
+            && value
+                .bytes()
+                .all(|c| c.is_ascii_alphanumeric() || c == b'.' || c == b'_' || c == b'-')
+    };
+    if !token(client_id, 100) || !token(client_secret, 200) {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_github_client",
+            "Invalid OAuth client",
+            "Copy the Client ID and a new client secret from the app's settings on GitHub.",
+            id,
+        ));
+    }
+    let secret = encrypt_github_secret(&key, client_secret)
+        .map_err(|()| ApiError::internal(id).cause("could not encrypt the secret"))?;
+    let mut tx = state
+        .tasks
+        .database()
+        .immediate_transaction()
+        .await
+        .map_err(|error| ApiError::internal(id).cause(error))?;
+    let updated = sqlx::query("UPDATE github_apps SET client_id = $1, client_secret_encrypted = $2, callback_origin = $3 WHERE workspace_id = $4 AND client_id IS NULL")
+        .bind(client_id).bind(secret).bind(&origin).bind(&workspace)
+        .execute(&mut *tx).await.map_err(|error| ApiError::internal(id).cause(error))?;
+    if updated.rows_affected() != 1 {
+        return Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "github_client_not_needed",
+            "No upgrade needed",
+            "This workspace has no GitHub App from an older Orbit version.",
+            id,
+        ));
+    }
+    record_github_change(&mut tx, &workspace, "github.app.upgraded", id).await?;
+    tx.commit()
+        .await
+        .map_err(|error| ApiError::internal(id).cause(error))?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[derive(Deserialize)]

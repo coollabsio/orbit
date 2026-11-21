@@ -24,7 +24,7 @@ test('a broken connection asks to reconnect', async () => {
 
 test('an old app sends managers to the GitHub settings', async () => {
   const view = show('needs_recreate', 'owner')
-  expect(await view.findByText(/re-create the GitHub App/)).toBeTruthy()
+  expect(await view.findByText(/upgrade the GitHub App/)).toBeTruthy()
   expect(view.getByRole('link', { name: 'Open GitHub settings' }).getAttribute('href')).toBe('/settings/github')
 })
 

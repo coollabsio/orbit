@@ -58648,6 +58648,154 @@
         ]
       }
     },
+    "/api/v1/workspaces/{workspace_id}/github/client": {
+      "put": {
+        "tags": [
+          "crate::integration_routes"
+        ],
+        "summary": "Upgrades an app from before PR review in place: the admin gives the OAuth client from the app's settings on\nGitHub, so the installations and project connections stay.",
+        "operationId": "save_github_app_client",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GithubAppClientBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "OAuth client saved"
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden, github_manager_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "github_workspace_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch, github_client_not_needed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "github_https_required, invalid_github_client",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "app_key_missing",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/workspaces/{workspace_id}/github/manifest": {
       "post": {
         "tags": [
@@ -106811,6 +106959,23 @@
           }
         }
       },
+      "GithubAppClientBody": {
+        "type": "object",
+        "description": "The OAuth client of an app from before PR review, copied from the app's settings on GitHub.",
+        "required": [
+          "client_id",
+          "client_secret"
+        ],
+        "properties": {
+          "client_id": {
+            "type": "string"
+          },
+          "client_secret": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
       "GithubCheckRun": {
         "type": "object",
         "required": [
@@ -107204,7 +107369,7 @@
           },
           "needs_recreate": {
             "type": "boolean",
-            "description": "The app is from before PR review (no OAuth client): an admin must re-create it."
+            "description": "The app is from before PR review (no OAuth client): an admin must upgrade or re-create it."
           },
           "repositories": {
             "type": "array",
@@ -107706,7 +107871,7 @@
           },
           "needs_recreate": {
             "type": "boolean",
-            "description": "The app is from before PR review (no OAuth client): an admin must re-create it."
+            "description": "The app is from before PR review (no OAuth client): an admin must upgrade or re-create it."
           },
           "repositories": {
             "type": "array",

@@ -167,6 +167,40 @@ async fn current_app_does_not_need_recreate() {
 }
 
 #[tokio::test]
+async fn upgrade_adds_client_to_old_app_and_keeps_its_links() {
+    let fixture = fixture().await;
+    fixture.seed_app(false).await;
+    let path = format!("/api/v1/workspaces/{}/github/client", fixture.workspace());
+    let send = |body: serde_json::Value| fixture.send("PUT", &path, &fixture.session_cookie, Some(body));
+    let invalid = send(json!({ "client_id": "Iv1 abc", "client_secret": "x" })).await;
+    assert_eq!(invalid.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let saved = send(json!({ "client_id": " Iv23li.new ", "client_secret": "f00d" })).await;
+    assert_eq!(saved.status(), StatusCode::NO_CONTENT);
+    let row = sqlx::query("SELECT client_id, client_secret_encrypted, callback_origin FROM github_apps WHERE workspace_id = $1")
+        .bind(fixture.workspace())
+        .fetch_one(fixture.database.pool())
+        .await
+        .unwrap();
+    assert_eq!(row.get::<String, _>("client_id"), "Iv23li.new");
+    assert_eq!(
+        decrypt_for_test(&KEY, &row.get::<Vec<u8>, _>("client_secret_encrypted")),
+        "f00d"
+    );
+    assert_eq!(row.get::<String, _>("callback_origin"), "https://orbit.test");
+    let project = format!(
+        "/api/v1/workspaces/{}/projects/{}/github",
+        fixture.workspace(),
+        fixture.project_id
+    );
+    let project = json_body(fixture.get(&project).await).await;
+    assert_eq!(project["needs_recreate"], false);
+    assert_eq!(project["repository"], "acme/repo");
+    // a current app keeps its client: the upgrade does not overwrite it
+    let again = send(json!({ "client_id": "Iv1.other", "client_secret": "beef" })).await;
+    assert_eq!(again.status(), StatusCode::CONFLICT);
+}
+
+#[tokio::test]
 async fn recreate_replaces_old_app_and_its_links() {
     let fixture = fixture().await;
     fixture.seed_app(false).await;

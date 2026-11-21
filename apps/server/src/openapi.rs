@@ -330,6 +330,7 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::integration_routes::save_github_project_connection,
         crate::integration_routes::delete_github_project_connection,
         crate::integration_routes::start_github_manifest,
+        crate::integration_routes::save_github_app_client,
         crate::github_user_routes::github_connection,
         crate::github_user_routes::start_github_connection,
         crate::github_user_routes::delete_github_connection,
@@ -1692,6 +1693,14 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             add_code(&mut responses, "409", "github_app_missing");
             add_code(&mut responses, "409", "github_app_recreate");
             add_code(&mut responses, "422", "invalid_redirect");
+            add_code(&mut responses, "503", "app_key_missing");
+        }
+        "save_github_app_client" => {
+            add_code(&mut responses, "403", "github_manager_required");
+            add_code(&mut responses, "404", "github_workspace_not_found");
+            add_code(&mut responses, "409", "github_client_not_needed");
+            add_code(&mut responses, "422", "github_https_required");
+            add_code(&mut responses, "422", "invalid_github_client");
             add_code(&mut responses, "503", "app_key_missing");
         }
         "start_github_manifest" => {
