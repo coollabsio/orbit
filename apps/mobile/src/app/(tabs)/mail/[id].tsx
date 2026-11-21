@@ -95,17 +95,20 @@ export default function MailThreadScreen() {
     <SafeAreaView edges={['left', 'right']} className="flex-1 bg-background">
       <PaneHeader className="px-2 gap-0.5">
         <IconButton icon="back" label="Back" onPress={back} />
-        <View className="flex-1" />
-        <IconButton icon="more" label="Thread actions" color={muted} onPress={() => setSheet('actions')} />
-      </PaneHeader>
-      <ScrollView contentContainerClassName="px-4 pt-5 pb-8">
-        <View className="flex-row flex-wrap items-center gap-2.5 pb-2">
-          <Text selectable className="font-noto-semibold text-[20px] leading-[28px]">
+        {/* the subject and folder sit in the header row, so the messages start one row higher */}
+        <View className="min-w-0 flex-1 flex-row items-center gap-2">
+          <Text accessibilityRole="header" numberOfLines={1} className="shrink font-noto-semibold text-[15px]">
             {subject}
           </Text>
-          <View className="rounded-md bg-secondary px-2 py-0.5">
+          <View className="shrink-0 rounded-md bg-secondary px-2 py-0.5">
             <Text className="font-noto-medium text-[12px] text-secondary-foreground">{folderLabel(thread.folder)}</Text>
           </View>
+        </View>
+        <IconButton icon="more" label="Thread actions" color={muted} onPress={() => setSheet('actions')} />
+      </PaneHeader>
+      <ScrollView contentContainerClassName="px-4 pt-3 pb-8">
+        {chips.length ? (
+        <View className="flex-row flex-wrap items-center gap-2.5 pb-2">
           {chips.map((label) => (
             <View key={label.id} className="flex-row items-center gap-1 rounded-md border border-border px-2 py-0.5">
               <View className="size-1.5 rounded-full" style={{ backgroundColor: label.color }} />
@@ -113,6 +116,7 @@ export default function MailThreadScreen() {
             </View>
           ))}
         </View>
+        ) : null}
         {thread.folder === 'spam' ? (
           <FolderNotice title="In Spam" text="Links and images in spam can be harmful. Move it to the inbox only if you trust the sender." action="Not spam" onPress={() => change({ folder: 'inbox' }, true)} />
         ) : null}

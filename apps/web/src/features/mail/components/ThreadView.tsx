@@ -251,6 +251,11 @@ export function ThreadView({ detail, status, onRetry, labels, labelsById, canMan
         <Button variant="ghost" size="icon-sm" className="hidden text-muted-foreground/70 max-[899px]:inline-flex" aria-label="Back" onClick={onBack}>
           <ArrowLeft className="size-4" />
         </Button>
+        {/* on phones the subject and folder sit in the header row, so the messages start one row higher */}
+        <h1 className="m-0 hidden min-w-0 truncate text-[0.9375rem] font-semibold text-foreground max-[899px]:block">{subject}</h1>
+        <Badge variant="secondary" className="hidden shrink-0 max-[899px]:inline-flex">
+          {folderLabel(thread.folder)}
+        </Badge>
         <span className="flex-1" />
         <div className="contents max-[899px]:hidden">
         <HeaderButton label={thread.starred ? 'Unstar' : 'Star'} command="mail.star" pressed={thread.starred} onClick={actions.star}>
@@ -294,10 +299,12 @@ export function ThreadView({ detail, status, onRetry, labels, labelsById, canMan
         <PhoneThreadMenu thread={thread} labels={labels} canManage={canManage} actions={actions} />
       </PaneHeader>
       <div data-print-root="" className="min-h-0 flex-1 overflow-y-auto">
-        <div ref={messagesRef} className="mx-auto flex max-w-[800px] flex-col px-5 pt-6 pb-8">
-          <div className="flex flex-wrap items-center gap-2.5 pb-2">
-            <h1 className="m-0 text-xl font-semibold break-words text-foreground">{subject}</h1>
-            <Badge variant="secondary">{folderLabel(thread.folder)}</Badge>
+        <div ref={messagesRef} className="mx-auto flex max-w-[800px] flex-col px-5 pt-6 pb-8 max-[899px]:pt-3">
+          <div className={cn('flex flex-wrap items-center gap-2.5 pb-2', chips.length === 0 && 'max-[899px]:hidden')}>
+            <h1 className="m-0 text-xl font-semibold break-words text-foreground max-[899px]:hidden">{subject}</h1>
+            <Badge variant="secondary" className="max-[899px]:hidden">
+              {folderLabel(thread.folder)}
+            </Badge>
             {chips.map((label) => (
               <Badge key={label.id} variant="outline">
                 <ColorDot color={label.color} />
