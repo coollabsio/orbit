@@ -231,7 +231,7 @@ fn valid_description(description: String) -> Result<String> {
 fn label_conflict(error: TaskError) -> TokenApiError {
     match error {
         TaskError::Conflict => {
-            TokenApiError::Invalid("The project already has a label with this name")
+            TokenApiError::Conflict("The project already has a label with this name")
         }
         error => error.into(),
     }

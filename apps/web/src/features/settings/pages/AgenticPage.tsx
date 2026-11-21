@@ -9,7 +9,7 @@ export function AgenticPage() {
   const url = mcpUrl(window.location.origin)
   return (
     <>
-      <SettingsCard title="MCP server" description="AI clients such as Claude, Codex and Grok can use tasks and read docs and chat through this address. Sign in with your Orbit account and select the workspace, projects and permissions.">
+      <SettingsCard title="MCP server" description="AI clients such as Claude, Codex and Grok can use tasks, docs, chat and mail through this address. Sign in with your Orbit account and select the workspace, projects and permissions.">
         <CodeBlock text={url} />
       </SettingsCard>
       <SettingsCard title="Connect a client" description="Run the command for your client in a terminal. Then sign in to Orbit in the browser, select the projects and permissions, then allow access.">

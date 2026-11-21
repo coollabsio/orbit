@@ -603,7 +603,7 @@ impl<'a> Call<'a> {
 }
 
 /// The text of a stable error code.
-fn detail(code: &'static str) -> &'static str {
+pub(crate) fn detail(code: &'static str) -> &'static str {
     match code {
         "mail_forbidden" => "Only workspace owners and admins can manage mail.",
         "mail_disabled" => "Mail is off on this Orbit server. An instance admin can turn it on.",
@@ -673,7 +673,7 @@ fn detail(code: &'static str) -> &'static str {
 }
 
 /// The snake_case name of a reason, as in the `not_ready_reason` of a From address.
-fn not_ready_code(reason: NotReadyReason) -> &'static str {
+pub(crate) fn not_ready_code(reason: NotReadyReason) -> &'static str {
     match reason {
         NotReadyReason::DomainUnverified => "domain_unverified",
         NotReadyReason::InboundNotLive => "inbound_not_live",
@@ -683,7 +683,7 @@ fn not_ready_code(reason: NotReadyReason) -> &'static str {
     }
 }
 
-fn not_ready_detail(reason: NotReadyReason) -> &'static str {
+pub(crate) fn not_ready_detail(reason: NotReadyReason) -> &'static str {
     match reason {
         NotReadyReason::DomainUnverified => "The domain is not verified yet.",
         NotReadyReason::InboundNotLive => {

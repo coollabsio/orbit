@@ -22,13 +22,14 @@ const consentClient = createApiClient()
 type Pick = { selected: string[]; all: boolean }
 const NO_PICK: Pick = { selected: [], all: false }
 
-type Scope = 'tasks:write' | 'docs:read' | 'docs:write' | 'chat:read'
+type Scope = 'tasks:write' | 'docs:read' | 'docs:write' | 'chat:read' | 'mail:read' | 'mail:write'
 
 // Task read access comes with every grant, and chat has no write scope.
 const RESOURCES: ScopeResource<Scope>[] = [
   { name: 'Tasks', hint: 'In the selected projects', write: 'tasks:write' },
   { name: 'Docs', hint: 'Including private docs', read: 'docs:read', write: 'docs:write' },
   { name: 'Chat', hint: 'Including private channels and direct messages', read: 'chat:read' },
+  { name: 'Mail', hint: 'Your mailboxes and drafts. Write includes sending mail.', read: 'mail:read', write: 'mail:write' },
 ]
 
 export function OAuthConsentPage() {

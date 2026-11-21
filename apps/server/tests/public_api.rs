@@ -5,10 +5,12 @@ use std::sync::Arc;
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode, header};
 use orbit_platform::{
-    HttpPlatformLayer, Id, OriginPolicy, PasswordService, TestDatabase, TimestampMillis,
+    AttachmentMutationCoordinator, HttpPlatformLayer, Id, LocalBlobStore, OriginPolicy,
+    PasswordService, TestDatabase, TimestampMillis, UploadLimits, UploadService,
 };
 use orbit_server::public_api::{PublicApiState, router};
 use orbit_server::repositories::api_tokens::{ApiTokenError, ApiTokenRepository, ApiTokenScope};
+use orbit_server::repositories::chat::ChatRepository;
 use orbit_server::repositories::identity::{IdentityRepository, SetupRequest};
 use orbit_server::repositories::pages::{CreatePage, PageChanges, PageRepository, SpaceRequest};
 use orbit_server::repositories::tasks::{CreateTask, TaskRepository};
@@ -31,6 +33,8 @@ struct Fixture {
     other_project: Id,
     task: Id,
     other_task: Id,
+    /// Chat's upload store; removed with the fixture.
+    _files: tempfile::TempDir,
 }
 
 impl Fixture {
@@ -97,13 +101,21 @@ impl Fixture {
         .await;
         let pages = Arc::new(PageRepository::new((*database).clone()));
         let tokens = ApiTokenRepository::new((*database).clone());
+        let files = tempfile::tempdir().unwrap();
+        let uploads = UploadService::new(
+            (*database).clone(),
+            Arc::new(LocalBlobStore::new(files.path().join("files"))),
+            AttachmentMutationCoordinator::default(),
+            UploadLimits::default(),
+        );
         let app = router(
             PublicApiState::new(
                 Arc::new(tokens.clone()),
                 Arc::new(tasks.clone()),
                 "https://orbit.test",
             )
-            .with_pages(Arc::clone(&pages)),
+            .with_pages(Arc::clone(&pages))
+            .with_chat(Arc::new(ChatRepository::new((*database).clone(), uploads))),
         )
         .layer(HttpPlatformLayer::new(OriginPolicy::new(
             "https://orbit.test",
@@ -120,6 +132,7 @@ impl Fixture {
             other_project: other.id,
             task,
             other_task,
+            _files: files,
         }
     }
 
@@ -2056,12 +2069,29 @@ async fn only_owners_and_admins_manage_tokens_and_tokens_follow_their_creator() 
         token_by(&f, member, true).await,
         Err(ApiTokenError::Forbidden)
     ));
-    assert!(matches!(
-        f.tokens.list(f.workspace, member).await,
-        Err(ApiTokenError::Forbidden)
-    ));
-
+    // A member may hold personal export tokens (#89), so they list and revoke their own tokens
+    // only: never another member's token or a service account's.
     let (admin_token, admin_token_id) = token_by(&f, admin, false).await.unwrap();
+    let own = f
+        .tokens
+        .create(
+            f.workspace,
+            member,
+            "member export".to_owned(),
+            Vec::<Id>::new(),
+            &[ApiTokenScope::WorkspaceExportPersonal],
+            false,
+            None,
+            "test",
+            TimestampMillis::now(),
+        )
+        .await
+        .unwrap();
+    let listed = f.tokens.list(f.workspace, member).await.unwrap();
+    assert_eq!(
+        listed.iter().map(|token| token.id).collect::<Vec<_>>(),
+        vec![own.api_token.id]
+    );
     assert!(matches!(
         f.tokens
             .revoke(
@@ -2072,7 +2102,7 @@ async fn only_owners_and_admins_manage_tokens_and_tokens_follow_their_creator() 
                 TimestampMillis::now()
             )
             .await,
-        Err(ApiTokenError::Forbidden)
+        Err(ApiTokenError::NotFound)
     ));
     let (code, _) = f
         .call(Some(&admin_token), "POST", "/tasks", Some(body.clone()))
@@ -3176,3 +3206,503 @@ async fn idempotency_keys_make_task_and_comment_creates_safe_to_retry() {
         .await;
     assert_eq!(code, StatusCode::FORBIDDEN, "{problem}");
 }
+
+#[tokio::test]
+async fn task_comments_can_be_edited_and_deleted_and_task_activity_is_listed() {
+    let f = Fixture::new().await;
+    let (writer, _) = f
+        .token(
+            &[ApiTokenScope::TasksRead, ApiTokenScope::TasksWrite],
+            false,
+        )
+        .await;
+    let (reader, _) = f.token(&[ApiTokenScope::TasksRead], false).await;
+    let (bot, _) = f.token(&[ApiTokenScope::TasksWrite], true).await;
+    let comments = format!("/tasks/{}/comments", f.task);
+    let (_, comment) = f
+        .call(
+            Some(&writer),
+            "POST",
+            &comments,
+            Some(json!({"body": "First"})),
+        )
+        .await;
+    let path = format!("{comments}/{}", comment["id"].as_str().unwrap());
+
+    let (code, problem) = f
+        .call(
+            Some(&reader),
+            "PATCH",
+            &path,
+            Some(json!({"expected_version": comment["version"], "body": "no"})),
+        )
+        .await;
+    assert_eq!(code, StatusCode::FORBIDDEN);
+    assert_eq!(problem["code"], "insufficient_scope");
+    // A service account acts as the owner, so it cannot edit the owner's comments.
+    let (code, _) = f
+        .call(
+            Some(&bot),
+            "PATCH",
+            &path,
+            Some(json!({"expected_version": comment["version"], "body": "no"})),
+        )
+        .await;
+    assert_eq!(code, StatusCode::NOT_FOUND);
+    let (code, edited) = f
+        .call(
+            Some(&writer),
+            "PATCH",
+            &path,
+            Some(json!({"expected_version": comment["version"], "body": "Second"})),
+        )
+        .await;
+    assert_eq!(code, StatusCode::OK, "{edited}");
+    assert_eq!(edited["body"], "Second");
+    assert_ne!(edited["version"], comment["version"]);
+    let stale = format!("{path}?expected_version={}", comment["version"]);
+    let (code, problem) = f.call(Some(&writer), "DELETE", &stale, None).await;
+    assert_eq!(code, StatusCode::CONFLICT, "{problem}");
+    let current = format!("{path}?expected_version={}", edited["version"]);
+    let (code, _) = f.call(Some(&writer), "DELETE", &current, None).await;
+    assert_eq!(code, StatusCode::NO_CONTENT);
+    let (_, listed) = f.call(Some(&reader), "GET", &comments, None).await;
+    assert_eq!(listed["items"], json!([]));
+
+    let (code, activity) = f
+        .call(
+            Some(&reader),
+            "GET",
+            &format!("/tasks/{}/activity?limit=1", f.task),
+            None,
+        )
+        .await;
+    assert_eq!(code, StatusCode::OK, "{activity}");
+    assert_eq!(activity["items"].as_array().unwrap().len(), 1);
+    assert!(activity["items"][0]["action"].is_string(), "{activity}");
+    let (code, _) = f
+        .call(
+            Some(&reader),
+            "GET",
+            &format!("/tasks/{}/activity", f.other_task),
+            None,
+        )
+        .await;
+    assert_eq!(code, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn doc_comments_and_teamspaces_use_the_docs_scopes() {
+    let f = Fixture::new().await;
+    let (writer, _) = f
+        .token(&[ApiTokenScope::DocsRead, ApiTokenScope::DocsWrite], false)
+        .await;
+    let (tasks_only, _) = f.token(&[ApiTokenScope::TasksWrite], false).await;
+    let (_, doc) = f
+        .call(
+            Some(&writer),
+            "POST",
+            "/docs",
+            Some(json!({"title": "Spec", "markdown": "The plan"})),
+        )
+        .await;
+    let path = format!("/docs/{}/comments", doc["id"].as_str().unwrap());
+
+    let (code, problem) = f.call(Some(&tasks_only), "GET", &path, None).await;
+    assert_eq!(code, StatusCode::FORBIDDEN, "{problem}");
+    let (code, _) = f
+        .call(
+            Some(&writer),
+            "POST",
+            &path,
+            Some(json!({"body": "Both", "quote": "plan", "thread_id": Id::new_v7()})),
+        )
+        .await;
+    assert_eq!(code, StatusCode::BAD_REQUEST);
+    let (code, started) = f
+        .call(
+            Some(&writer),
+            "POST",
+            &path,
+            Some(json!({"body": "Is this **final**?", "quote": "plan"})),
+        )
+        .await;
+    assert_eq!(code, StatusCode::CREATED, "{started}");
+    assert_eq!(started["author"]["id"], f.user.to_string());
+    let (code, reply) = f
+        .call(
+            Some(&writer),
+            "POST",
+            &path,
+            Some(json!({"body": "Yes", "thread_id": started["thread_id"]})),
+        )
+        .await;
+    assert_eq!(code, StatusCode::CREATED, "{reply}");
+    let (code, threads) = f.call(Some(&writer), "GET", &path, None).await;
+    assert_eq!(code, StatusCode::OK, "{threads}");
+    assert_eq!(threads["next_cursor"], Value::Null);
+    let thread = &threads["items"][0];
+    assert_eq!(thread["quote"], "plan");
+    assert_eq!(thread["comments"][0]["body"], "Is this **final**?\n");
+    assert_eq!(thread["comments"][1]["body"], "Yes\n");
+
+    let (code, teamspaces) = f.call(Some(&writer), "GET", "/teamspaces", None).await;
+    assert_eq!(code, StatusCode::OK, "{teamspaces}");
+    assert_eq!(teamspaces["items"][0]["is_default"], true, "{teamspaces}");
+    let (code, _) = f.call(Some(&tasks_only), "GET", "/teamspaces", None).await;
+    assert_eq!(code, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn the_trash_lists_shows_and_restores_tasks_and_docs() {
+    let f = Fixture::new().await;
+    let (writer, _) = f
+        .token(
+            &[
+                ApiTokenScope::TasksRead,
+                ApiTokenScope::TasksWrite,
+                ApiTokenScope::DocsRead,
+                ApiTokenScope::DocsWrite,
+            ],
+            false,
+        )
+        .await;
+    let (reader, _) = f.token(&[ApiTokenScope::TasksRead], false).await;
+    let task = format!("/tasks/{}", f.task);
+    let (_, live) = f.call(Some(&writer), "GET", &task, None).await;
+    let (code, _) = f
+        .call(
+            Some(&writer),
+            "DELETE",
+            &format!("{task}?expected_version={}", live["version"]),
+            None,
+        )
+        .await;
+    assert_eq!(code, StatusCode::NO_CONTENT);
+    // The other project's task is trashed too, but the token does not see it.
+    let version: i64 = sqlx::query_scalar("SELECT version FROM tasks WHERE id = $1")
+        .bind(f.other_task.to_string())
+        .fetch_one(f.database.pool())
+        .await
+        .unwrap();
+    f.tasks
+        .delete_task(
+            f.workspace,
+            f.other_task,
+            f.user,
+            u64::try_from(version).unwrap(),
+            "test",
+            TimestampMillis::now(),
+        )
+        .await
+        .unwrap();
+
+    let (code, trash) = f.call(Some(&reader), "GET", "/tasks/trash", None).await;
+    assert_eq!(code, StatusCode::OK, "{trash}");
+    let items = trash["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1, "{trash}");
+    assert_eq!(items[0]["id"], f.task.to_string());
+    assert!(items[0]["deleted_at"].is_string());
+    let identifier = items[0]["identifier"].as_str().unwrap();
+    let (code, trashed) = f
+        .call(
+            Some(&reader),
+            "GET",
+            &format!("/tasks/trash/{identifier}"),
+            None,
+        )
+        .await;
+    assert_eq!(code, StatusCode::OK, "{trashed}");
+    assert_eq!(trashed["deleted_by"], f.user.to_string());
+    assert!(trashed["status"]["name"].is_string(), "{trashed}");
+    let (code, _) = f
+        .call(
+            Some(&reader),
+            "GET",
+            &format!("/tasks/trash/{}", f.other_task),
+            None,
+        )
+        .await;
+    assert_eq!(code, StatusCode::NOT_FOUND);
+    let restore = format!("{task}/restore");
+    let (code, _) = f
+        .call(
+            Some(&reader),
+            "POST",
+            &restore,
+            Some(json!({"expected_version": trashed["version"]})),
+        )
+        .await;
+    assert_eq!(code, StatusCode::FORBIDDEN);
+    let (code, restored) = f
+        .call(
+            Some(&writer),
+            "POST",
+            &restore,
+            Some(json!({"expected_version": trashed["version"]})),
+        )
+        .await;
+    assert_eq!(code, StatusCode::OK, "{restored}");
+    assert_eq!(restored["id"], f.task.to_string());
+    let (code, _) = f.call(Some(&writer), "GET", &task, None).await;
+    assert_eq!(code, StatusCode::OK);
+
+    let (_, doc) = f
+        .call(
+            Some(&writer),
+            "POST",
+            "/docs",
+            Some(json!({"title": "Old"})),
+        )
+        .await;
+    let doc_path = format!("/docs/{}", doc["id"].as_str().unwrap());
+    let (code, _) = f
+        .call(
+            Some(&writer),
+            "DELETE",
+            &format!("{doc_path}?expected_version={}", doc["version"]),
+            None,
+        )
+        .await;
+    assert_eq!(code, StatusCode::NO_CONTENT);
+    let (code, problem) = f.call(Some(&reader), "GET", "/docs/trash", None).await;
+    assert_eq!(code, StatusCode::FORBIDDEN, "{problem}");
+    let (code, docs) = f.call(Some(&writer), "GET", "/docs/trash", None).await;
+    assert_eq!(code, StatusCode::OK, "{docs}");
+    assert_eq!(docs["items"][0]["id"], doc["id"]);
+    let (code, back) = f
+        .call(
+            Some(&writer),
+            "POST",
+            &format!("{doc_path}/restore"),
+            Some(json!({"expected_version": docs["items"][0]["version"]})),
+        )
+        .await;
+    assert_eq!(code, StatusCode::OK, "{back}");
+    assert_eq!(back["title"], "Old");
+}
+
+#[tokio::test]
+async fn milestones_cycles_statuses_and_labels_can_be_written_and_deleted() {
+    let f = Fixture::new().await;
+    let (writer, _) = f.token(&[ApiTokenScope::TasksWrite], false).await;
+    let (reader, _) = f.token(&[ApiTokenScope::TasksRead], false).await;
+    let project = format!("/projects/{}", f.project);
+
+    let (code, _) = f
+        .call(
+            Some(&reader),
+            "POST",
+            &format!("{project}/milestones"),
+            Some(json!({"name": "Beta"})),
+        )
+        .await;
+    assert_eq!(code, StatusCode::FORBIDDEN);
+    let (code, _) = f
+        .call(
+            Some(&writer),
+            "POST",
+            &format!("/projects/{}/milestones", f.other_project),
+            Some(json!({"name": "Beta"})),
+        )
+        .await;
+    assert_eq!(code, StatusCode::NOT_FOUND);
+    let (code, problem) = f
+        .call(
+            Some(&writer),
+            "POST",
+            &format!("{project}/milestones"),
+            Some(json!({"name": "Beta", "target_at": "next week"})),
+        )
+        .await;
+    assert_eq!(code, StatusCode::BAD_REQUEST);
+    assert!(problem["detail"].as_str().unwrap().contains("target_at"));
+    let (code, milestone) = f
+        .call(
+            Some(&writer),
+            "POST",
+            &format!("{project}/milestones"),
+            Some(json!({"name": "Beta", "target_at": "2026-12-01"})),
+        )
+        .await;
+    assert_eq!(code, StatusCode::CREATED, "{milestone}");
+    // A day is stored at noon UTC, as the web app stores it.
+    assert!(
+        milestone["target_at"]
+            .as_str()
+            .unwrap()
+            .starts_with("2026-12-01T12:00:00"),
+        "{milestone}"
+    );
+    let milestone_path = format!("{project}/milestones/{}", milestone["id"].as_str().unwrap());
+    let (code, renamed) = f
+        .call(
+            Some(&writer),
+            "PATCH",
+            &milestone_path,
+            Some(
+                json!({"expected_version": milestone["version"], "name": "GA", "target_at": null}),
+            ),
+        )
+        .await;
+    assert_eq!(code, StatusCode::OK, "{renamed}");
+    assert_eq!(renamed["name"], "GA");
+    assert_eq!(renamed["target_at"], Value::Null);
+    let (code, _) = f
+        .call(
+            Some(&writer),
+            "DELETE",
+            &format!("{milestone_path}?expected_version={}", milestone["version"]),
+            None,
+        )
+        .await;
+    assert_eq!(code, StatusCode::CONFLICT);
+    let (code, _) = f
+        .call(
+            Some(&writer),
+            "DELETE",
+            &format!("{milestone_path}?expected_version={}", renamed["version"]),
+            None,
+        )
+        .await;
+    assert_eq!(code, StatusCode::NO_CONTENT);
+
+    let (code, cycle) = f
+        .call(
+            Some(&writer),
+            "POST",
+            &format!("{project}/cycles"),
+            Some(json!({"starts_at": "2026-11-23", "ends_at": "2026-12-07"})),
+        )
+        .await;
+    assert_eq!(code, StatusCode::CREATED, "{cycle}");
+    assert_eq!(cycle["number"], 1);
+    let cycle_path = format!("{project}/cycles/{}", cycle["id"].as_str().unwrap());
+    let (code, named) = f
+        .call(
+            Some(&writer),
+            "PATCH",
+            &cycle_path,
+            Some(json!({"expected_version": cycle["version"], "name": "Sprint 1"})),
+        )
+        .await;
+    assert_eq!(code, StatusCode::OK, "{named}");
+    assert_eq!(named["name"], "Sprint 1");
+    let (code, _) = f
+        .call(
+            Some(&writer),
+            "DELETE",
+            &format!("{cycle_path}?expected_version={}", named["version"]),
+            None,
+        )
+        .await;
+    assert_eq!(code, StatusCode::NO_CONTENT);
+
+    let (_, label) = f
+        .call(
+            Some(&writer),
+            "POST",
+            &format!("{project}/labels"),
+            Some(json!({"name": "Bug"})),
+        )
+        .await;
+    let label_path = format!("{project}/labels/{}", label["id"].as_str().unwrap());
+    let (code, _) = f.call(Some(&writer), "DELETE", &label_path, None).await;
+    assert_eq!(
+        code,
+        StatusCode::BAD_REQUEST,
+        "expected_version is required"
+    );
+    let (code, _) = f
+        .call(
+            Some(&writer),
+            "DELETE",
+            &format!("{label_path}?expected_version={}", label["version"]),
+            None,
+        )
+        .await;
+    assert_eq!(code, StatusCode::NO_CONTENT);
+    let (_, status) = f
+        .call(
+            Some(&writer),
+            "POST",
+            &format!("{project}/statuses"),
+            Some(json!({"name": "Review", "category": "started"})),
+        )
+        .await;
+    let (code, _) = f
+        .call(
+            Some(&writer),
+            "DELETE",
+            &format!(
+                "{project}/statuses/{}?expected_version={}",
+                status["id"].as_str().unwrap(),
+                status["version"]
+            ),
+            None,
+        )
+        .await;
+    assert_eq!(code, StatusCode::NO_CONTENT);
+}
+
+#[tokio::test]
+async fn chat_reads_need_the_chat_scope() {
+    let f = Fixture::new().await;
+    let (reader, _) = f.token(&[ApiTokenScope::ChatRead], false).await;
+    let (tasks_only, _) = f.token(&[ApiTokenScope::TasksRead], false).await;
+
+    let (code, problem) = f
+        .call(Some(&tasks_only), "GET", "/chat/conversations", None)
+        .await;
+    assert_eq!(code, StatusCode::FORBIDDEN, "{problem}");
+    let (code, conversations) = f
+        .call(Some(&reader), "GET", "/chat/conversations", None)
+        .await;
+    assert_eq!(code, StatusCode::OK, "{conversations}");
+    let general = conversations["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|conversation| conversation["is_default"] == true)
+        .expect("the setup makes #general");
+    let id = general["id"].as_str().unwrap();
+    let (code, messages) = f
+        .call(
+            Some(&reader),
+            "GET",
+            &format!("/chat/conversations/{id}/messages?limit=10"),
+            None,
+        )
+        .await;
+    assert_eq!(code, StatusCode::OK, "{messages}");
+    assert!(messages["items"].is_array());
+    let (code, _) = f
+        .call(
+            Some(&reader),
+            "GET",
+            &format!("/chat/conversations/{id}/messages?limit=0"),
+            None,
+        )
+        .await;
+    assert_eq!(code, StatusCode::BAD_REQUEST);
+    let (code, hits) = f
+        .call(
+            Some(&reader),
+            "GET",
+            &format!("/chat/search?q=hello&conversation_id={id}"),
+            None,
+        )
+        .await;
+    assert_eq!(code, StatusCode::OK, "{hits}");
+    assert_eq!(hits["items"], json!([]));
+    let (code, _) = f
+        .call(
+            Some(&reader),
+            "GET",
+            &format!("/chat/threads/{}", Id::new_v7()),
+            None,
+        )
+        .await;
+    assert_eq!(code, StatusCode::NOT_FOUND);
+}
+

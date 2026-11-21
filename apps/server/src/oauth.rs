@@ -30,12 +30,14 @@ use crate::repositories::project_access::user_sees_project_sql;
 use crate::task_routes::authenticate_session;
 
 const SCOPE: &str = "tasks:read";
-const SCOPES: [&str; 5] = [
+const SCOPES: [&str; 7] = [
     "tasks:read",
     "tasks:write",
     "docs:read",
     "docs:write",
     "chat:read",
+    "mail:read",
+    "mail:write",
 ];
 fn valid_scopes(scope: &str) -> bool {
     !scope.is_empty() && scope.len() < 128 && scope.split_whitespace().all(|s| SCOPES.contains(&s))
@@ -300,7 +302,7 @@ async fn server_metadata(State(state): State<OAuthState>) -> Json<Value> {
 async fn resource_metadata(State(state): State<OAuthState>) -> Json<Value> {
     Json(
         json!({"resource": state.resource, "authorization_servers": [state.origin],
-        "scopes_supported": SCOPES, "bearer_methods_supported": ["header"], "resource_name": "Orbit tasks, docs and chat"}),
+        "scopes_supported": SCOPES, "bearer_methods_supported": ["header"], "resource_name": "Orbit tasks, docs, chat and mail"}),
     )
 }
 

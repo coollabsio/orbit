@@ -79,7 +79,7 @@ pub struct LinkedDatabase {
 }
 
 impl Authorized<'_> {
-    fn databases(&self, scope: ApiTokenScope) -> Result<DatabaseRepository> {
+    pub(super) fn databases(&self, scope: ApiTokenScope) -> Result<DatabaseRepository> {
         self.content(scope, &self.api.pages)?;
         Ok(DatabaseRepository::new(self.api.tasks.database().clone()))
     }

@@ -27,12 +27,14 @@ use crate::collab::{CollabError, CollabHub, CollabWrite, DocKey, DocKind, LinkPo
 use crate::export::markdown::{KeepLinks, blocks_to_markdown};
 
 mod cycles;
+mod github_links;
 mod milestones;
 mod project_icons;
 
 pub use project_icons::{ProjectIconError, project_icon_url};
 
 pub use cycles::{CycleChanges, CycleMoveOutcome, CycleRecord};
+pub use github_links::GithubLink;
 pub use milestones::{MilestoneChanges, MilestoneRecord};
 
 /// The largest task estimate, in points.
@@ -2955,8 +2957,19 @@ impl TaskRepository {
         // every write, so its result never depends on the order of the items.
         let mut snapshots = Vec::with_capacity(updates.len());
         for update in updates {
+            // As in `update_task`: an API token writes only trees of its projects.
+            self.check_project_grant(&mut tx, workspace_id, update.id)
+                .await?;
+            if let Some(Some(parent_id)) = update.changes.parent_task_id {
+                self.check_project_grant(&mut tx, workspace_id, parent_id)
+                    .await?;
+            }
             let before = sub_issues::snapshot_in_tx(&mut tx, update.id).await?;
             let task_before = task_in_tx(&mut tx, scope, workspace_id, update.id, false).await?;
+            let update = &TaskUpdate {
+                expected_version: self.expected_version(update.expected_version, &task_before)?,
+                ..update.clone()
+            };
             let blocks = update_task_in_tx(
                 &mut tx,
                 scope,
@@ -3006,13 +3019,14 @@ impl TaskRepository {
         let actor = sub_issues::AutomationActor {
             workspace_id,
             actor_id,
-            service_account: None,
+            service_account: self.service_account(),
             request_id,
             now,
         };
         let mut auto_closed = Vec::new();
         for (update, snapshot) in updates.iter().zip(&snapshots) {
-            if let Some((before, after)) = snapshot {
+            // An import write runs no automation, as in `update_task`.
+            if let (Some((before, after)), false) = (snapshot, self.importing) {
                 sub_issues::run_automation_in_tx(
                     &mut tx,
                     actor,

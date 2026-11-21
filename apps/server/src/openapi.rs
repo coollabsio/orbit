@@ -154,11 +154,20 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::public_api::setup::update_status,
         crate::public_api::setup::create_label,
         crate::public_api::setup::update_label,
+        crate::public_api::plan::delete_status,
+        crate::public_api::plan::delete_label,
+        crate::public_api::plan::create_milestone,
+        crate::public_api::plan::update_milestone,
+        crate::public_api::plan::delete_milestone,
+        crate::public_api::plan::create_cycle,
+        crate::public_api::plan::update_cycle,
+        crate::public_api::plan::delete_cycle,
         crate::public_api::statuses,
         crate::public_api::labels,
         crate::public_api::milestones,
         crate::public_api::cycles,
         crate::public_api::members,
+        crate::public_api::context::teamspaces,
         crate::public_api::list_tasks,
         crate::public_api::get_task,
         crate::public_api::create_task,
@@ -166,6 +175,12 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::public_api::delete_task,
         crate::public_api::comments,
         crate::public_api::create_comment,
+        crate::public_api::comments::update_comment,
+        crate::public_api::comments::delete_comment,
+        crate::public_api::context::task_activity,
+        crate::public_api::trash::task_trash,
+        crate::public_api::trash::trashed_task,
+        crate::public_api::trash::restore_task,
         crate::public_api::relations::relations,
         crate::public_api::relations::create_relation,
         crate::public_api::relations::delete_relation,
@@ -177,6 +192,10 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::public_api::move_doc,
         crate::public_api::doc_versions,
         crate::public_api::doc_version,
+        crate::public_api::comments::doc_comments,
+        crate::public_api::comments::create_doc_comment,
+        crate::public_api::trash::doc_trash,
+        crate::public_api::trash::restore_doc,
         crate::public_api::databases::database,
         crate::public_api::databases::query_database,
         crate::public_api::databases::create_row,
@@ -193,6 +212,112 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::public_api::database_views::delete_view,
         crate::public_api::database_views::create_link,
         crate::public_api::database_views::delete_link,
+        crate::public_api::chat::conversations,
+        crate::public_api::chat::messages,
+        crate::public_api::chat::thread,
+        crate::public_api::chat::search,
+        crate::public_api::mail::mailboxes,
+        crate::public_api::mail::threads,
+        crate::public_api::mail::thread,
+        crate::public_api::mail::update_thread,
+        crate::public_api::mail::update_threads,
+        crate::public_api::mail::search,
+        crate::public_api::mail::counts,
+        crate::public_api::mail::attachment,
+        crate::public_api::mail::drafts,
+        crate::public_api::mail::create_draft,
+        crate::public_api::mail::draft,
+        crate::public_api::mail::update_draft,
+        crate::public_api::mail::delete_draft,
+        crate::public_api::mail::check_draft,
+        crate::public_api::mail::send_draft,
+        crate::public_api::mail::upload_draft_file,
+        crate::public_api::mail::update_draft_file,
+        crate::public_api::mail::delete_draft_file,
+        crate::public_api::mail::outbound,
+        crate::public_api::mail::cancel_outbound,
+        crate::public_api::mail::labels,
+        crate::public_api::mail::create_label,
+        crate::public_api::mail::update_label,
+        crate::public_api::mail::delete_label,
+        crate::public_api::mail::contacts,
+        crate::public_api::mail::from_addresses,
+        crate::public_api::mail::signature,
+        crate::public_api::mail::put_signature,
+        crate::public_api::mail::delete_signature,
+        crate::public_api::mail::snippets,
+        crate::public_api::mail::create_snippet,
+        crate::public_api::mail::update_snippet,
+        crate::public_api::mail::delete_snippet,
+        crate::public_api::mail::settings,
+        crate::public_api::mail::put_settings,
+        crate::public_api::mail::vacation,
+        crate::public_api::mail::put_vacation,
+        // public_api::projects
+        crate::public_api::projects::bulk_update_tasks,
+        crate::public_api::projects::reorder_tasks,
+        crate::public_api::projects::github_links,
+        crate::public_api::projects::empty_task_trash,
+        crate::public_api::projects::project_trash,
+        crate::public_api::projects::trashed_project,
+        crate::public_api::projects::delete_project,
+        crate::public_api::projects::restore_project,
+        crate::public_api::projects::purge_project,
+        crate::public_api::projects::project_members,
+        crate::public_api::projects::add_project_member,
+        crate::public_api::projects::remove_project_member,
+        crate::public_api::projects::reorder_statuses,
+        crate::public_api::projects::reorder_milestones,
+        crate::public_api::projects::move_unfinished,
+        // public_api::doc_actions
+        crate::public_api::doc_actions::search_docs,
+        crate::public_api::doc_actions::recent_docs,
+        crate::public_api::doc_actions::favorite_docs,
+        crate::public_api::doc_actions::add_favorite_doc,
+        crate::public_api::doc_actions::remove_favorite_doc,
+        crate::public_api::doc_actions::move_favorite_doc,
+        crate::public_api::doc_actions::doc_descendants,
+        crate::public_api::doc_actions::duplicate_doc,
+        crate::public_api::doc_actions::lock_doc,
+        crate::public_api::doc_actions::restore_doc_version,
+        crate::public_api::doc_actions::purge_doc,
+        crate::public_api::doc_actions::empty_doc_trash,
+        crate::public_api::doc_actions::create_teamspace,
+        crate::public_api::doc_actions::update_teamspace,
+        crate::public_api::doc_actions::delete_teamspace,
+        crate::public_api::doc_actions::move_teamspace,
+        crate::public_api::doc_actions::update_doc_comment,
+        crate::public_api::doc_actions::delete_doc_comment,
+        crate::public_api::doc_actions::resolve_doc_thread,
+        crate::public_api::doc_actions::reopen_doc_thread,
+        crate::public_api::doc_actions::delete_doc_thread,
+        // public_api::database_actions
+        crate::public_api::database_actions::move_row,
+        crate::public_api::database_actions::create_template,
+        crate::public_api::database_actions::update_template,
+        crate::public_api::database_actions::delete_template,
+        crate::public_api::database_actions::preview_formula,
+        crate::public_api::notifications::notifications,
+        crate::public_api::notifications::read_notification,
+        crate::public_api::notifications::read_all_notifications,
+        crate::public_api::views::views,
+        crate::public_api::views::create_view,
+        crate::public_api::views::get_view,
+        crate::public_api::views::update_view,
+        crate::public_api::views::delete_view,
+        crate::public_api::views::favorite_view,
+        crate::public_api::views::unfavorite_view,
+        crate::public_api::views::reorder_view_favorites,
+        crate::public_api::files::task_attachments,
+        crate::public_api::files::upload_task_attachment,
+        crate::public_api::files::delete_task_attachment,
+        crate::public_api::files::download_task_attachment,
+        crate::public_api::files::comment_attachments,
+        crate::public_api::files::upload_comment_attachment,
+        crate::public_api::files::delete_comment_attachment,
+        crate::public_api::files::download_comment_attachment,
+        crate::public_api::files::upload_doc_file,
+        crate::public_api::files::download_doc_file,
         crate::public_api::create_export,
         crate::public_api::get_export,
         crate::public_api::download_export,
@@ -809,6 +934,11 @@ fn public_api_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             | "public_list_doc_versions"
             | "public_query_database"
             | "public_create_export"
+            | "public_list_task_trash"
+            | "public_list_task_activity"
+            | "public_list_messages"
+            | "public_get_thread"
+            | "public_search_messages"
     ) {
         add_code(&mut responses, "400", "invalid_request");
     }
@@ -831,6 +961,8 @@ fn public_api_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             | "public_list_tasks"
             | "public_list_comments"
             | "public_list_doc_versions"
+            | "public_list_task_trash"
+            | "public_list_task_activity"
     ) {
         add_code(&mut responses, "400", "invalid_cursor");
     }
@@ -853,6 +985,19 @@ fn public_api_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             | "public_delete_database_view"
             | "public_create_database_link"
             | "public_delete_database_link"
+            | "public_update_comment"
+            | "public_delete_comment"
+            | "public_create_doc_comment"
+            | "public_restore_task"
+            | "public_restore_doc"
+            | "public_create_milestone"
+            | "public_update_milestone"
+            | "public_delete_milestone"
+            | "public_create_cycle"
+            | "public_update_cycle"
+            | "public_delete_cycle"
+            | "public_delete_status"
+            | "public_delete_label"
     );
     if write {
         add_code(&mut responses, "400", "invalid_request");
@@ -901,6 +1046,16 @@ fn public_api_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             | "public_update_doc"
             | "public_move_doc"
             | "public_delete_doc"
+            | "public_update_comment"
+            | "public_delete_comment"
+            | "public_restore_task"
+            | "public_restore_doc"
+            | "public_update_milestone"
+            | "public_delete_milestone"
+            | "public_update_cycle"
+            | "public_delete_cycle"
+            | "public_delete_status"
+            | "public_delete_label"
     ) {
         add_code(&mut responses, "409", "conflict");
     }
@@ -910,6 +1065,7 @@ fn public_api_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             | "public_update_task"
             | "public_delete_task"
             | "public_create_comment"
+            | "public_restore_task"
     ) {
         add_code(&mut responses, "409", "task_conflict");
     }
@@ -964,10 +1120,295 @@ fn public_api_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
         }
         _ => {}
     }
+    setup_responses(operation_id, &mut responses);
+    project_responses(operation_id, &mut responses);
+    doc_action_responses(operation_id, &mut responses);
+    database_action_responses(operation_id, &mut responses);
+    inbox_view_file_responses(operation_id, &mut responses);
     responses
         .into_iter()
         .map(|(status, codes)| (status, codes.join(", ")))
         .collect()
+}
+
+type Codes = BTreeMap<&'static str, Vec<&'static str>>;
+
+/// Notifications, saved views and files (`public_api::{notifications, views, files}`).
+fn inbox_view_file_responses(operation_id: &str, responses: &mut Codes) {
+    let personal = matches!(
+        operation_id,
+        "public_list_notifications"
+            | "public_read_notification"
+            | "public_read_all_notifications"
+            | "public_list_views"
+            | "public_create_view"
+            | "public_get_view"
+            | "public_update_view"
+            | "public_delete_view"
+            | "public_favorite_view"
+            | "public_unfavorite_view"
+            | "public_reorder_view_favorites"
+            | "public_upload_task_attachment"
+            | "public_delete_task_attachment"
+            | "public_upload_comment_attachment"
+            | "public_delete_comment_attachment"
+    );
+    if personal {
+        // A service-account token, or (views and comment files) the member's role.
+        add_code(responses, "403", "workspace_action_forbidden");
+    }
+    let write = matches!(
+        operation_id,
+        "public_read_notification"
+            | "public_read_all_notifications"
+            | "public_create_view"
+            | "public_update_view"
+            | "public_delete_view"
+            | "public_favorite_view"
+            | "public_unfavorite_view"
+            | "public_reorder_view_favorites"
+            | "public_upload_task_attachment"
+            | "public_delete_task_attachment"
+            | "public_upload_comment_attachment"
+            | "public_delete_comment_attachment"
+            | "public_upload_doc_file"
+    );
+    if write {
+        add_code(responses, "400", "invalid_request");
+        add_code(responses, "402", "workspace_read_only");
+        add_code(responses, "403", "origin_forbidden");
+        add_code(responses, "503", "service_unavailable");
+    }
+    if matches!(
+        operation_id,
+        "public_list_notifications"
+            | "public_list_task_attachments"
+            | "public_list_comment_attachments"
+    ) {
+        add_code(responses, "400", "invalid_request");
+    }
+    if matches!(operation_id, "public_create_view" | "public_update_view") {
+        add_code(responses, "422", "validation_failed");
+    }
+    if operation_id == "public_update_view" {
+        add_code(responses, "409", "conflict");
+    }
+    if matches!(
+        operation_id,
+        "public_upload_task_attachment"
+            | "public_upload_comment_attachment"
+            | "public_upload_doc_file"
+    ) {
+        add_code(responses, "413", "upload_too_large");
+        add_code(responses, "413", "storage_quota_exceeded");
+    }
+}
+
+/// Project setup (`public_api::setup`) and task relations (`public_api::relations`).
+fn setup_responses(operation_id: &str, responses: &mut Codes) {
+    let write = matches!(
+        operation_id,
+        "public_create_project"
+            | "public_update_project"
+            | "public_create_status"
+            | "public_update_status"
+            | "public_create_label"
+            | "public_update_label"
+            | "public_create_relation"
+            | "public_delete_relation"
+    );
+    if write {
+        add_code(responses, "400", "invalid_request");
+        add_code(responses, "402", "workspace_read_only");
+        add_code(responses, "403", "origin_forbidden");
+        add_code(responses, "503", "service_unavailable");
+    }
+    // A taken project key or label name, or a stale `expected_version`.
+    if matches!(
+        operation_id,
+        "public_create_project"
+            | "public_update_project"
+            | "public_update_status"
+            | "public_create_label"
+            | "public_update_label"
+    ) {
+        add_code(responses, "409", "conflict");
+    }
+    // A field the repository refuses (a status category, the Duplicate status, a task that is
+    // not a live task of an approved project).
+    if matches!(
+        operation_id,
+        "public_update_project"
+            | "public_create_status"
+            | "public_update_status"
+            | "public_create_label"
+            | "public_update_label"
+            | "public_create_relation"
+    ) {
+        add_code(responses, "422", "validation_failed");
+    }
+    match operation_id {
+        "public_create_project" => add_code(responses, "403", "all_projects_required"),
+        // A duplicate relation, or `blocks` the other way round.
+        "public_create_relation" => add_code(responses, "409", "task_conflict"),
+        _ => {}
+    }
+}
+
+/// Project lifecycle, members, reorders and task bulk writes (`public_api::projects`).
+fn project_responses(operation_id: &str, responses: &mut Codes) {
+    let write = matches!(
+        operation_id,
+        "public_bulk_update_tasks"
+            | "public_reorder_tasks"
+            | "public_empty_task_trash"
+            | "public_delete_project"
+            | "public_restore_project"
+            | "public_purge_project"
+            | "public_add_project_member"
+            | "public_remove_project_member"
+            | "public_reorder_statuses"
+            | "public_reorder_milestones"
+            | "public_move_unfinished_cycle_tasks"
+    );
+    if write {
+        add_code(responses, "400", "invalid_request");
+        add_code(responses, "402", "workspace_read_only");
+        add_code(responses, "403", "origin_forbidden");
+        add_code(responses, "503", "service_unavailable");
+    }
+    if matches!(operation_id, "public_list_project_trash") {
+        add_code(responses, "400", "invalid_request");
+        add_code(responses, "400", "invalid_cursor");
+    }
+    // A token for chosen projects (trash), or a creator without the role or permission.
+    if matches!(
+        operation_id,
+        "public_empty_task_trash"
+            | "public_list_project_trash"
+            | "public_get_trashed_project"
+            | "public_delete_project"
+            | "public_restore_project"
+            | "public_purge_project"
+            | "public_add_project_member"
+            | "public_remove_project_member"
+            | "public_reorder_statuses"
+    ) {
+        add_code(responses, "403", "workspace_action_forbidden");
+    }
+    match operation_id {
+        "public_bulk_update_tasks" | "public_reorder_tasks" => {
+            add_code(responses, "409", "conflict");
+            add_code(responses, "409", "task_conflict");
+            add_code(responses, "422", "validation_failed");
+            add_code(responses, "422", "parent_cycle");
+            add_code(responses, "422", "parent_invalid");
+            add_code(responses, "503", "task_busy");
+        }
+        "public_reorder_statuses" | "public_reorder_milestones" | "public_delete_project" => {
+            add_code(responses, "409", "conflict");
+        }
+        // A stale version, or a live project that took the key.
+        "public_restore_project" => {
+            add_code(responses, "409", "conflict");
+            add_code(responses, "409", "task_conflict");
+        }
+        "public_purge_project" => add_code(responses, "409", "conflict"),
+        "public_add_project_member" => add_code(responses, "409", "task_conflict"),
+        "public_move_unfinished_cycle_tasks" => add_code(responses, "409", "conflict"),
+        _ => {}
+    }
+}
+
+/// Doc actions, teamspaces and doc comment threads (`public_api::doc_actions`).
+fn doc_action_responses(operation_id: &str, responses: &mut Codes) {
+    if matches!(
+        operation_id,
+        "public_search_docs" | "public_list_recent_docs"
+    ) {
+        add_code(responses, "400", "invalid_request");
+    }
+    let write = matches!(
+        operation_id,
+        "public_add_favorite_doc"
+            | "public_remove_favorite_doc"
+            | "public_move_favorite_doc"
+            | "public_duplicate_doc"
+            | "public_lock_doc"
+            | "public_restore_doc_version"
+            | "public_purge_doc"
+            | "public_empty_doc_trash"
+            | "public_create_teamspace"
+            | "public_update_teamspace"
+            | "public_delete_teamspace"
+            | "public_move_teamspace"
+            | "public_update_doc_comment"
+            | "public_delete_doc_comment"
+            | "public_resolve_doc_thread"
+            | "public_reopen_doc_thread"
+            | "public_delete_doc_thread"
+    );
+    if !write {
+        return;
+    }
+    add_code(responses, "400", "invalid_request");
+    add_code(responses, "402", "workspace_read_only");
+    add_code(responses, "403", "origin_forbidden");
+    add_code(responses, "503", "service_unavailable");
+    match operation_id {
+        "public_duplicate_doc" => {
+            add_code(responses, "402", "trial_limit_reached");
+            add_code(responses, "409", "database_row_limit");
+        }
+        "public_restore_doc_version" => {
+            add_code(responses, "409", "conflict");
+            add_code(responses, "423", "page_locked");
+            add_code(responses, "503", "page_busy");
+        }
+        "public_lock_doc" => add_code(responses, "503", "page_busy"),
+        // Not in the trash or a stale version (409); a teamspace doc without owner or admin.
+        "public_purge_doc" | "public_empty_doc_trash" => {
+            add_code(responses, "409", "conflict");
+            add_code(responses, "403", "workspace_action_forbidden");
+        }
+        "public_update_teamspace" | "public_move_teamspace" => {
+            add_code(responses, "409", "conflict");
+        }
+        "public_delete_teamspace"
+        | "public_update_doc_comment"
+        | "public_delete_doc_comment"
+        | "public_delete_doc_thread" => {
+            add_code(responses, "409", "conflict");
+            add_code(responses, "403", "workspace_action_forbidden");
+        }
+        _ => {}
+    }
+}
+
+/// Database row moves, templates and formula previews (`public_api::database_actions`).
+fn database_action_responses(operation_id: &str, responses: &mut Codes) {
+    let write = matches!(
+        operation_id,
+        "public_move_database_row"
+            | "public_create_database_template"
+            | "public_update_database_template"
+            | "public_delete_database_template"
+    );
+    if write {
+        add_code(responses, "400", "invalid_request");
+        add_code(responses, "402", "workspace_read_only");
+        add_code(responses, "403", "origin_forbidden");
+        add_code(responses, "503", "service_unavailable");
+        add_code(responses, "423", "page_locked");
+    }
+    match operation_id {
+        // A value that does not fit its property.
+        "public_move_database_row" => add_code(responses, "422", "validation_failed"),
+        "public_create_database_template" => add_code(responses, "402", "trial_limit_reached"),
+        // An expression that is too long, or a time zone that is not one.
+        "public_preview_database_formula" => add_code(responses, "400", "invalid_request"),
+        _ => {}
+    }
 }
 
 fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {

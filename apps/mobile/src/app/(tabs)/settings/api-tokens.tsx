@@ -64,7 +64,7 @@ function CreateToken({ canManage }: { canManage: boolean }) {
   const taskScope = access && scopes.some((scope) => scope.startsWith('tasks:'))
   const ready = name.trim() !== '' && (!access || (scopes.length > 0 && (!taskScope || allProjects || projectIds.length > 0)))
 
-  // a service account has task access only, so selecting it drops the docs and chat scopes
+  // a service account has task access only, so selecting it drops the docs, chat and mail scopes
   const selectServiceAccount = (checked: boolean) => {
     setServiceAccount(checked)
     if (!checked) return

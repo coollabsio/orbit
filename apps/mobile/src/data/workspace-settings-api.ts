@@ -53,7 +53,7 @@ export type ExpirationValue = (typeof EXPIRATION_OPTIONS)[number]['value']
 
 /** An export scope stands alone on a personal token, so it is a kind of token, not an access level. */
 export const TOKEN_KINDS = [
-  { value: 'access', label: 'Tasks, docs and chat', description: 'For scripts, bots and AI clients.' },
+  { value: 'access', label: 'Tasks, docs, chat and mail', description: 'For scripts, bots and AI clients.' },
   { value: 'workspace:export', label: 'Workspace export', description: 'Lets another Orbit instance import this workspace as you see it: tasks, docs, chat and files.' },
   { value: 'workspace:export:personal', label: 'Personal export', description: 'Lets another Orbit instance import only your private docs, your private channels and your DMs.' },
 ] as const
@@ -78,7 +78,8 @@ export function tokenResources(serviceAccount: boolean): ScopeResource[] {
   return [
     { name: 'Tasks', hint: 'In the selected projects. Write includes delete.', read: 'tasks:read', write: 'tasks:write' },
     { name: 'Docs', hint: 'Including your private docs', read: 'docs:read', write: 'docs:write', disabled: serviceAccount },
-    { name: 'Chat', hint: 'Including your private channels and DMs. MCP only.', read: 'chat:read', disabled: serviceAccount },
+    { name: 'Chat', hint: 'Including your private channels and DMs. Read only.', read: 'chat:read', disabled: serviceAccount },
+    { name: 'Mail', hint: 'Your mailboxes, drafts and mail settings. Write includes sending mail.', read: 'mail:read', write: 'mail:write', disabled: serviceAccount },
   ]
 }
 

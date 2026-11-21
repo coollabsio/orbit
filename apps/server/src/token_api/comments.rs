@@ -4,13 +4,14 @@ use std::collections::HashMap;
 use orbit_platform::{Id, TimestampMillis};
 use serde::Serialize;
 use serde_json::{Value, json};
+use utoipa::ToSchema;
 
 use super::{Authorized, Result, TokenApiError, hidden_page};
 use crate::collab::kind_task::members;
 use crate::export::markdown::{KeepLinks, blocks_to_markdown};
 use crate::repositories::api_tokens::ApiTokenScope;
 use crate::repositories::page_comments::{
-    CommentBody, PageComment, PageCommentError, PageCommentRepository,
+    CommentBody, PageComment, PageCommentError, PageCommentRepository, PageThread,
 };
 use crate::repositories::tasks::{CommentContent, CommentRecord};
 
@@ -18,36 +19,50 @@ use crate::repositories::tasks::{CommentContent, CommentRecord};
 const MAX_QUOTE_CHARS: usize = 1_000;
 
 /// A member as an agent reads it.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, ToSchema)]
+#[schema(as = PublicPerson)]
 pub struct Person {
+    #[schema(value_type = String)]
     pub id: Id,
     pub name: String,
 }
 
 /// A doc comment thread with its comments oldest first.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
+#[schema(as = PublicDocThread)]
 pub struct DocThread {
+    #[schema(value_type = String)]
     pub id: Id,
     /// The doc text the thread was started on.
     pub quote: String,
     pub resolved: bool,
+    #[schema(required = true)]
     pub resolved_by: Option<Person>,
     pub created_by: Person,
+    #[schema(value_type = String, format = DateTime)]
     pub created_at: TimestampMillis,
     pub comments: Vec<DocComment>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
+#[schema(as = PublicDocComment)]
 pub struct DocComment {
+    #[schema(value_type = String)]
     pub id: Id,
+    #[schema(value_type = String)]
     pub thread_id: Id,
     pub author: Person,
     /// Markdown; empty once deleted.
     pub body: String,
+    #[schema(value_type = Vec<String>)]
     pub mentioned_user_ids: Vec<Id>,
+    #[schema(value_type = String, format = DateTime)]
     pub created_at: TimestampMillis,
+    #[schema(value_type = Option<String>, format = DateTime, required = true)]
     pub edited_at: Option<TimestampMillis>,
+    /// Present and `true` once the comment is deleted.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
+    #[schema(required = false)]
     pub deleted: bool,
 }
 
@@ -126,19 +141,7 @@ impl Authorized<'_> {
         Ok(list
             .items
             .into_iter()
-            .map(|thread| DocThread {
-                id: thread.id,
-                quote: thread.quote,
-                resolved: thread.resolved,
-                resolved_by: thread.resolved_by.map(|id| person(&names, id)),
-                created_by: person(&names, thread.created_by),
-                created_at: thread.created_at,
-                comments: thread
-                    .comments
-                    .into_iter()
-                    .map(|comment| doc_comment(&names, comment))
-                    .collect(),
-            })
+            .map(|thread| doc_thread(&names, thread))
             .collect())
     }
 
@@ -213,7 +216,7 @@ impl Authorized<'_> {
     }
 
     /// Doc comments act as the token's user, on a doc that `get_doc` would show.
-    async fn doc_comment_repository(
+    pub(super) async fn doc_comment_repository(
         &self,
         page_id: Id,
         scope: ApiTokenScope,
@@ -236,7 +239,7 @@ impl Authorized<'_> {
         }
     }
 
-    async fn member_names(&self) -> Result<HashMap<Id, String>> {
+    pub(super) async fn member_names(&self) -> Result<HashMap<Id, String>> {
         let database = self.api.tasks.database();
         Ok(members(database.pool(), self.principal.workspace_id)
             .await?
@@ -255,7 +258,23 @@ fn person(names: &HashMap<Id, String>, id: Id) -> Person {
     }
 }
 
-fn doc_comment(names: &HashMap<Id, String>, comment: PageComment) -> DocComment {
+pub(super) fn doc_thread(names: &HashMap<Id, String>, thread: PageThread) -> DocThread {
+    DocThread {
+        id: thread.id,
+        quote: thread.quote,
+        resolved: thread.resolved,
+        resolved_by: thread.resolved_by.map(|id| person(names, id)),
+        created_by: person(names, thread.created_by),
+        created_at: thread.created_at,
+        comments: thread
+            .comments
+            .into_iter()
+            .map(|comment| doc_comment(names, comment))
+            .collect(),
+    }
+}
+
+pub(super) fn doc_comment(names: &HashMap<Id, String>, comment: PageComment) -> DocComment {
     let blocks = match comment.body {
         Value::Array(blocks) => blocks,
         _ => Vec::new(),
@@ -274,7 +293,7 @@ fn doc_comment(names: &HashMap<Id, String>, comment: PageComment) -> DocComment 
 
 /// A comment holds only paragraphs: every block with inline content (headings, list items,
 /// quotes, code, nested ones included) becomes a paragraph, so no text is dropped.
-fn paragraphs(blocks: &[Value]) -> Vec<Value> {
+pub(super) fn paragraphs(blocks: &[Value]) -> Vec<Value> {
     let mut out = Vec::new();
     for block in blocks {
         if let Some(content) = block.get("content").filter(|content| content.is_array()) {
@@ -288,7 +307,7 @@ fn paragraphs(blocks: &[Value]) -> Vec<Value> {
 }
 
 /// Doc comment refusals tell no missing doc, thread or comment apart.
-fn comment_error(error: PageCommentError) -> TokenApiError {
+pub(super) fn comment_error(error: PageCommentError) -> TokenApiError {
     match error {
         PageCommentError::Invalid { field: "mentions" } => {
             TokenApiError::Invalid("A comment can mention at most 50 members")

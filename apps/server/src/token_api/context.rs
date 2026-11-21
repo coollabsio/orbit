@@ -7,6 +7,7 @@
 use orbit_platform::{Id, TimestampMillis};
 use serde::Serialize;
 use serde_json::{Map, Value};
+use utoipa::ToSchema;
 
 use super::{Authorized, Result, TokenApiError, page_limit};
 use crate::repositories::api_tokens::ApiTokenScope;
@@ -14,28 +15,42 @@ use crate::repositories::tasks::Page;
 use crate::repositories::teamspaces::{TeamspaceError, TeamspaceRepository};
 
 /// A teamspace as `create_doc` and `move_doc` see it.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
+#[schema(as = PublicTeamspace)]
 pub struct TeamspaceView {
+    #[schema(value_type = String)]
     pub id: Id,
     pub name: String,
+    #[schema(required = true)]
     pub icon: Option<String>,
     /// New root docs go here when `teamspace_id` is omitted.
     pub is_default: bool,
     /// The linked project, `null` when the teamspace holds global docs or its project is not
     /// approved for the token.
+    #[schema(value_type = Option<String>, required = true)]
     pub project_id: Option<Id>,
     /// True when the teamspace holds global docs (no linked project).
     pub global: bool,
+    /// Send it as `expected_version` to change, move or delete the teamspace.
+    pub version: u64,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
+#[schema(as = PublicTaskActivity)]
 pub struct TaskActivity {
+    #[schema(value_type = String)]
     pub id: Id,
     pub action: String,
     /// `null` for system events and service accounts (see `actor_service_account_name`).
+    #[schema(value_type = Option<String>, required = true)]
     pub actor_id: Option<Id>,
+    #[schema(required = true)]
     pub actor_name: Option<String>,
+    /// Depends on `action`. A task or project outside the approved projects is `null`, with
+    /// `<field>_hidden: true`.
+    #[schema(value_type = Object)]
     pub metadata: Value,
+    #[schema(value_type = String, format = DateTime)]
     pub occurred_at: TimestampMillis,
 }
 
@@ -74,6 +89,7 @@ impl Authorized<'_> {
                 is_default: teamspace.is_default,
                 project_id: teamspace.project_id.filter(|id| self.approved(*id)),
                 global: teamspace.project_id.is_none(),
+                version: teamspace.version,
             })
             .collect())
     }

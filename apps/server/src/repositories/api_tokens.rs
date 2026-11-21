@@ -42,8 +42,9 @@ pub struct IssuedApiToken {
 }
 
 /// What a credential may do. API tokens and OAuth grants use the same names; `tasks:write`
-/// includes `tasks:read`, and `docs:write` includes `docs:read`. The two export scopes are for
-/// personal API tokens only, each as the token's only scope (see [`ApiTokenScope::export_mode`]).
+/// includes `tasks:read`, `docs:write` includes `docs:read`, and `mail:write` includes
+/// `mail:read`. The two export scopes are for personal API tokens only, each as the token's only
+/// scope (see [`ApiTokenScope::export_mode`]).
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize, ToSchema)]
 pub enum ApiTokenScope {
     #[serde(rename = "tasks:read")]
@@ -60,6 +61,12 @@ pub enum ApiTokenScope {
     DocsWrite,
     #[serde(rename = "chat:read")]
     ChatRead,
+    /// The creator's mailboxes, drafts and mail settings, as the creator sees them.
+    #[serde(rename = "mail:read")]
+    MailRead,
+    /// With `mail:read`: organise threads, write drafts and send mail as the creator.
+    #[serde(rename = "mail:write")]
+    MailWrite,
     /// Export the whole workspace as the token's creator sees it; owners and admins only.
     #[serde(rename = "workspace:export")]
     WorkspaceExport,
@@ -69,13 +76,15 @@ pub enum ApiTokenScope {
 }
 
 impl ApiTokenScope {
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 10] = [
         Self::TasksRead,
         Self::TasksWrite,
         Self::TasksImport,
         Self::DocsRead,
         Self::DocsWrite,
         Self::ChatRead,
+        Self::MailRead,
+        Self::MailWrite,
         Self::WorkspaceExport,
         Self::WorkspaceExportPersonal,
     ];
@@ -89,6 +98,8 @@ impl ApiTokenScope {
             Self::DocsRead => "docs:read",
             Self::DocsWrite => "docs:write",
             Self::ChatRead => "chat:read",
+            Self::MailRead => "mail:read",
+            Self::MailWrite => "mail:write",
             Self::WorkspaceExport => "workspace:export",
             Self::WorkspaceExportPersonal => "workspace:export:personal",
         }
@@ -109,14 +120,23 @@ impl ApiTokenScope {
     }
 
     /// Whether a token may hold these scopes: an export scope stands alone on a personal token,
-    /// a service account (which acts as the workspace owner) gets tasks only, and `tasks:import`
-    /// comes with `tasks:write`.
+    /// a service account (which acts as the workspace owner) gets tasks only (no docs, chat or
+    /// mail), and `tasks:import` comes with `tasks:write`.
     #[must_use]
     pub fn valid_combination(scopes: &[Self], service_account: bool) -> bool {
         let export = scopes.iter().any(|scope| scope.is_export());
         let content = scopes
             .iter()
-            .any(|scope| matches!(scope, Self::DocsRead | Self::DocsWrite | Self::ChatRead));
+            .any(|scope| {
+                matches!(
+                    scope,
+                    Self::DocsRead
+                        | Self::DocsWrite
+                        | Self::ChatRead
+                        | Self::MailRead
+                        | Self::MailWrite
+                )
+            });
         !scopes.is_empty()
             && !(export && (service_account || scopes.len() > 1))
             && !(service_account && content)
@@ -195,6 +215,7 @@ impl ApiTokenPrincipal {
         let write = match scope {
             ApiTokenScope::TasksRead => Some(ApiTokenScope::TasksWrite),
             ApiTokenScope::DocsRead => Some(ApiTokenScope::DocsWrite),
+            ApiTokenScope::MailRead => Some(ApiTokenScope::MailWrite),
             _ => None,
         };
         self.scopes.contains(&scope) || write.is_some_and(|write| self.scopes.contains(&write))

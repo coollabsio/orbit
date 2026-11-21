@@ -53,8 +53,8 @@ service account has no other token that is not revoked and not expired, Orbit
 disables the service account; its past work keeps its
 name. A new token with the same service-account name enables it again. The
 GitHub integration's service account (named `GitHub`) is never disabled this way.
-A service-account token can use tasks only, not docs. Orbit refuses to create a service-account token
-with `docs:read`, `docs:write` or `chat:read` (`422`). Its writes show the service account as the author:
+A service-account token can use tasks only, not docs, chat or mail. Orbit refuses to create a
+service-account token with `docs:read`, `docs:write`, `chat:read`, `mail:read` or `mail:write` (`422`). Its writes show the service account as the author:
 as the creator of the tasks that it makes, and as the author of its comments.
 Its writes do not send notifications (assignments and mentions), because no
 member made them.
@@ -65,23 +65,26 @@ service-account token shows the service account as the actor.
 
 ## Scopes
 
-API tokens and MCP OAuth connections use the same five resource scopes. In
+API tokens and MCP OAuth connections use the same seven resource scopes. In
 **Settings → API tokens**, set the access for each resource to **No access**,
 **Read** or **Write**. API tokens also have an import scope and two export
 scopes, which MCP does not use.
 
 | Scope | Access in **Settings → API tokens** | Public API endpoints |
 | --- | --- | --- |
-| `tasks:read` | Tasks: **Read** | `GET` projects, statuses, labels, members, tasks and comments |
-| `tasks:write` | Tasks: **Write** | Create, update and delete tasks, add comments, link tasks, create and change projects, statuses and labels, `POST /integrations/discord/events` |
+| `tasks:read` | Tasks: **Read** | `GET` projects, statuses, labels, milestones, cycles, members, tasks, comments, relations, task activity and the task trash |
+| `tasks:write` | Tasks: **Write** | Create, update and delete tasks, restore them from the trash, add, edit and delete comments, link tasks, create and change projects, create, change and delete statuses, labels, milestones and cycles, `POST /integrations/discord/events` |
 | `tasks:import` | Tasks: **Write** with **Import mode** | With `tasks:write`: the import fields of new tasks and comments. See [Import from another tool](#import-from-another-tool). |
-| `docs:read` | Docs: **Read** | `GET /docs`, `GET /docs/{page_id}`, `GET /docs/{page_id}/versions`, `GET /docs/{page_id}/versions/{version_id}`, `GET /docs/{page_id}/database`, `POST /docs/{page_id}/database/query`, `GET /docs/{page_id}/database/views` and `…/views/{view_id}` |
-| `docs:write` | Docs: **Write** | `POST /docs`, `PATCH /docs/{page_id}`, `POST /docs/{page_id}/move`, `DELETE /docs/{page_id}`, `POST /docs/{page_id}/rows`, `PATCH /docs/{page_id}/rows/{row_id}`, `POST /docs/{page_id}/rows/trash`, `POST /databases`, the schema, view and linked view endpoints under `/docs/{page_id}/database` |
-| `chat:read` | Chat: **Read** | None. Chat is available through MCP only. A bot that reads and writes one channel uses a [chat webhook with events](chat-webhooks.md#events). |
+| `docs:read` | Docs: **Read** | `GET /docs`, `GET /docs/trash`, `GET /teamspaces`, `GET /docs/{page_id}`, `GET /docs/{page_id}/comments`, `GET /docs/{page_id}/versions`, `GET /docs/{page_id}/versions/{version_id}`, `GET /docs/{page_id}/database`, `POST /docs/{page_id}/database/query`, `GET /docs/{page_id}/database/views` and `…/views/{view_id}` |
+| `docs:write` | Docs: **Write** | `POST /docs`, `PATCH /docs/{page_id}`, `POST /docs/{page_id}/move`, `DELETE /docs/{page_id}`, `POST /docs/{page_id}/restore`, `POST /docs/{page_id}/comments`, `POST /docs/{page_id}/rows`, `PATCH /docs/{page_id}/rows/{row_id}`, `POST /docs/{page_id}/rows/trash`, `POST /databases`, the schema, view and linked view endpoints under `/docs/{page_id}/database` |
+| `chat:read` | Chat: **Read** | `GET /chat/conversations`, `GET /chat/conversations/{conversation_id}/messages`, `GET /chat/threads/{message_id}`, `GET /chat/search`. Chat has no write endpoint: a bot that reads and writes one channel uses a [chat webhook with events](chat-webhooks.md#events). |
+| `mail:read` | Mail: **Read** | `GET /mail/mailboxes`, `GET /mail/threads`, `GET /mail/threads/{thread_id}`, `GET /mail/search`, `GET /mail/counts`, `GET /mail/attachments/{attachment_id}`, `GET /mail/drafts`, `GET /mail/drafts/{draft_id}`, `POST /mail/drafts/{draft_id}/check`, `GET /mail/outbound`, `GET /mail/labels`, `GET /mail/contacts`, `GET /mail/from-addresses`, `GET /mail/signatures/{address_id}`, `GET /mail/snippets`, `GET /mail/settings`, `GET /mail/mailboxes/{mailbox_id}/vacation` |
+| `mail:write` | Mail: **Write** | Change threads (`PATCH /mail/threads/{thread_id}`, `POST /mail/threads/bulk`), create, change, delete and **send** drafts, draft files, cancel a send, change labels, signatures, snippets, settings and vacation replies. See [Mail](#mail). |
 | `workspace:export` | **Workspace export** | `POST /exports` with `mode: "full"`, `GET /exports/{export_id}`, `GET /exports/{export_id}/download` |
 | `workspace:export:personal` | **Personal export** | The same, with `mode: "personal"` |
 
-`tasks:write` includes `tasks:read`, and `docs:write` includes `docs:read`.
+`tasks:write` includes `tasks:read`, `docs:write` includes `docs:read`, and `mail:write` includes
+`mail:read`.
 `GET /me` works with each valid token.
 
 An export scope must be the only scope of a personal token: Orbit refuses a
@@ -179,7 +182,7 @@ curl -sS "$ORBIT_WS/projects" -H "Authorization: Bearer $ORBIT_TOKEN"
 not use the new project. Body: `{name, key, color?}`. `key` is the prefix of task identifiers:
 1 to 20 letters, digits or underscores, unique in the workspace, stored in upper case. `color` is
 `#rrggbb` (default `#6366f1`). The project gets the default workflow statuses. Answers 201 with
-the project, or 400 when the key is already used.
+the project, or 409 when the key is already used.
 
 ```bash
 curl -sS -X POST "$ORBIT_WS/projects" -H "Authorization: Bearer $ORBIT_TOKEN" \
@@ -210,6 +213,11 @@ Without `position`, it goes after the last status. Answers 201 with the status.
 missing field keeps its value. The Duplicate status cannot change its category, and no other
 status can become `duplicate` (400). Answers 200 with the status, or 409 after a change.
 
+`DELETE /workspaces/{workspace_id}/projects/{project_id}/statuses/{status_id}?expected_version=…`.
+Scope: `tasks:write`. Answers 204. No task may use the status, trashed tasks included (409), and
+the Duplicate status cannot be deleted (400). The token's creator must be allowed to manage the
+project (403 otherwise).
+
 ```bash
 curl -sS -X POST "$ORBIT_WS/projects/$PROJECT_ID/statuses" \
   -H "Authorization: Bearer $ORBIT_TOKEN" -H 'Content-Type: application/json' \
@@ -227,16 +235,34 @@ curl -sS "$ORBIT_WS/projects/$PROJECT_ID/labels" \
 
 `POST /workspaces/{workspace_id}/projects/{project_id}/labels`. Scope: `tasks:write`. Body:
 `{name, color?}`: 1 to 100 characters, and `#rrggbb` (gray when unset). Answers 201 with the
-label, or 400 when the project already has a label with this name.
+label, or 409 when the project already has a label with this name.
 
 `PATCH /workspaces/{workspace_id}/projects/{project_id}/labels/{label_id}`. Scope:
 `tasks:write`. Body: `{expected_version, name?, color?}`. A missing field keeps its value.
 Answers 200 with the label, or 409 after a change.
 
+`DELETE /workspaces/{workspace_id}/projects/{project_id}/labels/{label_id}?expected_version=…`.
+Scope: `tasks:write`. Answers 204 and takes the label off its tasks. The token's creator must be
+allowed to manage the project (403 otherwise).
+
 `GET /workspaces/{workspace_id}/projects/{project_id}/milestones`. Scope: `tasks:read`. Every
 milestone of the project in its order, on one page (`next_cursor` is `null`). Item:
 `{id, project_id, name, description, target_at, position, version, task_count, completed_count,
 estimate_total, estimate_completed}`. Use the IDs in `milestone_id`.
+
+`POST /workspaces/{workspace_id}/projects/{project_id}/milestones`. Scope: `tasks:write`. Body:
+`{name, description?, target_at?}`: a name of 1 to 200 characters, unique in the project (409
+otherwise), and a description of up to 20,000 characters. `target_at` is `YYYY-MM-DD`, stored at
+noon UTC as the web app does, or an RFC 3339 time. The milestone goes after the others. Answers 201
+with the milestone, as the list shows it.
+
+`PATCH /workspaces/{workspace_id}/projects/{project_id}/milestones/{milestone_id}`. Scope:
+`tasks:write`. Body: `{expected_version, name?, description?, target_at?, position?}`. A missing
+field keeps its value; `null` clears `description` or `target_at`. Answers 200, or 409 after a
+change.
+
+`DELETE /workspaces/{workspace_id}/projects/{project_id}/milestones/{milestone_id}?expected_version=…`.
+Scope: `tasks:write`. Answers 204. Its tasks stay, without a milestone.
 
 `GET /workspaces/{workspace_id}/projects/{project_id}/cycles`. Scope: `tasks:read`. Every cycle of
 the project by start date, on one page. Item: `{id, project_id, number, name, starts_at, ends_at,
@@ -246,6 +272,26 @@ next cycle" took out of the cycle and that are not back in it; they are not in `
 covers `starts_at` up to `ends_at`, exclusive. `relative` is `current` (the cycle that runs now),
 `next` (the first that starts after now), `previous` (the last that ended before now) or `null`.
 Use the IDs in `cycle_id`.
+
+`POST /workspaces/{workspace_id}/projects/{project_id}/cycles`. Scope: `tasks:write`. Body:
+`{name?, starts_at?, ends_at?}`. A date is an RFC 3339 time, or `YYYY-MM-DD` for midnight UTC;
+`ends_at` is exclusive. Without `starts_at`, the cycle starts when the last cycle ends (today's
+UTC midnight for the first one). Without `ends_at`, it lasts as long as the last cycle (14 days for
+the first one). Cycles of a project cannot overlap (409); they may touch. Answers 201 with the next
+numbered cycle, as the list shows it.
+
+`PATCH /workspaces/{workspace_id}/projects/{project_id}/cycles/{cycle_id}`. Scope: `tasks:write`.
+Body: `{expected_version, name?, starts_at?, ends_at?}`. `null` or a blank `name` clears it, and the
+cycle shows as its number. Answers 200, or 409 after a change.
+
+`DELETE /workspaces/{workspace_id}/projects/{project_id}/cycles/{cycle_id}?expected_version=…`.
+Scope: `tasks:write`. Answers 204. Its tasks stay, without a cycle.
+
+```bash
+curl -sS -X POST "$ORBIT_WS/projects/$PROJECT_ID/cycles" \
+  -H "Authorization: Bearer $ORBIT_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"starts_at":"2026-11-23","ends_at":"2026-12-07"}'
+```
 
 The counts cover the live tasks, without cancelled and duplicate tasks. `completed_count` and
 `estimate_completed` cover the tasks in a `completed` status.
@@ -262,6 +308,43 @@ API does not show email addresses or roles.
 ```bash
 curl -sS "$ORBIT_WS/members" -H "Authorization: Bearer $ORBIT_TOKEN"
 ```
+
+### Project trash, members and order
+
+`DELETE /workspaces/{workspace_id}/projects/{project_id}?expected_version=…`. Scope: `tasks:write`.
+Moves the project with its tasks to the trash for 30 days. The token's creator must be allowed to
+manage the project (403 otherwise). Answers 204, or 409 after a change.
+
+A trashed project is in no token's approved projects. So the project trash needs a token for
+**all projects** (403 `workspace_action_forbidden` otherwise):
+
+- `GET /workspaces/{workspace_id}/projects/trash?cursor&limit`. Scope: `tasks:read`. Item: the
+  project with `deleted_at`, last trashed first.
+- `GET /workspaces/{workspace_id}/projects/trash/{project_id}`. Scope: `tasks:read`. The project
+  with its `statuses` and `deleted_by` (`null` for a service account).
+- `POST /workspaces/{workspace_id}/projects/{project_id}/restore`. Scope: `tasks:write`. Body:
+  `{expected_version}`. Answers 200 with the project, or 409 after a change or when a live project
+  took its key.
+- `DELETE /workspaces/{workspace_id}/projects/{project_id}/permanent`. Scope: `tasks:write`. Deletes
+  a trashed project forever with all its tasks (409 for a live project). Needs a token of a
+  workspace owner or admin, or a service account.
+
+`GET /workspaces/{workspace_id}/projects/{project_id}/members`. Scope: `tasks:read`. The members of
+the project: `{user_id, created_at}`. Only they (and workspace owners and admins, who are not
+listed) see a private project. `POST …/members` with `{user_id}` adds a workspace member (201;
+again changes nothing), and `DELETE …/members/{user_id}` removes one (204). Both need a creator who
+may manage the project (403 otherwise).
+
+`POST /workspaces/{workspace_id}/projects/{project_id}/statuses/reorder` and
+`POST …/milestones/reorder`. Scope: `tasks:write`. Body: `{items: [{id, expected_version,
+position}]}`, 1 to 100 items. All moves are written, or none (409 after a change). Answers 200 with
+the project's statuses or milestones in their new order. Reordering statuses needs a creator who
+may manage the project.
+
+`POST /workspaces/{workspace_id}/projects/{project_id}/cycles/{cycle_id}/move-unfinished`. Scope:
+`tasks:write`. Moves the cycle's unfinished tasks to the next cycle, as the web app's "Move
+unfinished tasks to next cycle". Answers 200 with `{moved, to_cycle}`, or 409 when no cycle comes
+after it.
 
 ### Tasks
 
@@ -393,6 +476,52 @@ curl -sS -X DELETE "$ORBIT_WS/tasks/ENG-12?expected_version=4503599627370495&per
   -H "Authorization: Bearer $ORBIT_TOKEN"
 ```
 
+### Task trash and activity
+
+`GET /workspaces/{workspace_id}/tasks/trash?cursor&limit`. Scope: `tasks:read`. The tasks in the
+trash of the approved projects, last trashed first. An item is the task as `GET /tasks/{task}`
+shows it, with `deleted_at` and `trashed_descendant_count` (the sub-issues that a restore brings
+back too). A page can hold fewer than `limit` tasks before the last page: follow `next_cursor`.
+
+`GET /workspaces/{workspace_id}/tasks/trash/{task}`. Scope: `tasks:read`. A task in the trash, with
+its `status`, `labels` and `deleted_by` (the user who trashed it; `null` for a service account).
+
+`POST /workspaces/{workspace_id}/tasks/{task}/restore`. Scope: `tasks:write`. Body:
+`{expected_version}`, the `version` from the trash. Restores the task with the sub-issues that went
+to the trash with it. A task whose parent is still in the trash comes back top-level. Answers 200
+with the task, or 409 after a change.
+
+```bash
+curl -sS -X POST "$ORBIT_WS/tasks/ENG-12/restore" \
+  -H "Authorization: Bearer $ORBIT_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"expected_version":4503599627370495}'
+```
+
+`GET /workspaces/{workspace_id}/tasks/{task}/activity?cursor&limit`. Scope: `tasks:read`. The
+task's history, newest first. Item: `{id, action, actor_id, actor_name, metadata, occurred_at}`.
+`actor_id` is `null` for system events and service accounts. `metadata` depends on `action`: a task
+or project reference outside the approved projects is `null`, with `<field>_hidden: true`.
+
+`POST /workspaces/{workspace_id}/tasks/trash/empty`. Scope: `tasks:write`. Deletes forever every
+task and project in the workspace's trash. It covers the whole trash, so it needs a token for all
+projects of a workspace owner or admin, or a service account (403 otherwise). Answers 200 with the
+counts.
+
+### Bulk updates, order and GitHub links
+
+`POST /workspaces/{workspace_id}/tasks/bulk`. Scope: `tasks:write`. Body: `{updates: [{task,
+expected_version, …}]}`: 1 to 100 distinct tasks (UUID or identifier), each with the fields of
+`PATCH /tasks/{task}` except `project_id`. All updates are written in one transaction, or none: one
+stale `expected_version` answers 409 for the whole request. Answers 200 with `{items,
+auto_closed}`: the tasks, and the parents that the sub-issue automation closed.
+
+`POST /workspaces/{workspace_id}/tasks/reorder`. Scope: `tasks:write`. Body: `{items: [{id,
+expected_version, position}]}`: 1 to 100 tasks of approved projects (`id` is a UUID or identifier).
+Sets their board positions, all or none. Answers 200 with the tasks.
+
+`GET /workspaces/{workspace_id}/tasks/{task}/github-links`. Scope: `tasks:read`. The GitHub issues
+and pull requests linked to the task: `{kind, title, url, state, source}`.
+
 ### Relations
 
 `GET /workspaces/{workspace_id}/tasks/{task}/relations`. Scope: `tasks:read`. Every relation of
@@ -441,6 +570,16 @@ the service account.
 curl -sS "$ORBIT_WS/tasks/ENG-12/comments" -H "Authorization: Bearer $ORBIT_TOKEN" \
   -H 'Content-Type: application/json' -d '{"body":"Deployed in build 512."}'
 ```
+
+`PATCH /workspaces/{workspace_id}/tasks/{task}/comments/{comment_id}`. Scope: `tasks:write`. Body:
+`{expected_version, body}`. Only the comment's author can edit it (400 otherwise). Answers 200 with
+the comment, or 409 after a change.
+
+`DELETE /workspaces/{workspace_id}/tasks/{task}/comments/{comment_id}?expected_version=…`. Scope:
+`tasks:write`. Deletes your own comment, or any comment if you may moderate comments in the
+project (400 otherwise). You cannot undo this. Answers 204.
+
+Comment edits and deletes act as the token's creator, so a service-account token gets 404.
 
 ### Import from another tool
 
@@ -581,8 +720,8 @@ curl -sS "$ORBIT_WS/docs/$PAGE_ID/move" -H "Authorization: Bearer $ORBIT_TOKEN" 
 
 `DELETE /workspaces/{workspace_id}/docs/{page_id}?expected_version=…`. Scope:
 `docs:write`. Moves the doc and its live sub-docs to the trash, where people can
-restore them in Orbit. Deleting forever, and restoring, are not part of the API.
-Response: `204`. A stale `expected_version` gets `409`. Afterwards `GET` on the
+restore them in Orbit or with `POST /docs/{page_id}/restore`. Deleting forever is
+not part of the API. Response: `204`. A stale `expected_version` gets `409`. Afterwards `GET` on the
 doc answers `404`.
 
 `GET /workspaces/{workspace_id}/docs/{page_id}/versions`. Scope: `docs:read`.
@@ -595,6 +734,101 @@ version when someone edits the title or content, at most one per 10 minutes.
 `docs:read`. One version with its `content` and its `markdown`, the format that
 doc writes take. Restoring a version is not part of the API: send the version's
 `markdown` in a `PATCH`.
+
+`GET /workspaces/{workspace_id}/docs/trash`. Scope: `docs:read`. The docs in the trash that the
+token's creator can see, last trashed first, on one page. Item: `{id, parent_id, teamspace_id,
+private, can_purge, title, icon, kind, position, version, updated_at, deleted_at, …}`. Docs trashed
+with a parent doc are not listed: restoring the parent brings them back. Docs stay in the trash for
+30 days.
+
+`POST /workspaces/{workspace_id}/docs/{page_id}/restore`. Scope: `docs:write`. Body:
+`{expected_version}`, the `version` from the trash. Restores the doc with the sub-docs trashed with
+it. A row of a database that is in the trash cannot be restored before the database. Answers 200
+with the doc, as `GET /docs/{page_id}` shows it, or 409 after a change.
+
+`GET /workspaces/{workspace_id}/docs/{page_id}/comments`. Scope: `docs:read`. The comment threads of
+the doc, oldest first, on one page. Item: `{id, quote, resolved, resolved_by, created_by,
+created_at, comments}`. A comment is `{id, thread_id, author, body, mentioned_user_ids,
+created_at, edited_at, deleted?}`; `author`, `created_by` and `resolved_by` are `{id, name}`, and
+`body` is Markdown (empty once deleted).
+
+`POST /workspaces/{workspace_id}/docs/{page_id}/comments`. Scope: `docs:write`. Body:
+`{body, thread_id?, quote?}`, with exactly one of `thread_id` (a reply in that thread) and `quote`
+(a new thread on 1 to 1,000 characters of the doc's text; 400 otherwise). `body` is Markdown:
+paragraphs, bold, italic, code, links and `@Name` mentions; headings and list items become plain
+paragraphs. A new thread is not anchored in the doc's text: the doc lists it with its quote.
+Answers 201 with the comment.
+
+```bash
+curl -sS "$ORBIT_WS/docs/$PAGE_ID/comments" -H "Authorization: Bearer $ORBIT_TOKEN" \
+  -H 'Content-Type: application/json' -d '{"body":"Is this final?","quote":"launch date"}'
+```
+
+`GET /workspaces/{workspace_id}/teamspaces`. Scope: `docs:read`. The teamspaces that the token's
+creator sees, the default one first. Item: `{id, name, icon, is_default, project_id, global}`. Send
+an `id` as `teamspace_id` to create or move a doc. `project_id` is the linked project, `null` for
+global docs (`global: true`) or a project that is not approved. Each item has a `version` for the
+writes below.
+
+#### Teamspace writes
+
+Scope: `docs:write`. As in the web app, any member may add, rename and move teamspaces; deleting
+one needs the teamspace delete permission, which owners and admins have (403 otherwise).
+
+- `POST /workspaces/{workspace_id}/teamspaces`. Body: `{name, icon?}`: 1 to 100 characters after
+  trimming, and an emoji. The teamspace goes last. Answers 201.
+- `PATCH /workspaces/{workspace_id}/teamspaces/{teamspace_id}`. Body: `{expected_version, name?,
+  icon?, project_id?}`. `null` clears `icon`, and `project_id: null` makes the teamspace hold
+  global docs. A linked project must be approved for the token (400 otherwise), and a project has at
+  most one teamspace (409).
+- `DELETE /workspaces/{workspace_id}/teamspaces/{teamspace_id}?expected_version=…`. Only an empty
+  teamspace, never the last one (409). Answers 204.
+- `POST /workspaces/{workspace_id}/teamspaces/{teamspace_id}/move`. Body: `{expected_version,
+  position}`. Position 0 makes it the default teamspace. Answers 200 with the list.
+
+#### Search, favorites, copies and locks
+
+- `GET /workspaces/{workspace_id}/docs/search?q=…`. Scope: `docs:read`. The docs that the token's
+  creator can see where every word matches the title, the text or a row's values (the last word as
+  a prefix), best first.
+- `GET /workspaces/{workspace_id}/docs/recent?limit=`. Scope: `docs:read`. The docs that the
+  creator opened last.
+- `GET /workspaces/{workspace_id}/docs/favorites`. Scope: `docs:read`. The creator's favorites, in
+  order. `PUT /docs/{page_id}/favorite` adds one last (a favorite stays where it is), `DELETE
+  /docs/{page_id}/favorite` removes it (204), and `POST /docs/favorites/{page_id}/move` with
+  `{position}` moves it. Scope: `docs:write`.
+- `GET /workspaces/{workspace_id}/docs/{page_id}/descendants`. Scope: `docs:read`. Every live
+  sub-doc at any depth, by `parent_id` and `position`.
+- `POST /workspaces/{workspace_id}/docs/{page_id}/duplicate`. Scope: `docs:write`. Body:
+  `{include_children}`. The copy, titled "<title> (copy)", goes right after the doc. Answers 201
+  with it.
+- `POST /workspaces/{workspace_id}/docs/{page_id}/lock`. Scope: `docs:write`. Body: `{locked}`. A
+  locked doc's title, icon and content cannot change (423). Answers 200 with the doc.
+- `POST /workspaces/{workspace_id}/docs/{page_id}/versions/{version_id}/restore`. Scope:
+  `docs:write`. Body: `{expected_version}`, the doc's `version`. The content becomes the version's;
+  the current content is saved as a version first. Answers 200 with the doc, or 409 after a change.
+- `DELETE /workspaces/{workspace_id}/docs/{page_id}/permanent?expected_version=…`. Scope:
+  `docs:write`. Deletes a trashed doc forever with its sub-docs (409 when it is not in the trash).
+  Teamspace docs need a workspace owner or admin (403); members delete their own private docs.
+- `POST /workspaces/{workspace_id}/docs/trash/empty`. Scope: `docs:write`. Deletes forever every
+  trashed doc that the creator may delete, as above; the others stay.
+
+`GET /docs/{page_id}` already gives a doc as Markdown, so there is no separate export of one doc.
+
+#### Doc comment threads
+
+Scope: `docs:write`. Reply with `POST /docs/{page_id}/comments` and `thread_id`.
+
+- `PATCH /workspaces/{workspace_id}/docs/{page_id}/threads/{thread_id}/comments/{comment_id}`.
+  Body: `{body}` (Markdown, as for a new comment). Only the comment's author may edit it (403).
+  Answers 200 with the comment.
+- `DELETE …/threads/{thread_id}/comments/{comment_id}`. Only the author (403). The comment keeps
+  its place, empty. Answers 204.
+- `POST …/threads/{thread_id}/resolve` and `POST …/threads/{thread_id}/reopen`. Answers 200 with
+  the thread.
+- `DELETE …/threads/{thread_id}`. Deletes the thread with its comments. Its creator may delete it
+  while nobody else commented in it (409 otherwise); a member who may moderate comments may delete
+  any thread (403 otherwise). Answers 204.
 
 ### Databases
 
@@ -811,6 +1045,170 @@ with `423 page_locked` for a locked doc. Response: `201` with `link_id`, `databa
 
 `DELETE …/database/links/{link_id}` removes the block from its doc and deletes its views. The
 database and its rows stay. Response: `204`.
+
+#### Row order, templates and formula previews
+
+`POST /workspaces/{workspace_id}/docs/{page_id}/rows/{row_id}/move`. Scope: `docs:write`. Body:
+`{after_row_id, values?}`: the row goes right after `after_row_id`, or first for `null`. The order is
+the one that views without a sort show. `values` (by property name or id, as in `PATCH
+…/rows/{row_id}`) are written with the move, as a board drop sets the group value. Answers 200 with
+the row.
+
+`POST /workspaces/{workspace_id}/docs/{page_id}/database/templates`. Scope: `docs:write`. Body:
+`{name, from_row_id?}`: 1 to 200 characters, and a row or template whose title, icon, values and
+body the template copies (else it is empty). Answers 201 with `{id, name}`, as `templates` in `GET
+…/database` lists it. A template is a page: change its body with `PATCH /docs/{id}` and its values
+with `PATCH …/rows/{id}`. `POST …/rows` with `template_id` fills a new row from it. `PATCH
+…/database/templates/{template_id}` with `{name?, position?}` renames or moves it, and `DELETE`
+deletes it (204; rows made from it stay). Templates have no version, as in the web app.
+
+`POST /workspaces/{workspace_id}/docs/{page_id}/database/formula/preview`. Scope: `docs:read`. Body:
+`{expression, property_id?, tz?}`. Tries the expression without saving it: answers 200 with its
+`result_type`, or `error` with `message`, `start` and `end`, and `samples` (`{row_id, value}`) on
+the first rows. `property_id` is the formula property being edited, so it cannot read itself.
+
+Not in the API: pressing a button property (its actions are row writes that the row endpoints
+already do, and the web app limits presses per person), and submitting a form view (a form is a
+web page for people; `POST …/rows` writes every property).
+
+### Chat
+
+Chat is read-only and shows only the conversations that the token's creator can see. A bot that
+writes uses a [chat webhook](chat-webhooks.md).
+
+`GET /workspaces/{workspace_id}/chat/conversations`. Scope: `chat:read`. Every visible
+conversation, on one page. Item: `{id, kind, name, topic, category_id, position, member_ids,
+is_default, self_dm, archived, created_by, created_at, …}`.
+
+`GET /workspaces/{workspace_id}/chat/conversations/{conversation_id}/messages?before&limit`. Scope:
+`chat:read`. A page of messages, oldest first: `{items, before, after}`. Send `before` from the
+response to read older messages; it is `null` when there are none. `limit` is 1 to 100.
+
+`GET /workspaces/{workspace_id}/chat/threads/{message_id}?before&limit`. Scope: `chat:read`. A
+thread: `{root, items, before, after, state}`, where `items` are the replies to the root message.
+
+`GET /workspaces/{workspace_id}/chat/search?q&conversation_id&author_id&has_file&cursor`.
+Scope: `chat:read`. Messages in the visible conversations, newest first, 20 per page:
+`{items: [{message, conversation_id, ranges}], cursor}`. Every word of `query` must match, the last
+one as a prefix (up to 500 characters). Without `query`, send a filter: the result is then the
+newest messages that pass it. Send `cursor` from the response for the next page.
+
+```bash
+curl -sS "$ORBIT_WS/chat/search?q=deploy" -H "Authorization: Bearer $ORBIT_TOKEN"
+```
+
+### Mail
+
+Mail acts as the token's creator, with the web app's rules: you see only the mailboxes that
+you are a member of, and their threads, and only your own drafts, snippets, signatures and
+settings. A mailbox, thread, message, attachment or draft that you cannot see is `404`, like a
+missing one. Mail must be on for the Orbit server (`403 mail_disabled` otherwise). Refusals keep
+the web app's stable codes in `code`, such as `send_as_denied`, `sending_paused`,
+`send_not_ready`, `no_recipients`, `draft_conflict` and `mail_forbidden`. Mail administration
+(domains, send routes, providers, suppressions, mailbox members and addresses) is not in the
+public API.
+
+Paths are under `/workspaces/{workspace_id}/mail`:
+
+| Method and path | Scope | Result |
+| --- | --- | --- |
+| `GET /mailboxes` | `mail:read` | Your mailboxes: `{id, name, kind, status, primary_address, unread}`. |
+| `GET /threads?mailbox_id&folder&label_id&starred&unread&sent&cursor&limit` | `mail:read` | Threads newest first, and `next_cursor`. `folder` is `inbox`, `archive`, `spam` or `trash`. |
+| `GET /threads/{thread_id}` | `mail:read` | `{thread, messages}`: each message with `body_text` (also for HTML mail), `has_html`, `attachments`, `auth` and, for mail you sent, `delivery`. |
+| `PATCH /threads/{thread_id}` | `mail:write` | Move (`folder`, `restore`), mark (`read`), star (`starred`), or label (`add_labels`, `remove_labels`) a thread. |
+| `POST /threads/bulk` | `mail:write` | The same change for up to 100 `ids`. |
+| `GET /search?q&cursor&limit` | `mail:read` | Threads that match `q`, with the operators `from:`, `to:`, `subject:`, `label:`, `in:`, `is:unread`, `is:starred`, `has:attachment`, `before:` and `after:`. |
+| `GET /counts` | `mail:read` | Unread threads in each folder of each mailbox. |
+| `GET /attachments/{attachment_id}` | `mail:read` | The file, always as a download. |
+| `GET /drafts?mailbox_id`, `GET /drafts/{draft_id}` | `mail:read` | Your drafts. |
+| `POST /drafts` | `mail:write` | A new draft (`mode: "new"`, `from_address_id`), or a `reply`, `reply_all`, `forward` or `forward_attached` of a `thread_id`; with `to`, `cc`, `bcc`, `subject` and `body_html`. Your draft of a thread already there is `200`. |
+| `PATCH /drafts/{draft_id}`, `DELETE /drafts/{draft_id}` | `mail:write` | Change a draft (send its `version`) or discard it. |
+| `POST /drafts/{draft_id}/files?inline`, `PATCH`/`DELETE /drafts/{draft_id}/files/{file_id}` | `mail:write` | Attach a file (multipart, one `file` field), send it as a link (`as_link`), or remove it. |
+| `POST /drafts/{draft_id}/check` | `mail:read` | The recipients a send would skip (suppression list). |
+| `POST /drafts/{draft_id}/send` | `mail:write` | Sends the draft: `{outbound, suppressed}`. |
+| `GET /outbound?view&mailbox_id` | `mail:read` | Your `scheduled` messages or your `outbox`. |
+| `POST /outbound/{outbound_id}/cancel` | `mail:write` | Undoes a send before it goes; returns the draft. |
+| `GET /labels`; `POST /labels`, `PATCH`/`DELETE /labels/{label_id}` | `mail:read`; `mail:write` | Workspace mail labels. Only owners and admins change them (`403 mail_forbidden`). |
+| `GET /contacts?q` | `mail:read` | Up to 8 address suggestions. |
+| `GET /from-addresses?thread_id` | `mail:read` | The addresses you can send as, and whether each is `ready`. |
+| `GET`, `PUT`, `DELETE /signatures/{address_id}` | `mail:read`; `mail:write` | Your signature for an address. |
+| `GET /snippets`; `POST /snippets`, `PATCH`/`DELETE /snippets/{snippet_id}` | `mail:read`; `mail:write` | Your snippets. |
+| `GET /settings`, `PUT /settings` | `mail:read`; `mail:write` | `undo_send_seconds`: 0, 5, 10, 20 or 30. |
+| `GET`, `PUT /mailboxes/{mailbox_id}/vacation` | `mail:read`; `mail:write` | The vacation reply. The owner of a personal mailbox, or an owner or admin for a shared one, sets it. |
+
+Sending goes through the same path as the web app. `POST /drafts/{draft_id}/send` first runs the
+check, then holds the message for your undo-send time (or until `scheduled_at`, an RFC 3339
+time). The workspace's send policy, rate limits and recipient limits apply. Until the message
+goes, `POST /outbound/{outbound_id}/cancel` returns it to a draft. A second send of the same draft
+returns the same message. The HTML of a message is shown only in the web app's sandboxed viewer:
+the API gives `body_text`.
+
+```bash
+DRAFT=$(curl -sS -X POST "$ORBIT_WS/mail/drafts" -H "Authorization: Bearer $ORBIT_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d "{\"mode\":\"new\",\"from_address_id\":\"$FROM\",\"to\":[\"ana@example.com\"],\"subject\":\"Hi\",\"body_html\":\"<p>Hello</p>\"}" | jq -r .id)
+curl -sS -X POST "$ORBIT_WS/mail/drafts/$DRAFT/send" -H "Authorization: Bearer $ORBIT_TOKEN"
+```
+
+### Notifications, saved views and files
+
+These act as the token's creator, so a service-account token gets `403
+workspace_action_forbidden` for notifications and views, and for file uploads and deletes (it can
+list and download task files).
+
+**Notifications** (the creator's inbox). Reading needs `tasks:read`, marking read `tasks:write`.
+A notification shows only when the token may read what it points to: a task notification needs
+the task's project in the grant, a doc mention needs `docs:read`, a chat mention or report needs
+`chat:read`, and a GitHub notice needs its repository connected to an approved project. Other
+kinds are hidden. "Mark all read" marks only the notifications that the token can list, so a
+token for one project does not clear the creator's other unread items.
+
+| Method and path | Scope | Result |
+| --- | --- | --- |
+| `GET /notifications?unread&cursor&limit` | `tasks:read` | Newest first: `{id, kind, actor_user_id, task_id, comment_id, page_id, chat_conversation_id, …, read_at, created_at}` and `next_cursor`. A page can hold fewer than `limit` items before the last one. |
+| `POST /notifications/{notification_id}/read` | `tasks:write` | The notification; an already read one keeps its `read_at`. |
+| `POST /notifications/read-all` | `tasks:write` | `{updated}`. At most 5,000 per call. |
+
+**Saved views** (task filters with display options). Reading needs `tasks:read`, writing
+`tasks:write`. A view whose filter has a `project` condition naming a project outside the grant
+is hidden (`404`), and a create or update cannot name one (`400`). The web app's rules apply:
+personal views are their owner's; a workspace view can be changed by its owner or a workspace
+owner or admin; only the owner changes `visibility`. View preferences and the sidebar project
+order are not in the API: they are the web app's layout state.
+
+| Method and path | Scope | Result |
+| --- | --- | --- |
+| `GET /views` | `tasks:read` | Every view the creator sees, by name, with `is_favorite` and `favorite_position`. |
+| `POST /views`, `GET`/`PATCH`/`DELETE /views/{view_id}` | `tasks:write`, `tasks:read` | `{name, description, icon, color, visibility, state}`; `PATCH` takes `expected_version` (`409` when stale). |
+| `PUT`/`DELETE /views/{view_id}/favorite` | `tasks:write` | `204`. Idempotent; a new favorite goes last. |
+| `PUT /view-favorites/order` | `tasks:write` | `{view_ids}`: every favorite of `GET /views`, each once. Favorites that the token cannot see keep their places. |
+
+**Files.** Uploads are `multipart/form-data` with one `file` field, as in the web app. The server
+detects the type from the bytes. The server's upload limit (25 MiB per file by default) and the
+workspace's storage quota apply (`413 upload_too_large`, `413 storage_quota_exceeded`). The bytes
+go to the file store before the database write. Downloads stream the bytes with the stored
+`Content-Type`, `Content-Disposition` (with the file name) and `X-Content-Type-Options: nosniff`.
+A file that an admin deleted answers `410` with a "Deleted file" image. Each file in a result has
+its `download_path`.
+
+| Method and path | Scope | Result |
+| --- | --- | --- |
+| `GET /tasks/{task}/attachments?cursor&limit` | `tasks:read` | The task's own files, oldest first (not its comments' files, not files placed in the description). |
+| `POST /tasks/{task}/attachments` | `tasks:write` | `201` with the file. |
+| `DELETE /tasks/{task}/attachments/{attachment_id}` | `tasks:write` | `204`. |
+| `GET /tasks/{task}/attachments/{attachment_id}/download` | `tasks:read` | The bytes. |
+| `GET`, `POST /tasks/{task}/comments/{comment_id}/attachments`; `DELETE …/{attachment_id}`; `GET …/{attachment_id}/download` | as above | The files of a comment. Adding or deleting one follows the comment's edit rule: its author, or a workspace owner or admin (`403`). |
+| `POST /docs/{page_id}/files` | `docs:write` | `201` with `{id, page_id, url, file_name, mime_type, size_bytes, download_path}`. Put `url` in the doc's Markdown (`![name](url)` for an image) with `PATCH /docs/{page_id}`. |
+| `GET /docs/{page_id}/files/{file_id}` | `docs:read` | The bytes of a doc's file: `file_id` is the last segment of its `url`. |
+
+To attach a file to a new comment, create the comment, then upload to it. The web app's "comment
+with only a file" upload is not in the API.
+
+```bash
+curl -sS "$ORBIT_WS/tasks/ENG-12/attachments" -H "Authorization: Bearer $ORBIT_TOKEN" \
+  -F "file=@report.pdf"
+curl -sS -OJ "$ORBIT_WS/tasks/ENG-12/attachments/$FILE/download" -H "Authorization: Bearer $ORBIT_TOKEN"
+```
 
 ### Exports
 

@@ -27,7 +27,7 @@ fn openapi_generation_is_byte_stable_and_covers_public_routes() {
 
     let document: serde_json::Value = serde_json::from_str(&first).unwrap();
     assert_eq!(document["info"]["version"], CONTRACT_ID);
-    assert_eq!(document["paths"].as_object().unwrap().len(), 436);
+    assert_eq!(document["paths"].as_object().unwrap().len(), 527);
     let operation_count: usize = document["paths"]
         .as_object()
         .unwrap()
@@ -42,7 +42,7 @@ fn openapi_generation_is_byte_stable_and_covers_public_routes() {
                 .count()
         })
         .sum();
-    assert_eq!(operation_count, 572);
+    assert_eq!(operation_count, 698);
     for path in [
         "/api/v1/setup/status",
         "/api/v1/auth/me",
@@ -1509,11 +1509,45 @@ fn public_api_router_routes() -> BTreeSet<(String, String)> {
         .split_once("let routes")
         .expect("the router nests the workspace routes");
     assert!(root.contains(".nest(\"/workspaces/{workspace_id}\", workspace)"));
-    let mut routes = BTreeSet::new();
-    for (prefix, block) in [
+    // Each `.merge(module::routes(…))` of the workspace router adds that module's `routes` body.
+    let modules = [
+        ("mail", include_str!("../src/public_api/mail.rs")),
+        ("projects", include_str!("../src/public_api/projects.rs")),
+        (
+            "doc_actions",
+            include_str!("../src/public_api/doc_actions.rs"),
+        ),
+        (
+            "database_actions",
+            include_str!("../src/public_api/database_actions.rs"),
+        ),
+        (
+            "notifications",
+            include_str!("../src/public_api/notifications.rs"),
+        ),
+        ("views", include_str!("../src/public_api/views.rs")),
+        ("files", include_str!("../src/public_api/files.rs")),
+    ];
+    let mut blocks = vec![
         ("/api/public/v1/workspaces/{workspace_id}", workspace),
         ("/api/public/v1", root),
-    ] {
+    ];
+    for merge in workspace.split(".merge(").skip(1) {
+        let name = merge.split("::").next().unwrap().trim();
+        let source = modules
+            .iter()
+            .find(|(module, _)| *module == name)
+            .unwrap_or_else(|| panic!("add public_api/{name}.rs to this test"))
+            .1;
+        let body = source
+            .split_once("fn routes(")
+            .and_then(|(_, rest)| rest.split_once("\n}\n"))
+            .unwrap_or_else(|| panic!("public_api/{name}.rs has fn routes"))
+            .0;
+        blocks.push(("/api/public/v1/workspaces/{workspace_id}", body));
+    }
+    let mut routes = BTreeSet::new();
+    for (prefix, block) in blocks {
         for call in block.split(".route(").skip(1) {
             let mut depth = 1;
             let end = call
@@ -1642,6 +1676,26 @@ fn every_public_api_route_is_documented() {
             .contains(&"workspace_action_forbidden".to_owned())
     );
     assert!(codes(operation(&document, &task, "patch"), "409").contains(&"conflict".to_owned()));
+    // Deletes of versioned records take the version as a query parameter, as tasks and docs do.
+    for (path, method) in [
+        ("/projects/{project_id}/milestones/{milestone_id}", "delete"),
+        ("/projects/{project_id}/cycles/{cycle_id}", "delete"),
+        ("/projects/{project_id}/statuses/{status_id}", "delete"),
+        ("/projects/{project_id}/labels/{label_id}", "delete"),
+        ("/tasks/{task}/comments/{comment_id}", "delete"),
+    ] {
+        let path = format!("/api/public/v1/workspaces/{{workspace_id}}{path}");
+        let operation = operation(&document, &path, method);
+        assert_eq!(
+            parameter_names(operation, "query"),
+            ["expected_version"],
+            "{path}"
+        );
+        assert!(
+            codes(operation, "409").contains(&"conflict".to_owned()),
+            "{path}"
+        );
+    }
     assert_eq!(
         codes(
             operation(

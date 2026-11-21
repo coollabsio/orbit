@@ -9,6 +9,22 @@ use crate::repositories::tasks::{
 
 const DAY_MS: i64 = 86_400_000;
 
+/// Noon UTC, where the web app stores a milestone's target day.
+pub const NOON_MS: i64 = 12 * 3_600_000;
+
+/// A milestone or cycle date: an RFC 3339 time, or a `YYYY-MM-DD` day at `day_offset_ms` after
+/// its UTC midnight. `None` for any other text.
+pub fn parse_plan_time(raw: &str, day_offset_ms: i64) -> Option<TimestampMillis> {
+    if let Ok(day) = chrono::NaiveDate::parse_from_str(raw, "%Y-%m-%d") {
+        let midnight = day
+            .and_time(chrono::NaiveTime::MIN)
+            .and_utc()
+            .timestamp_millis();
+        return Some(TimestampMillis::from_millis(midnight + day_offset_ms));
+    }
+    serde_json::from_value(serde_json::Value::String(raw.to_owned())).ok()
+}
+
 impl Authorized<'_> {
     /// Adds a milestone after the approved project's others.
     pub async fn create_milestone(
@@ -217,7 +233,7 @@ impl Authorized<'_> {
                 TaskError::Invalid { field: "status_id" } => {
                     TokenApiError::Invalid("The Duplicate status cannot be deleted")
                 }
-                TaskError::Conflict => TokenApiError::Invalid(
+                TaskError::Conflict => TokenApiError::Conflict(
                     "Tasks use this status, in the trash too: move them to another status first",
                 ),
                 error => manage_forbidden(error),
@@ -315,7 +331,7 @@ fn cycle_name(value: Option<String>) -> Result<Option<String>> {
 fn milestone_error(error: TaskError) -> TokenApiError {
     match error {
         TaskError::Conflict => {
-            TokenApiError::Invalid("The project already has a milestone with this name")
+            TokenApiError::Conflict("The project already has a milestone with this name")
         }
         error => error.into(),
     }
@@ -323,7 +339,7 @@ fn milestone_error(error: TaskError) -> TokenApiError {
 
 fn cycle_error(error: TaskError) -> TokenApiError {
     match error {
-        TaskError::CycleOverlap => TokenApiError::Invalid(
+        TaskError::CycleOverlap => TokenApiError::Conflict(
             "The dates overlap another cycle of the project (see list_cycles); cycles may touch",
         ),
         TaskError::Invalid { field: "ends_at" } => {
@@ -334,9 +350,9 @@ fn cycle_error(error: TaskError) -> TokenApiError {
 }
 
 /// The project is already approved, so a refusal is the manage permission.
-fn manage_forbidden(error: TaskError) -> TokenApiError {
+pub(super) fn manage_forbidden(error: TaskError) -> TokenApiError {
     match error {
-        TaskError::Forbidden => TokenApiError::Invalid(
+        TaskError::Forbidden => TokenApiError::Forbidden(
             "Deleting statuses and labels needs a member who may manage the project",
         ),
         error => error.into(),

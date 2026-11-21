@@ -22,7 +22,7 @@ export function AgenticScreen({ title, nav }: { title: string; nav: readonly Set
 
   return (
     <SettingsShell title={title} nav={nav} onRefresh={() => connections.refetch()}>
-      <SettingsCard title="MCP server" description="AI clients such as Claude, Codex and Grok can use tasks and read docs and chat through this address. Sign in with your Orbit account and select the workspace, projects and permissions.">
+      <SettingsCard title="MCP server" description="AI clients such as Claude, Codex and Grok can use tasks, docs, chat and mail through this address. Sign in with your Orbit account and select the workspace, projects and permissions.">
         <Code text={url} />
       </SettingsCard>
 

@@ -44,13 +44,36 @@ use orbit_domain::Permission;
 
 mod comments;
 mod context;
+mod database_actions;
 mod databases;
+mod doc_actions;
+mod files;
+mod mail;
+mod notifications;
 mod plan;
+mod projects;
 mod relations;
 mod setup;
 mod trash;
+mod views;
+pub use comments::{DocComment, DocThread, Person};
+pub use context::{TaskActivity, TeamspaceView};
+pub use files::{
+    FileDownload, MAX_INLINE_DOWNLOAD_BYTES, TokenFile, TokenPageFile, too_large, upload_error,
+};
+pub use notifications::NotificationView;
 pub use databases::{DatabaseRowPatch, LinkedDatabase, NewDatabase, NewDatabaseRow};
+pub use doc_actions::TeamspacePatch;
+pub use mail::{
+    MailAttachment, MailAttachmentInfo, MailContactView, MailDraftCheck, MailDraftFileView,
+    MailDraftView, MailFromAddressView, MailLabelView, MailOutboundItemView, MailOutboundView,
+    MailSent, MailSettingsView, MailSignatureView, MailSnippetView, MailSuppressedView,
+    MailVacationView, MailboxView, mail_refusal,
+};
+pub use plan::{NOON_MS, parse_plan_time};
+pub use projects::{BulkTaskUpdate, BulkTasks, CycleMove, ReorderItem};
 pub use setup::StatusPatch;
+pub use trash::{TrashedTaskPreview, TrashedTaskView};
 
 const PRIORITIES: [&str; 5] = ["none", "low", "medium", "high", "urgent"];
 /// The web app's second project color, indigo.
@@ -79,10 +102,22 @@ pub enum TokenApiError {
     AllProjectsRequired,
     /// A `tasks:import` credential whose creator is no longer a workspace owner or admin.
     ImportForbidden,
+    /// The request conflicts with the current state (409), with what to change first.
+    Conflict(&'static str),
+    /// The token's creator lacks the role or permission for this action (403), and why.
+    Forbidden(&'static str),
+    /// An upload over a size limit or the workspace's storage quota (413): a problem `code` and
+    /// what to do.
+    TooLarge {
+        code: &'static str,
+        detail: &'static str,
+    },
     Task(TaskError),
     Page(PageError),
     /// A database refusal other than not found (see `databases`).
     Database(crate::repositories::databases::DatabaseError),
+    /// A mail refusal with its stable code (see `mail`); never `NotFound` or a database failure.
+    Mail(crate::repositories::mail::MailError),
     /// Why it failed, for the server log; clients do not see it.
     Internal(String),
 }
@@ -637,6 +672,9 @@ pub struct TokenApi {
     tasks: Arc<TaskRepository>,
     pages: Option<Arc<PageRepository>>,
     chat: Option<Arc<ChatRepository>>,
+    mail: Option<Arc<crate::repositories::mail::MailRepository>>,
+    /// Task attachments and doc files (see `files`).
+    uploads: Option<orbit_platform::UploadService>,
     web_origin: String,
 }
 
@@ -647,6 +685,8 @@ impl TokenApi {
             tasks,
             pages: None,
             chat: None,
+            mail: None,
+            uploads: None,
             web_origin: String::new(),
         }
     }
@@ -667,6 +707,13 @@ impl TokenApi {
     #[must_use]
     pub fn with_chat(mut self, chat: Arc<ChatRepository>) -> Self {
         self.chat = Some(chat);
+        self
+    }
+
+    /// The upload service for task attachments and doc files.
+    #[must_use]
+    pub fn with_uploads(mut self, uploads: orbit_platform::UploadService) -> Self {
+        self.uploads = Some(uploads);
         self
     }
 
@@ -959,7 +1006,7 @@ impl Authorized<'_> {
             .await
             .map_err(|error| match error {
                 TaskError::Conflict => {
-                    TokenApiError::Invalid("A project with this key already exists")
+                    TokenApiError::Conflict("A project with this key already exists")
                 }
                 error => error.into(),
             })

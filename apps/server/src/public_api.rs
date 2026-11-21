@@ -22,6 +22,7 @@ use crate::export::names::{ascii_file_name, rfc5987};
 use crate::repositories::api_tokens::{
     ApiTokenError, ApiTokenPrincipal, ApiTokenRepository, ApiTokenScope,
 };
+use crate::repositories::chat::ChatRepository;
 use crate::repositories::page_versions::PageVersionSummary;
 use crate::repositories::pages::PageSummary;
 use crate::repositories::pages::{PageError, PageRepository};
@@ -75,6 +76,19 @@ impl PublicApiState {
         self.api = self.api.with_pages(pages);
         self
     }
+
+    #[must_use]
+    pub fn with_chat(mut self, chat: Arc<ChatRepository>) -> Self {
+        self.api = self.api.with_chat(chat);
+        self
+    }
+
+    /// File storage for task attachments and doc files.
+    #[must_use]
+    pub fn with_uploads(mut self, uploads: orbit_platform::UploadService) -> Self {
+        self.api = self.api.with_uploads(uploads);
+        self
+    }
 }
 
 pub fn router(state: PublicApiState) -> Router {
@@ -91,7 +105,7 @@ pub fn router(state: PublicApiState) -> Router {
         )
         .route(
             "/projects/{project_id}/statuses/{status_id}",
-            patch(setup::update_status),
+            patch(setup::update_status).delete(plan::delete_status),
         )
         .route(
             "/projects/{project_id}/labels",
@@ -99,11 +113,26 @@ pub fn router(state: PublicApiState) -> Router {
         )
         .route(
             "/projects/{project_id}/labels/{label_id}",
-            patch(setup::update_label),
+            patch(setup::update_label).delete(plan::delete_label),
         )
-        .route("/projects/{project_id}/milestones", get(milestones))
-        .route("/projects/{project_id}/cycles", get(cycles))
+        .route(
+            "/projects/{project_id}/milestones",
+            get(milestones).post(plan::create_milestone),
+        )
+        .route(
+            "/projects/{project_id}/milestones/{milestone_id}",
+            patch(plan::update_milestone).delete(plan::delete_milestone),
+        )
+        .route(
+            "/projects/{project_id}/cycles",
+            get(cycles).post(plan::create_cycle),
+        )
+        .route(
+            "/projects/{project_id}/cycles/{cycle_id}",
+            patch(plan::update_cycle).delete(plan::delete_cycle),
+        )
         .route("/members", get(members))
+        .route("/teamspaces", get(context::teamspaces))
         .route(
             "/tasks",
             get(list_tasks)
@@ -114,10 +143,19 @@ pub fn router(state: PublicApiState) -> Router {
             "/tasks/{task}",
             get(get_task).patch(update_task).delete(delete_task),
         )
+        // Static segments win over `{task}`: identifiers are `KEY-N`, never `trash`.
+        .route("/tasks/trash", get(trash::task_trash))
+        .route("/tasks/trash/{task}", get(trash::trashed_task))
+        .route("/tasks/{task}/restore", post(trash::restore_task))
         .route(
             "/tasks/{task}/comments",
             get(comments).post(create_comment).route_layer(idempotent),
         )
+        .route(
+            "/tasks/{task}/comments/{comment_id}",
+            patch(comments::update_comment).delete(comments::delete_comment),
+        )
+        .route("/tasks/{task}/activity", get(context::task_activity))
         .route(
             "/tasks/{task}/relations",
             get(relations::relations).post(relations::create_relation),
@@ -127,6 +165,12 @@ pub fn router(state: PublicApiState) -> Router {
             delete(relations::delete_relation),
         )
         .route("/docs", get(docs).post(create_doc))
+        .route("/docs/trash", get(trash::doc_trash))
+        .route("/docs/{page_id}/restore", post(trash::restore_doc))
+        .route(
+            "/docs/{page_id}/comments",
+            get(comments::doc_comments).post(comments::create_doc_comment),
+        )
         .route(
             "/docs/{page_id}",
             get(doc).patch(update_doc).delete(delete_doc),
@@ -171,7 +215,21 @@ pub fn router(state: PublicApiState) -> Router {
         .route(
             "/docs/{page_id}/database/links/{link_id}",
             delete(database_views::delete_link),
-        );
+        )
+        .route("/chat/conversations", get(chat::conversations))
+        .route(
+            "/chat/conversations/{conversation_id}/messages",
+            get(chat::messages),
+        )
+        .route("/chat/threads/{message_id}", get(chat::thread))
+        .route("/chat/search", get(chat::search))
+        .merge(mail::routes(&state))
+        .merge(projects::routes())
+        .merge(doc_actions::routes())
+        .merge(database_actions::routes())
+        .merge(notifications::routes())
+        .merge(views::routes())
+        .merge(files::routes(&state));
     // Exports belong to the token's only workspace, which the token already names.
     let routes = Router::new()
         .route("/me", get(me))
@@ -399,10 +457,23 @@ impl Responder {
                 "Workspace action forbidden",
                 "A tasks:import token writes only while its creator is a workspace owner or admin.",
             ),
+            TokenApiError::Conflict(detail) => {
+                self.problem(StatusCode::CONFLICT, "conflict", "Conflict", detail)
+            }
+            TokenApiError::Forbidden(detail) => self.problem(
+                StatusCode::FORBIDDEN,
+                "workspace_action_forbidden",
+                "Workspace action forbidden",
+                detail,
+            ),
+            TokenApiError::TooLarge { code, detail } => {
+                self.problem(StatusCode::PAYLOAD_TOO_LARGE, code, "Upload too large", detail)
+            }
             TokenApiError::Internal(_) => Problem::internal(&self.request_id, &self.instance),
             TokenApiError::Task(error) => self.task_problem(error),
             TokenApiError::Page(error) => self.page_problem(error),
             TokenApiError::Database(error) => self.database_problem(error),
+            TokenApiError::Mail(error) => mail::mail_problem(self, &error),
         };
         with_cause(problem_response(problem), cause)
     }
@@ -1162,7 +1233,7 @@ struct MoveDocBody {
 #[derive(Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 #[serde(deny_unknown_fields)]
-struct DeleteDocQuery {
+struct ExpectedVersionQuery {
     /// The `version` that you read: an opaque number below 2^53. Compare it for equality only.
     expected_version: u64,
 }
@@ -1210,11 +1281,23 @@ macro_rules! path_id {
     };
 }
 
+pub(crate) mod chat;
+pub(crate) mod comments;
+pub(crate) mod context;
+pub(crate) mod database_actions;
 pub(crate) mod database_views;
 pub(crate) mod databases;
+pub(crate) mod doc_actions;
+pub(crate) mod files;
 mod idempotency;
+pub(crate) mod mail;
+pub(crate) mod notifications;
+pub(crate) mod plan;
+pub(crate) mod projects;
 pub(crate) mod relations;
 pub(crate) mod setup;
+pub(crate) mod trash;
+pub(crate) mod views;
 
 #[utoipa::path(
     get,
@@ -1840,7 +1923,7 @@ async fn update_doc(
     tag = "public-api",
     summary = "Move a doc and its sub-docs to the trash",
     description = "Moves the doc and its live sub-docs to the trash, where people can restore them. Deleting forever is not available through the API.",
-    params(("workspace_id" = String, Path, description = "The token's workspace, from `GET /me`."), ("page_id" = String, Path), DeleteDocQuery),
+    params(("workspace_id" = String, Path, description = "The token's workspace, from `GET /me`."), ("page_id" = String, Path), ExpectedVersionQuery),
     responses((status = 204, description = "The doc is in the trash")),
     security(("bearerAuth" = []))
 )]
@@ -1848,7 +1931,7 @@ async fn delete_doc(
     State(s): State<PublicApiState>,
     ctx: Ctx,
     Path((_workspace, page)): Path<(String, String)>,
-    query: Result<Query<DeleteDocQuery>, QueryRejection>,
+    query: Result<Query<ExpectedVersionQuery>, QueryRejection>,
 ) -> Response {
     let page = path_id!(ctx, page);
     let query = input!(ctx, ApiTokenScope::DocsWrite, query);

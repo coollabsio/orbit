@@ -75,6 +75,29 @@ pub enum AttachmentRepositoryError {
     Upload(#[from] UploadError),
 }
 
+/// Who reads or changes attachments: a signed-in session (which must stay live), or a member
+/// acting through an API token that the token layer already checked.
+#[derive(Clone, Copy)]
+pub enum AttachmentCaller<'a> {
+    Session(&'a AuthenticatedSession),
+    Member(Id),
+}
+
+impl AttachmentCaller<'_> {
+    fn user_id(self) -> Id {
+        match self {
+            Self::Session(session) => session.user.id,
+            Self::Member(id) => id,
+        }
+    }
+}
+
+impl<'a> From<&'a AuthenticatedSession> for AttachmentCaller<'a> {
+    fn from(session: &'a AuthenticatedSession) -> Self {
+        Self::Session(session)
+    }
+}
+
 impl AttachmentRepository {
     #[must_use]
     pub fn new(database: Database, uploads: UploadService) -> Self {
@@ -83,20 +106,20 @@ impl AttachmentRepository {
 
     pub async fn authorize_task(
         &self,
-        session: &AuthenticatedSession,
+        caller: impl Into<AttachmentCaller<'_>>,
         workspace_id: Id,
         task_id: Id,
     ) -> Result<(), AttachmentRepositoryError> {
         let now = self.database.database_now().await?;
         let access = task_access(
             self.database.pool(),
-            session,
+            caller.into(),
             workspace_id,
             task_id,
             now.as_millis(),
         )
         .await?;
-        if access == 1 {
+        if access {
             Ok(())
         } else {
             Err(AttachmentRepositoryError::NotFound)
@@ -105,12 +128,12 @@ impl AttachmentRepository {
 
     pub async fn require_comment(
         &self,
-        session: &AuthenticatedSession,
+        caller: impl Into<AttachmentCaller<'_>>,
         workspace_id: Id,
         task_id: Id,
         comment_id: Id,
     ) -> Result<(), AttachmentRepositoryError> {
-        self.authorize_task(session, workspace_id, task_id).await?;
+        self.authorize_task(caller, workspace_id, task_id).await?;
         let exists: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM task_comments WHERE id = $1 AND workspace_id = $2 AND task_id = $3",
         )
@@ -130,19 +153,20 @@ impl AttachmentRepository {
     /// Runs before the upload body is read; `finalize` checks again in its transaction.
     pub async fn require_comment_editor(
         &self,
-        session: &AuthenticatedSession,
+        caller: impl Into<AttachmentCaller<'_>>,
         workspace_id: Id,
         task_id: Id,
         comment_id: Id,
     ) -> Result<(), AttachmentRepositoryError> {
-        self.authorize_task(session, workspace_id, task_id).await?;
+        let caller: AttachmentCaller<'_> = caller.into();
+        self.authorize_task(caller, workspace_id, task_id).await?;
         let mut connection = self.database.pool().acquire().await?;
-        require_comment_editor(&mut connection, session, workspace_id, task_id, comment_id).await
+        require_comment_editor(&mut connection, caller, workspace_id, task_id, comment_id).await
     }
 
     pub async fn list(
         &self,
-        session: &AuthenticatedSession,
+        caller: impl Into<AttachmentCaller<'_>>,
         workspace_id: Id,
         task_id: Id,
         comment_id: Option<Id>,
@@ -159,15 +183,14 @@ impl AttachmentRepository {
         let comment = comment_id.map(|id| id.to_string());
         let now = self.database.database_now().await?;
         let mut transaction = self.database.immediate_transaction().await?;
-        if task_access(
+        if !task_access(
             &mut *transaction,
-            session,
+            caller.into(),
             workspace_id,
             task_id,
             now.as_millis(),
         )
         .await?
-            != 1
         {
             return Err(AttachmentRepositoryError::NotFound);
         }
@@ -245,7 +268,7 @@ impl AttachmentRepository {
     #[allow(clippy::too_many_arguments)]
     pub async fn delete(
         &self,
-        session: &AuthenticatedSession,
+        caller: impl Into<AttachmentCaller<'_>>,
         workspace_id: Id,
         task_id: Id,
         comment_id: Option<Id>,
@@ -253,21 +276,21 @@ impl AttachmentRepository {
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<(), AttachmentRepositoryError> {
+        let caller: AttachmentCaller<'_> = caller.into();
         let mut transaction = self.database.immediate_transaction().await?;
-        if task_access(
+        if !task_access(
             &mut *transaction,
-            session,
+            caller,
             workspace_id,
             task_id,
             now.as_millis(),
         )
         .await?
-            != 1
         {
             return Err(AttachmentRepositoryError::NotFound);
         }
         if let Some(comment_id) = comment_id {
-            require_comment_editor(&mut transaction, session, workspace_id, task_id, comment_id)
+            require_comment_editor(&mut transaction, caller, workspace_id, task_id, comment_id)
                 .await?;
         }
         let row = sqlx::query(
@@ -320,7 +343,7 @@ impl AttachmentRepository {
         audit::record(
             &mut transaction,
             workspace_id,
-            Some(session.user.id),
+            Some(caller.user_id()),
             "attachment.deleted",
             AuditOutcome::Success,
             "attachment",
@@ -336,24 +359,16 @@ impl AttachmentRepository {
 
     pub async fn download(
         &self,
-        session: &AuthenticatedSession,
+        caller: impl Into<AttachmentCaller<'_>>,
         workspace_id: Id,
         task_id: Id,
         comment_id: Option<Id>,
         attachment_id: Id,
     ) -> Result<BlobDownload, AttachmentRepositoryError> {
-        let repository = self.clone();
-        let session = session.clone();
+        let caller: AttachmentCaller<'_> = caller.into();
         self.uploads
             .download(move || async move {
-                repository
-                    .authorized_attachment(
-                        &session,
-                        workspace_id,
-                        task_id,
-                        comment_id,
-                        attachment_id,
-                    )
+                self.authorized_attachment(caller, workspace_id, task_id, comment_id, attachment_id)
                     .await
                     .map_err(|error| match error {
                         AttachmentRepositoryError::NotFound => UploadError::Unauthorized,
@@ -370,42 +385,25 @@ impl AttachmentRepository {
 
     async fn authorized_attachment(
         &self,
-        session: &AuthenticatedSession,
+        caller: AttachmentCaller<'_>,
         workspace_id: Id,
         task_id: Id,
         comment_id: Option<Id>,
         attachment_id: Id,
     ) -> Result<AuthorizedAttachment, AttachmentRepositoryError> {
-        let now = self.database.database_now().await?;
-        let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+        self.authorize_task(caller, workspace_id, task_id).await?;
+        let row = sqlx::query(
             "SELECT attachment_blobs.storage_key, attachment_blobs.deleted_at, attachment_references.media_type, \
              attachment_references.display_name FROM attachment_references JOIN attachment_blobs \
              ON attachment_blobs.id = attachment_references.blob_id \
              AND attachment_blobs.workspace_id = attachment_references.workspace_id \
-             JOIN tasks ON tasks.id = attachment_references.task_id \
-             AND tasks.workspace_id = attachment_references.workspace_id \
-             JOIN projects ON projects.id = tasks.project_id \
-             JOIN workspaces ON workspaces.id = tasks.workspace_id \
-             JOIN memberships ON memberships.workspace_id = tasks.workspace_id \
-             AND memberships.user_id = $1 AND memberships.role <> 'guest' \
-             JOIN users ON users.id = memberships.user_id \
-             JOIN sessions ON sessions.id = $2 AND sessions.user_id = users.id \
-             WHERE attachment_references.id = $3 AND attachment_references.workspace_id = $4 \
-             AND attachment_references.task_id = $5 AND attachment_references.comment_id IS NOT DISTINCT FROM $6 \
-             AND sessions.revoked_at IS NULL AND sessions.idle_expires_at > $7 \
-             AND sessions.absolute_expires_at > $8 AND tasks.deleted_at IS NULL \
-             AND projects.deleted_at IS NULL AND workspaces.deleted_at IS NULL \
-             AND users.suspended_at IS NULL AND {}",
-            user_sees_project_sql("tasks.project_id", "users.id")
-        )))
-        .bind(session.user.id.to_string())
-        .bind(session.id.to_string())
+             WHERE attachment_references.id = $1 AND attachment_references.workspace_id = $2 \
+             AND attachment_references.task_id = $3 AND attachment_references.comment_id IS NOT DISTINCT FROM $4",
+        )
         .bind(attachment_id.to_string())
         .bind(workspace_id.to_string())
         .bind(task_id.to_string())
         .bind(comment_id.map(|id| id.to_string()))
-        .bind(now.as_millis())
-        .bind(now.as_millis())
         .fetch_optional(self.database.pool())
         .await?
         .ok_or(AttachmentRepositoryError::NotFound)?;
@@ -421,7 +419,7 @@ impl AttachmentRepository {
     /// the text (description or comment) and are left out of the attachment lists.
     pub async fn finalize(
         &self,
-        session: &AuthenticatedSession,
+        caller: impl Into<AttachmentCaller<'_>>,
         workspace_id: Id,
         task_id: Id,
         comment_id: Option<Id>,
@@ -430,7 +428,7 @@ impl AttachmentRepository {
     ) -> Result<CreatedAttachment, AttachmentRepositoryError> {
         let (attachment, _) = self
             .finalize_inner(
-                session,
+                caller.into(),
                 workspace_id,
                 task_id,
                 comment_id,
@@ -445,7 +443,7 @@ impl AttachmentRepository {
 
     pub async fn finalize_attachment_comment(
         &self,
-        session: &AuthenticatedSession,
+        caller: impl Into<AttachmentCaller<'_>>,
         workspace_id: Id,
         task_id: Id,
         request_id: &str,
@@ -453,7 +451,7 @@ impl AttachmentRepository {
     ) -> Result<(CreatedAttachment, CommentRecord), AttachmentRepositoryError> {
         let (attachment, comment) = self
             .finalize_inner(
-                session,
+                caller.into(),
                 workspace_id,
                 task_id,
                 None,
@@ -565,7 +563,7 @@ impl AttachmentRepository {
     #[allow(clippy::too_many_arguments)]
     async fn finalize_inner(
         &self,
-        session: &AuthenticatedSession,
+        caller: AttachmentCaller<'_>,
         workspace_id: Id,
         task_id: Id,
         comment_id: Option<Id>,
@@ -574,7 +572,7 @@ impl AttachmentRepository {
         request_id: &str,
         upload: &StagedUpload,
     ) -> Result<(CreatedAttachment, Option<CommentRecord>), AttachmentRepositoryError> {
-        if upload.workspace_id != workspace_id || upload.owner_id != session.user.id {
+        if upload.workspace_id != workspace_id || upload.owner_id != caller.user_id() {
             return Err(AttachmentRepositoryError::NotFound);
         }
         let finalization = self.uploads.begin_finalization().await;
@@ -582,13 +580,13 @@ impl AttachmentRepository {
         let checked_at = self.database.database_now().await?.as_millis();
         let access = task_access(
             self.database.pool(),
-            session,
+            caller,
             workspace_id,
             task_id,
             checked_at,
         )
         .await?;
-        if access != 1 {
+        if !access {
             return Err(AttachmentRepositoryError::NotFound);
         }
         let prepared = finalization.prepare(upload).await?;
@@ -604,19 +602,13 @@ impl AttachmentRepository {
             .fetch_one(&mut *transaction)
             .await?;
         let now = TimestampMillis::from_millis(now_millis);
-        let access = task_access(
-            &mut *transaction,
-            session,
-            workspace_id,
-            task_id,
-            now_millis,
-        )
-        .await?;
-        if access != 1 {
+        let access =
+            task_access(&mut *transaction, caller, workspace_id, task_id, now_millis).await?;
+        if !access {
             return Err(AttachmentRepositoryError::NotFound);
         }
         if let Some(comment_id) = comment_id {
-            require_comment_editor(&mut transaction, session, workspace_id, task_id, comment_id)
+            require_comment_editor(&mut transaction, caller, workspace_id, task_id, comment_id)
                 .await?;
         }
 
@@ -629,7 +621,7 @@ impl AttachmentRepository {
             .bind(id.to_string())
             .bind(workspace_id.to_string())
             .bind(task_id.to_string())
-            .bind(session.user.id.to_string())
+            .bind(caller.user_id().to_string())
             .bind(now_millis)
             .bind(now_millis)
             .execute(&mut *transaction)
@@ -637,7 +629,7 @@ impl AttachmentRepository {
             audit::record(
                 &mut transaction,
                 workspace_id,
-                Some(session.user.id),
+                Some(caller.user_id()),
                 "comment.created",
                 AuditOutcome::Success,
                 "comment",
@@ -651,7 +643,7 @@ impl AttachmentRepository {
                 id,
                 workspace_id,
                 task_id,
-                author_id: session.user.id,
+                author_id: caller.user_id(),
                 author_service_account_id: None,
                 author_service_account_name: None,
                 parent_id: None,
@@ -683,7 +675,7 @@ impl AttachmentRepository {
                 workspace_id,
                 task_id,
                 comment_id: target_comment_id,
-                owner_id: session.user.id,
+                owner_id: caller.user_id(),
                 display_name: upload.display_name.clone(),
                 media_type: upload.detected_media_type.clone(),
                 byte_size: upload.size_bytes,
@@ -726,15 +718,21 @@ where
 
 async fn task_access<'e, E>(
     executor: E,
-    session: &AuthenticatedSession,
+    caller: AttachmentCaller<'_>,
     workspace_id: Id,
     task_id: Id,
     now_millis: i64,
-) -> Result<i64, sqlx::Error>
+) -> Result<bool, sqlx::Error>
 where
     E: sqlx::Executor<'e, Database = sqlx::Any>,
 {
-    sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+    let session = match caller {
+        AttachmentCaller::Session(session) => session,
+        AttachmentCaller::Member(actor_id) => {
+            return member_may_attach(executor, workspace_id, task_id, actor_id).await;
+        }
+    };
+    let count: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         "SELECT COUNT(*) FROM sessions JOIN users ON users.id = sessions.user_id \
          JOIN memberships ON memberships.user_id = users.id AND memberships.workspace_id = $1 \
          AND memberships.role <> 'guest' \
@@ -754,19 +752,20 @@ where
     .bind(now_millis)
     .bind(now_millis)
     .fetch_one(executor)
-    .await
+    .await?;
+    Ok(count == 1)
 }
 
 /// A comment's attachments are part of the comment, so adding or removing one follows the
 /// comment's edit rule. Reading them stays open to every member.
 async fn require_comment_editor(
     connection: &mut sqlx::AnyConnection,
-    session: &AuthenticatedSession,
+    caller: AttachmentCaller<'_>,
     workspace_id: Id,
     task_id: Id,
     comment_id: Id,
 ) -> Result<(), AttachmentRepositoryError> {
-    let actor: Actor = membership::actor(&mut *connection, workspace_id, session.user.id)
+    let actor: Actor = membership::actor(&mut *connection, workspace_id, caller.user_id())
         .await?
         .ok_or(AttachmentRepositoryError::NotFound)?;
     let (author_id, service_account) = sqlx::query_as::<_, (String, Option<String>)>(

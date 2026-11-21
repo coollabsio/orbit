@@ -591,7 +591,9 @@ impl App {
                             attachment_state.uploads.clone(),
                         )),
                     )
-                    .with_oauth(oauth.clone()),
+                    .with_oauth(oauth.clone())
+                    .with_mail(Arc::clone(&mail))
+                    .with_uploads(attachment_state.uploads.clone()),
                     &config.http.public_origin,
                 ),
                 public_api: crate::public_api::router(
@@ -603,7 +605,13 @@ impl App {
                     .with_pages(Arc::new(crate::repositories::pages::PageRepository::new(
                         database.clone(),
                     )))
-                    .with_exports(workspace_exports.clone()),
+                    .with_chat(Arc::new(crate::repositories::chat::ChatRepository::new(
+                        database.clone(),
+                        attachment_state.uploads.clone(),
+                    )))
+                    .with_exports(workspace_exports.clone())
+                    .with_mail(Arc::clone(&mail))
+                    .with_uploads(attachment_state.uploads.clone()),
                 ),
                 oauth: crate::oauth::router(oauth),
                 auth: {

@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 use super::{arguments, parse_id, present, write_definition};
 use crate::repositories::api_tokens::ApiTokenScope;
 use crate::repositories::tasks::{CycleChanges, MilestoneChanges};
-use crate::token_api::{Authorized, TokenApiError};
+use crate::token_api::{Authorized, NOON_MS, TokenApiError, parse_plan_time};
 
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -325,23 +325,12 @@ pub(super) async fn call(
     Some(result)
 }
 
-/// Noon UTC, where the web app stores a milestone's target day.
-const NOON_MS: i64 = 12 * 3_600_000;
-
-/// An RFC 3339 time, or a `YYYY-MM-DD` day at `day_offset_ms` after its UTC midnight.
+/// [`parse_plan_time`], with the field named in the error.
 fn parse_time(raw: &str, field: &str, day_offset_ms: i64) -> Result<TimestampMillis, ErrorData> {
-    let invalid = || {
+    parse_plan_time(raw, day_offset_ms).ok_or_else(|| {
         ErrorData::invalid_params(
             format!("{field} must be YYYY-MM-DD or an RFC 3339 time such as 2026-11-23T00:00:00Z"),
             None,
         )
-    };
-    if let Ok(day) = chrono::NaiveDate::parse_from_str(raw, "%Y-%m-%d") {
-        let midnight = day
-            .and_time(chrono::NaiveTime::MIN)
-            .and_utc()
-            .timestamp_millis();
-        return Ok(TimestampMillis::from_millis(midnight + day_offset_ms));
-    }
-    serde_json::from_value(Value::String(raw.to_owned())).map_err(|_| invalid())
+    })
 }

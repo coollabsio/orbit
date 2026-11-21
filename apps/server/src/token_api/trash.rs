@@ -6,6 +6,7 @@
 use orbit_platform::{Id, TimestampMillis};
 use serde::Serialize;
 use serde_json::json;
+use utoipa::ToSchema;
 
 use super::{Authorized, DocView, Result, TaskView, hidden_page, page_limit};
 use crate::repositories::api_tokens::ApiTokenScope;
@@ -13,24 +14,32 @@ use crate::repositories::pages::{PageError, PageTrash, revision};
 use crate::repositories::tasks::{LabelRecord, Page, StatusRecord, TaskError, TaskRecord};
 
 /// A task in the trash, in the public form of [`TaskView`] (no references outside the grant).
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, ToSchema)]
+#[schema(as = PublicTrashedTask)]
 pub struct TrashedTaskView {
     #[serde(flatten)]
     pub task: TaskView,
+    #[schema(value_type = Option<String>, format = DateTime, required = true)]
     pub deleted_at: Option<TimestampMillis>,
     /// The sub-issues trashed with it, which a restore brings back too (list only).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub trashed_descendant_count: Option<i64>,
+    /// `status`, `labels` and `deleted_by`: a single trashed task only, not the list.
     #[serde(flatten, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = TrashedTaskPreview)]
     pub preview: Option<TrashedTaskPreview>,
 }
 
 /// What `get_trashed_task` adds: the task's own status and labels, and who trashed it.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, ToSchema)]
+#[schema(as = PublicTrashedTaskPreview)]
 pub struct TrashedTaskPreview {
+    #[schema(required = false)]
     pub status: StatusRecord,
+    #[schema(required = false)]
     pub labels: Vec<LabelRecord>,
     /// The user who moved the task to the trash; `null` for a service account or when unknown.
+    #[schema(value_type = Option<String>)]
     pub deleted_by: Option<Id>,
 }
 
