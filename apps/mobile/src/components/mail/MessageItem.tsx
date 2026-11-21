@@ -35,34 +35,35 @@ export function MessageItem({ message, expanded, onToggle }: { message: MailMess
   const offerImages = message.has_html && !loadImages && (blocked ?? 0) > 0
 
   return (
-    <View className={`border-b border-border ${expanded ? 'py-4' : 'py-2.5'}`}>
-      <Pressable accessibilityRole="button" accessibilityState={{ expanded }} onPress={onToggle} className="flex-row items-center gap-2.5 rounded-md active:bg-muted">
+    <View className={`border-b border-border pt-2.5 ${expanded ? 'pb-4' : 'pb-2.5'}`}>
+      <Pressable accessibilityRole="button" accessibilityState={{ expanded }} onPress={onToggle} className="flex-row items-start gap-2.5 rounded-md active:bg-muted">
         {member ? <Avatar id={member.user_id} name={member.display_name} size={32} /> : <Avatar id={address ?? name} name={name} size={32} url={null} />}
         <View className="flex-1 min-w-0">
-          <Text numberOfLines={1} className="font-noto-semibold text-[13px] leading-[18px]">
-            {name}
-          </Text>
-          {expanded ? (
-            <View className="flex-row items-center gap-1.5 min-w-0">
-              <Text numberOfLines={1} className="shrink text-[12px] leading-[16px] text-muted-foreground/70">
-                {address}
-              </Text>
-              {message.auth.aligned_domain ? (
-                <View accessibilityLabel={`DMARC confirmed that the message comes from ${message.auth.aligned_domain}`} className="flex-row items-center gap-0.5">
-                  <Icon name="shield" size={13} color={colors.mutedForeground} />
-                  <Text className="text-[12px] leading-[16px] text-muted-foreground">{message.auth.aligned_domain}</Text>
-                </View>
-              ) : null}
-            </View>
-          ) : (
+          <View className="flex-row items-baseline gap-2 min-w-0">
+            <Text numberOfLines={1} className="flex-1 font-noto-semibold text-[13px] leading-[18px]">
+              {name}
+            </Text>
+            <Text className="text-[12px] leading-[18px] text-muted-foreground/70">
+              {fullDate(date)}, {timeOfDay(date)}
+            </Text>
+          </View>
+          <View className="flex-row items-center gap-1.5 min-w-0">
+            <Text numberOfLines={1} className="shrink text-[12px] leading-[18px] text-muted-foreground/70">
+              {address}
+            </Text>
+            {message.auth.aligned_domain ? (
+              <View accessibilityLabel={`DMARC confirmed that the message comes from ${message.auth.aligned_domain}`} className="flex-row items-center gap-0.5">
+                <Icon name="shield" size={13} color={colors.mutedForeground} />
+                <Text className="text-[12px] leading-[18px] text-muted-foreground">{message.auth.aligned_domain}</Text>
+              </View>
+            ) : null}
+          </View>
+          {expanded ? null : (
             <Text numberOfLines={1} className="text-[13px] leading-[18px] text-muted-foreground">
               {firstLine(message.body_text)}
             </Text>
           )}
         </View>
-        <Text className="text-[12px] leading-[16px] text-muted-foreground/70">
-          {fullDate(date)}, {timeOfDay(date)}
-        </Text>
       </Pressable>
       {expanded ? (
         <View>

@@ -79,10 +79,10 @@ export function MessageItem({ threadId, message, expanded, avatarOf, onToggle, o
   const offerImages = message.has_html && !loadImages && (blocked ?? 0) > 0
 
   return (
-    <div data-slot="mail-message" className={`${expanded ? 'py-4' : 'py-2.5'} [[data-slot=mail-message]+&]:border-t`} data-expanded={expanded || undefined}>
-      <div className="flex items-center gap-1">
+    <div data-slot="mail-message" className={`pt-2.5 ${expanded ? 'pb-4' : 'pb-2.5'} [[data-slot=mail-message]+&]:border-t`} data-expanded={expanded || undefined}>
+      <div className="flex items-start gap-1">
         <div
-          className="-m-1 flex min-w-0 flex-1 cursor-pointer items-center gap-2.5 rounded-md p-1 transition-colors outline-none hover:bg-muted/45 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset"
+          className="-m-1 flex min-w-0 flex-1 cursor-pointer items-start gap-2.5 rounded-md p-1 transition-colors outline-none hover:bg-muted/45 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset"
           role="button"
           tabIndex={0}
           aria-expanded={expanded}
@@ -94,11 +94,14 @@ export function MessageItem({ threadId, message, expanded, avatarOf, onToggle, o
           }}
         >
           <UserAvatar user={avatarOf(message.from, name, Boolean(message.delivery) || Boolean(message.auth.aligned_domain))} size={32} />
-          <div className="flex min-w-0 flex-col">
-            <span className="truncate text-[0.8125rem] font-semibold text-foreground">{name}</span>
-            {/* folded: the first line of the text in place of the address */}
-            {expanded ? null : <span className="truncate text-[0.8125rem] text-muted-foreground">{firstLine(message.body_text)}</span>}
-            <span className={expanded ? 'flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground/70' : 'hidden'}>
+          <div className="flex min-w-0 flex-1 flex-col">
+            <div className="flex min-w-0 items-baseline gap-2">
+              <span className="min-w-0 flex-1 truncate text-[0.8125rem] leading-5 font-semibold text-foreground">{name}</span>
+              <span className="shrink-0 text-xs leading-5 text-muted-foreground/70" title={new Date(message.received_at).toLocaleString()}>
+                {fullDate(date)}, {timeOfDay(date)}
+              </span>
+            </div>
+            <span className="flex min-w-0 items-center gap-1.5 text-xs leading-5 text-muted-foreground/70">
               <span className="truncate">{address}</span>
               {message.auth.aligned_domain ? (
                 <span className="inline-flex shrink-0 items-center gap-0.5 text-muted-foreground" title="DMARC confirmed that the message comes from this domain.">
@@ -107,16 +110,14 @@ export function MessageItem({ threadId, message, expanded, avatarOf, onToggle, o
                 </span>
               ) : null}
             </span>
+            {/* folded: the first line of the text under the address */}
+            {expanded ? null : <span className="truncate text-[0.8125rem] leading-5 text-muted-foreground">{firstLine(message.body_text)}</span>}
           </div>
-          <span className="flex-1" />
-          <span className="shrink-0 text-xs text-muted-foreground/70" title={new Date(message.received_at).toLocaleString()}>
-            {fullDate(date)}, {timeOfDay(date)}
-          </span>
         </div>
         <DropdownMenu>
           <Tip label="Message actions">
             <DropdownMenuTrigger
-              render={<Button variant="ghost" size="icon-sm" className="shrink-0 text-muted-foreground/70" aria-label="Message actions" data-print-hide="" />}
+              render={<Button variant="ghost" size="icon-sm" className="-mt-1 shrink-0 text-muted-foreground/70" aria-label="Message actions" data-print-hide="" />}
             >
               <More className="size-4" />
             </DropdownMenuTrigger>

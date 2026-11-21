@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { router, useLocalSearchParams } from 'expo-router'
 import { useEffect, useRef, useState } from 'react'
 import { Alert, ScrollView, View } from 'react-native'
+import { SafeAreaProvider } from 'react-native-safe-area-context'
 
 import { RecipientField } from '../../components/mail/RecipientField'
 import { mailKeys } from '../../data/keys'
@@ -31,8 +32,18 @@ import { TextInput } from '../../ui/scaled'
 /** The wait before a change is saved: typing makes one save, not one per key (the web's `DRAFT_SAVE_DELAY_MS`). */
 const SAVE_DELAY_MS = 2000
 
-/** A new message, a reply or a forward: the draft opens here, saves itself as it changes, and sends. */
+/** A new message, a reply or a forward: the draft opens here, saves itself as it changes, and sends. The modal is its
+ *  own iOS view controller with no navigator of its own, so it needs its own safe-area provider: with the root one, the
+ *  content goes under the status bar and taps miss. */
 export default function ComposeScreen() {
+  return (
+    <SafeAreaProvider>
+      <ComposeContent />
+    </SafeAreaProvider>
+  )
+}
+
+function ComposeContent() {
   const { draft: draftId } = useLocalSearchParams<{ draft: string }>()
   const { client, workspaceId } = useOrbit()
   const draft = useQuery({ queryKey: mailKeys.draft(workspaceId, draftId), queryFn: () => mail.draft(client, workspaceId, draftId), staleTime: Infinity })

@@ -9,6 +9,7 @@ import { Tip } from '@/components/common/Tip'
 import { Button } from '@/components/ui/button'
 import type { CommandId } from '@/shortcuts/commands'
 import { Shortcut } from '@/shortcuts/Shortcut'
+import { holdKeyboard } from '@/lib/holdKeyboard'
 import { useCancelOutbound, useCreateDraft } from '../api/mutations'
 import { mailKeys } from '../api/keys'
 import { useDrafts, useOutbound } from '../api/queries'
@@ -85,6 +86,8 @@ export function ThreadReply({ threadId, last, ref }: ThreadReplyProps) {
   /** R / A / F and Continue: one draft per thread, so the server answers with the existing one when there is one. */
   const start = (mode: string, click: boolean) => {
     if (create.isPending) return
+    // a tap on a phone: the text field opens after the server answers, too late for iOS to show the keyboard
+    if (click) holdKeyboard()
     create.mutate(
       { mode, thread_id: threadId },
       {
