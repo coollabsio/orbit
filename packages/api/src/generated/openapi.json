@@ -122242,6 +122242,10 @@
           "parent_id"
         ],
         "properties": {
+          "dry_run": {
+            "type": "boolean",
+            "description": "`true` checks the move and returns the doc as it would be, with `dropped_values`, but\nchanges nothing. `version` stays the current one."
+          },
           "expected_version": {
             "type": "integer",
             "format": "int64",
@@ -122330,7 +122334,7 @@
               "dropped_values": {
                 "type": "integer",
                 "format": "int64",
-                "description": "Property values that the move deleted: the doc left its database, or the new database has\nno property of the same name and type (or no such option) for them.",
+                "description": "Property values that the move deleted (with `dry_run`: would delete): the doc left its\ndatabase, or the new database has no property of the same name and type (or no such\noption) for them.",
                 "minimum": 0
               }
             }

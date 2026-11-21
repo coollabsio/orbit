@@ -9245,6 +9245,11 @@ export type PublicMoveDatabaseRowBody = {
  */
 export type PublicMoveDocBody = {
     /**
+     * `true` checks the move and returns the doc as it would be, with `dropped_values`, but
+     * changes nothing. `version` stays the current one.
+     */
+    dry_run?: boolean;
+    /**
      * The `version` that you read: an opaque number below 2^53. Compare it for equality only.
      */
     expected_version: number;
@@ -9292,8 +9297,9 @@ export type PublicMoveTeamspaceBody = {
  */
 export type PublicMovedDoc = PublicDoc & {
     /**
-     * Property values that the move deleted: the doc left its database, or the new database has
-     * no property of the same name and type (or no such option) for them.
+     * Property values that the move deleted (with `dry_run`: would delete): the doc left its
+     * database, or the new database has no property of the same name and type (or no such
+     * option) for them.
      */
     dropped_values: number;
 };

@@ -505,6 +505,9 @@ struct MoveDocArgs {
     private: Option<bool>,
     /// The place among the new siblings (0 is first). Default: last.
     position: Option<u64>,
+    /// `true` checks the move and returns dropped_values without moving the document.
+    #[serde(default)]
+    dry_run: bool,
 }
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -672,7 +675,7 @@ fn tools() -> Vec<Tool> {
         ),
         write_definition::<MoveDocArgs>(
             "move_doc",
-            "Move a visible document, with its sub-documents, under another document or to a space root, using its current version. dropped_values counts the database property values that the move deleted.",
+            "Move a visible document, with its sub-documents, under another document or to a space root, using its current version. dropped_values counts the database property values that the move deleted. Send dry_run: true first to see dropped_values without moving.",
             true,
         ),
         definition::<DocVersionsArgs>(
@@ -1123,6 +1126,7 @@ impl TaskTools {
                     teamspace_id: a.teamspace_id.as_deref().map(parse_id).transpose()?,
                     private: a.private,
                     position: a.position,
+                    dry_run: a.dry_run,
                 };
                 api.move_doc(parse_id(&a.page_id)?, a.expected_version, target)
                     .await

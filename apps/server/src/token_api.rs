@@ -560,8 +560,9 @@ pub struct DocView {
 pub struct MovedDocView {
     #[serde(flatten)]
     pub doc: DocView,
-    /// Property values that the move deleted: the doc left its database, or the new database has
-    /// no property of the same name and type (or no such option) for them.
+    /// Property values that the move deleted (with `dry_run`: would delete): the doc left its
+    /// database, or the new database has no property of the same name and type (or no such
+    /// option) for them.
     pub dropped_values: u64,
 }
 
@@ -631,7 +632,8 @@ pub struct DocMove {
     /// Root moves only: `true` moves the doc to the token creator's private space.
     pub private: Option<bool>,
     /// Index among the new siblings; `None` puts the doc last.
-    pub position: Option<u64>,
+    pub position: Option<u64>,    /// Checks the move and counts `dropped_values`, then changes nothing.
+    pub dry_run: bool,
 }
 
 #[derive(Debug, Default)]
@@ -1841,6 +1843,7 @@ impl Authorized<'_> {
                 target.position.map_or(i64::MAX, |position| {
                     i64::try_from(position).unwrap_or(i64::MAX)
                 }),
+                target.dry_run,
                 self.request_id,
                 TimestampMillis::now(),
             )

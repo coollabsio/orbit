@@ -448,7 +448,8 @@ trash, where people can restore them; deleting forever is not available. `move_d
 `page_id`, `expected_version` and a place: `parent_id`, or for a root move `teamspace_id` or
 `private: true` (omitted: the doc's own space), and an optional `position` among the new
 siblings (default: last). Its result has `dropped_values`: the database property values that
-the move deleted. `list_doc_versions` takes `page_id` and optional `cursor`, `limit`, and lists
+the move deleted. With `dry_run: true`, `move_doc` checks the move and returns the doc as it
+would be with `dropped_values`, but moves nothing and keeps the current `version`. `list_doc_versions` takes `page_id` and optional `cursor`, `limit`, and lists
 the stored versions newest first, without content. `get_doc_version` takes `page_id` and
 `version_id` and returns that version with `markdown`; to restore it, send that Markdown to
 `update_doc`.

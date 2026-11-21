@@ -421,7 +421,8 @@ async fn a_row_moved_out_loses_its_values_and_search_text_and_can_move_back() {
             &preview["database_id"],
             preview["version"].as_u64()
         ),
-        (Some(2), &Value::Null, Some(version.as_u64().unwrap() + 1))
+        // The version stays the current one, so the same body without `dry_run` does the move.
+        (Some(2), &Value::Null, version.as_u64())
     );
     assert_eq!(fixture.page(&row).await["version"], version);
     assert_eq!(fixture.stored_values(&row).await, 2);

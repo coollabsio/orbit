@@ -1227,7 +1227,10 @@ struct MoveDocBody {
     private: Option<bool>,
     /// Index among the new siblings, from 0. Omitted, or past the last sibling, puts the doc
     /// last. A doc that enters a database always goes last.
-    position: Option<u64>,
+    position: Option<u64>,    /// `true` checks the move and returns the doc as it would be, with `dropped_values`, but
+    /// changes nothing. `version` stays the current one.
+    #[serde(default)]
+    dry_run: bool,
 }
 
 #[derive(Deserialize, IntoParams)]
@@ -1978,6 +1981,7 @@ async fn move_doc(
             teamspace_id: body.teamspace_id,
             private: body.private,
             position: body.position,
+            dry_run: body.dry_run,
         };
         api.move_doc(page, body.expected_version, target).await
     }

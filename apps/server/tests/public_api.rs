@@ -3706,3 +3706,55 @@ async fn chat_reads_need_the_chat_scope() {
     assert_eq!(code, StatusCode::NOT_FOUND);
 }
 
+#[tokio::test]
+async fn a_dry_run_move_counts_the_values_it_would_drop_and_changes_nothing() {
+    let f = Fixture::new().await;
+    let (writer, _) = f.token(&[ApiTokenScope::DocsWrite], false).await;
+    let (code, database) = f
+        .call(
+            Some(&writer),
+            "POST",
+            "/databases",
+            Some(json!({"title": "Papers", "properties": [{"name": "Score", "type": "number"}]})),
+        )
+        .await;
+    assert_eq!(code, StatusCode::CREATED, "{database}");
+    let database_id = database["id"].as_str().unwrap().to_owned();
+    let (code, row) = f
+        .call(
+            Some(&writer),
+            "POST",
+            &format!("/docs/{database_id}/rows"),
+            Some(json!({"title": "Paper A", "values": {"Score": 3}})),
+        )
+        .await;
+    assert_eq!(code, StatusCode::CREATED, "{row}");
+    let id = row["id"].as_str().unwrap().to_owned();
+    let (_, row) = f
+        .call(Some(&writer), "GET", &format!("/docs/{id}"), None)
+        .await;
+    let path = format!("/docs/{id}/move");
+    let body = json!({"expected_version": row["version"], "parent_id": null});
+
+    let mut dry = body.clone();
+    dry["dry_run"] = json!(true);
+    let (code, preview) = f.call(Some(&writer), "POST", &path, Some(dry)).await;
+    assert_eq!(code, StatusCode::OK, "{preview}");
+    assert_eq!(preview["dropped_values"], 1, "{preview}");
+    assert_eq!(preview["parent_id"], Value::Null, "{preview}");
+    assert_eq!(preview["version"], row["version"], "{preview}");
+    // Nothing moved: the row is still in its database with its value.
+    let (_, read) = f
+        .call(Some(&writer), "GET", &format!("/docs/{id}"), None)
+        .await;
+    assert_eq!(read["parent_id"], database["id"], "{read}");
+    assert_eq!(read["version"], row["version"], "{read}");
+    assert_eq!(read["values"]["Score"], 3.0, "{read}");
+
+    // The same body without `dry_run` does the move that the preview showed.
+    let (code, moved) = f.call(Some(&writer), "POST", &path, Some(body)).await;
+    assert_eq!(code, StatusCode::OK, "{moved}");
+    assert_eq!(moved["dropped_values"], 1, "{moved}");
+    assert_eq!(moved["parent_id"], Value::Null, "{moved}");
+    assert_ne!(moved["version"], row["version"], "{moved}");
+}

@@ -1322,6 +1322,7 @@ impl PageRepository {
         parent_id: Option<Id>,
         space: SpaceRequest,
         position: i64,
+        dry_run: bool,
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<MovedPage, PageError> {
@@ -1333,7 +1334,7 @@ impl PageRepository {
             parent_id,
             space,
             position,
-            false,
+            dry_run,
             request_id,
             now,
         )
@@ -1471,16 +1472,21 @@ impl PageRepository {
             .await?;
         }
         let updated_by_user = user_in_tx(&mut tx, actor_id).await?;
+        // A dry run keeps the current version, so the caller can send it again for the real move.
         let page = PageRecord {
             parent_id,
             teamspace_id: space.teamspace_id(),
             private: space.teamspace_id().is_none(),
             database_id,
             position: index as i64,
-            version: current.version + 1,
-            updated_by: actor_id,
-            updated_by_user,
-            updated_at: now,
+            version: current.version + u64::from(!dry_run),
+            updated_by: if dry_run { current.updated_by } else { actor_id },
+            updated_by_user: if dry_run {
+                current.updated_by_user.clone()
+            } else {
+                updated_by_user
+            },
+            updated_at: if dry_run { current.updated_at } else { now },
             ..current
         };
         if dry_run {

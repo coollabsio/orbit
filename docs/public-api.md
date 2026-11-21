@@ -697,7 +697,7 @@ curl -sS -X PATCH "$ORBIT_WS/docs/$PAGE_ID" -H "Authorization: Bearer $ORBIT_TOK
 
 `POST /workspaces/{workspace_id}/docs/{page_id}/move`. Scope: `docs:write`. Body:
 `expected_version` (required), `parent_id` (required: a doc ID, or `null` for a
-space root) and optional `position`, `teamspace_id` and `private`. The doc and
+space root) and optional `position`, `teamspace_id`, `private` and `dry_run`. The doc and
 its sub-docs go under the new parent and take the parent's space. With
 `parent_id: null`, `teamspace_id` moves the doc to that teamspace and
 `private: true` moves it to the token creator's private space; with neither,
@@ -705,7 +705,12 @@ the doc keeps its space. `position` is the index among the new siblings, from 0;
 without it, or past the last sibling, the doc goes last. A doc that moves into a
 database always goes last. Response: `200` with the doc record, as `GET` shows
 it after the move, and `dropped_values`: how many property values the move
-deleted because the new database cannot hold them. `expected_version` works as
+deleted because the new database cannot hold them. With `dry_run: true`, Orbit
+does all checks and returns the doc as it would be after the move, with the
+`dropped_values` that the move would delete, but changes nothing; `version`
+stays the current one, so you can send the same body without `dry_run` to do the
+move. Use it before you move a database row to another database or out of
+its database. `expected_version` works as
 in `PATCH`: a stale value gets `409`. A move under the doc itself or under one
 of its sub-docs gets `422`; moving a database under a database gets `409`
 (`database_in_database`); moving teamspace docs that others created into a
