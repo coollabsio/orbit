@@ -77,7 +77,7 @@ export function ComposerDock() {
   const [mountSequence] = useState(() => Math.max(0, ...store.getSnapshot().windows.map((entry) => entry.openedAt)))
   if (state.windows.length === 0) return null
   return (
-    <div data-slot="composer-dock" className="pointer-events-none fixed right-4 bottom-4 z-40 flex items-end justify-end gap-3 max-[899px]:right-2 max-[899px]:bottom-2">
+    <div data-slot="composer-dock" className="pointer-events-none fixed right-4 bottom-4 z-40 flex items-end justify-end gap-3 max-[899px]:right-2 max-[899px]:bottom-[calc(5rem+env(safe-area-inset-bottom,0px))]">
       {checked && layout.pills.length > 0 ? (
         <div inert={layout.full !== null} className="flex max-w-[50vw] flex-wrap-reverse items-end justify-end gap-2 max-[899px]:max-w-none">
           {layout.pills.map((id) => (
@@ -210,8 +210,8 @@ function DockWindowFrame({
       className={cn(
         'pointer-events-auto flex flex-col',
         full
-          ? 'fixed inset-0 z-50'
-          : 'h-[min(620px,calc(100svh-2rem))] w-[520px] origin-bottom-right max-[899px]:fixed max-[899px]:inset-2 max-[899px]:h-auto max-[899px]:w-auto',
+          ? 'fixed inset-x-0 top-0 z-50 h-[var(--app-height,100svh)] bg-background pt-[env(safe-area-inset-top,0px)] pr-[env(safe-area-inset-right,0px)] pb-[env(safe-area-inset-bottom,0px)] pl-[env(safe-area-inset-left,0px)] in-data-keyboard:pb-0'
+          : 'h-[min(620px,calc(100svh-2rem))] w-[520px] origin-bottom-right max-[899px]:fixed max-[899px]:inset-x-0 max-[899px]:top-0 max-[899px]:h-[var(--app-height,100svh)] max-[899px]:w-auto max-[899px]:bg-background max-[899px]:pt-[env(safe-area-inset-top,0px)] max-[899px]:pr-[env(safe-area-inset-right,0px)] max-[899px]:pb-[env(safe-area-inset-bottom,0px)] max-[899px]:pl-[env(safe-area-inset-left,0px)] max-[899px]:in-data-keyboard:pb-0',
         // opened by a click: 200 ms from the bottom right (reduced motion: the fade only). Opened by a key, and full
         // screen and back: at once. A hidden window shown again by a click plays it again (display: none restarts it).
         !full && animate && 'animate-composer-window-enter motion-reduce:animate-composer-window-fade',

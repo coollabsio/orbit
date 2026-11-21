@@ -2,6 +2,7 @@
 // focus in the text. No motion: it opens many times a day, mostly from the keyboard. A thread has one draft for each
 // member: a draft left earlier shows as a "Draft" line to continue; one popped out to a window says so.
 import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type ReactNode, type Ref } from 'react'
+import { createPortal } from 'react-dom'
 import { ForwardRight, Reply } from 'reicon-react'
 import { toast } from 'sonner'
 import type { MailMessageView } from '@orbit/api/generated/types.gen'
@@ -17,6 +18,7 @@ import { heldReplyState } from '../mailStatus'
 import { useQueryClient } from '@tanstack/react-query'
 import { ApiProblem } from '@orbit/api/problem'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
+import { useIsPhone } from '@/features/chat/pages/useChatViewport'
 import { personName, problemText, sendingOutboundId } from '../mailLib'
 import { Composer, type ComposerHandle } from './Composer'
 import { reopenDraft, useArchiveAfterSend, useComposerDock, useInlineReplyHost } from './useComposerDock'
@@ -40,6 +42,7 @@ interface ThreadReplyProps {
 
 export function ThreadReply({ threadId, last, ref }: ThreadReplyProps) {
   const { state: dock, store } = useComposerDock()
+  const phone = useIsPhone()
   const create = useCreateDraft()
   const announce = useAnnounceSent()
   const archiveAfterSend = useArchiveAfterSend()
@@ -181,6 +184,24 @@ export function ThreadReply({ threadId, last, ref }: ThreadReplyProps) {
   // the reply goes to the sender of the newest message, unless the user sent it (then to its recipients)
   const replyTo = last && !last.delivery && last.from ? personName(last.from) : null
 
+  if (openId && phone) {
+    // a phone writes the reply full screen, as the native app does (the thread stays below it)
+    return createPortal(
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Reply"
+        data-slot="thread-reply"
+        // the visible height (above the keyboard) and clear of the notch, the home bar and the rounded corners; with the
+        // keyboard open, the home bar is under it
+        className="fixed inset-x-0 top-0 z-50 flex h-[var(--app-height,100svh)] flex-col bg-background pt-[env(safe-area-inset-top,0px)] pr-[env(safe-area-inset-right,0px)] pb-[env(safe-area-inset-bottom,0px)] pl-[env(safe-area-inset-left,0px)] in-data-keyboard:pb-0"
+      >
+        <Composer key={openId} draftId={openId} placement="full" className="min-h-0 flex-1" handleRef={composer} onClose={collapse} onSent={onSent} />
+      </div>,
+      document.body,
+    )
+  }
+
   if (openId) {
     return (
       <div ref={box} data-slot="thread-reply" className="scroll-mb-6 pt-4">
@@ -198,8 +219,17 @@ export function ThreadReply({ threadId, last, ref }: ThreadReplyProps) {
   }
 
   return (
-    // the bar stays at the bottom of the pane while the thread scrolls: the reply is always one click (or R) away
-    <div data-slot="thread-reply" data-print-hide="" className={`sticky bottom-0 z-10 -mx-5 -mb-8 flex flex-col gap-2 bg-linear-to-t from-background from-75% to-transparent px-5 pt-6 ${dockOpen ? 'pb-16' : 'pb-5'}`}>
+    // the bar stays at the bottom of the pane while the thread scrolls: the reply is always one click (or R) away.
+    // A phone shows the native app's row instead: Reply, Reply all and Forward under the last message, after a line.
+    <div
+      data-slot="thread-reply"
+      data-print-hide=""
+      className={
+        phone
+          ? 'mt-4 flex flex-col gap-3 border-t pt-4 pb-4'
+          : `sticky bottom-0 z-10 -mx-5 -mb-8 flex flex-col gap-2 bg-linear-to-t from-background from-75% to-transparent px-5 pt-6 ${dockOpen ? 'pb-16' : 'pb-5'}`
+      }
+    >
       {saved && !savedInDock ? (
         <button
           type="button"
@@ -228,6 +258,24 @@ export function ThreadReply({ threadId, last, ref }: ThreadReplyProps) {
           </Button>
         </p>
       ) : null}
+      {phone ? (
+        <div ref={actions} className="flex flex-wrap gap-2">
+          <Button variant="outline" disabled={create.isPending} onClick={() => start('reply', true)}>
+            <Reply />
+            Reply
+          </Button>
+          {replyAll ? (
+            <Button variant="outline" disabled={create.isPending} onClick={() => start('reply_all', true)}>
+              <Reply />
+              Reply all
+            </Button>
+          ) : null}
+          <Button variant="outline" disabled={create.isPending} onClick={() => start('forward', true)}>
+            <ForwardRight />
+            Forward
+          </Button>
+        </div>
+      ) : (
       <div ref={actions} className="flex min-w-0 items-center gap-1 rounded-xl border bg-card p-1 shadow-sm">
         <button
           type="button"
@@ -242,6 +290,7 @@ export function ThreadReply({ threadId, last, ref }: ThreadReplyProps) {
         {replyAll ? <ReplyButton label="Reply all" command="mail.replyAll" icon={<Reply />} disabled={create.isPending} onClick={() => start('reply_all', true)} /> : null}
         <ReplyButton label="Forward" command="mail.forward" icon={<ForwardRight />} disabled={create.isPending} onClick={() => start('forward', true)} />
       </div>
+      )}
     </div>
   )
 }

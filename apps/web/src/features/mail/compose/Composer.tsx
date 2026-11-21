@@ -29,6 +29,7 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Spinner } from '@/components/ui/spinner'
 import { ShortcutKeys } from '@/shortcuts/Shortcut'
+import { useIsPhone } from '@/features/chat/pages/useChatViewport'
 import { problemText, type DraftText } from '../mailLib'
 import { useDeleteDraft, useRemoveDraftFile, useSaveDraft, useSetDraftFileLink, useUploadDraftFile } from '../api/mutations'
 import { fetchDraftFile, useDraft, useDraftCheck, useFromAddresses, useSnippets, useThread } from '../api/queries'
@@ -82,7 +83,8 @@ export interface ComposerProps {
 
 const ROOT_CLASS: Record<ComposerPlacement, string> = {
   inline: 'rounded-xl border bg-card shadow-xs',
-  window: 'h-full min-h-0 overflow-hidden rounded-xl border bg-popover shadow-2xl',
+  // on a phone the window fills the screen, as the full form does
+  window: 'h-full min-h-0 overflow-hidden rounded-xl border bg-popover shadow-2xl max-[899px]:rounded-none max-[899px]:border-0 max-[899px]:bg-background max-[899px]:shadow-none',
   full: 'h-full min-h-0 bg-background',
 }
 
@@ -615,8 +617,10 @@ function ComposerBody({
   }
 
   const inline = placement === 'inline'
+  // a phone shows the composer full screen, as the native app does: Close on the left, Send on the right
+  const phone = useIsPhone() && !inline
   const title = subject.trim() || (draft.mode === 'new' ? 'New message' : draft.mode.startsWith('forward') ? 'Forward' : 'Reply')
-  const showFrom = fromAddresses.length > 1 || (fromAddress !== undefined && fromAddress.ready !== 'ready')
+  const showFrom = phone || fromAddresses.length > 1 || (fromAddress !== undefined && fromAddress.ready !== 'ready')
   const ccToggles = (
     <span className="mt-[5px] flex shrink-0 items-center gap-0.5">
       {!showCc ? (
@@ -635,7 +639,16 @@ function ComposerBody({
 
   return (
     <div data-slot="composer" data-placement={placement} className={cn('relative', className)} onKeyDownCapture={onKeyDownCapture} onKeyDown={onKeyDown} {...drag}>
-      {!inline ? (
+      {phone ? (
+        <header className="flex h-12 shrink-0 items-center gap-1 border-b border-border/60 px-2">
+          <Button variant="ghost" size="icon" className="text-muted-foreground" aria-label="Close" onClick={close}>
+            <X />
+          </Button>
+          <h2 className="min-w-0 flex-1 truncate text-[0.8125rem] font-semibold">{title}</h2>
+          {headerActions}
+          <SendButton blocked={blocked} sending={sending} anyway={warnings.length > 0} inThread={Boolean(draft.thread_id)} onSend={(options) => void send(options)} />
+        </header>
+      ) : !inline ? (
         <header className="flex h-10 shrink-0 items-center gap-1 border-b border-border/60 pr-1.5 pl-3">
           <h2 className="min-w-0 flex-1 truncate text-[0.8125rem] font-semibold">{title}</h2>
           {headerActions}
@@ -729,6 +742,12 @@ function ComposerBody({
         </Suspense>
       </div>
 
+      {phone && draft.mode !== 'new' ? (
+        <p className="shrink-0 px-3 pb-2 text-xs text-muted-foreground">
+          {draft.mode.startsWith('forward') ? 'The forwarded message goes below your text.' : 'The message you answer is quoted below your text.'}
+        </p>
+      ) : null}
+
       <ComposerFiles files={files} pending={pending} busy={busy} tooLarge={tooLarge} onRemove={dropFile} onToggleLink={toggleLink} onLinkSuggested={linkSuggested} />
 
       {warnings.length > 0 ? (
@@ -749,13 +768,13 @@ function ComposerBody({
             </p>
           ))}
           <p className="flex items-center gap-1.5 pl-5.5 text-xs text-muted-foreground">
-            Press <ShortcutKeys keys="Mod+Enter" /> again to send anyway.
+            {phone ? 'Tap Send anyway to send it.' : <>Press <ShortcutKeys keys="Mod+Enter" /> again to send anyway.</>}
           </p>
         </div>
       ) : null}
 
       <footer className="flex shrink-0 items-center gap-1 px-3 pb-3">
-        <SendButton blocked={blocked} sending={sending} anyway={warnings.length > 0} inThread={Boolean(draft.thread_id)} onSend={(options) => void send(options)} />
+        {phone ? null : <SendButton blocked={blocked} sending={sending} anyway={warnings.length > 0} inThread={Boolean(draft.thread_id)} onSend={(options) => void send(options)} />}
         <Tip label="Attach files">
           <Button variant="ghost" size="icon-sm" className="text-muted-foreground" aria-label="Attach files" onClick={() => fileInput.current?.click()}>
             <Paperclip2 />
