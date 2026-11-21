@@ -3455,6 +3455,23 @@ async fn the_trash_lists_shows_and_restores_tasks_and_docs() {
             Some(json!({"title": "Old"})),
         )
         .await;
+    let (code, child) = f
+        .call(
+            Some(&writer),
+            "POST",
+            "/docs",
+            Some(json!({"title": "Old notes", "parent_id": doc["id"]})),
+        )
+        .await;
+    assert_eq!(code, StatusCode::CREATED, "{child}");
+    let (_, doc) = f
+        .call(
+            Some(&writer),
+            "GET",
+            &format!("/docs/{}", doc["id"].as_str().unwrap()),
+            None,
+        )
+        .await;
     let doc_path = format!("/docs/{}", doc["id"].as_str().unwrap());
     let (code, _) = f
         .call(
@@ -3480,6 +3497,21 @@ async fn the_trash_lists_shows_and_restores_tasks_and_docs() {
         .await;
     assert_eq!(code, StatusCode::OK, "{back}");
     assert_eq!(back["title"], "Old");
+    // The sub-doc trashed with the doc came back with it.
+    assert_eq!(
+        back["restored_descendant_ids"],
+        json!([child["id"]]),
+        "{back}"
+    );
+    let (code, _) = f
+        .call(
+            Some(&writer),
+            "GET",
+            &format!("/docs/{}", child["id"].as_str().unwrap()),
+            None,
+        )
+        .await;
+    assert_eq!(code, StatusCode::OK);
 }
 
 #[tokio::test]

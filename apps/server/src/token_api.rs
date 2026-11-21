@@ -73,7 +73,7 @@ pub use mail::{
 pub use plan::{NOON_MS, parse_plan_time};
 pub use projects::{BulkTaskUpdate, BulkTasks, CycleMove, ReorderItem};
 pub use setup::StatusPatch;
-pub use trash::{TrashedTaskPreview, TrashedTaskView};
+pub use trash::{RestoredDocView, TrashedTaskPreview, TrashedTaskView};
 
 const PRIORITIES: [&str; 5] = ["none", "low", "medium", "high", "urgent"];
 /// The web app's second project color, indigo.

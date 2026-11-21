@@ -13,6 +13,17 @@ use crate::repositories::api_tokens::ApiTokenScope;
 use crate::repositories::pages::{PageError, PageTrash, revision};
 use crate::repositories::tasks::{LabelRecord, Page, StatusRecord, TaskError, TaskRecord};
 
+/// A doc after a restore, with the sub-docs that came back with it.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+#[schema(as = PublicRestoredDoc)]
+pub struct RestoredDocView {
+    #[serde(flatten)]
+    pub doc: DocView,
+    /// The sub-docs (and database rows) trashed with the doc, which came back with it.
+    #[schema(value_type = Vec<String>)]
+    pub restored_descendant_ids: Vec<Id>,
+}
+
 /// A task in the trash, in the public form of [`TaskView`] (no references outside the grant).
 #[derive(Clone, Debug, Serialize, ToSchema)]
 #[schema(as = PublicTrashedTask)]
@@ -166,7 +177,7 @@ impl Authorized<'_> {
     }
 
     /// Restores a trashed doc with the sub-docs trashed with it.
-    pub async fn restore_doc(&self, page_id: Id, expected_version: u64) -> Result<DocView> {
+    pub async fn restore_doc(&self, page_id: Id, expected_version: u64) -> Result<RestoredDocView> {
         let pages = self.content(ApiTokenScope::DocsWrite, &self.api.pages)?;
         let p = self.principal;
         let now = TimestampMillis::now();
@@ -183,7 +194,7 @@ impl Authorized<'_> {
             }
             .into());
         }
-        let page = pages
+        let (page, restored_descendant_ids) = pages
             .restore_page(
                 p.workspace_id,
                 page_id,
@@ -193,6 +204,9 @@ impl Authorized<'_> {
                 now,
             )
             .await?;
-        self.doc_view(pages, page).await
+        Ok(RestoredDocView {
+            doc: self.doc_view(pages, page).await?,
+            restored_descendant_ids,
+        })
     }
 }

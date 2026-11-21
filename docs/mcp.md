@@ -465,7 +465,8 @@ approved, so a page can hold fewer than `limit` items: follow `next_cursor`. Res
 restores the sub-issues trashed with it; a task whose parent is still in the trash comes back at
 the top level. A task that is only in a trashed project is not in the task trash.
 `list_doc_trash` lists only docs trashed directly, with `version` for `restore_doc`; restoring a
-doc restores its sub-docs, and a database row comes back only after its database.
+doc restores its sub-docs and returns their IDs in `restored_descendant_ids`, and a database
+row comes back only after its database.
 Milestone and cycle dates take an RFC 3339 time or `YYYY-MM-DD` (a milestone's day is noon UTC, a
 cycle's day is midnight UTC). A cycle's `ends_at` is exclusive. `create_cycle` without dates
 starts where the project's last cycle ends and lasts as many days; the first cycle starts today

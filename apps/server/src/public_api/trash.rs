@@ -10,7 +10,7 @@ use utoipa::ToSchema;
 use super::{Ctx, List, PageQuery, PublicApiState, list, problem_response};
 use crate::repositories::api_tokens::ApiTokenScope;
 use crate::repositories::pages::TrashedPage;
-use crate::token_api::{DocView, TaskView, TokenApiError, TrashedTaskView};
+use crate::token_api::{RestoredDocView, TaskView, TokenApiError, TrashedTaskView};
 use orbit_platform::Id;
 
 #[derive(Deserialize, ToSchema)]
@@ -139,7 +139,7 @@ pub(super) async fn doc_trash(State(s): State<PublicApiState>, ctx: Ctx) -> Resp
     description = "Brings back the sub-docs trashed with it. A row of a database that is in the trash cannot be restored before the database.",
     params(("workspace_id" = String, Path, description = "The token's workspace, from `GET /me`."), ("page_id" = String, Path)),
     request_body = RestoreBody,
-    responses((status = 200, description = "The doc, as `GET /docs/{page_id}` shows it", body = DocView)),
+    responses((status = 200, description = "The doc, as `GET /docs/{page_id}` shows it, with `restored_descendant_ids`", body = RestoredDocView)),
     security(("bearerAuth" = []))
 )]
 pub(super) async fn restore_doc(

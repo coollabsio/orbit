@@ -1480,7 +1480,11 @@ impl PageRepository {
             database_id,
             position: index as i64,
             version: current.version + u64::from(!dry_run),
-            updated_by: if dry_run { current.updated_by } else { actor_id },
+            updated_by: if dry_run {
+                current.updated_by
+            } else {
+                actor_id
+            },
             updated_by_user: if dry_run {
                 current.updated_by_user.clone()
             } else {
@@ -1669,8 +1673,9 @@ impl PageRepository {
         Ok(())
     }
 
-    /// Restores the page and the descendants trashed in the same batch. A page whose parent is
-    /// no longer live goes to the root of its own space.
+    /// Restores the page and the descendants trashed in the same batch, and returns the page with
+    /// the IDs of those descendants. A page whose parent is no longer live goes to the root of its
+    /// own space.
     #[allow(clippy::too_many_arguments)]
     pub async fn restore_page(
         &self,
@@ -1680,7 +1685,7 @@ impl PageRepository {
         expected_version: u64,
         request_id: &str,
         now: TimestampMillis,
-    ) -> Result<PageRecord, PageError> {
+    ) -> Result<(PageRecord, Vec<Id>), PageError> {
         let mut tx = self.database.immediate_transaction().await?;
         require_access_tx(&mut tx, workspace_id, actor_id).await?;
         let current = page_in_tx(&mut tx, workspace_id, page_id, actor_id, true).await?;
@@ -1695,29 +1700,37 @@ impl PageRepository {
                 .bind(page_id.to_string())
                 .fetch_one(&mut *tx)
                 .await?;
-        let restored: i64 = sqlx::query_scalar(
+        let restored: Vec<String> = sqlx::query_scalar(
             "WITH RECURSIVE subtree(id) AS ( \
                  SELECT $1 \
                  UNION ALL \
                  SELECT pages.id FROM pages JOIN subtree ON pages.parent_id = subtree.id \
                  WHERE pages.deleted_at IS NOT NULL AND pages.trashed_with = $2 \
              ) \
-             SELECT CAST(COUNT(*) AS BIGINT) FROM pages \
-             WHERE workspace_id = $3 AND deleted_at IS NOT NULL AND id IN (SELECT id FROM subtree)",
+             SELECT id FROM pages \
+             WHERE workspace_id = $3 AND deleted_at IS NOT NULL AND id IN (SELECT id FROM subtree) \
+             ORDER BY id",
         )
         .bind(page_id.to_string())
         .bind(&batch)
         .bind(workspace_id.to_string())
-        .fetch_one(&mut *tx)
+        .fetch_all(&mut *tx)
         .await?;
         ensure_trial_capacity(
             &self.database,
             &mut tx,
             workspace_id,
             TrialLimit::Pages,
-            restored,
+            restored.len() as i64,
         )
         .await?;
+        let mut descendant_ids = Vec::with_capacity(restored.len());
+        for id in restored {
+            let id = parse_id(id)?;
+            if id != page_id {
+                descendant_ids.push(id);
+            }
+        }
         let space = current.space(actor_id);
         let parent_id = match current.parent_id {
             Some(parent_id)
@@ -1776,7 +1789,7 @@ impl PageRepository {
         .await?;
         let updated_by_user = user_in_tx(&mut tx, actor_id).await?;
         tx.commit().await?;
-        Ok(PageRecord {
+        let page = PageRecord {
             parent_id,
             position: index as i64,
             version: current.version + 1,
@@ -1785,7 +1798,8 @@ impl PageRepository {
             updated_at: now,
             deleted_at: None,
             ..current
-        })
+        };
+        Ok((page, descendant_ids))
     }
 
     /// Pages trashed directly (not along with an ancestor), newest first.

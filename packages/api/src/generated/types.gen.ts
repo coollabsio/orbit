@@ -9531,6 +9531,16 @@ export type PublicRestoreProjectBody = {
     expected_version: number;
 };
 
+/**
+ * A doc after a restore, with the sub-docs that came back with it.
+ */
+export type PublicRestoredDoc = PublicDoc & {
+    /**
+     * The sub-docs (and database rows) trashed with the doc, which came back with it.
+     */
+    restored_descendant_ids: Array<string>;
+};
+
 export type PublicSendMailDraftBody = {
     /**
      * Send at this RFC 3339 time instead of after your undo-send time. Must be in the future.
@@ -16261,9 +16271,9 @@ export type PublicRestoreDocError = PublicRestoreDocErrors[keyof PublicRestoreDo
 
 export type PublicRestoreDocResponses = {
     /**
-     * The doc, as `GET /docs/{page_id}` shows it
+     * The doc, as `GET /docs/{page_id}` shows it, with `restored_descendant_ids`
      */
-    200: PublicDoc;
+    200: PublicRestoredDoc;
 };
 
 export type PublicRestoreDocResponse = PublicRestoreDocResponses[keyof PublicRestoreDocResponses];

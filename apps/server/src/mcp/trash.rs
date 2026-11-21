@@ -74,7 +74,7 @@ pub(super) fn tools() -> Vec<Tool> {
         ),
         write_definition::<RestoreDocArgs>(
             "restore_doc",
-            "Restore a doc from the trash with the sub-docs trashed with it. A row of a database that is in the trash cannot be restored before the database. Returns the doc as get_doc does.",
+            "Restore a doc from the trash with the sub-docs trashed with it. A row of a database that is in the trash cannot be restored before the database. Returns the doc as get_doc does, with restored_descendant_ids: the sub-docs that came back with it.",
             false,
         ),
     ]

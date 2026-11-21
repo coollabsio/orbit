@@ -749,7 +749,8 @@ with a parent doc are not listed: restoring the parent brings them back. Docs st
 `POST /workspaces/{workspace_id}/docs/{page_id}/restore`. Scope: `docs:write`. Body:
 `{expected_version}`, the `version` from the trash. Restores the doc with the sub-docs trashed with
 it. A row of a database that is in the trash cannot be restored before the database. Answers 200
-with the doc, as `GET /docs/{page_id}` shows it, or 409 after a change.
+with the doc, as `GET /docs/{page_id}` shows it, and `restored_descendant_ids`: the IDs of the
+sub-docs (and database rows) that came back with it. It answers 409 after a change.
 
 `GET /workspaces/{workspace_id}/docs/{page_id}/comments`. Scope: `docs:read`. The comment threads of
 the doc, oldest first, on one page. Item: `{id, quote, resolved, resolved_by, created_by,

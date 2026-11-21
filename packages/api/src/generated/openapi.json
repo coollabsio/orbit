@@ -7850,11 +7850,11 @@
         },
         "responses": {
           "200": {
-            "description": "The doc, as `GET /docs/{page_id}` shows it",
+            "description": "The doc, as `GET /docs/{page_id}` shows it, with `restored_descendant_ids`",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PublicDoc"
+                  "$ref": "#/components/schemas/PublicRestoredDoc"
                 }
               }
             }
@@ -122971,6 +122971,29 @@
           }
         },
         "additionalProperties": false
+      },
+      "PublicRestoredDoc": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/PublicDoc"
+          },
+          {
+            "type": "object",
+            "required": [
+              "restored_descendant_ids"
+            ],
+            "properties": {
+              "restored_descendant_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "The sub-docs (and database rows) trashed with the doc, which came back with it."
+              }
+            }
+          }
+        ],
+        "description": "A doc after a restore, with the sub-docs that came back with it."
       },
       "PublicSendMailDraftBody": {
         "type": "object",
