@@ -6,7 +6,8 @@ Screenshots of the iOS app with the "Acme" demo workspace, for App Store Connect
 | Folder | Size | App Store slot |
 | --- | --- | --- |
 | `screenshots/iphone-6.9/` | 1320×2868 | iPhone 6.9" |
-| `screenshots/ipad-13/` | 2064×2752 | iPad 13" |
+| `screenshots/iphone-6.5/` | 1284×2778 | iPhone 6.5" (scaled from 6.9") |
+| `screenshots/ipad-13/` | 2064×2752 | iPad 13" (not used: the app is iPhone only, `supportsTablet: false`) |
 
 The images come from the mobile app's Expo web build in Chromium, not from a real device.
 
@@ -24,6 +25,7 @@ database does not change. Build the server first (`cargo build -p orbit-server`)
 4. Start Expo web: `cd apps/mobile && bunx expo start --web --port 8082`
 5. Take the screenshots, for each device:
    `node marketing/app-store/shoot.mjs marketing/app-store/screenshots/iphone-6.9 http://127.0.0.1:19181 /root/orbit-appstore-demo/maya.token "$(cat /root/orbit-appstore-demo/ids.json)" iphone`
+   Make the 6.5" set from the 6.9" set: `ffmpeg -i <6.9 file> -vf "scale=1284:2790:flags=lanczos,crop=1284:2778:0:6,format=rgb24" <6.5 file>`
    (for iPad: folder `screenshots/ipad-13`, last argument `ipad`; add `light` after it for the light theme).
 
 All demo accounts use the password `demo-password-1` (`maya@acme.example`, `leo@…`, `sara@…`, `jon@…`, `ana@…`).

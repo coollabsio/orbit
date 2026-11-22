@@ -8,7 +8,7 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "supportsTablet": true,
+      "supportsTablet": false,
       "backgroundColor": "#0a0a0a",
       "bundleIdentifier": "io.coollabs.orbit",
       "config": {
