@@ -64,7 +64,9 @@ test('route_fields_per_kind: each kind asks for its own secrets and settings', (
   // what is required to create the route; an SMTP login is optional (both or neither)
   const required = (kind: SendRouteKind) => routeFields(kind).filter((field) => field.required).map((field) => field.name)
   expect(required('smtp')).toEqual(['host'])
-  expect(required('postshiba')).toEqual(['host', 'smtp_username', 'smtp_password', 'webhook_secret'])
+  // the webhook secret comes after the route exists (its events URL holds the route id)
+  expect(required('postshiba')).toEqual(['host', 'smtp_username', 'smtp_password'])
+  expect(required('resend')).toEqual(['api_key'])
   expect(required('ses')).toEqual(['region', 'access_key_id', 'secret_access_key'])
   expect(required('cloudflare')).toEqual(['account_id', 'api_token'])
   // secrets are never shown: password inputs

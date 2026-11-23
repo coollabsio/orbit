@@ -171,6 +171,7 @@ const SPF_FIELD = setting('spf', 'SPF entry', {
   placeholder: 'include:spf.example.com',
   help: 'What the domain’s SPF record must allow for this route: an include, IP addresses (ip4:…), or a whole v=spf1 record.',
 })
+const LATER_SECRET = 'You can leave it empty: save the route, add the webhook with the events URL Orbit then shows, and paste the secret here with Edit.'
 const SMTP_PORT = setting('port', 'Port', { input: 'number', placeholder: '587', help: 'Empty: 465 with TLS, 587 with STARTTLS, 25 without TLS.' })
 
 /** The inputs each kind needs (the server's `RouteSecrets` and `RouteSettings`); `direct` needs none. */
@@ -203,7 +204,7 @@ export function routeFields(kind: SendRouteKind): FieldSpec[] {
         { ...SMTP_PORT, defaultValue: '587', help: 'PostShiba takes STARTTLS on port 587 only.' },
         secret('smtp_username', 'SMTP user name'),
         secret('smtp_password', 'SMTP password'),
-        secret('webhook_secret', 'Events webhook secret', 'The signing secret of the events webhook you add for Orbit (not the inbox one).'),
+        secret('webhook_secret', 'Events webhook secret', `${LATER_SECRET} The signing secret of the events webhook you add for Orbit (not the inbox one).`, false),
         SPF_FIELD,
       ]
     case 'postmark':
@@ -214,7 +215,7 @@ export function routeFields(kind: SendRouteKind): FieldSpec[] {
     case 'resend':
       return [
         secret('api_key', 'API key', 'Resend → API keys → Create. Sending access is enough; Full access also works.'),
-        secret('webhook_secret', 'Webhook signing secret', 'Resend → Webhooks → add a webhook for email.delivered, email.bounced, email.complained and email.delivery_delayed with the events URL Orbit shows after you add the route. Its signing secret starts with whsec_.'),
+        secret('webhook_secret', 'Webhook signing secret', `${LATER_SECRET} Resend → Webhooks → add a webhook for email.delivered, email.bounced, email.complained and email.delivery_delayed with that URL. Its signing secret starts with whsec_.`, false),
       ]
     case 'mailgun':
       return [
@@ -348,6 +349,10 @@ export function routeFormReady(fields: FieldSpec[], form: { settings: FormValues
   return maxBytesValid(form.maxBytes)
 }
 
+/** A route whose events Orbit refuses until the user pastes the provider's webhook signing secret. */
+export const missingEventSecret = (route: { kind: string; secrets_set: string[] }) =>
+  (route.kind === 'postshiba' || route.kind === 'resend') && !route.secrets_set.includes('webhook_secret')
+
 /** Secrets the server makes for a new route when none are given (it checks them on the events it receives), shown once. */
 export function generatedSecrets(kind: SendRouteKind): string[] {
   if (kind === 'postmark') return ['webhook_user', 'webhook_password']
@@ -428,7 +433,7 @@ export function routeSetupSteps(kind: SendRouteKind, eventSecretFromProvider = f
     case 'postshiba':
       return [
         'In PostShiba, add an events webhook with the URL above, for bounce, complaint and delivery events.',
-        'Paste its signing secret into the route (it is not the inbox webhook’s secret).',
+        'Edit the route and paste its signing secret (it is not the inbox webhook’s secret).',
         'Publish the records PostShiba shows for each domain: the return path CNAME (rp.<domain>) and its DKIM.',
       ]
     case 'postmark':
@@ -440,7 +445,7 @@ export function routeSetupSteps(kind: SendRouteKind, eventSecretFromProvider = f
     case 'resend':
       return [
         'In Resend → Webhooks, add an endpoint with the URL above, for email.bounced, email.complained and email.delivered.',
-        'Paste its signing secret (whsec_…) into the route.',
+        'Edit the route and paste its signing secret (whsec_…).',
         'Verify each domain at Resend: publish its DKIM and send.<domain> records.',
       ]
     case 'mailgun':

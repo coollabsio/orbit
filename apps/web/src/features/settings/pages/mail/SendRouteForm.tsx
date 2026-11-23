@@ -20,6 +20,7 @@ import {
   CLOUDFLARE_EVENTS_WORKER,
   defaultMaxBytes,
   eventsUrlWithLogin,
+  missingEventSecret,
   generatedSecrets,
   initialSettingValues,
   isSendRouteKind,
@@ -366,6 +367,13 @@ export function RouteSetup({ route }: { route: MailSendRouteView }) {
         </Alert>
       ) : null}
       {route.events_url ? <CopyRow label="Events URL" value={eventsUrlWithLogin(route.events_url, login)} /> : null}
+      {route.events_url && missingEventSecret(route) ? (
+        <Alert>
+          <Danger />
+          <AlertTitle>Orbit refuses this route’s events until it has the webhook’s signing secret.</AlertTitle>
+          <AlertDescription>Add the webhook with this URL, then Edit the route and paste its signing secret.</AlertDescription>
+        </Alert>
+      ) : null}
       {kind === 'postmark' && !login ? (
         <p className="m-0 text-xs text-muted-foreground">
           {route.provider_id
