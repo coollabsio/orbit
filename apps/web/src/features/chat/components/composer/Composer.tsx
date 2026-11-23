@@ -171,7 +171,7 @@ export function Composer({ ref, conversation, threadRootId = null, replyTo = nul
    */
   function sendSticker(sticker: CustomStickerRecord) {
     setStickerOpen(false)
-    send({ conversationId, threadRootId, replyTo: replyTo && quoteOf(replyTo), body: '', sticker: { id: sticker.id, name: sticker.name, url: sticker.url } })
+    send({ conversationId, threadRootId, replyTo: replyTo && quoteOf(replyTo), body: '', sticker: { id: sticker.id, name: sticker.name, url: sticker.url }, alsoInChannel: inThread && alsoInChannel })
     onClearReply?.()
     onSent?.()
   }
@@ -183,7 +183,7 @@ export function Composer({ ref, conversation, threadRootId = null, replyTo = nul
     // the server takes a title of at most 200 characters
     const title = Array.from(item.title).slice(0, 200).join('')
     const media = { kind: item.kind, url: item.full.url, width: item.full.width, height: item.full.height, title }
-    send({ conversationId, threadRootId, replyTo: replyTo && quoteOf(replyTo), body: '', media })
+    send({ conversationId, threadRootId, replyTo: replyTo && quoteOf(replyTo), body: '', media, alsoInChannel: inThread && alsoInChannel })
     onClearReply?.()
     onSent?.()
   }

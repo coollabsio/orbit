@@ -22,7 +22,11 @@ use crate::repositories::chat::ChatMediaKind;
 pub const KLIPY_API_BASE: &str = "https://api.klipy.com/api/v1";
 const USER_AGENT: &str = "Orbit/1.0 (chat GIFs)";
 const PER_PAGE: &str = "24";
-const RATING: &str = "pg-13";
+/// KLIPY's safety level (`off`, `low`, `medium`, `high`; <https://docs.klipy.com/content-filtering>): about PG-13,
+/// for a work chat.
+const CONTENT_FILTER: &str = "medium";
+/// Only the formats that [`variant`] reads.
+const FORMAT_FILTER: &str = "webp,gif";
 /// The most bytes of one answer.
 const MAX_BODY_BYTES: usize = 2 * 1024 * 1024;
 /// The most bytes of the image a message shows, when KLIPY has no `md` size.
@@ -174,7 +178,8 @@ impl KlipyClient {
         let mut params = vec![
             ("page", page_text.as_str()),
             ("per_page", PER_PAGE),
-            ("rating", RATING),
+            ("content_filter", CONTENT_FILTER),
+            ("format_filter", FORMAT_FILTER),
         ];
         if !query.is_empty() {
             params.push(("q", query));

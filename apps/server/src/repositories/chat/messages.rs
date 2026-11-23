@@ -104,7 +104,8 @@ fn check_media(input: &MediaInput) -> Result<MessageMediaRecord, ChatError> {
             .ok_or_else(invalid)
     };
     let title = input.title.trim();
-    if title.chars().count() > MEDIA_TITLE_MAX_CHARS {
+    // Postgres text refuses NUL, and no title needs a control character.
+    if title.chars().count() > MEDIA_TITLE_MAX_CHARS || title.chars().any(char::is_control) {
         return Err(invalid());
     }
     Ok(MessageMediaRecord {

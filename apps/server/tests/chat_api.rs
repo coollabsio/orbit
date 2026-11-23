@@ -3522,6 +3522,7 @@ async fn a_forward_is_a_copy_with_its_files_that_mentions_nobody_and_outlives_th
         "conversation_id": source,
         "author_id": fixture.owner.id.to_string(),
         "created_at": sent["result"]["created_at"],
+        "bot_name": null,
     });
     assert_eq!(forward["forwarded"], origin);
     // The other members get the same event as for a sent message.
@@ -4200,6 +4201,8 @@ async fn a_message_can_carry_a_klipy_gif_that_forwards_quotes_and_deletes_with_i
         json!({ "kind": "gif", "url": url, "width": 0, "height": 180 }),
         json!({ "kind": "gif", "url": url, "width": 320, "height": 5000 }),
         json!({ "kind": "gif", "url": url, "width": 320, "height": 180, "title": long_title }),
+        // Postgres text refuses NUL: a 422, not a 500.
+        json!({ "kind": "gif", "url": url, "width": 320, "height": 180, "title": "cat\u{0}" }),
     ] {
         let body = json!({ "body": "", "media": media, "nonce": fixture.next_nonce() });
         let (status, problem) = fixture.call(&ada, "POST", &messages, Some(body)).await;
