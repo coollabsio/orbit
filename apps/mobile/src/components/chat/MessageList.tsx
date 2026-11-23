@@ -16,7 +16,7 @@ import { useConversations, usePeople } from '../../queries'
 import { type IconName, Spinner, Text } from '../../ui'
 import type { ComposerState, PendingMessage } from './Composer'
 import { Emoji, EmojiPicker } from './EmojiPicker'
-import { type MessageHandlers, MessageItem } from './Message'
+import { type MessageHandlers, MessageItem, MessageMedia, Sticker } from './Message'
 import { PersonSheet, ReportSheet } from './Safety'
 import { ActionSheet, type SheetItem } from './Sheet'
 
@@ -304,6 +304,8 @@ function PendingRow({ pending, text }: { pending: PendingMessage; text: (body: s
     <View className="pr-3 pl-12.5 py-0.5 opacity-50">
       {pending.body ? <Text className="text-[14px] leading-[21px]">{text(pending.body)}</Text> : null}
       {pending.files > 0 ? <Text className="text-[12px] text-muted-foreground">Sending {pending.files === 1 ? '1 file' : `${pending.files} files`}…</Text> : null}
+      {pending.sticker ? <Sticker url={pending.sticker.url} name={pending.sticker.name} /> : null}
+      {pending.media ? <MessageMedia media={pending.media} /> : null}
     </View>
   )
 }

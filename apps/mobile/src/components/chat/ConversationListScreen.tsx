@@ -3,7 +3,7 @@ import { type ConversationList } from '../../chat-cache'
 import { useState } from 'react'
 import { FlatList, Image, Pressable, ScrollView, useWindowDimensions, View } from 'react-native'
 
-import { fileSize, isImage } from '../../data/chat'
+import { fileSize, isImage, messageMediaLabel } from '../../data/chat'
 import type { ChatFileRecord } from '../../data/chat-api'
 import * as chat from '../../data/chat-api'
 import { relativeAgo } from '../../data/format'
@@ -59,6 +59,8 @@ function Body({ message, maxHeight }: { message: MessageRecord; maxHeight?: numb
   const words = useMessageText()
   if (message.deleted) return <Text className="text-[14px] leading-[21px] italic text-muted-foreground">Message deleted.</Text>
   const text = words.text(message.body)
+  const media = messageMediaLabel(message)
+  if (!text && media) return <Text className="text-[13px] leading-[19px] text-muted-foreground">{media}</Text>
   return text ? (
     <View className="overflow-hidden" style={maxHeight ? { maxHeight } : undefined}>
       <Text className="text-[14px] leading-[21px] text-foreground/85">{text}</Text>

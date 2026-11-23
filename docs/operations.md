@@ -84,6 +84,7 @@ The variables of one group are set together. For example, `ORBIT_SMTP_HOST` need
 | `ORBIT_OIDC_CLIENT_ID`, `ORBIT_OIDC_CLIENT_SECRET`, `ORBIT_OIDC_CLIENT_SECRET_FILE` | none | The client that the provider issued to Orbit. |
 | `ORBIT_OIDC_DISPLAY_NAME` | `SSO` | The name on the sign-in button ("Continue with SSO"), at most 50 characters. |
 | `ORBIT_OIDC_PROVISION` | saved value (`false`) | `true` or `false`. `true`: a first OpenID Connect sign-in creates an account, also when open registration is off. It has no effect without an OpenID Connect provider. See [Create accounts at the first sign-in](#create-accounts-at-the-first-sign-in). |
+| `ORBIT_KLIPY_API_KEY`, `ORBIT_KLIPY_API_KEY_FILE` | saved value (none) | The [KLIPY](https://klipy.com) API key that lets chat members send GIFs and stickers. Orbit searches KLIPY for the browser, which never sees the key. Without the variable, the root user can save a key in Admin. |
 
 Orbit does not test the `ORBIT_S3_*` bucket at startup, as Admin does when it saves one. An unreachable bucket shows up as a move error on **Admin → Storage** and as failed backups. Orbit refuses to start when a workspace's own bucket overlaps the `ORBIT_S3_*` bucket.
 

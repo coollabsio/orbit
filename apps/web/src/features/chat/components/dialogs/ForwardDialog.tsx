@@ -14,6 +14,7 @@ import { ConversationIcon } from '@/features/chat/components/sidebar/Conversatio
 import { replaceEmoticons } from '@/features/chat/lib/emoticons'
 import { FORWARD_LIMIT, forwardDestinations, forwardToEach, toggleDestination } from '@/features/chat/lib/forward'
 import { decodeMentions, encodeMentions } from '@/features/chat/lib/mentionTokens'
+import { wordlessContentOf } from '@/features/chat/lib/quote'
 import { extractPreview, wordlessPreview } from '@/lib/messagePreview'
 
 interface ForwardDialogProps {
@@ -112,7 +113,7 @@ function ForwardForm({ message, pending, setPending, onDone }: ForwardFormProps)
       <div data-slot="forward-preview" className="grid min-w-0 gap-1 border-l-4 border-muted-foreground/40 pl-3">
         <MessageByline message={message} members={people.members} />
         {text ? <p className="line-clamp-2 text-[0.8125rem] wrap-anywhere text-muted-foreground">{text}</p> : null}
-        {!text && message.stickerId ? <p className="text-[0.8125rem] text-muted-foreground">{wordlessPreview(true)}</p> : null}
+        {!text && (message.stickerId || message.media) ? <p className="text-[0.8125rem] text-muted-foreground">{wordlessPreview(wordlessContentOf(message))}</p> : null}
         {files > 0 ? <p className="text-xs text-muted-foreground">{files === 1 ? '1 file' : `${files} files`}</p> : null}
       </div>
       <Command shouldFilter={false} label="Forward to" className="h-auto gap-1 bg-transparent p-0">

@@ -170,6 +170,15 @@ export const queryKeys = {
   customEmoji: (workspaceId: string) => ['custom-emoji', workspaceId] as const,
   /** Outside the workspace prefix for the same reason: the chat socket says when the list changed (`stickers.changed`). */
   customStickers: (workspaceId: string) => ['custom-stickers', workspaceId] as const,
+  /**
+   * GIFs and stickers from KLIPY for chat, and whether a KLIPY key is set. Outside the workspace prefix: no workspace
+   * event changes them. Saving or removing the key in Admin invalidates `all`.
+   */
+  klipy: {
+    all: ['klipy'] as const,
+    status: (workspaceId: string) => ['klipy', workspaceId, 'status'] as const,
+    search: (workspaceId: string, catalog: string, query: string) => ['klipy', workspaceId, 'search', catalog, query] as const,
+  },
   tasks: {
     all: (workspaceId: string) => [...workspace(workspaceId), 'tasks'] as const,
     list: (workspaceId: string, filters: TaskFilters = {}) =>

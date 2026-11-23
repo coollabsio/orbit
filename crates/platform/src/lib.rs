@@ -32,6 +32,7 @@ pub use config::{
     EnvironmentMode, FcmConfig, HttpConfig, InstanceConfig, JobsConfig, MailConfig, MailMode,
     MetricsConfig, OAuthClientConfig, OidcConfig, Plan, RateLimitConfig, Secret, SmtpConfig,
     SmtpSecurity, TrialConfig, UploadConfig, oidc_display_name, oidc_issuer, redact_database_url,
+    valid_klipy_api_key,
 };
 pub use db::{
     Access, Backend, Column, Database, DatabaseConfig, DatabaseError, Flag, GuardedMigrationError,

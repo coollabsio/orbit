@@ -1,11 +1,13 @@
+import { useState } from 'react'
 import { View } from 'react-native'
 
+import { ConfirmDialog, type ConfirmRequest } from '../../../../components/settings/Dialog'
 import { AdminShell, Note, OptionHint, OptionText, SetByEnvironment, SettingsCard, SettingsRow, Toggle } from '../../../../components/settings/Shell'
-import { useInstanceSettings, useSetRegistration } from '../../../../hooks/admin'
+import { useInstanceSettings, useRemoveKlipy, useSaveKlipy, useSetRegistration } from '../../../../hooks/admin'
 import { errorMessage } from '../../../../session-context'
-import { Button } from '../../../../ui'
+import { Button, Input } from '../../../../ui'
 
-/** The web's Admin → General: who can create an account. */
+/** The web's Admin → General: who can create an account, and the KLIPY key for GIFs and stickers in chat. */
 export default function AdminGeneralScreen() {
   const settings = useInstanceSettings()
   return (
@@ -20,7 +22,10 @@ export default function AdminGeneralScreen() {
         </SettingsCard>
       ) : null}
       {settings.data ? (
-        <RegistrationCard open={settings.data.registration_open} ready={settings.data.registration_ready} locked={settings.data.environment.registration_open} />
+        <>
+          <RegistrationCard open={settings.data.registration_open} ready={settings.data.registration_ready} locked={settings.data.environment.registration_open} />
+          <KlipyCard keySet={settings.data.klipy.key_set} locked={settings.data.environment.klipy} />
+        </>
       ) : null}
     </AdminShell>
   )
@@ -38,6 +43,69 @@ function RegistrationCard({ open, ready, locked }: { open: boolean; ready: boole
         </OptionText>
         <Toggle label="Open registration" value={open} disabled={locked || (!ready && !open) || setRegistration.isPending} onChange={(checked) => setRegistration.mutate(checked)} />
       </SettingsRow>
+    </SettingsCard>
+  )
+}
+
+function KlipyCard({ keySet, locked }: { keySet: boolean; locked: boolean }) {
+  const save = useSaveKlipy()
+  const remove = useRemoveKlipy()
+  const [apiKey, setApiKey] = useState('')
+  const [confirm, setConfirm] = useState<ConfirmRequest | null>(null)
+  const edit = (value: string) => {
+    save.reset()
+    setApiKey(value)
+  }
+
+  return (
+    <SettingsCard
+      title="GIFs and stickers"
+      description="With a KLIPY API key, chat members can search and send GIFs and stickers from KLIPY. Orbit searches KLIPY for them, so the app never sees the key."
+      actions={
+        keySet && !locked ? (
+          <Button
+            label="Remove"
+            variant="destructive"
+            disabled={remove.isPending}
+            onPress={() =>
+              setConfirm({
+                title: 'Remove the KLIPY key?',
+                description: 'Chat members can no longer send GIFs and stickers from KLIPY. Messages that have one keep it.',
+                confirmLabel: 'Remove',
+                danger: true,
+                onConfirm: () => remove.mutate(undefined, { onSuccess: () => setApiKey('') }),
+              })
+            }
+          />
+        ) : undefined
+      }
+    >
+      <View className="gap-4">
+        <Input
+          label="KLIPY API key"
+          help="The key of your app at KLIPY (klipy.com). Orbit stores it encrypted and never shows it again."
+          secureTextEntry
+          autoCapitalize="none"
+          autoCorrect={false}
+          autoComplete="off"
+          placeholder={keySet ? 'Saved. Enter a new key to replace it.' : undefined}
+          editable={!locked}
+          value={apiKey}
+          onChangeText={edit}
+        />
+        {locked ? <SetByEnvironment variable="ORBIT_KLIPY_API_KEY" /> : null}
+        {save.isError ? <Note error>{errorMessage(save.error)}</Note> : null}
+        {remove.isError ? <Note error>{errorMessage(remove.error)}</Note> : null}
+        {save.isSuccess ? <Note>KLIPY key saved.</Note> : null}
+        <View className="flex-row justify-end">
+          <Button
+            label={save.isPending ? 'Saving…' : 'Save key'}
+            disabled={locked || save.isPending || apiKey.trim() === ''}
+            onPress={() => save.mutate(apiKey, { onSuccess: () => setApiKey('') })}
+          />
+        </View>
+      </View>
+      <ConfirmDialog request={confirm} onClose={() => setConfirm(null)} />
     </SettingsCard>
   )
 }

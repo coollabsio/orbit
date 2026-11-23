@@ -13,6 +13,7 @@ import type {
   Message,
   MessagePage,
   NotifyLevel,
+  MessageMedia,
   MessageSticker,
   ReplyQuote,
   SearchPage,
@@ -37,6 +38,8 @@ export interface SendMessageInput {
   replyTo?: ReplyQuote | null
   /** A sticker of the workspace. The server gets the id; the row that waits shows the image. With one the body may be empty. */
   sticker?: MessageSticker | null
+  /** A GIF or sticker from KLIPY. It cannot go with `sticker` or `attachments`; with one the body may be empty. */
+  media?: MessageMedia | null
   body: string
   attachments?: Attachment[]
   alsoInChannel?: boolean

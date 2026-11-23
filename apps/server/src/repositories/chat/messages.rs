@@ -11,13 +11,13 @@ use super::state::unread_threads;
 use super::stickers::load_sticker;
 use super::webhooks::{BotSender, HookTarget, clean_bot_name, clean_icon_url};
 use super::{
-    Access, BotRecord, ChatError, ChatEvent, ChatRepository, Conversation, ConversationKind,
-    Events, FollowedThreadRecord, ForwardedRecord, MESSAGE_MAX_CHARS, MESSAGE_SELECT,
-    MentionsRecord, MessageKind, MessagePage, MessageRecord, ReplyToRecord, StickerRecord,
-    ThreadMember, ThreadPage, Written, current_state, finish, hydrate, id_list, in_ids,
-    json_values, load_access, load_actor, load_conversation, load_message, load_message_access,
-    load_thread_member, mentioned_user_ids, parse_id, parse_optional_id, public_for, reachable_dm,
-    thread_state,
+    Access, BotRecord, ChatError, ChatEvent, ChatMediaKind, ChatRepository, Conversation,
+    ConversationKind, Events, FollowedThreadRecord, ForwardedRecord, MESSAGE_MAX_CHARS,
+    MESSAGE_SELECT, MentionsRecord, MessageKind, MessageMediaRecord, MessagePage, MessageRecord,
+    ReplyToRecord, StickerRecord, ThreadMember, ThreadPage, Written, current_state, finish,
+    hydrate, id_list, in_ids, json_values, load_access, load_actor, load_conversation,
+    load_message, load_message_access, load_thread_member, mentioned_user_ids, parse_id,
+    parse_optional_id, public_for, reachable_dm, thread_state,
 };
 
 const DEFAULT_PAGE: usize = 50;
@@ -64,16 +64,56 @@ pub struct SendInput {
     pub thread_root_id: Option<Id>,
     /// The message this one quotes: a message of the same conversation.
     pub reply_to_id: Option<Id>,
-    /// May be blank when the message has files or a sticker.
+    /// May be blank when the message has files, a sticker or media.
     pub body: String,
     /// A sticker of the workspace.
     pub sticker_id: Option<Id>,
+    /// A GIF or sticker from KLIPY; not with `sticker_id` or files.
+    pub media: Option<MediaInput>,
     /// Files the sender uploaded for this message.
     pub file_ids: Vec<Id>,
     /// Who is online now: `@here` notifies these members only.
     pub online: Vec<Id>,
     pub also_in_channel: bool,
     pub nonce: String,
+}
+
+/// A GIF or sticker from KLIPY, as the sender's client picked it. Checked by [`check_media`].
+#[derive(Clone, Debug)]
+pub struct MediaInput {
+    pub kind: ChatMediaKind,
+    /// An https URL on `klipy.com` or one of its subdomains.
+    pub url: String,
+    pub width: i64,
+    pub height: i64,
+    pub title: String,
+}
+
+/// Characters of a media title.
+const MEDIA_TITLE_MAX_CHARS: usize = 200;
+
+/// The media to store, or `Invalid { field: "media" }`: a URL that is not a KLIPY image, a width or height
+/// outside 1–4096, or a title over 200 characters.
+fn check_media(input: &MediaInput) -> Result<MessageMediaRecord, ChatError> {
+    let invalid = || ChatError::Invalid { field: "media" };
+    let url = crate::klipy::media_url(&input.url).ok_or_else(invalid)?;
+    let side = |value: i64| {
+        u32::try_from(value)
+            .ok()
+            .filter(|value| (1..=crate::klipy::MAX_MEDIA_SIDE).contains(value))
+            .ok_or_else(invalid)
+    };
+    let title = input.title.trim();
+    if title.chars().count() > MEDIA_TITLE_MAX_CHARS {
+        return Err(invalid());
+    }
+    Ok(MessageMediaRecord {
+        kind: input.kind,
+        url,
+        width: side(input.width)?,
+        height: side(input.height)?,
+        title: title.to_owned(),
+    })
 }
 
 #[derive(Clone, Debug)]
@@ -301,8 +341,12 @@ impl ChatRepository {
     ) -> Result<Written<MessageRecord>, ChatError> {
         let body = clean_body(
             &input.body,
-            !input.file_ids.is_empty() || input.sticker_id.is_some(),
+            !input.file_ids.is_empty() || input.sticker_id.is_some() || input.media.is_some(),
         )?;
+        let media = input.media.as_ref().map(check_media).transpose()?;
+        if media.is_some() && (input.sticker_id.is_some() || !input.file_ids.is_empty()) {
+            return Err(ChatError::Invalid { field: "media" });
+        }
         if input.file_ids.len() > MAX_MESSAGE_FILES {
             return Err(ChatError::Invalid { field: "file_ids" });
         }
@@ -381,6 +425,7 @@ impl ChatRepository {
                 forwarded: None,
                 sticker_id: sticker.as_ref().map(|sticker| sticker.id),
                 sticker,
+                media,
                 bot: None,
                 blocks: None,
                 now,
@@ -517,6 +562,7 @@ impl ChatRepository {
                 forwarded: None,
                 sticker_id: None,
                 sticker: None,
+                media: None,
                 bot: Some(bot),
                 blocks,
                 now,
@@ -680,6 +726,7 @@ impl ChatRepository {
                 // The id of a deleted sticker is copied too.
                 sticker_id: source.sticker_id,
                 sticker: source.sticker.clone(),
+                media: source.media.clone(),
                 bot: None,
                 // The copy shows the same card.
                 blocks: source.blocks.clone(),
@@ -901,7 +948,7 @@ impl ChatRepository {
 /// The stored body: without the two control characters that the search index uses as highlight
 /// markers, without empty lines and spaces at its start and end (as Discord stores a message; API
 /// and MCP clients send such lines too), at most 4000 characters, and not blank (unless the
-/// message has files or a sticker).
+/// message has files, a sticker or media).
 fn clean_body(body: &str, may_be_blank: bool) -> Result<String, ChatError> {
     let body = body.replace(['\u{2}', '\u{3}'], "");
     let body = body.trim();
@@ -1172,7 +1219,9 @@ pub(super) async fn remove_message(
         }
         sqlx::query(
                 "UPDATE chat_messages SET body = '', deleted_at = $1, pinned_at = NULL, pinned_by = NULL, \
-                 mention_channel = 0, mention_here = 0, sticker_id = NULL WHERE id = $2",
+                 mention_channel = 0, mention_here = 0, sticker_id = NULL, media_kind = NULL, \
+                 media_url = NULL, media_width = NULL, media_height = NULL, media_title = NULL \
+                 WHERE id = $2",
             )
             .bind(now.as_millis())
             .bind(message.id.to_string())
@@ -1270,6 +1319,8 @@ struct NewMessage<'a> {
     /// The id alone on a forward of a message whose sticker is deleted.
     sticker_id: Option<Id>,
     sticker: Option<StickerRecord>,
+    /// A GIF or sticker from KLIPY.
+    media: Option<MessageMediaRecord>,
     /// Set when an integration posts the message.
     bot: Option<BotRecord>,
     blocks: Option<Vec<MessageBlock>>,
@@ -1287,9 +1338,10 @@ async fn insert_message(
         "INSERT INTO chat_messages (id, conversation_id, thread_root_id, kind, author_id, body, \
          mention_channel, mention_here, also_in_channel, nonce, reply_to_id, forward_of_id, \
          forward_conversation_id, forward_author_id, forward_created_at, forward_bot_name, \
-         sticker_id, webhook_id, bot_name, bot_icon_url, bot_icon_emoji, blocks, created_at) \
+         sticker_id, webhook_id, bot_name, bot_icon_url, bot_icon_emoji, blocks, created_at, \
+         media_kind, media_url, media_width, media_height, media_title) \
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, \
-         $19, $20, $21, $22, $23)",
+         $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)",
     )
     .bind(id.to_string())
     .bind(new.conversation_id.to_string())
@@ -1334,6 +1386,11 @@ async fn insert_message(
     .bind(new.bot.as_ref().and_then(|bot| bot.icon_emoji.clone()))
     .bind(new.blocks.as_deref().map(blocks::to_json))
     .bind(new.now.as_millis())
+    .bind(new.media.as_ref().map(|media| media.kind.as_str()))
+    .bind(new.media.as_ref().map(|media| media.url.clone()))
+    .bind(new.media.as_ref().map(|media| i64::from(media.width)))
+    .bind(new.media.as_ref().map(|media| i64::from(media.height)))
+    .bind(new.media.as_ref().map(|media| media.title.clone()))
     .execute(&mut *conn)
     .await?;
     Ok(MessageRecord {
@@ -1369,6 +1426,7 @@ async fn insert_message(
         forwarded: new.forwarded,
         sticker_id: new.sticker_id,
         sticker: new.sticker,
+        media: new.media,
         bot: new.bot,
         blocks: new.blocks,
         last_reply_id: None,
@@ -1400,6 +1458,7 @@ pub(super) async fn add_system_row(
             forwarded: None,
             sticker_id: None,
             sticker: None,
+            media: None,
             bot: None,
             blocks: None,
             now,

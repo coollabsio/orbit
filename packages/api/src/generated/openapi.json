@@ -33053,6 +33053,248 @@
         ]
       }
     },
+    "/api/v1/admin/settings/klipy": {
+      "put": {
+        "tags": [
+          "crate::workspace_routes"
+        ],
+        "summary": "Saves the KLIPY API key that lets chat members send GIFs and stickers. 422 `invalid_klipy_settings` for an\nempty or too long key, 409 `set_by_environment` when `ORBIT_KLIPY_API_KEY` sets it.",
+        "operationId": "save_klipy",
+        "parameters": [
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KlipyBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstanceSettingsView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden, installation_admin_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch, set_by_environment",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "invalid_klipy_settings",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "app_key_missing",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "crate::workspace_routes"
+        ],
+        "summary": "Removes the saved KLIPY API key: chat members can no longer send GIFs and stickers. 409\n`set_by_environment` when `ORBIT_KLIPY_API_KEY` sets it.",
+        "operationId": "remove_klipy",
+        "parameters": [
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstanceSettingsView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden, installation_admin_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch, set_by_environment",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/settings/limits": {
       "put": {
         "tags": [
@@ -51033,6 +51275,295 @@
           },
           "500": {
             "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/chat/klipy": {
+      "get": {
+        "tags": [
+          "crate::chat_routes::klipy"
+        ],
+        "summary": "Whether the composer can offer GIFs and stickers from KLIPY.",
+        "operationId": "get_chat_klipy",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatKlipyStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "chat_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/chat/klipy/{catalog}": {
+      "get": {
+        "tags": [
+          "crate::chat_routes::klipy"
+        ],
+        "summary": "Trending GIFs or stickers (`catalog` is `gifs` or `stickers`), or search results for `q`. 404\n`klipy_not_configured` without a KLIPY API key, 502 `klipy_unavailable` when KLIPY does not answer.",
+        "operationId": "list_chat_klipy",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "description": "Search words, at most 100 characters; blank or absent lists what is trending.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "description": "1–50; default 1.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "catalog",
+            "in": "path",
+            "description": "`gifs` or `stickers`",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KlipyPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "chat_not_found, klipy_not_configured",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "klipy_unavailable",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -102808,6 +103339,18 @@
         },
         "additionalProperties": false
       },
+      "ChatKlipyStatus": {
+        "type": "object",
+        "required": [
+          "enabled"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "A KLIPY API key is set: the composer can offer GIFs and stickers."
+          }
+        }
+      },
       "ChatLinkPreview": {
         "type": "object",
         "properties": {
@@ -102823,6 +103366,48 @@
             ]
           }
         }
+      },
+      "ChatMediaBody": {
+        "type": "object",
+        "description": "A GIF or sticker from KLIPY: the `full` image of a [`crate::klipy::KlipyItem`], its `kind` and `title`.",
+        "required": [
+          "kind",
+          "url",
+          "width",
+          "height"
+        ],
+        "properties": {
+          "height": {
+            "type": "integer",
+            "format": "int64",
+            "description": "1–4096."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ChatMediaKind"
+          },
+          "title": {
+            "type": "string",
+            "description": "At most 200 characters; may be empty."
+          },
+          "url": {
+            "type": "string",
+            "description": "An https URL on `klipy.com` or one of its subdomains, at most 2048 bytes."
+          },
+          "width": {
+            "type": "integer",
+            "format": "int64",
+            "description": "1–4096."
+          }
+        },
+        "additionalProperties": false
+      },
+      "ChatMediaKind": {
+        "type": "string",
+        "description": "What a message's `media` is: a GIF or a sticker from KLIPY.",
+        "enum": [
+          "gif",
+          "sticker"
+        ]
       },
       "ChatMoveBody": {
         "type": "object",
@@ -103010,6 +103595,17 @@
               "type": "string"
             },
             "description": "Files the caller uploaded for this message (at most 10). With files the body may be\nempty."
+          },
+          "media": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ChatMediaBody",
+                "description": "A GIF or sticker from KLIPY (an item of `GET …/chat/klipy/{catalog}`). With media the body may be\nempty; it cannot go with `sticker_id` or `file_ids`."
+              }
+            ]
           },
           "nonce": {
             "type": "string",
@@ -103401,6 +103997,7 @@
               "forwarded",
               "sticker_id",
               "sticker",
+              "media",
               "bot",
               "blocks"
             ],
@@ -103495,6 +104092,17 @@
                   "null"
                 ],
                 "format": "date-time"
+              },
+              "media": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/MessageMediaRecord",
+                    "description": "A GIF or sticker from KLIPY; its body may be empty. Null when the message has none, or is deleted."
+                  }
+                ]
               },
               "mentions": {
                 "$ref": "#/components/schemas/MentionsRecord"
@@ -106618,7 +107226,8 @@
           "backups_in_s3",
           "backup_schedule",
           "s3_keep_deleted_days",
-          "sign_in_providers"
+          "sign_in_providers",
+          "klipy"
         ],
         "properties": {
           "attachments_in_s3": {
@@ -106632,6 +107241,10 @@
           "backups_in_s3": {
             "type": "boolean",
             "description": "`ORBIT_S3_BACKUPS`."
+          },
+          "klipy": {
+            "type": "boolean",
+            "description": "`ORBIT_KLIPY_API_KEY`."
           },
           "oidc_provision": {
             "type": "boolean",
@@ -108183,12 +108796,17 @@
           "limits",
           "mail",
           "sign_in_providers",
+          "klipy",
           "environment"
         ],
         "properties": {
           "environment": {
             "$ref": "#/components/schemas/EnvironmentView",
             "description": "The settings that `ORBIT_*` environment variables set. They replace the saved values, and changing them\nhere gives 409 `set_by_environment`."
+          },
+          "klipy": {
+            "$ref": "#/components/schemas/KlipyView",
+            "description": "GIFs and stickers from KLIPY in chat."
           },
           "limits": {
             "$ref": "#/components/schemas/LimitsView"
@@ -108459,6 +109077,109 @@
             "items": {
               "$ref": "#/components/schemas/JobLimitView"
             }
+          }
+        }
+      },
+      "KlipyBody": {
+        "type": "object",
+        "required": [
+          "api_key"
+        ],
+        "properties": {
+          "api_key": {
+            "type": "string",
+            "description": "The KLIPY API key (at most 200 bytes, no spaces). It is stored encrypted and never returned."
+          }
+        },
+        "additionalProperties": false
+      },
+      "KlipyImage": {
+        "type": "object",
+        "description": "One size of a GIF or sticker on KLIPY's CDN.",
+        "required": [
+          "url",
+          "width",
+          "height"
+        ],
+        "properties": {
+          "height": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "url": {
+            "type": "string",
+            "description": "An https URL on `klipy.com` or one of its subdomains."
+          },
+          "width": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "KlipyItem": {
+        "type": "object",
+        "description": "A GIF or sticker that a chat message can show: send `full` with its `kind` and `title` as the message's\n`media`.",
+        "required": [
+          "id",
+          "title",
+          "kind",
+          "preview",
+          "full"
+        ],
+        "properties": {
+          "full": {
+            "$ref": "#/components/schemas/KlipyImage",
+            "description": "The size a message shows."
+          },
+          "id": {
+            "type": "string",
+            "description": "KLIPY's id."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ChatMediaKind"
+          },
+          "preview": {
+            "$ref": "#/components/schemas/KlipyImage",
+            "description": "A small size for the picker grid."
+          },
+          "title": {
+            "type": "string",
+            "description": "May be empty."
+          }
+        }
+      },
+      "KlipyPage": {
+        "type": "object",
+        "description": "One page of trending GIFs or stickers, or of search results.",
+        "required": [
+          "items",
+          "has_next"
+        ],
+        "properties": {
+          "has_next": {
+            "type": "boolean",
+            "description": "Another page follows."
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/KlipyItem"
+            }
+          }
+        }
+      },
+      "KlipyView": {
+        "type": "object",
+        "description": "GIFs and stickers from KLIPY in chat. The key itself is never returned.",
+        "required": [
+          "key_set"
+        ],
+        "properties": {
+          "key_set": {
+            "type": "boolean",
+            "description": "A KLIPY API key is saved here or set by `ORBIT_KLIPY_API_KEY`: chat members can send GIFs and stickers."
           }
         }
       },
@@ -115018,6 +115739,40 @@
           "leave"
         ]
       },
+      "MessageMediaRecord": {
+        "type": "object",
+        "description": "A GIF or sticker from KLIPY that a message shows, straight from KLIPY's CDN.",
+        "required": [
+          "kind",
+          "url",
+          "width",
+          "height",
+          "title"
+        ],
+        "properties": {
+          "height": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ChatMediaKind"
+          },
+          "title": {
+            "type": "string",
+            "description": "May be empty."
+          },
+          "url": {
+            "type": "string",
+            "description": "An https URL on `klipy.com` or one of its subdomains."
+          },
+          "width": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
       "MessagePage": {
         "type": "object",
         "description": "Messages in ascending order. A null cursor means there is nothing more in that direction.",
@@ -115074,6 +115829,7 @@
           "forwarded",
           "sticker_id",
           "sticker",
+          "media",
           "bot",
           "blocks"
         ],
@@ -115168,6 +115924,17 @@
               "null"
             ],
             "format": "date-time"
+          },
+          "media": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/MessageMediaRecord",
+                "description": "A GIF or sticker from KLIPY; its body may be empty. Null when the message has none, or is deleted."
+              }
+            ]
           },
           "mentions": {
             "$ref": "#/components/schemas/MentionsRecord"
@@ -124971,6 +125738,7 @@
           "author_id",
           "body",
           "sticker",
+          "gif",
           "created_at",
           "bot_name"
         ],
@@ -124992,9 +125760,13 @@
             "type": "string",
             "format": "date-time"
           },
+          "gif": {
+            "type": "boolean",
+            "description": "The reply has a GIF: a preview with no text says so."
+          },
           "sticker": {
             "type": "boolean",
-            "description": "The reply has a sticker: a preview with no text says so."
+            "description": "The reply has a sticker (a custom one or one from KLIPY): a preview with no text says so."
           }
         }
       },
@@ -125006,6 +125778,7 @@
           "author_id",
           "body",
           "sticker",
+          "gif",
           "bot_name"
         ],
         "properties": {
@@ -125023,12 +125796,16 @@
             ],
             "description": "Set when an integration posted the quoted message: show it as the author."
           },
+          "gif": {
+            "type": "boolean",
+            "description": "The quoted message has a GIF: a quote with no text says so."
+          },
           "id": {
             "type": "string"
           },
           "sticker": {
             "type": "boolean",
-            "description": "The quoted message has a sticker: a quote with no text says so."
+            "description": "The quoted message has a sticker (a custom one or one from KLIPY): a quote with no text says so."
           }
         }
       },

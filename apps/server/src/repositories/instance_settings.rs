@@ -486,6 +486,55 @@ impl InstanceSettingsRepository {
         Ok(())
     }
 
+    /// The KLIPY API key for GIFs and stickers in chat, encrypted under the app key: `ORBIT_KLIPY_API_KEY`, or
+    /// the key saved in Admin. `None`: GIFs are off.
+    pub async fn klipy_api_key(&self) -> Result<Option<Vec<u8>>, sqlx::Error> {
+        if let Some(key) = &EnvironmentSettings::of(&self.database).klipy_api_key {
+            return Ok(Some(key.clone()));
+        }
+        sqlx::query_scalar::<_, Option<Vec<u8>>>(
+            "SELECT klipy_api_key FROM instance_settings WHERE id = 1",
+        )
+        .fetch_one(self.database.pool())
+        .await
+    }
+
+    /// Saves the KLIPY API key, encrypted under the app key (`sealed`); `None` removes it.
+    pub async fn save_klipy_api_key(
+        &self,
+        actor_id: Id,
+        sealed: Option<Vec<u8>>,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<(), sqlx::Error> {
+        let mut transaction = self.database.immediate_transaction().await?;
+        let action = if sealed.is_some() {
+            "instance.klipy_updated"
+        } else {
+            "instance.klipy_removed"
+        };
+        sqlx::query(
+            "UPDATE instance_settings SET klipy_api_key = $1, updated_at = $2 WHERE id = 1",
+        )
+        .bind(sealed)
+        .bind(now.as_millis())
+        .execute(&mut *transaction)
+        .await?;
+        audit::record_global(
+            &mut transaction,
+            Some(actor_id),
+            action,
+            AuditOutcome::Success,
+            "installation",
+            None,
+            request_id,
+            serde_json::json!({}),
+            now,
+        )
+        .await?;
+        transaction.commit().await
+    }
+
     pub async fn limits(&self) -> Result<InstanceLimits, sqlx::Error> {
         let row = sqlx::query(
             "SELECT max_owned_workspaces, workspace_storage_quota_bytes FROM instance_settings WHERE id = 1",

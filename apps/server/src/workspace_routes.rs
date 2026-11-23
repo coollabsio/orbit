@@ -280,6 +280,10 @@ pub fn workspace_router(state: WorkspaceState) -> Router {
             "/api/v1/admin/settings/sign-in-providers/{provider}",
             put(save_sign_in_provider).delete(remove_sign_in_provider),
         )
+        .route(
+            "/api/v1/admin/settings/klipy",
+            put(save_klipy).delete(remove_klipy),
+        )
         .route("/api/v1/admin/settings/storage", put(save_storage_options))
         .route("/api/v1/admin/settings/limits", put(save_limits))
         .route(
@@ -2134,9 +2138,18 @@ struct InstanceSettingsView {
     /// The OAuth clients of the sign-in providers that are on: Google and GitHub saved here or set by the
     /// environment, and OpenID Connect from `ORBIT_OIDC_*`. A provider that is not listed is off.
     sign_in_providers: Vec<SignInProviderView>,
+    /// GIFs and stickers from KLIPY in chat.
+    klipy: KlipyView,
     /// The settings that `ORBIT_*` environment variables set. They replace the saved values, and changing them
     /// here gives 409 `set_by_environment`.
     environment: EnvironmentView,
+}
+
+/// GIFs and stickers from KLIPY in chat. The key itself is never returned.
+#[derive(Serialize, ToSchema)]
+struct KlipyView {
+    /// A KLIPY API key is saved here or set by `ORBIT_KLIPY_API_KEY`: chat members can send GIFs and stickers.
+    key_set: bool,
 }
 
 /// `true` for each setting that an environment variable sets.
@@ -2160,6 +2173,8 @@ struct EnvironmentView {
     s3_keep_deleted_days: bool,
     /// `ORBIT_GOOGLE_*`, `ORBIT_GITHUB_*`, `ORBIT_OIDC_*`.
     sign_in_providers: Vec<Provider>,
+    /// `ORBIT_KLIPY_API_KEY`.
+    klipy: bool,
 }
 
 impl From<&EnvironmentSettings> for EnvironmentView {
@@ -2178,6 +2193,7 @@ impl From<&EnvironmentSettings> for EnvironmentView {
                 .iter()
                 .map(|saved| saved.provider)
                 .collect(),
+            klipy: environment.klipy_api_key.is_some(),
         }
     }
 }
@@ -2268,6 +2284,11 @@ async fn settings_view(
         .sign_in_providers()
         .await
         .map_err(|error| internal(instance, request_id).cause(error))?;
+    let klipy_key_set = repository
+        .klipy_api_key()
+        .await
+        .map_err(|error| internal(instance, request_id).cause(error))?
+        .is_some();
     let registration_ready = can_confirm_sign_up(
         state.identity.database(),
         settings.smtp.is_some(),
@@ -2295,6 +2316,9 @@ async fn settings_view(
     let moving = moving.flatten().unwrap_or_default();
     Ok(Json(InstanceSettingsView {
         sign_in_providers,
+        klipy: KlipyView {
+            key_set: klipy_key_set,
+        },
         environment: EnvironmentView::from(&*EnvironmentSettings::of(state.identity.database())),
         storage: StorageView {
             s3: storage.s3.map(|s3| S3View {
@@ -2745,6 +2769,98 @@ async fn remove_smtp(
                 internal(instance, request_id.as_ref()).cause(error)
             }
         })?;
+    settings_view(&state, instance, request_id.as_ref()).await
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+struct KlipyBody {
+    /// The KLIPY API key (at most 200 bytes, no spaces). It is stored encrypted and never returned.
+    api_key: String,
+}
+
+/// 409 `set_by_environment` when `ORBIT_KLIPY_API_KEY` sets the key.
+fn klipy_set_by_environment(
+    state: &WorkspaceState,
+    instance: &str,
+    request_id: Option<&Extension<RequestId>>,
+) -> Result<(), ApiError> {
+    if EnvironmentSettings::of(state.identity.database())
+        .klipy_api_key
+        .is_some()
+    {
+        return Err(set_by_environment(
+            "ORBIT_KLIPY_API_KEY",
+            instance,
+            request_id,
+        ));
+    }
+    Ok(())
+}
+
+/// Saves the KLIPY API key that lets chat members send GIFs and stickers. 422 `invalid_klipy_settings` for an
+/// empty or too long key, 409 `set_by_environment` when `ORBIT_KLIPY_API_KEY` sets it.
+#[utoipa::path(put, path = "/api/v1/admin/settings/klipy", request_body = KlipyBody, responses((status = 200, body = InstanceSettingsView)))]
+async fn save_klipy(
+    State(state): State<WorkspaceState>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<KlipyBody>,
+) -> Result<Json<InstanceSettingsView>, ApiError> {
+    let instance = "/api/v1/admin/settings/klipy";
+    let session = require_root(&state, &headers, instance, request_id.as_ref()).await?;
+    klipy_set_by_environment(&state, instance, request_id.as_ref())?;
+    let api_key = body.api_key.trim();
+    if !orbit_platform::valid_klipy_api_key(api_key) {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_klipy_settings",
+            "Invalid KLIPY settings",
+            "api_key: enter the KLIPY API key (at most 200 characters, no spaces).",
+            instance,
+            request_id.as_ref(),
+        ));
+    }
+    let key = state
+        .mailer
+        .as_ref()
+        .and_then(Mailer::app_key)
+        .ok_or_else(|| app_key_missing(instance, request_id.as_ref()))?;
+    let sealed = crate::secret_box::encrypt_secret(key, api_key).map_err(|()| {
+        internal(instance, request_id.as_ref()).cause("could not encrypt the secret")
+    })?;
+    InstanceSettingsRepository::new(state.identity.database().clone())
+        .save_klipy_api_key(
+            session.user.id,
+            Some(sealed),
+            request_id_value(request_id.as_ref()),
+            TimestampMillis::now(),
+        )
+        .await
+        .map_err(|error| internal(instance, request_id.as_ref()).cause(error))?;
+    settings_view(&state, instance, request_id.as_ref()).await
+}
+
+/// Removes the saved KLIPY API key: chat members can no longer send GIFs and stickers. 409
+/// `set_by_environment` when `ORBIT_KLIPY_API_KEY` sets it.
+#[utoipa::path(delete, path = "/api/v1/admin/settings/klipy", responses((status = 200, body = InstanceSettingsView)))]
+async fn remove_klipy(
+    State(state): State<WorkspaceState>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<Json<InstanceSettingsView>, ApiError> {
+    let instance = "/api/v1/admin/settings/klipy";
+    let session = require_root(&state, &headers, instance, request_id.as_ref()).await?;
+    klipy_set_by_environment(&state, instance, request_id.as_ref())?;
+    InstanceSettingsRepository::new(state.identity.database().clone())
+        .save_klipy_api_key(
+            session.user.id,
+            None,
+            request_id_value(request_id.as_ref()),
+            TimestampMillis::now(),
+        )
+        .await
+        .map_err(|error| internal(instance, request_id.as_ref()).cause(error))?;
     settings_view(&state, instance, request_id.as_ref()).await
 }
 

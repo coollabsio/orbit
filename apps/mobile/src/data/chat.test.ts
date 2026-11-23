@@ -14,6 +14,11 @@ import {
   decodeMentions,
   emojiGroups,
   fileSize,
+  fitSize,
+  klipyMedia,
+  mediaLabel,
+  messageMediaLabel,
+  nextKlipyPage,
   hasReaction,
   leadToFirstMatch,
   messageActions,
@@ -422,4 +427,53 @@ test('"Add people" never offers a guest for a public channel, and a channel with
   expect(hasGuests({ kind: 'private', member_ids: ['me', 'gus'] }, people)).toBe(true)
   expect(hasGuests({ kind: 'private', member_ids: ['me', 'ann'] }, people)).toBe(false)
   expect(hasGuests({ kind: 'dm', member_ids: ['me', 'gus'] }, people)).toBe(false)
+})
+
+describe('GIFs and stickers from KLIPY', () => {
+  const item = {
+    id: 'k1',
+    title: 'Happy dance',
+    kind: 'gif' as const,
+    preview: { url: 'https://static.klipy.com/sm.gif', width: 220, height: 124 },
+    full: { url: 'https://static.klipy.com/md.webp', width: 320, height: 180 },
+  }
+
+  it('sends the full size with its kind and title, never the preview', () => {
+    expect(klipyMedia(item)).toEqual({ kind: 'gif', url: 'https://static.klipy.com/md.webp', width: 320, height: 180, title: 'Happy dance' })
+  })
+
+  it('a quote or last reply without text says GIF or Sticker; with text it shows the text', () => {
+    expect(mediaLabel({ body: '', gif: true, sticker: false })).toBe('GIF')
+    expect(mediaLabel({ body: '', gif: false, sticker: true })).toBe('Sticker')
+    expect(mediaLabel({ body: '  ', gif: false, sticker: false })).toBeNull()
+    expect(mediaLabel({ body: 'look', gif: true, sticker: false })).toBeNull()
+  })
+
+  it('a list preview names the GIF or sticker', () => {
+    const media = (kind: 'gif' | 'sticker', title: string) => ({ kind, title, url: 'https://static.klipy.com/a.webp', width: 1, height: 1 })
+    expect(messageMediaLabel(message('m1', { media: media('gif', 'Happy dance'), sticker: null, sticker_id: null }))).toBe('GIF: Happy dance')
+    expect(messageMediaLabel(message('m1', { media: media('sticker', ''), sticker: null, sticker_id: null }))).toBe('Sticker')
+    expect(messageMediaLabel(message('m1', { media: null, sticker: { url: '/s.png', name: 'Parrot' } as MessageRecord['sticker'], sticker_id: 's1' }))).toBe('Sticker: Parrot')
+    expect(messageMediaLabel(message('m1', { media: null, sticker: null, sticker_id: 's1' }))).toBe('Sticker')
+    expect(messageMediaLabel(message('m1', { media: null, sticker: null, sticker_id: null }))).toBeNull()
+  })
+
+  it('a GIF or sticker alone cannot be edited; one with text can', () => {
+    const gif = { kind: 'gif' as const, title: '', url: 'https://static.klipy.com/a.webp', width: 1, height: 1 }
+    const options = { inThread: false, canWrite: true, authorBlocked: false }
+    expect(messageActions(message('m1', { author_id: 'me', body: '', media: gif }), 'me', false, options)).not.toContain('edit')
+    expect(messageActions(message('m1', { author_id: 'me', body: 'so true', media: gif }), 'me', false, options)).toContain('edit')
+  })
+
+  it('loads the next page while KLIPY has one, up to page 50', () => {
+    expect(nextKlipyPage({ has_next: true }, 1)).toBe(2)
+    expect(nextKlipyPage({ has_next: false }, 1)).toBeUndefined()
+    expect(nextKlipyPage({ has_next: true }, 50)).toBeUndefined()
+  })
+
+  it('a GIF scales down into its box, keeping its ratio, and never up', () => {
+    expect(fitSize(520, 260, 260, 260)).toEqual({ width: 260, height: 130 })
+    expect(fitSize(200, 400, 260, 260)).toEqual({ width: 130, height: 260 })
+    expect(fitSize(100, 50, 260, 260)).toEqual({ width: 100, height: 50 })
+  })
 })

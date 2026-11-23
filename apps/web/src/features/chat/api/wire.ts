@@ -126,6 +126,7 @@ export function toMessage(record: MessageRecord): Message {
       authorId: record.reply_to.author_id,
       body: record.reply_to.body,
       sticker: record.reply_to.sticker,
+      gif: record.reply_to.gif,
       botName: record.reply_to.bot_name,
     },
     forwarded: record.forwarded && {
@@ -137,6 +138,7 @@ export function toMessage(record: MessageRecord): Message {
     },
     stickerId: record.sticker_id,
     sticker: record.sticker && { id: record.sticker.id, name: record.sticker.name, url: record.sticker.url },
+    media: record.media && { kind: record.media.kind, url: record.media.url, width: record.media.width, height: record.media.height, title: record.media.title },
     kind: record.kind,
     authorId: record.author_id,
     body: record.body,
@@ -156,6 +158,7 @@ export function toMessage(record: MessageRecord): Message {
       authorId: record.last_reply.author_id,
       body: record.last_reply.body,
       sticker: record.last_reply.sticker,
+      gif: record.last_reply.gif,
       createdAt: millis(record.last_reply.created_at),
       botName: record.last_reply.bot_name,
     },

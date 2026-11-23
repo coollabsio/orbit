@@ -45,7 +45,7 @@ pub use conversations::{
 pub use emoji::{CustomEmojiImage, CustomEmojiRecord, EMOJI_MAX_BYTES};
 pub use interactions::{Click, ResponseTarget};
 pub use messages::BotPost;
-pub use messages::{ForwardInput, MessageCursor, SendInput};
+pub use messages::{ForwardInput, MediaInput, MessageCursor, SendInput};
 pub use safety::{
     BlockedUserRecord, ChatReportRecord, REPORT_NOTE_MAX_CHARS, ReportMail, ReportReason,
 };
@@ -245,14 +245,54 @@ pub struct MentionsRecord {
     pub here: bool,
 }
 
+/// What a message's `media` is: a GIF or a sticker from KLIPY.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+#[schema(as = ChatMediaKind)]
+pub enum ChatMediaKind {
+    Gif,
+    Sticker,
+}
+
+impl ChatMediaKind {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Gif => "gif",
+            Self::Sticker => "sticker",
+        }
+    }
+
+    fn from_db(value: &str) -> Option<Self> {
+        match value {
+            "gif" => Some(Self::Gif),
+            "sticker" => Some(Self::Sticker),
+            _ => None,
+        }
+    }
+}
+
+/// A GIF or sticker from KLIPY that a message shows, straight from KLIPY's CDN.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, ToSchema)]
+pub struct MessageMediaRecord {
+    pub kind: ChatMediaKind,
+    /// An https URL on `klipy.com` or one of its subdomains.
+    pub url: String,
+    pub width: u32,
+    pub height: u32,
+    /// May be empty.
+    pub title: String,
+}
+
 /// The newest reply of a thread, shown under its root.
 #[derive(Clone, Debug, Serialize, ToSchema)]
 pub struct ReplyPreviewRecord {
     #[schema(value_type = String)]
     pub author_id: Id,
     pub body: String,
-    /// The reply has a sticker: a preview with no text says so.
+    /// The reply has a sticker (a custom one or one from KLIPY): a preview with no text says so.
     pub sticker: bool,
+    /// The reply has a GIF: a preview with no text says so.
+    pub gif: bool,
     #[schema(value_type = String, format = DateTime)]
     pub created_at: TimestampMillis,
     /// The integration's name when an integration posted the reply: `author_id` is then only the
@@ -270,8 +310,10 @@ pub struct ReplyToRecord {
     pub author_id: Id,
     /// The first 200 characters of the quoted body.
     pub body: String,
-    /// The quoted message has a sticker: a quote with no text says so.
+    /// The quoted message has a sticker (a custom one or one from KLIPY): a quote with no text says so.
     pub sticker: bool,
+    /// The quoted message has a GIF: a quote with no text says so.
+    pub gif: bool,
     /// Set when an integration posted the quoted message: show it as the author.
     #[schema(required = true)]
     pub bot_name: Option<String>,
@@ -287,7 +329,9 @@ impl ReplyToRecord {
             id: target.id,
             author_id: target.author_id,
             body: target.body.chars().take(REPLY_TO_BODY_CHARS).collect(),
-            sticker: target.sticker_id.is_some(),
+            sticker: target.sticker_id.is_some()
+                || target.media_kind() == Some(ChatMediaKind::Sticker),
+            gif: target.media_kind() == Some(ChatMediaKind::Gif),
             bot_name: target.bot.as_ref().map(|bot| bot.name.clone()),
         })
     }
@@ -386,6 +430,9 @@ pub struct MessageRecord {
     /// Null when the message has no sticker, or the sticker is deleted.
     #[schema(required = true)]
     pub sticker: Option<StickerRecord>,
+    /// A GIF or sticker from KLIPY; its body may be empty. Null when the message has none, or is deleted.
+    #[schema(required = true)]
+    pub media: Option<MessageMediaRecord>,
     /// Set when an integration (an incoming webhook) posted the message. Nobody can edit it.
     #[schema(required = true)]
     pub bot: Option<BotRecord>,
@@ -398,6 +445,11 @@ pub struct MessageRecord {
 }
 
 impl MessageRecord {
+    /// The kind of the message's KLIPY media, if it has one.
+    pub(crate) fn media_kind(&self) -> Option<ChatMediaKind> {
+        self.media.as_ref().map(|media| media.kind)
+    }
+
     /// The message shows in the conversation's main list.
     fn in_main(&self) -> bool {
         self.thread_root_id.is_none() || self.also_in_channel
@@ -1076,14 +1128,18 @@ const MESSAGE_SELECT: &str = "SELECT m.id, m.conversation_id, m.thread_root_id, 
      m.edited_at, m.deleted_at, m.created_at, m.reply_count, m.reply_user_ids, m.last_reply_id, \
      l.author_id AS last_author_id, l.body AS last_body, l.created_at AS last_created_at, \
      l.bot_name AS last_bot_name, \
-     l.sticker_id IS NOT NULL AS last_sticker, q.sticker_id IS NOT NULL AS quoted_sticker, \
+     (l.sticker_id IS NOT NULL OR COALESCE(l.media_kind, '') = 'sticker') AS last_sticker, \
+     COALESCE(l.media_kind, '') = 'gif' AS last_gif, \
+     (q.sticker_id IS NOT NULL OR COALESCE(q.media_kind, '') = 'sticker') AS quoted_sticker, \
+     COALESCE(q.media_kind, '') = 'gif' AS quoted_gif, \
      m.reply_to_id, q.author_id AS quoted_author_id, substr(q.body, 1, 200) AS quoted_body, \
      m.forward_of_id, m.forward_conversation_id, m.forward_author_id, m.forward_created_at, \
      m.forward_bot_name, q.bot_name AS quoted_bot_name, m.webhook_id, m.bot_name, m.bot_icon_url, m.bot_icon_emoji, \
      CAST(CASE WHEN wh.request_url IS NOT NULL AND wh.revoked_at IS NULL THEN 1 ELSE 0 END AS BIGINT) \
      AS bot_interactive, \
      m.blocks, \
-     m.sticker_id, s.workspace_id AS sticker_workspace_id, s.name AS sticker_name \
+     m.sticker_id, s.workspace_id AS sticker_workspace_id, s.name AS sticker_name, \
+     m.media_kind, m.media_url, m.media_width, m.media_height, m.media_title \
      FROM chat_messages m LEFT JOIN chat_messages l ON l.id = m.last_reply_id \
      LEFT JOIN chat_messages q ON q.id = m.reply_to_id AND q.deleted_at IS NULL \
      LEFT JOIN custom_stickers s ON s.id = m.sticker_id \
@@ -1099,6 +1155,7 @@ fn message_from_row(row: &AnyRow) -> Result<MessageRecord, ChatError> {
             author_id: parse_id(author_id)?,
             body: row.get("last_body"),
             sticker: row.get("last_sticker"),
+            gif: row.get("last_gif"),
             created_at: TimestampMillis::from_millis(row.get("last_created_at")),
             bot_name: row.get("last_bot_name"),
         }),
@@ -1118,6 +1175,7 @@ fn message_from_row(row: &AnyRow) -> Result<MessageRecord, ChatError> {
             author_id: parse_id(author_id)?,
             body: row.get("quoted_body"),
             sticker: row.get("quoted_sticker"),
+            gif: row.get("quoted_gif"),
             bot_name: row.get("quoted_bot_name"),
         }),
         _ => None,
@@ -1153,6 +1211,26 @@ fn message_from_row(row: &AnyRow) -> Result<MessageRecord, ChatError> {
             url: stickers::image_url(workspace_id, id),
         }),
         _ => None,
+    };
+    let media = match row
+        .get::<Option<String>, _>("media_kind")
+        .as_deref()
+        .map(ChatMediaKind::from_db)
+    {
+        _ if deleted => None,
+        Some(Some(kind)) => Some(MessageMediaRecord {
+            kind,
+            url: row
+                .get::<Option<String>, _>("media_url")
+                .ok_or_else(|| corrupt("message media"))?,
+            width: media_side(row.get("media_width"))?,
+            height: media_side(row.get("media_height"))?,
+            title: row
+                .get::<Option<String>, _>("media_title")
+                .unwrap_or_default(),
+        }),
+        Some(None) => return Err(corrupt("message media")),
+        None => None,
     };
     let bot = parse_optional_id(row.get("webhook_id"))?.map(|webhook_id| BotRecord {
         webhook_id,
@@ -1205,10 +1283,18 @@ fn message_from_row(row: &AnyRow) -> Result<MessageRecord, ChatError> {
         forwarded,
         sticker_id,
         sticker,
+        media,
         bot,
         blocks,
         last_reply_id: parse_optional_id(row.get("last_reply_id"))?,
     })
+}
+
+/// A stored width or height of message media.
+fn media_side(value: Option<i64>) -> Result<u32, ChatError> {
+    value
+        .and_then(|value| u32::try_from(value).ok())
+        .ok_or_else(|| corrupt("message media"))
 }
 
 /// Rows to records, with their reactions and files: two more queries for the whole list.

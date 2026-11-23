@@ -35,7 +35,7 @@ use utoipa::ToSchema;
 
 use crate::auth_routes::avatar_url;
 use crate::live::LiveHub;
-use crate::repositories::chat::MessageRecord;
+use crate::repositories::chat::{ChatMediaKind, MessageRecord};
 use crate::repositories::project_access::user_sees_project_sql;
 use apns::{ApnsDevice, ApnsEnvironment, ApnsSender};
 
@@ -1049,8 +1049,13 @@ impl PushService {
         let line = text.split_whitespace().collect::<Vec<_>>().join(" ");
         Ok(if line.is_empty() && !message.attachments.is_empty() {
             "Sent a file".to_owned()
-        } else if line.is_empty() && message.sticker_id.is_some() {
+        } else if line.is_empty()
+            && (message.sticker_id.is_some()
+                || message.media_kind() == Some(ChatMediaKind::Sticker))
+        {
             "Sticker".to_owned()
+        } else if line.is_empty() && message.media_kind() == Some(ChatMediaKind::Gif) {
+            "Sent a GIF".to_owned()
         } else {
             short(&line, BODY_CHARS)
         })

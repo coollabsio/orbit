@@ -10,7 +10,7 @@ import {
   useId,
 } from 'react'
 import { At, Hashtag, Paperclip2, Send2, SmileCircle, Sticker, Xmark } from 'reicon-react'
-import type { CustomStickerRecord } from '@orbit/api/generated/types.gen'
+import type { CustomStickerRecord, KlipyItem } from '@orbit/api/generated/types.gen'
 import { confirmAction } from '@/components/common/confirmAction'
 import { EmojiPicker } from '@/components/common/EmojiPicker'
 import { MentionPopover } from '@/components/common/MentionPopover'
@@ -23,6 +23,7 @@ import { clipboardFiles } from '@/lib/attachmentLib'
 import { useMentionAutocomplete } from '@/lib/useMentionAutocomplete'
 import { useChatHost } from '../../chatHost'
 import { useChatContext } from '../../api/chatContext'
+import { useKlipyStatus } from '../../api/klipy'
 import { useSendMessage, useSendTyping } from '../../api/mutations'
 import { MESSAGE_MAX_LENGTH, type Conversation, type Message } from '../../api/types'
 import { clearDraft, getDraft, setDraft } from '../../lib/drafts'
@@ -36,6 +37,7 @@ import { ComposerReferencePreview } from './ComposerReferencePreview'
 import { completeCodeFence, inOpenCodeBlock } from './composerSegments'
 import { ComposerUploads } from './ComposerUploads'
 import { EmojiSuggestions } from './EmojiSuggestions'
+import { GifPicker } from './GifPicker'
 import { StickerPicker } from './StickerPicker'
 import { useAutosize } from './useAutosize'
 import { useEmojiAutocomplete } from './useEmojiAutocomplete'
@@ -91,7 +93,9 @@ export function Composer({ ref, conversation, threadRootId = null, replyTo = nul
   const [alsoInChannel, setAlsoInChannel] = useState(false)
   const [emojiOpen, setEmojiOpen] = useState(false)
   const [stickerOpen, setStickerOpen] = useState(false)
+  const [gifOpen, setGifOpen] = useState(false)
   const stickers = useCustomStickers(workspaceId).data ?? []
+  const klipy = useKlipyStatus(workspaceId).data?.enabled === true
   const input = useRef<HTMLTextAreaElement>(null)
   const filePicker = useRef<HTMLInputElement>(null)
   useAutosize(input, text)
@@ -168,6 +172,18 @@ export function Composer({ ref, conversation, threadRootId = null, replyTo = nul
   function sendSticker(sticker: CustomStickerRecord) {
     setStickerOpen(false)
     send({ conversationId, threadRootId, replyTo: replyTo && quoteOf(replyTo), body: '', sticker: { id: sticker.id, name: sticker.name, url: sticker.url } })
+    onClearReply?.()
+    onSent?.()
+  }
+
+  /** A GIF or sticker from KLIPY goes at once too, the way a sticker of the workspace does. */
+  function sendKlipy(item: KlipyItem) {
+    setGifOpen(false)
+    setStickerOpen(false)
+    // the server takes a title of at most 200 characters
+    const title = Array.from(item.title).slice(0, 200).join('')
+    const media = { kind: item.kind, url: item.full.url, width: item.full.width, height: item.full.height, title }
+    send({ conversationId, threadRootId, replyTo: replyTo && quoteOf(replyTo), body: '', media })
     onClearReply?.()
     onSent?.()
   }
@@ -362,7 +378,24 @@ export function Composer({ ref, conversation, threadRootId = null, replyTo = nul
                 />
               </PopoverContent>
             </Popover>
-            {stickers.length > 0 ? (
+            {klipy ? (
+              <Popover open={gifOpen} onOpenChange={setGifOpen} modal={false}>
+                <Tip label="Send a GIF">
+                  <PopoverTrigger render={<Button variant="ghost" size="icon" aria-label="Send a GIF" />}>
+                    {/* reicon has no GIF icon: the word, in the size and weight of an outline icon */}
+                    <span aria-hidden="true" className="rounded-[4px] border-[1.5px] border-current px-0.5 text-[0.5625rem] leading-3 font-bold tracking-wide">
+                      GIF
+                    </span>
+                  </PopoverTrigger>
+                </Tip>
+                {gifOpen ? (
+                  <PopoverContent side="top" align="start" finalFocus={input} className="w-auto gap-0 p-0">
+                    <GifPicker workspaceId={workspaceId} onPick={sendKlipy} />
+                  </PopoverContent>
+                ) : null}
+              </Popover>
+            ) : null}
+            {stickers.length > 0 || klipy ? (
               <Popover open={stickerOpen} onOpenChange={setStickerOpen} modal={false}>
                 <Tip label="Send a sticker">
                   <PopoverTrigger render={<Button variant="ghost" size="icon" aria-label="Send a sticker" />}>
@@ -371,7 +404,7 @@ export function Composer({ ref, conversation, threadRootId = null, replyTo = nul
                 </Tip>
                 {stickerOpen ? (
                   <PopoverContent side="top" align="start" finalFocus={input} className="w-auto gap-0 p-0">
-                    <StickerPicker stickers={stickers} onPick={sendSticker} />
+                    <StickerPicker stickers={stickers} klipyWorkspaceId={klipy ? workspaceId : null} onPick={sendSticker} onPickKlipy={sendKlipy} />
                   </PopoverContent>
                 ) : null}
               </Popover>

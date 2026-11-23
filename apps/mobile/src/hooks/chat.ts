@@ -1,9 +1,9 @@
 /** The chat queries and writes beyond the shared lists in `src/queries.ts`. */
-import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useMemo } from 'react'
+import { keepPreviousData, useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useEffect, useMemo, useState } from 'react'
 import { Alert, Platform } from 'react-native'
 
-import { BUILT_IN_EMOJI, type EmojiGroup, emojiGroups, isChatAdmin } from '../data/chat'
+import { BUILT_IN_EMOJI, type EmojiGroup, emojiGroups, isChatAdmin, nextKlipyPage } from '../data/chat'
 import * as chat from '../data/chat-api'
 import { keys } from '../data/keys'
 import * as api from '../data/orbit'
@@ -161,6 +161,43 @@ export function useEmojiGroups(): EmojiGroup[] {
   const { session } = useOrbit()
   const query = useQuery({ queryKey: chatQueryKeys.emojibase(session.server), queryFn: () => chat.emojibase(session.server), staleTime: Infinity, gcTime: Infinity, retry: 1 })
   return useMemo(() => (query.data ? emojiGroups(query.data) : BUILT_IN_EMOJI), [query.data])
+}
+
+/** Whether the composer offers GIFs and KLIPY stickers: the instance has a KLIPY key. False while it loads or fails. */
+export function useKlipyEnabled(): boolean {
+  const { client, workspaceId } = useOrbit()
+  const query = useQuery({ queryKey: chatQueryKeys.klipy(workspaceId), queryFn: () => chat.klipyStatus(client, workspaceId), staleTime: 10 * 60_000, retry: 1 })
+  return query.data ?? false
+}
+
+/** `value` once it has not changed for `delay` ms. */
+export function useDebounced<T>(value: T, delay: number): T {
+  const [settled, setSettled] = useState(value)
+  useEffect(() => {
+    const timer = setTimeout(() => setSettled(value), delay)
+    return () => clearTimeout(timer)
+  }, [value, delay])
+  return settled
+}
+
+/**
+ * KLIPY's trending GIFs or stickers, or the results for `query` (300 ms after the last key), page by page. Waits for
+ * `enabled` (the picker's tab is open and KLIPY is on).
+ */
+export function useKlipySearch(catalog: chat.KlipyCatalog, query: string, enabled: boolean) {
+  const { client, workspaceId } = useOrbit()
+  const settled = useDebounced(query.trim(), 300)
+  return useInfiniteQuery({
+    queryKey: chatQueryKeys.klipyPages(workspaceId, catalog, settled),
+    initialPageParam: 1,
+    queryFn: ({ pageParam }) => chat.klipyPage(client, workspaceId, catalog, settled, pageParam),
+    getNextPageParam: (last, _pages, page) => nextKlipyPage(last, page),
+    enabled,
+    staleTime: 5 * 60_000,
+    retry: 1,
+    // the grid stays while the next search loads
+    placeholderData: keepPreviousData,
+  })
 }
 
 /** An image source for a server path: the session's bearer token goes with it. */

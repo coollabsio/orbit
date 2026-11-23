@@ -95,3 +95,11 @@ test('a message that is only a sticker cannot be edited; one with text can, and 
   // a row cached before stickers existed has no such fields
   expect(canEdit({ ...testMessage({ id: 'm3' }), stickerId: undefined as unknown as null }, 'u1')).toBe(true)
 })
+
+test('a message that is only a GIF from KLIPY cannot be edited; one with text can', () => {
+  const media = { kind: 'gif' as const, url: 'https://static.klipy.com/a.gif', width: 320, height: 240, title: 'Wave' }
+  expect(canEdit(testMessage({ id: 'm1', body: '', media }), 'u1')).toBe(false)
+  expect(canEdit(testMessage({ id: 'm2', body: 'hi', media }), 'u1')).toBe(true)
+  // a row cached before media existed has no such field
+  expect(canEdit({ ...testMessage({ id: 'm3' }), media: undefined as unknown as null }, 'u1')).toBe(true)
+})

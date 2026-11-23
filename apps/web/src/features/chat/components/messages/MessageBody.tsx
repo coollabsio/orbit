@@ -9,6 +9,7 @@ import type { Message } from '../../api/types'
 import { useChatHost } from '../../chatHost'
 import { decodeMentions } from '../../lib/mentionTokens'
 import { LinkEmbed } from './LinkEmbed'
+import { MessageMediaImage } from './MessageMediaImage'
 import { MessageBlocks } from './MessageBlocks'
 import { extractLinkUrls, isJumboEmoji, isLongMessage, standaloneLinkUrls } from './messageText'
 import { useChatPeople } from './people'
@@ -33,7 +34,7 @@ function LinkCards({ body }: { body: string }) {
 }
 
 /**
- * What a message says: its markdown with mentions shown as names, "(edited)", its sticker, attachments and link cards. A long
+ * What a message says: its markdown with mentions shown as names, "(edited)", its sticker or GIF, attachments and link cards. A long
  * message collapses behind "Show more". No list or toolbar concerns, so previews (pins, search, unreads) can use it.
  * An Orbit URL the reader can see shows as a chip; one that is a whole line shows only as its card. A typed task
  * identifier (`ENG-12`) shows as the URL of its task does, and stays the typed text when the reader cannot see the task
@@ -135,6 +136,7 @@ export function MessageBody({ message }: { message: Message }) {
           Sticker was deleted
         </p>
       ) : null}
+      {message.media ? <MessageMediaImage key={message.media.url} media={message.media} /> : null}
       <Attachments attachments={message.attachments} hasTextContent={text !== ''} />
       <LinkCards body={linkBody} />
     </div>

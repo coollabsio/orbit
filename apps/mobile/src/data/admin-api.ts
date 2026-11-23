@@ -16,12 +16,14 @@ import {
   listBackups,
   listBackupWorkspaces,
   listGlobalAudit,
+  removeKlipy as removeKlipyRequest,
   removeS3 as removeS3Request,
   removeSignInProvider as removeSignInProviderRequest,
   removeSmtp as removeSmtpRequest,
   resetTwoFactor,
   restoreBackupItem as restoreBackupItemRequest,
   saveJobLimits as saveJobLimitsRequest,
+  saveKlipy as saveKlipyRequest,
   saveLimits as saveLimitsRequest,
   saveS3 as saveS3Request,
   saveSignInProvider as saveSignInProviderRequest,
@@ -211,6 +213,15 @@ export async function removeSignInProvider(client: OrbitClient, provider: Provid
 
 export async function sendTestEmail(client: OrbitClient): Promise<void> {
   await sendTestEmailRequest({ client, throwOnError: true })
+}
+
+/** The KLIPY API key for GIFs and stickers in chat; the server stores it encrypted and never returns it. */
+export async function saveKlipy(client: OrbitClient, apiKey: string): Promise<InstanceSettingsView> {
+  return (await saveKlipyRequest({ client, body: { api_key: apiKey.trim() }, throwOnError: true })).data
+}
+
+export async function removeKlipy(client: OrbitClient): Promise<InstanceSettingsView> {
+  return (await removeKlipyRequest({ client, throwOnError: true })).data
 }
 
 export async function saveLimits(client: OrbitClient, body: LimitsView): Promise<InstanceSettingsView> {

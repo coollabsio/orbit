@@ -822,6 +822,7 @@ async fn environment_settings_replace_the_saved_ones_and_admin_cannot_change_the
                 client_id: "env-client".to_owned(),
                 client_secret: Secret::new("env-secret"),
             }),
+            klipy_api_key: Some(Secret::new("env-klipy-key")),
             ..InstanceConfig::default()
         },
         &key,
@@ -854,8 +855,14 @@ async fn environment_settings_replace_the_saved_ones_and_admin_cannot_change_the
     );
     assert_eq!(
         body["environment"],
-        json!({"registration_open": true, "smtp": true, "s3": false, "attachments_in_s3": false,
-               "backups_in_s3": false, "backup_schedule": false, "sign_in_providers": ["github"]})
+        json!({"registration_open": true, "oidc_provision": false, "smtp": true, "s3": false,
+               "attachments_in_s3": false, "backups_in_s3": false, "backup_schedule": false,
+               "s3_keep_deleted_days": false, "sign_in_providers": ["github"], "klipy": true})
+    );
+    assert_eq!(body["klipy"], json!({"key_set": true}));
+    assert!(
+        !body.to_string().contains("env-klipy-key"),
+        "the key is never returned"
     );
     assert_eq!(
         call(app, "GET", "/api/v1/auth/options", None, None).await.1["registration_open"],
@@ -875,6 +882,12 @@ async fn environment_settings_replace_the_saved_ones_and_admin_cannot_change_the
             "/api/v1/admin/settings/sign-in-providers/github",
             None,
         ),
+        (
+            "PUT",
+            "/api/v1/admin/settings/klipy",
+            Some(json!({"api_key": "saved-key"})),
+        ),
+        ("DELETE", "/api/v1/admin/settings/klipy", None),
     ] {
         let (status, body) = call(app, method, uri, root, request).await;
         assert_eq!(

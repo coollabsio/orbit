@@ -4,8 +4,8 @@ import { useState } from 'react'
 import { Image, Modal, Platform, Pressable, Share, useWindowDimensions, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
-import { fileSize, hasReaction, isImage, type TextPart } from '../../data/chat'
-import type { ChatFileRecord } from '../../data/chat-api'
+import { fileSize, fitSize, hasReaction, isImage, mediaLabel, type TextPart } from '../../data/chat'
+import type { ChatFileRecord, ChatMediaBody } from '../../data/chat-api'
 import { relativeAgo, timeOfDay } from '../../data/format'
 import type { MessageRecord } from '../../data/orbit'
 import { showError, useServerImage } from '../../hooks/chat'
@@ -13,6 +13,7 @@ import { useIsGuest, useOrbit } from '../../orbit-context'
 import { cssColors, useTheme } from '../../theme'
 import { Avatar, Icon, IconButton, Spinner, Text } from '../../ui'
 import { GithubPullCard } from '../pulls/GithubPullCard'
+import { ChatImage } from './ChatImage'
 import { Emoji } from './EmojiPicker'
 
 /** What a message row needs from the screen: names, the shown text of a body, and what a tap does. */
@@ -88,7 +89,7 @@ export function MessageItem({ message, groupStart, highlighted = false, handlers
       accessibilityHint="Long press for actions"
       className={`${highlighted ? 'bg-primary/12' : mentioned ? 'bg-primary/8' : ''} ${groupStart ? 'mt-2' : 'mt-0'}`}
     >
-      {message.reply_to ? <Quote author={handlers.nameOf(message.reply_to.author_id)} body={message.reply_to.sticker && !message.reply_to.body ? 'Sticker' : handlers.text(message.reply_to.body)} /> : null}
+      {message.reply_to ? <Quote author={handlers.nameOf(message.reply_to.author_id)} body={mediaLabel(message.reply_to) ?? handlers.text(message.reply_to.body)} /> : null}
       <View className={`flex-row gap-2 px-3 pb-0.5 ${groupStart ? 'pt-1' : 'pt-0.5'}`}>
         <View className="w-7.5 pt-0.5">
           {groupStart ? (
@@ -132,6 +133,7 @@ export function MessageItem({ message, groupStart, highlighted = false, handlers
           ) : null}
           {message.deleted || guest ? null : extractPullRefs(message.body).map((ref) => <GithubPullCard key={`${ref.owner}/${ref.repo}#${ref.number}`} pullRef={ref} />)}
           {message.sticker ? <Sticker url={message.sticker.url} name={message.sticker.name} /> : message.sticker_id && !message.deleted ? <Text className="text-[12px] text-muted-foreground">Sticker was deleted</Text> : null}
+          {message.media && !message.deleted ? <MessageMedia media={message.media} /> : null}
           {!message.deleted && message.attachments.length > 0 ? <Attachments files={message.attachments} hasText={body !== ''} /> : null}
           {!message.deleted && message.reactions.length > 0 ? (
             <View className="flex-row flex-wrap gap-1 mt-1">
@@ -204,7 +206,7 @@ function ReplySummary({ message, handlers }: { message: MessageRecord; handlers:
               {reply.bot_name ?? handlers.nameOf(reply.author_id)}
             </Text>
             <Text numberOfLines={1} className="text-[13px] leading-[17px] shrink text-muted-foreground">
-              {reply.sticker ? 'Sticker' : handlers.text(reply.body)}
+              {mediaLabel(reply) ?? handlers.text(reply.body)}
             </Text>
           </View>
         ) : null}
@@ -218,9 +220,40 @@ function ReplySummary({ message, handlers }: { message: MessageRecord; handlers:
   )
 }
 
-function Sticker({ url, name }: { url: string; name: string }) {
+/** A workspace sticker: 120px, whole, animated when its image is. */
+export function Sticker({ url, name }: { url: string; name: string }) {
   const image = useServerImage()
-  return <Image accessibilityLabel={`Sticker ${name}`} source={image(url)} className="size-30 mt-1" resizeMode="contain" />
+  return (
+    <View className="mt-1">
+      <ChatImage source={image(url)} label={`Sticker ${name}`} contain style={STICKER_SIZE} />
+    </View>
+  )
+}
+
+const STICKER_SIZE = { width: 120, height: 120 }
+const GIF_MAX = 260
+
+/**
+ * A GIF or sticker from KLIPY, straight from its CDN. A GIF keeps its aspect ratio in at most 260×260 (less on a narrow
+ * screen), rounded; a sticker sits like a workspace sticker.
+ */
+export function MessageMedia({ media }: { media: ChatMediaBody }) {
+  const { width: screen } = useWindowDimensions()
+  const label = `${media.kind === 'gif' ? 'GIF' : 'Sticker'}${media.title ? ` ${media.title}` : ''}`
+  if (media.kind === 'sticker') {
+    return (
+      <View className="mt-1">
+        <ChatImage source={{ uri: media.url }} label={label} contain style={STICKER_SIZE} />
+      </View>
+    )
+  }
+  // the row's padding, avatar column and gap, as `Attachments` counts them
+  const size = fitSize(media.width, media.height, Math.min(screen - 12 - 30 - 8 - 12, GIF_MAX), GIF_MAX)
+  return (
+    <View className="mt-1 rounded-md overflow-hidden bg-muted" style={size}>
+      <ChatImage source={{ uri: media.url }} label={label} style={size} />
+    </View>
+  )
 }
 
 /** The web `Attachments` at phone size: images in a grid (one alone up to 300px high), other files as cards. */
@@ -232,7 +265,7 @@ export function Attachments({ files, hasText }: { files: readonly ChatFileRecord
   const others = files.filter((file) => !isImage(file) || file.deleted)
   const maxWidth = Math.min(screen - 12 - 30 - 8 - 12, 512)
   const single = images.length === 1 ? images[0] : undefined
-  const singleSize = single?.width && single.height ? fit(single.width, single.height, maxWidth, 300) : { width: maxWidth, height: 200 }
+  const singleSize = single?.width && single.height ? fitSize(single.width, single.height, maxWidth, 300) : { width: maxWidth, height: 200 }
   const columns = images.length === 3 ? 3 : 2
   const cell = (maxWidth - (columns - 1) * 4) / columns
 
@@ -262,11 +295,6 @@ export function Attachments({ files, hasText }: { files: readonly ChatFileRecord
       <ImageViewer file={viewing} onClose={() => setViewing(null)} />
     </View>
   )
-}
-
-const fit = (width: number, height: number, maxWidth: number, maxHeight: number) => {
-  const scale = Math.min(1, maxWidth / width, maxHeight / height)
-  return { width: Math.round(width * scale), height: Math.round(height * scale) }
 }
 
 /**

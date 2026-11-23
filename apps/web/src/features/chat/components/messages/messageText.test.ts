@@ -7,6 +7,7 @@ import {
   firstLine,
   isJumboEmoji,
   isLongMessage,
+  mediaSize,
   messagesAfter,
   quickReactions,
   standaloneLinkUrls,
@@ -127,4 +128,12 @@ test('a known custom emoji counts for jumbo; other text does not', () => {
   expect(isJumboEmoji('👍 nice', custom)).toBe(false)
   expect(isJumboEmoji('@Ada 👍', custom)).toBe(false)
   expect(isJumboEmoji('👍.', custom)).toBe(false)
+})
+
+test('a GIF keeps its aspect ratio and only gets smaller to fit 300px; a sticker is a 160px square', () => {
+  expect(mediaSize({ kind: 'gif', width: 200, height: 100 })).toEqual({ width: 200, height: 100 })
+  expect(mediaSize({ kind: 'gif', width: 600, height: 300 })).toEqual({ width: 300, height: 150 })
+  expect(mediaSize({ kind: 'gif', width: 240, height: 720 })).toEqual({ width: 100, height: 300 })
+  expect(mediaSize({ kind: 'gif', width: 0, height: 0 })).toEqual({ width: 300, height: 300 })
+  expect(mediaSize({ kind: 'sticker', width: 512, height: 256 })).toEqual({ width: 160, height: 160 })
 })

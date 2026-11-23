@@ -102,6 +102,7 @@
       "expo-system-ui",
       "@react-native-community/datetimepicker",
       "expo-web-browser",
+      "expo-image",
       [
         "expo-image-picker",
         {
