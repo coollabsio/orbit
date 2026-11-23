@@ -10,6 +10,7 @@ export function testMessage(overrides: Partial<Message> & { id: string }): Messa
     forwarded: null,
     stickerId: null,
     sticker: null,
+    media: null,
     kind: 'message',
     authorId: 'u1',
     body: 'text',

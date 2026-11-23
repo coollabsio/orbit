@@ -1269,6 +1269,7 @@ async fn docs_and_chat_require_explicit_scopes_and_doc_writes_need_docs_write() 
             reply_to_id: None,
             body: body.into(),
             sticker_id: None,
+            media: None,
             file_ids: vec![],
             online: vec![],
             also_in_channel: false,

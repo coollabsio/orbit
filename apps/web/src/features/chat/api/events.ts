@@ -1,6 +1,6 @@
 import type { InfiniteData, QueryClient } from '@tanstack/react-query'
 import { queryKeys } from '@/api/queryKeys'
-import { quoteOf } from '../lib/quote'
+import { quoteOf, wordlessContentOf } from '../lib/quote'
 import { sortFollowedThreads } from '../lib/sidebar'
 import type { MessageCursor } from './client'
 import { chatKeys } from './keys'
@@ -214,7 +214,7 @@ function messageCreated(queryClient: QueryClient, workspaceId: string, message: 
           replyCount: root.replyCount + 1,
           lastReplyAt: message.createdAt,
           replyUserIds: root.replyUserIds.includes(message.authorId) ? root.replyUserIds : [...root.replyUserIds, message.authorId],
-          lastReply: { authorId: message.authorId, body: message.body, sticker: message.stickerId != null, createdAt: message.createdAt },
+          lastReply: { authorId: message.authorId, body: message.body, ...wordlessContentOf(message), createdAt: message.createdAt },
         },
   )
   queryClient.setQueryData<FollowedThread[]>(chatKeys.followedThreads(workspaceId), (threads) =>

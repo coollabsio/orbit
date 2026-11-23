@@ -326,6 +326,7 @@ impl ChatRepository {
             forwarded: None,
             sticker_id: None,
             sticker: None,
+            media: None,
             bot: Some(super::BotRecord { interactive, ..bot }),
             blocks,
             last_reply_id: None,

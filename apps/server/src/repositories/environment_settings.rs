@@ -32,6 +32,8 @@ pub struct EnvironmentSettings {
     pub sign_in_providers: Vec<SavedSignInProvider>,
     /// `ORBIT_OIDC_PROVISION`.
     pub oidc_provision: Option<bool>,
+    /// `ORBIT_KLIPY_API_KEY`: the KLIPY API key for GIFs and stickers in chat, encrypted.
+    pub klipy_api_key: Option<Vec<u8>>,
 }
 
 impl EnvironmentSettings {
@@ -107,6 +109,11 @@ impl EnvironmentSettings {
                 }),
             });
         }
+        let klipy_api_key = config
+            .klipy_api_key
+            .as_ref()
+            .map(|key| seal(key.expose()))
+            .transpose()?;
         Ok(Self {
             registration_open: config.registration_open,
             smtp,
@@ -117,6 +124,7 @@ impl EnvironmentSettings {
             s3_keep_deleted_days: config.s3_keep_deleted_days,
             sign_in_providers,
             oidc_provision: config.oidc_provision,
+            klipy_api_key,
         })
     }
 

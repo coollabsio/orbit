@@ -22,6 +22,7 @@ pub mod github;
 pub mod github_pull_routes;
 pub mod github_user_routes;
 pub mod integration_routes;
+pub mod klipy;
 pub mod linear;
 pub mod linear_import_routes;
 pub mod link_preview;

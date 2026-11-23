@@ -804,6 +804,7 @@ async fn seed_chat(
                 body,
                 file_ids: Vec::new(),
                 sticker_id: None,
+                media: None,
                 online: Vec::new(),
                 also_in_channel: false,
                 nonce: format!("development-seed-{sent}"),

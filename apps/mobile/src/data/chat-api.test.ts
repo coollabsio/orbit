@@ -39,6 +39,27 @@ test('a thread reply that also goes to the channel sends every field of the web 
   ])
 })
 
+test('a GIF from KLIPY goes with an empty body, the reply target and no files', async () => {
+  const { client, sent } = recording({ result: { id: 'm9' }, events: [], seq: 4 })
+  const media = { kind: 'gif' as const, url: 'https://static.klipy.com/md.webp', width: 320, height: 180, title: 'Happy dance' }
+  await chat.send(client, 'w1', 'c1', { body: '', nonce: 'n1', replyToId: 'm1', media })
+  await chat.send(client, 'w1', 'c1', { body: '', nonce: 'n2', stickerId: 's1' })
+  expect(sent.map(({ body }) => JSON.parse(body))).toEqual([
+    { body: '', nonce: 'n1', thread_root_id: null, reply_to_id: 'm1', file_ids: [], also_in_channel: false, media },
+    { body: '', nonce: 'n2', thread_root_id: null, reply_to_id: null, file_ids: [], also_in_channel: false, sticker_id: 's1' },
+  ])
+})
+
+test('KLIPY lists what is trending without words, and searches with them', async () => {
+  const { client, sent } = recording({ items: [], has_next: false })
+  await chat.klipyPage(client, 'w1', 'gifs', '  ', 1)
+  await chat.klipyPage(client, 'w1', 'stickers', ' cat ', 3)
+  expect(sent.map(({ url }) => url)).toEqual([
+    'https://orbit.test/api/v1/workspaces/w1/chat/klipy/gifs?page=1',
+    'https://orbit.test/api/v1/workspaces/w1/chat/klipy/stickers?q=cat&page=3',
+  ])
+})
+
 test('reactions go on with PUT and off with DELETE, the emoji encoded in the path', async () => {
   const { client, sent } = recording({ result: { id: 'm1' }, events: [], seq: 1 })
   await chat.react(client, 'w1', 'm1', '👍', true)

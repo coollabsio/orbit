@@ -9,10 +9,11 @@ const message: MessageRecord = {
   conversation_id: 'c1',
   thread_root_id: 'm1',
   reply_to_id: 'm0',
-  reply_to: { id: 'm0', author_id: 'u1', body: 'Is it <@u2>?', sticker: false, bot_name: null },
+  reply_to: { id: 'm0', author_id: 'u1', body: 'Is it <@u2>?', sticker: false, gif: false, bot_name: null },
   forwarded: null,
   sticker_id: null,
   sticker: null,
+  media: null,
   bot: null,
   blocks: null,
   kind: 'message',
@@ -33,7 +34,7 @@ const message: MessageRecord = {
   reply_count: 2,
   last_reply_at: '2026-10-02T08:02:00.000Z',
   reply_user_ids: ['u1'],
-  last_reply: { author_id: 'u1', body: 'Thanks', sticker: false, created_at: '2026-10-02T08:02:00.000Z', bot_name: null },
+  last_reply: { author_id: 'u1', body: 'Thanks', sticker: false, gif: false, created_at: '2026-10-02T08:02:00.000Z', bot_name: null },
 }
 
 const conversation: ConversationRecord = {
@@ -60,10 +61,11 @@ test('a wire message becomes a chat message with millisecond times', () => {
       conversationId: 'c1',
       threadRootId: 'm1',
       replyToId: 'm0',
-      replyTo: { id: 'm0', authorId: 'u1', body: 'Is it <@u2>?', sticker: false },
+      replyTo: { id: 'm0', authorId: 'u1', body: 'Is it <@u2>?', sticker: false, gif: false, botName: null },
       forwarded: null,
       stickerId: null,
       sticker: null,
+      media: null,
       kind: 'message',
       authorId: 'u2',
       body: '<@u1> done',
@@ -82,7 +84,9 @@ test('a wire message becomes a chat message with millisecond times', () => {
       replyCount: 2,
       lastReplyAt: Date.UTC(2026, 9, 2, 8, 2),
       replyUserIds: ['u1'],
-      lastReply: { authorId: 'u1', body: 'Thanks', sticker: false, createdAt: Date.UTC(2026, 9, 2, 8, 2), botName: null },
+      lastReply: { authorId: 'u1', body: 'Thanks', sticker: false, gif: false, createdAt: Date.UTC(2026, 9, 2, 8, 2), botName: null },
+      bot: null,
+      blocks: null,
     },
   })
 })
@@ -144,6 +148,24 @@ test('a message carries its sticker, and only the id once the sticker was delete
   expect(sent).toMatchObject({ message: { body: '', stickerId: 's1', sticker } })
   const deleted = toEvent({ type: 'message.updated', message: { ...message, sticker_id: 's1', sticker: null } }, 'u1')
   expect(deleted).toMatchObject({ message: { stickerId: 's1', sticker: null } })
+})
+
+test('a message carries its GIF from KLIPY, and its quote and newest reply say they are GIFs', () => {
+  const media = { kind: 'gif' as const, url: 'https://static.klipy.com/a.gif', width: 498, height: 280, title: 'Wave' }
+  const event = toEvent(
+    {
+      type: 'message.created',
+      message: {
+        ...message,
+        body: '',
+        media,
+        reply_to: { ...message.reply_to!, body: '', gif: true },
+        last_reply: { ...message.last_reply!, body: '', gif: true },
+      },
+    },
+    'u1',
+  )
+  expect(event).toMatchObject({ message: { body: '', media, replyTo: { gif: true, sticker: false }, lastReply: { gif: true, sticker: false } } })
 })
 
 test('stickers.changed has no payload', () => {

@@ -19,10 +19,17 @@ export function extractPreview(content: string): string {
     .replace(/\\([!-/:-@[-`{-~])|\*\*([^*]+)\*\*|__([^_]+)__|\*([^*]+)\*|_([^_]+)_|`([^`]+)`/g, (_, x, a, b, c, d, e) => x ?? a ?? b ?? c ?? d ?? e)
 }
 
+/** What a message shows besides its text: a sticker (a custom one or one from KLIPY), or a GIF from KLIPY. */
+export interface WordlessContent {
+  sticker?: boolean
+  gif?: boolean
+}
+
 /**
- * What a one-line preview says for a message without text: `Sticker` for a sticker, else that a file was sent (a
- * message has text, a sticker or files).
+ * What a one-line preview says for a message without text: `GIF` for a GIF, `Sticker` for a sticker, else that a file
+ * was sent (a message has text, a sticker, a GIF or files).
  */
-export function wordlessPreview(sticker: boolean): string {
+export function wordlessPreview({ sticker, gif }: WordlessContent): string {
+  if (gif) return 'GIF'
   return sticker ? 'Sticker' : 'Sent a file'
 }

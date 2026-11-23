@@ -22,6 +22,7 @@ import { DocsPage } from '@/features/docs/pages/DocsPage'
 import { AccountLayout, AdminLayout, SettingsLayout } from '@/features/settings/pages/SettingsLayout'
 import { AdminAuditPage } from '@/features/admin/pages/AdminAuditPage'
 import { AdminBackupsPage } from '@/features/admin/pages/AdminBackupsPage'
+import { AdminChatPage } from '@/features/admin/pages/AdminChatPage'
 import { AdminEmailPage } from '@/features/admin/pages/AdminEmailPage'
 import { AdminJobsPage } from '@/features/admin/pages/AdminJobsPage'
 import { AdminEmailLimitsPage, AdminLimitsPage } from '@/features/admin/pages/AdminLimitsPage'
@@ -188,6 +189,7 @@ export default function App() {
                   <Route path="storage" element={<AdminStoragePage />} />
                   <Route path="backups" element={<AdminBackupsPage />} />
                   <Route path="jobs" element={<AdminJobsPage />} />
+                  <Route path="chat" element={<AdminChatPage />} />
                   <Route path="mail" element={<AdminMailPage />} />
                 </Route>
                 <Route path="settings" element={<SettingsLayout />}>

@@ -8,11 +8,13 @@ import { type ComponentType, type ReactNode, useEffect, useMemo, useRef, useStat
 import { Image, Platform, Pressable, ScrollView, type TextInputInstance, View } from 'react-native'
 import { TextInput } from '../../ui/scaled'
 
-import { decodeMentions, newNonce, type ThreadPages, upsertThreadMessage } from '../../data/chat'
+import { decodeMentions, klipyMedia, newNonce, type ThreadPages, upsertThreadMessage } from '../../data/chat'
 import * as chat from '../../data/chat-api'
+import type { CustomStickerRecord } from '../../data/custom-emoji-api'
 import { encodeMentions, GLOBAL_MENTIONS, type MentionTarget } from '../../data/mentions'
 import type { MessageRecord } from '../../data/orbit'
-import { showError } from '../../hooks/chat'
+import { showError, useKlipyEnabled } from '../../hooks/chat'
+import { useCustomStickers } from '../../hooks/custom-emoji'
 import { useConversations, useMentionPeople, usePeople } from '../../queries'
 import { MentionSuggestions, useMentionField } from '../MentionSuggestions'
 
@@ -21,6 +23,7 @@ import { useTheme } from '../../theme'
 import { Icon, IconButton, Spinner, Text } from '../../ui'
 import { uploadPart } from '../../upload-part'
 import { EmojiPicker } from './EmojiPicker'
+import { StickerPicker } from './StickerPicker'
 import { ActionSheet } from './Sheet'
 
 /** A picked file: it uploads at once, and the message names it once it is there. */
@@ -38,7 +41,14 @@ export interface PendingMessage {
   nonce: string
   body: string
   files: number
+  /** A workspace sticker sent alone. */
+  sticker?: { url: string; name: string }
+  /** A GIF or sticker from KLIPY sent alone. */
+  media?: chat.ChatMediaBody
 }
+
+/** What the sticker picker hands the composer: a workspace sticker, or a GIF or sticker from KLIPY. */
+export type StickerPick = { kind: 'sticker'; sticker: CustomStickerRecord } | { kind: 'klipy'; item: chat.KlipyItem }
 
 /** What the composer writes: a new message (maybe quoting one) or an edit of your own. */
 type Mode = { kind: 'new'; replyTo: MessageRecord | null } | { kind: 'edit'; message: MessageRecord }
@@ -126,8 +136,16 @@ export function useComposer(conversationId: string, threadRootId: string | null)
     setDraft('')
     setFiles([])
     setMode({ kind: 'new', replyTo: null })
+    deliver(item, { body, nonce: item.nonce, threadRootId, replyToId: replyTo?.id ?? null, fileIds, alsoInChannel: threadRootId !== null && alsoInChannel }, (error) => {
+      setDraft((current) => current || typed)
+      showError('Message not sent', error)
+    })
+  }
+
+  /** Shows `item` until the server confirms the message, then puts the message into the caches. */
+  const deliver = (item: PendingMessage, message: chat.OutgoingMessage, failed: (error: unknown) => void) => {
     setPending((list) => [...list, item])
-    chat.send(client, workspaceId, conversationId, { body, nonce: item.nonce, threadRootId, replyToId: replyTo?.id ?? null, fileIds, alsoInChannel: threadRootId !== null && alsoInChannel }).then(
+    chat.send(client, workspaceId, conversationId, message).then(
       ({ result, events }) => {
         applyChatEvents(queryClient, workspaceId, events)
         received(result)
@@ -135,8 +153,35 @@ export function useComposer(conversationId: string, threadRootId: string | null)
       },
       (error) => {
         setPending((list) => list.filter((other) => other.nonce !== item.nonce))
-        setDraft((current) => current || typed)
-        showError('Message not sent', error)
+        failed(error)
+      },
+    )
+  }
+
+  /**
+   * A picked sticker or GIF goes at once, with no text, quoting the reply target. The draft and its files stay for the
+   * next message: the server takes a sticker or GIF only alone.
+   */
+  const sendPick = (pick: StickerPick) => {
+    if (mode.kind !== 'new') return
+    const replyTo = mode.replyTo
+    const media = pick.kind === 'klipy' ? klipyMedia(pick.item) : null
+    const item: PendingMessage = { nonce: newNonce(), body: '', files: 0, ...(pick.kind === 'sticker' ? { sticker: { url: pick.sticker.url, name: pick.sticker.name } } : { media: media ?? undefined }) }
+    setMode({ kind: 'new', replyTo: null })
+    deliver(
+      item,
+      {
+        body: '',
+        nonce: item.nonce,
+        threadRootId,
+        replyToId: replyTo?.id ?? null,
+        alsoInChannel: threadRootId !== null && alsoInChannel,
+        stickerId: pick.kind === 'sticker' ? pick.sticker.id : null,
+        media,
+      },
+      (error) => {
+        if (replyTo) setMode((current) => (current.kind === 'new' && !current.replyTo ? { kind: 'new', replyTo } : current))
+        showError(pick.kind === 'klipy' && pick.item.kind === 'gif' ? 'GIF not sent' : 'Sticker not sent', error)
       },
     )
   }
@@ -162,6 +207,7 @@ export function useComposer(conversationId: string, threadRootId: string | null)
     pending,
     canSend,
     send,
+    sendPick,
     mentionPeople,
     channels,
   }
@@ -178,6 +224,10 @@ export function Composer({ state, placeholder, nameOf, alsoSendTo }: { state: Co
   const [focused, setFocused] = useState(false)
   const [attachOpen, setAttachOpen] = useState(false)
   const [emojiOpen, setEmojiOpen] = useState(false)
+  const [stickerOpen, setStickerOpen] = useState(false)
+  // the GIFs and stickers button shows when there is something to pick: KLIPY is on, or the workspace has stickers
+  const klipy = useKlipyEnabled()
+  const stickers = useCustomStickers(true).data ?? []
   const { draft, setDraft, mode } = state
   const input = useRef<TextInputInstance>(null)
   // Reply and Edit open the keyboard. They run from the message's action sheet, so wait until its Modal has slid
@@ -278,6 +328,9 @@ export function Composer({ state, placeholder, nameOf, alsoSendTo }: { state: Co
         <View className="flex-row items-center gap-1 p-1.5">
           <IconButton icon="attach" label="Attach files" size={32} iconSize={20} disabled={mode.kind === 'edit'} onPress={() => setAttachOpen(true)} />
           <IconButton icon="smile" label="Emoji" size={32} iconSize={20} onPress={() => setEmojiOpen(true)} />
+          {klipy || stickers.length > 0 ? (
+            <IconButton icon="sticker" label={klipy ? 'GIFs and stickers' : 'Stickers'} size={32} iconSize={20} disabled={mode.kind === 'edit'} onPress={() => setStickerOpen(true)} />
+          ) : null}
           <IconButton icon="at" label="Mention" size={32} iconSize={20} onPress={() => mention.mention('@')} />
           <IconButton icon="hashtag" label="Mention a channel or task" size={32} iconSize={20} onPress={() => mention.mention('#')} />
           <View className="flex-1" />
@@ -318,6 +371,7 @@ export function Composer({ state, placeholder, nameOf, alsoSendTo }: { state: Co
         onClose={() => setAttachOpen(false)}
       />
       <EmojiPicker visible={emojiOpen} onPick={(emoji) => setDraft(`${draft}${emoji}`)} onClose={() => setEmojiOpen(false)} />
+      <StickerPicker visible={stickerOpen} klipy={klipy} stickers={stickers} onPick={state.sendPick} onClose={() => setStickerOpen(false)} />
     </View>
   )
 }

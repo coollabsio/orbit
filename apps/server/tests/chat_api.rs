@@ -2629,7 +2629,7 @@ async fn a_reply_quotes_a_message_of_its_conversation_and_keeps_the_id_of_a_dele
     assert_eq!(sent["result"]["thread_root_id"], Value::Null);
     assert_eq!(
         sent["result"]["reply_to"],
-        json!({ "id": target, "author_id": fixture.owner.id.to_string(), "body": "é".repeat(200), "sticker": false })
+        json!({ "id": target, "author_id": fixture.owner.id.to_string(), "body": "é".repeat(200), "sticker": false, "gif": false, "bot_name": null })
     );
     // The event that the other members get carries the quote too.
     assert_eq!(sent["events"][0]["type"], "message.created");
@@ -3522,6 +3522,7 @@ async fn a_forward_is_a_copy_with_its_files_that_mentions_nobody_and_outlives_th
         "conversation_id": source,
         "author_id": fixture.owner.id.to_string(),
         "created_at": sent["result"]["created_at"],
+        "bot_name": null,
     });
     assert_eq!(forward["forwarded"], origin);
     // The other members get the same event as for a sent message.
@@ -4139,4 +4140,275 @@ async fn a_guest_push_names_no_public_channel() {
     };
     assert_eq!(body_for(&ada), Some(json!("@ada @guest see #general")));
     assert_eq!(body_for(&guest), Some(json!("@ada @guest see #channel")));
+}
+
+/// A GIF from KLIPY, as the composer sends it.
+fn gif_media(url: &str) -> Value {
+    json!({ "kind": "gif", "url": url, "width": 320, "height": 180, "title": " Happy cat " })
+}
+
+#[tokio::test]
+async fn a_message_can_carry_a_klipy_gif_that_forwards_quotes_and_deletes_with_it() {
+    let fixture = Fixture::new().await;
+    let ada = fixture.add_member("ada").await;
+    let general = fixture.general().await;
+    let url = "https://static.klipy.com/ii/happy-cat.webp";
+
+    // A GIF alone needs no text.
+    let sent = fixture
+        .send_with(
+            &ada,
+            &general,
+            json!({ "body": "", "media": gif_media(url) }),
+        )
+        .await;
+    let gif = sent["result"]["id"].as_str().unwrap().to_owned();
+    let media =
+        json!({ "kind": "gif", "url": url, "width": 320, "height": 180, "title": "Happy cat" });
+    assert_eq!(sent["result"]["media"], media);
+    assert_eq!(sent["result"]["body"], "");
+    let page = fixture
+        .ok(
+            &fixture.owner,
+            "GET",
+            &format!("/conversations/{general}/messages"),
+            None,
+        )
+        .await;
+    let listed = page["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|message| message["id"] == gif.as_str())
+        .unwrap()
+        .clone();
+    assert_eq!(listed["media"], media);
+    // A message without media has the field, null.
+    let plain = fixture
+        .send_with(&ada, &general, json!({ "body": "hi" }))
+        .await;
+    assert_eq!(plain["result"]["media"], Value::Null);
+
+    // Only https images on klipy.com and its subdomains, with a sane size and title.
+    let messages = format!("/conversations/{general}/messages");
+    let long_title = "a".repeat(201);
+    for media in [
+        gif_media("https://evil.com/x.gif"),
+        gif_media("https://klipy.com.evil.com/x.gif"),
+        gif_media("http://static.klipy.com/x.gif"),
+        gif_media("https://user:secret@static.klipy.com/x.gif"),
+        gif_media("https://static.klipy.com:8443/x.gif"),
+        json!({ "kind": "gif", "url": url, "width": 0, "height": 180 }),
+        json!({ "kind": "gif", "url": url, "width": 320, "height": 5000 }),
+        json!({ "kind": "gif", "url": url, "width": 320, "height": 180, "title": long_title }),
+        // Postgres text refuses NUL: a 422, not a 500.
+        json!({ "kind": "gif", "url": url, "width": 320, "height": 180, "title": "cat\u{0}" }),
+    ] {
+        let body = json!({ "body": "", "media": media, "nonce": fixture.next_nonce() });
+        let (status, problem) = fixture.call(&ada, "POST", &messages, Some(body)).await;
+        assert_eq!(
+            status,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "{media}: {problem}"
+        );
+        assert_eq!(problem["code"], "validation_failed", "{media}: {problem}");
+    }
+    let body = json!({
+        "body": "",
+        "media": { "kind": "video", "url": url, "width": 320, "height": 180 },
+        "nonce": fixture.next_nonce(),
+    });
+    let (status, problem) = fixture.call(&ada, "POST", &messages, Some(body)).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{problem}");
+    // Media does not go with a custom sticker.
+    let (status, sticker) = fixture.add_sticker(&fixture.owner, "wave", PNG).await;
+    assert_eq!(status, StatusCode::CREATED, "{sticker}");
+    let body = json!({
+        "body": "", "media": gif_media(url), "sticker_id": sticker["id"], "nonce": fixture.next_nonce()
+    });
+    let (status, problem) = fixture.call(&ada, "POST", &messages, Some(body)).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{problem}");
+    assert_eq!(problem["code"], "validation_failed");
+
+    // A quote and a thread preview say what the message has.
+    let quoting = fixture
+        .send_with(
+            &fixture.owner,
+            &general,
+            json!({ "body": "lol", "reply_to_id": gif }),
+        )
+        .await;
+    assert_eq!(quoting["result"]["reply_to"]["gif"], true);
+    assert_eq!(quoting["result"]["reply_to"]["sticker"], false);
+    let root = fixture.send(&fixture.owner, &general, "thread").await;
+    let sticker_media = json!({
+        "kind": "sticker", "url": "https://static.klipy.com/st.webp", "width": 128, "height": 128
+    });
+    fixture
+        .send_with(
+            &ada,
+            &general,
+            json!({ "body": "", "media": sticker_media, "thread_root_id": root }),
+        )
+        .await;
+    let thread = fixture
+        .ok(&ada, "GET", &format!("/threads/{root}"), None)
+        .await;
+    assert_eq!(thread["root"]["last_reply"]["sticker"], true);
+    assert_eq!(thread["root"]["last_reply"]["gif"], false);
+    assert_eq!(thread["items"][0]["media"]["kind"], "sticker");
+    assert_eq!(thread["items"][0]["media"]["title"], "");
+
+    // A forward copies the GIF; an edit keeps it.
+    let target = fixture.channel(&ada, "target", "private", &[]).await;
+    let (status, forward) = fixture.forward(&ada, &gif, &target).await;
+    assert_eq!(status, StatusCode::OK, "{forward}");
+    assert_eq!(forward["result"]["media"], media);
+    let edited = fixture
+        .ok(
+            &ada,
+            "PATCH",
+            &format!("/messages/{gif}"),
+            Some(json!({ "body": "so happy" })),
+        )
+        .await;
+    assert_eq!(edited["result"]["media"], media);
+
+    // A deleted root with replies stays in the list without its media, and its row forgets the URL.
+    fixture.reply(&fixture.owner, &general, &gif, "nice").await;
+    fixture
+        .ok(&ada, "DELETE", &format!("/messages/{gif}"), None)
+        .await;
+    let thread = fixture
+        .ok(&ada, "GET", &format!("/threads/{gif}"), None)
+        .await;
+    assert_eq!(thread["root"]["deleted"], true);
+    assert_eq!(thread["root"]["media"], Value::Null);
+    let (kind, stored): (Option<String>, Option<String>) =
+        sqlx::query_as("SELECT media_kind, media_url FROM chat_messages WHERE id = $1")
+            .bind(&gif)
+            .fetch_one(fixture.database.pool())
+            .await
+            .unwrap();
+    assert_eq!((kind, stored), (None, None));
+    // The quote of a deleted message is gone with it.
+    let quote = quoting["result"]["id"].as_str().unwrap().to_owned();
+    let page = fixture.ok(&ada, "GET", &messages, None).await;
+    let quote = page["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|message| message["id"] == quote.as_str())
+        .unwrap()
+        .clone();
+    assert_eq!(quote["reply_to"], Value::Null);
+}
+
+#[tokio::test]
+async fn the_root_user_saves_the_klipy_key_and_members_see_gifs_turn_on() {
+    use orbit_server::mail::Mailer;
+    use orbit_server::workspace_routes::{WorkspaceState, workspace_router};
+
+    let mut fixture = Fixture::new().await;
+    let ada = fixture.add_member("ada").await;
+    let key = [5; 32];
+    fixture.app = chat_router(
+        ChatState::new(
+            Arc::clone(&fixture.identity),
+            fixture.uploads.clone(),
+            CookieMode::secure(),
+        )
+        .with_interactivity(Some(key), false),
+    )
+    .merge(workspace_router(
+        WorkspaceState::new(
+            Arc::clone(&fixture.identity),
+            "https://orbit.test".to_owned(),
+            CookieMode::secure(),
+        )
+        .with_mailer(Mailer::new(
+            (*fixture.database).clone(),
+            Some(key),
+            "https://orbit.test",
+        )),
+    ));
+    let admin = |member: &Member, method: &str, body: Option<Value>| {
+        let builder = Request::builder()
+            .method(method)
+            .uri("/api/v1/admin/settings/klipy")
+            .header(header::COOKIE, &member.cookie);
+        let request = match body {
+            Some(value) => builder
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(value.to_string())),
+            None => builder.body(Body::empty()),
+        }
+        .unwrap();
+        let app = fixture.app.clone();
+        async move {
+            let response = app.oneshot(request).await.unwrap();
+            let status = response.status();
+            let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+            (
+                status,
+                serde_json::from_slice::<Value>(&bytes).unwrap_or(Value::Null),
+            )
+        }
+    };
+
+    assert_eq!(
+        fixture.ok(&ada, "GET", "/klipy", None).await,
+        json!({ "enabled": false })
+    );
+    let (status, problem) = fixture.call(&ada, "GET", "/klipy/gifs?q=cat", None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{problem}");
+    assert_eq!(problem["code"], "klipy_not_configured");
+    let (status, problem) = fixture.call(&ada, "GET", "/klipy/clips", None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{problem}");
+    assert_eq!(problem["code"], "chat_not_found");
+
+    // Only the root user saves a key, and an empty or too long one is refused.
+    let (status, _) = admin(&ada, "PUT", Some(json!({ "api_key": "klipy-key" }))).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let long = "k".repeat(201);
+    for api_key in ["  ", long.as_str()] {
+        let (status, problem) =
+            admin(&fixture.owner, "PUT", Some(json!({ "api_key": api_key }))).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{problem}");
+        assert_eq!(problem["code"], "invalid_klipy_settings");
+    }
+    let (status, settings) = admin(
+        &fixture.owner,
+        "PUT",
+        Some(json!({ "api_key": " klipy-secret-key " })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{settings}");
+    assert_eq!(settings["klipy"], json!({ "key_set": true }));
+    assert_eq!(settings["environment"]["klipy"], false);
+    assert!(!settings.to_string().contains("klipy-secret-key"));
+    // The key is stored encrypted.
+    let stored: Vec<u8> =
+        sqlx::query_scalar("SELECT klipy_api_key FROM instance_settings WHERE id = 1")
+            .fetch_one(fixture.database.pool())
+            .await
+            .unwrap();
+    assert!(!String::from_utf8_lossy(&stored).contains("klipy-secret-key"));
+    assert_eq!(
+        fixture.ok(&ada, "GET", "/klipy", None).await,
+        json!({ "enabled": true })
+    );
+    // An outsider of the workspace learns nothing.
+    let (outsider_id, email) = fixture.add_user("outsider").await;
+    let outsider = fixture.session(outsider_id, email, "outsider").await;
+    let (status, _) = fixture.call(&outsider, "GET", "/klipy", None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    let (status, settings) = admin(&fixture.owner, "DELETE", None).await;
+    assert_eq!(status, StatusCode::OK, "{settings}");
+    assert_eq!(settings["klipy"], json!({ "key_set": false }));
+    assert_eq!(
+        fixture.ok(&ada, "GET", "/klipy", None).await,
+        json!({ "enabled": false })
+    );
 }

@@ -9,8 +9,8 @@ use utoipa::{IntoParams, ToSchema};
 use super::{Call, ChatEvents, ChatState, ChatWrite, RequestIdExtension};
 use crate::push::PushService;
 use crate::repositories::chat::{
-    ChatError, FollowedThreadRecord, ForwardInput, MessageCursor, MessagePage, MessageRecord,
-    SearchInput, SearchPage, SendInput, ThreadPage,
+    ChatError, ChatMediaKind, FollowedThreadRecord, ForwardInput, MediaInput, MessageCursor,
+    MessagePage, MessageRecord, SearchInput, SearchPage, SendInput, ThreadPage,
 };
 use crate::task_routes::{ApiError, ApiJson, ApiQuery};
 
@@ -78,9 +78,31 @@ pub(crate) struct ChatSendBody {
     #[serde(default)]
     #[schema(required = false)]
     sticker_id: Option<String>,
+    /// A GIF or sticker from KLIPY (an item of `GET …/chat/klipy/{catalog}`). With media the body may be
+    /// empty; it cannot go with `sticker_id` or `file_ids`.
+    #[serde(default)]
+    #[schema(required = false)]
+    media: Option<ChatMediaBody>,
     /// Made by the caller (1–64 bytes). A send that is tried again with the same nonce returns
     /// the first message.
     nonce: String,
+}
+
+/// A GIF or sticker from KLIPY: the `full` image of a [`crate::klipy::KlipyItem`], its `kind` and `title`.
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ChatMediaBody {
+    kind: ChatMediaKind,
+    /// An https URL on `klipy.com` or one of its subdomains, at most 2048 bytes.
+    url: String,
+    /// 1–4096.
+    width: i64,
+    /// 1–4096.
+    height: i64,
+    /// At most 200 characters; may be empty.
+    #[serde(default)]
+    #[schema(required = false)]
+    title: String,
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -154,6 +176,13 @@ pub(crate) async fn send_chat_message(
             .as_deref()
             .map(|id| call.body_id(id, "sticker_id"))
             .transpose()?,
+        media: body.media.map(|media| MediaInput {
+            kind: media.kind,
+            url: media.url,
+            width: media.width,
+            height: media.height,
+            title: media.title,
+        }),
         online: state.hub.online(call.workspace_id),
         body: body.body,
         also_in_channel: body.also_in_channel,

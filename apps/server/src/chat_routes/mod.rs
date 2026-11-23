@@ -8,6 +8,7 @@ pub(crate) mod files;
 pub(crate) mod hooks;
 mod images;
 pub(crate) mod interactions;
+pub(crate) mod klipy;
 pub(crate) mod links;
 pub(crate) mod messages;
 pub(crate) mod safety;
@@ -28,6 +29,7 @@ use tracing::Instrument;
 use utoipa::ToSchema;
 
 use crate::auth_routes::CookieMode;
+use crate::klipy::KlipyClient;
 use crate::link_preview::LinkPreviewer;
 use crate::live::{LiveHub, NewEvent, Recipients};
 use crate::mail::Mailer;
@@ -44,9 +46,12 @@ pub struct ChatState {
     pub(crate) hub: LiveHub,
     pub(crate) cookie_mode: CookieMode,
     pub(crate) link_previews: Arc<LinkPreviewer>,
+    /// Searches GIFs and stickers on KLIPY with the key that the admin set.
+    pub(crate) klipy: Arc<KlipyClient>,
     /// The origin of the webhook URLs that Orbit shows (`ORBIT_PUBLIC_ORIGIN`).
     pub(crate) public_origin: Arc<str>,
-    /// Encrypts the signing secrets of interactive webhooks; `None` turns interactivity off.
+    /// Encrypts the signing secrets of interactive webhooks and decrypts the KLIPY API key; `None` turns
+    /// interactivity and GIFs off.
     pub(crate) app_key: Option<[u8; 32]>,
     pub(crate) clicks: Arc<interactions::ClickSender>,
     /// Emails the installation admins about a reported message; `None` sends nothing.
@@ -66,6 +71,7 @@ impl ChatState {
             identity,
             cookie_mode,
             link_previews: Arc::new(LinkPreviewer::default()),
+            klipy: Arc::new(KlipyClient::default()),
             public_origin: Arc::from(""),
             app_key: None,
             clicks: Arc::new(interactions::ClickSender::new(false)),
@@ -343,6 +349,14 @@ fn json_router(state: ChatState) -> Router {
         .route(
             "/api/v1/workspaces/{workspace_id}/chat/link-preview",
             get(links::get_chat_link_preview),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/chat/klipy",
+            get(klipy::get_chat_klipy),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/chat/klipy/{catalog}",
+            get(klipy::list_chat_klipy),
         )
         .route(
             "/api/v1/workspaces/{workspace_id}/chat/emoji",

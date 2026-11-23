@@ -39,13 +39,15 @@ const OIDC_CLIENT_ID: &str = "ORBIT_OIDC_CLIENT_ID";
 const OIDC_CLIENT_SECRET: &str = "ORBIT_OIDC_CLIENT_SECRET";
 const OIDC_DISPLAY_NAME: &str = "ORBIT_OIDC_DISPLAY_NAME";
 const OIDC_PROVISION: &str = "ORBIT_OIDC_PROVISION";
+const KLIPY_API_KEY: &str = "ORBIT_KLIPY_API_KEY";
 
-const SECRETS: [&str; 5] = [
+const SECRETS: [&str; 6] = [
     SMTP_PASSWORD,
     S3_SECRET_ACCESS_KEY,
     GOOGLE_CLIENT_SECRET,
     GITHUB_CLIENT_SECRET,
     OIDC_CLIENT_SECRET,
+    KLIPY_API_KEY,
 ];
 const SMTP_KEYS: [&str; 7] = [
     SMTP_HOST,
@@ -65,7 +67,7 @@ const S3_KEYS: [&str; 7] = [
     S3_SECRET_ACCESS_KEY,
     S3_PATH_STYLE,
 ];
-const OTHER_KEYS: [&str; 14] = [
+const OTHER_KEYS: [&str; 15] = [
     OPEN_REGISTRATION,
     AUTOMATIC_BACKUPS,
     S3_ATTACHMENTS,
@@ -80,6 +82,7 @@ const OTHER_KEYS: [&str; 14] = [
     OIDC_CLIENT_SECRET,
     OIDC_DISPLAY_NAME,
     OIDC_PROVISION,
+    KLIPY_API_KEY,
 ];
 
 /// The variable is read by [`InstanceConfig::from_environment`].
@@ -206,6 +209,8 @@ pub struct InstanceConfig {
     pub oidc: Option<OidcConfig>,
     /// A first OpenID Connect sign-in creates an account, also when registration is closed.
     pub oidc_provision: Option<bool>,
+    /// The KLIPY API key for GIFs and stickers in chat (`ORBIT_KLIPY_API_KEY`).
+    pub klipy_api_key: Option<Secret>,
 }
 
 impl InstanceConfig {
@@ -267,6 +272,7 @@ impl InstanceConfig {
             github: oauth_client(&values, GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET)?,
             oidc: oidc(&values)?,
             oidc_provision: values.flag(OIDC_PROVISION)?,
+            klipy_api_key: klipy_api_key(&values)?,
         };
         if config.registration_open == Some(true)
             && config.smtp.is_none()
@@ -344,6 +350,9 @@ impl InstanceConfig {
         if let Some(provision) = self.oidc_provision {
             push(OIDC_PROVISION, &provision.to_string());
         }
+        if self.klipy_api_key.is_some() {
+            push(KLIPY_API_KEY, "[REDACTED]");
+        }
         lines
     }
 }
@@ -399,6 +408,33 @@ fn invalid(key: &'static str, detail: &str) -> ConfigError {
         key,
         detail: detail.to_owned(),
     }
+}
+
+/// The most bytes of a KLIPY API key, the same limit as a key saved in Admin.
+const KLIPY_API_KEY_MAX_BYTES: usize = 200;
+
+/// A key goes into the path of KLIPY's URLs, so it has no whitespace and no `/`.
+fn klipy_api_key(values: &Values<'_>) -> Result<Option<Secret>, ConfigError> {
+    let Some(key) = values.secret(KLIPY_API_KEY)? else {
+        return Ok(None);
+    };
+    if !valid_klipy_api_key(&key) {
+        return Err(invalid(
+            KLIPY_API_KEY,
+            "must be at most 200 bytes without spaces, `/`, `?` or `#`",
+        ));
+    }
+    Ok(Some(Secret::new(key)))
+}
+
+/// A KLIPY API key that fits in a URL path segment: 1 to [`KLIPY_API_KEY_MAX_BYTES`] bytes of visible ASCII
+/// other than `/`, `?`, `#` and `%`.
+#[must_use]
+pub fn valid_klipy_api_key(key: &str) -> bool {
+    (1..=KLIPY_API_KEY_MAX_BYTES).contains(&key.len())
+        && key
+            .bytes()
+            .all(|byte| byte.is_ascii_graphic() && !matches!(byte, b'/' | b'?' | b'#' | b'%'))
 }
 
 fn required(values: &Values<'_>, key: &'static str, group: &str) -> Result<String, ConfigError> {
@@ -746,6 +782,32 @@ mod tests {
             parse(&[
                 ("ORBIT_S3_SECRET_ACCESS_KEY", "secret"),
                 ("ORBIT_S3_SECRET_ACCESS_KEY_FILE", "/run/secrets/s3"),
+            ]),
+            Err(ConfigError::AmbiguousSecret { .. })
+        ));
+    }
+
+    #[test]
+    fn the_klipy_key_is_read_from_its_file_and_redacted() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("klipy");
+        std::fs::write(&path, "klipy-secret-key\n").unwrap();
+        let config = parse(&[("ORBIT_KLIPY_API_KEY_FILE", path.to_str().unwrap())]).unwrap();
+        assert_eq!(
+            config.klipy_api_key.as_ref().map(Secret::expose),
+            Some("klipy-secret-key")
+        );
+        let lines = config.redacted_lines().join("\n");
+        assert!(lines.contains("ORBIT_KLIPY_API_KEY=[REDACTED]"), "{lines}");
+        assert!(!lines.contains("klipy-secret-key"), "{lines}");
+        assert_eq!(
+            invalid_key(parse(&[("ORBIT_KLIPY_API_KEY", "a/b")])),
+            "ORBIT_KLIPY_API_KEY"
+        );
+        assert!(matches!(
+            parse(&[
+                ("ORBIT_KLIPY_API_KEY", "key"),
+                ("ORBIT_KLIPY_API_KEY_FILE", "/run/secrets/klipy"),
             ]),
             Err(ConfigError::AmbiguousSecret { .. })
         ));

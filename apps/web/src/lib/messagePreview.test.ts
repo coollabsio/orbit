@@ -16,7 +16,10 @@ test('a preview shows what the message shows, not the escapes of its source', ()
   expect(extractPreview('@Ada Lovelace in #general: a < b > c')).toBe('@Ada Lovelace in #general: a < b > c')
 })
 
-test('a message without text previews as its sticker, else as a file', () => {
-  expect(extractPreview('') || wordlessPreview(true)).toBe('Sticker')
-  expect(extractPreview('') || wordlessPreview(false)).toBe('Sent a file')
+test('a message without text previews as its GIF or sticker, else as a file', () => {
+  expect(extractPreview('') || wordlessPreview({ sticker: true })).toBe('Sticker')
+  expect(extractPreview('') || wordlessPreview({ gif: true, sticker: false })).toBe('GIF')
+  expect(extractPreview('') || wordlessPreview({ sticker: false })).toBe('Sent a file')
+  // a row cached before stickers and GIFs existed has neither flag
+  expect(extractPreview('') || wordlessPreview({})).toBe('Sent a file')
 })

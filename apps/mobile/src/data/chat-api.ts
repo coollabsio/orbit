@@ -15,12 +15,14 @@ import {
   deleteReportedChatMessage,
   editChatMessage,
   followChatThread,
+  getChatKlipy,
   getChatThread,
   joinChatChannel,
   leaveChatChannel,
   listChatBlocks,
   listChatEmoji,
   listChatFiles,
+  listChatKlipy,
   listChatMessages,
   listChatPins,
   listChatReports,
@@ -44,16 +46,21 @@ import {
   updateChatState,
   uploadChatFile,
 } from '@orbit/api/generated/sdk.gen'
+import { ApiProblem } from '@orbit/api/problem'
 import type {
   BlockedUserRecord,
   ChatChannelUpdateBody,
   ChatEvent,
   ChatFileRecord,
+  ChatMediaBody,
   ChatReportReason,
   ChatReportRecord,
   ChatStateBody,
   CustomEmojiRecord,
   FollowedThreadRecord,
+  KlipyItem,
+  KlipyPage,
+  MessageMediaRecord,
   MessagePage,
   SearchPage,
   ThreadPage,
@@ -62,7 +69,22 @@ import type {
 
 import type { CategoryRecord, ConversationRecord, ConversationStateRecord, MessageRecord, OrbitClient } from './orbit'
 
-export type { BlockedUserRecord, ChatEvent, ChatFileRecord, ChatReportReason, ChatReportRecord, CustomEmojiRecord, FollowedThreadRecord, SearchPage, ThreadPage, ThreadStateRecord }
+export type {
+  BlockedUserRecord,
+  ChatEvent,
+  ChatFileRecord,
+  ChatMediaBody,
+  ChatReportReason,
+  ChatReportRecord,
+  CustomEmojiRecord,
+  FollowedThreadRecord,
+  KlipyItem,
+  KlipyPage,
+  MessageMediaRecord,
+  SearchPage,
+  ThreadPage,
+  ThreadStateRecord,
+}
 
 /** What a write made, and the live events it caused. */
 export interface ChatWrite<T> {
@@ -165,6 +187,10 @@ export interface OutgoingMessage {
   fileIds?: string[]
   /** A thread reply that also shows in the conversation. */
   alsoInChannel?: boolean
+  /** A custom sticker of the workspace; the body may then be empty. Not with files or `media`. */
+  stickerId?: string | null
+  /** A GIF or sticker from KLIPY; the body may then be empty. Not with files or `stickerId`. */
+  media?: ChatMediaBody | null
 }
 
 export async function send(client: OrbitClient, workspaceId: string, conversationId: string, message: OutgoingMessage): Promise<ChatWrite<MessageRecord>> {
@@ -175,6 +201,8 @@ export async function send(client: OrbitClient, workspaceId: string, conversatio
     reply_to_id: message.replyToId ?? null,
     file_ids: message.fileIds ?? [],
     also_in_channel: message.alsoInChannel ?? false,
+    ...(message.stickerId ? { sticker_id: message.stickerId } : {}),
+    ...(message.media ? { media: message.media } : {}),
   }
   return write((await sendChatMessage({ ...inConversation(client, workspaceId, conversationId), body })).data)
 }
@@ -317,6 +345,28 @@ export async function uploadFile(client: OrbitClient, workspaceId: string, uploa
 
 export async function customEmoji(client: OrbitClient, workspaceId: string): Promise<CustomEmojiRecord[]> {
   return (await listChatEmoji(at(client, workspaceId))).data
+}
+
+// ---- GIFs and stickers from KLIPY
+
+/** Whether the instance has a KLIPY API key: the composer offers GIFs and KLIPY stickers only then. */
+export async function klipyStatus(client: OrbitClient, workspaceId: string): Promise<boolean> {
+  return (await getChatKlipy(at(client, workspaceId))).data.enabled
+}
+
+export type KlipyCatalog = 'gifs' | 'stickers'
+
+/** One page (1–50) of what is trending, or of the results for `query` when it is not blank. */
+export async function klipyPage(client: OrbitClient, workspaceId: string, catalog: KlipyCatalog, query: string, page: number): Promise<KlipyPage> {
+  const q = query.trim()
+  return (await listChatKlipy({ client, path: { workspace_id: workspaceId, catalog }, query: { ...(q ? { q } : {}), page }, throwOnError: true })).data
+}
+
+/** Why the picker cannot show KLIPY's GIFs or stickers, in words. */
+export function klipyProblem(error: unknown): string {
+  if (error instanceof ApiProblem && error.code === 'klipy_not_configured') return 'GIFs and stickers from KLIPY are turned off on this Orbit.'
+  if (error instanceof ApiProblem && error.code === 'klipy_unavailable') return 'KLIPY did not answer. Try again in a moment.'
+  return error instanceof ApiProblem ? error.detail : 'Orbit did not answer. Check your connection and try again.'
 }
 
 /**

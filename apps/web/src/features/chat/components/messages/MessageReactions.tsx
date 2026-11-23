@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { SmileCircle } from 'reicon-react'
 import { Emoji } from '@/components/common/Emoji'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import type { Message } from '../../api/types'
@@ -14,7 +15,7 @@ function reactorNames(userIds: readonly string[], nameOf: (id: string) => string
 
 /** Reaction chips under a message. The user's own reaction is tinted pink; the tooltip names who reacted. */
 export function MessageReactions({ message }: { message: Message }) {
-  const { currentUserId, people, react } = useMessageList()
+  const { currentUserId, people, react, openPicker } = useMessageList()
   // Chips that were there when the row appeared do not animate; one added later scales in.
   const [initial] = useState(() => new Set(message.reactions.map((reaction) => reaction.emoji)))
   if (message.reactions.length === 0 || message.deleted) return null
@@ -49,6 +50,24 @@ export function MessageReactions({ message }: { message: Message }) {
           </Tooltip>
         )
       })}
+      {/* Add a reaction without the hover toolbar, as in Discord: shown while the pointer is on the row, always on touch. */}
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <button
+              type="button"
+              data-slot="reaction-add"
+              aria-label="Add reaction"
+              aria-haspopup="dialog"
+              className="invisible inline-flex h-6 w-9 items-center justify-center rounded-full border border-border bg-muted/50 text-muted-foreground outline-none transition-[scale] duration-[120ms] ease-out group-has-[:focus-visible]/message:visible focus-visible:ring-3 focus-visible:ring-ring/50 active:scale-[0.97] pointer-coarse:visible group-data-menu-open/message:visible hover-fine:group-hover/message:visible hover-fine:hover:bg-muted hover-fine:hover:text-foreground"
+              onClick={(event) => openPicker(message, event.currentTarget, 'start')}
+            />
+          }
+        >
+          <SmileCircle className="size-4" />
+        </TooltipTrigger>
+        <TooltipContent>Add reaction</TooltipContent>
+      </Tooltip>
     </div>
   )
 }

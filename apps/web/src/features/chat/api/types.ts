@@ -90,8 +90,10 @@ export interface Mentions {
 export interface ReplyPreview {
   authorId: string
   body: string
-  /** The reply has a sticker. Missing on a row cached before stickers existed. */
+  /** The reply has a sticker (a custom one or one from KLIPY). Missing on a row cached before stickers existed. */
   sticker?: boolean
+  /** The reply has a GIF from KLIPY. Missing on a row cached before GIFs existed. */
+  gif?: boolean
   createdAt: number
   /** The integration that posted the reply; `authorId` is then only the member who set it up. */
   botName?: string | null
@@ -106,8 +108,10 @@ export interface ReplyQuote {
   authorId: string
   /** The start of the quoted message's stored body, with its mention tokens. */
   body: string
-  /** The quoted message has a sticker. Missing on a row cached before stickers existed. */
+  /** The quoted message has a sticker (a custom one or one from KLIPY). Missing on a row cached before stickers existed. */
   sticker?: boolean
+  /** The quoted message has a GIF from KLIPY. Missing on a row cached before GIFs existed. */
+  gif?: boolean
   /** Set when an integration posted the quoted message: shown as its author. */
   botName?: string | null
 }
@@ -173,6 +177,19 @@ export interface MessageSticker {
   url: string
 }
 
+/**
+ * A GIF or sticker from KLIPY that a message shows, straight from KLIPY's CDN. `width` and `height` are the image's
+ * size, so its box is there before it loads.
+ */
+export interface MessageMedia {
+  kind: 'gif' | 'sticker'
+  url: string
+  width: number
+  height: number
+  /** May be empty. */
+  title: string
+}
+
 export interface Message {
   id: string
   conversationId: string
@@ -191,6 +208,8 @@ export interface Message {
   stickerId: string | null
   /** The sticker of `stickerId`; `null` when it was deleted. A row cached before stickers existed has neither field. */
   sticker: MessageSticker | null
+  /** A GIF or sticker from KLIPY; its body may be empty. A row cached before media existed has no such field. */
+  media: MessageMedia | null
   kind: MessageKind
   authorId: string
   /** Markdown source. Mentions are tokens: `<@userId>`, `<#conversationId>`, `<!channel>`, `<!here>`. */

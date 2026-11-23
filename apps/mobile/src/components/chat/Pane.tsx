@@ -2,7 +2,7 @@ import { router } from 'expo-router'
 import type { ReactNode } from 'react'
 import { Pressable, View } from 'react-native'
 
-import type { TextSegment } from '../../data/chat'
+import { messageMediaLabel, type TextSegment } from '../../data/chat'
 import { presenceOf, type ShownPresence, usePresence } from '../../data/chat-presence'
 import { relativeAgo, shortDate, timeOfDay } from '../../data/format'
 import type { ConversationRecord, MessageRecord } from '../../data/orbit'
@@ -148,6 +148,7 @@ export function MessagePreview({
 }) {
   const { colors } = useTheme()
   const files = message.attachments.length
+  const media = message.deleted ? null : messageMediaLabel(message)
   return (
     <Pressable
       accessibilityRole={onPress ? 'button' : undefined}
@@ -187,6 +188,14 @@ export function MessagePreview({
                 )
               : text}
           </Text>
+        ) : null}
+        {media ? (
+          <View className="flex-row items-center gap-1">
+            <Icon name="sticker" size={13} color={colors.mutedForeground} />
+            <Text numberOfLines={1} className="text-[12px] shrink text-muted-foreground">
+              {media}
+            </Text>
+          </View>
         ) : null}
         {files > 0 ? (
           <View className="flex-row items-center gap-1">

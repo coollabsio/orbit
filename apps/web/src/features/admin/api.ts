@@ -1,8 +1,8 @@
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/api/client'
 import { queryKeys } from '@/api/queryKeys'
-import { changeUserEmail, getAdminUserSummary, createBackup, createRecoveryLink, deleteBackup, getInstanceSettings, getJobLimits, saveJobLimits, listAdminUsers, listBackupItems, listBackups, listBackupWorkspaces, restoreBackupItem, listGlobalAudit, removeS3, removeSignInProvider, removeSmtp, resetTwoFactor, saveLimits, saveS3, saveSignInProvider, saveStorageOptions, setInstanceAdmin, startImageCompression, saveSmtp, sendTestEmail, setAccountSuspension, setOidcProvision, setRegistration } from '@orbit/api/generated/sdk.gen'
-import type { BackupItemKind, InstanceSettingsView, JobLimitsBody, LimitsView, Provider, S3Body, SignInProviderBody, SmtpBody, StorageOptionsBody } from '@orbit/api/generated/types.gen'
+import { changeUserEmail, getAdminUserSummary, createBackup, createRecoveryLink, deleteBackup, getInstanceSettings, getJobLimits, saveJobLimits, listAdminUsers, listBackupItems, listBackups, listBackupWorkspaces, restoreBackupItem, listGlobalAudit, removeKlipy, removeS3, removeSignInProvider, removeSmtp, resetTwoFactor, saveKlipy, saveLimits, saveS3, saveSignInProvider, saveStorageOptions, setInstanceAdmin, startImageCompression, saveSmtp, sendTestEmail, setAccountSuspension, setOidcProvision, setRegistration } from '@orbit/api/generated/sdk.gen'
+import type { BackupItemKind, InstanceSettingsView, JobLimitsBody, KlipyBody, LimitsView, Provider, S3Body, SignInProviderBody, SmtpBody, StorageOptionsBody } from '@orbit/api/generated/types.gen'
 
 /** How many results the user search shows; more matches ask for a longer search. */
 export const ADMIN_USER_RESULTS = 20
@@ -253,6 +253,35 @@ export function useSaveS3() {
 export function useRemoveS3() {
   return useSettingsWrite(async () => {
     const { data } = await removeS3({ client: apiClient, throwOnError: true })
+    return data
+  })
+}
+
+/**
+ * Saves or removes the KLIPY API key. Chat asks again whether GIFs and stickers are on (`queryKeys.klipy`), so the
+ * composer shows or hides its GIF button without a reload.
+ */
+function useKlipyWrite<T>(write: (input: T) => Promise<InstanceSettingsView>) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: write,
+    onSuccess: (settings) => {
+      queryClient.setQueryData(queryKeys.adminSettings, settings)
+      void queryClient.invalidateQueries({ queryKey: queryKeys.klipy.all })
+    },
+  })
+}
+
+export function useSaveKlipy() {
+  return useKlipyWrite(async (body: KlipyBody) => {
+    const { data } = await saveKlipy({ client: apiClient, throwOnError: true, body })
+    return data
+  })
+}
+
+export function useRemoveKlipy() {
+  return useKlipyWrite(async () => {
+    const { data } = await removeKlipy({ client: apiClient, throwOnError: true })
     return data
   })
 }

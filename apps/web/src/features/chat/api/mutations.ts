@@ -6,7 +6,7 @@ import type { ChannelInput, ChatClient, SendMessageInput, UploadOptions, Webhook
 import { patchMessage, updateOutbox } from './events'
 import { chatKeys } from './keys'
 import { requireClient } from './queries'
-import { ChatError, type Attachment, type Category, type Conversation, type ConversationState, type Message, type MessageSticker, type NotifyLevel, type ReplyQuote, type ThreadState } from './types'
+import { ChatError, type Attachment, type Category, type Conversation, type ConversationState, type Message, type MessageMedia, type MessageSticker, type NotifyLevel, type ReplyQuote, type ThreadState } from './types'
 
 const TYPING_INTERVAL = 8000
 /** When the typing signal was last sent, for each composer (conversation or thread). */
@@ -30,6 +30,8 @@ export interface SendInput {
   replyTo?: ReplyQuote | null
   /** A sticker of the workspace. With one, `body` may be empty. */
   sticker?: MessageSticker | null
+  /** A GIF or sticker from KLIPY. With one, `body` may be empty; it cannot go with `sticker` or `attachments`. */
+  media?: MessageMedia | null
   /** Stored form: run the composer text through `encodeMentions` first. */
   body: string
   attachments?: Attachment[]
@@ -50,6 +52,7 @@ function optimisticMessage(input: SendMessageInput, authorId: string): Message {
     forwarded: null,
     stickerId: input.sticker?.id ?? null,
     sticker: input.sticker ?? null,
+    media: input.media ?? null,
     kind: 'message',
     authorId,
     body: input.body,
@@ -111,8 +114,8 @@ export function useSendMessage() {
       if (!message.nonce) return
       // A quote whose message was deleted meanwhile is `null` by now: the message then goes as a plain one.
       // A sticker that was deleted meanwhile is refused by the server: the row stays failed and can be discarded.
-      const { conversationId, threadRootId, replyTo, sticker, body, attachments, alsoInChannel, nonce } = message
-      mutation.mutate({ conversationId, threadRootId, replyTo, sticker, body, attachments, alsoInChannel, nonce })
+      const { conversationId, threadRootId, replyTo, sticker, media, body, attachments, alsoInChannel, nonce } = message
+      mutation.mutate({ conversationId, threadRootId, replyTo, sticker, media, body, attachments, alsoInChannel, nonce })
     },
     /** Removes a failed message. */
     discard: (message: Message) => {

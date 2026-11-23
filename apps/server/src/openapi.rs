@@ -123,6 +123,8 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::workspace_routes::set_oidc_provision,
         crate::workspace_routes::save_smtp,
         crate::workspace_routes::remove_smtp,
+        crate::workspace_routes::save_klipy,
+        crate::workspace_routes::remove_klipy,
         crate::workspace_routes::send_test_email,
         crate::workspace_routes::save_s3,
         crate::workspace_routes::remove_s3,
@@ -585,6 +587,8 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::chat_routes::files::list_chat_files,
         crate::chat_routes::messages::list_chat_search,
         crate::chat_routes::links::get_chat_link_preview,
+        crate::chat_routes::klipy::get_chat_klipy,
+        crate::chat_routes::klipy::list_chat_klipy,
         crate::chat_routes::emoji::list_chat_emoji,
         crate::chat_routes::emoji::create_chat_emoji,
         crate::chat_routes::emoji::delete_chat_emoji,
@@ -1770,6 +1774,16 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             add_code(&mut responses, "409", "oidc_not_configured");
             add_code(&mut responses, "409", "set_by_environment");
         }
+        "save_klipy" => {
+            add_code(&mut responses, "403", "installation_admin_required");
+            add_code(&mut responses, "409", "set_by_environment");
+            add_code(&mut responses, "422", "invalid_klipy_settings");
+            add_code(&mut responses, "503", "app_key_missing");
+        }
+        "remove_klipy" => {
+            add_code(&mut responses, "403", "installation_admin_required");
+            add_code(&mut responses, "409", "set_by_environment");
+        }
         "save_smtp" => {
             add_code(&mut responses, "403", "installation_admin_required");
             add_code(&mut responses, "422", "invalid_smtp_settings");
@@ -2038,6 +2052,7 @@ fn invalid_request_operation(operation_id: &str) -> bool {
             | "set_registration"
             | "set_oidc_provision"
             | "save_smtp"
+            | "save_klipy"
             | "save_s3"
             | "save_sign_in_provider"
             | "start_provider_sign_in"
@@ -2831,6 +2846,12 @@ fn chat_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec<&'
         operation_id,
         "download_chat_file" | "get_chat_emoji_image" | "get_chat_sticker_image"
     ) {
+        return;
+    }
+    if operation_id == "list_chat_klipy" {
+        add_code(responses, "404", "klipy_not_configured");
+        add_code(responses, "422", "validation_failed");
+        add_code(responses, "502", "klipy_unavailable");
         return;
     }
     if operation_id == "create_chat_emoji" {

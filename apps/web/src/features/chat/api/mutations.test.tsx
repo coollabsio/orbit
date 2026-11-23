@@ -39,6 +39,7 @@ function message(id: string, authorId: string, body: string, nonce: string | nul
     forwarded: null,
     stickerId: null,
     sticker: null,
+    media: null,
     kind: 'message',
     authorId,
     body,
@@ -249,4 +250,28 @@ test('a sticker shows on the row that waits, and a retry sends it again', async 
   })
   expect(sent.map((input) => input.sticker)).toEqual([sticker, sticker])
   expect(messages().at(-1)).toMatchObject({ stickerId: 's1', sticker })
+})
+
+test('a GIF from KLIPY shows on the row that waits, and a retry sends it again', async () => {
+  const sent: SendMessageInput[] = []
+  const { wrapper, messages } = await setup({
+    sendMessage: async (input) => {
+      sent.push(input)
+      throw new ChatError('offline', 'No connection.')
+    },
+  })
+  const media = { kind: 'gif' as const, url: 'https://static.klipy.com/a.gif', width: 498, height: 280, title: 'Wave' }
+  const view = renderHook(() => useSendMessage(), { wrapper })
+
+  await act(async () => {
+    view.result.current.send({ conversationId: general.id, body: '', media })
+    await tick()
+  })
+  expect(messages().at(-1)).toMatchObject({ body: '', media, sendState: 'failed' })
+
+  await act(async () => {
+    view.result.current.retry(messages().at(-1)!)
+    await tick()
+  })
+  expect(sent.map((input) => input.media)).toEqual([media, media])
 })

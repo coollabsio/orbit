@@ -24,6 +24,7 @@ import type { Message } from '../../api/types'
 import { canEdit } from '../../lib/forward'
 import { buildMessageRows, messageKey, type MessageRow } from '../../lib/grouping'
 import { decodeMentions } from '../../lib/mentionTokens'
+import { wordlessContentOf } from '../../lib/quote'
 import { dayChip, isSameDay } from '../../lib/time'
 import { useDelayed, useIsPhone } from './environment'
 import { ForwardDialog } from '../dialogs/ForwardDialog'
@@ -32,7 +33,7 @@ import { MessageItem } from './MessageItem'
 import { MessageListContext, type MessageListContextValue } from './messageListContext'
 import { MessageActionSheet, MessageMenu } from './MessageMenu'
 import { BlockedMessageRow, DayChip, NewLine, RepliesDivider, SystemRow } from './MessageRows'
-import { firstLine, messagesAfter, quickReactions } from './messageText'
+import { firstLine, mediaSize, messagesAfter, quickReactions } from './messageText'
 import { authorName, useChatPeople } from './people'
 import { useMessageActions, type MenuAnchor } from './useMessageActions'
 
@@ -143,6 +144,8 @@ function estimateSize(item: ListItem): number {
         (item.message.forwarded ? 40 : 0) +
         // a sticker is a 160px square in place of the line of text, or under it
         (item.message.sticker ? (item.message.body ? 164 : 140) : 0) +
+        // a GIF or sticker from KLIPY shows at its own size (`mediaSize`)
+        (item.message.media ? mediaSize(item.message.media).height + (item.message.body ? 4 : -20) : 0) +
         (item.day === undefined ? 0 : 44) +
         (item.isNew ? 24 : 0)
       )
@@ -453,7 +456,7 @@ export function MessageList({
       if (announce && newest && hidden(newest)) setAnnouncement('Message from a person you blocked')
       else if (announce && newest) {
         const text = firstLine(decodeMentions(newest.body, people.members, people.channels), 200)
-        setAnnouncement(`${authorName(people, newest.authorId, newest.bot?.name, 'Someone')}: ${text || wordlessPreview(Boolean(newest.stickerId)).toLowerCase()}`)
+        setAnnouncement(`${authorName(people, newest.authorId, newest.bot?.name, 'Someone')}: ${text || wordlessPreview(wordlessContentOf(newest)).toLowerCase()}`)
       }
     }
     state.lastKey = lastKey

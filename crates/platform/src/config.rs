@@ -14,7 +14,7 @@ mod instance;
 
 pub use instance::{
     BackupSchedule, InstanceConfig, OAuthClientConfig, OidcConfig, SmtpConfig, SmtpSecurity,
-    oidc_display_name, oidc_issuer,
+    oidc_display_name, oidc_issuer, valid_klipy_api_key,
 };
 
 const MAX_SECRET_FILE_BYTES: u64 = 64 * 1024;

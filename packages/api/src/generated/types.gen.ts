@@ -996,9 +996,44 @@ export type ChatInteractivityBody = {
     request_url?: string | null;
 };
 
+export type ChatKlipyStatus = {
+    /**
+     * A KLIPY API key is set: the composer can offer GIFs and stickers.
+     */
+    enabled: boolean;
+};
+
 export type ChatLinkPreview = {
     preview?: null | LinkPreview;
 };
+
+/**
+ * A GIF or sticker from KLIPY: the `full` image of a [`crate::klipy::KlipyItem`], its `kind` and `title`.
+ */
+export type ChatMediaBody = {
+    /**
+     * 1–4096.
+     */
+    height: number;
+    kind: ChatMediaKind;
+    /**
+     * At most 200 characters; may be empty.
+     */
+    title?: string;
+    /**
+     * An https URL on `klipy.com` or one of its subdomains, at most 2048 bytes.
+     */
+    url: string;
+    /**
+     * 1–4096.
+     */
+    width: number;
+};
+
+/**
+ * What a message's `media` is: a GIF or a sticker from KLIPY.
+ */
+export type ChatMediaKind = 'gif' | 'sticker';
 
 export type ChatMoveBody = {
     /**
@@ -1081,6 +1116,7 @@ export type ChatSendBody = {
      * empty.
      */
     file_ids?: Array<string>;
+    media?: null | ChatMediaBody;
     /**
      * Made by the caller (1–64 bytes). A send that is tried again with the same nonce returns
      * the first message.
@@ -1269,6 +1305,7 @@ export type ChatWriteMessageRecord = {
         kind: MessageKind;
         last_reply: null | ReplyPreviewRecord;
         last_reply_at: string | null;
+        media: null | MessageMediaRecord;
         mentions: MentionsRecord;
         /**
          * Echo of the sender's nonce, so the sender can replace its optimistic row.
@@ -2661,6 +2698,10 @@ export type EnvironmentView = {
      */
     backups_in_s3: boolean;
     /**
+     * `ORBIT_KLIPY_API_KEY`.
+     */
+    klipy: boolean;
+    /**
      * `ORBIT_OIDC_PROVISION`.
      */
     oidc_provision: boolean;
@@ -3357,6 +3398,10 @@ export type InstanceSettingsView = {
      * here gives 409 `set_by_environment`.
      */
     environment: EnvironmentView;
+    /**
+     * GIFs and stickers from KLIPY in chat.
+     */
+    klipy: KlipyView;
     limits: LimitsView;
     mail: InstanceMailView;
     /**
@@ -3456,6 +3501,70 @@ export type JobLimitsBody = {
 
 export type JobLimitsView = {
     kinds: Array<JobLimitView>;
+};
+
+export type KlipyBody = {
+    /**
+     * The KLIPY API key (at most 200 bytes, no spaces). It is stored encrypted and never returned.
+     */
+    api_key: string;
+};
+
+/**
+ * One size of a GIF or sticker on KLIPY's CDN.
+ */
+export type KlipyImage = {
+    height: number;
+    /**
+     * An https URL on `klipy.com` or one of its subdomains.
+     */
+    url: string;
+    width: number;
+};
+
+/**
+ * A GIF or sticker that a chat message can show: send `full` with its `kind` and `title` as the message's
+ * `media`.
+ */
+export type KlipyItem = {
+    /**
+     * The size a message shows.
+     */
+    full: KlipyImage;
+    /**
+     * KLIPY's id.
+     */
+    id: string;
+    kind: ChatMediaKind;
+    /**
+     * A small size for the picker grid.
+     */
+    preview: KlipyImage;
+    /**
+     * May be empty.
+     */
+    title: string;
+};
+
+/**
+ * One page of trending GIFs or stickers, or of search results.
+ */
+export type KlipyPage = {
+    /**
+     * Another page follows.
+     */
+    has_next: boolean;
+    items: Array<KlipyItem>;
+};
+
+/**
+ * GIFs and stickers from KLIPY in chat. The key itself is never returned.
+ */
+export type KlipyView = {
+    /**
+     * A KLIPY API key is saved here or set by `ORBIT_KLIPY_API_KEY`: chat members can send GIFs and stickers.
+     */
+    key_set: boolean;
 };
 
 export type LabelBody = {
@@ -6015,6 +6124,23 @@ export type MessageBlock = {
 export type MessageKind = 'message' | 'pin' | 'join' | 'leave';
 
 /**
+ * A GIF or sticker from KLIPY that a message shows, straight from KLIPY's CDN.
+ */
+export type MessageMediaRecord = {
+    height: number;
+    kind: ChatMediaKind;
+    /**
+     * May be empty.
+     */
+    title: string;
+    /**
+     * An https URL on `klipy.com` or one of its subdomains.
+     */
+    url: string;
+    width: number;
+};
+
+/**
  * Messages in ascending order. A null cursor means there is nothing more in that direction.
  */
 export type MessagePage = {
@@ -6056,6 +6182,7 @@ export type MessageRecord = {
     kind: MessageKind;
     last_reply: null | ReplyPreviewRecord;
     last_reply_at: string | null;
+    media: null | MessageMediaRecord;
     mentions: MentionsRecord;
     /**
      * Echo of the sender's nonce, so the sender can replace its optimistic row.
@@ -10441,7 +10568,11 @@ export type ReplyPreviewRecord = {
     bot_name: string | null;
     created_at: string;
     /**
-     * The reply has a sticker: a preview with no text says so.
+     * The reply has a GIF: a preview with no text says so.
+     */
+    gif: boolean;
+    /**
+     * The reply has a sticker (a custom one or one from KLIPY): a preview with no text says so.
      */
     sticker: boolean;
 };
@@ -10459,9 +10590,13 @@ export type ReplyToRecord = {
      * Set when an integration posted the quoted message: show it as the author.
      */
     bot_name: string | null;
+    /**
+     * The quoted message has a GIF: a quote with no text says so.
+     */
+    gif: boolean;
     id: string;
     /**
-     * The quoted message has a sticker: a quote with no text says so.
+     * The quoted message has a sticker (a custom one or one from KLIPY): a quote with no text says so.
      */
     sticker: boolean;
 };
@@ -27983,6 +28118,118 @@ export type GetInstanceSettingsResponses = {
 
 export type GetInstanceSettingsResponse = GetInstanceSettingsResponses[keyof GetInstanceSettingsResponses];
 
+export type RemoveKlipyData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/admin/settings/klipy';
+};
+
+export type RemoveKlipyErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden, installation_admin_required
+     */
+    403: WorkspaceProblem;
+    /**
+     * contract_mismatch, set_by_environment
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type RemoveKlipyError = RemoveKlipyErrors[keyof RemoveKlipyErrors];
+
+export type RemoveKlipyResponses = {
+    200: InstanceSettingsView;
+};
+
+export type RemoveKlipyResponse = RemoveKlipyResponses[keyof RemoveKlipyResponses];
+
+export type SaveKlipyData = {
+    body: KlipyBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/admin/settings/klipy';
+};
+
+export type SaveKlipyErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden, installation_admin_required
+     */
+    403: WorkspaceProblem;
+    /**
+     * contract_mismatch, set_by_environment
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * invalid_klipy_settings
+     */
+    422: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * app_key_missing
+     */
+    503: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type SaveKlipyError = SaveKlipyErrors[keyof SaveKlipyErrors];
+
+export type SaveKlipyResponses = {
+    200: InstanceSettingsView;
+};
+
+export type SaveKlipyResponse = SaveKlipyResponses[keyof SaveKlipyResponses];
+
 export type SaveLimitsData = {
     body: LimitsView;
     headers?: {
@@ -36161,6 +36408,139 @@ export type DownloadChatFileResponses = {
 };
 
 export type DownloadChatFileResponse = DownloadChatFileResponses[keyof DownloadChatFileResponses];
+
+export type GetChatKlipyData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/chat/klipy';
+};
+
+export type GetChatKlipyErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * chat_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type GetChatKlipyError = GetChatKlipyErrors[keyof GetChatKlipyErrors];
+
+export type GetChatKlipyResponses = {
+    200: ChatKlipyStatus;
+};
+
+export type GetChatKlipyResponse = GetChatKlipyResponses[keyof GetChatKlipyResponses];
+
+export type ListChatKlipyData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        /**
+         * `gifs` or `stickers`
+         */
+        catalog: string;
+    };
+    query?: {
+        /**
+         * Search words, at most 100 characters; blank or absent lists what is trending.
+         */
+        q?: string;
+        /**
+         * 1–50; default 1.
+         */
+        page?: number;
+    };
+    url: '/api/v1/workspaces/{workspace_id}/chat/klipy/{catalog}';
+};
+
+export type ListChatKlipyErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * chat_not_found, klipy_not_configured
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * klipy_unavailable
+     */
+    502: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ListChatKlipyError = ListChatKlipyErrors[keyof ListChatKlipyErrors];
+
+export type ListChatKlipyResponses = {
+    200: KlipyPage;
+};
+
+export type ListChatKlipyResponse = ListChatKlipyResponses[keyof ListChatKlipyResponses];
 
 export type GetChatLinkPreviewData = {
     body?: never;

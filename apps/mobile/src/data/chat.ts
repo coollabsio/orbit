@@ -1,4 +1,4 @@
-import type { ChatFileRecord, EmojibaseData, FollowedThreadRecord, ThreadPage } from './chat-api'
+import type { ChatFileRecord, ChatMediaBody, EmojibaseData, FollowedThreadRecord, KlipyItem, ThreadPage } from './chat-api'
 import type { CategoryRecord, ConversationRecord, ConversationStateRecord, MemberRecord, MessagePage, MessageRecord } from './orbit'
 
 export interface Person {
@@ -325,7 +325,7 @@ export type MessageAction = 'reply' | 'thread' | 'copy' | 'pin' | 'unpin' | 'unr
 
 /**
  * The web's `actionsFor`: system rows have none; a deleted message keeps "Reply in thread"; edit is for your own text
- * (not a forward, not a sticker alone); delete for your own message or a moderator. Reactions sit above the list.
+ * (not a forward, not a sticker or GIF alone); delete for your own message or a moderator. Reactions sit above the list.
  */
 export function messageActions(
   message: MessageRecord,
@@ -343,7 +343,7 @@ export function messageActions(
   // an integration posts as the member who set it up: its message can be reported, but blocking it would block that member
   if (!own || message.bot) actions.push('report')
   if (!own && !message.bot) actions.push(options.authorBlocked ? 'unblock' : 'block')
-  const stickerOnly = Boolean(message.sticker_id) && message.body === ''
+  const stickerOnly = (Boolean(message.sticker_id) || Boolean(message.media)) && message.body === ''
   if (own && !message.forwarded && !stickerOnly) actions.push('edit')
   if (own || moderator) actions.push('delete')
   return actions
@@ -588,6 +588,43 @@ export function fileSize(bytes: number): string {
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
+
+/** The size of a `width`×`height` image shown in at most `maxWidth`×`maxHeight`: scaled down, never up. */
+export function fitSize(width: number, height: number, maxWidth: number, maxHeight: number): { width: number; height: number } {
+  if (width <= 0 || height <= 0) return { width: maxWidth, height: maxHeight }
+  const scale = Math.min(1, maxWidth / width, maxHeight / height)
+  return { width: Math.round(width * scale), height: Math.round(height * scale) }
+}
+
+// ---- GIFs and stickers from KLIPY
+
+/** What a message sends for a picked KLIPY GIF or sticker: its `full` size, with its kind and title. */
+export const klipyMedia = (item: KlipyItem): ChatMediaBody => ({ kind: item.kind, url: item.full.url, width: item.full.width, height: item.full.height, title: item.title })
+
+/**
+ * The word a quote or a thread's last reply shows for a message without text: "GIF" or "Sticker" (a custom one or one
+ * from KLIPY). `null` when the message has text, or neither.
+ */
+export function mediaLabel(ref: { body: string; gif: boolean; sticker: boolean }): string | null {
+  if (ref.body.trim() !== '') return null
+  return ref.gif ? 'GIF' : ref.sticker ? 'Sticker' : null
+}
+
+/** The line a list preview (Unreads, Threads, search, pins) shows for a message's GIF or sticker, with its title or name. */
+export function messageMediaLabel(message: Pick<MessageRecord, 'media' | 'sticker' | 'sticker_id'>): string | null {
+  if (message.media) {
+    const kind = message.media.kind === 'gif' ? 'GIF' : 'Sticker'
+    return message.media.title ? `${kind}: ${message.media.title}` : kind
+  }
+  if (message.sticker) return `Sticker: ${message.sticker.name}`
+  return message.sticker_id ? 'Sticker' : null
+}
+
+/** KLIPY serves pages 1 to 50. */
+export const KLIPY_LAST_PAGE = 50
+
+/** The page after `page`, while the server says one follows. */
+export const nextKlipyPage = (last: { has_next: boolean }, page: number): number | undefined => (last.has_next && page < KLIPY_LAST_PAGE ? page + 1 : undefined)
 
 // ---- emoji
 

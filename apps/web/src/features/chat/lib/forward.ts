@@ -11,11 +11,11 @@ export function canForward(message: Message): boolean {
 
 /**
  * The user's own confirmed message can be edited. A forward cannot: it is a copy of what somebody else wrote. Nor can
- * a message that is only a sticker: it has no text to change.
+ * a message that is only a sticker or a GIF: it has no text to change.
  */
 export function canEdit(message: Message, currentUserId: string | null): boolean {
-  const stickerOnly = Boolean(message.stickerId) && message.body === ''
-  return canForward(message) && !message.forwarded && !stickerOnly && isOwnMessage(message, currentUserId)
+  const imageOnly = (Boolean(message.stickerId) || Boolean(message.media)) && message.body === ''
+  return canForward(message) && !message.forwarded && !imageOnly && isOwnMessage(message, currentUserId)
 }
 
 /**

@@ -126,8 +126,11 @@ export function useInstanceSettings() {
   })
 }
 
-/** A settings write: it answers with the whole settings, and the sign-in options follow from them. */
-function useSettingsWrite<T>(write: (client: ReturnType<typeof useOrbit>['client'], input: T) => Promise<admin.InstanceSettingsView>) {
+/**
+ * A settings write: it answers with the whole settings, and the sign-in options follow from them. `refresh` names
+ * other queries that follow from the change.
+ */
+function useSettingsWrite<T>(write: (client: ReturnType<typeof useOrbit>['client'], input: T) => Promise<admin.InstanceSettingsView>, refresh?: readonly unknown[]) {
   const { client } = useOrbit()
   const queryClient = useQueryClient()
   return useMutation({
@@ -135,6 +138,7 @@ function useSettingsWrite<T>(write: (client: ReturnType<typeof useOrbit>['client
     onSuccess: (settings) => {
       queryClient.setQueryData(admin.adminKeys.settings, settings)
       void queryClient.invalidateQueries({ queryKey: accountKeys.authOptions })
+      if (refresh) void queryClient.invalidateQueries({ queryKey: refresh })
     },
   })
 }
@@ -145,6 +149,9 @@ export const useSaveSmtp = () => useSettingsWrite(admin.saveSmtp)
 export const useRemoveSmtp = () => useSettingsWrite((client, _: void) => admin.removeSmtp(client))
 export const useSaveSignInProvider = () => useSettingsWrite(admin.saveSignInProvider)
 export const useRemoveSignInProvider = () => useSettingsWrite(admin.removeSignInProvider)
+// the KLIPY key turns the composer's GIFs and stickers on or off: every `['chat-klipy', …]` query refetches
+export const useSaveKlipy = () => useSettingsWrite(admin.saveKlipy, ['chat-klipy'])
+export const useRemoveKlipy = () => useSettingsWrite((client, _: void) => admin.removeKlipy(client), ['chat-klipy'])
 export const useSaveLimits = () => useSettingsWrite(admin.saveLimits)
 export const useSaveS3 = () => useSettingsWrite(admin.saveS3)
 export const useRemoveS3 = () => useSettingsWrite((client, _: void) => admin.removeS3(client))

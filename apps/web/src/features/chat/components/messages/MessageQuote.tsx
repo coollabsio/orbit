@@ -34,7 +34,7 @@ export function MessageQuote({ message, active }: { message: Message; active: bo
           {quote.botName ? <BotAvatar bot={{ name: quote.botName, iconUrl: null }} size={16} /> : <UserAvatar user={author} name="?" size={16} />}
           <span className="shrink-0 font-medium text-foreground/90">{authorName(people, quote.authorId, quote.botName)}</span>
           <span className="truncate text-[0.8125rem]">
-            <EmojiText text={text || wordlessPreview(quote.sticker === true)} />
+            <EmojiText text={text || wordlessPreview(quote)} />
           </span>
         </button>
       ) : (

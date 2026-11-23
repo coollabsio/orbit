@@ -1,5 +1,5 @@
 import { splitEmoji } from '@/lib/twemoji'
-import type { Message } from '../../api/types'
+import type { Message, MessageMedia } from '../../api/types'
 import { isOwnMessage } from '../../lib/bot'
 
 /** A message longer than this many lines collapses behind "Show more". */
@@ -123,4 +123,21 @@ export function messagesAfter(
   const index = messages.findIndex((message) => keyOf(message) === lastKey)
   if (index === -1) return []
   return messages.slice(index + 1).filter((message) => message.kind === 'message' && !isOwnMessage(message, currentUserId))
+}
+
+/** A GIF shows at most this many pixels wide and high. */
+export const MEDIA_MAX = 300
+/** A sticker shows in a square of this side (`size-40`), as a sticker of the workspace does. */
+const STICKER_SIDE = 160
+
+/**
+ * The box a GIF or sticker from KLIPY shows in: a GIF at its own aspect ratio, made smaller (never larger) to fit in
+ * `MEDIA_MAX` either way; a sticker as a sticker of the workspace. An image without a size is a square.
+ */
+export function mediaSize(media: Pick<MessageMedia, 'kind' | 'width' | 'height'>): { width: number; height: number } {
+  if (media.kind === 'sticker') return { width: STICKER_SIDE, height: STICKER_SIDE }
+  const width = media.width > 0 ? media.width : MEDIA_MAX
+  const height = media.height > 0 ? media.height : MEDIA_MAX
+  const scale = Math.min(1, MEDIA_MAX / width, MEDIA_MAX / height)
+  return { width: Math.round(width * scale), height: Math.round(height * scale) }
 }
