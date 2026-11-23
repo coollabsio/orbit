@@ -43,7 +43,7 @@ export function TopBar() {
           accessibilityRole="button"
           accessibilityLabel={`Workspace: ${workspace.name}`}
           onPress={() => setSwitching(true)}
-          className="-ml-1 h-8 min-w-0 shrink-0 flex-row items-center gap-1.5 rounded-lg px-2 active:bg-muted"
+          className="-ml-1 h-8 min-w-0 shrink flex-row items-center gap-1.5 rounded-lg px-2 active:bg-muted"
         >
           <View className="size-5 items-center justify-center rounded-md bg-muted">
             <Text className="font-noto-semibold text-[11px] text-muted-foreground">{workspace.name.charAt(0).toUpperCase()}</Text>
