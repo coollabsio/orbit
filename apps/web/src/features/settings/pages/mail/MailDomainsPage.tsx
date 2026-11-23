@@ -300,14 +300,9 @@ function DomainCard({
   /** What each step shows above its records. */
   const extras: Partial<Record<StepKey, ReactNode>> = {
     receive: providers.length > 0 || domain.provider ? <DomainRouteRow domain={domain} providers={providers} /> : null,
-    send: (
-      <>
-        {sendRoutes && sendRoutes.routes.length > 0 ? <DomainSendRouteRow domain={domain} routes={sendRoutes} /> : null}
-        {domain.send_route
-          ? routeNote ? <StepNote>{routeNote}</StepNote> : null
-          : <StepNote>No send route: this domain cannot send. Pick one above, or ask your server admin for a default route.</StepNote>}
-      </>
-    ),
+    send: domain.send_route
+      ? routeNote ? <StepNote>{routeNote}</StepNote> : null
+      : <StepNote>No send route: this domain cannot send. Pick one in Send through below, or ask your server admin for a default route.</StepNote>,
     inbox: spf ? <StepNote>The SPF record includes <code className="font-mono">{spf}</code> for {routeLabel(domain.send_route?.kind ?? '')}.</StepNote> : null,
   }
   const blocked: Partial<Record<StepKey, ReactNode>> = {
@@ -423,6 +418,7 @@ function DomainCard({
                 Download zone file
               </Button>
             </SettingsRow>
+            {sendRoutes && sendRoutes.routes.length > 0 ? <DomainSendRouteRow domain={domain} routes={sendRoutes} /> : null}
             <SettingsRow className="flex-nowrap">
               <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[0.8125rem] font-medium text-foreground">
                 Catch-all

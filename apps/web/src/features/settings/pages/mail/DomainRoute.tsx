@@ -59,21 +59,22 @@ export function DomainRouteRow({ domain, providers }: { domain: MailDomain; prov
 /** The select value of the server's default route. */
 const DEFAULT_ROUTE = 'default'
 
-/** A domain's row: how its mail is sent. A change makes the SPF record below expect the route's servers. */
+/** A domain's row, next to the catch-all: how its mail is sent. A change makes the SPF record expect the route's servers. */
 export function DomainSendRouteRow({ domain, routes }: { domain: MailDomain; routes: MailSendRouteList }) {
   const setRoute = useSetDomainSendRoute()
   const fallback = routes.routes.find((route) => route.id === routes.default_route_id)
+  // the server's default is a choice only when the server has one
   const options = [
-    { value: DEFAULT_ROUTE, label: fallback ? `Server default (${fallback.name})` : 'Server default (none set)' },
+    ...(fallback ? [{ value: DEFAULT_ROUTE, label: `Server default (${fallback.name})` }] : []),
     ...routes.routes.map((route) => ({ value: route.id, label: `${route.name} (${routeLabel(route.kind)})` })),
   ]
   // the domain's own route; without one it follows the server's default, whatever that becomes
-  const value = domain.own_send_route_id ?? DEFAULT_ROUTE
+  const value = domain.own_send_route_id ?? (fallback ? DEFAULT_ROUTE : null)
   return (
-    <SettingsRow className="flex-nowrap px-0 py-0">
-      <span className="flex min-w-0 flex-1 items-center gap-1.5 text-xs text-muted-foreground">
+    <SettingsRow className="flex-nowrap">
+      <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[0.8125rem] font-medium text-foreground">
         Send through
-        <InfoTip text={`How mail from ${domain.name} is sent. The SPF record below changes with it.`} />
+        <InfoTip text={`How mail from ${domain.name} is sent. The SPF record under Reach the inbox changes with it.`} />
       </span>
       <Select
         items={options}
@@ -84,7 +85,7 @@ export function DomainSendRouteRow({ domain, routes }: { domain: MailDomain; rou
           onError: (error) => toast.error(mailProblem(error, 'The send route could not be saved.')),
         })}
       >
-        <SelectTrigger aria-label={`How mail from ${domain.name} is sent`} className="w-64 max-w-[45vw]"><SelectValue /></SelectTrigger>
+        <SelectTrigger aria-label={`How mail from ${domain.name} is sent`} className="w-80 max-w-[55vw]"><SelectValue placeholder="Pick a send route" /></SelectTrigger>
         <SelectContent>
           {options.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
         </SelectContent>

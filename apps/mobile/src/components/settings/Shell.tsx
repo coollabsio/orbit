@@ -172,9 +172,10 @@ export function SettingsCard({ title, description, actions, flush = false, dange
 }
 
 /** The web `Select` (its 32px trigger, or the 28px `sm` one): the current choice and a chevron; the choices open in a `PickerSheet`. */
-export function Select<T extends string>({ value, options, onChange, label, size = 'default', disabled = false }: { value: T; options: readonly { value: T; label: string }[]; onChange: (value: T) => void; label: string; size?: 'default' | 'sm'; disabled?: boolean }) {
+export function Select<T extends string>({ value, options, onChange, label, placeholder, size = 'default', disabled = false }: { value: T; options: readonly { value: T; label: string }[]; onChange: (value: T) => void; label: string; placeholder?: string; size?: 'default' | 'sm'; disabled?: boolean }) {
   const { colors } = useTheme()
   const [open, setOpen] = useState(false)
+  const selected = options.find((option) => option.value === value)
   return (
     <>
       <Pressable
@@ -185,8 +186,8 @@ export function Select<T extends string>({ value, options, onChange, label, size
         onPress={() => setOpen(true)}
         className={`flex-row items-center justify-between gap-1.5 border border-input pr-2 pl-2.5 dark:bg-input/30 active:bg-input/50 ${size === 'sm' ? 'h-7 rounded-md' : 'h-8 rounded-lg'} ${disabled ? 'opacity-50' : ''}`}
       >
-        <Text numberOfLines={1} className={`shrink text-foreground ${size === 'sm' ? 'text-[13px]' : 'text-[14px]'}`}>
-          {options.find((option) => option.value === value)?.label}
+        <Text numberOfLines={1} className={`shrink ${selected ? 'text-foreground' : 'text-muted-foreground'} ${size === 'sm' ? 'text-[13px]' : 'text-[14px]'}`}>
+          {selected?.label ?? placeholder}
         </Text>
         <Icon name="chevronDown" size={16} color={colors.mutedForeground} />
       </Pressable>

@@ -57,8 +57,9 @@ const DEFAULT_ROUTE = 'default'
 export function DomainSendRouteRow({ domain, routes, notify }: { domain: MailDomain; routes: MailSendRouteList; notify: Notify }) {
   const { setSendRoute } = useDomainWrites()
   const fallback = routes.routes.find((route) => route.id === routes.default_route_id)
+  // the server's default is a choice only when the server has one
   const options = [
-    { value: DEFAULT_ROUTE, label: fallback ? `Server default (${fallback.name})` : 'Server default (none set)' },
+    ...(fallback ? [{ value: DEFAULT_ROUTE, label: `Server default (${fallback.name})` }] : []),
     ...routes.routes.map((route) => ({ value: route.id, label: `${route.name} (${routeLabel(route.kind)})` })),
   ]
   return (
@@ -67,7 +68,8 @@ export function DomainSendRouteRow({ domain, routes, notify }: { domain: MailDom
       <Select
         label={`How mail from ${domain.name} is sent`}
         // the domain's own route; without one it follows the server's default, whatever that becomes
-        value={domain.own_send_route_id ?? DEFAULT_ROUTE}
+        value={domain.own_send_route_id ?? (fallback ? DEFAULT_ROUTE : '')}
+        placeholder="Pick a send route"
         options={options}
         disabled={setSendRoute.isPending}
         onChange={(next) =>
