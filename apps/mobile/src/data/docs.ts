@@ -35,7 +35,8 @@ export interface DocSpace {
 }
 
 const byPosition = (a: PageSummary, b: PageSummary) => a.position - b.position || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
-const spaceOf = (page: PageSummary) => (page.private || !page.teamspace_id ? 'private' : `teamspace:${page.teamspace_id}`)
+/** The space key of a page: `private`, or `teamspace:<id>`. */
+export const spaceOf = (page: Pick<PageSummary, 'private' | 'teamspace_id'>) => (page.private || !page.teamspace_id ? 'private' : `teamspace:${page.teamspace_id}`)
 
 /**
  * Teamspaces by position, then Private: each with its pages depth first in the server's order. The children of a page

@@ -22,6 +22,7 @@ export const keys = {
   conversations: (workspaceId: string) => ['conversations', workspaceId] as const,
   chatCategories: (workspaceId: string) => ['chat-categories', workspaceId] as const,
   chatStates: (workspaceId: string) => ['chat-states', workspaceId] as const,
+  linkPreview: (workspaceId: string, url: string) => ['chat-link-preview', workspaceId, url] as const,
   messages: (workspaceId: string, conversationId: string) => ['messages', workspaceId, conversationId] as const,
   notifications: (workspaceId: string) => ['notifications', workspaceId] as const,
   unreadNotifications: (workspaceId: string) => ['notifications', workspaceId, 'unread'] as const,

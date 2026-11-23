@@ -15,6 +15,7 @@ import {
   deleteReportedChatMessage,
   editChatMessage,
   followChatThread,
+  getChatLinkPreview,
   getChatThread,
   joinChatChannel,
   leaveChatChannel,
@@ -58,6 +59,7 @@ import type {
   SearchPage,
   ThreadPage,
   ThreadStateRecord,
+  LinkPreview,
 } from '@orbit/api/generated/types.gen'
 
 import type { CategoryRecord, ConversationRecord, ConversationStateRecord, MessageRecord, OrbitClient } from './orbit'
@@ -347,3 +349,8 @@ export async function emojibase(server: string): Promise<EmojibaseData> {
 
 /** The address of a server path (a file's or custom emoji's `url`), for an image that sends the bearer token. */
 export const serverUrl = (server: string, path: string) => (/^https?:\/\//i.test(path) ? path : `${server.replace(/\/+$/, '')}${path}`)
+
+/** What an external URL shows as a card; `null` when the server finds nothing to show. */
+export async function linkPreview(client: OrbitClient, workspaceId: string, url: string): Promise<LinkPreview | null> {
+  return (await getChatLinkPreview({ client, path: { workspace_id: workspaceId }, query: { url }, throwOnError: true })).data.preview ?? null
+}

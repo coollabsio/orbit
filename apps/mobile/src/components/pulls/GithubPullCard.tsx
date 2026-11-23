@@ -13,7 +13,7 @@ export function GithubPullCard({ pullRef }: { pullRef: PullRef }) {
   if (!pull.data) return null
   const data = pull.data
   return (
-    <Pressable accessibilityRole="link" accessibilityLabel={`${data.title} #${data.number}`} onPress={() => router.push(pullRoute(pullRef) as never)} className="mt-1.5 gap-1 rounded-lg border border-border px-3 py-2 active:bg-muted">
+    <Pressable accessibilityRole="link" accessibilityLabel={`${data.title} #${data.number}`} onPress={() => router.push(pullRoute(pullRef) as never)} className="gap-1 rounded-lg border border-border px-3 py-2 active:bg-muted">
       <View className="flex-row items-center gap-2">
         <PullStateBadge state={data.state} />
         <Text numberOfLines={1} className="flex-1 font-noto-medium text-[13px]">
