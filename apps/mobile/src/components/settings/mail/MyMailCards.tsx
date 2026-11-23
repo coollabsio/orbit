@@ -6,7 +6,9 @@ import { htmlToText } from '../../../data/mail-compose'
 import type { MailFromAddress } from '../../../data/mail-api'
 import type { MailSnippet } from '../../../data/mail-sending-api'
 import { mailProblem, UNDO_SECONDS } from '../../../data/mail-settings'
+import { SWIPE_ACTIONS, SWIPE_LABELS, type SwipeSettings } from '../../../data/mail-swipe'
 import { useFromAddresses, useMailMe } from '../../../hooks/mail'
+import { setMailSwipes, useMailSwipes } from '../../../hooks/mail-swipe'
 import { useMailSettingsMe, useSaveMailSettings, useSaveSignature, useSignatures, useSnippets, useSnippetWrites } from '../../../hooks/mail-sending'
 import { Button, EmptyState, Input, Text } from '../../../ui'
 import { ConfirmDialog, type ConfirmRequest, Dialog } from '../Dialog'
@@ -117,6 +119,29 @@ export function UndoSendCard() {
           />
         </View>
       </SettingsRow>
+    </SettingsCard>
+  )
+}
+
+const SWIPE_OPTIONS = SWIPE_ACTIONS.map((value) => ({ value, label: SWIPE_LABELS[value] }))
+const SWIPE_SIDES: readonly { side: keyof SwipeSettings; title: string }[] = [
+  { side: 'left', title: 'Swipe left' },
+  { side: 'right', title: 'Swipe right' },
+]
+
+/** The mail list's swipe actions: kept on this device, as only a touch screen swipes. */
+export function SwipeActionsCard() {
+  const swipes = useMailSwipes()
+  return (
+    <SettingsCard title="Swipe actions" description="What a swipe to each side does to a conversation in the mail list. Saved on this device." flush>
+      {SWIPE_SIDES.map(({ side, title }, index) => (
+        <SettingsRow key={side} first={index === 0}>
+          <OptionText title={title} />
+          <View className="w-44">
+            <Select label={title} value={swipes[side]} options={SWIPE_OPTIONS} onChange={(value) => setMailSwipes({ ...swipes, [side]: value })} />
+          </View>
+        </SettingsRow>
+      ))}
     </SettingsCard>
   )
 }

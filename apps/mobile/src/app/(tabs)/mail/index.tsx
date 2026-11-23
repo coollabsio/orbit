@@ -15,8 +15,10 @@ import * as mail from '../../../data/mail-api'
 import type { MailDraft, MailOutboundItem, MailThreadSummary } from '../../../data/mail-api'
 import { htmlToText, recipientSummary } from '../../../data/mail-compose'
 import { outboxStatus } from '../../../data/mail-status'
+import type { SwipeStep } from '../../../data/mail-swipe'
 import { confirmAction } from '../../../hooks/chat'
 import { refreshSendViews, useDrafts, useMailCounts, useMailMe, useMailSearch, useOutbound, useSendPolicy, useStartDraft, useThreads, useUpdateThread } from '../../../hooks/mail'
+import { useMailSwipes } from '../../../hooks/mail-swipe'
 import { useOrbit } from '../../../orbit-context'
 import { errorMessage } from '../../../session-context'
 import { alpha, useTheme } from '../../../theme'
@@ -36,6 +38,7 @@ export default function MailScreen() {
   const [menu, setMenu] = useState<{ title: string; actions: SheetAction[] } | null>(null)
   const update = useUpdateThread()
   const start = useStartDraft()
+  const swipes = useMailSwipes()
   const source = TAB_INFO[tab].source
   const searching = query.trim() !== ''
   const threadFilter = source.kind === 'threads' ? (unreadOnly ? { ...source.filter, unread: true } : source.filter) : {}
@@ -60,6 +63,10 @@ export default function MailScreen() {
   }
   const change = (thread: MailThreadSummary, next: ThreadChange) =>
     update.mutate({ threadId: thread.id, change: next }, { onError: (error) => Alert.alert('The change could not be saved.', errorMessage(error)) })
+  const swiped = (thread: MailThreadSummary, step: SwipeStep) => {
+    if ('change' in step.outcome) change(thread, step.outcome.change)
+    else if (!start.isPending) start.mutate({ mode: step.outcome.reply, threadId: thread.id })
+  }
   const rowMenu = (thread: MailThreadSummary) => {
     const actions = threadActions(thread.folder)
     setMenu({
@@ -199,6 +206,8 @@ export default function MailScreen() {
                   onOpen={(thread) => router.push(`/mail/${thread.id}`)}
                   onStar={(thread) => change(thread, { starred: !thread.starred })}
                   onLongPress={rowMenu}
+                  swipes={swipes}
+                  onSwipe={swiped}
                 />
               )
             }
