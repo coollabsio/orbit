@@ -164,7 +164,7 @@ export function SendRouteForm({
   const firstKind: SendRouteKind = route && isSendRouteKind(route.kind) ? route.kind : directAvailable ? 'direct' : 'smtp'
   const [kind, setKind] = useState<SendRouteKind>(firstKind)
   const fields = routeFormFields(kind, scope)
-  const [name, setName] = useState(route?.name ?? '')
+  const [name, setName] = useState(route?.name ?? ROUTE_LABELS[firstKind])
   const [settings, setSettings] = useState<FormValues>(() => initialSettingValues(fields, route?.settings))
   const [secrets, setSecrets] = useState<FormValues>({})
   const [maxBytes, setMaxBytes] = useState(() => {
@@ -183,6 +183,8 @@ export function SendRouteForm({
 
   function chooseKind(next: SendRouteKind) {
     setKind(next)
+    // keep a name the user typed; replace the previous kind's prefilled one
+    setName((current) => (current.trim() === '' || current === ROUTE_LABELS[kind] ? ROUTE_LABELS[next] : current))
     setSecrets({})
     setSettings(initialSettingValues(routeFormFields(next, scope), null))
     setMaxBytes('')

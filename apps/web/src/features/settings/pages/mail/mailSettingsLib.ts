@@ -158,7 +158,7 @@ export interface FieldSpec {
   /** Help text for the label's info tip. */
   help?: string
   options?: { value: string; label: string }[]
-  /** A select's value when the route sets none: what the server uses then. */
+  /** The starting value when the route sets none: the provider's documented value, which the user can change. */
   defaultValue?: string
   /** Only on a route of the root user (Admin → Mail). */
   instanceOnly?: boolean
@@ -198,8 +198,9 @@ export function routeFields(kind: SendRouteKind): FieldSpec[] {
       ]
     case 'postshiba':
       return [
-        setting('host', 'SMTP host', { required: true, help: 'The SMTP host of your PostShiba cluster.' }),
-        SMTP_PORT,
+        // https://www.postshiba.com/docs/send-with-smtp: STARTTLS on 587 only
+        setting('host', 'SMTP host', { required: true, placeholder: 'smtp.postshiba.com', defaultValue: 'smtp.postshiba.com' }),
+        { ...SMTP_PORT, defaultValue: '587', help: 'PostShiba takes STARTTLS on port 587 only.' },
         secret('smtp_username', 'SMTP user name'),
         secret('smtp_password', 'SMTP password'),
         secret('webhook_secret', 'Events webhook secret', 'The signing secret of the events webhook you add for Orbit (not the inbox one).'),
@@ -208,7 +209,7 @@ export function routeFields(kind: SendRouteKind): FieldSpec[] {
     case 'postmark':
       return [
         secret('server_token', 'Server API token', 'Postmark → Servers → your server → API Tokens.'),
-        setting('stream', 'Message stream', { placeholder: 'outbound', help: 'Empty: outbound, the default transactional stream.' }),
+        setting('stream', 'Message stream', { placeholder: 'outbound', defaultValue: 'outbound', help: 'Empty: outbound, the default transactional stream.' }),
       ]
     case 'resend':
       return [
