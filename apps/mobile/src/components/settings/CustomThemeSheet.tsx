@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Platform, Pressable, Share, useColorScheme, View } from 'react-native'
 
 import { CUSTOM_THEME_PRESETS, type CustomTheme, normalizeHex, parseCustomTheme, readableOn, serializeCustomTheme } from '../../data/custom-theme'
-import { palettes, type Scheme, setCustomTheme, useCustomTheme, useSchemePreference, useTheme } from '../../theme'
+import { palettes, type Scheme, useSchemePreference, useTheme } from '../../theme'
 import { Button, Text, LabelTip } from '../../ui'
 import { TextInput } from '../../ui/scaled'
 import { Dialog } from './Dialog'
@@ -17,25 +17,35 @@ const COLOR_FIELDS: readonly { key: keyof CustomTheme; label: string; hint: stri
   { key: 'chat', label: 'Pages', hint: 'Every page, menus, dialogs' },
 ]
 
-/** The web's `CustomThemeDialog`: presets, four colours and a code to share. Saved on this device. */
-export function CustomThemeSheet({ visible, onClose }: { visible: boolean; onClose: () => void }) {
+/**
+ * The web's `CustomThemeDialog`: presets, four colours and a code to share. Saved on this device. It edits the colours
+ * of the whole app (Custom) or of one part of it (Per app): `value` is the saved theme, `null` for the Orbit default.
+ */
+export function CustomThemeSheet({
+  visible,
+  title,
+  description,
+  value,
+  onSave,
+  onClose,
+}: {
+  visible: boolean
+  title: string
+  description: string
+  value: CustomTheme | null
+  onSave: (theme: CustomTheme | null) => void
+  onClose: () => void
+}) {
   return (
-    <Dialog
-      visible={visible}
-      title="Custom theme"
-      description="Colours of the whole app, in place of Light, System or Dark. Only you see them, and text stays readable on every colour."
-      onClose={onClose}
-      footer={null}
-    >
+    <Dialog visible={visible} title={title} description={description} onClose={onClose} footer={null}>
       {/* mounted only while open, so every opening starts from the saved theme */}
-      {visible ? <CustomThemeForm onDone={onClose} /> : null}
+      {visible ? <CustomThemeForm saved={value} onSave={onSave} onDone={onClose} /> : null}
     </Dialog>
   )
 }
 
-function CustomThemeForm({ onDone }: { onDone: () => void }) {
+function CustomThemeForm({ saved, onSave, onDone }: { saved: CustomTheme | null; onSave: (theme: CustomTheme | null) => void; onDone: () => void }) {
   const { colors: palette } = useTheme()
-  const saved = useCustomTheme()
   const [theme, setTheme] = useState<CustomTheme | null>(saved)
   // Changes when the colours come from a preset or a pasted code, so the hex fields take the new values.
   const [revision, setRevision] = useState(0)
@@ -125,7 +135,7 @@ function CustomThemeForm({ onDone }: { onDone: () => void }) {
             label="Reset"
             variant="ghost"
             onPress={() => {
-              setCustomTheme(null)
+              onSave(null)
               onDone()
             }}
           />
@@ -136,7 +146,7 @@ function CustomThemeForm({ onDone }: { onDone: () => void }) {
           label="Save theme"
           disabled={codeError}
           onPress={() => {
-            setCustomTheme(theme)
+            onSave(theme)
             onDone()
           }}
         />

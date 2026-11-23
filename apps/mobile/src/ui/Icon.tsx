@@ -3,7 +3,7 @@ import { SvgXml } from 'react-native-svg'
 
 import { brandIcons } from './brand-icons'
 import { icons as reicons } from './icons.gen'
-import { useTheme } from '../theme'
+import { useTheme, useUiScale } from '../theme'
 
 // A sign-in provider's `icon={provider}`: any OpenID Connect provider gets a neutral key, not a brand mark.
 const icons = { ...reicons, ...brandIcons, oidc: reicons.key }
@@ -19,5 +19,6 @@ export interface IconProps {
 
 export function Icon({ name, size = 20, color }: IconProps) {
   const { colors } = useTheme()
-  return <SvgXml xml={icons[name]} width={size} height={size} color={color ?? colors.foreground} />
+  const scaled = size * useUiScale()
+  return <SvgXml xml={icons[name]} width={scaled} height={scaled} color={color ?? colors.foreground} />
 }

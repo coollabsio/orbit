@@ -7,7 +7,7 @@ import { absoluteUrl } from '../data/docs'
 import { keys } from '../data/keys'
 import { members } from '../data/orbit'
 import { useOrbitIfSignedIn } from '../orbit-context'
-import { presenceColors, useTheme } from '../theme'
+import { presenceColors, useTheme, useUiScale } from '../theme'
 import { Text } from './Text'
 
 export type Presence = 'online' | 'idle' | 'dnd' | 'offline' | 'invisible'
@@ -50,22 +50,25 @@ function usePictureUrl(id: string, url: string | null | undefined): { uri: strin
 }
 
 /** The web `UserAvatar`: the person's picture, over the fallback of initials on a tint of their color on the muted surface. */
-export function Avatar({ id, name, size = 24, presence, surface, url }: AvatarProps) {
+export function Avatar({ id, name, size: baseSize = 24, presence, surface, url }: AvatarProps) {
   const { colors } = useTheme()
+  // Text size scales the avatar; the initials are sized from the base size, as `Text` scales them itself
+  const scale = useUiScale()
+  const size = baseSize * scale
   const look = avatarColors(userColor(id), colors.muted, colors.foreground)
   const picture = usePictureUrl(id, url)
   const [failed, setFailed] = useState<string | null>(null)
   return (
     <View accessibilityLabel={name} style={{ width: size, height: size }}>
       <View className="items-center justify-center overflow-hidden rounded-full" style={{ width: size, height: size, backgroundColor: look.background }}>
-        <Text className="font-noto-semibold" style={{ color: look.text, fontSize: Math.max(9, Math.round(size * 0.38)), lineHeight: size }}>
+        <Text className="font-noto-semibold" style={{ color: look.text, fontSize: Math.max(9, Math.round(baseSize * 0.38)), lineHeight: baseSize }}>
           {initialsOf(name)}
         </Text>
         {picture && failed !== picture.uri ? (
           <Image source={picture} onError={() => setFailed(picture.uri)} className="absolute inset-0" style={{ width: size, height: size }} />
         ) : null}
       </View>
-      {presence ? <PresenceBadge presence={presence} size={size <= 24 ? 8 : size <= 40 ? 10 : size < 64 ? 12 : 14} surface={surface ?? colors.background} /> : null}
+      {presence ? <PresenceBadge presence={presence} size={(baseSize <= 24 ? 8 : baseSize <= 40 ? 10 : baseSize < 64 ? 12 : 14) * scale} surface={surface ?? colors.background} /> : null}
     </View>
   )
 }

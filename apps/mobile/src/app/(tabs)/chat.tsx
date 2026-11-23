@@ -15,7 +15,7 @@ import { useOwnStatus } from '../../hooks/account'
 import { confirmAction, useChatWrite, useFollowedThreads, useIsChatAdmin } from '../../hooks/chat'
 import { useIsGuest, useOrbit } from '../../orbit-context'
 import { useChatCategories, useChatStates, useChatBadge, useConversations, usePeople } from '../../queries'
-import { useTheme } from '../../theme'
+import { setAppLook, setCustomTheme, useCustomTheme, useCustomThemeChoice, useTheme } from '../../theme'
 import { Avatar, CountBadge, EmptyState, ErrorView, HeaderTitle, Icon, type IconName, IconButton, LoadingView, PaneHeader, PullRefresh, SafeAreaView, Text } from '../../ui'
 import { useShownPresence } from '../../components/chat/Pane'
 
@@ -41,6 +41,9 @@ export default function ChatScreen() {
   const [overlay, setOverlay] = useState<Overlay | null>(null)
   const [accountOpen, setAccountOpen] = useState(false)
   const [themeOpen, setThemeOpen] = useState(false)
+  const theme = useCustomTheme()
+  const themeChoice = useCustomThemeChoice()
+  const perApp = Boolean(themeChoice && 'apps' in themeChoice)
   const ownStatus = useOwnStatus()
   const admin = useIsChatAdmin()
   // a guest is only in the private channels it was added to: it browses and makes none
@@ -159,7 +162,18 @@ export default function ChatScreen() {
           </View>
         </Pressable>
       </View>
-      <CustomThemeSheet visible={themeOpen} onClose={() => setThemeOpen(false)} />
+      <CustomThemeSheet
+        visible={themeOpen}
+        title={perApp ? 'Chat colours' : 'Custom theme'}
+        description={
+          perApp
+            ? 'Colours of chat screens. Orbit uses your Light, System or Dark theme. Only you see them.'
+            : 'Colours of the whole app, in place of Light, System or Dark. Only you see them, and text stays readable on every colour.'
+        }
+        value={theme}
+        onSave={(next) => (perApp ? setAppLook('chat', next) : setCustomTheme(next))}
+        onClose={() => setThemeOpen(false)}
+      />
       <AccountMenu visible={accountOpen} onClose={() => setAccountOpen(false)} onNavigate={(href) => router.navigate(href)} />
       <ActionSheet
         visible={overlay?.kind === 'new'}

@@ -5,6 +5,11 @@
   "dependencies": {
     "@blocknote/core": "^0.55.0",
     "@blocknote/react": "^0.55.0",
+    "@expo-google-fonts/geist": "^0.4.2",
+    "@expo-google-fonts/geist-mono": "^0.4.3",
+    "@expo-google-fonts/ibm-plex-sans": "^0.4.1",
+    "@expo-google-fonts/inter": "^0.4.2",
+    "@expo-google-fonts/literata": "^0.4.3",
     "@expo-google-fonts/noto-sans": "^0.4.2",
     "@orbit/api": "workspace:*",
     "@orbit/database": "workspace:*",

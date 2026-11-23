@@ -1,6 +1,21 @@
 import { expect, test } from 'bun:test'
 
-import { accentOn, colorVariables, customSidebarTheme, customThemeColors, customThemeScheme, normalizeHex, parseCustomTheme, readableOn, serializeCustomTheme } from './custom-theme'
+import {
+  accentOn,
+  activeCustomTheme,
+  appSectionOf,
+  colorVariables,
+  customSidebarTheme,
+  customThemeColors,
+  customThemeScheme,
+  DEFAULT_APP_LOOKS,
+  normalizeHex,
+  parseCustomTheme,
+  parseCustomThemeChoice,
+  readableOn,
+  serializeCustomTheme,
+  serializeCustomThemeChoice,
+} from './custom-theme'
 
 const slack = { sidebar: '#3f0e40', selected: '#1164a3', accent: '#ecb22e', chat: '#ffffff' }
 
@@ -32,4 +47,23 @@ test('the page colours follow the message colour and the drawer follows the side
 
 test('colour tokens become the variables Uniwind reads', () => {
   expect(colorVariables({ sidebarNavActive: '#fff', chart1: '#000' })).toEqual({ '--color-sidebar-nav-active': '#fff', '--color-chart1': '#000' })
+})
+
+test('Per app is stored in the web format and colours only the open part of the app', () => {
+  const choice = { apps: { ...DEFAULT_APP_LOOKS, chat: null } }
+  const raw = serializeCustomThemeChoice(choice)
+  expect(raw).toBe('apps:{"docs":"#f7f7f5,#ebebe9,#2383e2,#ffffff","chat":null,"tasks":"#0e0f11,#24252a,#5e6ad2,#16171a"}')
+  expect(parseCustomThemeChoice(raw)).toEqual(choice)
+  // a whole-app theme saved before Per app still reads
+  expect(parseCustomThemeChoice('#3f0e40,#1164a3,#ecb22e,#ffffff')).toEqual(slack)
+  expect(parseCustomThemeChoice('apps:{broken')).toEqual({ apps: DEFAULT_APP_LOOKS })
+
+  expect(appSectionOf('/docs/abc')).toBe('docs')
+  expect(appSectionOf('/chat')).toBe('chat')
+  expect(appSectionOf('/tasks/project/1')).toBe('tasks')
+  expect(appSectionOf('/settings/appearance')).toBeNull()
+  expect(activeCustomTheme(choice, 'tasks')?.accent).toBe('#5e6ad2')
+  expect(activeCustomTheme(choice, 'chat')).toBeNull()
+  expect(activeCustomTheme(choice, null)).toBeNull()
+  expect(activeCustomTheme(slack, null)).toBe(slack)
 })

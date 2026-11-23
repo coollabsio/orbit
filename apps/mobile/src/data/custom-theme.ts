@@ -3,7 +3,7 @@ import { alpha, mix } from './color'
 
 /**
  * Settings → Appearance → Custom: a personal colour theme, the web's `lib/customTheme.ts`. Four colours, and every
- * text colour is derived so that it stays readable. It colours the whole app.
+ * text colour is derived so that it stays readable. It colours the whole app, or under Per app one part of it.
  */
 export interface CustomTheme {
   /** The sidebar (drawer) background. */
@@ -21,8 +21,14 @@ export interface CustomThemePreset {
   theme: CustomTheme
 }
 
+const NOTION: CustomThemePreset = { name: 'Notion', theme: { sidebar: '#f7f7f5', selected: '#ebebe9', accent: '#2383e2', chat: '#ffffff' } }
+const SLACK: CustomThemePreset = { name: 'Slack', theme: { sidebar: '#3f0e40', selected: '#1164a3', accent: '#ecb22e', chat: '#ffffff' } }
+const LINEAR: CustomThemePreset = { name: 'Linear', theme: { sidebar: '#0e0f11', selected: '#24252a', accent: '#5e6ad2', chat: '#16171a' } }
+
 export const CUSTOM_THEME_PRESETS: readonly CustomThemePreset[] = [
-  { name: 'Slack', theme: { sidebar: '#3f0e40', selected: '#1164a3', accent: '#ecb22e', chat: '#ffffff' } },
+  SLACK,
+  NOTION,
+  LINEAR,
   { name: 'Slack Dark', theme: { sidebar: '#19171d', selected: '#1164a3', accent: '#ecb22e', chat: '#1a1d21' } },
   { name: 'Discord Ash', theme: { sidebar: '#2b2d31', selected: '#404249', accent: '#5865f2', chat: '#313338' } },
   { name: 'Discord Dark', theme: { sidebar: '#121214', selected: '#2c2c30', accent: '#5865f2', chat: '#1a1a1e' } },
@@ -35,6 +41,65 @@ export const CUSTOM_THEME_PRESETS: readonly CustomThemePreset[] = [
   { name: 'Paper', theme: { sidebar: '#ebe6da', selected: '#d9d1bf', accent: '#c2410c', chat: '#f7f4ec' } },
   { name: 'Blossom', theme: { sidebar: '#fde8f1', selected: '#f9c4dc', accent: '#d61f69', chat: '#fff7fa' } },
 ]
+
+/** The part of the app that a screen belongs to, for Appearance → Per app. */
+export type AppSection = 'docs' | 'chat' | 'tasks'
+export const APP_SECTIONS: readonly AppSection[] = ['docs', 'chat', 'tasks']
+
+/** Appearance → Per app: the colours of each part of the app. `null` is the chosen Light, System or Dark theme. */
+export type AppLooks = Readonly<Record<AppSection, CustomTheme | null>>
+
+/** Per app starts with each part in the colours of the app it replaces. */
+export const DEFAULT_APP_LOOKS: AppLooks = { docs: NOTION.theme, chat: SLACK.theme, tasks: LINEAR.theme }
+
+/** The saved choice: colours for the whole app, colours per part of the app, or `null` for Light, System or Dark. */
+export type CustomThemeChoice = CustomTheme | { apps: AppLooks } | null
+
+/** A theme's preset name, `Your colors` when it is not a preset, or `Orbit` for the Light, System or Dark theme. */
+export function themeName(theme: CustomTheme | null): string {
+  if (!theme) return 'Orbit'
+  const code = serializeCustomTheme(theme)
+  return CUSTOM_THEME_PRESETS.find((preset) => serializeCustomTheme(preset.theme) === code)?.name ?? 'Your colors'
+}
+
+/** The part of the app of an Expo Router path (groups such as `(tabs)` are not in it). */
+export function appSectionOf(pathname: string): AppSection | null {
+  if (/^\/docs(\/|$)/.test(pathname)) return 'docs'
+  if (/^\/chat(\/|$)/.test(pathname)) return 'chat'
+  if (/^\/(tasks|views)(\/|$)/.test(pathname)) return 'tasks'
+  return null
+}
+
+// Per app is stored as the web stores it: `apps:` and a JSON object of share codes
+const APPS_PREFIX = 'apps:'
+
+/** Reads a stored choice: one share code, or `apps:` and the codes of each part. */
+export function parseCustomThemeChoice(raw: string): CustomThemeChoice {
+  if (!raw.startsWith(APPS_PREFIX)) return parseCustomTheme(raw)
+  let codes: unknown
+  try {
+    codes = JSON.parse(raw.slice(APPS_PREFIX.length))
+  } catch {
+    return { apps: DEFAULT_APP_LOOKS }
+  }
+  const look = (section: AppSection) => {
+    const value = codes && typeof codes === 'object' ? (codes as Record<string, unknown>)[section] : undefined
+    return typeof value === 'string' ? parseCustomTheme(value) : value === null ? null : DEFAULT_APP_LOOKS[section]
+  }
+  return { apps: { docs: look('docs'), chat: look('chat'), tasks: look('tasks') } }
+}
+
+export function serializeCustomThemeChoice(choice: NonNullable<CustomThemeChoice>): string {
+  if (!('apps' in choice)) return serializeCustomTheme(choice)
+  const codes = Object.fromEntries(APP_SECTIONS.map((section) => [section, choice.apps[section] && serializeCustomTheme(choice.apps[section])]))
+  return APPS_PREFIX + JSON.stringify(codes)
+}
+
+/** The colours on screen: the whole-app theme, or under Per app the colours of the open part of the app. */
+export function activeCustomTheme(choice: CustomThemeChoice, section: AppSection | null): CustomTheme | null {
+  if (!choice || !('apps' in choice)) return choice
+  return section ? choice.apps[section] : null
+}
 
 const HEX = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i
 const LIGHT_TEXT = '#ffffff'

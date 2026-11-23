@@ -4,7 +4,7 @@ import { NotoSans_500Medium } from '@expo-google-fonts/noto-sans/500Medium'
 import { NotoSans_600SemiBold } from '@expo-google-fonts/noto-sans/600SemiBold'
 import { NotoSans_700Bold } from '@expo-google-fonts/noto-sans/700Bold'
 import { focusManager, QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { DarkTheme, DefaultTheme, type ErrorBoundaryProps, SplashScreen, Stack, ThemeProvider } from 'expo-router'
+import { DarkTheme, DefaultTheme, type ErrorBoundaryProps, SplashScreen, Stack, ThemeProvider, usePathname } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
 import * as SystemUI from 'expo-system-ui'
 import { useFonts } from 'expo-font'
@@ -14,7 +14,8 @@ import { AppState, View } from 'react-native'
 import { NoWorkspace } from '../components/NoWorkspace'
 import { OrbitProvider } from '../orbit-context'
 import { SessionProvider, useSession } from '../session-context'
-import { fonts, loadAppearance, palettes, type Theme, useTheme } from '../theme'
+import { loadAppearance, palettes, setOpenPage, type Theme, useFont, useTheme } from '../theme'
+import { type FontChoice, fontFace } from '../theme/typography'
 import { AppColorScope, useAppPalette } from '../theme/ColorScope'
 import { Button, EmptyState, OrbitLoader, Text } from '../ui'
 
@@ -29,16 +30,16 @@ focusManager.setEventListener((setFocused) => {
   return () => subscription.remove()
 })
 
-function navigationTheme({ scheme, colors }: Theme) {
+function navigationTheme({ scheme, colors }: Theme, font: FontChoice) {
   const base = scheme === 'dark' ? DarkTheme : DefaultTheme
   return {
     ...base,
     colors: { ...base.colors, primary: colors.primary, background: colors.background, card: colors.background, text: colors.foreground, border: colors.border, notification: colors.primary },
     fonts: {
-      regular: { fontFamily: fonts.regular, fontWeight: 'normal' as const },
-      medium: { fontFamily: fonts.medium, fontWeight: 'normal' as const },
-      bold: { fontFamily: fonts.semibold, fontWeight: 'normal' as const },
-      heavy: { fontFamily: fonts.bold, fontWeight: 'normal' as const },
+      regular: { fontWeight: 'normal' as const, ...fontFace(font, '400Regular') },
+      medium: { fontWeight: 'normal' as const, ...fontFace(font, '500Medium') },
+      bold: { fontWeight: 'normal' as const, ...fontFace(font, '600SemiBold') },
+      heavy: { fontWeight: 'normal' as const, ...fontFace(font, '700Bold') },
     },
   }
 }
@@ -77,6 +78,8 @@ function RootNavigator({ fontsReady }: { fontsReady: boolean }) {
   // the root is above `AppColorScope`, so it reads the app's colours itself (with the custom theme)
   const palette = useAppPalette()
   const theme = { ...useTheme(), scheme: palette.scheme, colors: { ...palettes[palette.scheme], ...palette.colors } }
+  const font = useFont()
+  const pathname = usePathname()
   const [schemeLoaded, setSchemeLoaded] = useState(false)
   const ready = fontsReady && schemeLoaded && state.status !== 'loading'
 
@@ -84,6 +87,11 @@ function RootNavigator({ fontsReady }: { fontsReady: boolean }) {
     void loadAppearance().finally(() => setSchemeLoaded(true))
   }, [])
   const signedIn = state.status === 'signed_in'
+
+  // Appearance → Per app colours the open part of the app
+  useEffect(() => {
+    setOpenPage(pathname)
+  }, [pathname])
 
   useEffect(() => {
     // the root view shows behind screen transitions and the keyboard; keep it on the theme canvas
@@ -104,7 +112,7 @@ function RootNavigator({ fontsReady }: { fontsReady: boolean }) {
         headerStyle: { backgroundColor: theme.colors.background },
         headerShadowVisible: false,
         headerTintColor: theme.colors.foreground,
-        headerTitleStyle: { fontFamily: theme.fonts.semibold, fontSize: 17, color: theme.colors.foreground },
+        headerTitleStyle: { ...fontFace(font, '600SemiBold'), fontSize: 17, color: theme.colors.foreground },
         headerBackButtonDisplayMode: 'minimal',
       }}
     >
@@ -133,7 +141,7 @@ function RootNavigator({ fontsReady }: { fontsReady: boolean }) {
 
   return (
     <AppColorScope>
-      <ThemeProvider value={navigationTheme(theme)}>
+      <ThemeProvider value={navigationTheme(theme, font)}>
         <StatusBar style={theme.scheme === 'dark' ? 'light' : 'dark'} />
         {state.status === 'offline' ? <SessionOffline server={state.session.server} /> : signedIn ? <OrbitProvider noWorkspace={<NoWorkspace />}>{stack}</OrbitProvider> : stack}
       </ThemeProvider>
