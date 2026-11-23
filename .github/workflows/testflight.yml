@@ -7,9 +7,19 @@ name: TestFlight
 #   IOS_PROVISIONING_PROFILE base64 of the App Store provisioning profile for io.coollabs.orbit
 #   ASC_API_KEY_P8, ASC_KEY_ID, ASC_ISSUER_ID  App Store Connect API key (App Manager)
 #   ASC_APP_ID               App Store Connect → App Information → Apple ID
+# Each build goes to the external group "Public" (the one with the public link) and to Beta App Review. Fill in
+# TestFlight → Test Information first, or the review submission fails.
 # The certificate and the profile expire after one year: renew them and update the secrets.
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - apps/mobile/**
+      - packages/**
+      - bun.lock
+      - .github/workflows/testflight.yml
+      - .github/scripts/testflight-distribute.ts
 
 concurrency:
   group: ${{ github.workflow }}
@@ -135,6 +145,18 @@ jobs:
             --bundle-short-version-string "$(jq -r .expo.version app.json)" \
             --apiKey "$ASC_KEY_ID" \
             --apiIssuer "$ASC_ISSUER_ID"
+
+      - name: Give the build to the public TestFlight group
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_APP_ID: ${{ secrets.ASC_APP_ID }}
+          TESTFLIGHT_GROUP: Public
+          WHAT_TO_TEST: ${{ github.event.head_commit.message }}
+        run: |
+          export ASC_KEY_PATH=~/.appstoreconnect/private_keys/AuthKey_$ASC_KEY_ID.p8
+          export APP_VERSION="$(jq -r .expo.version app.json)"
+          bun ../../.github/scripts/testflight-distribute.ts
 
       - name: Remove signing files
         if: always()
