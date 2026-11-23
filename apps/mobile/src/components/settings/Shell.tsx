@@ -6,7 +6,7 @@ import { Platform, Pressable, ScrollView, Switch, View } from 'react-native'
 import { useOrbit } from '../../orbit-context'
 import { guestMayOpen } from '../../data/guest'
 import { alpha, cssColors, useButtonStyle, useTheme } from '../../theme'
-import { Icon, type IconName, KeyboardSpace, LabelTip, PaneHeader, PickerSheet, type Presence, PullRefresh, SafeAreaView, Spinner, StatusMark, Text } from '../../ui'
+import { Icon, type IconName, HelpTip, KeyboardSpace, LabelTip, PaneHeader, PickerSheet, type Presence, PullRefresh, SafeAreaView, Spinner, StatusMark, Text } from '../../ui'
 
 export interface SettingsNavItem {
   href: Href & string
@@ -141,28 +141,26 @@ export function AdminShell({ children, onRefresh }: { children: ReactNode; onRef
 
 /**
  * The web `SettingsCard`: a title strip (with its actions on the right) on the card surface, the body on a panel below
- * a hairline. A description hides behind the underlined title (the web's tooltip); tapping the title shows it.
+ * a hairline. A description hides behind the underlined title: a tap on the title shows it in a tooltip.
  */
 export function SettingsCard({ title, description, actions, flush = false, danger = false, children }: { title: string; description?: string; actions?: ReactNode; flush?: boolean; /** Delete account: a destructive ring and title, and a body without its own fill. */ danger?: boolean; children?: ReactNode }) {
-  const [open, setOpen] = useState(false)
   return (
     <View className={`rounded-lg bg-card ${danger ? 'shadow-[0_0_0_1px_var(--color-destructive)]' : 'shadow-[0_0_0_1px_var(--color-border)]'}`}>
       <View className="min-h-12 justify-center py-2 pr-2 pl-4">
         <View className="flex-row flex-wrap items-center justify-between gap-2">
           <View className="min-w-0 shrink py-0.5">
-            <Text
-              accessibilityRole={description ? 'button' : 'header'}
-              accessibilityHint={description}
-              onPress={description ? () => setOpen((value) => !value) : undefined}
-              className={`font-noto-medium text-[14px] leading-[20px] ${danger ? 'text-destructive' : 'text-foreground'} ${description ? 'underline' : ''}`}
-            >
-              {title}
-            </Text>
+            {description ? (
+              <HelpTip text={description} label={title}>
+                <Text className={`font-noto-medium text-[14px] leading-[20px] underline ${danger ? 'text-destructive' : 'text-foreground'}`}>{title}</Text>
+              </HelpTip>
+            ) : (
+              <Text accessibilityRole="header" className={`font-noto-medium text-[14px] leading-[20px] ${danger ? 'text-destructive' : 'text-foreground'}`}>
+                {title}
+              </Text>
+            )}
           </View>
           {actions ? <View className="min-w-0 max-w-full flex-row flex-wrap items-center gap-2">{actions}</View> : null}
         </View>
-        {/* the web shows it in a tooltip; a tap on the title shows it here, under the whole row */}
-        {description && open ? <Text className="pr-2 pb-0.5 text-[12px] leading-[16px] text-muted-foreground">{description}</Text> : null}
       </View>
       {children !== undefined ? (
         <View className={`rounded-b-lg overflow-hidden border-t border-border ${danger ? '' : 'bg-background'} ${flush ? 'p-0' : 'p-4'}`}>{children}</View>
