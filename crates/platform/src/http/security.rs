@@ -95,8 +95,11 @@ impl OriginPolicy {
             // Machine-to-machine: the secret in the path is the credential, and no cookie is read.
             return true;
         }
-        if uri.path().starts_with("/api/v1/mail/inbound/") {
-            // webhooks from servers: no Origin, and the handler checks their signature
+        if uri.path().starts_with("/api/v1/mail/inbound/")
+            || uri.path().starts_with("/api/v1/mail/events/")
+        {
+            // webhooks from servers (inbound mail, send route events): no Origin, and the
+            // handler checks their signature
             return true;
         }
         if matches!(
@@ -397,6 +400,12 @@ mod tests {
     }
 
     const TASKS: &str = "/api/v1/workspaces/w/tasks";
+
+    #[test]
+    fn mail_webhooks_without_origin_are_allowed() {
+        assert!(permits(Method::POST, "/api/v1/mail/inbound/postshiba/x", &[]));
+        assert!(permits(Method::POST, "/api/v1/mail/events/postshiba/x", &[]));
+    }
 
     #[test]
     fn bearer_without_origin_or_cookie_is_allowed() {
