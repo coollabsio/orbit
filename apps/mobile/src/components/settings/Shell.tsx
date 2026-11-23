@@ -257,8 +257,8 @@ export type BadgeTone = 'primary' | 'secondary' | 'outline' | 'destructive'
 /** The web `Badge`: a 20px pill. */
 export function Badge({ label, tone = 'primary' }: { label: string; tone?: BadgeTone }) {
   return (
-    <View className={`h-5 justify-center rounded-full border px-2 ${BADGE[tone].box}`}>
-      <Text className={`font-noto-medium text-[12px] leading-[16px] ${BADGE[tone].text}`}>{label}</Text>
+    <View className={`h-5 max-w-full shrink justify-center rounded-full border px-2 ${BADGE[tone].box}`}>
+      <Text numberOfLines={1} className={`font-noto-medium text-[12px] leading-[16px] ${BADGE[tone].text}`}>{label}</Text>
     </View>
   )
 }
