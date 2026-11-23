@@ -1,12 +1,12 @@
 import type { PageKind } from '@orbit/api/generated/types.gen'
 import { router } from 'expo-router'
 import { type ReactNode, useMemo, useState } from 'react'
-import { Pressable, ScrollView, View } from 'react-native'
+import { FlatList, Pressable, View } from 'react-native'
 
 import { IconDialog } from '../../../components/docs/IconDialog'
 import { useMoveSheet } from '../../../components/docs/MoveSheet'
 import { ActionSheet, ConfirmDialog, type ConfirmRequest, PromptDialog, type PromptRequest, type SheetAction } from '../../../components/settings/Dialog'
-import { descendantsOf, docSpaces, type FavoriteRow, favoritePages, pageTitle, trashPrompt, type TreeRow } from '../../../data/docs'
+import { descendantsOf, type DocSpace, docSpaces, type FavoriteRow, favoritePages, pageTitle, trashPrompt, type TreeRow } from '../../../data/docs'
 import { descendants } from '../../../data/docs-api'
 import * as api from '../../../data/orbit'
 import type { PageSummary, Teamspace } from '../../../data/orbit'
@@ -42,6 +42,8 @@ export default function DocsScreen() {
   const spaces = useMemo(() => (pages.data && teamspaces.data ? docSpaces(pages.data, teamspaces.data, collapsed) : null), [collapsed, pages.data, teamspaces.data])
   const favoriteRows = useMemo(() => favoritePages(pages.data ?? [], favorites.data ?? []), [favorites.data, pages.data])
   const sortedTeamspaces = useMemo(() => [...(teamspaces.data ?? [])].sort((a, b) => a.position - b.position), [teamspaces.data])
+  // one flat list, so that only the rows on screen render (a workspace can have thousands of pages)
+  const lines = useMemo(() => (spaces ? treeLines(spaces, favoriteRows, sortedTeamspaces, collapsed) : []), [spaces, favoriteRows, sortedTeamspaces, collapsed])
   const refresh = () => Promise.all([pages.refetch(), teamspaces.refetch(), favorites.refetch()])
   const toggle = (key: string) =>
     setCollapsed((current) => {
@@ -191,30 +193,43 @@ export default function DocsScreen() {
           <LoadingView />
         )
       ) : (
-        <ScrollView contentContainerClassName="px-2 pt-2 pb-4 gap-3.5" refreshControl={<PullRefresh onRefresh={() => refresh()} />}>
-          {favoriteRows.length > 0 ? (
-            <View>
-              <GroupHeader label="Favorites" icon="star" />
-              {favoriteRows.map((row) => (
-                <TreeItem
-                  key={row.id}
-                  label={pageTitle(row)}
-                  hint={row.hint}
-                  paddingLeft={28}
-                  leading={<PageIcon page={row} color={muted} />}
-                  onPress={() => router.push(`/docs/${row.id}`)}
-                  actions={<IconButton icon="more" label={`${pageTitle(row)} options`} size={22} iconSize={13} color={muted} onPress={() => favoriteMenu(row)} />}
-                />
-              ))}
-            </View>
-          ) : null}
-          <View>
-            <GroupHeader label="Teamspaces" action={<IconButton icon="plus" label="New teamspace" size={22} iconSize={13} color={muted} onPress={newTeamspace} />} />
-            {spaces.teamspaces.map((space) => {
-              const open = !collapsed.has(space.key)
-              const teamspace = sortedTeamspaces.find((item) => `teamspace:${item.id}` === space.key)
-              return (
-                <View key={space.key}>
+        <FlatList
+          data={lines}
+          keyExtractor={(line) => line.key}
+          contentContainerClassName="px-2 pt-2 pb-4"
+          refreshControl={<PullRefresh onRefresh={() => refresh()} />}
+          renderItem={({ item: line }) => {
+            switch (line.kind) {
+              case 'group':
+                return (
+                  <View className={line.first ? undefined : 'mt-3.5'}>
+                    <GroupHeader
+                      label={line.label}
+                      icon={line.icon}
+                      action={
+                        line.create === 'teamspace' ? (
+                          <IconButton icon="plus" label="New teamspace" size={22} iconSize={13} color={muted} onPress={newTeamspace} />
+                        ) : line.create === 'private' ? (
+                          <IconButton icon="plus" label="New private page" size={22} iconSize={13} color={muted} onPress={() => createMenu('New private', { space: 'private' })} />
+                        ) : undefined
+                      }
+                    />
+                  </View>
+                )
+              case 'favorite':
+                return (
+                  <TreeItem
+                    label={pageTitle(line.row)}
+                    hint={line.row.hint}
+                    paddingLeft={28}
+                    leading={<PageIcon page={line.row} color={muted} />}
+                    onPress={() => router.push(`/docs/${line.row.id}`)}
+                    actions={<IconButton icon="more" label={`${pageTitle(line.row)} options`} size={22} iconSize={13} color={muted} onPress={() => favoriteMenu(line.row)} />}
+                  />
+                )
+              case 'teamspace': {
+                const { space, teamspace } = line
+                return (
                   <TreeItem
                     label={space.name}
                     hint={projects.data?.find((project) => project.id === teamspace?.project_id)?.name}
@@ -228,22 +243,35 @@ export default function DocsScreen() {
                       </>
                     }
                   />
-                  {open ? <PageRows rows={space.rows} collapsed={collapsed} onToggle={toggle} onCreateChild={(page) => createMenu(`New in ${pageTitle(page)}`, { parentId: page.id })} onMenu={pageMenu} /> : null}
-                </View>
-              )
-            })}
-          </View>
-          <View>
-            <GroupHeader label="Private" icon="lock" action={<IconButton icon="plus" label="New private page" size={22} iconSize={13} color={muted} onPress={() => createMenu('New private', { space: 'private' })} />} />
-            {spaces.private.rows.length === 0 ? (
-              <View className="h-8 justify-center pl-10">
-                <Text className="text-[13px] text-muted-foreground/60">No pages inside</Text>
-              </View>
-            ) : (
-              <PageRows rows={spaces.private.rows} collapsed={collapsed} onToggle={toggle} onCreateChild={(page) => createMenu(`New in ${pageTitle(page)}`, { parentId: page.id })} onMenu={pageMenu} />
-            )}
-          </View>
-        </ScrollView>
+                )
+              }
+              case 'page': {
+                const { page, depth, hasChildren } = line.row
+                return (
+                  <TreeItem
+                    label={pageTitle(page)}
+                    paddingLeft={28 + depth * 18}
+                    chevron={hasChildren ? { open: !collapsed.has(page.id), onPress: () => toggle(page.id) } : null}
+                    leading={<PageIcon page={page} color={muted} />}
+                    onPress={() => router.push(`/docs/${page.id}`)}
+                    actions={
+                      <>
+                        <IconButton icon="more" label={`${pageTitle(page)} options`} size={22} iconSize={13} color={muted} onPress={() => pageMenu(page)} />
+                        {page.kind === 'database' ? null : <IconButton icon="plus" label={`New page in ${pageTitle(page)}`} size={22} iconSize={13} color={muted} onPress={() => createMenu(`New in ${pageTitle(page)}`, { parentId: page.id })} />}
+                      </>
+                    }
+                  />
+                )
+              }
+              case 'empty':
+                return (
+                  <View className="h-8 justify-center pl-10">
+                    <Text className="text-[13px] text-muted-foreground/60">No pages inside</Text>
+                  </View>
+                )
+            }
+          }}
+        />
       )}
       <Pressable
         accessibilityRole="link"
@@ -281,37 +309,29 @@ function GroupHeader({ label, icon, action }: { label: string; icon?: IconName; 
   )
 }
 
-function PageRows({
-  rows,
-  collapsed,
-  onToggle,
-  onCreateChild,
-  onMenu,
-}: {
-  rows: TreeRow[]
-  collapsed: ReadonlySet<string>
-  onToggle: (key: string) => void
-  onCreateChild: (page: PageSummary) => void
-  onMenu: (page: PageSummary) => void
-}) {
-  const { colors } = useTheme()
-  const muted = alpha(colors.mutedForeground, 0.7)
-  return rows.map((row) => (
-    <TreeItem
-      key={row.page.id}
-      label={pageTitle(row.page)}
-      paddingLeft={28 + row.depth * 18}
-      chevron={row.hasChildren ? { open: !collapsed.has(row.page.id), onPress: () => onToggle(row.page.id) } : null}
-      leading={<PageIcon page={row.page} color={muted} />}
-      onPress={() => router.push(`/docs/${row.page.id}`)}
-      actions={
-        <>
-          <IconButton icon="more" label={`${pageTitle(row.page)} options`} size={22} iconSize={13} color={muted} onPress={() => onMenu(row.page)} />
-          {row.page.kind === 'database' ? null : <IconButton icon="plus" label={`New page in ${pageTitle(row.page)}`} size={22} iconSize={13} color={muted} onPress={() => onCreateChild(row.page)} />}
-        </>
-      }
-    />
-  ))
+/** One line of the docs list: a group title, a favorite, a teamspace, a page of a tree, or "No pages inside". */
+type TreeLine =
+  | { kind: 'group'; key: string; label: string; icon?: IconName; create?: 'teamspace' | 'private'; first: boolean }
+  | { kind: 'favorite'; key: string; row: FavoriteRow }
+  | { kind: 'teamspace'; key: string; space: DocSpace; teamspace?: Teamspace }
+  | { kind: 'page'; key: string; row: TreeRow }
+  | { kind: 'empty'; key: string }
+
+/** Favorites, Teamspaces with their open page trees, and Private, in the order they show. */
+function treeLines(spaces: { teamspaces: DocSpace[]; private: DocSpace }, favorites: FavoriteRow[], teamspaces: Teamspace[], collapsed: ReadonlySet<string>): TreeLine[] {
+  const pageLines = (space: DocSpace): TreeLine[] => space.rows.map((row) => ({ kind: 'page', key: `${space.key}:${row.page.id}`, row }))
+  return [
+    ...(favorites.length > 0
+      ? [{ kind: 'group', key: 'group:favorites', label: 'Favorites', icon: 'star', first: true } as const, ...favorites.map((row): TreeLine => ({ kind: 'favorite', key: `favorite:${row.id}`, row }))]
+      : []),
+    { kind: 'group', key: 'group:teamspaces', label: 'Teamspaces', create: 'teamspace', first: favorites.length === 0 },
+    ...spaces.teamspaces.flatMap((space): TreeLine[] => [
+      { kind: 'teamspace', key: space.key, space, teamspace: teamspaces.find((item) => `teamspace:${item.id}` === space.key) },
+      ...(collapsed.has(space.key) ? [] : pageLines(space)),
+    ]),
+    { kind: 'group', key: 'group:private', label: 'Private', icon: 'lock', create: 'private', first: false },
+    ...(spaces.private.rows.length === 0 ? [{ kind: 'empty', key: 'private:empty' } as const] : pageLines(spaces.private)),
+  ]
 }
 
 /** One 32px tree row: an optional chevron slot, the icon, the name, and the row actions. */

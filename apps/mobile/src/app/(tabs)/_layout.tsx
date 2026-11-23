@@ -6,6 +6,7 @@ import { Dock } from '../../components/Dock'
 import { DrawerProvider } from '../../components/Drawer'
 import { MailServerBanner } from '../../components/MailServerBanner'
 import { TopBar } from '../../components/TopBar'
+import { OpenColorScope, partScreenLayout } from '../../theme/ColorScope'
 import { guestHome, guestMayOpen } from '../../data/guest'
 import { useLiveUpdates } from '../../live'
 import { usePushNotifications } from '../../push'
@@ -22,13 +23,16 @@ export default function TabsLayout() {
   if (guest && !guestMayOpen(pathname)) return <Redirect href={guestHome} />
   return (
     <DrawerProvider>
-      <TopBar />
-      <Tabs tabBar={(props) => (
-          <>
+      <OpenColorScope>
+        <TopBar />
+      </OpenColorScope>
+      {/* a tab that is not open stays mounted but hidden (React Activity): a move to another tab does not render it again */}
+      <Tabs activityEnabled screenLayout={partScreenLayout} tabBar={(props) => (
+          <OpenColorScope>
             <MailServerBanner />
             <BillingBanner />
             <Dock {...props} />
-          </>
+          </OpenColorScope>
         )} screenOptions={{ headerShown: false, sceneStyle: { backgroundColor: colors.background } }}>
         <Tabs.Screen name="index" />
         <Tabs.Screen name="tasks" />

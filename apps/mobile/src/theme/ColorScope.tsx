@@ -1,9 +1,9 @@
-import { type ReactNode, useMemo } from 'react'
+import { type ReactElement, type ReactNode, useMemo } from 'react'
 import { ScopedTheme, ScopedVariables } from 'uniwind'
 
-import { colorVariables, customThemeColors } from '../data/custom-theme'
+import { type AppSection, appSectionOf, colorVariables, customThemeColors } from '../data/custom-theme'
 import { mix } from '../data/color'
-import { type Colors, ColorScopeContext, cssColors, palettes, type Scheme, useAppScheme, useCustomTheme } from './index'
+import { type Colors, ColorScopeContext, cssColors, palettes, type Scheme, useCustomThemeOf, useOpenSection, useSchemeOf } from './index'
 
 /**
  * Colours a part of the screen: Uniwind's classes (`bg-background`, `dark:`) and `useTheme().colors` below it. The web
@@ -22,12 +22,12 @@ export function ColorScope({ scheme, colors, children }: { scheme: Scheme; color
 }
 
 /**
- * The app's colours: the chosen scheme, the custom theme, and the selected row in the sidebar's own colour (a bit
- * darker, lighter in dark mode) like the web's `--sidebar-accent`.
+ * The app's colours in one part of the app (`null`: outside Docs, Chat and Tasks): the scheme, the custom theme, and
+ * the selected row in the sidebar's own colour (a bit darker, lighter in dark mode) like the web's `--sidebar-accent`.
  */
-export function useAppPalette(): { scheme: Scheme; colors: Partial<Colors> } {
-  const scheme = useAppScheme()
-  const custom = useCustomTheme()
+export function useAppPalette(part: AppSection | null): { scheme: Scheme; colors: Partial<Colors> } {
+  const custom = useCustomThemeOf(part)
+  const scheme = useSchemeOf(custom)
   return useMemo(() => {
     const sidebar = palettes[scheme].sidebar
     const sidebarAccent = scheme === 'dark' ? mix(sidebar, 0.91, cssColors.white) : mix(sidebar, 0.94, cssColors.black)
@@ -35,12 +35,26 @@ export function useAppPalette(): { scheme: Scheme; colors: Partial<Colors> } {
   }, [scheme, custom])
 }
 
-/** Puts the app's colours (`useAppPalette`) on everything below. Mount once, at the root. */
-export function AppColorScope({ children }: { children: ReactNode }) {
-  const { scheme, colors } = useAppPalette()
+/** Puts the app's colours of one part of the app (`useAppPalette`) on everything below. */
+export function AppColorScope({ part = null, children }: { part?: AppSection | null; children: ReactNode }) {
+  const { scheme, colors } = useAppPalette(part)
   return (
     <ColorScope scheme={scheme} colors={colors}>
       {children}
     </ColorScope>
   )
+}
+
+/** The colours of the part of the app that is open, for what all parts share: the top bar and the dock. */
+export function OpenColorScope({ children }: { children: ReactNode }) {
+  return <AppColorScope part={useOpenSection()}>{children}</AppColorScope>
+}
+
+/**
+ * A navigator's `screenLayout`: Per app gives Docs, Chat and Tasks their own colours that do not change with the open
+ * page, so a move to another part of the app does not render the hidden screens again.
+ */
+export function partScreenLayout({ route, children }: { route: { name: string }; children: ReactElement }) {
+  const part = appSectionOf(`/${route.name}`)
+  return part ? <AppColorScope part={part}>{children}</AppColorScope> : children
 }

@@ -145,9 +145,19 @@ export function useCustomThemeChoice(): CustomThemeChoice {
   return useSyncExternalStore(subscribe, () => customTheme)
 }
 
-/** The colours on screen now: the custom theme, or under Per app the open part's. `null` is Light, System or Dark. */
+/** The part of the app that is open (`setOpenPage`): `null` outside Docs, Chat and Tasks. */
+export function useOpenSection(): AppSection | null {
+  return useSyncExternalStore(subscribe, () => section)
+}
+
+/** The custom theme of one part of the app: under Per app that part's own, otherwise the whole app's. `null` is Light, System or Dark. */
+export function useCustomThemeOf(part: AppSection | null): CustomTheme | null {
+  return useSyncExternalStore(subscribe, () => activeCustomTheme(customTheme, part))
+}
+
+/** The colours of the part of the app that is open (`useCustomThemeOf`). */
 export function useCustomTheme(): CustomTheme | null {
-  return useSyncExternalStore(subscribe, () => activeCustomTheme(customTheme, section))
+  return useCustomThemeOf(useOpenSection())
 }
 
 export function useFont(): FontChoice {
@@ -180,17 +190,18 @@ export function useButtonStyle(): ButtonStyle {
   return useSyncExternalStore(subscribe, () => buttonStyle)
 }
 
-/** The app's scheme: a custom theme decides it from its message colour, otherwise the chosen one. */
-export function useAppScheme(): Scheme {
+/** The scheme under a custom theme: the theme decides it from its message colour, otherwise the chosen one. */
+export function useSchemeOf(custom: CustomTheme | null): Scheme {
   const system = useColorScheme()
   const chosen = useSyncExternalStore(subscribe, () => preference)
-  const custom = useCustomTheme()
   if (custom) return customThemeScheme(custom)
   return chosen ?? (system === 'dark' ? 'dark' : 'light')
 }
 
+/**
+ * The colours of the nearest `ColorScope` (the root layout mounts `AppColorScope`). Reads only the scope: a store
+ * subscription here would render every coloured component again when Per app changes the open part of the app.
+ */
 export function useTheme(): Theme {
-  const scope = use(ColorScopeContext)
-  const scheme = useAppScheme()
-  return scope ? { ...scope, fonts } : { scheme, colors: palettes[scheme], fonts }
+  return { ...(use(ColorScopeContext) ?? { scheme: 'light', colors: palettes.light }), fonts }
 }

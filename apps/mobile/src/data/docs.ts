@@ -43,7 +43,15 @@ export const spaceOf = (page: Pick<PageSummary, 'private' | 'teamspace_id'>) => 
  * in `collapsed` are left out.
  */
 export function docSpaces(pages: readonly PageSummary[], teamspaces: readonly Teamspace[], collapsed: ReadonlySet<string>): { teamspaces: DocSpace[]; private: DocSpace } {
-  const children = (parentId: string) => pages.filter((page) => page.parent_id === parentId).sort(byPosition)
+  // the children of each page, found once: a search per page would make a big tree slow (n²)
+  const byParent = new Map<string, PageSummary[]>()
+  for (const page of pages) {
+    if (page.parent_id === null) continue
+    const siblings = byParent.get(page.parent_id)
+    if (siblings) siblings.push(page)
+    else byParent.set(page.parent_id, [page])
+  }
+  const children = (parentId: string) => [...(byParent.get(parentId) ?? [])].sort(byPosition)
   const rowsOf = (roots: PageSummary[], depth: number): TreeRow[] =>
     roots.flatMap((page) => {
       const below = children(page.id)

@@ -1,11 +1,11 @@
 import { useQuery } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 import { Image, View } from 'react-native'
 
 import { avatarColors, userColor } from '../data/color'
 import { absoluteUrl } from '../data/docs'
 import { keys } from '../data/keys'
-import { members } from '../data/orbit'
+import { type MemberRecord, members } from '../data/orbit'
 import { useOrbitIfSignedIn } from '../orbit-context'
 import { presenceColors, useTheme, useUiScale } from '../theme'
 import { Text } from './Text'
@@ -38,13 +38,16 @@ export interface AvatarProps {
  */
 function usePictureUrl(id: string, url: string | null | undefined): { uri: string; headers: { Authorization: string } } | null {
   const orbit = useOrbitIfSignedIn()
-  const list = useQuery({
+  // `select` and an unconditional `data` read: the avatar renders again only when its own picture changes, not on
+  // every fetch of the member list (an observer that reads no field is told of every change)
+  const { data: memberPath } = useQuery({
     queryKey: keys.members(orbit?.workspaceId ?? ''),
     queryFn: () => members(orbit!.client, orbit!.workspaceId),
     enabled: !!orbit && url === undefined && id !== orbit.user.id,
+    select: useCallback((list: MemberRecord[]) => list.find((member) => member.user_id === id)?.avatar_url ?? null, [id]),
   })
   if (!orbit) return null
-  const path = url !== undefined ? url : id === orbit.user.id ? orbit.user.avatar_url : list.data?.find((member) => member.user_id === id)?.avatar_url
+  const path = url !== undefined ? url : id === orbit.user.id ? orbit.user.avatar_url : memberPath
   // the endpoint needs the session: native Image sends no cookie, so the bearer token goes in a header (never the URL)
   return path ? { uri: absoluteUrl(orbit.session.server, path), headers: { Authorization: `Bearer ${orbit.session.token}` } } : null
 }

@@ -14,9 +14,9 @@ import { AppState, View } from 'react-native'
 import { NoWorkspace } from '../components/NoWorkspace'
 import { OrbitProvider } from '../orbit-context'
 import { SessionProvider, useSession } from '../session-context'
-import { loadAppearance, palettes, setOpenPage, type Theme, useFont, useTheme } from '../theme'
+import { fonts, loadAppearance, palettes, setOpenPage, type Theme, useFont, useOpenSection } from '../theme'
 import { type FontChoice, fontFace } from '../theme/typography'
-import { AppColorScope, useAppPalette } from '../theme/ColorScope'
+import { AppColorScope, partScreenLayout, useAppPalette } from '../theme/ColorScope'
 import { Button, EmptyState, OrbitLoader, Text } from '../ui'
 
 void SplashScreen.preventAutoHideAsync()
@@ -51,14 +51,16 @@ export function ErrorBoundary({ retry }: ErrorBoundaryProps) {
     SplashScreen.hide()
   }, [])
   return (
-    <View className="flex-1 bg-background">
-      <EmptyState
-        icon="danger"
-        title="Something went wrong"
-        description="This part of Orbit stopped working. Try again, or restart the app."
-        action={<Button label="Try again" onPress={() => void retry()} />}
-      />
-    </View>
+    <AppColorScope>
+      <View className="flex-1 bg-background">
+        <EmptyState
+          icon="danger"
+          title="Something went wrong"
+          description="This part of Orbit stopped working. Try again, or restart the app."
+          action={<Button label="Try again" onPress={() => void retry()} />}
+        />
+      </View>
+    </AppColorScope>
   )
 }
 
@@ -75,11 +77,11 @@ export default function RootLayout() {
 
 function RootNavigator({ fontsReady }: { fontsReady: boolean }) {
   const { state } = useSession()
-  // the root is above `AppColorScope`, so it reads the app's colours itself (with the custom theme)
-  const palette = useAppPalette()
-  const theme = { ...useTheme(), scheme: palette.scheme, colors: { ...palettes[palette.scheme], ...palette.colors } }
+  // the root is above `AppColorScope`, so it reads the app's colours itself (with the custom theme). Docs, Chat and
+  // Tasks get their own under Per app (`partScreenLayout`).
+  const palette = useAppPalette(null)
+  const theme: Theme = { fonts, scheme: palette.scheme, colors: { ...palettes[palette.scheme], ...palette.colors } }
   const font = useFont()
-  const pathname = usePathname()
   const [schemeLoaded, setSchemeLoaded] = useState(false)
   const ready = fontsReady && schemeLoaded && state.status !== 'loading'
 
@@ -87,16 +89,6 @@ function RootNavigator({ fontsReady }: { fontsReady: boolean }) {
     void loadAppearance().finally(() => setSchemeLoaded(true))
   }, [])
   const signedIn = state.status === 'signed_in'
-
-  // Appearance → Per app colours the open part of the app
-  useEffect(() => {
-    setOpenPage(pathname)
-  }, [pathname])
-
-  useEffect(() => {
-    // the root view shows behind screen transitions and the keyboard; keep it on the theme canvas
-    void SystemUI.setBackgroundColorAsync(theme.colors.background)
-  }, [theme.colors.background])
 
   useEffect(() => {
     if (ready) SplashScreen.hide()
@@ -106,6 +98,7 @@ function RootNavigator({ fontsReady }: { fontsReady: boolean }) {
 
   const stack = (
     <Stack
+      screenLayout={partScreenLayout}
       screenOptions={{
         headerShown: false,
         contentStyle: { backgroundColor: theme.colors.background },
@@ -142,11 +135,29 @@ function RootNavigator({ fontsReady }: { fontsReady: boolean }) {
   return (
     <AppColorScope>
       <ThemeProvider value={navigationTheme(theme, font)}>
-        <StatusBar style={theme.scheme === 'dark' ? 'light' : 'dark'} />
+        <OpenPage />
         {state.status === 'offline' ? <SessionOffline server={state.session.server} /> : signedIn ? <OrbitProvider noWorkspace={<NoWorkspace />}>{stack}</OrbitProvider> : stack}
       </ThemeProvider>
     </AppColorScope>
   )
+}
+
+/**
+ * Tells Per app which part of the app is open, and gives the status bar and the root view its colours. Its own
+ * component: a move to another page does not render the root again.
+ */
+function OpenPage() {
+  const pathname = usePathname()
+  useEffect(() => {
+    setOpenPage(pathname)
+  }, [pathname])
+  const palette = useAppPalette(useOpenSection())
+  const background = palette.colors.background ?? palettes[palette.scheme].background
+  useEffect(() => {
+    // the root view shows behind screen transitions and the keyboard; keep it on the theme canvas
+    void SystemUI.setBackgroundColorAsync(background)
+  }, [background])
+  return <StatusBar style={palette.scheme === 'dark' ? 'light' : 'dark'} />
 }
 
 /** The saved session could not be checked at launch (offline, a server error): the user stays signed in. */

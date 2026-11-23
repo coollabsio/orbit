@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { createContext, type ReactNode, use, useEffect, useState } from 'react'
+import { createContext, type ReactNode, use, useEffect, useMemo, useState } from 'react'
 
 import { accountKeys, authOptions } from './data/account-api'
 import { billingKey, workspaceBilling } from './data/billing'
@@ -41,23 +41,27 @@ export function OrbitProvider({ children, noWorkspace }: { children: ReactNode; 
     void loadWorkspaceId().then(setChosen, () => setChosen(null))
   }, [])
 
+  const live = useMemo(() => list.data?.filter((workspace) => !workspace.deleted_at), [list.data])
+  const workspace = live?.find((item) => item.id === chosen) ?? live?.[0]
+  // one value until the session or the workspace changes: a new object would render every `useOrbit()` again
+  const value = useMemo(() => {
+    if (!live || !workspace) return null
+    const selectWorkspace = (id: string) => {
+      setChosen(id)
+      void saveWorkspaceId(id)
+    }
+    return { client, session, user, workspace, workspaceId: workspace.id, workspaces: live, selectWorkspace, signOut, setUser }
+  }, [client, session, user, workspace, live, signOut, setUser])
+
   if (!list.data) {
     if (list.isError) return <ErrorView error={list.error} onRetry={() => void list.refetch()} />
     return <LoadingView />
   }
   if (chosen === undefined) return <LoadingView />
-
-  const live = list.data.filter((workspace) => !workspace.deleted_at)
-  const workspace = live.find((item) => item.id === chosen) ?? live[0]
-  if (!workspace) return noWorkspace
-
-  const selectWorkspace = (id: string) => {
-    setChosen(id)
-    void saveWorkspaceId(id)
-  }
+  if (!value) return noWorkspace
 
   return (
-    <OrbitContext value={{ client, session, user, workspace, workspaceId: workspace.id, workspaces: live, selectWorkspace, signOut, setUser }}><BillingReady>{children}</BillingReady></OrbitContext>
+    <OrbitContext value={value}><BillingReady>{children}</BillingReady></OrbitContext>
   )
 }
 

@@ -1,6 +1,6 @@
 import { router } from 'expo-router'
 import { type ReactNode, useMemo, useState } from 'react'
-import { Pressable, ScrollView, View } from 'react-native'
+import { FlatList, Pressable, View } from 'react-native'
 
 import { AccountMenu } from '../../components/AccountMenu'
 import { CategorySheet, NewChannelSheet, NewMessageSheet } from '../../components/chat/ChannelSheets'
@@ -8,14 +8,14 @@ import { ConversationOptions } from '../../components/chat/ConversationOptions'
 import { CustomThemeSheet } from '../../components/settings/CustomThemeSheet'
 import { Emoji } from '../../components/chat/EmojiPicker'
 import { ActionSheet, type SheetItem } from '../../components/chat/Sheet'
-import { chatSections, conversationBadge, conversationTitle, unreadThreadCount } from '../../data/chat'
+import { type ChatSection, chatSections, conversationBadge, conversationTitle, unreadThreadCount } from '../../data/chat'
 import * as chat from '../../data/chat-api'
 import type { CategoryRecord, ConversationRecord, ConversationStateRecord } from '../../data/orbit'
 import { useOwnStatus } from '../../hooks/account'
 import { confirmAction, useChatWrite, useFollowedThreads, useIsChatAdmin } from '../../hooks/chat'
 import { useIsGuest, useOrbit } from '../../orbit-context'
 import { useChatCategories, useChatStates, useChatBadge, useConversations, usePeople } from '../../queries'
-import { setAppLook, setCustomTheme, useCustomTheme, useCustomThemeChoice, useTheme } from '../../theme'
+import { setAppLook, setCustomTheme, useCustomThemeChoice, useCustomThemeOf, useTheme } from '../../theme'
 import { Avatar, CountBadge, EmptyState, ErrorView, HeaderTitle, Icon, type IconName, IconButton, LoadingView, PaneHeader, PullRefresh, SafeAreaView, Text } from '../../ui'
 import { useShownPresence } from '../../components/chat/Pane'
 
@@ -29,6 +29,12 @@ type Overlay =
   | { kind: 'category'; category?: CategoryRecord }
   | { kind: 'category-options'; category: CategoryRecord }
 
+/** One line of the chat list: the pinned Unreads and Threads, "No conversations", a section title, or a conversation. */
+type ChatLine =
+  | { kind: 'unreads' | 'threads' | 'empty'; key: string }
+  | { kind: 'section'; key: string; section: ChatSection }
+  | { kind: 'conversation'; key: string; conversation: ConversationRecord }
+
 /** The web's mobile chat list: Unreads and Threads, then each section, then the user bar. */
 export default function ChatScreen() {
   const { user } = useOrbit()
@@ -41,7 +47,7 @@ export default function ChatScreen() {
   const [overlay, setOverlay] = useState<Overlay | null>(null)
   const [accountOpen, setAccountOpen] = useState(false)
   const [themeOpen, setThemeOpen] = useState(false)
-  const theme = useCustomTheme()
+  const theme = useCustomThemeOf('chat')
   const themeChoice = useCustomThemeChoice()
   const perApp = Boolean(themeChoice && 'apps' in themeChoice)
   const ownStatus = useOwnStatus()
@@ -57,6 +63,16 @@ export default function ChatScreen() {
     () => (conversations.data && categories.data && states.data ? chatSections(conversations.data, categories.data, states.data, user.id) : []),
     [categories.data, conversations.data, states.data, user.id],
   )
+  // one flat list, so that only the rows on screen render (a workspace can have hundreds of channels)
+  const lines = useMemo((): ChatLine[] => [
+    { kind: 'unreads', key: 'unreads' },
+    { kind: 'threads', key: 'threads' },
+    ...(sections.length === 0 ? [{ kind: 'empty', key: 'empty' } as const] : []),
+    ...sections.flatMap((section): ChatLine[] => [
+      { kind: 'section', key: `section:${section.key}`, section },
+      ...(collapsed.has(section.key) ? [] : section.conversations.map((conversation): ChatLine => ({ kind: 'conversation', key: `${section.key}:${conversation.id}`, conversation }))),
+    ]),
+  ], [sections, collapsed])
   const refresh = () => Promise.all([conversations.refetch(), categories.refetch(), states.refetch()])
   const stateById = new Map((states.data ?? []).map((state) => [state.conversation_id, state]))
   const toggle = (key: string) =>
@@ -84,31 +100,43 @@ export default function ChatScreen() {
           <LoadingView />
         )
       ) : (
-        <ScrollView refreshControl={<PullRefresh onRefresh={() => refresh()} />}>
-          <View className="px-2 pt-2 gap-px">
-            <PinnedRow icon="directInbox" name="Unreads" count={unreads} onPress={() => router.push('/chat/unreads')} />
-            <PinnedRow icon="layer" name="Threads" count={unreadThreadCount(threads.data ?? [])} onPress={() => router.push('/chat/threads')} />
-          </View>
-          <View className="p-2 pt-3 gap-3">
-            {sections.length === 0 ? (
-              <EmptyState
-                icon="chat"
-                title="No conversations"
-                description={guest ? 'As a guest, you see only the channels that you are added to. Ask a channel manager to add you to a channel.' : 'Start a direct message or create a channel with New.'}
-              />
-            ) : null}
-            {sections.map((section) => {
-              const open = !collapsed.has(section.key)
-              const category = admin ? categories.data?.find((item) => `category-${item.id}` === section.key) : undefined
-              const onAdd =
-                section.key === 'dms'
-                  ? () => setOverlay({ kind: 'message' })
-                  : section.key === 'favorites' || guest
-                    ? null
-                    : () => setOverlay({ kind: 'channel', categoryId: section.key.startsWith('category-') ? section.key.slice('category-'.length) : null })
-              return (
-                <View key={section.key} className="gap-px">
-                  <View className="h-7 flex-row items-center gap-0.5 pr-1.5">
+        <FlatList
+          data={lines}
+          keyExtractor={(line) => line.key}
+          contentContainerClassName="px-2 pt-2 pb-2"
+          refreshControl={<PullRefresh onRefresh={() => refresh()} />}
+          renderItem={({ item: line }) => {
+            switch (line.kind) {
+              case 'unreads':
+                return <PinnedRow icon="directInbox" name="Unreads" count={unreads} onPress={() => router.push('/chat/unreads')} />
+              case 'threads':
+                return (
+                  <View className="mt-px">
+                    <PinnedRow icon="layer" name="Threads" count={unreadThreadCount(threads.data ?? [])} onPress={() => router.push('/chat/threads')} />
+                  </View>
+                )
+              case 'empty':
+                return (
+                  <View className="mt-3">
+                    <EmptyState
+                      icon="chat"
+                      title="No conversations"
+                      description={guest ? 'As a guest, you see only the channels that you are added to. Ask a channel manager to add you to a channel.' : 'Start a direct message or create a channel with New.'}
+                    />
+                  </View>
+                )
+              case 'section': {
+                const { section } = line
+                const open = !collapsed.has(section.key)
+                const category = admin ? categories.data?.find((item) => `category-${item.id}` === section.key) : undefined
+                const onAdd =
+                  section.key === 'dms'
+                    ? () => setOverlay({ kind: 'message' })
+                    : section.key === 'favorites' || guest
+                      ? null
+                      : () => setOverlay({ kind: 'channel', categoryId: section.key.startsWith('category-') ? section.key.slice('category-'.length) : null })
+                return (
+                  <View className="mt-3 h-7 flex-row items-center gap-0.5 pr-1.5">
                     <Pressable
                       accessibilityRole="button"
                       accessibilityState={{ expanded: open }}
@@ -124,22 +152,22 @@ export default function ChatScreen() {
                     {category ? <IconButton icon="more" label={`Options for the category ${category.name}`} size={24} color={colors.mutedForeground} onPress={() => setOverlay({ kind: 'category-options', category })} /> : null}
                     {onAdd ? <IconButton icon="plus" label={section.key === 'dms' ? 'New message' : `New channel in ${section.title}`} size={24} color={colors.mutedForeground} onPress={onAdd} /> : null}
                   </View>
-                  {open
-                    ? section.conversations.map((conversation) => (
-                        <ConversationRow
-                          key={conversation.id}
-                          conversation={conversation}
-                          title={conversationTitle(conversation, people, user.id)}
-                          state={stateById.get(conversation.id)}
-                          userId={user.id}
-                        />
-                      ))
-                    : null}
-                </View>
-              )
-            })}
-          </View>
-        </ScrollView>
+                )
+              }
+              case 'conversation':
+                return (
+                  <View className="mt-px">
+                    <ConversationRow
+                      conversation={line.conversation}
+                      title={conversationTitle(line.conversation, people, user.id)}
+                      state={stateById.get(line.conversation.id)}
+                      userId={user.id}
+                    />
+                  </View>
+                )
+            }
+          }}
+        />
       )}
       <View className="h-12 flex-row items-center px-2 border-t border-border">
         <Pressable
