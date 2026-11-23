@@ -91,7 +91,7 @@ function SuppressionRow({ row }: { row: MailSuppression }) {
 
   return (
     <li className="flex flex-wrap items-start gap-3 px-4 py-3">
-      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+      <div className="flex min-w-0 flex-[1_1_16rem] flex-col gap-0.5">
         <div className="flex flex-wrap items-center gap-2">
           <span className="min-w-0 font-mono text-xs break-all">{row.address}</span>
           <Badge variant={row.reason === 'complaint' ? 'destructive' : 'outline'}>{REASON_LABELS[row.reason] ?? row.reason}</Badge>

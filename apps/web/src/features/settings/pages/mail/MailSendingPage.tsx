@@ -145,7 +145,8 @@ export function RouteCreatedModal({ created, onClose }: { created: MailSendRoute
 function SendRouteRow({ scope, route, hostname, onEdit }: { scope: ProviderScope; route: MailSendRouteView; hostname?: string | null; onEdit: () => void }) {
   const remove = useDeleteSendRoute(scope)
   const setDefault = useSetSendDefault()
-  const [open, setOpen] = useState<'setup' | 'test' | null>(null)
+  const [setupOpen, setSetupOpen] = useState(false)
+  const [testOpen, setTestOpen] = useState(false)
   // a server route listed to a workspace: its name and kind only
   const own = route.settings !== null && route.settings !== undefined
   const kind = isSendRouteKind(route.kind) ? route.kind : null
@@ -175,11 +176,10 @@ function SendRouteRow({ scope, route, hostname, onEdit }: { scope: ProviderScope
     })
   }
 
-  const toggle = (panel: 'setup' | 'test') => setOpen((current) => (current === panel ? null : panel))
   return (
     <div className="flex flex-col gap-3 px-4 py-3">
       <div className="flex flex-wrap items-start gap-3">
-        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <div className="flex min-w-0 flex-[1_1_16rem] flex-col gap-0.5">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-[0.8125rem] font-medium text-foreground">{route.name}</span>
             <Badge variant="outline">{routeLabel(route.kind)}</Badge>
@@ -199,8 +199,8 @@ function SendRouteRow({ scope, route, hostname, onEdit }: { scope: ProviderScope
         </div>
         {own ? (
           <div className="flex flex-wrap items-center gap-1">
-            <Button type="button" variant="outline" size="sm" aria-expanded={open === 'test'} onClick={() => toggle('test')}>Send test</Button>
-            <Button type="button" variant="ghost" size="sm" aria-expanded={open === 'setup'} onClick={() => toggle('setup')}>{open === 'setup' ? 'Hide setup' : 'Setup'}</Button>
+            <Button type="button" variant="outline" size="sm" aria-haspopup="dialog" onClick={() => setTestOpen(true)}>Send test</Button>
+            <Button type="button" variant="ghost" size="sm" aria-expanded={setupOpen} onClick={() => setSetupOpen((value) => !value)}>{setupOpen ? 'Hide setup' : 'Setup'}</Button>
             {canSetDefault ? (
               <Button type="button" variant="ghost" size="sm" disabled={setDefault.isPending} onClick={() => saveDefault(route.is_default ? null : route.id)}>
                 {route.is_default ? 'Unset default' : 'Set as default'}
@@ -211,8 +211,8 @@ function SendRouteRow({ scope, route, hostname, onEdit }: { scope: ProviderScope
           </div>
         ) : null}
       </div>
-      {open === 'setup' ? <RouteSetup route={route} /> : null}
-      {open === 'test' ? <SendTest scope={scope} route={route} /> : null}
+      {setupOpen ? <RouteSetup route={route} /> : null}
+      {testOpen ? <SendTestModal scope={scope} route={route} onClose={() => setTestOpen(false)} /> : null}
     </div>
   )
 }
@@ -221,7 +221,7 @@ const STEP_ICONS = { ok: TickCircle, failed: CloseCircle, skipped: MinusCircle }
 const STEP_WORDS = { ok: 'OK', failed: 'Failed', skipped: 'Skipped' } as const
 
 /** **Send test**: a message to an address the admin types, and the result of each step. */
-function SendTest({ scope, route }: { scope: ProviderScope; route: MailSendRouteView }) {
+function SendTestModal({ scope, route, onClose }: { scope: ProviderScope; route: MailSendRouteView; onClose: () => void }) {
   const id = useId()
   const test = useTestSendRoute(scope)
   const [to, setTo] = useState('')
@@ -239,10 +239,10 @@ function SendTest({ scope, route }: { scope: ProviderScope; route: MailSendRoute
   }
 
   return (
-    <div className="flex flex-col gap-3 rounded-md border bg-muted/30 p-3">
+    <Modal className="sm:max-w-lg" title={`Send a test through ${route.name}`} description="Orbit sends a short message and shows the result of each step." onClose={onClose}>
       <form className="flex flex-wrap items-center gap-2" onSubmit={submit}>
         <label htmlFor={`${id}-to`} className="sr-only">Send a test message to</label>
-        <Input id={`${id}-to`} type="email" className="max-w-xs" placeholder="you@example.com" autoComplete="email" value={to} onChange={(event) => setTo(event.target.value)} />
+        <Input id={`${id}-to`} type="email" className="min-w-0 flex-[1_1_12rem]" placeholder="you@example.com" autoComplete="email" autoFocus value={to} onChange={(event) => setTo(event.target.value)} />
         <Button type="submit" variant="outline" disabled={!to.trim() || test.isPending}>{test.isPending ? 'Sending…' : 'Send test'}</Button>
       </form>
       {result ? (
@@ -268,6 +268,6 @@ function SendTest({ scope, route }: { scope: ProviderScope; route: MailSendRoute
         </ul>
       ) : null}
       {route.last_sent_at ? <span className="text-xs text-muted-foreground">Last message sent {dateTime(route.last_sent_at)}.</span> : null}
-    </div>
+    </Modal>
   )
 }
