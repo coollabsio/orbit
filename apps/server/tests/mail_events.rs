@@ -210,6 +210,7 @@ impl Fixture {
                 ProviderScope::Instance,
                 setup.user_id,
                 NewRoute {
+                    id: None,
                     kind,
                     name: "Provider".to_owned(),
                     provider_id: None,
@@ -1021,6 +1022,7 @@ async fn event_for_other_workspace_route_ignored() {
             ProviderScope::Workspace(other),
             f.user,
             NewRoute {
+                id: None,
                 kind: SendRouteKind::Mailgun,
                 name: "Theirs".to_owned(),
                 provider_id: None,
@@ -1150,7 +1152,7 @@ async fn resend_event_matches_by_message_id_header() {
         SendRouteKind::Resend,
         RouteSecrets::Resend {
             api_key: "re_key".to_owned(),
-            webhook_secret: secret,
+            webhook_secret: Some(secret),
         },
     )
     .await;
@@ -1362,6 +1364,7 @@ async fn event_matches_the_route_that_sent_after_a_route_change() {
             ProviderScope::Instance,
             f.user,
             NewRoute {
+                id: None,
                 kind: SendRouteKind::Mailgun,
                 name: "Second".to_owned(),
                 provider_id: None,

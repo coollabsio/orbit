@@ -1739,6 +1739,11 @@ export type CreateMailProviderBody = {
 };
 
 export type CreateMailSendRouteBody = {
+    /**
+     * A new UUIDv7 the client made, so that it can show the events URL
+     * (`{events_base_url}/{kind}/{id}`) before the route exists. Empty: the server makes one.
+     */
+    id?: string | null;
     kind: string;
     name: string;
     /**
@@ -1746,7 +1751,8 @@ export type CreateMailSendRouteBody = {
      * `mailgun` api_key and webhook_signing_key, `ses` access_key_id and secret_access_key,
      * `cloudflare` api_token and event_secret, `postmark` server_token, webhook_user and
      * webhook_password, `resend` api_key and webhook_secret, `postshiba` smtp_username,
-     * smtp_password and webhook_secret. `direct` has none.
+     * smtp_password and webhook_secret. `direct` has none. The `webhook_secret` of `resend` and
+     * `postshiba` is optional: without it, Orbit refuses the route's events.
      */
     secrets?: {
         [key: string]: string;
@@ -5529,6 +5535,10 @@ export type MailSendRouteList = {
      * `ORBIT_MAIL_HOSTNAME` is set, so the `direct` kind can be created.
      */
     direct_available: boolean;
+    /**
+     * The start of every route's events URL: `{events_base_url}/{kind}/{route id}`.
+     */
+    events_base_url: string;
     routes: Array<MailSendRouteView>;
     /**
      * Whether workspaces may add their own routes (the instance switch).

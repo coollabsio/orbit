@@ -19,6 +19,7 @@ import {
   type SendRouteKind,
   settingsBody,
   spfHint,
+  uuidV7,
 } from './mailSettingsLib'
 
 const record = (kind: MailDnsRecordKind, status: 'ok' | 'missing' | 'unknown'): MailDnsRecord =>
@@ -208,4 +209,10 @@ test('tier limits and rates read plainly', () => {
   expect(percent(5.25)).toBe('5.3 %')
   expect(percent(0.25)).toBe('0.25 %')
   expect(percent(0.1)).toBe('0.1 %')
+})
+
+test('uuidV7 makes the canonical UUIDv7 the server takes as a route id', () => {
+  // 2026-11-23T00:00:00.000Z, random bytes all ones: version 7 and variant 10 replace their bits
+  expect(uuidV7(Date.UTC(2026, 10, 23), new Uint8Array(10).fill(0xff))).toBe('01a205b3-d000-7fff-bfff-ffffffffffff')
+  expect(uuidV7(0, new Uint8Array(10))).toBe('00000000-0000-7000-8000-000000000000')
 })

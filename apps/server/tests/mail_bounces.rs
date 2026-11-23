@@ -214,6 +214,7 @@ impl Fixture {
                 ProviderScope::Instance,
                 setup.user_id,
                 NewRoute {
+                    id: None,
                     kind: SendRouteKind::Direct,
                     name: "Direct".to_owned(),
                     provider_id: None,

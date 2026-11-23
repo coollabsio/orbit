@@ -67,12 +67,27 @@ pub(crate) async fn post_mail_events(
 
     // what can be checked before the body is read: anyone can post to this URL
     let secret = match secrets {
-        RouteSecrets::Postshiba { webhook_secret, .. } => Some(EventSecret::Hmac(webhook_secret)),
+        // no events secret yet: the route sends, but its events cannot be checked
+        RouteSecrets::Postshiba {
+            webhook_secret: None,
+            ..
+        }
+        | RouteSecrets::Resend {
+            webhook_secret: None,
+            ..
+        } => return unauthorized(),
+        RouteSecrets::Postshiba {
+            webhook_secret: Some(webhook_secret),
+            ..
+        } => Some(EventSecret::Hmac(webhook_secret)),
         RouteSecrets::Mailgun {
             webhook_signing_key,
             ..
         } => Some(EventSecret::Hmac(webhook_signing_key)),
-        RouteSecrets::Resend { webhook_secret, .. } => Some(EventSecret::Hmac(webhook_secret)),
+        RouteSecrets::Resend {
+            webhook_secret: Some(webhook_secret),
+            ..
+        } => Some(EventSecret::Hmac(webhook_secret)),
         RouteSecrets::Cloudflare { event_secret, .. } => Some(EventSecret::Hmac(event_secret)),
         RouteSecrets::Postmark {
             webhook_user,

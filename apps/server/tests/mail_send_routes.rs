@@ -699,7 +699,7 @@ async fn send_route_from_provider() {
         secrets,
         RouteSecrets::Resend {
             api_key: "re_key".to_owned(),
-            webhook_secret: "whsec_events".to_owned()
+            webhook_secret: Some("whsec_events".to_owned())
         }
     );
     // Postmark: the webhook login is Orbit's, the server token is missing

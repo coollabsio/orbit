@@ -113,6 +113,7 @@ pub async fn seed_mail(
                 ProviderScope::Instance,
                 developer,
                 NewRoute {
+                    id: None,
                     kind: SendRouteKind::Smtp,
                     name: ROUTE_NAME.to_owned(),
                     provider_id: None,

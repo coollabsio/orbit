@@ -19,6 +19,7 @@ import { ProviderLinks } from './ProviderLinks'
 import {
   CLOUDFLARE_EVENTS_WORKER,
   defaultMaxBytes,
+  eventsUrlInForm,
   eventsUrlWithLogin,
   missingEventSecret,
   generatedSecrets,
@@ -39,6 +40,7 @@ import {
   type FieldSpec,
   type FormValues,
   type SendRouteKind,
+  uuidV7,
 } from './mailSettingsLib'
 
 /** The help of the Kind field for the chosen kind. */
@@ -149,12 +151,15 @@ export function SendRouteForm({
   scope,
   route,
   directAvailable,
+  eventsBaseUrl,
   onClose,
   onCreated,
 }: {
   scope: ProviderScope
   route?: MailSendRouteView
   directAvailable: boolean
+  /** The list's `events_base_url`: with it, a new route of a kind that needs a webhook secret shows its events URL. */
+  eventsBaseUrl?: string
   onClose: () => void
   /** The new route, with the secrets the server made (`generated`, shown once). */
   onCreated?: (created: MailSendRouteView) => void
@@ -165,6 +170,9 @@ export function SendRouteForm({
   const firstKind: SendRouteKind = route && isSendRouteKind(route.kind) ? route.kind : directAvailable ? 'direct' : 'smtp'
   const [kind, setKind] = useState<SendRouteKind>(firstKind)
   const fields = routeFormFields(kind, scope)
+  // the new route's id, made here so the events URL can be shown before the route exists
+  const [newId] = useState(uuidV7)
+  const eventsUrl = !route && eventsBaseUrl && eventsUrlInForm(fields) ? `${eventsBaseUrl}/${kind}/${newId}` : null
   const [name, setName] = useState(route?.name ?? ROUTE_LABELS[firstKind])
   const [settings, setSettings] = useState<FormValues>(() => initialSettingValues(fields, route?.settings))
   const [secrets, setSecrets] = useState<FormValues>({})
@@ -201,7 +209,7 @@ export function SendRouteForm({
       return
     }
     // the server makes the webhook secrets it checks (Postmark, Cloudflare) and answers with them once
-    create.mutate({ kind, ...body, secrets: given }, { onSuccess: (created) => { onCreated?.(created); onClose() } })
+    create.mutate({ id: newId, kind, ...body, secrets: given }, { onSuccess: (created) => { onCreated?.(created); onClose() } })
   }
 
   async function removeLogin() {
@@ -248,6 +256,7 @@ export function SendRouteForm({
           </Field>
         </div>
         <ProviderLinks kind={kind} purpose="send" />
+        {eventsUrl ? <CopyRow label="Events URL" value={eventsUrl} /> : null}
         <RouteFields
           kind={kind}
           ids={ids}

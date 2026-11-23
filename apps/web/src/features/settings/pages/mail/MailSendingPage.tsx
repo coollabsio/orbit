@@ -126,7 +126,7 @@ export function OutgoingRoutes({ scope, hostname, adding, onAddClose }: { scope:
       {routes.data?.routes.map((route) => (
         <SendRouteRow key={route.id} scope={scope} route={route} hostname={hostname} onEdit={() => setEditing(route)} />
       ))}
-      {adding ? <SendRouteForm scope={scope} directAvailable={directAvailable} onClose={onAddClose} onCreated={setCreated} /> : null}
+      {adding ? <SendRouteForm scope={scope} directAvailable={directAvailable} eventsBaseUrl={routes.data?.events_base_url} onClose={onAddClose} onCreated={setCreated} /> : null}
       {editing ? <SendRouteForm scope={scope} route={editing} directAvailable={directAvailable} onClose={() => setEditing(null)} /> : null}
       {created ? <RouteCreatedModal created={created} onClose={() => setCreated(null)} /> : null}
     </>

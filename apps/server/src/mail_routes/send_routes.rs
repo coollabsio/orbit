@@ -77,11 +77,18 @@ pub(crate) struct MailSendRouteList {
     direct_available: bool,
     #[schema(value_type = Option<String>)]
     default_route_id: Option<Id>,
+    /// The start of every route's events URL: `{events_base_url}/{kind}/{route id}`.
+    events_base_url: String,
 }
 
 #[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct CreateMailSendRouteBody {
+    /// A new UUIDv7 the client made, so that it can show the events URL
+    /// (`{events_base_url}/{kind}/{id}`) before the route exists. Empty: the server makes one.
+    #[serde(default)]
+    #[schema(value_type = Option<String>)]
+    id: Option<Id>,
     #[schema(value_type = String)]
     kind: SendRouteKind,
     name: String,
@@ -89,7 +96,8 @@ pub(crate) struct CreateMailSendRouteBody {
     /// `mailgun` api_key and webhook_signing_key, `ses` access_key_id and secret_access_key,
     /// `cloudflare` api_token and event_secret, `postmark` server_token, webhook_user and
     /// webhook_password, `resend` api_key and webhook_secret, `postshiba` smtp_username,
-    /// smtp_password and webhook_secret. `direct` has none.
+    /// smtp_password and webhook_secret. `direct` has none. The `webhook_secret` of `resend` and
+    /// `postshiba` is optional: without it, Orbit refuses the route's events.
     #[serde(default)]
     secrets: BTreeMap<String, String>,
     #[serde(default)]
@@ -145,12 +153,16 @@ pub(crate) struct SetMailSendDefaultBody {
     route_id: Option<String>,
 }
 
+fn events_base_url(state: &MailState) -> String {
+    format!("{}/api/v1/mail/events", state.public_origin)
+}
+
 fn view(state: &MailState, route: SendRoute, own: bool, default: Option<Id>) -> MailSendRouteView {
     let events_url = (own && !matches!(route.kind, SendRouteKind::Direct | SendRouteKind::Smtp))
         .then(|| {
             format!(
-                "{}/api/v1/mail/events/{}/{}",
-                state.public_origin,
+                "{}/{}/{}",
+                events_base_url(state),
                 route.kind.as_str(),
                 route.id
             )
@@ -302,6 +314,7 @@ async fn list(
             .as_deref()
             .is_some_and(|host| !host.trim().is_empty()),
         default_route_id: default,
+        events_base_url: events_base_url(state),
     }))
 }
 
@@ -323,6 +336,7 @@ async fn create(
             scope,
             actor_id,
             NewRoute {
+                id: body.id,
                 kind: body.kind,
                 name: body.name,
                 provider_id: None,

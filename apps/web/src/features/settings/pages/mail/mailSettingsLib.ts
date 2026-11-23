@@ -171,7 +171,7 @@ const SPF_FIELD = setting('spf', 'SPF entry', {
   placeholder: 'include:spf.example.com',
   help: 'What the domain’s SPF record must allow for this route: an include, IP addresses (ip4:…), or a whole v=spf1 record.',
 })
-const LATER_SECRET = 'You can leave it empty: save the route, add the webhook with the events URL Orbit then shows, and paste the secret here with Edit.'
+const LATER_SECRET = 'Add the webhook with the Events URL above, then paste its signing secret here. You can also leave it empty and paste it later with Edit: until then, Orbit does not track bounces and complaints.'
 const SMTP_PORT = setting('port', 'Port', { input: 'number', placeholder: '587', help: 'Empty: 465 with TLS, 587 with STARTTLS, 25 without TLS.' })
 
 /** The inputs each kind needs (the server's `RouteSecrets` and `RouteSettings`); `direct` needs none. */
@@ -350,6 +350,23 @@ export function routeFormReady(fields: FieldSpec[], form: { settings: FormValues
 }
 
 /** A route whose events Orbit refuses until the user pastes the provider's webhook signing secret. */
+/** Whether the new route form shows the events URL: the kinds whose webhook secret the provider makes. */
+export const eventsUrlInForm = (fields: FieldSpec[]) => fields.some((field) => field.name === 'webhook_secret')
+
+/**
+ * A new UUIDv7 (RFC 9562): 48 bits of Unix milliseconds, then random bits with the version and variant. The new route
+ * form sends it as the route id, so it can show the events URL before the route exists.
+ */
+export function uuidV7(now = Date.now(), random: Uint8Array = crypto.getRandomValues(new Uint8Array(10))): string {
+  const bytes = new Uint8Array(16)
+  for (let index = 0; index < 6; index += 1) bytes[index] = Math.floor(now / 2 ** (8 * (5 - index))) % 256
+  bytes.set(random, 6)
+  bytes[6] = 0x70 | (bytes[6]! & 0x0f)
+  bytes[8] = 0x80 | (bytes[8]! & 0x3f)
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+}
+
 export const missingEventSecret = (route: { kind: string; secrets_set: string[] }) =>
   (route.kind === 'postshiba' || route.kind === 'resend') && !route.secrets_set.includes('webhook_secret')
 

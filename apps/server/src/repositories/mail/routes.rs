@@ -8,7 +8,7 @@ use std::net::IpAddr;
 use std::str::FromStr;
 use std::time::Duration;
 
-use orbit_platform::{Id, Row, TimestampMillis};
+use orbit_platform::{Flag, Id, Row, TimestampMillis};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::any::AnyRow;
@@ -149,14 +149,18 @@ pub enum RouteSecrets {
         webhook_user: String,
         webhook_password: String,
     },
+    /// `webhook_secret`: the events webhook's signing secret. Optional: without it, the route
+    /// sends but Orbit refuses its events (no bounce or complaint tracking).
     Resend {
         api_key: String,
-        webhook_secret: String,
+        #[serde(default)]
+        webhook_secret: Option<String>,
     },
     Postshiba {
         smtp_username: String,
         smtp_password: String,
-        webhook_secret: String,
+        #[serde(default)]
+        webhook_secret: Option<String>,
     },
 }
 
@@ -177,7 +181,7 @@ impl RouteSecrets {
         )
     }
 
-    /// Every secret as (name, value).
+    /// Every secret as (name, value); an optional secret without a value is left out.
     #[must_use]
     pub fn fields(&self) -> Vec<(&'static str, &str)> {
         match self {
@@ -215,16 +219,31 @@ impl RouteSecrets {
             Self::Resend {
                 api_key,
                 webhook_secret,
-            } => vec![("api_key", api_key), ("webhook_secret", webhook_secret)],
+            } => {
+                let mut fields = vec![("api_key", api_key.as_str())];
+                fields.extend(
+                    webhook_secret
+                        .as_deref()
+                        .map(|value| ("webhook_secret", value)),
+                );
+                fields
+            }
             Self::Postshiba {
                 smtp_username,
                 smtp_password,
                 webhook_secret,
-            } => vec![
-                ("smtp_username", smtp_username),
-                ("smtp_password", smtp_password),
-                ("webhook_secret", webhook_secret),
-            ],
+            } => {
+                let mut fields = vec![
+                    ("smtp_username", smtp_username.as_str()),
+                    ("smtp_password", smtp_password.as_str()),
+                ];
+                fields.extend(
+                    webhook_secret
+                        .as_deref()
+                        .map(|value| ("webhook_secret", value)),
+                );
+                fields
+            }
         }
     }
 
@@ -238,7 +257,7 @@ impl RouteSecrets {
             .collect()
     }
 
-    /// The secrets of `kind` from named values. `None` when a value is missing, or a name is not
+    /// The secrets of `kind` from named values. `None` when a required value is missing, or a name is not
     /// one of the kind's. An SMTP relay without login (both empty) gives [`RouteSecrets::None`].
     #[must_use]
     pub fn from_fields(kind: SendRouteKind, given: &BTreeMap<String, String>) -> Option<Self> {
@@ -278,12 +297,12 @@ impl RouteSecrets {
             },
             SendRouteKind::Resend => Self::Resend {
                 api_key: get("api_key")?,
-                webhook_secret: get("webhook_secret")?,
+                webhook_secret: get("webhook_secret"),
             },
             SendRouteKind::Postshiba => Self::Postshiba {
                 smtp_username: get("smtp_username")?,
                 smtp_password: get("smtp_password")?,
-                webhook_secret: get("webhook_secret")?,
+                webhook_secret: get("webhook_secret"),
             },
         })
     }
@@ -385,6 +404,9 @@ pub struct SendRoute {
 
 #[derive(Clone, Debug)]
 pub struct NewRoute {
+    /// The id the client chose (so it could show the events URL before the route existed);
+    /// `None` makes one.
+    pub id: Option<Id>,
     pub kind: SendRouteKind,
     pub name: String,
     pub provider_id: Option<Id>,
@@ -916,7 +938,21 @@ impl MailRepository {
                 });
             }
         }
-        let id = Id::new_v7();
+        let id = match input.id {
+            Some(id) => {
+                let taken: Flag = sqlx::query_scalar(
+                    "SELECT EXISTS (SELECT 1 FROM mail_send_routes WHERE id = $1)",
+                )
+                .bind(id.to_string())
+                .fetch_one(&mut *transaction)
+                .await?;
+                if taken.0 {
+                    return Err(MailError::Invalid { field: "id" });
+                }
+                id
+            }
+            None => Id::new_v7(),
+        };
         sqlx::query(
             "INSERT INTO mail_send_routes (id, workspace_id, kind, name, provider_id, secrets, \
              settings, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8)",
@@ -996,6 +1032,7 @@ impl MailRepository {
             scope,
             actor_id,
             NewRoute {
+                id: None,
                 kind,
                 name: input.name.unwrap_or(provider.name),
                 provider_id: Some(provider_id),

@@ -104621,6 +104621,13 @@
           "name"
         ],
         "properties": {
+          "id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A new UUIDv7 the client made, so that it can show the events URL\n(`{events_base_url}/{kind}/{id}`) before the route exists. Empty: the server makes one."
+          },
           "kind": {
             "type": "string"
           },
@@ -104629,7 +104636,7 @@
           },
           "secrets": {
             "type": "object",
-            "description": "The kind's secrets by name: `smtp` username and password (both or neither),\n`mailgun` api_key and webhook_signing_key, `ses` access_key_id and secret_access_key,\n`cloudflare` api_token and event_secret, `postmark` server_token, webhook_user and\nwebhook_password, `resend` api_key and webhook_secret, `postshiba` smtp_username,\nsmtp_password and webhook_secret. `direct` has none.",
+            "description": "The kind's secrets by name: `smtp` username and password (both or neither),\n`mailgun` api_key and webhook_signing_key, `ses` access_key_id and secret_access_key,\n`cloudflare` api_token and event_secret, `postmark` server_token, webhook_user and\nwebhook_password, `resend` api_key and webhook_secret, `postshiba` smtp_username,\nsmtp_password and webhook_secret. `direct` has none. The `webhook_secret` of `resend` and\n`postshiba` is optional: without it, Orbit refuses the route's events.",
             "additionalProperties": {
               "type": "string"
             },
@@ -113762,7 +113769,8 @@
         "required": [
           "routes",
           "workspace_providers_enabled",
-          "direct_available"
+          "direct_available",
+          "events_base_url"
         ],
         "properties": {
           "default_route_id": {
@@ -113774,6 +113782,10 @@
           "direct_available": {
             "type": "boolean",
             "description": "`ORBIT_MAIL_HOSTNAME` is set, so the `direct` kind can be created."
+          },
+          "events_base_url": {
+            "type": "string",
+            "description": "The start of every route's events URL: `{events_base_url}/{kind}/{route id}`."
           },
           "routes": {
             "type": "array",
