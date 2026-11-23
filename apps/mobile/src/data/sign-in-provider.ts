@@ -150,12 +150,23 @@ export async function startProviderSignIn(client: OrbitClient, provider: Provide
   return answer ? exchangeOutcome(intent, answer.status, answer.body) : { kind: 'cancelled' }
 }
 
+const PASSKEY_SERVER_TOO_OLD = 'This server runs an older Orbit version that cannot sign in to the app with a passkey. Sign in with your password, or ask the server admin to update Orbit.'
+
 /**
  * Signs in with a passkey. A passkey belongs to the server's web address, so the server's own sign-in page asks for it
  * in the auth session; the app gets the session the same way as from a provider. `client` is Origin-less and tokenless.
  */
 export async function startPasskeySignIn(client: OrbitClient, device: ProviderDevice): Promise<ProviderOutcome> {
-  const flow = await startFlow(device, async (code_challenge, redirect) => (await startAppPasskeySignIn({ client, body: { code_challenge, redirect }, throwOnError: true })).data)
+  const flow = await startFlow(device, async (code_challenge, redirect) => {
+    try {
+      return (await startAppPasskeySignIn({ client, body: { code_challenge, redirect }, throwOnError: true })).data
+    } catch (cause) {
+      // A server older than the app's passkey sign-in has no such route, and its origin check refuses the Origin-less
+      // request before the router answers 404. Its web passkeys still set `passkeys_enabled`, so the app offers it.
+      if (cause instanceof ApiProblem && (cause.code === 'origin_forbidden' || cause.code === 'route_not_found')) throw new Error(PASSKEY_SERVER_TOO_OLD)
+      throw cause
+    }
+  })
   const answer = await finishFlow(client, device, flow, 'The passkey sign-in did not finish. Try again.')
   return answer ? exchangeOutcome('sign_in', answer.status, answer.body) : { kind: 'cancelled' }
 }

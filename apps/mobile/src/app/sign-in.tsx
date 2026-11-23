@@ -40,6 +40,8 @@ export default function SignInScreen() {
   const [linkPassword, setLinkPassword] = useState('')
   const [busy, setBusy] = useState<'password' | 'passkey' | Provider | null>(null)
   const [error, setError] = useState(state.status === 'signed_out' ? state.error : undefined)
+  // a passkey or provider error shows under its button, not under the password field it has nothing to do with
+  const [errorFromButton, setErrorFromButton] = useState(false)
   const current = looksLikeServer(server) ? normalizeServer(server) : null
   // asks the typed server which providers it offers once typing pauses
   const typedServer = useDebounced(current, 600)
@@ -58,6 +60,7 @@ export default function SignInScreen() {
   const run = async (kind: 'password' | 'passkey' | Provider, action: () => Promise<void>) => {
     setBusy(kind)
     setError(undefined)
+    setErrorFromButton(kind !== 'password')
     try {
       await action()
     } catch (cause) {
@@ -101,6 +104,8 @@ export default function SignInScreen() {
     setStep({ name: 'credentials' })
     setCode('')
     setLinkPassword('')
+    // the only message here is a provider sign-in that must start over
+    setErrorFromButton(true)
     setError(message)
   }
 
@@ -165,7 +170,7 @@ export default function SignInScreen() {
                   onChangeText={setPassword}
                   returnKeyType="go"
                   onSubmitEditing={() => server && email && password && submitCredentials()}
-                  error={error}
+                  error={errorFromButton ? undefined : error}
                 />
                 {server.trim() ? (
                   <Text accessibilityRole="link" onPress={() => void Linking.openURL(`${normalizeServer(server)}/recovery`)} className="self-end text-[13px] text-muted-foreground">
@@ -194,6 +199,7 @@ export default function SignInScreen() {
                         onPress={() => void continueWith(provider)}
                       />
                     ))}
+                    {errorFromButton && error ? <Text className="text-[14px] leading-[21px] text-destructive">{error}</Text> : null}
                   </>
                 ) : null}
               </>

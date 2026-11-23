@@ -132,6 +132,18 @@ test('a passkey sign-in opens the server page and exchanges the handoff for a se
   ])
 })
 
+test('a server too old for the app passkey sign-in says so, and opens no browser', async () => {
+  // the 403 that app.orbit.so (v0.4.1) gave on 2026-11-23
+  const old = server([{ status: 403, body: { type: 'about:blank', title: 'Forbidden origin', status: 403, code: 'origin_forbidden', detail: 'The request origin is not allowed.', instance: '/api/v1/auth/passkey/app/start', request_id: 'r1' } }])
+  const phone = device({ type: 'success', url: 'orbit://auth/callback?handoff=h1' })
+  const error = await startPasskeySignIn(old.client, phone).catch((reason: unknown) => reason)
+  expect(providerErrorMessage(error)).toBe('This server runs an older Orbit version that cannot sign in to the app with a passkey. Sign in with your password, or ask the server admin to update Orbit.')
+  expect(phone.opened).toEqual([])
+
+  const missing = server([{ status: 404, body: { type: 'about:blank', title: 'Route not found', status: 404, code: 'route_not_found', detail: 'The requested route does not exist.', instance: '/api/v1/auth/passkey/app/start', request_id: 'r2' } }])
+  await expect(startPasskeySignIn(missing.client, phone)).rejects.toThrow('older Orbit version')
+})
+
 test('a closed passkey page exchanges nothing, and a redirect without a handoff is an error', async () => {
   const closed = server([{ status: 200, body: { authorize_url: 'https://orbit.test/login/app#flow=f1' } }])
   expect(await startPasskeySignIn(closed.client, device({ type: 'cancel' }))).toEqual({ kind: 'cancelled' })
