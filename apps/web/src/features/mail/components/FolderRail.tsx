@@ -42,7 +42,7 @@ function RailRow({
     <Button
       type="button"
       variant="ghost"
-      className="w-full min-w-0 justify-start gap-2.5 text-[0.8125rem] data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
+      className="w-full min-w-0 justify-start gap-2.5 text-[0.8125rem] text-sidebar-nav hover:text-sidebar-nav-active data-active:bg-sidebar-accent data-active:text-sidebar-nav-active"
       data-active={active || undefined}
       aria-current={active ? 'page' : undefined}
       aria-label={unread > 0 ? `${label}, ${unread} unread` : label}
@@ -60,7 +60,7 @@ function RailRow({
 }
 
 function RailSection({ children }: { children: string }) {
-  return <span className="mt-3 px-2.5 py-1 text-[0.6875rem] font-medium text-sidebar-foreground/60 select-none">{children}</span>
+  return <span className="mt-3 px-2.5 py-1 text-[0.6875rem] font-medium text-sidebar-nav-muted select-none">{children}</span>
 }
 
 /** The rail's main action: a new message. Its key shows on it, so the shortcut is learnt by using the button. */
