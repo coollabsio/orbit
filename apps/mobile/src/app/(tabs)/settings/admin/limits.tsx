@@ -1,15 +1,18 @@
 import { useState } from 'react'
 import { View } from 'react-native'
 
+import { MailSendLimits } from '../../../../components/settings/MailSendLimits'
 import { AdminShell, Note, SettingsCard } from '../../../../components/settings/Shell'
 import { limitsBody, limitsDraft, type LimitsView } from '../../../../data/admin-api'
 import { useInstanceSettings, useSaveLimits } from '../../../../hooks/admin'
+import { useMailEnabled } from '../../../../hooks/mail'
 import { errorMessage } from '../../../../session-context'
 import { Button, Input } from '../../../../ui'
 
-/** The web's Admin → Limits: what one account and one workspace may use. */
+/** The web's Admin → Limits: Workspaces (what one account and one workspace may use), then Email while Mail is on. */
 export default function AdminLimitsScreen() {
   const settings = useInstanceSettings()
+  const mail = useMailEnabled()
   return (
     <AdminShell onRefresh={() => settings.refetch()}>
       {settings.isPending ? <SettingsCard title="Limits"><Note loading>Loading settings…</Note></SettingsCard> : null}
@@ -22,6 +25,7 @@ export default function AdminLimitsScreen() {
         </SettingsCard>
       ) : null}
       {settings.data ? <LimitsCard limits={settings.data.limits} /> : null}
+      {mail ? <MailSendLimits /> : null}
     </AdminShell>
   )
 }

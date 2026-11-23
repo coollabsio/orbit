@@ -76,7 +76,7 @@ export default function MailScreen() {
     })
   }
 
-  // no mailbox to read: an admin sets mail up (on the web), a member asks for a mailbox
+  // no mailbox to read: an admin sets mail up, a member asks for a mailbox
   if (me.data && mailboxes.length === 0) {
     return (
       <SafeAreaView edges={['left', 'right']} className="flex-1 bg-background">
@@ -84,7 +84,12 @@ export default function MailScreen() {
           <HeaderTitle>Mail</HeaderTitle>
         </PaneHeader>
         {me.data.can_manage ? (
-          <EmptyState icon="mail" title="Set up mail" description="Add a domain and create mailboxes in Settings → Mail in Orbit on the web, and mail for your team arrives here." />
+          <EmptyState
+            icon="mail"
+            title="Set up mail"
+            description="Add a domain and create mailboxes, and mail for your team arrives here."
+            action={<Button label="Set up mail" onPress={() => router.push('/settings/mail/domains')} />}
+          />
         ) : (
           <EmptyState icon="mail" title="No mailbox yet" description="Ask an admin for a mailbox." />
         )}
@@ -223,7 +228,7 @@ function Notices({ mailboxes, canManage }: { mailboxes: { status: string; name: 
   const { colors } = useTheme()
   const policy = useSendPolicy()
   const suspended = mailboxes.filter((mailbox) => mailbox.status === 'suspended')
-  const notices: { key: string; title: string; text: string }[] = []
+  const notices: { key: string; title: string; text: string; resume?: boolean }[] = []
   if (policy.data?.paused_at) {
     notices.push({ key: 'paused', title: 'Sending is paused for this workspace', text: `${policy.data.pause_reason ? `${policy.data.pause_reason} ` : ''}New messages wait in the Outbox. Ask the instance admin to resume sending.` })
   }
@@ -234,6 +239,7 @@ function Notices({ mailboxes, canManage }: { mailboxes: { status: string; name: 
       key: 'suspended',
       title: one ? `${first!.name} is suspended` : `${suspended.length} mailboxes are suspended`,
       text: `${one && first!.primary_address ? `New mail to ${first!.primary_address} is refused.` : 'New mail to them is refused.'} The mail already here stays readable.${canManage ? '' : ' Ask an admin to resume it.'}`,
+      resume: canManage,
     })
   }
   if (notices.length === 0) return null
@@ -246,6 +252,7 @@ function Notices({ mailboxes, canManage }: { mailboxes: { status: string; name: 
             <Text className="font-noto-medium text-[13px] leading-[18px]">{notice.title}</Text>
             <Text className="text-[13px] leading-[18px] text-muted-foreground">{notice.text}</Text>
           </View>
+          {notice.resume ? <Button label="Resume" variant="outline" size="sm" onPress={() => router.push('/settings/mail/mailboxes')} /> : null}
         </View>
       ))}
     </View>

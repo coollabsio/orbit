@@ -70,7 +70,9 @@ export default function MailThreadScreen() {
         const on = thread.labels.includes(label.id)
         return { label: label.name, icon: on ? 'checkSquare' : 'square', onPress: () => change(on ? { remove_labels: [label.id] } : { add_labels: [label.id] }, false) }
       })
-    : [{ label: me.data?.can_manage ? 'Create labels in Settings → Mail on the web' : 'No labels yet', disabled: true, onPress: () => {} }]
+    : [me.data?.can_manage
+        ? { label: 'Create labels in Settings', icon: 'tag', onPress: () => router.push('/settings/mail/labels') }
+        : { label: 'No labels yet', disabled: true, onPress: () => {} }]
 
   const menuActions: SheetAction[] = [
     { label: thread.starred ? 'Unstar' : 'Star', icon: thread.starred ? 'starFilled' : 'star', onPress: () => change({ starred: !thread.starred }, false) },

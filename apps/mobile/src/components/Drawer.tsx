@@ -253,7 +253,7 @@ function DrawerPanel({ mounted, width, onClose }: { mounted: boolean; width: num
           ) : area ? (
             <>
               <BackRow label={DRAWER_AREA_TITLES[area]} onPress={backToApp} />
-              {drawerSections(area, allowedNav(navs[area], workspace.permissions, cloud, guest)).map((section) => (
+              {drawerSections(area, allowedNav(navs[area], workspace.permissions, cloud, mailEnabled, guest)).map((section) => (
                 <Fragment key={section.label}>
                   <Section label={section.label} />
                   {section.items.map((item) => (

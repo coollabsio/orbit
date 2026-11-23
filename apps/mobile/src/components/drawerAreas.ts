@@ -36,6 +36,10 @@ const SECTIONS: Record<SettingsArea, { label: string; hrefs?: readonly string[] 
   workspace: [
     { label: 'Workspace' },
     { label: 'Chat', hrefs: ['/settings/emoji', '/settings/stickers', '/settings/reports'] },
+    {
+      label: 'Mail',
+      hrefs: ['/settings/mail/domains', '/settings/mail/providers', '/settings/mail/mailboxes', '/settings/mail/labels', '/settings/mail/sending', '/settings/mail/suppressions', '/settings/mail/failed', '/settings/mail/me'],
+    },
     { label: 'Integrations', hrefs: ['/settings/file-storage', '/settings/github', '/settings/workspace-agentic', '/settings/api-tokens', '/settings/webhooks'] },
     { label: 'Advanced', hrefs: ['/settings/import', '/settings/export', '/settings/danger-zone'] },
   ],
@@ -46,6 +50,7 @@ const SECTIONS: Record<SettingsArea, { label: string; hrefs?: readonly string[] 
   ],
   admin: [
     { label: 'Instance' },
+    { label: 'Apps', hrefs: ['/settings/admin/mail'] },
     { label: 'Data', hrefs: ['/settings/admin/storage', '/settings/admin/backups'] },
     { label: 'Monitoring', hrefs: ['/settings/admin/audit', '/settings/admin/jobs'] },
   ],

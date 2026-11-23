@@ -97,13 +97,13 @@ export function useContacts(query: string) {
   return useQuery({ queryKey: mailKeys.contacts(workspaceId, q), queryFn: () => mail.contacts(client, workspaceId, q), enabled: q !== '', staleTime: LIVE_STALE_MS })
 }
 
-/** Owners and admins: whether sending is paused for the workspace. */
-export function useSendPolicy() {
+/** Owners and admins: whether sending is paused for the workspace. `enabled` overrides the role check (Settings → Mail → Sending checks `mail.manage`). */
+export function useSendPolicy(enabled?: boolean) {
   const { client, workspaceId, workspace } = useOrbit()
   return useQuery({
     queryKey: mailKeys.sendPolicy(workspaceId),
     queryFn: () => mail.sendPolicy(client, workspaceId),
-    enabled: workspace.role === 'owner' || workspace.role === 'admin',
+    enabled: enabled ?? (workspace.role === 'owner' || workspace.role === 'admin'),
   })
 }
 

@@ -16,6 +16,8 @@ export interface SettingsNavItem {
   permission?: Permission
   /** Shown only in Orbit Cloud (billing on), and never on iOS: App Store guideline 3.1.1 refuses links to purchases outside the app. */
   cloud?: boolean
+  /** Shown only while Mail is on for the server (Admin → Mail). */
+  mail?: boolean
 }
 
 /**
@@ -30,6 +32,15 @@ export const WORKSPACE_NAV: readonly SettingsNavItem[] = [
   { href: '/settings/emoji', label: 'Emoji', icon: 'smile', permission: 'chat.manage' },
   { href: '/settings/stickers', label: 'Stickers', icon: 'sticker', permission: 'chat.manage' },
   { href: '/settings/reports', label: 'Reports', icon: 'flag', permission: 'chat.manage' },
+  { href: '/settings/mail/domains', label: 'Domains', icon: 'global', permission: 'mail.manage', mail: true },
+  { href: '/settings/mail/providers', label: 'Providers', icon: 'routing', permission: 'mail.manage', mail: true },
+  { href: '/settings/mail/mailboxes', label: 'Mailboxes', icon: 'directInbox', permission: 'mail.manage', mail: true },
+  { href: '/settings/mail/labels', label: 'Mail labels', icon: 'tag', permission: 'mail.manage', mail: true },
+  { href: '/settings/mail/sending', label: 'Sending', icon: 'send', permission: 'mail.manage', mail: true },
+  { href: '/settings/mail/suppressions', label: 'Suppressions', icon: 'shieldCross', permission: 'mail.manage', mail: true },
+  { href: '/settings/mail/failed', label: 'Failed messages', icon: 'smsTracking', permission: 'mail.manage', mail: true },
+  // every member's own: signatures, undo send, snippets, vacation reply
+  { href: '/settings/mail/me', label: 'Mail preferences', icon: 'mail', mail: true },
   { href: '/settings/file-storage', label: 'File storage', icon: 'cloudConnection' },
   { href: '/settings/github', label: 'GitHub', icon: 'link2' },
   { href: '/settings/workspace-agentic', label: 'Agentic', icon: 'robot' },
@@ -42,11 +53,11 @@ export const WORKSPACE_NAV: readonly SettingsNavItem[] = [
 ]
 
 /**
- * The links of `nav` this person may open: by permission, the cloud-only ones only in Orbit Cloud off iOS, and for a guest
- * only its own settings (`guestMayOpen`).
+ * The links of `nav` this person may open: by permission, the cloud-only ones only in Orbit Cloud off iOS, the Mail
+ * ones only while Mail is on, and for a guest only its own settings (`guestMayOpen`).
  */
-export function allowedNav<T extends SettingsNavItem>(nav: readonly T[], permissions: readonly Permission[], cloud: boolean, guest = false): T[] {
-  return nav.filter((item) => (!item.permission || permissions.includes(item.permission)) && (!item.cloud || (cloud && Platform.OS !== 'ios')) && (!guest || guestMayOpen(item.href)))
+export function allowedNav<T extends SettingsNavItem>(nav: readonly T[], permissions: readonly Permission[], cloud: boolean, mail: boolean, guest = false): T[] {
+  return nav.filter((item) => (!item.permission || permissions.includes(item.permission)) && (!item.cloud || (cloud && Platform.OS !== 'ios')) && (!item.mail || mail) && (!guest || guestMayOpen(item.href)))
 }
 
 export const ACCOUNT_NAV: readonly SettingsNavItem[] = [
@@ -67,6 +78,7 @@ export const ADMIN_NAV: readonly SettingsNavItem[] = [
   { href: '/settings/admin/email', label: 'System email', icon: 'mail' },
   { href: '/settings/admin/sign-in-providers', label: 'Sign-in providers', icon: 'login' },
   { href: '/settings/admin/limits', label: 'Limits', icon: 'chart' },
+  { href: '/settings/admin/mail', label: 'Mail', icon: 'directInbox' },
   { href: '/settings/admin/storage', label: 'Storage', icon: 'cloudConnection' },
   { href: '/settings/admin/backups', label: 'Backups', icon: 'archiveBox' },
   { href: '/settings/admin/audit', label: 'Audit log', icon: 'clipboardText' },
