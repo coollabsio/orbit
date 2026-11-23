@@ -432,7 +432,7 @@ export function routeSetupSteps(kind: SendRouteKind, eventSecretFromProvider = f
       ]
     case 'postshiba':
       return [
-        'In PostShiba, add an events webhook with the URL above, for bounce, complaint and delivery events.',
+        'In PostShiba → Webhooks, add an endpoint with the URL above, for the event types delivered, deferred, bounce, dropped and spamreport.',
         'Edit the route and paste its signing secret (it is not the inbox webhook’s secret).',
         'Publish the records PostShiba shows for each domain: the return path CNAME (rp.<domain>) and its DKIM.',
       ]
