@@ -11,6 +11,8 @@ import { Spinner } from '@/components/ui/spinner'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { groupThreads, mailViewPath, railFolders, type MailView } from '@/features/mail/mailLib'
 import { MailEmptyState } from './MailEmptyState'
+import { swipeStep, useMailSwipes, type SwipeStep } from '@/features/mail/mailSwipe'
+import { SwipeRow } from './SwipeRow'
 import { ThreadRow } from './ThreadRow'
 import { useMailAvatar } from './useMailAvatar'
 
@@ -59,6 +61,8 @@ interface ThreadListProps {
   onArchive: (thread: MailThreadSummary) => void
   onToggleRead: (thread: MailThreadSummary) => void
   onTrash: (thread: MailThreadSummary) => void
+  /** A touch swipe on a row, past the threshold (Settings → Mail → Mail preferences). */
+  onSwipe: (thread: MailThreadSummary, step: SwipeStep) => void
 }
 
 const mobileViews = (showOutbox: boolean): Array<{ view: MailView; label: string }> => [
@@ -98,7 +102,9 @@ export function ThreadList({
   onArchive,
   onToggleRead,
   onTrash,
+  onSwipe,
 }: ThreadListProps) {
+  const swipes = useMailSwipes()
   const navigate = useNavigate()
   const avatarOf = useMailAvatar()
   const scroller = useRef<HTMLDivElement>(null)
@@ -222,24 +228,26 @@ export function ThreadList({
                       {entry.label}
                     </div>
                   ) : (
-                    <ThreadRow
-                      thread={entry.thread}
-                      labels={labels}
-                      active={entry.thread.id === activeThreadId}
-                      focused={entry.thread.id === focusedId}
-                      selected={selected.has(entry.thread.id)}
-                      selecting={selected.size > 0}
-                      draft={draftThreads.has(entry.thread.id)}
-                      sentView={sentView}
-                      mailboxName={mailboxName?.(entry.thread)}
-                      avatarOf={avatarOf}
-                      onOpen={onOpen}
-                      onSelect={onSelect}
-                      onStar={onStar}
-                      onArchive={onArchive}
-                      onToggleRead={onToggleRead}
-                      onTrash={onTrash}
-                    />
+                    <SwipeRow left={swipeStep(swipes.left, entry.thread)} right={swipeStep(swipes.right, entry.thread)} onSwipe={(step) => onSwipe(entry.thread, step)} resetKey={entry.thread}>
+                      <ThreadRow
+                        thread={entry.thread}
+                        labels={labels}
+                        active={entry.thread.id === activeThreadId}
+                        focused={entry.thread.id === focusedId}
+                        selected={selected.has(entry.thread.id)}
+                        selecting={selected.size > 0}
+                        draft={draftThreads.has(entry.thread.id)}
+                        sentView={sentView}
+                        mailboxName={mailboxName?.(entry.thread)}
+                        avatarOf={avatarOf}
+                        onOpen={onOpen}
+                        onSelect={onSelect}
+                        onStar={onStar}
+                        onArchive={onArchive}
+                        onToggleRead={onToggleRead}
+                        onTrash={onTrash}
+                      />
+                    </SwipeRow>
                   )}
                 </div>
               )

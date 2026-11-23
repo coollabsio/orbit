@@ -439,6 +439,13 @@ function MailApp({ view, threadId }: { view: MailView; threadId: string | null }
         onArchive={(thread) => archive([thread])}
         onToggleRead={(thread) => toggleRead([thread])}
         onTrash={(thread) => trash([thread])}
+        onSwipe={(thread, step) => {
+          if ('change' in step.outcome) apply([thread], step.outcome.change, step.leaves)
+          else {
+            setPendingReply({ threadId: thread.id, from: threadId, mode: step.outcome.reply })
+            open(thread.id)
+          }
+        }}
       />
       <section className="flex h-full min-h-0 min-w-0 flex-1 flex-col border-l bg-background max-[899px]:border-l-0 max-[899px]:group-data-[view=list]/mail:hidden">
         {threadId ? (

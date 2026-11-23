@@ -14,16 +14,18 @@ import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useCreateSnippet, useDeleteSnippet, useSaveMailSettings, useSaveSignature, useUpdateSnippet } from '@/features/mail/api/mutations'
 import { useFromAddresses, useMailMe, useMailSettingsMe, useSignatures, useSnippets } from '@/features/mail/api/queries'
+import { setMailSwipes, SWIPE_ACTIONS, SWIPE_LABELS, useMailSwipes, type SwipeAction, type SwipeSettings } from '@/features/mail/mailSwipe'
 import { SettingsRow } from '@/features/settings/components/SettingsParts'
 import { mailProblem, UNDO_SECONDS } from './mailSettingsLib'
 import { MailBodyField, VacationForm } from './VacationForm'
 
-/** Settings → Mail → Mail preferences: each member's signatures, undo send delay, snippets and vacation reply. */
+/** Settings → Mail → Mail preferences: each member's signatures, undo send delay, swipe actions, snippets and vacation reply. */
 export function MyMailPage() {
   return (
     <>
       <SignaturesCard />
       <UndoSendCard />
+      <SwipeActionsCard />
       <SnippetsCard />
       <VacationCard />
     </>
@@ -114,6 +116,34 @@ function UndoSendCard() {
           </SelectContent>
         </Select>
       </SettingsRow>
+    </SettingsCard>
+  )
+}
+
+const SWIPE_OPTIONS = SWIPE_ACTIONS.map((value) => ({ value, label: SWIPE_LABELS[value] }))
+const SWIPE_SIDES: ReadonlyArray<{ side: keyof SwipeSettings; title: string }> = [
+  { side: 'left', title: 'Swipe left' },
+  { side: 'right', title: 'Swipe right' },
+]
+
+/** The mail list's swipe actions on a touch screen: kept in this browser. */
+function SwipeActionsCard() {
+  const swipes = useMailSwipes()
+  return (
+    <SettingsCard title="Swipe actions" description="What a swipe to each side does to a conversation in the mail list, on a touch screen. Saved in this browser." flush>
+      <div className="flex flex-col divide-y">
+        {SWIPE_SIDES.map(({ side, title }) => (
+          <SettingsRow key={side} className="flex-nowrap">
+            <span className="min-w-0 flex-1 text-[0.8125rem] font-medium text-foreground">{title}</span>
+            <Select items={SWIPE_OPTIONS} value={swipes[side]} onValueChange={(value) => setMailSwipes({ ...swipes, [side]: value as SwipeAction })}>
+              <SelectTrigger aria-label={title} className="w-48"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {SWIPE_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </SettingsRow>
+        ))}
+      </div>
     </SettingsCard>
   )
 }

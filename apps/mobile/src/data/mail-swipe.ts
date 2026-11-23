@@ -1,4 +1,4 @@
-/** The swipe actions of the mail list: what each direction does, chosen in Settings → Mail → Mail preferences. */
+/** The web's `mailSwipe.ts`: the swipe actions of the mail list, chosen in Settings → Mail → Mail preferences. */
 import type { MailThreadSummary } from '@orbit/api/generated/types.gen'
 import type { IconName } from '../ui/Icon'
 import { threadActions, type ThreadChange } from './mail'
