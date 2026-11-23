@@ -12,7 +12,7 @@ import { useOrbit } from '../../orbit-context'
 import { useMembers } from '../../queries'
 import { errorMessage } from '../../session-context'
 import { type Colors, useTheme } from '../../theme'
-import { Avatar, Button, Icon, type IconName, LabelTip, Text } from '../../ui'
+import { Avatar, Button, Icon, type IconName, Text } from '../../ui'
 import { openFile } from '../tasks/files'
 import { MailHtmlView } from './MailHtmlView'
 
@@ -23,6 +23,8 @@ export function MessageItem({ message, expanded, onToggle }: { message: MailMess
   const members = useMembers().data
   const [imagesLoaded, setImagesLoaded] = useState(false)
   const [blocked, setBlocked] = useState<number | null>(null)
+  /** The delivery line hides behind the details toggle; it shows by itself when something needs attention. */
+  const [details, setDetails] = useState(false)
   const senderPref = useMutation({ mutationFn: (address: string) => mail.setSenderImages(client, workspaceId, address) })
   const loadImages = imagesLoaded || message.load_images_default
   const address = message.from?.address
@@ -33,6 +35,8 @@ export function MessageItem({ message, expanded, onToggle }: { message: MailMess
   const member = trusted && address ? members?.find((entry) => entry.email.toLowerCase() === address) : undefined
   const files = message.attachments.filter((attachment) => !attachment.inline)
   const offerImages = message.has_html && !loadImages && (blocked ?? 0) > 0
+  const deliveryLabel = message.delivery ? deliverySummary(message.delivery.recipients).label : null
+  const deliveryProblem = deliveryLabel !== null && deliveryLabel !== 'Sending' && deliveryLabel !== 'Delivered'
 
   return (
     <View className={`border-b border-border pt-2.5 ${expanded ? 'pb-4' : 'pb-2.5'}`}>
@@ -68,11 +72,20 @@ export function MessageItem({ message, expanded, onToggle }: { message: MailMess
       {expanded ? (
         <View>
           <View className="mt-2 gap-0.5 pl-[42px]">
-            {message.to.length > 0 ? <Text numberOfLines={2} className="text-[12px] leading-[16px] text-muted-foreground">To: {peopleLine(message.to)}</Text> : null}
+            {message.to.length > 0 || (message.delivery && !deliveryProblem) ? (
+              <View className="flex-row items-center gap-1 min-w-0">
+                {message.to.length > 0 ? <Text numberOfLines={2} className="shrink text-[12px] leading-[16px] text-muted-foreground">To: {peopleLine(message.to)}</Text> : null}
+                {message.delivery && !deliveryProblem ? (
+                  <Pressable accessibilityRole="button" accessibilityLabel={details ? 'Hide details' : 'Show details'} accessibilityState={{ expanded: details }} hitSlop={10} onPress={() => setDetails(!details)} className="rounded p-0.5 active:bg-muted">
+                    <Icon name={details ? 'chevronUp' : 'chevronDown'} size={12} color={colors.mutedForeground} />
+                  </Pressable>
+                ) : null}
+              </View>
+            ) : null}
             {message.cc.length > 0 ? <Text numberOfLines={2} className="text-[12px] leading-[16px] text-muted-foreground">Cc: {peopleLine(message.cc)}</Text> : null}
             {message.sender ? <Text numberOfLines={1} className="text-[12px] leading-[16px] text-muted-foreground">Sent by {message.sender}</Text> : null}
           </View>
-          {message.delivery ? <DeliveryStatus outboundId={message.delivery.outbound_id} recipients={message.delivery.recipients} /> : null}
+          {message.delivery && (details || deliveryProblem) ? <DeliveryStatus outboundId={message.delivery.outbound_id} recipients={message.delivery.recipients} /> : null}
           <SafetyBanners message={message} />
           {offerImages ? (
             <View className="mt-3 flex-row flex-wrap items-center gap-2 rounded-lg border border-border px-2.5 py-1.5">
@@ -189,33 +202,39 @@ const ICON: Record<RecipientState, IconName> = { sending: 'clock', delivered: 'c
 const DELIVERY_HELP =
   'Delivered means the next mail server accepted the message. Orbit does not track whether it was opened. Delayed: the receiving server has not accepted it for more than 4 hours; Orbit keeps trying for 5 days.'
 
-/** The delivery of a sent message (web §9.1 U10): the summary, then each recipient; a bounced one says why and offers Retry. */
+/**
+ * The delivery of a sent message (web §9.1 U10): one quiet line with the summary. A tap shows the help text and, with
+ * more than one recipient, each recipient; it opens by itself when something needs attention. A recipient that bounced
+ * says why and offers Retry.
+ */
 function DeliveryStatus({ outboundId, recipients }: { outboundId: string; recipients: NonNullable<MailMessageView['delivery']>['recipients'] }) {
   const { colors } = useTheme()
-  const { client, workspaceId } = useOrbit()
   const summary = deliverySummary(recipients)
   const shown = recipients.filter((recipient) => recipient.status !== 'cancelled')
+  const many = shown.length > 1
   const [chosen, setChosen] = useState<boolean | null>(null)
-  const open = chosen ?? (summary.label !== 'Sending' && summary.label !== 'Delivered')
-  const retry = useMutation({ mutationFn: (recipientId: string) => mail.retryRecipient(client, workspaceId, outboundId, recipientId) })
+  const open = chosen ?? (many && summary.label !== 'Sending' && summary.label !== 'Delivered')
   if (shown.length === 0) return null
   return (
     <View className="mt-2 gap-1 pl-[42px]">
-      <LabelTip label="Delivery" text={DELIVERY_HELP} className="text-[12px] leading-[16px] text-muted-foreground" />
-      <View className="flex-row items-center gap-1.5">
-        <Pressable accessibilityRole="button" accessibilityState={{ expanded: open }} onPress={() => setChosen(!open)} className="flex-row items-center gap-1.5 rounded-md py-0.5 active:bg-muted">
-          <Icon name={ICON[summary.state]} size={14} color={toneOf(summary.state, colors)} />
-          <Text className="font-noto-medium text-[12px]" style={{ color: toneOf(summary.state, colors) }}>
-            {summary.label}
-          </Text>
-          {summary.failed > 0 && shown.length > 1 ? <Text className="text-[12px] text-muted-foreground">· {summary.failed} not delivered</Text> : null}
-          <Icon name={open ? 'chevronUp' : 'chevronDown'} size={12} color={colors.mutedForeground} />
-        </Pressable>
-      </View>
-      {open
+      <Pressable
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        accessibilityHint={DELIVERY_HELP}
+        onPress={() => setChosen(!open)}
+        className="flex-row items-center gap-1.5 self-start rounded-md py-0.5 active:bg-muted"
+      >
+        <Icon name={ICON[summary.state]} size={14} color={toneOf(summary.state, colors)} />
+        <Text className="text-[12px]" style={{ color: toneOf(summary.state, colors) }}>
+          {summary.label}
+        </Text>
+        {summary.failed > 0 && many ? <Text className="text-[12px] text-muted-foreground">· {summary.failed} not delivered</Text> : null}
+        {many ? <Icon name={open ? 'chevronUp' : 'chevronDown'} size={12} color={colors.mutedForeground} /> : null}
+      </Pressable>
+      {many ? null : <RecipientProblem outboundId={outboundId} recipient={shown[0]} />}
+      {open && many
         ? shown.map((recipient) => {
             const state = recipientState(recipient)
-            const problem = recipientProblem(recipient)
             return (
               <View key={recipient.id} className="gap-0.5">
                 <View className="flex-row flex-wrap items-center gap-x-2">
@@ -227,27 +246,41 @@ function DeliveryStatus({ outboundId, recipients }: { outboundId: string; recipi
                   <Text className="text-[12px]" style={{ color: toneOf(state, colors) }}>
                     {RECIPIENT_LABEL[state]}
                   </Text>
-                  {problem && recipient.retryable ? (
-                    <Button
-                      label="Retry"
-                      icon="refresh"
-                      size="xs"
-                      variant="outline"
-                      disabled={retry.isPending && retry.variables === recipient.id}
-                      onPress={() =>
-                        retry.mutate(recipient.id, {
-                          onSuccess: () => Alert.alert(`Sending to ${recipient.address} again.`),
-                          onError: (error) => Alert.alert('The message could not be sent again.', errorMessage(error)),
-                        })
-                      }
-                    />
-                  ) : null}
                 </View>
-                {problem ? <Text className="pl-5 text-[12px] text-muted-foreground">{problem}</Text> : null}
+                <RecipientProblem outboundId={outboundId} recipient={recipient} />
               </View>
             )
           })
         : null}
+      {open ? <Text className="text-[12px] leading-[17px] text-muted-foreground">{DELIVERY_HELP}</Text> : null}
+    </View>
+  )
+}
+
+/** Why a recipient was not delivered, and its Retry. */
+function RecipientProblem({ outboundId, recipient }: { outboundId: string; recipient: NonNullable<MailMessageView['delivery']>['recipients'][number] }) {
+  const { client, workspaceId } = useOrbit()
+  const retry = useMutation({ mutationFn: () => mail.retryRecipient(client, workspaceId, outboundId, recipient.id) })
+  const problem = recipientProblem(recipient)
+  if (!problem) return null
+  return (
+    <View className="flex-row flex-wrap items-center gap-x-2 gap-y-1 pl-5">
+      <Text className="shrink text-[12px] text-muted-foreground">{problem}</Text>
+      {recipient.retryable ? (
+        <Button
+          label="Retry"
+          icon="refresh"
+          size="xs"
+          variant="outline"
+          disabled={retry.isPending}
+          onPress={() =>
+            retry.mutate(undefined, {
+              onSuccess: () => Alert.alert(`Sending to ${recipient.address} again.`),
+              onError: (error) => Alert.alert('The message could not be sent again.', errorMessage(error)),
+            })
+          }
+        />
+      ) : null}
     </View>
   )
 }

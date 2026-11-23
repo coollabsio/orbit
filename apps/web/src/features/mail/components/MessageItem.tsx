@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { Code, DocumentDownload, Gallery, More, Printer, ShieldTick } from 'reicon-react'
+import { ArrowDown2 as ChevronDown, Code, DocumentDownload, Gallery, More, Printer, ShieldTick } from 'reicon-react'
+import { cn } from 'cn'
 import type { MailMessageView, MailPerson } from '@orbit/api/generated/types.gen'
 import { Attachments } from '@/components/common/Attachments'
 import { Modal } from '@/components/common/Modal'
@@ -13,6 +14,7 @@ import { fullDate, timeOfDay } from '@/lib/format'
 import { useSetSenderPref } from '@/features/mail/api/mutations'
 import { useRawMessage } from '@/features/mail/api/queries'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
+import { deliverySummary } from '@/features/mail/mailStatus'
 import { firstLine, mailAttachment, personName, problemText, rawMessageUrl, splitTextQuote } from '@/features/mail/mailLib'
 import { DeliveryStatus } from './DeliveryStatus'
 import { FileLinks } from './FileLinks'
@@ -67,6 +69,8 @@ export function MessageItem({ threadId, message, expanded, avatarOf, onToggle, o
   const { workspace } = useWorkspace()
   const [imagesLoaded, setImagesLoaded] = useState(false)
   const [originalOpen, setOriginalOpen] = useState(false)
+  /** The delivery line hides behind the details toggle; it shows by itself when something needs attention. */
+  const [details, setDetails] = useState(false)
   /** Remote images the view removed, as the frame says (`null` until it does). */
   const [blocked, setBlocked] = useState<number | null>(null)
   const senderPref = useSetSenderPref()
@@ -77,6 +81,8 @@ export function MessageItem({ threadId, message, expanded, avatarOf, onToggle, o
   const files = message.attachments.filter((attachment) => !attachment.inline).map((attachment) => mailAttachment(workspace.id, attachment))
   // the frame counts the remote images the view removed: no offer for a message without any
   const offerImages = message.has_html && !loadImages && (blocked ?? 0) > 0
+  const deliveryLabel = message.delivery ? deliverySummary(message.delivery.recipients).label : null
+  const deliveryProblem = deliveryLabel !== null && deliveryLabel !== 'Sending' && deliveryLabel !== 'Delivered'
 
   return (
     <div data-slot="mail-message" className={`pt-2.5 ${expanded ? 'pb-4' : 'pb-2.5'} [[data-slot=mail-message]+&]:border-t`} data-expanded={expanded || undefined}>
@@ -141,11 +147,29 @@ export function MessageItem({ threadId, message, expanded, avatarOf, onToggle, o
       {expanded ? (
         <div className="animate-relation-enter motion-reduce:animate-none">
           <div className="mt-2 flex flex-col gap-0.5 pl-[42px] text-xs text-muted-foreground">
-            {message.to.length > 0 ? <span className="truncate">To: {people(message.to)}</span> : null}
+            {message.to.length > 0 || (message.delivery && !deliveryProblem) ? (
+              <span className="flex min-w-0 items-center gap-1">
+                {message.to.length > 0 ? <span className="truncate">To: {people(message.to)}</span> : null}
+                {message.delivery && !deliveryProblem ? (
+                  <Tip label={details ? 'Hide details' : 'Show details'}>
+                    <button
+                      type="button"
+                      className="inline-flex size-5 shrink-0 items-center justify-center rounded outline-none hover:bg-muted/45 focus-visible:ring-2 focus-visible:ring-ring/50"
+                      aria-expanded={details}
+                      aria-label={details ? 'Hide details' : 'Show details'}
+                      data-print-hide=""
+                      onClick={() => setDetails(!details)}
+                    >
+                      <ChevronDown className={cn('size-3 transition-transform duration-150', details && 'rotate-180')} aria-hidden="true" />
+                    </button>
+                  </Tip>
+                ) : null}
+              </span>
+            ) : null}
             {message.cc.length > 0 ? <span className="truncate">Cc: {people(message.cc)}</span> : null}
             {message.sender ? <span className="truncate">Sent by {message.sender}</span> : null}
           </div>
-          {message.delivery ? <DeliveryStatus outboundId={message.delivery.outbound_id} recipients={message.delivery.recipients} /> : null}
+          {message.delivery && (details || deliveryProblem) ? <DeliveryStatus outboundId={message.delivery.outbound_id} recipients={message.delivery.recipients} /> : null}
           <SafetyBanner message={message} />
           {offerImages ? (
             <div data-print-hide="" className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border px-2.5 py-1.5 text-[0.8125rem] text-muted-foreground">
