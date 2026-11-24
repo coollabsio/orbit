@@ -305,7 +305,9 @@ Several servers can share one Postgres database; see [Orbit Cloud](#orbit-cloud-
 | `verify-ca` | TLS, and the certificate must come from a trusted CA. |
 | `verify-full` | As `verify-ca`, and the certificate must also match the host name in the URL. Use this on a network that you do not control. |
 
-For `verify-ca` and `verify-full`, Orbit trusts the public web CAs (Mozilla's list, built into the binary), not the CA store of the system. If your server uses a private CA (for example CloudNativePG, or Amazon RDS), set `sslrootcert` to its PEM file and mount the file read-only. UID 65532 must be able to read it. For a client certificate, set `sslcert` and `sslkey`. `orbit db` gives the same URL to `psql`.
+For `verify-ca` and `verify-full`, Orbit trusts the public web CAs (Mozilla's list, built into the binary), not the CA store of the system. If your server uses a private CA (for example CloudNativePG, or Amazon RDS), set `sslrootcert` to its PEM file and mount the file read-only. UID 65532 must be able to read it. Orbit then trusts this CA and also the public web CAs. Orbit does not support `sslrootcert=system`. For a client certificate, set `sslcert` and `sslkey`. The key must not be encrypted: Orbit does not support `sslpassword`.
+
+`orbit db` gives the same URL to `psql`, but `psql` does not trust the public web CAs. Thus, with `verify-ca` or `verify-full` and no `sslrootcert`, Orbit connects but `orbit db` does not.
 
 ## Orbit Cloud: one Postgres, several Orbit servers
 

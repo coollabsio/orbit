@@ -3102,3 +3102,43 @@ async fn an_api_token_may_have_no_project_but_a_set_project_is_still_checked() {
         "existing rows keep their project"
     );
 }
+
+/// Regression (#155): `sslmode=require` must start a TLS handshake, not fail because the build has
+/// no TLS backend. A fake server accepts the SSLRequest and checks that a TLS ClientHello follows.
+#[tokio::test]
+async fn postgres_sslmode_require_starts_tls_handshake() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut ssl_request = [0_u8; 8];
+        socket.read_exact(&mut ssl_request).await.unwrap();
+        assert_eq!(ssl_request, [0, 0, 0, 8, 0x04, 0xd2, 0x16, 0x2f]);
+        socket.write_all(b"S").await.unwrap();
+        let mut record_type = [0_u8; 1];
+        socket.read_exact(&mut record_type).await.unwrap();
+        record_type[0]
+    });
+
+    let directory = tempfile::tempdir().unwrap();
+    let mut config = DatabaseConfig::new(directory.path().join("orbit.sqlite"));
+    config.postgres_url = Some(format!(
+        "postgres://orbit:orbit@127.0.0.1:{port}/orbit?sslmode=require"
+    ));
+    let error = Database::open(&config)
+        .await
+        .err()
+        .expect("fake server cannot finish");
+
+    assert!(
+        !error.to_string().contains("without TLS support"),
+        "{error}"
+    );
+    assert_eq!(
+        server.await.unwrap(),
+        0x16,
+        "expected a TLS handshake record"
+    );
+}
