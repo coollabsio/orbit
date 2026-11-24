@@ -77,8 +77,8 @@ export default function RootLayout() {
 
 function RootNavigator({ fontsReady }: { fontsReady: boolean }) {
   const { state } = useSession()
-  // the root is above `AppColorScope`, so it reads the app's colours itself (with the custom theme). Docs, Chat and
-  // Tasks get their own under Per app (`partScreenLayout`).
+  // the root is above `AppColorScope`, so it reads the app's colours itself (with the custom theme). Docs, Chat, Tasks and
+  // Mail get their own under Per app (`partScreenLayout`).
   const palette = useAppPalette(null)
   const theme: Theme = { fonts, scheme: palette.scheme, colors: { ...palettes[palette.scheme], ...palette.colors } }
   const font = useFont()

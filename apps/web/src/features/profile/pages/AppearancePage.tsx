@@ -21,7 +21,7 @@ const THEMES: { value: Appearance['theme']; label: string; description: string; 
   { value: 'dark', label: 'Dark', description: 'Dark surfaces and soft contrast.', preview: 'bg-[#181818]' },
 ]
 
-const SECTION_LABELS: Record<AppSection, string> = { docs: 'Docs', chat: 'Chat', tasks: 'Tasks' }
+const SECTION_LABELS: Record<AppSection, string> = { docs: 'Docs', chat: 'Chat', tasks: 'Tasks', mail: 'Mail' }
 
 const NAV_STYLES: { value: Appearance['navStyle']; label: string; description: string }[] = [
   { value: 'default', label: 'Default', description: 'The sidebar and the content run edge to edge.' },
@@ -92,7 +92,7 @@ export function AppearancePage() {
           </AppearanceOption>
           <AppearanceOption
             label="Per app"
-            description="Different colors for docs, chat and tasks. Starts as Notion, Slack and Linear."
+            description="Different colors for docs, chat, tasks and mail. Starts as Notion, Slack, Linear and Gmail."
             selected={Boolean(appLooks)}
             onClick={() => {
               if (!appLooks) setCustomTheme({ apps: DEFAULT_APP_LOOKS })
@@ -108,7 +108,7 @@ export function AppearancePage() {
 
       {appLooks ? (
         <SettingsCard title="Per app colors" description="Pick the colors of each part of Orbit. Orbit uses your Light, System or Dark theme, as set above.">
-          <div className="grid gap-3 sm:grid-cols-3">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             {APP_SECTIONS.map((section) => (
               <AppearanceOption
                 key={section}

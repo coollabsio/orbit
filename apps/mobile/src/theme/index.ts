@@ -145,7 +145,7 @@ export function useCustomThemeChoice(): CustomThemeChoice {
   return useSyncExternalStore(subscribe, () => customTheme)
 }
 
-/** The part of the app that is open (`setOpenPage`): `null` outside Docs, Chat and Tasks. */
+/** The part of the app that is open (`setOpenPage`): `null` outside Docs, Chat, Tasks and Mail. */
 export function useOpenSection(): AppSection | null {
   return useSyncExternalStore(subscribe, () => section)
 }

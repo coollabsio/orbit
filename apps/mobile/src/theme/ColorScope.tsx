@@ -22,7 +22,7 @@ export function ColorScope({ scheme, colors, children }: { scheme: Scheme; color
 }
 
 /**
- * The app's colours in one part of the app (`null`: outside Docs, Chat and Tasks): the scheme, the custom theme, and
+ * The app's colours in one part of the app (`null`: outside Docs, Chat, Tasks and Mail): the scheme, the custom theme, and
  * the selected row in the sidebar's own colour (a bit darker, lighter in dark mode) like the web's `--sidebar-accent`.
  */
 export function useAppPalette(part: AppSection | null): { scheme: Scheme; colors: Partial<Colors> } {
@@ -51,7 +51,7 @@ export function OpenColorScope({ children }: { children: ReactNode }) {
 }
 
 /**
- * A navigator's `screenLayout`: Per app gives Docs, Chat and Tasks their own colours that do not change with the open
+ * A navigator's `screenLayout`: Per app gives Docs, Chat, Tasks and Mail their own colours that do not change with the open
  * page, so a move to another part of the app does not render the hidden screens again.
  */
 export function partScreenLayout({ route, children }: { route: { name: string }; children: ReactElement }) {

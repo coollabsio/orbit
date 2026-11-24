@@ -114,7 +114,7 @@ function Shell() {
   const [pageListSlot, setPageListSlot] = useState<HTMLElement | null>(null)
   // Account settings → Appearance → Custom colours the sidebar too, not only chat
   const sidebarTheme = useAppSidebarTheme()
-  // Appearance → Per app colours docs, chat and tasks each in their own way; before paint, so no page shows wrong colours
+  // Appearance → Per app colours docs, chat, tasks and mail each in their own way; before paint, so no page shows wrong colours
   useLayoutEffect(() => {
     setOpenPage(pathname)
     return () => setOpenPage(null)

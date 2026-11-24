@@ -33,7 +33,7 @@ const THEMES: readonly { value: Scheme | 'system'; label: string; description: s
   { value: 'dark', label: 'Dark', description: 'Dark surfaces and soft contrast.' },
 ]
 
-const SECTION_LABELS: Record<AppSection, string> = { docs: 'Docs', chat: 'Chat', tasks: 'Tasks' }
+const SECTION_LABELS: Record<AppSection, string> = { docs: 'Docs', chat: 'Chat', tasks: 'Tasks', mail: 'Mail' }
 
 const STYLES: readonly { value: ButtonStyle; label: string; description: string }[] = [
   { value: '3d', label: '3D', description: 'Buttons and sidebar icons sit on a raised edge that lifts on hover.' },
@@ -107,7 +107,7 @@ export default function AppearanceScreen() {
           </AppearanceOption>
           <AppearanceOption
             label="Per app"
-            description="Different colors for docs, chat and tasks. Starts as Notion, Slack and Linear."
+            description="Different colors for docs, chat, tasks and mail. Starts as Notion, Slack, Linear and Gmail."
             selected={Boolean(appLooks)}
             onPress={() => {
               if (!appLooks) setCustomTheme({ apps: DEFAULT_APP_LOOKS })
