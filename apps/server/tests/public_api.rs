@@ -1950,6 +1950,106 @@ async fn priority_sort_desc_lists_the_highest_priority_first() {
 }
 
 #[tokio::test]
+async fn a_saved_view_lists_its_tasks_with_its_filter_and_order() {
+    let f = Fixture::new().await;
+    let (token, _) = f.token(&[ApiTokenScope::TasksWrite], false).await;
+    let status = f.first_status(f.project).await;
+    for (title, priority) in [("B high", "high"), ("Low", "low"), ("A high", "high")] {
+        let (code, _) = f
+            .call(
+                Some(&token),
+                "POST",
+                "/tasks",
+                Some(json!({"project_id": f.project, "status_id": status, "title": title, "priority": priority})),
+            )
+            .await;
+        assert_eq!(code, StatusCode::CREATED);
+    }
+    // The view names no project: the token's grant still keeps "Secret task" out.
+    let (code, view) = f
+        .call(
+            Some(&token),
+            "POST",
+            "/views",
+            Some(json!({
+                "name": "High",
+                "visibility": "personal",
+                "state": {
+                    "filter": {"op": "and", "children": [
+                        {"field": "priority", "operator": "is", "value": ["high"]}
+                    ]},
+                    "display": {
+                        "layout": "list", "group_by": "status", "sub_group_by": "none",
+                        "order_by": "title", "order_direction": "asc",
+                        "properties": ["id"], "show_completed": "all",
+                        "show_empty_groups": false, "sub_issues": "nested"
+                    }
+                }
+            })),
+        )
+        .await;
+    assert_eq!(code, StatusCode::CREATED, "{view}");
+    let view_id = view["id"].as_str().unwrap();
+    let titles = |page: &Value| {
+        page["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|task| task["title"].as_str().unwrap().to_owned())
+            .collect::<Vec<_>>()
+    };
+    let (code, page) = f
+        .call(
+            Some(&token),
+            "GET",
+            &format!("/tasks?view_id={view_id}"),
+            None,
+        )
+        .await;
+    assert_eq!(code, StatusCode::OK, "{page}");
+    assert_eq!(titles(&page), ["A high", "B high"]);
+    // An explicit sort wins over the view's order; other filters narrow the view.
+    let (_, page) = f
+        .call(
+            Some(&token),
+            "GET",
+            &format!("/tasks?view_id={view_id}&sort=title&order=desc"),
+            None,
+        )
+        .await;
+    assert_eq!(titles(&page), ["B high", "A high"]);
+    let (_, page) = f
+        .call(
+            Some(&token),
+            "GET",
+            &format!("/tasks?view_id={view_id}&q=B"),
+            None,
+        )
+        .await;
+    assert_eq!(titles(&page), ["B high"]);
+    // An unknown view is not found, and a service account has no views.
+    let (code, _) = f
+        .call(
+            Some(&token),
+            "GET",
+            &format!("/tasks?view_id={}", Id::new_v7()),
+            None,
+        )
+        .await;
+    assert_eq!(code, StatusCode::NOT_FOUND);
+    let (service, _) = f.token(&[ApiTokenScope::TasksRead], true).await;
+    let (code, _) = f
+        .call(
+            Some(&service),
+            "GET",
+            &format!("/tasks?view_id={view_id}"),
+            None,
+        )
+        .await;
+    assert_eq!(code, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
 async fn a_token_without_the_scope_gets_403_also_for_an_invalid_body() {
     let f = Fixture::new().await;
     let (read_only, _) = f.token(&[ApiTokenScope::TasksRead], false).await;

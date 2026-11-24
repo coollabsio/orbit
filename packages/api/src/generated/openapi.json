@@ -21488,6 +21488,15 @@
             }
           },
           {
+            "name": "view_id",
+            "in": "query",
+            "description": "Only tasks that match this saved view (from `GET /views`): its filter, its \"show\ncompleted\" option, and, without `sort` and `order`, its order. Personal tokens only.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "cursor",
             "in": "query",
             "description": "The `next_cursor` of the previous page. Keep the other parameters the same.",
