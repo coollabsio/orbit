@@ -8,6 +8,11 @@ export function hostsPageList(pathname: string): boolean {
   return /^\/(docs|chat|mail)(\/|$)/.test(pathname)
 }
 
+/** On a phone, docs and chat show their list as the page itself; the mail folders have no room there, so the drawer holds them. */
+export function drawerHostsPageList(pathname: string): boolean {
+  return /^\/mail(\/|$)/.test(pathname)
+}
+
 /** The page's list shows in the app sidebar, not beside it. */
 export function useInAppSidebar(): boolean {
   return useContext(SidebarSlotContext) !== null

@@ -8,13 +8,14 @@ import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg'
 import { useAuthOptions } from '../hooks/account'
 import { useGithubSettings } from '../hooks/workspace-settings'
 import { useOrbit } from '../orbit-context'
-import { useMailBadge, useMailEnabled } from '../hooks/mail'
+import { useMailBadge, useMailCounts, useMailEnabled, useMailMe, useOutbound, useStartDraft } from '../hooks/mail'
+import { type MailTab, parseTab, shownTabs, TAB_INFO } from '../data/mail'
 import { useChatBadge, useProjects } from '../queries'
 import { splitAlpha } from '../data/color'
 import { customSidebarTheme } from '../data/custom-theme'
 import { alpha, cssColors, mix, useButtonStyle, useCustomTheme, useTheme } from '../theme'
 import { ColorScope } from '../theme/ColorScope'
-import { CountBadge, Icon, type IconName, useReduceMotion } from '../ui'
+import { Button, CountBadge, Icon, type IconName, useReduceMotion } from '../ui'
 import { NewProjectSheet } from './NewProjectSheet'
 import { ActionSheet } from './settings/Dialog'
 import { useProjectOrder } from '../hooks/tasks'
@@ -119,6 +120,8 @@ interface NavLink {
   icon: IconName
   /** A project's colour and icon: its mark replaces the icon tile. */
   project?: { color: string; icon_url?: string | null }
+  /** A mail label's colour: a dot replaces the icon tile. */
+  color?: string
   /** A private project: a lock follows the label. */
   locked?: boolean
   href: Href
@@ -195,7 +198,8 @@ function DrawerPanel({ mounted, width, onClose }: { mounted: boolean; width: num
 
   const navs = areaNavs()
   const routeArea = drawerAreaOf(pathname, navs)
-  const pageArea = guest && routeArea === 'tasks' ? null : routeArea
+  // a guest has no Tasks or Mail; with Mail off, its folders do not show
+  const pageArea = (guest && (routeArea === 'tasks' || routeArea === 'mail')) || (routeArea === 'mail' && !mailEnabled) ? null : routeArea
   // the area whose Back was pressed: the app links show until the page moves to another area or the drawer closes
   const [mainMenuFor, setMainMenuFor] = useState<DrawerArea | null>(null)
   if (!mounted && mainMenuFor) setMainMenuFor(null)
@@ -250,6 +254,8 @@ function DrawerPanel({ mounted, width, onClose }: { mounted: boolean; width: num
         <ScrollView className="-mx-1 flex-1" contentContainerClassName="grow gap-0.5 px-1 pb-2">
           {area === 'tasks' ? (
             <TasksArea view={view} project={project} onTasks={pathname === '/tasks'} onBack={backToApp} go={go} />
+          ) : area === 'mail' ? (
+            <MailArea onList={pathname === '/mail'} onBack={backToApp} go={go} />
           ) : area ? (
             <>
               <BackRow label={DRAWER_AREA_TITLES[area]} onPress={backToApp} />
@@ -357,6 +363,69 @@ function TasksArea({ view, project, onTasks, onBack, go }: { view?: string; proj
   )
 }
 
+/** The open mail list as a URL: a tab (Inbox without one), kept to one mailbox, or a label. */
+function mailHref(params: { tab?: MailTab; mailbox?: string; label?: string }): Href {
+  const query = new URLSearchParams()
+  if (params.tab && params.tab !== 'inbox') query.set('tab', params.tab)
+  if (params.mailbox) query.set('mailbox', params.mailbox)
+  if (params.label) query.set('label', params.label)
+  const search = query.toString()
+  return (search ? `/mail?${search}` : '/mail') as Href
+}
+
+/**
+ * The Mail area (the web's `FolderRail` in the sidebar): Compose, the inbox of every mailbox, Starred, the folders, each
+ * mailbox with its unread count (when there are several) and the labels. With a mailbox open, the folders are that
+ * mailbox's. The last row opens the mailbox settings, or the mail preferences of a member.
+ */
+function MailArea({ onList, onBack, go }: { onList: boolean; onBack: () => void; go: (href: Href) => void }) {
+  const params = useGlobalSearchParams<{ tab?: string; mailbox?: string; label?: string }>()
+  const tab = parseTab(params.tab)
+  const me = useMailMe()
+  const counts = useMailCounts()
+  const outbox = useOutbound('outbox')
+  const start = useStartDraft()
+  const mailboxes = me.data?.mailboxes ?? []
+  const labels = me.data?.labels ?? []
+  const scope = params.mailbox
+  const unread = (mailboxId: string | undefined, folder: 'inbox' | 'spam') =>
+    (counts.data?.mailboxes ?? []).filter((entry) => !mailboxId || entry.mailbox_id === mailboxId).reduce((sum, entry) => sum + entry[folder], 0)
+  const onTab = (entry: MailTab) => onList && !params.label && tab === entry
+  const folders = shownTabs((outbox.data?.length ?? 0) > 0 || tab === 'outbox').filter((entry) => entry !== 'inbox' && entry !== 'starred')
+  const settings = me.data?.can_manage ? { label: 'Mailbox settings', href: '/settings/mail/mailboxes' as Href } : { label: 'Mail preferences', href: '/settings/mail/me' as Href }
+  const row = (link: NavLink) => <NavRow key={String(link.href)} link={link} onPress={() => go(link.href)} />
+  return (
+    <>
+      <BackRow label={DRAWER_AREA_TITLES.mail} onPress={onBack} />
+      {/* the web rail's main action: a new message */}
+      {mailboxes.length > 0 ? (
+        <View className="mb-2">
+          <Button label="Compose" icon="edit" block loading={start.isPending} onPress={() => start.mutate({ mode: 'new' })} />
+        </View>
+      ) : null}
+      {row({ label: 'Inbox', icon: TAB_INFO.inbox.icon, href: mailHref({}), active: onTab('inbox') && !scope, badge: unread(undefined, 'inbox') })}
+      {row({ label: 'Starred', icon: TAB_INFO.starred.icon, href: mailHref({ tab: 'starred' }), active: onTab('starred') })}
+      {folders.map((entry) =>
+        row({ label: TAB_INFO[entry].label, icon: TAB_INFO[entry].icon, href: mailHref({ tab: entry, mailbox: scope }), active: onTab(entry), badge: entry === 'spam' ? unread(scope, 'spam') : undefined }),
+      )}
+      {mailboxes.length > 1 ? <Section label="Mailboxes" /> : null}
+      {mailboxes.length > 1
+        ? mailboxes.map((mailbox) =>
+            row({ label: mailbox.name, icon: 'directboxDefault', href: mailHref({ mailbox: mailbox.id }), active: onTab('inbox') && scope === mailbox.id, badge: unread(mailbox.id, 'inbox') }),
+          )
+        : null}
+      {labels.length > 0 ? <Section label="Labels" /> : null}
+      {labels.map((label) => row({ label: label.name, icon: 'tag', color: label.color, href: mailHref({ label: label.id }), active: onList && params.label === label.id }))}
+      {me.data ? (
+        <>
+          <View className="min-h-3 flex-1" />
+          <NavRow link={{ label: settings.label, icon: 'settings', href: settings.href, active: false }} onPress={() => go(settings.href)} />
+        </>
+      ) : null}
+    </>
+  )
+}
+
 type SlideFrom = 'left' | 'right'
 
 /** The web's `slide-in-from-left-6` / `slide-in-from-right-6` with a fade, 200ms. Mounted again for each new content. */
@@ -418,7 +487,11 @@ function NavRow({ link, onPress, onLongPress, tone = 'brand' }: { link: NavLink;
     >
       {({ pressed }) => (
         <>
-          {link.project ? (
+          {link.color ? (
+            <View className={`items-center justify-center ${flat ? 'w-[18px]' : 'w-[30px]'}`}>
+              <View className="size-2 rounded-full" style={{ backgroundColor: link.color }} />
+            </View>
+          ) : link.project ? (
             // the web's `dotIcon`: the project's colour where the icon would be, as wide as the icon or tile
             <View className={`items-center justify-center ${flat ? 'w-[18px]' : 'w-[30px]'}`}>
               <ProjectMark project={link.project} className="size-2.5 rounded-[3px]" />

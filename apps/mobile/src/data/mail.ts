@@ -51,10 +51,12 @@ export const folderLabel = (folder: MailFolder) => TAB_INFO[folder].label
  * read while the Unread list shows stays (as read) until the list is read again.
  */
 export function fitsFilter(thread: MailThreadSummary, filter: ThreadFilter): boolean {
+  if (filter.mailboxId && thread.mailbox_id !== filter.mailboxId) return false
+  if (filter.labelId && !thread.labels.includes(filter.labelId)) return false
   if (filter.starred && !thread.starred) return false
   if (filter.sent) return thread.last_sent_at != null && thread.folder !== 'trash'
   if (filter.folder) return thread.folder === filter.folder
-  if (filter.starred) return thread.folder === 'inbox' || thread.folder === 'archive'
+  if (filter.labelId || filter.starred) return thread.folder === 'inbox' || thread.folder === 'archive'
   return thread.folder === 'inbox'
 }
 
@@ -81,6 +83,17 @@ export function patchRows(rows: MailThreadSummary[], filter: ThreadFilter | null
   })
 }
 
+/**
+ * Which list the mail screen shows (the web's `threadFilterOf`): a label's threads, or a tab's, kept to one mailbox
+ * when `mailboxId` is set. Starred stays across every mailbox, as on the web. `null` for drafts and the outbound queue.
+ */
+export function listFilter(tab: MailTab, scope: { mailboxId?: string; labelId?: string }): ThreadFilter | null {
+  if (scope.labelId) return { labelId: scope.labelId }
+  const source = TAB_INFO[tab].source
+  if (source.kind !== 'threads') return null
+  return scope.mailboxId && tab !== 'starred' ? { mailboxId: scope.mailboxId, ...source.filter } : source.filter
+}
+
 /** The filter of a list key (`mailKeys.threads`), `null` for a search. */
 export const filterOfKey = (key: QueryKey): ThreadFilter | null => (key[3] === 'threads' ? (key[4] as ThreadFilter) : null)
 
@@ -96,6 +109,13 @@ export function threadActions(folder: MailFolder): { archive: 'archive' | 'unarc
 // ---- people and text
 
 /** A person's display name, else their address. */
+/** An outside sender's colour, from the address (the web's `senderColor`). */
+export function senderColor(address: string | null | undefined): string {
+  let hash = 0
+  for (const character of (address ?? '').toLowerCase()) hash = (hash * 31 + character.charCodeAt(0)) >>> 0
+  return `oklch(0.68 0.13 ${hash % 360})`
+}
+
 export const personName = (person: MailPerson | null | undefined) => person?.name?.trim() || person?.address || 'Unknown sender'
 
 /** The senders of a list row: first names when there are several. */

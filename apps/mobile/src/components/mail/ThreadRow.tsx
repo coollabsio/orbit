@@ -3,7 +3,7 @@ import { memo } from 'react'
 import { Pressable, View } from 'react-native'
 
 import { relativeTime } from '../../data/format'
-import { personName, sentRecipients, threadSenders } from '../../data/mail'
+import { personName, senderColor, sentRecipients, threadSenders } from '../../data/mail'
 import type { MailThreadSummary } from '../../data/mail-api'
 import { swipeStep, type SwipeSettings, type SwipeStep } from '../../data/mail-swipe'
 import { alpha, starColor, useTheme } from '../../theme'
@@ -58,7 +58,7 @@ export const ThreadRow = memo(function ThreadRow({
       >
         <View className="w-2 h-8 justify-center">{thread.unread ? <View className="size-2 rounded-full bg-primary" /> : null}</View>
         {/* an outside sender's colour comes from the address: a forged From must not get a member's photo */}
-        <Avatar id={avatar.address} name={avatar.name} size={32} url={null} />
+        <Avatar id={avatar.address} name={avatar.name} size={32} url={null} color={senderColor(avatar.address)} />
         <View className="flex-1 min-w-0 gap-0.5">
           <View className="flex-row items-baseline gap-2">
             <Text numberOfLines={1} className={`shrink text-[13px] leading-[18px] ${weight}`}>
@@ -98,7 +98,8 @@ export const ThreadRow = memo(function ThreadRow({
         </View>
         <View className="items-center gap-1">
           <Pressable accessibilityRole="button" accessibilityLabel={thread.starred ? 'Unstar' : 'Star'} accessibilityState={{ selected: thread.starred }} hitSlop={8} onPress={() => onStar(thread)} className="size-6 items-center justify-center rounded-md active:bg-muted">
-            <Icon name={thread.starred ? 'starFilled' : 'star'} size={16} color={thread.starred ? starColor : muted} />
+            {/* the web's star: the outline turns yellow */}
+            <Icon name="star" size={16} color={thread.starred ? starColor : muted} />
           </Pressable>
           {thread.has_attachments ? <Icon name="attach" size={14} color={muted} /> : null}
         </View>

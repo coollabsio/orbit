@@ -54,3 +54,11 @@ test('splitAlpha gives the opaque color and its opacity, for SVG gradient stops'
   expect(splitAlpha('#160c0f')).toEqual({ color: '#160c0f', opacity: 1 })
   expect(splitAlpha('rgba(0, 0, 0, 0)').opacity).toBe(0)
 })
+
+test('an oklch() colour (the mail sender colour) mixes like the web', () => {
+  // oklch(0.68 0.13 0) is a pink: red above green and blue
+  const [r, g, b] = [1, 3, 5].map((index) => parseInt(mix('oklch(0.68 0.13 0)', 1, '#000000').slice(index, index + 2), 16))
+  expect(r).toBeGreaterThan(g)
+  expect(r).toBeGreaterThan(b)
+  expect(mix('oklch(0.68 0.13 140)', 0.26, '#f5f5f5')).toMatch(/^#[0-9a-f]{6}$/)
+})
