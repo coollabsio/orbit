@@ -328,7 +328,7 @@ pub fn mail_router(state: MailState) -> Router {
         )
         .route(
             "/api/v1/workspaces/{workspace_id}/mail/mailboxes/{mailbox_id}/addresses/{address_id}",
-            delete(mailboxes::remove_mailbox_address),
+            patch(mailboxes::update_mailbox_address).delete(mailboxes::remove_mailbox_address),
         )
         .route(
             "/api/v1/workspaces/{workspace_id}/mail/drafts",

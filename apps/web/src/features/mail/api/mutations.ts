@@ -32,6 +32,7 @@ import {
   deleteMailDomain,
   deleteMailLabel,
   removeMailboxAddress,
+  updateMailboxAddress,
   removeMailboxMember,
   retryMailReceipt,
   setMailAdmin,
@@ -306,6 +307,8 @@ const mailboxKeys = (workspaceId: string) => [
   mailKeys.me(workspaceId),
   mailKeys.counts(workspaceId),
   mailKeys.domains(workspaceId),
+  // the From picker shows the mailbox and address sender names
+  mailKeys.fromAddresses(workspaceId).slice(0, 3),
 ]
 
 function useMailboxWrite<Variables, Result>(
@@ -408,6 +411,23 @@ export function useRemoveMailboxAddress() {
         })
       ).data,
     ),
+  )
+}
+
+/** Sets the sender name of one address; `null` goes back to the mailbox name. */
+export function useUpdateMailboxAddress() {
+  return useMailboxWrite(
+    async (workspaceId, { mailboxId, addressId, senderName }: { mailboxId: string; addressId: string; senderName: string | null }) =>
+      required(
+        (
+          await updateMailboxAddress({
+            client: apiClient,
+            path: { workspace_id: workspaceId, mailbox_id: mailboxId, address_id: addressId },
+            body: { sender_name: senderName },
+            throwOnError: true,
+          })
+        ).data,
+      ),
   )
 }
 

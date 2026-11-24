@@ -325,10 +325,10 @@ async fn load_sender(
     membership_id: Id,
 ) -> Result<Sender, MailError> {
     let row = sqlx::query(
-        "SELECT a.local_part, d.id AS domain_id, d.name AS domain, mb.kind, mb.name AS mailbox_name, \
-         u.display_name FROM mail_addresses a JOIN mail_domains d ON d.id = a.domain_id \
+        "SELECT a.local_part, d.id AS domain_id, d.name AS domain, COALESCE(a.sender_name, mb.name) AS sender_name \
+         FROM mail_addresses a JOIN mail_domains d ON d.id = a.domain_id \
          JOIN mailboxes mb ON mb.id = a.mailbox_id JOIN memberships ms ON ms.id = $2 \
-         JOIN users u ON u.id = ms.user_id WHERE a.id = $1",
+         WHERE a.id = $1",
     )
     .bind(address_id.to_string())
     .bind(membership_id.to_string())
@@ -337,13 +337,8 @@ async fn load_sender(
     .ok_or(MailError::Unprocessable("send_as_denied"))?;
     let local: String = row.try_get("local_part")?;
     let domain: String = row.try_get("domain")?;
-    let kind: String = row.try_get("kind")?;
-    // A shared mailbox sends with its name, a personal one with its member's.
-    let name: String = if kind == "shared" {
-        row.try_get("mailbox_name")?
-    } else {
-        row.try_get("display_name")?
-    };
+    // The address's own sender name, else the mailbox name.
+    let name: String = row.try_get("sender_name")?;
     let name = plain(&name);
     Ok(Sender {
         address: format!("{local}@{domain}"),

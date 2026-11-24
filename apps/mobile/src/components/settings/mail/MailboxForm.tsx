@@ -133,7 +133,7 @@ export function MailboxForm({ domains, members, owners, onClose, onCreated }: { 
             />
           </View>
         ) : null}
-        <Input label="Name" maxLength={80} placeholder={kind === 'shared' ? 'Support' : 'Ann Lee'} value={name} onChangeText={setName} />
+        <Input label="Sender name" help="The name recipients see next to the address on mail from this mailbox." maxLength={80} placeholder={kind === 'shared' ? 'Support' : 'Ann Lee'} value={name} onChangeText={setName} />
         <View className="gap-1.5">
           <LabelTip label="Address" text={`Mail to ${localPart || 'name'}+anything@ arrives here too.`} />
           <AddressFields label="Address" localPart={localPart} domainId={domainId} domains={domains} onLocalPart={setLocalPart} onDomain={setDomainId} />

@@ -1,6 +1,7 @@
 import { useId, useState, type FormEvent } from 'react'
 import { toast } from 'sonner'
 import type { MailboxKind, MailDomain } from '@orbit/api/generated/types.gen'
+import { InfoTip } from '@/components/common/InfoTip'
 import { Button } from '@/components/ui/button'
 import { DialogClose, DialogFooter } from '@/components/ui/dialog'
 import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
@@ -105,7 +106,7 @@ export function MailboxForm({ domains, members, owners, onDone }: { domains: Mai
         </Field>
       ) : null}
       <Field>
-        <FieldLabel htmlFor={`${ids}-name`}>Name</FieldLabel>
+        <FieldLabel htmlFor={`${ids}-name`}>Sender name <InfoTip text="The name recipients see next to the address on mail from this mailbox." /></FieldLabel>
         <Input id={`${ids}-name`} maxLength={80} placeholder={kind === 'shared' ? 'Support' : 'Ann Lee'} value={name} onChange={(event) => setName(event.target.value)} />
       </Field>
       <Field>
