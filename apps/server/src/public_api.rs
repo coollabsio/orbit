@@ -987,6 +987,10 @@ struct TasksQuery {
     parent_task_id: Option<String>,
     /// Text in the title or description, or a task identifier; up to 500 characters.
     q: Option<String>,
+    /// Only tasks that match this saved view (from `GET /views`): its filter, its "show
+    /// completed" option, and, without `sort` and `order`, its order. Personal tokens only.
+    #[param(value_type = Option<String>)]
+    view_id: Option<Id>,
     /// The `next_cursor` of the previous page. Keep the other parameters the same.
     cursor: Option<String>,
     /// 1 to 100; 50 when unset.
@@ -1544,6 +1548,8 @@ async fn list_tasks(
             Err(_) => return ctx.invalid("assignee_id must be a user ID or `none`."),
         },
     };
+    // Without `sort` and `order`, a view keeps its own order.
+    let default_order = query.sort.is_none() && query.order.is_none();
     let sort = match query.sort.as_deref() {
         None | Some("created_at") => TaskSort::CreatedAt,
         Some("updated_at") => TaskSort::UpdatedAt,
@@ -1609,7 +1615,8 @@ async fn list_tasks(
             parent_task_id: api
                 .optional_task_id(query.parent_task_id.as_deref())
                 .await?,
-            sort: Some((sort, order)),
+            view_id: query.view_id,
+            sort: (!default_order).then_some((sort, order)),
             cursor: query.cursor,
             limit: query.limit,
         })

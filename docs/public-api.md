@@ -390,7 +390,8 @@ of this task, as a UUID or an identifier such as `ENG-12`; the task must be in a
 identifier), `sort` (`created_at`, `updated_at`, `priority`, `due_date`,
 `title` or `estimate`; default `created_at`; tasks without an estimate come last), `order` (`desc` or `asc`; default `desc`; with
 `sort=priority`, `desc` gives `urgent` first and `none` last),
-`cursor` and `limit`. Keep the same parameters when you send `cursor`.
+`view_id` (only the tasks of a saved view from `GET /views`, with its filter, its "show completed" option
+and, without `sort` and `order`, its order; personal tokens only), `cursor` and `limit`. Keep the same parameters when you send `cursor`.
 
 ```bash
 curl -sS -G "$ORBIT_WS/tasks" -H "Authorization: Bearer $ORBIT_TOKEN" \
@@ -1188,6 +1189,7 @@ order are not in the API: they are the web app's layout state.
 | `POST /views`, `GET`/`PATCH`/`DELETE /views/{view_id}` | `tasks:write`, `tasks:read` | `{name, description, icon, color, visibility, state}`; `PATCH` takes `expected_version` (`409` when stale). |
 | `PUT`/`DELETE /views/{view_id}/favorite` | `tasks:write` | `204`. Idempotent; a new favorite goes last. |
 | `PUT /view-favorites/order` | `tasks:write` | `{view_ids}`: every favorite of `GET /views`, each once. Favorites that the token cannot see keep their places. |
+| `GET /tasks?view_id={view_id}` | `tasks:read` | The view's tasks: Orbit runs its filter inside the token's approved projects, with its "show completed" option and, without `sort` and `order`, its order. Other `GET /tasks` parameters narrow the list. |
 
 **Files.** Uploads are `multipart/form-data` with one `file` field, as in the web app. The server
 detects the type from the bytes. The server's upload limit (25 MiB per file by default) and the
@@ -1346,7 +1348,7 @@ cannot use. Thus a token cannot find out which other resources exist.
 ## Automated checks
 
 ```bash
-cargo test -p orbit-server --test public_api
+cargo test -p orbit-server --test it public_api::
 ORBIT_TEST_POSTGRES_URL=postgres://orbit:orbit@127.0.0.1:15432/orbit \
-  cargo test -p orbit-server --test public_api
+  cargo test -p orbit-server --test it public_api::
 ```

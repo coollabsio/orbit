@@ -167,6 +167,7 @@ fn guest_may_use(operation: &str) -> bool {
             | "list_chat_search"
             | "list_chat_states"
             | "list_followed_chat_threads"
+            | "list_unread_chat_threads"
     )
 }
 
@@ -179,14 +180,29 @@ impl Records {
     fn id(&self, name: &str, path: &str) -> String {
         let key = match name {
             "comment_id" if path.contains("/pages/") => "page_comment_id",
+            "view_id" if path.contains("/forms/") => "form_view_id",
+            "property_id" if path.contains("/press/") => "button_property_id",
+            "view_id" if path.contains("/databases/") => "database_view_id",
+            "webhook_id" if path.starts_with(&format!("{PREFIX}/webhooks")) => {
+                "workspace_webhook_id"
+            }
+            "task_id" | "page_id" | "project_id" if path.contains("/trash/") => match name {
+                "task_id" => "trashed_task_id",
+                "page_id" => "trashed_page_id",
+                _ => "trashed_project_id",
+            },
+            "host_page_id" => "page_id",
             "user_id" | "user_ids" | "member_ids" | "assignee_ids" | "mentioned_user_ids" => {
                 "user_id"
             }
             "id" => "random",
             other => other,
         };
+        // A list of ids takes the record of its singular name.
+        let singular = key.strip_suffix('s').filter(|_| key.ends_with("_ids"));
         self.ids
             .get(key)
+            .or_else(|| self.ids.get(singular?))
             .cloned()
             .unwrap_or_else(|| Id::new_v7().to_string())
     }
@@ -384,7 +400,8 @@ fn operations(document: &Value, records: &Records) -> Vec<Operation> {
     }
     // Children before parents, so that deleting a task does not hide its comments.
     operations.sort_by_key(|operation| {
-        let delete = operation.method == "DELETE";
+        // Emptying a trash is a delete too: it would purge the trashed records.
+        let delete = operation.method == "DELETE" || operation.id.starts_with("empty_");
         (
             delete,
             std::cmp::Reverse(if delete { operation.template.len() } else { 0 }),
@@ -428,6 +445,35 @@ fn body_for(operation: &str, records: &Records) -> Option<Value> {
         }
         "bulk_tasks" => json!({"updates": [{"id": id("task_id"), "expected_version": 0}]}),
         "create_task_relation" => json!({"type": "blocks", "task_id": id("other_task_id")}),
+        "create_cycle" => json!({
+            "starts_at": "2030-01-01T00:00:00Z", "ends_at": "2030-01-15T00:00:00Z"
+        }),
+        "reorder_milestones" => {
+            json!({"items": [{"id": id("milestone_id"), "expected_version": 0, "position": 1}]})
+        }
+        "set_project_grant" => json!({
+            "project_id": id("project_id"), "user_id": id("user_id"),
+            "permissions": ["tasks.purge"]
+        }),
+        "create_webhook" => json!({
+            "name": "Sweep hook", "url": "http://127.0.0.1:9/hook",
+            "event_types": ["task.created"], "project_ids": [id("project_id")]
+        }),
+        "create_database_property" => json!({"name": "Sweep", "type": "text"}),
+        "create_database_from_csv" => json!({
+            "title_column": 0, "columns": [{"name": "Name", "target": "skip"}],
+            "rows": [["guest sweep"]], "dry_run": true
+        }),
+        "import_database_csv" => json!({
+            "columns": [{"name": "Name", "target": {"property_id": id("title_property_id")}}],
+            "rows": [["guest sweep"]], "dry_run": true
+        }),
+        "submit_database_form" => {
+            json!({"answers": {id("title_property_id"): "guest sweep"}})
+        }
+        "move_database_row" => json!({"after_row_id": null}),
+        "create_mail_draft" => json!({"mode": "new"}),
+        "create_workspace_mail_send_route" => json!({"kind": "direct", "name": "Sweep route"}),
         _ => return None,
     })
 }
@@ -478,6 +524,38 @@ const UNCHECKED: &[&str] = &[
     // GitHub needs a public HTTPS origin and an installed App.
     "start_github_manifest",
     "save_github_project_connection",
+    "save_github_app_client",
+    "start_github_connection",
+    "finish_github_connection",
+    "list_github_project_pulls",
+    "get_github_pull",
+    "get_github_pull_contents",
+    "list_github_pull_conversation",
+    "list_github_pull_files",
+    "get_github_pull_merge_base",
+    "list_github_pull_threads",
+    "merge_github_pull",
+    "delete_github_pull_branch",
+    "submit_github_review",
+    "discard_github_review",
+    "create_github_review_comment",
+    "update_github_review_comment",
+    "delete_github_review_comment",
+    "reply_github_review_thread",
+    "resolve_github_review_thread",
+    "unresolve_github_review_thread",
+    "mark_github_file_viewed",
+    "unmark_github_file_viewed",
+    // An Orbit import reads another server or an uploaded archive; its people come from it.
+    "create_orbit_import",
+    "upload_orbit_import",
+    "get_orbit_import",
+    "cancel_orbit_import",
+    "start_orbit_import",
+    "update_import_person",
+    // A project icon is a multipart upload.
+    "upload_project_icon",
+    "project_icon",
     // S3 needs a reachable endpoint.
     "save_workspace_bucket",
     // Records made by background work or by other features: exports, notifications, page
@@ -487,6 +565,7 @@ const UNCHECKED: &[&str] = &[
     "get_page_version",
     "restore_page_version",
     "click_chat_action",
+    "retry_webhook_delivery",
     // A restore needs a deleted record; deletes run last.
     "restore_page",
     "restore_project",
@@ -525,7 +604,7 @@ async fn a_guest_reaches_only_chat() {
     let owner = setup.session.token.clone();
     let workspace = setup.workspace_id.to_string();
     let base = format!("/api/v1/workspaces/{workspace}");
-    let (member_id, _) = server.person(&workspace, "member", Some("member")).await;
+    let (member_id, member) = server.person(&workspace, "member", Some("member")).await;
     let (_, admin) = server.person(&workspace, "admin", Some("admin")).await;
     let (guest_id, guest) = server.person(&workspace, "guest", Some("guest")).await;
 
@@ -754,8 +833,231 @@ async fn a_guest_reaches_only_chat() {
         )
         .await;
 
+    // A database with two rows (one for the trash call), a form view, a template and a link.
+    let database = id_of(
+        &server
+            .ok(
+                &owner,
+                "POST",
+                &format!("{base}/pages"),
+                json!({"title": "Secret database", "kind": "database", "teamspace_id": teamspace}),
+            )
+            .await,
+    );
+    let detail = server
+        .ok(
+            &owner,
+            "GET",
+            &format!("{base}/databases/{database}"),
+            Value::Null,
+        )
+        .await;
+    let property_of = |title: bool| {
+        detail["properties"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|property| (property["type"] == "title") == title)
+            .unwrap_or_else(|| panic!("no property: {detail}"))["id"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    let (title_property, property) = (property_of(true), property_of(false));
+    let database_view = first_id(&detail["views"]);
+    let button_property = id_of(
+        &server
+            .ok(
+                &owner,
+                "POST",
+                &format!("{base}/databases/{database}/properties"),
+                json!({"name": "Secret button", "type": "button"}),
+            )
+            .await,
+    );
+    let mut rows = Vec::new();
+    for title in ["Secret row", "Trashed row"] {
+        rows.push(id_of(
+            &server
+                .ok(
+                    &owner,
+                    "POST",
+                    &format!("{base}/databases/{database}/rows"),
+                    json!({"title": title}),
+                )
+                .await,
+        ));
+    }
+    let form_view = id_of(
+        &server
+            .ok(
+                &owner,
+                "POST",
+                &format!("{base}/databases/{database}/views"),
+                json!({"name": "Secret form", "type": "form"}),
+            )
+            .await,
+    );
+    let template = id_of(
+        &server
+            .ok(
+                &owner,
+                "POST",
+                &format!("{base}/databases/{database}/templates"),
+                json!({"name": "Secret template"}),
+            )
+            .await,
+    );
+    let link = server
+        .ok(
+            &owner,
+            "POST",
+            &format!("{base}/databases/{database}/links"),
+            json!({"host_page_id": page}),
+        )
+        .await["link"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let workspace_webhook = id_of(
+        &server
+            .ok(
+                &owner,
+                "POST",
+                &format!("{base}/webhooks"),
+                body_for(
+                    "create_webhook",
+                    &Records {
+                        ids: BTreeMap::from([("project_id", project.clone())]),
+                    },
+                )
+                .unwrap(),
+            )
+            .await,
+    );
+    let milestone = id_of(
+        &server
+            .ok(
+                &owner,
+                "POST",
+                &format!("{base}/projects/{project}/milestones"),
+                json!({"name": "Secret milestone"}),
+            )
+            .await,
+    );
+    let cycle = id_of(
+        &server
+            .ok(
+                &owner,
+                "POST",
+                &format!("{base}/projects/{project}/cycles"),
+                body_for(
+                    "create_cycle",
+                    &Records {
+                        ids: BTreeMap::new(),
+                    },
+                )
+                .unwrap(),
+            )
+            .await,
+    );
+    let role = id_of(
+        &server
+            .ok(
+                &owner,
+                "POST",
+                &format!("{base}/roles"),
+                json!({"name": "Secret role", "permissions": ["audit.view"]}),
+            )
+            .await,
+    );
+    // A report of another message, so that deleting the reported message spares `message`.
+    let reported = id_of(
+        &server
+            .ok(
+                &owner,
+                "POST",
+                &format!("{base}/chat/conversations/{general}/messages"),
+                json!({"body": "Reported news", "nonce": "sweep-2"}),
+            )
+            .await,
+    );
+    let report = id_of(
+        &server
+            .ok(
+                &member,
+                "POST",
+                &format!("{base}/chat/messages/{reported}/report"),
+                json!({"reason": "spam"}),
+            )
+            .await,
+    );
+    // Records in the trash.
+    let trashed_task = id_of(
+        &server
+            .ok(
+                &owner,
+                "POST",
+                &format!("{base}/tasks"),
+                json!({"project_id": project, "status_id": status, "title": "Trashed task"}),
+            )
+            .await,
+    );
+    let trashed_page = id_of(
+        &server
+            .ok(
+                &owner,
+                "POST",
+                &format!("{base}/pages"),
+                json!({"title": "Trashed page", "teamspace_id": teamspace}),
+            )
+            .await,
+    );
+    let trashed_project = id_of(
+        &server
+            .ok(
+                &owner,
+                "POST",
+                &format!("{base}/projects"),
+                json!({"name": "Trashed", "key": "TRS", "color": "#336699"}),
+            )
+            .await,
+    );
+    for path in [
+        format!("tasks/{trashed_task}"),
+        format!("pages/{trashed_page}"),
+        format!("projects/{trashed_project}"),
+    ] {
+        server
+            .ok(
+                &owner,
+                "DELETE",
+                &format!("{base}/{path}?expected_version=0"),
+                Value::Null,
+            )
+            .await;
+    }
+
     let records = Records {
         ids: BTreeMap::from([
+            ("database_id", database),
+            ("title_property_id", title_property),
+            ("property_id", property),
+            ("button_property_id", button_property),
+            ("database_view_id", database_view),
+            ("form_view_id", form_view),
+            ("row_id", rows[0].clone()),
+            ("row_ids", rows[1].clone()),
+            ("template_id", template),
+            ("link_id", link),
+            ("workspace_webhook_id", workspace_webhook),
+            ("milestone_id", milestone),
+            ("cycle_id", cycle),
+            ("role_id", role),
+            ("report_id", report),
+            ("trashed_task_id", trashed_task),
+            ("trashed_page_id", trashed_page),
+            ("trashed_project_id", trashed_project),
             ("workspace_id", workspace.clone()),
             ("project_id", project),
             ("status_id", status),

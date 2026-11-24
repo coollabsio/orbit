@@ -16,7 +16,7 @@ use tokio_tungstenite::tungstenite::http::HeaderValue;
 use tokio_tungstenite::tungstenite::{self, Message as Ws};
 use tokio_util::sync::CancellationToken;
 
-mod shared_postgres;
+use crate::shared_postgres;
 
 const COOKIE: &str = "orbit_session_dev";
 

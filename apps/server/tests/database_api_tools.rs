@@ -427,6 +427,10 @@ async fn each_tool_and_endpoint_needs_its_docs_scope() {
     let reads = [
         ("get_database", json!({"database_id": db})),
         ("query_database", json!({"database_id": db})),
+        (
+            "preview_database_formula",
+            json!({"database_id": db, "expression": "1"}),
+        ),
     ];
     let writes = [
         (
@@ -457,7 +461,12 @@ async fn each_tool_and_endpoint_needs_its_docs_scope() {
     );
     assert_eq!(
         listed(&f.rpc(&read, "tools/list", json!({})).await),
-        ["get_database", "query_database", "list_database_views"]
+        [
+            "get_database",
+            "query_database",
+            "list_database_views",
+            "preview_database_formula"
+        ]
     );
     assert_eq!(
         listed(&f.rpc(&write, "tools/list", json!({})).await),
@@ -476,7 +485,12 @@ async fn each_tool_and_endpoint_needs_its_docs_scope() {
             "update_database_view",
             "delete_database_view",
             "create_database_link",
-            "delete_database_link"
+            "delete_database_link",
+            "move_database_row",
+            "create_database_template",
+            "update_database_template",
+            "delete_database_template",
+            "preview_database_formula"
         ]
     );
     for (name, arguments) in reads.iter().chain(&writes) {

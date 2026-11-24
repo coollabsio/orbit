@@ -371,7 +371,10 @@ pub struct TaskQuery {
     pub has_due_date: Option<bool>,
     /// Only the direct sub-issues of this task, which must be in an approved project.
     pub parent_task_id: Option<Id>,
-    /// Newest first when unset.
+    /// Only tasks that match this saved view's filter, with its "show completed" and sub-issue
+    /// options. Personal tokens only, as [`Authorized::saved_view`].
+    pub view_id: Option<Id>,
+    /// The view's order when unset and `view_id` is set, else newest first.
     pub sort: Option<(TaskSort, SortOrder)>,
     pub cursor: Option<String>,
     pub limit: Option<usize>,
@@ -1061,9 +1064,25 @@ impl Authorized<'_> {
 
     pub async fn list_tasks(&self, query: TaskQuery) -> Result<Page<TaskView>> {
         self.need(ApiTokenScope::TasksRead)?;
+        let view = match query.view_id {
+            Some(view_id) => Some(self.saved_view(view_id).await?.state.ok_or(
+                TokenApiError::Invalid(
+                    "The view's saved state no longer parses; open the view in Orbit and save it again",
+                ),
+            )?),
+            None => None,
+        };
         let (sort, order) = query
             .sort
             .clone()
+            .or_else(|| {
+                view.as_ref().map(|view| {
+                    crate::task_routes::task_order(
+                        view.display.order_by,
+                        view.display.order_direction,
+                    )
+                })
+            })
             .unwrap_or((TaskSort::CreatedAt, SortOrder::Desc));
         let limit = query.limit.unwrap_or(50);
         if !(1..=100).contains(&limit)
@@ -1208,16 +1227,28 @@ impl Authorized<'_> {
                 json!({ "instant": after.as_millis() }),
             ));
         }
+        let mut groups = vec![FilterGroup {
+            op: GroupOp::And,
+            children,
+        }];
+        let (show_completed, sub_issues) = match view {
+            Some(view) => {
+                groups.push(view.filter);
+                let sub_issues = match view.display.sub_issues {
+                    SubIssuesDisplay::Hidden => SubIssuesDisplay::Hidden,
+                    SubIssuesDisplay::Nested | SubIssuesDisplay::Flat => SubIssuesDisplay::Flat,
+                };
+                (view.display.show_completed, sub_issues)
+            }
+            None => (ShowCompleted::All, SubIssuesDisplay::Flat),
+        };
         let filter = TaskFilter {
-            tree: FilterGroup {
-                op: GroupOp::And,
-                children,
-            },
-            show_completed: ShowCompleted::All,
+            tree: crate::repositories::task_filter::and_groups(groups),
+            show_completed,
             sort: sort.clone(),
             order: order.clone(),
             parent_task_id: query.parent_task_id,
-            sub_issues: SubIssuesDisplay::Flat,
+            sub_issues,
         };
         let p = self.principal;
         let page = self

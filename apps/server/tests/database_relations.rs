@@ -1,7 +1,7 @@
 //! Relation and rollup properties (docs databases P3 item 9, spec 11): links between rows, both
 //! sides of a two-way pair, access, trash, templates, duplicates and rollup functions.
 
-mod db_fixture;
+use crate::db_fixture;
 
 use axum::http::StatusCode;
 use db_fixture::{Fixture, id_of, property, row, value};

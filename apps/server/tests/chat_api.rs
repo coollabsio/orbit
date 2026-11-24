@@ -2629,7 +2629,7 @@ async fn a_reply_quotes_a_message_of_its_conversation_and_keeps_the_id_of_a_dele
     assert_eq!(sent["result"]["thread_root_id"], Value::Null);
     assert_eq!(
         sent["result"]["reply_to"],
-        json!({ "id": target, "author_id": fixture.owner.id.to_string(), "body": "é".repeat(200), "sticker": false })
+        json!({ "id": target, "author_id": fixture.owner.id.to_string(), "body": "é".repeat(200), "sticker": false, "bot_name": null })
     );
     // The event that the other members get carries the quote too.
     assert_eq!(sent["events"][0]["type"], "message.created");
@@ -3522,6 +3522,7 @@ async fn a_forward_is_a_copy_with_its_files_that_mentions_nobody_and_outlives_th
         "conversation_id": source,
         "author_id": fixture.owner.id.to_string(),
         "created_at": sent["result"]["created_at"],
+        "bot_name": null,
     });
     assert_eq!(forward["forwarded"], origin);
     // The other members get the same event as for a sent message.

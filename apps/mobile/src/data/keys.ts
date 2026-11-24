@@ -33,8 +33,13 @@ export const keys = {
   database: (workspaceId: string, databaseId: string, linkId = '') => (linkId ? ['database', workspaceId, databaseId, linkId] : ['database', workspaceId, databaseId]),
 }
 
-/** Which threads a list shows (the web's `ThreadFilter`): without `folder`, the inbox; `starred` the inbox and archive; `sent` every folder but the trash. */
+/**
+ * Which threads a list shows (the web's `ThreadFilter`): without `folder`, the inbox; `starred` or `labelId` the inbox
+ * and archive; `sent` every folder but the trash. `mailboxId` keeps one mailbox's threads.
+ */
 export interface ThreadFilter {
+  mailboxId?: string
+  labelId?: string
   folder?: 'inbox' | 'archive' | 'spam' | 'trash'
   starred?: boolean
   sent?: boolean

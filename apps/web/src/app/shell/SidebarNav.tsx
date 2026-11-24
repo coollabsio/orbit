@@ -531,7 +531,7 @@ export function SidebarNav({
   isRoot?: boolean
   /** The mobile drawer: Back shows the main menu without leaving the page. Closing the drawer forgets it. */
   backShowsMenu?: boolean
-  /** Set while the open page's own list (docs, chat) shows here instead of the app links: the element it renders in. */
+  /** Set while the open page's own list (docs, chat, mail; in the drawer only mail) shows here instead of the app links: the element it renders in. */
   pageListRef?: (element: HTMLDivElement | null) => void
 }) {
   const location = useLocation()
@@ -540,9 +540,10 @@ export function SidebarNav({
   const guest = useIsGuest()
   const pageArea: SidebarArea | null = (isAdminLimitsPath(location.pathname) ? 'admin-limits' : null) ?? settingsAreaOf(location.pathname) ?? (guest ? null : linkArea(location.pathname))
   // the area whose Back was pressed in the drawer: the main menu shows until the page moves to another area
-  const [mainMenuFor, setMainMenuFor] = useState<SidebarArea | null>(null)
+  const [mainMenuFor, setMainMenuFor] = useState<string | null>(null)
   const area = pageArea && pageArea === mainMenuFor ? null : pageArea
-  const pageList = pageListRef !== undefined && hostsPageList(location.pathname)
+  const listArea = hostsPageList(location.pathname) ? location.pathname.split('/')[1] : null
+  const pageList = pageListRef !== undefined && listArea !== null && listArea !== mainMenuFor
   // What the sidebar shows below Search. Only a change animates, so the first load and moves inside an area stay still.
   const content = pageList ? `list:${areaOf(location.pathname)}` : (area ?? 'app')
   const [shown, setShown] = useState(content)
@@ -613,7 +614,7 @@ export function SidebarNav({
           {pageList ? (
             <>
               {/* a guest has Chat alone: there is no main menu to go back to */}
-              {guest ? null : <BackToApp label={PAGE_LIST_TITLES[areaOf(location.pathname) ?? ''] ?? ''} onNavigate={onNavigate} />}
+              {guest ? null : <BackToApp label={PAGE_LIST_TITLES[listArea ?? ''] ?? ''} onNavigate={onNavigate} onBack={backShowsMenu ? () => setMainMenuFor(listArea) : undefined} />}
               {/* the page renders its list here (`InAppSidebar`); it scrolls on its own */}
               <div ref={pageListRef} data-slot="sidebar-page-list" className="-mx-3 mt-2 flex min-h-0 flex-1 flex-col" />
             </>

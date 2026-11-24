@@ -3,13 +3,13 @@ use std::sync::Arc;
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode, header};
 use orbit_platform::{
-    AuthenticatedUser, HttpPlatformLayer, Id, JobStoreError, LocalBlobStore, OriginPolicy,
-    PasswordService, TestDatabase, TimestampMillis, WorkerConfig, WorkerError,
+    AuthenticatedUser, HttpPlatformLayer, Id, LocalBlobStore, OriginPolicy, PasswordService,
+    TestDatabase, TimestampMillis, WorkerConfig,
 };
 use orbit_server::auth_routes::CookieMode;
 use orbit_server::repositories::api_tokens::{ApiTokenError, ApiTokenRepository, ApiTokenScope};
 use orbit_server::repositories::identity::{IdentityRepository, SetupRequest};
-use orbit_server::repositories::workspaces::{RetentionServiceError, WorkspaceRepository};
+use orbit_server::repositories::workspaces::WorkspaceRepository;
 use orbit_server::workspace_routes::{WorkspaceState, workspace_router};
 use serde_json::{Value, json};
 use tower::ServiceExt;
@@ -2194,7 +2194,7 @@ async fn workspace_api_tokens_are_admin_only_and_revealed_once() {
 }
 
 #[tokio::test]
-async fn retention_service_surfaces_worker_claim_failures() {
+async fn retention_service_buries_an_unreadable_job_and_keeps_running() {
     let database = TestDatabase::new().await.unwrap();
     sqlx::query(
         "INSERT INTO jobs (id, kind, payload_json, state, priority, attempt_count, max_attempts, \
@@ -2209,25 +2209,58 @@ async fn retention_service_surfaces_worker_claim_failures() {
     .unwrap();
 
     let shutdown = tokio_util::sync::CancellationToken::new();
-    let result = tokio::time::timeout(
-        std::time::Duration::from_secs(1),
-        WorkspaceRepository::new((*database).clone()).run_retention_service(
-            shutdown.clone(),
-            std::time::Duration::from_secs(60),
-            WorkerConfig::new(1)
-                .unwrap()
-                .with_poll_interval(std::time::Duration::from_millis(1)),
-        ),
-    )
-    .await
-    .expect("the retention service must stop when its worker fails")
-    .unwrap_err();
+    let repository = WorkspaceRepository::new((*database).clone());
+    let service = tokio::spawn({
+        let shutdown = shutdown.clone();
+        async move {
+            repository
+                .run_retention_service(
+                    shutdown,
+                    std::time::Duration::from_secs(60),
+                    WorkerConfig::new(1)
+                        .unwrap()
+                        .with_poll_interval(std::time::Duration::from_millis(1)),
+                )
+                .await
+        }
+    });
 
-    assert!(matches!(
-        result,
-        RetentionServiceError::Worker(WorkerError::Store(JobStoreError::Id(_)))
-    ));
-    assert!(shutdown.is_cancelled());
+    // A job row the worker cannot read becomes a dead job instead of stopping the server.
+    let buried = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let row: Option<(String, Option<String>)> =
+                sqlx::query_as("SELECT state, last_error FROM jobs WHERE id = 'invalid-job-id'")
+                    .fetch_optional(database.pool())
+                    .await
+                    .unwrap();
+            if let Some((state, last_error)) = row
+                && state == "dead"
+            {
+                break last_error;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("the invalid job must be marked dead");
+    assert!(
+        buried
+            .as_deref()
+            .is_some_and(|error| error.starts_with("invalid job data")),
+        "{buried:?}"
+    );
+    assert!(
+        !service.is_finished(),
+        "the retention service keeps running"
+    );
+    assert!(!shutdown.is_cancelled());
+
+    shutdown.cancel();
+    tokio::time::timeout(std::time::Duration::from_secs(5), service)
+        .await
+        .expect("the retention service stops on shutdown")
+        .unwrap()
+        .unwrap();
 }
 
 #[tokio::test]

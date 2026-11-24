@@ -199,6 +199,9 @@ struct ListTasksArgs {
     /// Only tasks in this cycle: an id from list_cycles, `current`, `next` or `previous` (the
     /// cycle of each task's project), or `none` for tasks without one.
     cycle_id: Option<String>,
+    /// Only the tasks of this saved view (an id from list_views), in its order and with its
+    /// show-completed option.
+    view_id: Option<String>,
     /// Continue from the next_cursor of the previous response.
     cursor: Option<String>,
     /// Maximum number of tasks, from 1 to 100. Default: 50.
@@ -765,7 +768,7 @@ fn tools() -> Vec<Tool> {
         ),
         definition::<ListTasksArgs>(
             "list_tasks",
-            "Search and list live tasks in approved projects. Includes completed tasks and sub-issues; parent_task_id lists the sub-issues of one task. milestone_id and cycle_id filter by plan; cycle_id also takes current, next or previous.",
+            "Search and list live tasks in approved projects. Includes completed tasks and sub-issues; parent_task_id lists the sub-issues of one task. milestone_id and cycle_id filter by plan; cycle_id also takes current, next or previous. view_id lists the tasks of a saved view from list_views.",
         ),
         definition::<TaskArgs>("get_task", "Read one live task from an approved project."),
         definition::<TaskArgs>(
@@ -1300,9 +1303,11 @@ impl TaskTools {
             "list_tasks" => {
                 let a: ListTasksArgs = arguments(&request)?;
                 let project_id = a.project_id.as_deref().map(parse_id).transpose()?;
+                let view_id = a.view_id.as_deref().map(parse_id).transpose()?;
                 async {
                     api.list_tasks(TaskQuery {
                         project_id,
+                        view_id,
                         query: a.query,
                         milestone: a
                             .milestone_id

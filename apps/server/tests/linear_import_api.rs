@@ -999,10 +999,12 @@ async fn resumes_after_a_restart_without_duplicates() {
             "{table} are not duplicated"
         );
     }
+    // Issues are read page by page from the stored cursor: a team already listed is not
+    // listed again, even when its item went back to pending.
     assert_eq!(
         h.fake.hits("issues t-ops"),
-        2,
-        "the reset team was listed again"
+        1,
+        "the reset team was listed once"
     );
     assert_eq!(h.fake.hits("issues t-eng"), 1);
     assert_eq!(import["report"]["files_imported"], 2);

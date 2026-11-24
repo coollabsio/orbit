@@ -9,7 +9,9 @@ use orbit_server::mcp::{McpState, router};
 use orbit_server::repositories::api_tokens::{ApiTokenRepository, ApiTokenScope};
 use orbit_server::repositories::identity::{IdentityRepository, SetupRequest};
 use orbit_server::repositories::pages::revision;
+use orbit_server::repositories::task_filter::{DisplayOptions, ViewState, parse_filter};
 use orbit_server::repositories::tasks::{CreateTask, TaskRecord, TaskRepository};
+use orbit_server::repositories::views::{ViewCreate, ViewRepository, Visibility};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
@@ -310,6 +312,57 @@ async fn task_reads_are_filtered_before_pagination_and_hide_related_projects() {
             .unwrap()
             .is_empty()
     );
+}
+
+#[tokio::test]
+async fn list_tasks_with_a_view_id_lists_the_view_s_tasks_within_the_grant() {
+    let fixture = Fixture::new().await;
+    create_task(
+        &fixture.tasks,
+        &fixture.database,
+        fixture.workspace,
+        fixture.user,
+        fixture.project,
+        "Release notes",
+    )
+    .await;
+    // The view matches "task" in both projects; the grant keeps "Secret task" out.
+    let view = ViewRepository::new((*fixture.database).clone())
+        .create_view(
+            fixture.workspace,
+            fixture.user,
+            ViewCreate {
+                name: "Tasks".into(),
+                description: String::new(),
+                icon: None,
+                color: None,
+                visibility: Visibility::Personal,
+                state: ViewState {
+                    filter: parse_filter(&json!({"op": "and", "children": [
+                        {"field": "text", "operator": "contains", "value": "task"}
+                    ]}))
+                    .unwrap(),
+                    display: DisplayOptions::default(),
+                },
+            },
+            "test",
+        )
+        .await
+        .unwrap();
+    let list = fixture
+        .tool("list_tasks", json!({"view_id": view.id}))
+        .await;
+    let titles: Vec<&str> = list["result"]["structuredContent"]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|task| task["title"].as_str().unwrap())
+        .collect();
+    assert_eq!(titles, ["Approved task"]);
+    let missing = fixture
+        .tool("list_tasks", json!({"view_id": Id::new_v7()}))
+        .await;
+    assert_eq!(missing["result"]["isError"], true);
 }
 
 #[tokio::test]
@@ -650,6 +703,9 @@ async fn mcp_route_is_mounted_in_the_application_and_rejects_oversized_bodies() 
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     assert!(response.headers().contains_key(header::WWW_AUTHENTICATE));
 
+    // The platform layer takes JSON bodies up to 2 MiB in the application (its default
+    // `max_body_bytes` of 1 MiB would answer first), so the MCP limit of 1.5 MiB
+    // (`MAX_REQUEST_BODY_BYTES`, raised for the upload tools) is the one that applies.
     let fixture = Fixture::new().await;
     let response = fixture
         .app

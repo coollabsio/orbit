@@ -1,7 +1,7 @@
 //! The development demo GitHub: seeded rows plus a local fake, so the PR review screens show sample data with no real
 //! GitHub App. Every request goes through the real routes, as in the app.
 
-mod fake_github;
+use crate::fake_github;
 
 use std::sync::Arc;
 

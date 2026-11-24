@@ -1,7 +1,6 @@
 //! GitHub pull request notices in the Orbit inbox (plan 4 of PR review).
-#![recursion_limit = "256"]
 
-mod fake_github;
+use crate::fake_github;
 
 use fake_github::{GithubFixture, fixture};
 use orbit_platform::{Id, Row};

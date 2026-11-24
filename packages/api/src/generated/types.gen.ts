@@ -22611,6 +22611,11 @@ export type PublicListTasksData = {
          */
         q?: string;
         /**
+         * Only tasks that match this saved view (from `GET /views`): its filter, its "show
+         * completed" option, and, without `sort` and `order`, its order. Personal tokens only.
+         */
+        view_id?: string;
+        /**
          * The `next_cursor` of the previous page. Keep the other parameters the same.
          */
         cursor?: string;

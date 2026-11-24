@@ -1,7 +1,7 @@
 //! The workspace GitHub App's OAuth client, re-creating apps from before PR review, and connecting a GitHub account
 //! for each member (plan 1 of PR review).
 
-mod fake_github;
+use crate::fake_github;
 
 use axum::http::StatusCode;
 use fake_github::{

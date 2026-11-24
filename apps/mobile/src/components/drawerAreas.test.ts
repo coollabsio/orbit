@@ -11,6 +11,9 @@ const areas = {
 
 describe('drawerAreaOf', () => {
   test('maps settings routes to their area', () => {
+    expect(drawerAreaOf('/mail', areas)).toBe('mail')
+    expect(drawerAreaOf('/mail/t1', areas)).toBe('mail')
+    expect(drawerAreaOf('/settings/mail/me', areas)).toBe('workspace')
     expect(drawerAreaOf('/settings', areas)).toBe('workspace')
     expect(drawerAreaOf('/settings/members', areas)).toBe('workspace')
     expect(drawerAreaOf('/settings/profile', areas)).toBe('account')

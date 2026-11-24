@@ -213,7 +213,7 @@ chat is read-only there too. See [Orbit public REST API](public-api.md).
 | Tool | Arguments | Result |
 | --- | --- | --- |
 | `list_projects` | None | Approved live projects only. |
-| `list_tasks` | Optional `project_id`, `query`, `parent_task_id`, `milestone_id`, `cycle_id`, `cursor`, `limit` | Tasks and `next_cursor`. |
+| `list_tasks` | Optional `project_id`, `query`, `parent_task_id`, `milestone_id`, `cycle_id`, `view_id`, `cursor`, `limit` | Tasks and `next_cursor`. `view_id` (from `list_views`) gives the tasks of that saved view, in its order. |
 | `get_task` | Required `task_id` | One task in an approved project. |
 | `create_project` | Required `name`, `key`; optional `color` | The new project, with the default statuses. Needs task write and an all-projects connection. |
 | `list_task_statuses`, `list_labels` | Required `project_id`; optional `cursor`, `limit` | Statuses or labels (names, colors) of an approved project. |
@@ -354,7 +354,7 @@ token in settings and repeat the request; it must return HTTP 401.
 For automated checks:
 
 ```bash
-cargo test -p orbit-server --test oauth_api --test mcp_api
+cargo test -p orbit-server --test it -- oauth_api:: mcp_api::
 cargo test -p orbit-platform --test http_security
 ```
 

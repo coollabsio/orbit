@@ -43,7 +43,7 @@ import { NoWorkspaceShell } from './NoWorkspaceShell'
 import { setOpenPage, useAppSidebarTheme } from '@/lib/customTheme'
 import { MenuSurfaceContext } from '@/components/ui/menuSurface'
 import { useSidebarMenuSurface } from './sidebarMenu'
-import { hostsPageList, SidebarSlotContext } from './sidebarSlot'
+import { drawerHostsPageList, hostsPageList, SidebarSlotContext } from './sidebarSlot'
 import { PullOverlay } from '@/features/pulls/PullOverlay'
 
 const desktopQuery = '(min-width: 900px)'
@@ -112,6 +112,9 @@ function Shell() {
   const [sidebarWidth, setSidebarWidth] = hostsList ? [pageListWidth, setPageListWidth] : [navWidth, setNavWidth]
   const [resizing, setResizing] = useState(false)
   const [pageListSlot, setPageListSlot] = useState<HTMLElement | null>(null)
+  // on a phone the drawer holds the mail folders; the slot exists only while the drawer is open
+  const drawerHostsList = !desktop && drawerHostsPageList(pathname)
+  const [drawerListSlot, setDrawerListSlot] = useState<HTMLElement | null>(null)
   // Account settings → Appearance → Custom colours the sidebar too, not only chat
   const sidebarTheme = useAppSidebarTheme()
   // Appearance → Per app colours docs, chat, tasks and mail each in their own way; before paint, so no page shows wrong colours
@@ -162,7 +165,7 @@ function Shell() {
   return (
     <ProfilePopoverProvider>
     <NewTaskProvider>
-    <SidebarSlotContext value={hostsList ? pageListSlot : null}>
+    <SidebarSlotContext value={hostsList ? pageListSlot : drawerHostsList ? drawerListSlot : null}>
     {/* Floating navigation (Account settings → Appearance, desktop): framed panels on a dotted backdrop */}
     <div className="flex h-[var(--app-height,100svh)] w-full overflow-hidden bg-background pt-[env(safe-area-inset-top,0px)] pl-[env(safe-area-inset-left,0px)] pr-[env(safe-area-inset-right,0px)] min-[900px]:floating:gap-2 min-[900px]:floating:p-2">
       <aside
@@ -232,7 +235,7 @@ function Shell() {
           style={sidebarTheme.style}
         >
           <MenuSurfaceContext value={menuSurface}>
-            <SidebarNav backShowsMenu onNavigate={() => setDrawerOpen(false)} chatBadge={chatBadge} chatUnread={chatUnread} mailBadge={mailBadge} mailEnabled={mailEnabled} isRoot={isRoot} />
+            <SidebarNav backShowsMenu onNavigate={() => setDrawerOpen(false)} pageListRef={drawerHostsList ? setDrawerListSlot : undefined} chatBadge={chatBadge} chatUnread={chatUnread} mailBadge={mailBadge} mailEnabled={mailEnabled} isRoot={isRoot} />
           </MenuSurfaceContext>
         </SideSheetContent>
       </SideSheet>
