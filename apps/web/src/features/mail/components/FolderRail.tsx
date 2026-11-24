@@ -4,6 +4,7 @@ import { DirectboxDefault, Edit2, Star } from 'reicon-react'
 import type { MailCounts, MailLabel, MailMeMailbox } from '@orbit/api/generated/types.gen'
 import { InAppSidebar } from '@/app/shell/InAppSidebar'
 import { useInAppSidebar } from '@/app/shell/sidebarSlot'
+import { SidebarNavTile, sidebarNavItemClass } from '@/app/shell/SidebarNav'
 import { ColorDot } from '@/components/common/ColorDot'
 import { PaneHeader, PaneTitle } from '@/components/common/Pane'
 import { Badge } from '@/components/ui/badge'
@@ -39,23 +40,24 @@ function RailRow({
   children?: ReactNode
 }) {
   return (
-    <Button
+    // the app sidebar's row: a 3D icon tile, or a plain row with the Flat style (Account settings → Appearance)
+    <button
       type="button"
-      variant="ghost"
-      className="w-full min-w-0 justify-start gap-2.5 text-[0.8125rem] text-sidebar-nav hover:text-sidebar-nav-active data-active:bg-sidebar-accent data-active:text-sidebar-nav-active"
-      data-active={active || undefined}
+      data-slot="sidebar-nav-item"
+      className={sidebarNavItemClass}
+      data-active={active}
       aria-current={active ? 'page' : undefined}
       aria-label={unread > 0 ? `${label}, ${unread} unread` : label}
       onClick={onClick}
     >
-      {Icon ? <Icon className="opacity-90" /> : children}
-      <span className="min-w-0 flex-1 truncate text-left">{label}</span>
+      <SidebarNavTile icon={Icon}>{children}</SidebarNavTile>
+      <span className="min-w-0 flex-1 truncate">{label}</span>
       {unread > 0 ? (
         <Badge aria-hidden="true" className="h-4 min-w-4 px-1 text-[0.625rem] tabular-nums">
           {unread > 999 ? '999+' : unread}
         </Badge>
       ) : null}
-    </Button>
+    </button>
   )
 }
 

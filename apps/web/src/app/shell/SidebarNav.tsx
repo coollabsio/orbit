@@ -38,7 +38,7 @@ const WORKSPACE_LINKS = [
 
 // Coolify tile navigation: the row never fills; the icon sits in a 3D tile and the current row shows a pink tile.
 // The Flat style (Account settings → Appearance) drops the tile: plain rows, and a filled row for the current page.
-const sidebarNavItemClass =
+export const sidebarNavItemClass =
   'group/nav-item relative flex h-9 w-full min-w-0 shrink-0 items-center justify-start gap-2.5 overflow-hidden pr-2.5 pl-1 text-left text-[0.8125rem] font-medium whitespace-nowrap text-sidebar-nav transition-colors duration-120 outline-none hover:text-sidebar-nav-active focus-visible:text-sidebar-nav-active data-[active=true]:text-sidebar-nav-active group-data-[collapsed=true]/sidebar-nav:justify-center group-data-[collapsed=true]/sidebar-nav:px-0 '
     + 'flat:h-8 flat:rounded-md flat:pl-2.5 flat:hover:not-disabled:bg-black/4 flat:data-[active=true]:bg-black/5 dark:flat:hover:not-disabled:bg-white/5 dark:flat:data-[active=true]:bg-white/6'
 
@@ -61,11 +61,11 @@ const sidebarNavTileVariants = cva(
   },
 )
 
-/** The 3D icon tile: it lifts on hover, sinks on press, and turns pink on the current row. */
-function SidebarNavTile({ icon: Icon, tone }: { icon: SidebarNavIcon } & VariantProps<typeof sidebarNavTileVariants>) {
+/** The 3D icon tile: it lifts on hover, sinks on press, and turns pink on the current row. `children` replaces the icon. */
+export function SidebarNavTile({ icon: Icon, tone, children }: { icon?: SidebarNavIcon; children?: ReactNode } & VariantProps<typeof sidebarNavTileVariants>) {
   return (
     <span data-slot="sidebar-nav-tile" className={sidebarNavTileVariants({ tone })}>
-      <Icon />
+      {Icon ? <Icon /> : children}
     </span>
   )
 }
