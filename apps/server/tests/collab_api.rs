@@ -25,8 +25,8 @@ use yrs::{
     Any, ClientID, Doc, ReadTxn, Text, Transact, TransactionMut, Update, Xml, XmlFragment, XmlOut,
 };
 
-mod collab_support;
-mod shared_postgres;
+use crate::collab_support;
+use crate::shared_postgres;
 
 use collab_support::*;
 

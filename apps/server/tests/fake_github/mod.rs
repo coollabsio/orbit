@@ -1,5 +1,5 @@
 //! A local fake of github.com and api.github.com for the PR review tests, plus a workspace fixture whose GitHub App
-//! points at it. Each test binary includes it with `mod fake_github;`.
+//! points at it. `it.rs` includes it once with `mod fake_github;`.
 #![allow(dead_code)]
 
 use std::collections::{HashMap, HashSet};

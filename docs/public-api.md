@@ -1348,7 +1348,7 @@ cannot use. Thus a token cannot find out which other resources exist.
 ## Automated checks
 
 ```bash
-cargo test -p orbit-server --test public_api
+cargo test -p orbit-server --test it public_api::
 ORBIT_TEST_POSTGRES_URL=postgres://orbit:orbit@127.0.0.1:15432/orbit \
-  cargo test -p orbit-server --test public_api
+  cargo test -p orbit-server --test it public_api::
 ```

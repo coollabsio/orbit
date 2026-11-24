@@ -3,7 +3,7 @@
 //!
 //! `cargo test --release -p orbit-server --test database_formula_bench -- --ignored --nocapture`
 
-mod database_fixture;
+use crate::database_fixture;
 
 use std::time::Instant;
 

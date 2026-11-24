@@ -1,6 +1,6 @@
 //! List and calendar views (docs databases P3 item 11, spec 13): their configs and repairs.
 
-mod db_fixture;
+use crate::db_fixture;
 
 use axum::http::StatusCode;
 use db_fixture::{Fixture, id_of, property};

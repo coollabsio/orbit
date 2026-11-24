@@ -3,10 +3,16 @@ name = "orbit-server"
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+# One test binary (`tests/it.rs`) in place of one binary for each file in `tests/`.
+autotests = false
 
 [[bin]]
 name = "orbit"
 path = "src/main.rs"
+
+[[test]]
+name = "it"
+path = "tests/it.rs"
 
 [dependencies]
 axum = { version = "0.8", features = ["multipart", "ws"] }

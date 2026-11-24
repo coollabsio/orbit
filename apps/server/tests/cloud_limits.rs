@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 use tempfile::TempDir;
 use tokio_util::sync::CancellationToken;
 
-mod shared_postgres;
+use crate::shared_postgres;
 
 const COOKIE: &str = "orbit_session_dev";
 

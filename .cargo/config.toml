@@ -1,0 +1,5 @@
+# Test threads get 8 MiB of stack (the Rust default is 2 MiB). Some import tests poll large debug-build
+# futures and overflow 2 MiB; one overflow aborts the whole `it` test binary under `cargo test`.
+# Source: https://doc.rust-lang.org/std/thread/#stack-size
+[env]
+RUST_MIN_STACK = "8388608"

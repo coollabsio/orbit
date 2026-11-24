@@ -1,7 +1,7 @@
 //! Files, email, phone and unique ID properties (docs databases P3 item 10, spec 12).
 
-mod db_fixture;
-mod shared_postgres;
+use crate::db_fixture;
+use crate::shared_postgres;
 
 use std::collections::BTreeSet;
 

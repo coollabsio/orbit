@@ -17,9 +17,7 @@ use orbit_server::repositories::tasks::{CreateTask, TaskRepository};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
-mod collab_support;
-#[allow(dead_code)] // `collab_support` needs it; the shared-database tests live elsewhere.
-mod shared_postgres;
+use crate::collab_support;
 
 struct Fixture {
     database: TestDatabase,
