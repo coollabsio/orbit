@@ -434,7 +434,7 @@ async fn setup_writes_make_statuses_and_labels_and_rename_projects() {
             Some(json!({"name": "Bug"})),
         )
         .await;
-    assert_eq!(code, StatusCode::BAD_REQUEST);
+    assert_eq!(code, StatusCode::CONFLICT);
     let (code, label) = f
         .call(
             &token,

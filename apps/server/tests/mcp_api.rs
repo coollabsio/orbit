@@ -185,6 +185,16 @@ async fn create_task(
 }
 
 /// The `version` that the tools show for `task` (its revision).
+/// The tool names of a `tools/list` response.
+fn tool_names(listing: &Value) -> Vec<&str> {
+    listing["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|tool| tool["name"].as_str().unwrap())
+        .collect()
+}
+
 fn token_version(task: &TaskRecord) -> u64 {
     revision(task.version, task.updated_at)
 }
@@ -687,18 +697,40 @@ async fn mcp_route_is_mounted_in_the_application_and_rejects_oversized_bodies() 
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     assert!(response.headers().contains_key(header::WWW_AUTHENTICATE));
 
+    // The platform layer takes JSON bodies up to 2 MiB in the application (its default
+    // `max_body_bytes` of 1 MiB would answer first), so the MCP limit of 1.5 MiB
+    // (`MAX_REQUEST_BODY_BYTES`, raised for the upload tools) is the one that applies.
     let fixture = Fixture::new().await;
-    let response = fixture
-        .app
-        .clone()
-        .oneshot(request(
-            Some(&fixture.token),
-            "tools/call",
-            json!({"name": "list_tasks", "arguments": {"query": "x".repeat(70 * 1024)}}),
-        ))
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    let app = router(
+        McpState::new(
+            Arc::new(fixture.tokens.clone()),
+            Arc::new(fixture.tasks.clone()),
+        ),
+        "https://orbit.test",
+    )
+    .layer(
+        HttpPlatformLayer::new(OriginPolicy::new("https://orbit.test")).with_limits(
+            orbit_platform::HttpLimits {
+                max_body_bytes: 100 * 1024 * 1024,
+                ..Default::default()
+            },
+        ),
+    );
+    for (kib, status) in [
+        (1400, StatusCode::OK),
+        (1600, StatusCode::PAYLOAD_TOO_LARGE),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(request(
+                Some(&fixture.token),
+                "tools/call",
+                json!({"name": "list_tasks", "arguments": {"query": "x".repeat(kib * 1024)}}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), status, "{kib} KiB");
+    }
 }
 
 #[tokio::test]
@@ -721,7 +753,35 @@ async fn tools_list_includes_required_cache_fields_for_current_protocol() {
         let result: Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(result["result"]["ttlMs"], 0, "{result}");
         assert_eq!(result["result"]["cacheScope"], "private", "{result}");
-        assert_eq!(result["result"]["tools"].as_array().unwrap().len(), 10);
+        // A tasks:read token lists only the read-only task tools and get_me.
+        assert_eq!(
+            tool_names(&result),
+            [
+                "list_task_statuses",
+                "list_labels",
+                "list_milestones",
+                "list_cycles",
+                "list_members",
+                "get_me",
+                "list_comments",
+                "list_projects",
+                "list_tasks",
+                "get_task",
+                "list_task_relations",
+                "list_task_trash",
+                "get_trashed_task",
+                "list_task_activity",
+                "list_task_github_links",
+                "list_project_trash",
+                "get_trashed_project",
+                "list_project_members",
+                "list_notifications",
+                "list_views",
+                "get_view",
+                "list_task_attachments",
+                "download_task_attachment",
+            ]
+        );
     }
 }
 
@@ -1459,10 +1519,18 @@ async fn docs_and_chat_require_explicit_scopes_and_doc_writes_need_docs_write() 
         .tool("search_messages", json!({"query": "x".repeat(501)}))
         .await;
     assert!(invalid.get("error").is_some(), "{invalid}");
+    // Tool names, not the whole listing: list_teamspaces's description mentions create_doc.
     let listing = f.rpc("tools/list", json!({})).await;
-    assert!(listing.to_string().contains("search_messages"), "{listing}");
-    assert!(!listing.to_string().contains("send_message"));
-    assert!(!listing.to_string().contains("create_doc"));
+    let names = tool_names(&listing);
+    assert!(names.contains(&"search_messages"), "{listing}");
+    for name in [
+        "send_message",
+        "create_doc",
+        "update_doc",
+        "create_doc_comment",
+    ] {
+        assert!(!names.contains(&name), "{name}: {listing}");
+    }
     let denied = f.tool("get_doc", json!({"page_id": Id::new_v7()})).await;
     assert_eq!(denied["result"]["isError"], true, "{denied}");
     let refused = f.tool("create_doc", json!({"title": "x"})).await;
@@ -1516,7 +1584,7 @@ async fn writes_are_refused_in_a_read_only_cloud_workspace() {
         .await
         .unwrap();
     // Not the exempt root workspace and past its trial, so without a subscription it is read-only.
-    sqlx::query("UPDATE workspaces SET created_at = 0, billing_exempt = 0 WHERE id = $1")
+    sqlx::query("UPDATE workspaces SET created_at = 0, trial_started_at = 0, billing_exempt = 0 WHERE id = $1")
         .bind(f.workspace.to_string())
         .execute(f.database.pool())
         .await

@@ -17,7 +17,7 @@ use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 use tower::ServiceExt;
 
-mod shared_postgres;
+use crate::shared_postgres;
 
 const ORIGIN: &str = "http://127.0.0.1:8080";
 

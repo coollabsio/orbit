@@ -1,7 +1,6 @@
 //! Reading pull requests with the member's own GitHub token (plan 2 of PR review).
-#![recursion_limit = "256"]
 
-mod fake_github;
+use crate::fake_github;
 
 use axum::http::StatusCode;
 use fake_github::{GithubFixture, fixture, json_body};

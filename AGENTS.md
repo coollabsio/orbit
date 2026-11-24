@@ -71,12 +71,28 @@ Every change must work on both.
   duplicate version or a missing Postgres file. Do not add migrations by hand to a list, and never rename or edit
   0001–0099.
 - **Tests:** run the tests that cover your change on both databases:
-  `cargo test -p orbit-server --test <name>`, then the same with
+  `cargo nextest run -p orbit-server --test it <file>::`, then the same with
   `ORBIT_TEST_POSTGRES_URL=postgres://orbit:orbit@127.0.0.1:15432/orbit`. Tests that only make sense on SQLite
   start with `if orbit_platform::testing_postgres() { return; }` and a one-line reason.
 - **Postgres setup:** the database must use `LOCALE_PROVIDER builtin BUILTIN_LOCALE 'C.UTF-8' LOCALE 'C.UTF-8'`
   (Orbit refuses other databases), and the server needs `ORBIT_APP_KEY`. S3 for files and backups stays optional
   and is set in Admin → Storage or with `ORBIT_S3_*`. Operator details: [`docs/operations.md`](docs/operations.md).
+
+## Tests: one test binary, run only the tests you need
+
+All files in `apps/server/tests/` are modules of one test binary, `it` (`tests/it.rs`, about 430 MB). Each file is
+one module: a new test file needs a `mod <file>;` line in `tests/it.rs`. Shared helpers (`shared_postgres`,
+`collab_support`, …) are declared once there; a test file imports them with `use crate::<helper>;`.
+
+- Run the tests with `cargo nextest run`. It runs each test in its own process, so one crash does not stop the
+  others. Run one file with `cargo nextest run -p orbit-server --test it <file>::`, several files with
+  `-E 'test(/^tasks_api::/) | test(/^pages_api::/)'`, and one test with `<file>::<test_name>`. Find the files with
+  a search in `apps/server/tests/` for the route, function or table you changed. For another crate, use
+  `cargo nextest run -p <crate> --lib`.
+- A filtered run still compiles the whole `it` binary: a test-only edit takes about 6 s, a server edit about 24 s.
+- In a worktree, do not run the full Rust suite (`just test`, `just check`, `cargo test --workspace`, or a run of
+  `it` without a filter) unless the user asks for it. It takes about 3 minutes on 12 cores.
+- When you change a signature that other code calls, run `cargo check -p orbit-server --tests`.
 
 ## Development servers: one per worktree
 

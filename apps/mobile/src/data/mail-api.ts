@@ -62,7 +62,7 @@ export async function mailCounts(client: OrbitClient, workspaceId: string): Prom
 
 /** One page of a folder list, newest first; `cursor` of the answer reads the next. */
 export async function threadPage(client: OrbitClient, workspaceId: string, filter: ThreadFilter, cursor?: string): Promise<MailThreadPage> {
-  const query = { folder: filter.folder, starred: filter.starred || undefined, sent: filter.sent || undefined, unread: filter.unread || undefined, cursor }
+  const query = { mailbox_id: filter.mailboxId, label_id: filter.labelId, folder: filter.folder, starred: filter.starred || undefined, sent: filter.sent || undefined, unread: filter.unread || undefined, cursor }
   return (await listMailThreads({ ...at(client, workspaceId), query })).data
 }
 

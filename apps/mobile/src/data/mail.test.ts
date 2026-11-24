@@ -3,7 +3,7 @@ import { expect, test } from 'bun:test'
 import type { MailThreadSummary } from '@orbit/api/generated/types.gen'
 
 import { mailKeys } from './keys'
-import { changedThread, filterOfKey, groupThreads, mailEventKeys, mailRoute, parseTab, patchRows, shownTabs, splitTextQuote, threadActions, threadSenders, sentRecipients } from './mail'
+import { changedThread, filterOfKey, groupThreads, listFilter, mailEventKeys, mailRoute, parseTab, patchRows, shownTabs, splitTextQuote, threadActions, threadSenders, sentRecipients } from './mail'
 
 const thread = (fields: Partial<MailThreadSummary> = {}): MailThreadSummary => ({
   id: 't1',
@@ -86,4 +86,16 @@ test('web mail paths open the thread or the tab', () => {
   expect(mailRoute(['m1', 'spam', 't', 'th 1'])).toBe('/mail/th%201')
   expect(mailRoute(['m1', 'sent'])).toBe('/mail?tab=sent')
   expect(mailRoute(['label', 'l1'])).toBe('/mail')
+})
+
+test('a label or mailbox list keeps only its threads, as on the web', () => {
+  expect(listFilter('inbox', { mailboxId: 'm2' })).toEqual({ mailboxId: 'm2', folder: 'inbox' })
+  expect(listFilter('sent', { mailboxId: 'm2' })).toEqual({ mailboxId: 'm2', sent: true })
+  expect(listFilter('starred', { mailboxId: 'm2' })).toEqual({ starred: true })
+  expect(listFilter('drafts', {})).toBe(null)
+  expect(listFilter('trash', { labelId: 'l1' })).toEqual({ labelId: 'l1' })
+  const unlabel = (row: MailThreadSummary) => changedThread(row, { remove_labels: ['l1'] })
+  expect(patchRows([thread({ labels: ['l1'], folder: 'archive' })], { labelId: 'l1' }, unlabel)).toEqual([])
+  expect(patchRows([thread({ labels: ['l1'], folder: 'archive' })], { labelId: 'l1' }, (row) => row)).toHaveLength(1)
+  expect(patchRows([thread({ mailbox_id: 'm1' })], { mailboxId: 'm2', folder: 'inbox' }, (row) => row)).toEqual([])
 })

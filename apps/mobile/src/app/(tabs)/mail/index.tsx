@@ -10,7 +10,7 @@ import { ThreadRow } from '../../../components/mail/ThreadRow'
 import { UndoSendBar } from '../../../components/mail/UndoSendBar'
 import { fullDate, relativeTime, timeOfDay } from '../../../data/format'
 import { mailKeys } from '../../../data/keys'
-import { groupThreads, type ListEntry, parseTab, shownTabs, TAB_INFO, threadActions, type MailTab, type ThreadChange } from '../../../data/mail'
+import { groupThreads, listFilter, type ListEntry, parseTab, shownTabs, TAB_INFO, threadActions, type MailTab, type ThreadChange } from '../../../data/mail'
 import * as mail from '../../../data/mail-api'
 import type { MailDraft, MailOutboundItem, MailThreadSummary } from '../../../data/mail-api'
 import { htmlToText, recipientSummary } from '../../../data/mail-compose'
@@ -23,11 +23,15 @@ import { useOrbit } from '../../../orbit-context'
 import { errorMessage } from '../../../session-context'
 import { alpha, useTheme } from '../../../theme'
 import { Button, EmptyState, ErrorView, HeaderTitle, Icon, IconButton, LoadingView, PaneHeader, PullRefresh, SafeAreaView, Spinner, Text } from '../../../ui'
+import { DropdownMenu } from '../../../ui/DropdownMenu'
 import { TextInput } from '../../../ui/scaled'
 
-/** The web's mail page at phone size: the search box, the folder tabs, and the list of the open tab. */
+/**
+ * The web's mail page at phone size: the search box, the folder tabs, and the list of the open tab. The drawer's mail
+ * folders (the web's sidebar) also open one mailbox (`mailbox`) or one label (`label`).
+ */
 export default function MailScreen() {
-  const params = useLocalSearchParams<{ tab?: string }>()
+  const params = useLocalSearchParams<{ tab?: string; mailbox?: string; label?: string }>()
   const tab = parseTab(params.tab)
   const { colors, scheme } = useTheme()
   const me = useMailMe()
@@ -41,8 +45,9 @@ export default function MailScreen() {
   const swipes = useMailSwipes()
   const source = TAB_INFO[tab].source
   const searching = query.trim() !== ''
-  const threadFilter = source.kind === 'threads' ? (unreadOnly ? { ...source.filter, unread: true } : source.filter) : {}
-  const list = useThreads(threadFilter, !searching && source.kind === 'threads')
+  const listed = listFilter(tab, { mailboxId: params.mailbox, labelId: params.label })
+  const threadFilter = listed ? (unreadOnly ? { ...listed, unread: true } : listed) : {}
+  const list = useThreads(threadFilter, !searching && listed !== null)
   const search = useMailSearch(query)
   const drafts = useDrafts()
   const outbox = useOutbound('outbox')
@@ -59,7 +64,8 @@ export default function MailScreen() {
     setQuery('')
     setTyped('')
     setUnreadOnly(false)
-    router.setParams({ tab: next === 'inbox' ? undefined : next })
+    // a tab keeps the open mailbox and leaves the label, like the web's folders
+    router.setParams({ tab: next === 'inbox' ? undefined : next, label: undefined })
   }
   const change = (thread: MailThreadSummary, next: ThreadChange) =>
     update.mutate({ threadId: thread.id, change: next }, { onError: (error) => Alert.alert('The change could not be saved.', errorMessage(error)) })
@@ -104,7 +110,12 @@ export default function MailScreen() {
     )
   }
 
-  const unreadCount = !searching && (tab === 'inbox' || tab === 'spam') ? (counts.data?.mailboxes ?? []).reduce((sum, mailbox) => sum + mailbox[tab], 0) : 0
+  const label = params.label ? labels.get(params.label) : undefined
+  const mailbox = params.mailbox ? mailboxes.find((entry) => entry.id === params.mailbox) : undefined
+  const unreadCount =
+    !searching && !params.label && (tab === 'inbox' || tab === 'spam')
+      ? (counts.data?.mailboxes ?? []).filter((entry) => !params.mailbox || entry.mailbox_id === params.mailbox).reduce((sum, entry) => sum + entry[tab], 0)
+      : 0
   const threadsShown = searching ? search : list
   const rows: MailThreadSummary[] = threadsShown.data ?? []
   const entries: ListEntry[] = groupThreads(rows, { sentView: tab === 'sent', grouped: !searching })
@@ -112,32 +123,43 @@ export default function MailScreen() {
     ? { title: 'No results', description: 'Try other words, or fewer operators.' }
     : unreadOnly
       ? { title: 'No unread conversations', description: 'You have read everything here.' }
-      : TAB_INFO[tab].empty
+      : params.label
+        ? { title: 'No conversations with this label', description: 'Add a label to a conversation to find it here.' }
+        : TAB_INFO[tab].empty
   const showsThreads = searching || source.kind === 'threads'
   const sendQuery = source.kind === 'drafts' ? drafts : source.kind === 'outbound' ? (source.view === 'outbox' ? outbox : scheduled) : null
 
   return (
     <SafeAreaView edges={['left', 'right']} className="flex-1 bg-background">
       <PaneHeader className="px-3">
-        <HeaderTitle>Mail</HeaderTitle>
+        <HeaderTitle>{label?.name ?? mailbox?.name ?? 'Mail'}</HeaderTitle>
         {unreadCount > 0 ? <Text className="text-[12px] text-muted-foreground">{unreadCount > 999 ? '999+' : unreadCount} unread</Text> : null}
         <View className="flex-1" />
         {source.kind === 'threads' && !searching ? (
-          <View accessibilityRole="radiogroup" accessibilityLabel="Show" className="flex-row rounded-md border border-border">
+          <View accessibilityRole="radiogroup" accessibilityLabel="Show" className="flex-row gap-2">
             {(['all', 'unread'] as const).map((value) => {
               const selected = (value === 'unread') === unreadOnly
               return (
-                <Pressable key={value} accessibilityRole="radio" accessibilityState={{ selected }} onPress={() => setUnreadOnly(value === 'unread')} className={`h-7 justify-center px-2 ${selected ? 'bg-muted' : ''}`}>
+                <Pressable key={value} accessibilityRole="radio" accessibilityState={{ selected }} onPress={() => setUnreadOnly(value === 'unread')} className={`h-7 justify-center rounded-lg border border-input px-2 ${selected ? 'bg-muted' : 'active:bg-muted'}`}>
                   <Text className={`text-[12px] ${selected ? 'text-foreground' : 'text-muted-foreground'}`}>{value === 'all' ? 'All' : 'Unread'}</Text>
                 </Pressable>
               )
             })}
           </View>
         ) : null}
-        <IconButton icon="edit" label="New email" disabled={start.isPending} onPress={() => start.mutate({ mode: 'new' })} />
+        {/* the web's list menu; Compose sits in the drawer, as in the web's sidebar */}
+        {source.kind === 'threads' ? (
+          <DropdownMenu
+            icon="more"
+            label="List actions"
+            color={alpha(colors.mutedForeground, 0.7)}
+            actions={[{ label: 'Mark all shown as read', icon: 'checkCircle', disabled: !rows.some((thread) => thread.unread), onPress: () => rows.filter((thread) => thread.unread).forEach((thread) => change(thread, { read: true })) }]}
+          />
+        ) : null}
       </PaneHeader>
-      <View className="flex-row items-center gap-2 border-b border-border px-3 py-2">
-        <Icon name="search" size={16} color={colors.mutedForeground} />
+      <View className="border-b border-border px-3 py-2">
+      <View className="h-8 flex-row items-center gap-2 rounded-lg border border-input pl-2.5 pr-1 dark:bg-input/30">
+        <Icon name="search" size={14} color={colors.mutedForeground} />
         <TextInput
           value={typed}
           onChangeText={setTyped}
@@ -150,7 +172,7 @@ export default function MailScreen() {
           autoCapitalize="none"
           autoCorrect={false}
           accessibilityLabel="Search mail"
-          className="flex-1 min-h-8 font-noto text-[16px] text-foreground"
+          className="flex-1 h-8 py-0 font-noto text-[16px] text-foreground"
         />
         {typed || query ? (
           <IconButton
@@ -163,9 +185,10 @@ export default function MailScreen() {
           />
         ) : null}
       </View>
+      </View>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} className="grow-0 border-b border-border" contentContainerClassName="min-h-10 items-center gap-1.5 px-3 py-1">
         {shownTabs(showOutbox).map((entry) => {
-          const active = !searching && entry === tab
+          const active = !searching && !params.label && entry === tab
           return (
             <Pressable key={entry} accessibilityRole="tab" accessibilityState={{ selected: active }} onPress={() => selectTab(entry)} className={`h-7 justify-center rounded-md px-2.5 ${active ? 'bg-primary/10' : 'active:bg-muted'}`}>
               <Text className={`text-[13px] ${active ? 'text-primary' : 'text-muted-foreground'}`}>{TAB_INFO[entry].label}</Text>
@@ -192,7 +215,7 @@ export default function MailScreen() {
               if (threadsShown.hasNextPage && !threadsShown.isFetchingNextPage) void threadsShown.fetchNextPage()
             }}
             ListFooterComponent={threadsShown.isFetchingNextPage ? <View className="py-3"><Spinner /></View> : undefined}
-            ListEmptyComponent={<EmptyState icon={searching ? 'search' : TAB_INFO[tab].icon} {...empty} />}
+            ListEmptyComponent={<EmptyState icon={searching ? 'search' : params.label ? 'tag' : TAB_INFO[tab].icon} {...empty} />}
             renderItem={({ item }) =>
               item.kind === 'group' ? (
                 <Text className="h-[30px] px-4 pb-1 pt-3 font-noto-medium text-[11px] uppercase tracking-wide text-muted-foreground">{item.label}</Text>

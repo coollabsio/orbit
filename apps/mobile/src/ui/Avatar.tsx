@@ -28,6 +28,8 @@ export interface AvatarProps {
   presence?: Presence
   /** The color behind the avatar: the badge's ring and cut-outs take it. */
   surface?: string
+  /** The colour, when it does not come from a user id (a mail sender's comes from the address). */
+  color?: string
   /** The picture's URL, when the caller knows it. Else the signed-in user's own, or the workspace member's. */
   url?: string | null
 }
@@ -53,12 +55,12 @@ function usePictureUrl(id: string, url: string | null | undefined): { uri: strin
 }
 
 /** The web `UserAvatar`: the person's picture, over the fallback of initials on a tint of their color on the muted surface. */
-export function Avatar({ id, name, size: baseSize = 24, presence, surface, url }: AvatarProps) {
+export function Avatar({ id, name, size: baseSize = 24, presence, surface, url, color }: AvatarProps) {
   const { colors } = useTheme()
   // Text size scales the avatar; the initials are sized from the base size, as `Text` scales them itself
   const scale = useUiScale()
   const size = baseSize * scale
-  const look = avatarColors(userColor(id), colors.muted, colors.foreground)
+  const look = avatarColors(color ?? userColor(id), colors.muted, colors.foreground)
   const picture = usePictureUrl(id, url)
   const [failed, setFailed] = useState<string | null>(null)
   return (

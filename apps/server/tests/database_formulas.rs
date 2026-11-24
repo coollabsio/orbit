@@ -1,4 +1,4 @@
-mod database_fixture;
+use crate::database_fixture;
 
 use axum::http::StatusCode;
 use database_fixture::{Fixture, id_of, problem, property};
