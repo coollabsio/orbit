@@ -590,6 +590,76 @@ async fn projection_writes_content_search_and_history_without_bumping_the_versio
 }
 
 #[tokio::test]
+async fn a_page_that_becomes_empty_or_not_empty_is_audited_within_the_interval() {
+    let root = TempDir::new().unwrap();
+    let server = Server::start(&root, fast_config()).await;
+    let users = setup(&server).await;
+    let page = create_page(
+        &server,
+        &users,
+        &users.owner,
+        json!({"title": "Notes"}),
+        "first",
+    )
+    .await;
+    let id = page["id"].as_str().unwrap();
+    let audits = || async {
+        scalar_i64(
+            &server,
+            "SELECT COUNT(*) FROM audit_events WHERE resource_id = $1 AND action = 'page.updated'",
+            id,
+        )
+        .await
+    };
+    let text = || async {
+        get_page(&server, &users, &users.owner, id).await["content"][0]["content"]
+            .as_array()
+            .map(|runs| {
+                runs.iter()
+                    .filter_map(|run| run["text"].as_str())
+                    .collect::<String>()
+            })
+            .unwrap_or_default()
+    };
+    let mut b = Client::open(&server, &users, &users.member, id).await;
+    b.type_text(5, " more").await;
+    wait_until("first projection", || async {
+        text().await == "first more"
+    })
+    .await;
+    let after_first = audits().await;
+
+    b.edit(|doc, txn| {
+        let node = paragraph_text(doc, txn, 0);
+        let len = node.len(txn);
+        node.remove_range(txn, 0, len);
+    })
+    .await;
+    wait_until("empty projection", || async { text().await.is_empty() }).await;
+    assert_eq!(audits().await, after_first + 1, "emptied: audited at once");
+
+    b.type_text(0, "back").await;
+    wait_until("refilled projection", || async { text().await == "back" }).await;
+    assert_eq!(
+        audits().await,
+        after_first + 2,
+        "not empty again: audited at once"
+    );
+
+    b.type_text(4, "!").await;
+    wait_until("plain edit projection", || async {
+        text().await == "back!"
+    })
+    .await;
+    assert_eq!(
+        audits().await,
+        after_first + 2,
+        "other edits stay throttled"
+    );
+    server.stop().await;
+}
+
+#[tokio::test]
 async fn moving_into_a_private_space_closes_4403_and_trash_closes_4404() {
     let root = TempDir::new().unwrap();
     let server = Server::start(&root, fast_config()).await;

@@ -303,7 +303,7 @@ async fn pages_can_be_created_read_updated_and_listed_in_tree_order() {
     let clamped = fixture
         .create(json!({"parent_id": id_of(&guide), "title": "Last", "position": 99}))
         .await;
-    assert_eq!(clamped["position"], 2);
+    assert_eq!(clamped["parent_id"], guide["id"]);
 
     let tree = fixture.tree().await;
     let titles = tree
@@ -311,15 +311,8 @@ async fn pages_can_be_created_read_updated_and_listed_in_tree_order() {
         .map(|page| page["title"].as_str().unwrap())
         .collect::<Vec<_>>();
     assert_eq!(titles, ["", "Guide", "First", "Appended", "Last"]);
-    assert_eq!(
-        tree.iter()
-            .map(|page| page["position"].as_i64().unwrap())
-            .collect::<Vec<_>>(),
-        [0, 1, 0, 1, 2]
-    );
     assert!(tree[0].get("content").is_none());
     assert_eq!(tree[2]["parent_id"], guide["id"]);
-    assert_eq!(fixture.get(id_of(&appended)).await["position"], 1);
     assert_eq!(fixture.get(id_of(&first)).await["title"], "First");
 
     let content = json!([
@@ -490,12 +483,6 @@ async fn moves_renumber_siblings_and_reject_cycles() {
     assert_eq!(nested["parent_id"], b["id"]);
     let tree = fixture.tree().await;
     assert_eq!(titles(&tree), ["C", "B", "A"]);
-    assert_eq!(
-        tree.iter()
-            .map(|page| page["position"].as_i64().unwrap())
-            .collect::<Vec<_>>(),
-        [0, 1, 0]
-    );
 
     let grandchild = fixture
         .create(json!({"parent_id": id_of(&a), "title": "A1"}))
@@ -1774,7 +1761,6 @@ async fn moving_a_root_between_spaces_takes_its_whole_subtree() {
             ("Trashed child".to_owned(), Some(general.clone()), None),
         ]
     );
-    assert_eq!(fixture.get(id_of(&shared)).await["position"], 1);
     assert_eq!(fixture.get(id_of(&child)).await["version"], 0);
     assert_eq!(
         member_titles().await,
@@ -1937,13 +1923,10 @@ async fn restore_goes_to_the_root_of_the_page_own_space() {
     assert_eq!(restored["parent_id"], Value::Null);
     assert_eq!(restored["private"], true);
     assert_eq!(restored["teamspace_id"], Value::Null);
-    // It keeps its old index (0) among the private roots; only that space is renumbered.
-    assert_eq!(restored["position"], 0);
+    // It goes back to its old place (first) among the private roots.
     let tree = fixture.tree().await;
     assert_eq!(titles(&tree), ["Team root", "Child", "First private"]);
-    assert_eq!(tree[0]["position"], 0);
     assert_eq!(tree[2]["id"], first["id"]);
-    assert_eq!(tree[2]["position"], 1);
 }
 
 #[tokio::test]

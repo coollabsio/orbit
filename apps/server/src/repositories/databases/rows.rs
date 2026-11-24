@@ -19,7 +19,7 @@ use super::{computed, files, relations, search, templates, unique_id};
 use crate::billing::TrialLimit;
 use crate::collab::CollabHub;
 use crate::repositories::billing::ensure_trial_capacity;
-use crate::repositories::pages::{PageSpace, renumber_spaced};
+use crate::repositories::pages::{POSITION_GAP, PageSpace, renumber_spaced};
 
 impl DatabaseRepository {
     pub async fn create_row(
@@ -447,6 +447,45 @@ impl DatabaseRepository {
     }
 }
 
+impl DatabaseRepository {
+    /// Gives the rows of one database whose positions have no room between them (numbered
+    /// `0..n` before rows got gaps) positions with gaps, in one short transaction. Returns how
+    /// many databases it spread: 0 when none is left, so a caller repeats until then. A request
+    /// then never spreads a large database itself. Safe to run again: a spread database is not
+    /// picked again.
+    pub async fn spread_dense_rows(&self) -> Result<usize, DatabaseError> {
+        let next = sqlx::query(sqlx::AssertSqlSafe(format!(
+            "SELECT parent.workspace_id AS workspace_id, parent.id AS database_id FROM pages \
+             JOIN pages AS parent ON parent.id = pages.parent_id AND parent.kind = 'database' \
+             WHERE pages.deleted_at IS NULL AND {NOT_TEMPLATE} \
+             GROUP BY parent.workspace_id, parent.id \
+             HAVING COUNT(*) > 1 AND MAX(pages.position) - MIN(pages.position) < (COUNT(*) - 1) * 2 \
+             LIMIT 1"
+        )))
+        .fetch_optional(self.database.pool())
+        .await?;
+        let Some(next) = next else {
+            return Ok(0);
+        };
+        let workspace_id = parse_id(&next.get::<String, _>("workspace_id"))?;
+        let database_id = parse_id(&next.get::<String, _>("database_id"))?;
+        let mut tx = self.database.workspace_transaction(workspace_id).await?;
+        let ids: Vec<Id> = sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(format!(
+            "SELECT id FROM pages WHERE parent_id = $1 AND deleted_at IS NULL AND {NOT_TEMPLATE} \
+             ORDER BY position, id"
+        )))
+        .bind(database_id.to_string())
+        .fetch_all(&mut *tx)
+        .await?
+        .iter()
+        .map(|id| parse_id(id))
+        .collect::<Result<_, _>>()?;
+        renumber_spaced(&mut tx, &ids).await?;
+        tx.commit().await?;
+        Ok(1)
+    }
+}
+
 pub(super) async fn require_row(
     tx: &mut Transaction<'_, Any>,
     database_id: Id,
@@ -469,14 +508,9 @@ pub(super) fn insert_index(position: Option<i64>, len: usize) -> usize {
     })
 }
 
-/// Room between the positions of neighbouring rows, so a new or moved row takes the middle of
-/// its neighbours and no other row is written. When two neighbours have no room left (after
-/// about 16 rows put into one gap, or rows numbered `0..n` by page moves), every row of the
-/// database is spread again once.
-const ROW_GAP: i64 = 1 << 16;
-
 /// The position for a row (`row_id`, left out of its siblings) at `placement` among the live rows
-/// of `database_id` in `space`.
+/// of `database_id` in `space`: the middle of its neighbours, so no other row is written. When the
+/// neighbours have no room left, every row of the database is spread once.
 async fn row_position(
     tx: &mut Transaction<'_, Any>,
     workspace_id: Id,
@@ -495,7 +529,7 @@ async fn row_position(
         return Ok(position);
     }
     let ids = templates::row_ids(tx, workspace_id, space, database_id, row_id).await?;
-    renumber_spaced(tx, &ids, ROW_GAP).await?;
+    renumber_spaced(tx, &ids).await?;
     siblings
         .free_position(tx, placement)
         .await?
@@ -527,12 +561,12 @@ impl Siblings {
             RowPlacement::First => Some(
                 self.edge(tx, Edge::First)
                     .await?
-                    .map_or(0, |(position, _)| position - ROW_GAP),
+                    .map_or(0, |(position, _)| position - POSITION_GAP),
             ),
             RowPlacement::Last => Some(
                 self.edge(tx, Edge::Last)
                     .await?
-                    .map_or(0, |(position, _)| position + ROW_GAP),
+                    .map_or(0, |(position, _)| position + POSITION_GAP),
             ),
             RowPlacement::After(after) => {
                 let (before, id) = self
@@ -540,7 +574,7 @@ impl Siblings {
                     .await?
                     .ok_or_else(|| DatabaseError::invalid("after_row_id"))?;
                 match self.edge(tx, Edge::Next(before, id)).await? {
-                    None => Some(before + ROW_GAP),
+                    None => Some(before + POSITION_GAP),
                     Some((next, _)) if next - before >= 2 => Some(before + (next - before) / 2),
                     Some(_) => None,
                 }

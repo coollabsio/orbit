@@ -92,6 +92,9 @@ const SCHEDULED_BACKUP: &str = "backup.scheduled";
 /// have none. After a database schema change: computes those of every row of that database again.
 /// A batch per transaction.
 const SEARCH_TEXT_FILL: &str = crate::repositories::databases::SEARCH_TEXT_JOB;
+/// Daily, and first at startup: gives database rows numbered `0..n` (before rows got gaps)
+/// positions with gaps, a database per transaction.
+const ROW_POSITIONS_SPREAD: &str = "docs.row_positions";
 
 pub struct App {
     config: Config,
@@ -1416,6 +1419,20 @@ async fn initialize_production_services(
             )
         })
         .and_then(|worker| {
+            let databases =
+                crate::repositories::databases::DatabaseRepository::new(database.clone());
+            worker.with_handler(maintenance_kind(ROW_POSITIONS_SPREAD), move |_| {
+                let databases = databases.clone();
+                async move {
+                    while databases.spread_dense_rows().await.map_err(|error| {
+                        JobError::Retryable(format!("spreading row positions failed: {error}"))
+                    })? > 0
+                    {}
+                    Ok(())
+                }
+            })
+        })
+        .and_then(|worker| {
             crate::notion::import::register_jobs(worker, notion_imports, import_notices.clone())
         })
         .and_then(|worker| {
@@ -1622,6 +1639,13 @@ async fn initialize_production_services(
         &scheduler,
         SEARCH_TEXT_FILL,
         Duration::from_secs(60 * 60),
+        now,
+    )
+    .await?;
+    ensure_schedule(
+        &scheduler,
+        ROW_POSITIONS_SPREAD,
+        Duration::from_secs(24 * 60 * 60),
         now,
     )
     .await?;

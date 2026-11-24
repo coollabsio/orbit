@@ -1666,6 +1666,18 @@ impl PageRepository {
             }
             project_collab_content(&mut tx, linking_id, &content, None, false, request_id, now)
                 .await?;
+            // Its own transaction, after the trash's event: clients learn of this change too.
+            record_mutation(
+                &mut tx,
+                workspace_id,
+                actor_id,
+                "page.updated",
+                "page",
+                linking_id,
+                request_id,
+                now,
+            )
+            .await?;
             collab.replace(&mut tx, &content, actor_id, now).await?;
             tx.commit().await?;
             collab.commit();
@@ -1750,7 +1762,12 @@ impl PageRepository {
             ensure_row_capacity(&mut tx, database_id, 1).await?;
         }
         let mut siblings = sibling_ids(&mut tx, workspace_id, space, parent_id, page_id).await?;
-        let index = insert_index(Some(current.position), siblings.len());
+        // Back where it was: before the first sibling at or after its stored position.
+        let index = positions(&mut tx, &siblings)
+            .await?
+            .iter()
+            .position(|position| *position >= current.position)
+            .unwrap_or(siblings.len());
         siblings.insert(index, page_id);
         sqlx::query(
             "WITH RECURSIVE subtree(id) AS ( \
@@ -3000,31 +3017,73 @@ pub(super) async fn sibling_ids(
     .collect()
 }
 
+/// Room left between the positions of neighbouring pages, so a page put between two others
+/// takes the middle and no other page is written. About 16 pages fit into one gap.
+pub(super) const POSITION_GAP: i64 = 1 << 16;
+
+/// Puts `ids` in this order and writes as few rows as possible (see [`placed`]).
 pub(super) async fn renumber(tx: &mut Transaction<'_, Any>, ids: &[Id]) -> Result<(), PageError> {
-    renumber_spaced(tx, ids, 1).await?;
+    let current = positions(tx, ids).await?;
+    let wanted = placed(&current).unwrap_or_else(|| spread(ids.len()));
+    write_positions(tx, ids, &wanted).await?;
     Ok(())
 }
 
-/// Gives `ids` the positions `0, step, 2 * step, …` in their order. One statement per batch, and
-/// only rows whose position changes are written.
+/// Gives `ids` the positions `0, POSITION_GAP, 2 * POSITION_GAP, …` in their order.
 pub(super) async fn renumber_spaced(
     tx: &mut Transaction<'_, Any>,
     ids: &[Id],
-    step: i64,
 ) -> Result<(), sqlx::Error> {
-    const BATCH: usize = 200;
-    for (batch, chunk) in ids.chunks(BATCH).enumerate() {
+    write_positions(tx, ids, &spread(ids.len())).await
+}
+
+fn spread(len: usize) -> Vec<i64> {
+    (0..len).map(|at| at as i64 * POSITION_GAP).collect()
+}
+
+/// The stored position of each of `ids`, in their order.
+async fn positions(tx: &mut Transaction<'_, Any>, ids: &[Id]) -> Result<Vec<i64>, sqlx::Error> {
+    let mut found = HashMap::with_capacity(ids.len());
+    for chunk in ids.chunks(POSITION_BATCH) {
+        let mut query = SqlBuilder::new("SELECT id, position FROM pages WHERE id IN (");
+        let mut list = query.separated(", ");
+        for id in chunk {
+            list.push_bind(id.to_string());
+        }
+        query.push(")");
+        for row in query.build().fetch_all(&mut **tx).await? {
+            found.insert(row.get::<String, _>("id"), row.get::<i64, _>("position"));
+        }
+    }
+    Ok(ids
+        .iter()
+        .map(|id| found.get(&id.to_string()).copied().unwrap_or(0))
+        .collect())
+}
+
+const POSITION_BATCH: usize = 200;
+
+/// Writes `positions[i]` to `ids[i]`: one statement per batch, and only rows whose position
+/// changes.
+async fn write_positions(
+    tx: &mut Transaction<'_, Any>,
+    ids: &[Id],
+    positions: &[i64],
+) -> Result<(), sqlx::Error> {
+    for (ids, positions) in ids
+        .chunks(POSITION_BATCH)
+        .zip(positions.chunks(POSITION_BATCH))
+    {
         let mut query = SqlBuilder::new("WITH wanted(id, position) AS (VALUES ");
-        for (offset, id) in chunk.iter().enumerate() {
+        for (offset, (id, position)) in ids.iter().zip(positions).enumerate() {
             if offset > 0 {
                 query.push(", ");
             }
-            let position = ((batch * BATCH + offset) as i64) * step;
             query
                 .push("(")
                 .push_bind(id.to_string())
                 .push(", CAST(")
-                .push_bind(position)
+                .push_bind(*position)
                 .push(" AS BIGINT))");
         }
         query.push(
@@ -3035,6 +3094,66 @@ pub(super) async fn renumber_spaced(
         query.build().execute(&mut **tx).await?;
     }
     Ok(())
+}
+
+/// New positions for a list whose current positions are `current`, in the wanted order: the
+/// longest run of entries whose positions already increase keeps them, and each other entry takes
+/// an evenly spaced free position between its kept neighbours. `None` when a stretch between two
+/// kept entries has no room; the caller then spreads the whole list.
+fn placed(current: &[i64]) -> Option<Vec<i64>> {
+    let mut wanted = current.to_vec();
+    let kept = longest_increasing(current);
+    let mut previous: Option<usize> = None;
+    for next in kept.iter().copied().map(Some).chain([None]) {
+        let from = previous.map_or(0, |at| at + 1);
+        let to = next.unwrap_or(current.len());
+        let count = (to - from) as i64;
+        if count > 0 {
+            let low = previous.map(|at| current[at]);
+            let high = next.map(|at| current[at]);
+            for (n, slot) in wanted[from..to].iter_mut().enumerate() {
+                let n = n as i64 + 1;
+                *slot = match (low, high) {
+                    (Some(low), Some(high)) => {
+                        let step = (high - low) / (count + 1);
+                        if step < 1 {
+                            return None;
+                        }
+                        low + step * n
+                    }
+                    (Some(low), None) => low + POSITION_GAP * n,
+                    (None, Some(high)) => high - POSITION_GAP * (count + 1 - n),
+                    (None, None) => (n - 1) * POSITION_GAP,
+                };
+            }
+        }
+        previous = next;
+    }
+    Some(wanted)
+}
+
+/// Indexes of a longest strictly increasing subsequence of `values`, in order.
+fn longest_increasing(values: &[i64]) -> Vec<usize> {
+    // tails[k]: index of the smallest last value of an increasing run of length k + 1.
+    let mut tails: Vec<usize> = Vec::new();
+    let mut before = vec![None; values.len()];
+    for (at, value) in values.iter().enumerate() {
+        let k = tails.partition_point(|&tail| values[tail] < *value);
+        before[at] = k.checked_sub(1).map(|k| tails[k]);
+        if k == tails.len() {
+            tails.push(at);
+        } else {
+            tails[k] = at;
+        }
+    }
+    let mut run = Vec::with_capacity(tails.len());
+    let mut at = tails.last().copied();
+    while let Some(index) = at {
+        run.push(index);
+        at = before[index];
+    }
+    run.reverse();
+    run
 }
 
 /// True when `ancestor` is on the parent chain of `page_id`.
@@ -3617,9 +3736,35 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        SEARCH_MAX_TERMS, TextRange, content_text, fts_query, pg_tsquery, split_marks,
-        with_ellipses,
+        POSITION_GAP, SEARCH_MAX_TERMS, TextRange, content_text, fts_query, pg_tsquery, placed,
+        split_marks, with_ellipses,
     };
+
+    #[test]
+    fn a_list_in_order_keeps_every_position() {
+        assert_eq!(placed(&[0, 5, 9]), Some(vec![0, 5, 9]));
+        assert_eq!(placed(&[]), Some(vec![]));
+    }
+
+    #[test]
+    fn only_the_moved_entry_gets_a_new_position() {
+        // The entry at 9 moved between 0 and 5.
+        assert_eq!(placed(&[0, 9, 5]), Some(vec![0, 2, 5]));
+        // Moved first, and moved last.
+        assert_eq!(placed(&[9, 0, 5]), Some(vec![-POSITION_GAP, 0, 5]));
+        assert_eq!(placed(&[5, 9, 0]), Some(vec![5, 9, 9 + POSITION_GAP]));
+    }
+
+    #[test]
+    fn several_entries_share_a_gap_evenly() {
+        assert_eq!(placed(&[0, 99, 98, 10]), Some(vec![0, 3, 6, 10]));
+    }
+
+    #[test]
+    fn no_room_asks_for_a_spread() {
+        assert_eq!(placed(&[0, 5, 1]), None);
+        assert_eq!(placed(&[3, 3]), Some(vec![3 - POSITION_GAP, 3]));
+    }
 
     #[test]
     fn content_text_walks_blocks_in_document_order() {

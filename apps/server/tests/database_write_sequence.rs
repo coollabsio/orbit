@@ -794,3 +794,37 @@ async fn every_database_write_bumps_the_workspace_sequence() {
         p.misses.join("\n")
     );
 }
+
+#[tokio::test]
+async fn trashing_a_page_that_a_row_body_links_to_sends_an_event_for_the_row() {
+    let f = Fixture::new().await;
+    let db = f.create_database("Linked").await;
+    let row_id = id_of(&f.add_row(&db, json!({"title": "Row"})).await).to_owned();
+    let target = id_of(&f.create_page(json!({"title": "Target"})).await).to_owned();
+    f.set_content(
+        &row_id,
+        json!([{"id": "b1", "type": "page", "props": {"pageId": target}, "children": []}]),
+    )
+    .await;
+    let events = || async {
+        f.count(
+            "SELECT COUNT(*) FROM audit_events WHERE resource_id = $1 AND action = 'page.updated'",
+            &row_id,
+        )
+        .await
+    };
+    let before = events().await;
+
+    f.trash_page(&target).await;
+
+    assert_eq!(
+        f.page(&row_id).await["content"],
+        json!([]),
+        "the link is gone"
+    );
+    assert_eq!(
+        events().await,
+        before + 1,
+        "the row's own change sends an event"
+    );
+}

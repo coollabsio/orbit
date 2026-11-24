@@ -2946,7 +2946,59 @@ async fn rows_put_into_one_gap_again_and_again_keep_their_order() {
             Some(json!({"after_row_id": id_of(&first)})),
         )
         .await;
-    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "a row cannot follow itself");
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "a row cannot follow itself"
+    );
+}
+
+#[tokio::test]
+async fn the_spread_job_gives_old_rows_gaps_once_and_keeps_their_order() {
+    let fixture = Fixture::new().await;
+    let db = fixture.create_database("Old").await;
+    seed_rows(&fixture, &db, 5).await;
+    let order = || async {
+        fixture.database(&db).await["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| {
+                (
+                    row["id"].as_str().unwrap().to_owned(),
+                    row["position"].as_i64().unwrap(),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    let before = order().await;
+    assert_eq!(
+        before
+            .iter()
+            .map(|(_, position)| *position)
+            .collect::<Vec<_>>(),
+        [0, 1, 2, 3, 4]
+    );
+
+    let repository =
+        orbit_server::repositories::databases::DatabaseRepository::new((*fixture.database).clone());
+    assert_eq!(repository.spread_dense_rows().await.unwrap(), 1);
+    assert_eq!(
+        repository.spread_dense_rows().await.unwrap(),
+        0,
+        "nothing left to spread"
+    );
+
+    let after = order().await;
+    let ids = |rows: &[(String, i64)]| rows.iter().map(|(id, _)| id.clone()).collect::<Vec<_>>();
+    assert_eq!(ids(&after), ids(&before), "same order");
+    assert_eq!(
+        after
+            .iter()
+            .map(|(_, position)| *position)
+            .collect::<Vec<_>>(),
+        [0, 65_536, 131_072, 196_608, 262_144]
+    );
 }
 
 /// Runs the search text jobs that requests queued, as the worker does; returns how many.

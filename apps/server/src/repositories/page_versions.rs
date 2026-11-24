@@ -403,7 +403,13 @@ pub(crate) async fn project_collab_content(
         now,
     )
     .await?;
-    if audit && let Some(editor) = editor {
+    // A page that becomes empty or not empty changes what database views show (`has_content`), so
+    // it is audited, with its realtime event, even between the editor's audit intervals.
+    let emptiness_changed =
+        content_text(&current.content).is_empty() != content_text(content).is_empty();
+    if (audit || emptiness_changed)
+        && let Some(editor) = editor
+    {
         record_mutation(
             tx,
             current.workspace_id,

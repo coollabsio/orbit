@@ -401,12 +401,16 @@ New rollout order, replacing section 6:
 ### 9.5 Write paths the realtime sequence does not see
 
 Found by step 1. Clients also depend on these events (`workspace.changed` refetches), so they matter without a
-cache too:
+cache too. Both are fixed:
 
-- Live editor (collab) edits of a row body: `collab/hub.rs:1033` audits at most every 10 minutes. A row that
-  becomes empty or not empty again within that time changes `has_content` with no event.
-- Restore cleanup of linking pages: `pages.rs:1667` calls `project_collab_content(..., audit: false, ...)`. If a
-  linking page is a row, its `has_content` can change with no event.
+- Live editor (collab) edits of a row body: `collab/hub.rs:1033` audits at most every 10 minutes. A page that
+  became empty or not empty again within that time changed `has_content` with no event. Now
+  `project_collab_content` audits such a change at once (test:
+  `collab_api::a_page_that_becomes_empty_or_not_empty_is_audited_within_the_interval`).
+- Cleanup of links to a trashed page (`unlink_trashed`, `pages.rs`): it rewrote linking pages in their own
+  transactions with no audit event. A page block has no text, so this never changes `has_content`, but clients
+  that show the linking page stayed stale. Now each rewritten page records `page.updated` (test:
+  `database_write_sequence::trashing_a_page_that_a_row_body_links_to_sends_an_event_for_the_row`).
 
 ### 9.6 Step 2 result (2026-11-24)
 
@@ -437,11 +441,17 @@ Measured with `database_scale_bench`, Postgres, single runs:
 ¹ The 5k runs used the first version, which set the text of all rows to `NULL` inside the request (4.3 s at 50k).
 The job version replaced it.
 
-Open:
+Follow-up fixes (same day):
 
-- The first move or "insert between" in a database whose rows still have `0..n` positions spreads every row in
-  the request: 278 ms at 5k, 2.5 s at 50k. Before the cap rises above 5,000, spread old databases in a batched job
-  or a migration.
-- Page-tree paths that place a row (restore, move into a database, page create under a database) still renumber
-  `0..n`. They are now batched, but they write every row after the insert point.
-- Creating a row at 50k still takes 287 ms (not profiled; `ensure_row_capacity` counts every row).
+- **`renumber` keeps positions.** It reads the current positions, keeps those of the longest run that is already
+  in order, and gives each other page an evenly spaced free position between its kept neighbours
+  (`pages.rs`, `placed`). Only when a stretch has no room is the whole list spread with gaps. All page lists
+  use it (page tree, rows moved into or out of a database, restore, duplicate), so these paths write only the
+  pages that move and no longer number a database's rows `0..n` again. Page-tree positions now have gaps too;
+  clients send list indexes for moves and sort by position, so they need no change.
+- **Restore** puts a page before the first sibling at or after its stored position (before: it used the
+  stored position as a list index, which breaks with gaps).
+- **`docs.row_positions` job** (daily, first at startup): gives the rows of each database numbered `0..n`
+  positions with gaps, a database per transaction (`spread_dense_rows`). A request then never spreads a large
+  old database. On the dev env the job spread a 4-row `0..n` database within 24 s of being due.
+- Creating a row at 50k still takes 287 ms (not profiled; `ensure_row_capacity` counts every row). Open.
