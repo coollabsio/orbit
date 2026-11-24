@@ -7,8 +7,8 @@ use orbit_server::repositories::tasks::{GithubWorkItem, TaskRepository};
 use serde_json::{Value, json};
 use tempfile::TempDir;
 
-mod collab_support;
-mod shared_postgres;
+use crate::collab_support;
+use crate::shared_postgres;
 
 use collab_support::*;
 

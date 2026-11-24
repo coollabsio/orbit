@@ -1657,6 +1657,7 @@ fn every_public_api_route_is_documented() {
             "has_due_date",
             "parent_task_id",
             "q",
+            "view_id",
             "cursor",
             "limit",
         ]

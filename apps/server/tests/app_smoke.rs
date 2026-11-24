@@ -571,8 +571,11 @@ async fn critical_durable_schedules_exist_before_serve() {
             "backup.scheduled",
             "docs.search_text",
             "integrity.weekly",
+            "mail.certificate.renew",
             "mail.dns_check",
             "mail.purge",
+            "mail.send_policy",
+            "mail.send_sweep",
             "notion.cleanup",
             "workspace.retention"
         ]

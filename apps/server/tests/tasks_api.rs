@@ -612,19 +612,25 @@ async fn members_can_crud_all_task_area_resources_and_unknown_fields_are_rejecte
         .unwrap();
     assert_eq!(deleted.status(), StatusCode::NO_CONTENT);
 
+    // Labels belong to the project's settings: a plain member does not manage a project they
+    // did not create, so only its manager deletes the label.
+    let label_uri = format!(
+        "/api/v1/workspaces/{}/projects/{}/labels/{}?expected_version=0",
+        fixture.workspace_id,
+        fixture.project_id,
+        label["id"].as_str().unwrap()
+    );
+    let refused_label = fixture
+        .app
+        .clone()
+        .oneshot(cookie_request("DELETE", &label_uri, &member_cookie))
+        .await
+        .unwrap();
+    assert_eq!(refused_label.status(), StatusCode::FORBIDDEN);
     let deleted_label = fixture
         .app
         .clone()
-        .oneshot(cookie_request(
-            "DELETE",
-            &format!(
-                "/api/v1/workspaces/{}/projects/{}/labels/{}?expected_version=0",
-                fixture.workspace_id,
-                fixture.project_id,
-                label["id"].as_str().unwrap()
-            ),
-            &member_cookie,
-        ))
+        .oneshot(cookie_request("DELETE", &label_uri, &fixture.owner_cookie))
         .await
         .unwrap();
     assert_eq!(deleted_label.status(), StatusCode::NO_CONTENT);
@@ -2021,10 +2027,8 @@ async fn patch_preserves_status_description_and_text_limits_preserve_source() {
         .await
         .unwrap();
     assert_eq!(comment.status(), StatusCode::CREATED);
-    assert_eq!(
-        response_json(comment).await["body"],
-        "  exact comment source  \n"
-    );
+    // Spaces and empty lines around a comment are trimmed, as in the editor.
+    assert_eq!(response_json(comment).await["body"], "exact comment source");
 
     let oversized_bytes = "😀".repeat(300);
     let rejected = fixture

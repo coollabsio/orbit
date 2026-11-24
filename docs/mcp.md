@@ -354,7 +354,7 @@ token in settings and repeat the request; it must return HTTP 401.
 For automated checks:
 
 ```bash
-cargo test -p orbit-server --test oauth_api --test mcp_api
+cargo test -p orbit-server --test it -- oauth_api:: mcp_api::
 cargo test -p orbit-platform --test http_security
 ```
 

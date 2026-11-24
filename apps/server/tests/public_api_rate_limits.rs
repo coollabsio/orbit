@@ -15,7 +15,7 @@ use orbit_server::repositories::identity::{IdentityRepository, SetupRequest};
 use tempfile::TempDir;
 use tower::ServiceExt;
 
-mod shared_postgres;
+use crate::shared_postgres;
 
 const COOKIE: &str = "orbit_session_dev";
 const ORIGIN: &str = "http://127.0.0.1:8080";

@@ -7,6 +7,28 @@ edition = "2024"
 version = "0.4.1"
 license = "Apache-2.0"
 
+# Dev and test builds: line numbers only for our crates, no debug info for dependencies.
+# Source: https://doc.rust-lang.org/cargo/guide/build-performance.html
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
+# Build scripts and proc macros (serde, utoipa, sqlx) run faster when optimized.
+[profile.dev.build-override]
+opt-level = 3
+
+# Tests hash passwords and run SQLite a lot; optimized, these crates make slow tests about 2x faster.
+[profile.dev.package.libsqlite3-sys]
+opt-level = 3
+
+[profile.dev.package.argon2]
+opt-level = 3
+
+[profile.dev.package.blake2]
+opt-level = 3
+
 # Removes the symbol table (about 13 MB). Panic backtraces then show addresses, not function names.
 [profile.release]
 strip = true

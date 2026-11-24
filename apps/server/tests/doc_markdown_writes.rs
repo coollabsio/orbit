@@ -13,9 +13,7 @@ use serde_json::{Value, json};
 use yrs::types::text::YChange;
 use yrs::{Any, Doc, Out, ReadTxn, Text, Transact, Xml, XmlElementRef, XmlFragment, XmlOut};
 
-mod collab_support;
-#[allow(dead_code)] // `collab_support` needs it.
-mod shared_postgres;
+use crate::collab_support;
 
 use collab_support::{Client, Server, Users, wait_until};
 
