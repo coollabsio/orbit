@@ -192,7 +192,7 @@ async fn only_the_root_user_saves_mail_settings_and_the_password_is_encrypted() 
     assert_eq!(body["code"], "email_not_configured");
     assert_eq!(
         call(app, "GET", "/api/v1/auth/options", None, None).await.1,
-        json!({"registration_open": false, "email_enabled": false, "passkeys_enabled": false, "billing_enabled": false, "mail_enabled": false, "providers": [], "provider_registration_open": false, "version": env!("CARGO_PKG_VERSION")})
+        json!({"registration_open": false, "email_enabled": false, "passkeys_enabled": false, "billing_enabled": false, "mail_enabled": false, "providers": [], "provider_registration_open": false, "oidc_provision": false, "oidc_name": null, "version": env!("CARGO_PKG_VERSION")})
     );
 
     let (status, body) = call(
@@ -241,7 +241,7 @@ async fn only_the_root_user_saves_mail_settings_and_the_password_is_encrypted() 
     assert_eq!(body["registration_open"], true);
     assert_eq!(
         call(app, "GET", "/api/v1/auth/options", None, None).await.1,
-        json!({"registration_open": true, "email_enabled": true, "passkeys_enabled": false, "billing_enabled": false, "mail_enabled": false, "providers": [], "provider_registration_open": false, "version": env!("CARGO_PKG_VERSION")})
+        json!({"registration_open": true, "email_enabled": true, "passkeys_enabled": false, "billing_enabled": false, "mail_enabled": false, "providers": [], "provider_registration_open": false, "oidc_provision": false, "oidc_name": null, "version": env!("CARGO_PKG_VERSION")})
     );
 
     // Mail on (the switch is in Admin → Inbound mail): the web reads it here to show the mail app.
@@ -854,8 +854,9 @@ async fn environment_settings_replace_the_saved_ones_and_admin_cannot_change_the
     );
     assert_eq!(
         body["environment"],
-        json!({"registration_open": true, "smtp": true, "s3": false, "attachments_in_s3": false,
-               "backups_in_s3": false, "backup_schedule": false, "sign_in_providers": ["github"]})
+        json!({"registration_open": true, "oidc_provision": false, "smtp": true, "s3": false,
+               "attachments_in_s3": false, "backups_in_s3": false, "backup_schedule": false,
+               "s3_keep_deleted_days": false, "sign_in_providers": ["github"]})
     );
     assert_eq!(
         call(app, "GET", "/api/v1/auth/options", None, None).await.1["registration_open"],

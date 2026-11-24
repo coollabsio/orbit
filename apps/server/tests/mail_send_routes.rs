@@ -643,7 +643,7 @@ async fn secrets_never_in_responses() {
         .admin(
             "POST",
             "/send-routes",
-            Some(json!({ "kind": "resend", "name": "R", "secrets": { "api_key": "k" } })),
+            Some(json!({ "kind": "resend", "name": "R", "secrets": { "webhook_secret": "w" } })),
         )
         .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
@@ -664,15 +664,17 @@ async fn send_route_from_provider() {
         .await;
     assert_eq!(status, StatusCode::CREATED, "{provider}");
     let provider_id = provider["id"].as_str().unwrap().to_owned();
-    // the inbound webhook's secret is not the events webhook's: the admin enters it
-    let (status, _) = fixture
+    // the inbound webhook's secret is not the events webhook's: it is optional, and without it
+    // the route sends but Orbit refuses its events
+    let (status, without_events) = fixture
         .admin(
             "POST",
             &format!("/providers/{provider_id}/send-route"),
             Some(json!({})),
         )
         .await;
-    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(status, StatusCode::CREATED, "{without_events}");
+    assert_eq!(without_events["secrets_set"], json!(["api_key"]));
     let (status, route) = fixture
         .admin(
             "POST",

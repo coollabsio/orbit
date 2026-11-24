@@ -640,7 +640,7 @@ async fn an_owner_exports_tasks_pages_chat_and_files_and_downloads_one_zip() {
 #[tokio::test]
 async fn a_read_only_workspace_still_exports_through_the_background_job() {
     let mut harness = Harness::new(true).await;
-    sqlx::query("UPDATE workspaces SET billing_exempt = 0, created_at = $1 WHERE id = $2")
+    sqlx::query("UPDATE workspaces SET billing_exempt = 0, created_at = $1, trial_started_at = $1 WHERE id = $2")
         .bind(TimestampMillis::now().as_millis() - 30 * DAY_MILLIS)
         .bind(&harness.workspace_id)
         .execute(harness.database.pool())
