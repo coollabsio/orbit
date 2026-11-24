@@ -635,6 +635,7 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::mail_routes::mailboxes::add_mailbox_member,
         crate::mail_routes::mailboxes::remove_mailbox_member,
         crate::mail_routes::mailboxes::add_mailbox_alias,
+        crate::mail_routes::mailboxes::update_mailbox_address,
         crate::mail_routes::mailboxes::remove_mailbox_address,
         crate::mail_routes::mailboxes::preview_personal_mailboxes,
         crate::mail_routes::mailboxes::create_personal_mailboxes,

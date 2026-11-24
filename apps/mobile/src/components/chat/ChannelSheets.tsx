@@ -5,7 +5,7 @@
 import { ApiProblem } from '@orbit/api/problem'
 import { router } from 'expo-router'
 import { useState } from 'react'
-import { Pressable, Switch, View } from 'react-native'
+import { Pressable, View } from 'react-native'
 
 import { addablePeople, CHANNEL_NAME_MAX, channelNameFinal, channelNameInput, matchPeople, messageablePeople, type Person, pickablePeople } from '../../data/chat'
 import * as chat from '../../data/chat-api'
@@ -15,6 +15,7 @@ import { useOrbit } from '../../orbit-context'
 import { useChatCategories, useConversations, useMembers } from '../../queries'
 import { useTheme } from '../../theme'
 import { Avatar, Icon, Input, PickerSheet, Text, LabelTip } from '../../ui'
+import { Toggle } from '../settings/Shell'
 import { ChoiceGroup, FormSheet } from './Sheet'
 
 const isConflict = (error: unknown) => error instanceof ApiProblem && error.status === 409
@@ -128,7 +129,6 @@ export function NewChannelSheet({ categoryId, onClose }: { categoryId: string | 
 }
 
 export function EditChannelSheet({ conversation, onClose }: { conversation: ConversationRecord; onClose: () => void }) {
-  const { colors } = useTheme()
   const run = useChatWrite()
   const [name, setName] = useState(conversation.name)
   const [topic, setTopic] = useState(conversation.topic)
@@ -180,7 +180,7 @@ export function EditChannelSheet({ conversation, onClose }: { conversation: Conv
             <LabelTip label="Private channel" text={isPrivate ? 'Only the people in it can see it. New people must be added.' : 'Everyone in the workspace is in it.'} />
           </View>
         )}
-        <Switch accessibilityLabel="Private channel" value={isPrivate} disabled={conversation.is_default} onValueChange={setIsPrivate} trackColor={{ true: colors.primary, false: colors.input }} />
+        <Toggle label="Private channel" value={isPrivate} disabled={conversation.is_default} onChange={setIsPrivate} />
       </View>
     </FormSheet>
   )

@@ -1828,7 +1828,7 @@ async fn query_tasks(
 
 /// Maps display ordering onto the list sort. Manual order has no direction; priority
 /// ascending means urgent first, like `GET /tasks?sort=priority&order=asc`.
-fn task_order(order_by: OrderBy, direction: OrderDirection) -> (TaskSort, SortOrder) {
+pub(crate) fn task_order(order_by: OrderBy, direction: OrderDirection) -> (TaskSort, SortOrder) {
     let sort = match order_by {
         OrderBy::Manual => TaskSort::Position,
         OrderBy::Priority => TaskSort::Priority,

@@ -113,6 +113,8 @@ pub struct MailAddress {
     /// The normalized domain name.
     pub domain: String,
     pub kind: AddressKind,
+    /// The name recipients see on mail from this address; `None`: the mailbox name.
+    pub sender_name: Option<String>,
 }
 
 impl MailAddress {
@@ -414,6 +416,16 @@ fn clean_name(name: &str) -> Result<String, MailError> {
     Ok(name.to_owned())
 }
 
+/// An address's sender name: `None` for a missing or blank one (the mailbox name is used).
+fn clean_sender_name(name: Option<&str>) -> Result<Option<String>, MailError> {
+    match name.map(str::trim) {
+        None | Some("") => Ok(None),
+        Some(name) => clean_name(name).map(Some).map_err(|_| MailError::Invalid {
+            field: "sender_name",
+        }),
+    }
+}
+
 /// The local part of the bounce addresses (`bounce+{token}@domain`, spec §5.7): no mailbox can
 /// have it, since every `bounce+…` address is read as a bounce, never as a `+tag`.
 pub const RESERVED_LOCAL_PART: &str = "bounce";
@@ -563,7 +575,8 @@ pub(super) async fn load_mailboxes(
     let address_rows = fetch(
         transaction,
         format!(
-            "SELECT a.id, a.mailbox_id, a.domain_id, a.local_part, a.kind, d.name AS domain \
+            "SELECT a.id, a.mailbox_id, a.domain_id, a.local_part, a.kind, a.sender_name, \
+             d.name AS domain \
              FROM mail_addresses a JOIN mailboxes m ON m.id = a.mailbox_id \
              JOIN mail_domains d ON d.id = a.domain_id WHERE m.workspace_id = $1{filter} \
              ORDER BY a.kind DESC, d.name, a.local_part"
@@ -594,6 +607,7 @@ pub(super) async fn load_mailboxes(
                 local_part: row.try_get("local_part")?,
                 domain: row.try_get("domain")?,
                 kind: AddressKind::parse(&row.try_get::<String, _>("kind")?)?,
+                sender_name: row.try_get("sender_name")?,
             });
     }
     let mut members: HashMap<String, Vec<Id>> = HashMap::new();
@@ -960,6 +974,54 @@ impl MailRepository {
         Ok(updated)
     }
 
+    /// Sets the sender name of one address; `None` (or a blank name) goes back to the mailbox name.
+    pub async fn set_address_sender_name(
+        &self,
+        workspace_id: Id,
+        actor_id: Id,
+        mailbox_id: Id,
+        address_id: Id,
+        sender_name: Option<&str>,
+        request_id: &str,
+    ) -> Result<Mailbox, MailError> {
+        let sender_name = clean_sender_name(sender_name)?;
+        let now = self.database.database_now().await?;
+        let mut transaction = self.database.immediate_transaction().await?;
+        manager(&mut transaction, workspace_id, actor_id).await?;
+        let found = load_one(&mut transaction, workspace_id, mailbox_id).await?;
+        let address = found
+            .addresses
+            .iter()
+            .find(|address| address.id == address_id)
+            .ok_or(MailError::NotFound)?;
+        if address.sender_name != sender_name {
+            sqlx::query("UPDATE mail_addresses SET sender_name = $1 WHERE id = $2")
+                .bind(sender_name.as_deref())
+                .bind(address_id.to_string())
+                .execute(&mut *transaction)
+                .await?;
+            record_mail_audit(
+                &mut transaction,
+                workspace_id,
+                actor_id,
+                "mail.address_updated",
+                "mail_address",
+                address_id,
+                request_id,
+                json!({
+                    "mailbox_id": mailbox_id.to_string(),
+                    "address": address.address(),
+                    "sender_name": sender_name,
+                }),
+                now,
+            )
+            .await?;
+        }
+        let updated = load_one(&mut transaction, workspace_id, mailbox_id).await?;
+        transaction.commit().await?;
+        Ok(updated)
+    }
+
     /// Deletes a mailbox with its addresses, members and threads; a catch-all on it is cleared.
     /// Parsed messages and receipts no thread uses any more go with the `mail.purge` job.
     pub async fn delete_mailbox(
@@ -1142,8 +1204,10 @@ impl MailRepository {
         mailbox_id: Id,
         domain_id: Id,
         local_part: &str,
+        sender_name: Option<&str>,
         request_id: &str,
     ) -> Result<Mailbox, MailError> {
+        let sender_name = clean_sender_name(sender_name)?;
         let now = self.database.database_now().await?;
         let mut transaction = self.database.immediate_transaction().await?;
         manager(&mut transaction, workspace_id, actor_id).await?;
@@ -1155,13 +1219,14 @@ impl MailRepository {
         }
         let address_id = Id::new_v7();
         sqlx::query(
-            "INSERT INTO mail_addresses (id, domain_id, mailbox_id, local_part, kind, created_at) \
-             VALUES ($1, $2, $3, $4, 'alias', $5)",
+            "INSERT INTO mail_addresses (id, domain_id, mailbox_id, local_part, kind, sender_name, \
+             created_at) VALUES ($1, $2, $3, $4, 'alias', $5, $6)",
         )
         .bind(address_id.to_string())
         .bind(domain_id.to_string())
         .bind(mailbox_id.to_string())
         .bind(&local)
+        .bind(sender_name.as_deref())
         .bind(now.as_millis())
         .execute(&mut *transaction)
         .await?;
@@ -1173,7 +1238,11 @@ impl MailRepository {
             "mail_address",
             address_id,
             request_id,
-            json!({ "mailbox_id": mailbox_id.to_string(), "address": format!("{local}@{domain}") }),
+            json!({
+                "mailbox_id": mailbox_id.to_string(),
+                "address": format!("{local}@{domain}"),
+                "sender_name": sender_name,
+            }),
             now,
         )
         .await?;

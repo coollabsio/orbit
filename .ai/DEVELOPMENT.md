@@ -38,6 +38,9 @@ The `justfile` sets a public development `ORBIT_APP_KEY` when none is set. To de
 
 ## Verification commands
 
+These commands run the full suite: run them only when the user asks for it. In a worktree, build only the tests
+you need ([`AGENTS.md`](../AGENTS.md#tests-build-only-the-tests-you-need)).
+
 ```bash
 just test
 just check

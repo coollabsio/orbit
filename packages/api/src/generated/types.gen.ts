@@ -4131,7 +4131,7 @@ export type ListPublicMailFromAddress = {
         address: string;
         address_id: string;
         /**
-         * The mailbox name (shared) or the member's name (personal).
+         * The sender name on mail from this address: its own, else the mailbox name.
          */
         display_name: string;
         mailbox_id: string;
@@ -5120,7 +5120,7 @@ export type MailFromAddress = {
     address: string;
     address_id: string;
     /**
-     * The mailbox name (shared) or the member's name (personal).
+     * The sender name on mail from this address: its own, else the mailbox name.
      */
     display_name: string;
     mailbox_id: string;
@@ -5876,6 +5876,17 @@ export type MailboxAddress = {
      * Lower case, without a `+tag`; mail to `local+anything@` arrives here too.
      */
     local_part: string;
+    /**
+     * The name recipients see on mail from this address; `null`: the mailbox name.
+     */
+    sender_name: string | null;
+};
+
+export type MailboxAddressBody = {
+    /**
+     * The name recipients see on mail from this address; `null` or blank: the mailbox name.
+     */
+    sender_name: string | null;
 };
 
 export type MailboxAliasBody = {
@@ -5884,6 +5895,10 @@ export type MailboxAliasBody = {
      */
     domain_id: string;
     local_part: string;
+    /**
+     * The name recipients see on mail from this alias; absent, `null` or blank: the mailbox name.
+     */
+    sender_name?: string | null;
 };
 
 export type MailboxKind = 'personal' | 'shared';
@@ -9050,7 +9065,7 @@ export type PublicMailFromAddress = {
     address: string;
     address_id: string;
     /**
-     * The mailbox name (shared) or the member's name (personal).
+     * The sender name on mail from this address: its own, else the mailbox name.
      */
     display_name: string;
     mailbox_id: string;
@@ -22621,6 +22636,11 @@ export type PublicListTasksData = {
          * Text in the title or description, or a task identifier; up to 500 characters.
          */
         q?: string;
+        /**
+         * Only tasks that match this saved view (from `GET /views`): its filter, its "show
+         * completed" option, and, without `sort` and `order`, its order. Personal tokens only.
+         */
+        view_id?: string;
         /**
          * The `next_cursor` of the previous page. Keep the other parameters the same.
          */
@@ -45865,6 +45885,70 @@ export type RemoveMailboxAddressResponses = {
 };
 
 export type RemoveMailboxAddressResponse = RemoveMailboxAddressResponses[keyof RemoveMailboxAddressResponses];
+
+export type UpdateMailboxAddressData = {
+    body: MailboxAddressBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        mailbox_id: string;
+        address_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/mail/mailboxes/{mailbox_id}/addresses/{address_id}';
+};
+
+export type UpdateMailboxAddressErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, mail_forbidden, mail_disabled
+     */
+    403: TaskProblem;
+    /**
+     * mail_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type UpdateMailboxAddressError = UpdateMailboxAddressErrors[keyof UpdateMailboxAddressErrors];
+
+export type UpdateMailboxAddressResponses = {
+    200: MailMailbox;
+};
+
+export type UpdateMailboxAddressResponse = UpdateMailboxAddressResponses[keyof UpdateMailboxAddressResponses];
 
 export type AddMailboxMemberData = {
     body: MailboxMemberBody;

@@ -25,7 +25,7 @@ pub struct FromAddress {
     pub address_id: Id,
     pub mailbox_id: Id,
     pub address: String,
-    /// A shared mailbox: its name. A personal one: the member's name.
+    /// The sender name on the mail: the address's own, else the mailbox name.
     pub display_name: String,
     pub signature_html: Option<String>,
     pub ready: SendReadiness,
@@ -130,13 +130,11 @@ impl MailRepository {
     ) -> Result<Vec<FromAddress>, MailError> {
         let mut sql = orbit_platform::SqlBuilder::new(
             "SELECT a.id, a.mailbox_id, a.local_part, a.domain_id, d.name AS domain, \
-             mb.name AS mailbox_name, mb.kind AS mailbox_kind, u.display_name \
+             COALESCE(a.sender_name, mb.name) AS sender_name \
              FROM mailbox_members mm \
              JOIN mailboxes mb ON mb.id = mm.mailbox_id \
              JOIN mail_addresses a ON a.mailbox_id = mb.id \
              JOIN mail_domains d ON d.id = a.domain_id \
-             JOIN memberships ms ON ms.id = mm.membership_id \
-             JOIN users u ON u.id = ms.user_id \
              WHERE mm.membership_id = ",
         );
         sql.push_bind(membership_id.to_string());
@@ -188,7 +186,6 @@ impl MailRepository {
                     limit
                 }
             };
-            let personal = row.try_get::<String, _>("mailbox_kind")? == "personal";
             addresses.push(FromAddress {
                 mailbox_id,
                 address: format!(
@@ -196,11 +193,7 @@ impl MailRepository {
                     row.try_get::<String, _>("local_part")?,
                     row.try_get::<String, _>("domain")?
                 ),
-                display_name: row.try_get(if personal {
-                    "display_name"
-                } else {
-                    "mailbox_name"
-                })?,
+                display_name: row.try_get("sender_name")?,
                 signature_html: signatures
                     .get(&address_id)
                     .filter(|html| !html.is_empty())

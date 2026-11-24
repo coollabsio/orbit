@@ -26,6 +26,9 @@ pub(crate) struct MailboxAddress {
     /// `local_part@domain`.
     address: String,
     kind: AddressKind,
+    /// The name recipients see on mail from this address; `null`: the mailbox name.
+    #[schema(required = true)]
+    sender_name: Option<String>,
 }
 
 /// A mailbox with its addresses (primary first) and members.
@@ -58,6 +61,7 @@ fn address_view(address: MailAddress) -> MailboxAddress {
         domain_id: address.domain_id,
         local_part: address.local_part,
         kind: address.kind,
+        sender_name: address.sender_name,
     }
 }
 
@@ -115,6 +119,17 @@ pub(crate) struct MailboxAliasBody {
     /// Any domain of the workspace.
     domain_id: String,
     local_part: String,
+    /// The name recipients see on mail from this alias; absent, `null` or blank: the mailbox name.
+    #[serde(default)]
+    sender_name: Option<String>,
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct MailboxAddressBody {
+    /// The name recipients see on mail from this address; `null` or blank: the mailbox name.
+    #[schema(required = true)]
+    sender_name: Option<String>,
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -370,11 +385,40 @@ pub(crate) async fn add_mailbox_alias(
             mailbox_id,
             domain_id,
             &body.local_part,
+            body.sender_name.as_deref(),
             call.request_id(),
         )
         .await
         .map_err(|error| call.problem(error))?;
     Ok((StatusCode::CREATED, Json(view(mailbox))))
+}
+
+/// Sets the sender name of one address.
+#[utoipa::path(patch, path = "/api/v1/workspaces/{workspace_id}/mail/mailboxes/{mailbox_id}/addresses/{address_id}", params(("workspace_id" = String, Path), ("mailbox_id" = String, Path), ("address_id" = String, Path)), request_body = MailboxAddressBody, responses((status = 200, body = MailMailbox)))]
+pub(crate) async fn update_mailbox_address(
+    State(state): State<MailState>,
+    Path((workspace, mailbox, address)): Path<(String, String, String)>,
+    headers: HeaderMap,
+    uri: Uri,
+    request_id: RequestIdExtension,
+    ApiJson(body): ApiJson<MailboxAddressBody>,
+) -> Result<Json<MailMailbox>, ApiError> {
+    let call = Call::enter(&state, &headers, &uri, &workspace, &request_id).await?;
+    let mailbox_id = call.id(&mailbox)?;
+    let address_id = call.id(&address)?;
+    let mailbox = state
+        .mail
+        .set_address_sender_name(
+            call.workspace_id,
+            call.actor_id,
+            mailbox_id,
+            address_id,
+            body.sender_name.as_deref(),
+            call.request_id(),
+        )
+        .await
+        .map_err(|error| call.problem(error))?;
+    Ok(Json(view(mailbox)))
 }
 
 /// Removes an alias. The primary address stays.

@@ -24,11 +24,13 @@ export interface CustomThemePreset {
 const NOTION: CustomThemePreset = { name: 'Notion', theme: { sidebar: '#f7f7f5', selected: '#ebebe9', accent: '#2383e2', chat: '#ffffff' } }
 const SLACK: CustomThemePreset = { name: 'Slack', theme: { sidebar: '#3f0e40', selected: '#1164a3', accent: '#ecb22e', chat: '#ffffff' } }
 const LINEAR: CustomThemePreset = { name: 'Linear', theme: { sidebar: '#0e0f11', selected: '#24252a', accent: '#5e6ad2', chat: '#16171a' } }
+const GMAIL: CustomThemePreset = { name: 'Gmail', theme: { sidebar: '#f6f8fc', selected: '#d3e3fd', accent: '#0b57d0', chat: '#ffffff' } }
 
 export const CUSTOM_THEME_PRESETS: readonly CustomThemePreset[] = [
   SLACK,
   NOTION,
   LINEAR,
+  GMAIL,
   { name: 'Slack Dark', theme: { sidebar: '#19171d', selected: '#1164a3', accent: '#ecb22e', chat: '#1a1d21' } },
   { name: 'Discord Ash', theme: { sidebar: '#2b2d31', selected: '#404249', accent: '#5865f2', chat: '#313338' } },
   { name: 'Discord Dark', theme: { sidebar: '#121214', selected: '#2c2c30', accent: '#5865f2', chat: '#1a1a1e' } },
@@ -43,14 +45,14 @@ export const CUSTOM_THEME_PRESETS: readonly CustomThemePreset[] = [
 ]
 
 /** The part of the app that a screen belongs to, for Appearance → Per app. */
-export type AppSection = 'docs' | 'chat' | 'tasks'
-export const APP_SECTIONS: readonly AppSection[] = ['docs', 'chat', 'tasks']
+export type AppSection = 'docs' | 'chat' | 'tasks' | 'mail'
+export const APP_SECTIONS: readonly AppSection[] = ['docs', 'chat', 'tasks', 'mail']
 
 /** Appearance → Per app: the colours of each part of the app. `null` is the chosen Light, System or Dark theme. */
 export type AppLooks = Readonly<Record<AppSection, CustomTheme | null>>
 
 /** Per app starts with each part in the colours of the app it replaces. */
-export const DEFAULT_APP_LOOKS: AppLooks = { docs: NOTION.theme, chat: SLACK.theme, tasks: LINEAR.theme }
+export const DEFAULT_APP_LOOKS: AppLooks = { docs: NOTION.theme, chat: SLACK.theme, tasks: LINEAR.theme, mail: GMAIL.theme }
 
 /** The saved choice: colours for the whole app, colours per part of the app, or `null` for Light, System or Dark. */
 export type CustomThemeChoice = CustomTheme | { apps: AppLooks } | null
@@ -67,6 +69,7 @@ export function appSectionOf(pathname: string): AppSection | null {
   if (/^\/docs(\/|$)/.test(pathname)) return 'docs'
   if (/^\/chat(\/|$)/.test(pathname)) return 'chat'
   if (/^\/(tasks|views)(\/|$)/.test(pathname)) return 'tasks'
+  if (/^\/mail(\/|$)/.test(pathname)) return 'mail'
   return null
 }
 
@@ -86,7 +89,7 @@ export function parseCustomThemeChoice(raw: string): CustomThemeChoice {
     const value = codes && typeof codes === 'object' ? (codes as Record<string, unknown>)[section] : undefined
     return typeof value === 'string' ? parseCustomTheme(value) : value === null ? null : DEFAULT_APP_LOOKS[section]
   }
-  return { apps: { docs: look('docs'), chat: look('chat'), tasks: look('tasks') } }
+  return { apps: { docs: look('docs'), chat: look('chat'), tasks: look('tasks'), mail: look('mail') } }
 }
 
 export function serializeCustomThemeChoice(choice: NonNullable<CustomThemeChoice>): string {

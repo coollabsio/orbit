@@ -262,7 +262,7 @@ pub struct MailFromAddressView {
     #[schema(value_type = String)]
     pub mailbox_id: Id,
     pub address: String,
-    /// The mailbox name (shared) or the member's name (personal).
+    /// The sender name on mail from this address: its own, else the mailbox name.
     pub display_name: String,
     /// The creator's signature for this address; `null` when none.
     #[schema(required = true)]

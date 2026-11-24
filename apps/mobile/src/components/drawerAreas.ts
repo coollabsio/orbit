@@ -1,9 +1,9 @@
 /** The settings areas (the web's `settingsAreaOf`). */
 export type SettingsArea = 'workspace' | 'account' | 'admin'
-/** The areas whose links replace the app links in the drawer: a settings area or Tasks. */
-export type DrawerArea = SettingsArea | 'tasks'
+/** The areas whose links replace the app links in the drawer: a settings area, Tasks, or Mail's folders. */
+export type DrawerArea = SettingsArea | 'tasks' | 'mail'
 
-export const DRAWER_AREA_TITLES: Record<DrawerArea, string> = { workspace: 'Settings', account: 'Account settings', admin: 'Admin', tasks: 'Tasks' }
+export const DRAWER_AREA_TITLES: Record<DrawerArea, string> = { workspace: 'Settings', account: 'Account settings', admin: 'Admin', tasks: 'Tasks', mail: 'Mail' }
 
 interface AreaLink {
   href: string
@@ -12,12 +12,13 @@ interface AreaLink {
 const under = (pathname: string, root: string) => pathname === root || pathname.startsWith(`${root}/`)
 
 /**
- * The area a route belongs to: Tasks for the task routes, else the settings area of the link whose route is the
+ * The area a route belongs to: Tasks or Mail for their routes, else the settings area of the link whose route is the
  * longest prefix of it, so `/settings/admin/jobs` is Admin and `/settings/profile` is Account settings, while any other
  * page under `/settings` is the workspace's.
  */
 export function drawerAreaOf(pathname: string, areas: Record<SettingsArea, readonly AreaLink[]>): DrawerArea | null {
   if (under(pathname, '/tasks')) return 'tasks'
+  if (under(pathname, '/mail')) return 'mail'
   let found: SettingsArea | null = null
   let length = -1
   for (const [area, links] of Object.entries(areas) as [SettingsArea, readonly AreaLink[]][]) {

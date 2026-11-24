@@ -1,4 +1,4 @@
-// The reply bar at the end of a thread (§9.1 U1): Reply / Reply all / Forward, or R / A / F, open the reply in a
+// The reply row at the end of a thread (§9.1 U1): Reply / Reply all / Forward, or R / A / F, open the reply in a
 // composer window of the dock (full screen on a phone), as a new message does. A thread has one draft for each member:
 // a draft left earlier shows as a "Draft" line to continue; one open in a window says so.
 import { useEffect, useImperativeHandle, useRef, useState, type ReactNode, type Ref } from 'react'
@@ -17,8 +17,7 @@ import { heldReplyState } from '../mailStatus'
 import { useQueryClient } from '@tanstack/react-query'
 import { ApiProblem } from '@orbit/api/problem'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
-import { useIsPhone } from '@/features/chat/pages/useChatViewport'
-import { personName, problemText, sendingOutboundId } from '../mailLib'
+import { problemText, sendingOutboundId } from '../mailLib'
 import { useComposerDock } from './useComposerDock'
 import { draftText, recipientSummary } from './composeLib'
 import { endPendingSend } from './undoSend'
@@ -39,7 +38,6 @@ interface ThreadReplyProps {
 
 export function ThreadReply({ threadId, last, ref }: ThreadReplyProps) {
   const { state: dock, store } = useComposerDock()
-  const phone = useIsPhone()
   const create = useCreateDraft()
   // a draft left in this thread
   const drafts = useDrafts()
@@ -111,23 +109,10 @@ export function ThreadReply({ threadId, last, ref }: ThreadReplyProps) {
   useImperativeHandle(ref, () => ({ reply: (mode) => start(mode, false) }))
 
   const replyAll = last ? last.to.length + last.cc.length > 1 : false
-  // the composer windows sit at the bottom right: the bar stays above them
-  const dockOpen = dock.windows.length > 0
-  // the reply goes to the sender of the newest message, unless the user sent it (then to its recipients)
-  const replyTo = last && !last.delivery && last.from ? personName(last.from) : null
 
   return (
-    // the bar stays at the bottom of the pane while the thread scrolls: the reply is always one click (or R) away.
-    // A phone shows the native app's row instead: Reply, Reply all and Forward under the last message, after a line.
-    <div
-      data-slot="thread-reply"
-      data-print-hide=""
-      className={
-        phone
-          ? 'mt-4 flex flex-col gap-3 border-t pt-4 pb-4'
-          : `sticky bottom-0 z-10 -mx-5 -mb-8 flex flex-col gap-2 bg-linear-to-t from-background from-75% to-transparent px-5 pt-6 ${dockOpen ? 'pb-16' : 'pb-5'}`
-      }
-    >
+    // Reply, Reply all and Forward under the last message, after a line, as in the native app
+    <div data-slot="thread-reply" data-print-hide="" className="mt-4 flex flex-col gap-3 border-t pt-4 pb-4">
       {saved && !savedInDock ? (
         <button
           type="button"
@@ -156,39 +141,11 @@ export function ThreadReply({ threadId, last, ref }: ThreadReplyProps) {
           </Button>
         </p>
       ) : null}
-      {phone ? (
-        <div className="flex flex-wrap gap-2">
-          <Button variant="outline" disabled={create.isPending} onClick={() => start('reply', true)}>
-            <Reply />
-            Reply
-          </Button>
-          {replyAll ? (
-            <Button variant="outline" disabled={create.isPending} onClick={() => start('reply_all', true)}>
-              <Reply />
-              Reply all
-            </Button>
-          ) : null}
-          <Button variant="outline" disabled={create.isPending} onClick={() => start('forward', true)}>
-            <ForwardRight />
-            Forward
-          </Button>
-        </div>
-      ) : (
-      <div className="flex min-w-0 items-center gap-1 rounded-xl border bg-card p-1 shadow-sm">
-        <button
-          type="button"
-          disabled={create.isPending}
-          onClick={() => start('reply', true)}
-          className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-lg px-2.5 text-left text-[0.8125rem] text-muted-foreground transition-colors outline-none hover:bg-muted/60 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 disabled:opacity-50"
-        >
-          <Reply className="size-4 shrink-0" />
-          <span className="min-w-0 flex-1 truncate">{replyTo ? `Reply to ${replyTo}…` : 'Reply…'}</span>
-          <Shortcut id="mail.reply" className="shrink-0 opacity-70" />
-        </button>
+      <div className="flex flex-wrap gap-2">
+        <ReplyButton label="Reply" command="mail.reply" icon={<Reply />} disabled={create.isPending} onClick={() => start('reply', true)} />
         {replyAll ? <ReplyButton label="Reply all" command="mail.replyAll" icon={<Reply />} disabled={create.isPending} onClick={() => start('reply_all', true)} /> : null}
         <ReplyButton label="Forward" command="mail.forward" icon={<ForwardRight />} disabled={create.isPending} onClick={() => start('forward', true)} />
       </div>
-      )}
     </div>
   )
 }
@@ -202,9 +159,9 @@ function ReplyButton({ label, command, icon, disabled, onClick }: { label: strin
         </span>
       }
     >
-      <Button variant="ghost" size="sm" className="shrink-0 text-muted-foreground hover:text-foreground" disabled={disabled} onClick={onClick}>
+      <Button variant="outline" disabled={disabled} onClick={onClick}>
         {icon}
-        <span className="max-[1199px]:sr-only">{label}</span>
+        {label}
       </Button>
     </Tip>
   )

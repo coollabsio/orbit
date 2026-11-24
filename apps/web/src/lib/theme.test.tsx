@@ -126,6 +126,7 @@ test('each part of the app can take other colours, or the chosen theme, and the 
     docs: '#0e0f11,#24252a,#5e6ad2,#16171a',
     chat: null,
     tasks: '#0e0f11,#24252a,#5e6ad2,#16171a',
+    mail: '#f6f8fc,#d3e3fd,#0b57d0,#ffffff',
   })
   act(() => setOpenPage('/docs'))
   expect([view.getByTestId('theme').textContent, document.documentElement.style.getPropertyValue('--background')]).toEqual(['dark', '#16171a'])

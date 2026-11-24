@@ -24,12 +24,12 @@ export function useBulkPersonalPreview(domainId: string, pattern: api.MailNamePa
   return useQuery({ queryKey: keys.bulkPreview(workspaceId, domainId, pattern), queryFn: () => api.bulkPreview(client, workspaceId, domainId, pattern), enabled: domainId !== '' })
 }
 
-/** A mailbox change also changes the user's mailbox list, the counts and the domains' address counts. */
+/** A mailbox change also changes the user's mailbox list, the counts, the domains' address counts and the sender names of the From picker. */
 export function useMailboxWrites() {
   const { client, workspaceId } = useOrbit()
   const queryClient = useQueryClient()
   const refresh = (extra: QueryKey[] = []) => () => {
-    for (const queryKey of [keys.mailboxes(workspaceId), mailKeys.me(workspaceId), mailKeys.counts(workspaceId), keys.domains(workspaceId), ...extra]) void queryClient.invalidateQueries({ queryKey })
+    for (const queryKey of [keys.mailboxes(workspaceId), mailKeys.me(workspaceId), mailKeys.counts(workspaceId), keys.domains(workspaceId), mailKeys.fromAddresses(workspaceId).slice(0, 3), ...extra]) void queryClient.invalidateQueries({ queryKey })
   }
   const onSettled = refresh()
   // the threads of a deleted mailbox, or of one a member no longer reads, leave their lists
@@ -42,7 +42,16 @@ export function useMailboxWrites() {
     setStatus: useMutation({ mutationFn: ({ mailboxId, status }: InMailbox & { status: MailboxStatus }) => api.setStatus(client, workspaceId, mailboxId, status), onSettled }),
     addMember: useMutation({ mutationFn: ({ mailboxId, membershipId }: InMailbox & { membershipId: string }) => api.addMember(client, workspaceId, mailboxId, membershipId), onSettled }),
     removeMember: useMutation({ mutationFn: ({ mailboxId, membershipId }: InMailbox & { membershipId: string }) => api.removeMember(client, workspaceId, mailboxId, membershipId), onSettled: withLists }),
-    addAlias: useMutation({ mutationFn: ({ mailboxId, domainId, localPart }: InMailbox & { domainId: string; localPart: string }) => api.addAlias(client, workspaceId, mailboxId, domainId, localPart), onSettled }),
+    addAlias: useMutation({
+      mutationFn: ({ mailboxId, domainId, localPart, senderName }: InMailbox & { domainId: string; localPart: string; senderName: string | null }) =>
+        api.addAlias(client, workspaceId, mailboxId, domainId, localPart, senderName),
+      onSettled,
+    }),
+    setSenderName: useMutation({
+      mutationFn: ({ mailboxId, addressId, senderName }: InMailbox & { addressId: string; senderName: string | null }) =>
+        api.setSenderName(client, workspaceId, mailboxId, addressId, senderName),
+      onSettled,
+    }),
     removeAddress: useMutation({ mutationFn: ({ mailboxId, addressId }: InMailbox & { addressId: string }) => api.removeAddress(client, workspaceId, mailboxId, addressId), onSettled }),
     bulk: useMutation({ mutationFn: (body: CreatePersonalMailboxesBody) => api.bulkCreate(client, workspaceId, body), onSettled }),
   }

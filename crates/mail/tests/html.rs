@@ -154,6 +154,18 @@ fn mail_without_colours_is_plain_and_follows_the_theme() {
         "<div class=\"x\"><font face=\"Arial\">Hi</font></div>",
         // the only CSS is dropped by the filter
         "<style>@import url(https://evil.test/a.css);</style><p>x</p>",
+        // layout and font styles set no colour (a Gmail reply)
+        "<style>p{margin:0}</style><p>x</p>",
+        "<p style=\"padding:4px\">x</p>",
+        "<div dir=\"ltr\" style=\"font-family:monospace\">it is working</div><div class=\"gmail_quote\">\
+         <blockquote class=\"gmail_quote\" style=\"margin:0px 0px 0px 0.8ex;border-left:1px solid rgb(204,204,204);\
+         padding-left:1ex\">asdfg</blockquote></div>",
+        "<p style=\"background-color:transparent;color:inherit !important\">x</p>",
+        // colours, but the mail has a dark design
+        "<meta name=\"color-scheme\" content=\"light dark\"><p style=\"color:#333\">x</p>",
+        "<meta name=\"supported-color-schemes\" content=\"light dark\"><table bgcolor=\"#fff\"><tr><td>x</td></tr></table>",
+        "<style>:root{color-scheme:light dark}p{color:#333}</style><p>x</p>",
+        "<style>p{color:#333}@media (prefers-color-scheme: dark){p{color:#eee}}</style><p>x</p>",
     ] {
         let out = render(html).html;
         assert!(
@@ -172,11 +184,16 @@ fn mail_without_colours_is_plain_and_follows_the_theme() {
         );
     }
     for html in [
-        "<style>p{margin:0}</style><p>x</p>",
+        "<style>p{color:#333}</style><p>x</p>",
+        "<style>a:hover{text-decoration:none}.box{ BACKGROUND : #fff }</style><p>x</p>",
         "<p style=\"color:#333\">x</p>",
-        "<p style=\"padding:4px\">x</p>",
+        "<p style=\"margin:0;background:linear-gradient(#fff,#eee)\">x</p>",
         "<table bgcolor=\"#ffffff\"><tr><td>x</td></tr></table>",
         "<font color=\"#333\">x</font>",
+        // a light-only colour scheme is no dark design
+        "<meta name=\"color-scheme\" content=\"light\"><p style=\"color:#333\">x</p>",
+        // the words only in the text
+        "<p style=\"color:#333\">color-scheme: dark</p>",
     ] {
         let out = render(html).html;
         assert!(

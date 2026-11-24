@@ -21488,6 +21488,15 @@
             }
           },
           {
+            "name": "view_id",
+            "in": "query",
+            "description": "Only tasks that match this saved view (from `GET /views`): its filter, its \"show\ncompleted\" option, and, without `sort` and `order`, its order. Personal tokens only.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "cursor",
             "in": "query",
             "description": "The `next_cursor` of the previous page. Keep the other parameters the same.",
@@ -73463,6 +73472,165 @@
             "cookieAuth": []
           }
         ]
+      },
+      "patch": {
+        "tags": [
+          "crate::mail_routes::mailboxes"
+        ],
+        "summary": "Sets the sender name of one address.",
+        "operationId": "update_mailbox_address",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "mailbox_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "address_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MailboxAddressBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MailMailbox"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden, mail_forbidden, mail_disabled",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "mail_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
       }
     },
     "/api/v1/workspaces/{workspace_id}/mail/mailboxes/{mailbox_id}/members": {
@@ -110397,7 +110565,7 @@
                 },
                 "display_name": {
                   "type": "string",
-                  "description": "The mailbox name (shared) or the member's name (personal)."
+                  "description": "The sender name on mail from this address: its own, else the mailbox name."
                 },
                 "mailbox_id": {
                   "type": "string"
@@ -112931,7 +113099,7 @@
           },
           "display_name": {
             "type": "string",
-            "description": "The mailbox name (shared) or the member's name (personal)."
+            "description": "The sender name on mail from this address: its own, else the mailbox name."
           },
           "mailbox_id": {
             "type": "string"
@@ -114613,7 +114781,8 @@
           "domain_id",
           "local_part",
           "address",
-          "kind"
+          "kind",
+          "sender_name"
         ],
         "properties": {
           "address": {
@@ -114632,8 +114801,31 @@
           "local_part": {
             "type": "string",
             "description": "Lower case, without a `+tag`; mail to `local+anything@` arrives here too."
+          },
+          "sender_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The name recipients see on mail from this address; `null`: the mailbox name."
           }
         }
+      },
+      "MailboxAddressBody": {
+        "type": "object",
+        "required": [
+          "sender_name"
+        ],
+        "properties": {
+          "sender_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The name recipients see on mail from this address; `null` or blank: the mailbox name."
+          }
+        },
+        "additionalProperties": false
       },
       "MailboxAliasBody": {
         "type": "object",
@@ -114648,6 +114840,13 @@
           },
           "local_part": {
             "type": "string"
+          },
+          "sender_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The name recipients see on mail from this alias; absent, `null` or blank: the mailbox name."
           }
         },
         "additionalProperties": false
@@ -122062,7 +122261,7 @@
           },
           "display_name": {
             "type": "string",
-            "description": "The mailbox name (shared) or the member's name (personal)."
+            "description": "The sender name on mail from this address: its own, else the mailbox name."
           },
           "mailbox_id": {
             "type": "string"

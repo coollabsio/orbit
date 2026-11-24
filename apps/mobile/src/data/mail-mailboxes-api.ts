@@ -22,6 +22,7 @@ import {
   retryMailReceipt,
   setMailboxStatus,
   updateMailbox,
+  updateMailboxAddress,
   updateMailLabel as updateLabelRequest,
 } from '@orbit/api/generated/sdk.gen'
 import type {
@@ -97,12 +98,17 @@ export async function removeMember(client: OrbitClient, workspaceId: string, mai
   return (await removeMailboxMember({ client, path: { workspace_id: workspaceId, mailbox_id: mailboxId, membership_id: membershipId }, throwOnError: true })).data
 }
 
-export async function addAlias(client: OrbitClient, workspaceId: string, mailboxId: string, domainId: string, localPart: string): Promise<MailMailbox> {
-  return (await addMailboxAlias({ ...inMailbox(client, workspaceId, mailboxId), body: { domain_id: domainId, local_part: localPart } })).data
+export async function addAlias(client: OrbitClient, workspaceId: string, mailboxId: string, domainId: string, localPart: string, senderName: string | null): Promise<MailMailbox> {
+  return (await addMailboxAlias({ ...inMailbox(client, workspaceId, mailboxId), body: { domain_id: domainId, local_part: localPart, sender_name: senderName } })).data
 }
 
 export async function removeAddress(client: OrbitClient, workspaceId: string, mailboxId: string, addressId: string): Promise<MailMailbox> {
   return (await removeMailboxAddress({ client, path: { workspace_id: workspaceId, mailbox_id: mailboxId, address_id: addressId }, throwOnError: true })).data
+}
+
+/** Sets the sender name of one address; `null` goes back to the mailbox name. */
+export async function setSenderName(client: OrbitClient, workspaceId: string, mailboxId: string, addressId: string, senderName: string | null): Promise<MailMailbox> {
+  return (await updateMailboxAddress({ client, path: { workspace_id: workspaceId, mailbox_id: mailboxId, address_id: addressId }, body: { sender_name: senderName }, throwOnError: true })).data
 }
 
 /** The proposed address of each member without a personal mailbox, with the conflicts marked. */

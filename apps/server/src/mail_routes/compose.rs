@@ -19,7 +19,7 @@ pub(crate) struct MailFromAddress {
     #[schema(value_type = String)]
     mailbox_id: Id,
     address: String,
-    /// The mailbox name (shared) or the member's name (personal).
+    /// The sender name on mail from this address: its own, else the mailbox name.
     display_name: String,
     signature_html: Option<String>,
     /// `ready` or `not_ready`.

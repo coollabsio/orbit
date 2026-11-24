@@ -38,7 +38,7 @@ const WORKSPACE_LINKS = [
 
 // Coolify tile navigation: the row never fills; the icon sits in a 3D tile and the current row shows a pink tile.
 // The Flat style (Account settings → Appearance) drops the tile: plain rows, and a filled row for the current page.
-const sidebarNavItemClass =
+export const sidebarNavItemClass =
   'group/nav-item relative flex h-9 w-full min-w-0 shrink-0 items-center justify-start gap-2.5 overflow-hidden pr-2.5 pl-1 text-left text-[0.8125rem] font-medium whitespace-nowrap text-sidebar-nav transition-colors duration-120 outline-none hover:text-sidebar-nav-active focus-visible:text-sidebar-nav-active data-[active=true]:text-sidebar-nav-active group-data-[collapsed=true]/sidebar-nav:justify-center group-data-[collapsed=true]/sidebar-nav:px-0 '
     + 'flat:h-8 flat:rounded-md flat:pl-2.5 flat:hover:not-disabled:bg-black/4 flat:data-[active=true]:bg-black/5 dark:flat:hover:not-disabled:bg-white/5 dark:flat:data-[active=true]:bg-white/6'
 
@@ -61,11 +61,11 @@ const sidebarNavTileVariants = cva(
   },
 )
 
-/** The 3D icon tile: it lifts on hover, sinks on press, and turns pink on the current row. */
-function SidebarNavTile({ icon: Icon, tone }: { icon: SidebarNavIcon } & VariantProps<typeof sidebarNavTileVariants>) {
+/** The 3D icon tile: it lifts on hover, sinks on press, and turns pink on the current row. `children` replaces the icon. */
+export function SidebarNavTile({ icon: Icon, tone, children }: { icon?: SidebarNavIcon; children?: ReactNode } & VariantProps<typeof sidebarNavTileVariants>) {
   return (
     <span data-slot="sidebar-nav-tile" className={sidebarNavTileVariants({ tone })}>
-      <Icon />
+      {Icon ? <Icon /> : children}
     </span>
   )
 }
@@ -531,7 +531,7 @@ export function SidebarNav({
   isRoot?: boolean
   /** The mobile drawer: Back shows the main menu without leaving the page. Closing the drawer forgets it. */
   backShowsMenu?: boolean
-  /** Set while the open page's own list (docs, chat) shows here instead of the app links: the element it renders in. */
+  /** Set while the open page's own list (docs, chat, mail; in the drawer only mail) shows here instead of the app links: the element it renders in. */
   pageListRef?: (element: HTMLDivElement | null) => void
 }) {
   const location = useLocation()
@@ -540,9 +540,10 @@ export function SidebarNav({
   const guest = useIsGuest()
   const pageArea: SidebarArea | null = (isAdminLimitsPath(location.pathname) ? 'admin-limits' : null) ?? settingsAreaOf(location.pathname) ?? (guest ? null : linkArea(location.pathname))
   // the area whose Back was pressed in the drawer: the main menu shows until the page moves to another area
-  const [mainMenuFor, setMainMenuFor] = useState<SidebarArea | null>(null)
+  const [mainMenuFor, setMainMenuFor] = useState<string | null>(null)
   const area = pageArea && pageArea === mainMenuFor ? null : pageArea
-  const pageList = pageListRef !== undefined && hostsPageList(location.pathname)
+  const listArea = hostsPageList(location.pathname) ? location.pathname.split('/')[1] : null
+  const pageList = pageListRef !== undefined && listArea !== null && listArea !== mainMenuFor
   // What the sidebar shows below Search. Only a change animates, so the first load and moves inside an area stay still.
   const content = pageList ? `list:${areaOf(location.pathname)}` : (area ?? 'app')
   const [shown, setShown] = useState(content)
@@ -613,7 +614,7 @@ export function SidebarNav({
           {pageList ? (
             <>
               {/* a guest has Chat alone: there is no main menu to go back to */}
-              {guest ? null : <BackToApp label={PAGE_LIST_TITLES[areaOf(location.pathname) ?? ''] ?? ''} onNavigate={onNavigate} />}
+              {guest ? null : <BackToApp label={PAGE_LIST_TITLES[listArea ?? ''] ?? ''} onNavigate={onNavigate} onBack={backShowsMenu ? () => setMainMenuFor(listArea) : undefined} />}
               {/* the page renders its list here (`InAppSidebar`); it scrolls on its own */}
               <div ref={pageListRef} data-slot="sidebar-page-list" className="-mx-3 mt-2 flex min-h-0 flex-1 flex-col" />
             </>

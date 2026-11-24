@@ -17,7 +17,7 @@ function hslToRgb(h: number, s: number, l: number): [number, number, number] {
   return [f(0), f(8), f(4)]
 }
 
-/** `#rgb`, `#rrggbb`, `rgb(…)`, `rgba(…)` and `hsl(h s% l%)`, the formats the tokens and `userColor` produce. */
+/** `#rgb`, `#rrggbb`, `rgb(…)`, `rgba(…)`, `hsl(h s% l%)` and `oklch(L C h)`, the formats the tokens, `userColor` and the mail sender colour produce. */
 function parse(color: string): Rgba {
   const value = color.trim()
   if (value.startsWith('#')) {
@@ -28,6 +28,12 @@ function parse(color: string): Rgba {
   if (value.startsWith('hsl')) {
     const [r, g, b] = hslToRgb(numbers[0] ?? 0, (numbers[1] ?? 0) / 100, (numbers[2] ?? 0) / 100)
     return { r, g, b, a: numbers[3] ?? 1 }
+  }
+  if (value.startsWith('oklch')) {
+    // clipped to sRGB, as the browser shows it
+    const { r, g, b } = fromOklch([numbers[0] ?? 0, numbers[1] ?? 0, numbers[2] ?? 0], 1)
+    const clip = (channel: number) => Math.min(1, Math.max(0, channel))
+    return { r: clip(r), g: clip(g), b: clip(b), a: numbers[3] ?? 1 }
   }
   if (value.startsWith('rgb')) return { r: (numbers[0] ?? 0) / 255, g: (numbers[1] ?? 0) / 255, b: (numbers[2] ?? 0) / 255, a: numbers[3] ?? 1 }
   throw new Error(`Unsupported color: ${color}`)

@@ -1,14 +1,16 @@
 import type { ComponentType, ReactNode } from 'react'
-import { useNavigate } from 'react-router'
-import { DirectboxDefault, Edit2, Star } from 'reicon-react'
+import { Link, useNavigate } from 'react-router'
+import { DirectboxDefault, Edit2, Setting2, Star } from 'reicon-react'
 import type { MailCounts, MailLabel, MailMeMailbox } from '@orbit/api/generated/types.gen'
 import { InAppSidebar } from '@/app/shell/InAppSidebar'
 import { useInAppSidebar } from '@/app/shell/sidebarSlot'
+import { SidebarNavTile, sidebarNavItemClass } from '@/app/shell/SidebarNav'
 import { ColorDot } from '@/components/common/ColorDot'
 import { PaneHeader, PaneTitle } from '@/components/common/Pane'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { cn } from 'cn'
+import { useCan } from '@/features/workspaces/permissions'
 import { FOLDERS, mailViewPath, railFolders, type MailView } from '@/features/mail/mailLib'
 import { Shortcut } from '@/shortcuts/Shortcut'
 
@@ -39,29 +41,39 @@ function RailRow({
   children?: ReactNode
 }) {
   return (
-    <Button
+    // the app sidebar's row: a 3D icon tile, or a plain row with the Flat style (Account settings → Appearance)
+    <button
       type="button"
-      variant="ghost"
-      className="w-full min-w-0 justify-start gap-2.5 text-[0.8125rem] text-sidebar-nav hover:text-sidebar-nav-active data-active:bg-sidebar-accent data-active:text-sidebar-nav-active"
-      data-active={active || undefined}
+      data-slot="sidebar-nav-item"
+      className={sidebarNavItemClass}
+      data-active={active}
       aria-current={active ? 'page' : undefined}
       aria-label={unread > 0 ? `${label}, ${unread} unread` : label}
       onClick={onClick}
     >
-      {Icon ? <Icon className="opacity-90" /> : children}
-      <span className="min-w-0 flex-1 truncate text-left">{label}</span>
+      <SidebarNavTile icon={Icon}>{children}</SidebarNavTile>
+      <span className="min-w-0 flex-1 truncate">{label}</span>
       {unread > 0 ? (
         <Badge aria-hidden="true" className="h-4 min-w-4 px-1 text-[0.625rem] tabular-nums">
           {unread > 999 ? '999+' : unread}
         </Badge>
       ) : null}
-    </Button>
+    </button>
   )
 }
 
 function RailSection({ children }: { children: string }) {
   return <span className="mt-3 px-2.5 py-1 text-[0.6875rem] font-medium text-sidebar-nav-muted select-none">{children}</span>
 }
+
+/**
+ * Where a mailbox's settings button goes: for a mail manager, the Mailboxes settings page with this mailbox open; for
+ * a member (who cannot open that page), their own mail preferences.
+ */
+const mailboxSettings = (mailboxId: string, canManage: boolean) =>
+  canManage
+    ? { to: `/settings/mail/mailboxes?mailbox=${encodeURIComponent(mailboxId)}`, label: 'Mailbox settings' }
+    : { to: '/settings/mail/me', label: 'Mail preferences' }
 
 /** The rail's main action: a new message. Its key shows on it, so the shortcut is learnt by using the button. */
 function ComposeButton({ onClick }: { onClick: () => void }) {
@@ -86,6 +98,7 @@ export function FolderRail({ view, mailboxes, labels, counts, showOutbox, onComp
   const go = (next: MailView) => navigate(mailViewPath(next))
   // in the app sidebar its Back row says "Mail", so the list has no header of its own
   const inAppSidebar = useInAppSidebar()
+  const canManage = useCan('mail.manage')
 
   return (
     <InAppSidebar>
@@ -117,16 +130,31 @@ export function FolderRail({ view, mailboxes, labels, counts, showOutbox, onComp
         ))}
         {mailboxes.length > 1 ? <RailSection>Mailboxes</RailSection> : null}
         {mailboxes.length > 1
-          ? mailboxes.map((mailbox) => (
-              <RailRow
-                key={mailbox.id}
-                icon={DirectboxDefault}
-                label={mailbox.name}
-                unread={unread(mailbox.id, 'inbox')}
-                active={view.kind === 'folder' && view.folder === 'inbox' && view.mailboxId === mailbox.id}
-                onClick={() => go({ kind: 'folder', folder: 'inbox', mailboxId: mailbox.id })}
-              />
-            ))
+          ? mailboxes.map((mailbox) => {
+              const settings = mailboxSettings(mailbox.id, canManage)
+              return (
+                <div key={mailbox.id} className="group/mailbox relative">
+                  <RailRow
+                    icon={DirectboxDefault}
+                    label={mailbox.name}
+                    unread={unread(mailbox.id, 'inbox')}
+                    active={view.kind === 'folder' && view.folder === 'inbox' && view.mailboxId === mailbox.id}
+                    onClick={() => go({ kind: 'folder', folder: 'inbox', mailboxId: mailbox.id })}
+                  />
+                  {/* shown on hover (or keyboard focus), over the unread count */}
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="absolute top-1/2 right-0.5 -translate-y-1/2 bg-sidebar-accent text-sidebar-nav opacity-0 group-hover/mailbox:opacity-100 hover:text-sidebar-nav-active focus-visible:opacity-100"
+                    aria-label={`${mailbox.name}: ${settings.label}`}
+                    title={settings.label}
+                    render={<Link to={settings.to} />}
+                  >
+                    <Setting2 />
+                  </Button>
+                </div>
+              )
+            })
           : null}
         {labels.length > 0 ? <RailSection>Labels</RailSection> : null}
         {labels.map((label) => (
@@ -141,6 +169,12 @@ export function FolderRail({ view, mailboxes, labels, counts, showOutbox, onComp
             </span>
           </RailRow>
         ))}
+        {mailboxes.length === 1 ? (
+          <Link data-slot="sidebar-nav-item" className={cn(sidebarNavItemClass, 'mt-auto')} to={mailboxSettings(mailboxes[0].id, canManage).to}>
+            <SidebarNavTile icon={Setting2} />
+            <span className="min-w-0 flex-1 truncate">{mailboxSettings(mailboxes[0].id, canManage).label}</span>
+          </Link>
+        ) : null}
       </div>
     </nav>
     </InAppSidebar>

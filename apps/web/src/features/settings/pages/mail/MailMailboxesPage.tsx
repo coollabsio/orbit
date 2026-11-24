@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { Link } from 'react-router'
+import { useEffect, useRef, useState } from 'react'
+import { Link, useSearchParams } from 'react-router'
 import { DirectInbox } from 'reicon-react'
 import type { MailDomain, MailMailbox } from '@orbit/api/generated/types.gen'
 import { EmptyState } from '@/components/common/EmptyState'
@@ -31,7 +31,10 @@ function MailMailboxes() {
   const domains = useMailDomains()
   const members = useMembers(workspace.id)
   const [dialog, setDialog] = useState<'create' | 'bulk' | null>(null)
-  const [openId, setOpenId] = useState<string | null>(null)
+  // the mail rail's settings button links here with `?mailbox=<id>`: that mailbox opens
+  const [params] = useSearchParams()
+  const [openId, setOpenId] = useState<string | null>(() => params.get('mailbox'))
+  const linkedId = params.get('mailbox')
 
   if (mailboxes.isPending || domains.isPending) return <SettingsCard title="Mailboxes"><p role="status">Loading mailboxes…</p></SettingsCard>
   if (mailboxes.isError || domains.isError) {
@@ -83,6 +86,7 @@ function MailMailboxes() {
               domains={domains.data}
               members={people}
               open={openId === mailbox.id}
+              linked={linkedId === mailbox.id}
               onToggle={() => setOpenId((current) => (current === mailbox.id ? null : mailbox.id))}
             />
           ))}
@@ -98,7 +102,7 @@ function MailMailboxes() {
   )
 }
 
-function MailboxRow({ mailbox, domains, members, open, onToggle }: { mailbox: MailMailbox; domains: MailDomain[]; members: User[]; open: boolean; onToggle: () => void }) {
+function MailboxRow({ mailbox, domains, members, open, linked, onToggle }: { mailbox: MailMailbox; domains: MailDomain[]; members: User[]; open: boolean; linked: boolean; onToggle: () => void }) {
   const primary = mailbox.addresses.find((address) => address.kind === 'primary') ?? mailbox.addresses[0]
   const aliases = mailbox.addresses.length - 1
   const ownerLeft = mailbox.kind === 'personal' && !mailbox.owner_membership_id
@@ -106,8 +110,12 @@ function MailboxRow({ mailbox, domains, members, open, onToggle }: { mailbox: Ma
   const who = mailbox.kind === 'personal'
     ? (ownerLeft ? 'Owner left' : owner?.name ?? 'Personal')
     : count(mailbox.member_ids.length, 'member', 'members')
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (linked) ref.current?.scrollIntoView({ block: 'start' })
+  }, [linked])
   return (
-    <div>
+    <div ref={ref}>
       <SettingsRow className="flex-nowrap">
         <RowIcon><DirectInbox /></RowIcon>
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">

@@ -78,6 +78,20 @@ Every change must work on both.
   (Orbit refuses other databases), and the server needs `ORBIT_APP_KEY`. S3 for files and backups stays optional
   and is set in Admin → Storage or with `ORBIT_S3_*`. Operator details: [`docs/operations.md`](docs/operations.md).
 
+## Tests: build only the tests you need
+
+Each file in `apps/server/tests/` becomes its own test program of 150–400 MB, so the full Rust suite uses about
+24 GB of `target/` and much CPU in each worktree. Many worktrees build on one disk at the same time.
+
+- In a worktree, do not run the full Rust suite: no `just test`, `just check`, `cargo test --workspace`, or
+  `cargo test -p orbit-server` without `--test`.
+- Run only the test files that cover your change: `cargo test -p orbit-server --test <name>` (add one `--test`
+  for each file; find the files with a search in `apps/server/tests/` for the route, function or table you
+  changed). For another crate, use `cargo test -p <crate> --lib`.
+- When you change a signature that other code calls, run `cargo check -p orbit-server --tests`. It compiles all
+  test files without linking test programs, so it finds broken callers in tests for little disk and CPU.
+- Run the full suite only when the user asks for it.
+
 ## Development servers: one per worktree
 
 Jean starts the dev server with `./scripts/dev run` (from `jean.json`). It wraps `just dev`, so several worktrees

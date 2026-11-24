@@ -168,6 +168,7 @@ impl Fixture {
                 fixture.team,
                 domain,
                 "support",
+                None,
                 "request",
             )
             .await

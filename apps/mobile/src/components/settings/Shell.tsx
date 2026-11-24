@@ -293,6 +293,8 @@ export function Toggle({ value, label, onChange, disabled }: { value: boolean; l
       trackColor={{ false: colors.input, true: colors.primary }}
       thumbColor={cssColors.white}
       ios_backgroundColor={colors.input}
+      // React Native's iOS Switch sets alignSelf: 'flex-start', which puts it at the top of a centered row
+      style={{ alignSelf: 'center' }}
       // react-native-web paints the on thumb teal unless told otherwise
       {...({ activeThumbColor: cssColors.white } as object)}
     />

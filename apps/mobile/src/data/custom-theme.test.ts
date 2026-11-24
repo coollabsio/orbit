@@ -52,8 +52,10 @@ test('colour tokens become the variables Uniwind reads', () => {
 test('Per app is stored in the web format and colours only the open part of the app', () => {
   const choice = { apps: { ...DEFAULT_APP_LOOKS, chat: null } }
   const raw = serializeCustomThemeChoice(choice)
-  expect(raw).toBe('apps:{"docs":"#f7f7f5,#ebebe9,#2383e2,#ffffff","chat":null,"tasks":"#0e0f11,#24252a,#5e6ad2,#16171a"}')
+  expect(raw).toBe('apps:{"docs":"#f7f7f5,#ebebe9,#2383e2,#ffffff","chat":null,"tasks":"#0e0f11,#24252a,#5e6ad2,#16171a","mail":"#f6f8fc,#d3e3fd,#0b57d0,#ffffff"}')
   expect(parseCustomThemeChoice(raw)).toEqual(choice)
+  // a Per app choice saved before Mail had its own colours gives Mail the default (Gmail)
+  expect(parseCustomThemeChoice('apps:{"docs":null,"chat":null,"tasks":null}')).toEqual({ apps: { docs: null, chat: null, tasks: null, mail: DEFAULT_APP_LOOKS.mail } })
   // a whole-app theme saved before Per app still reads
   expect(parseCustomThemeChoice('#3f0e40,#1164a3,#ecb22e,#ffffff')).toEqual(slack)
   expect(parseCustomThemeChoice('apps:{broken')).toEqual({ apps: DEFAULT_APP_LOOKS })
@@ -61,6 +63,7 @@ test('Per app is stored in the web format and colours only the open part of the 
   expect(appSectionOf('/docs/abc')).toBe('docs')
   expect(appSectionOf('/chat')).toBe('chat')
   expect(appSectionOf('/tasks/project/1')).toBe('tasks')
+  expect(appSectionOf('/mail/inbox')).toBe('mail')
   expect(appSectionOf('/settings/appearance')).toBeNull()
   expect(activeCustomTheme(choice, 'tasks')?.accent).toBe('#5e6ad2')
   expect(activeCustomTheme(choice, 'chat')).toBeNull()
