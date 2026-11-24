@@ -7,12 +7,13 @@ import { OPTION_COLORS, type CellValue, type Property, type Row, type SelectOpti
 import { cellOf, numberEditText, numberFromEditText, options, parseValue } from '@orbit/database/values'
 import { randomUUID } from 'expo-crypto'
 import { useState } from 'react'
-import { Pressable, Switch, View } from 'react-native'
+import { Pressable, View } from 'react-native'
 
 import { parseTime } from '../../data/database'
 import { usePeople } from '../../queries'
 import { useTheme } from '../../theme'
 import { Avatar, Button, Icon, Input, Text } from '../../ui'
+import { Toggle } from '../settings/Shell'
 import { DayPicker } from '../tasks/DayPicker'
 import { SheetList, SheetNote, SheetRow, SheetSearch } from '../tasks/Sheet'
 import { ChoiceRow, Pill } from './cells'
@@ -316,11 +317,10 @@ function DateRow({ label, day, active, onPress }: { label: string; day: string |
 }
 
 function SwitchRow({ label, value, onChange }: { label: string; value: boolean; onChange: (value: boolean) => void }) {
-  const { colors } = useTheme()
   return (
     <View className="min-h-11 flex-row items-center justify-between px-4">
       <Text className="font-noto-medium text-[14px]">{label}</Text>
-      <Switch accessibilityLabel={label} value={value} onValueChange={onChange} trackColor={{ true: colors.primary, false: colors.input }} />
+      <Toggle label={label} value={value} onChange={onChange} />
     </View>
   )
 }
