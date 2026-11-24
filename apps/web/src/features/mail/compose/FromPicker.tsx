@@ -25,7 +25,7 @@ export function FromPicker({ addresses, value, onChange }: { addresses: readonly
           <DropdownMenuContent align="start" className="w-auto max-w-[min(28rem,calc(100vw-2rem))] min-w-64">
             <DropdownMenuRadioGroup value={value} onValueChange={(next) => onChange(String(next))}>
               {addresses.map((address) => (
-                <DropdownMenuRadioItem key={address.address_id} value={address.address_id} className="items-start py-1.5">
+                <DropdownMenuRadioItem key={address.address_id} value={address.address_id} closeOnClick className="items-start py-1.5">
                   <span className="flex min-w-0 flex-col">
                     <span className="truncate text-[0.8125rem]">{address.display_name || address.address}</span>
                     <span className="truncate text-xs text-muted-foreground">{address.address}</span>
