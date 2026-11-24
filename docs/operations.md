@@ -18,7 +18,7 @@ Orbit reads its configuration only from environment variables that start with `O
 | `ORBIT_TRUSTED_PROXIES` | none | Comma-separated CIDRs of the reverse proxies, for example `127.0.0.1/32,::1/128`. Production requires at least one, also in the image. Orbit reads the client IP and `https` from forwarding headers only on connections from these networks. In the image, add `127.0.0.1/32`: the container healthcheck connects from loopback. Do not trust `0.0.0.0/0` or `::/0`: anyone who reaches the port could then fake their IP address (and get around rate limits) and HTTPS. Orbit logs a warning at startup for such a network. |
 | `ORBIT_SHUTDOWN_DELAY_SECONDS` | `0` | 0 to 300. Use it behind a load balancer: after SIGTERM, `/health/ready` reports 503 and the server continues to serve for this time. See [Orbit Cloud](#deployment). |
 | `ORBIT_DATABASE_PATH` | `data/orbit.sqlite` | The SQLite database file. Keep the database, attachment directory and backup directory separate. |
-| `ORBIT_DATABASE_URL` | none | Postgres instead of SQLite, for example `postgres://orbit:password@db.internal:5432/orbit`. See [Postgres](#postgres). |
+| `ORBIT_DATABASE_URL` | none | Postgres instead of SQLite, for example `postgres://orbit:password@db.internal:5432/orbit`. For TLS, add `?sslmode=require` or `verify-full`. See [Postgres](#postgres). |
 | `ORBIT_DATABASE_MAX_CONNECTIONS` | `5` (SQLite), `20` (Postgres) | 1 to 500. The size of each database pool. On Postgres, a server opens two pools of this size. See [Orbit Cloud](#deployment). |
 | `ORBIT_WRITE_LOCK` | `workspace` | Postgres only. `workspace`: writes in different workspaces can run at the same time. `global`: all writes run one at a time. See [Orbit Cloud](#deployment). |
 | `ORBIT_ATTACHMENTS_PATH` | `data/attachments` | |
@@ -294,6 +294,18 @@ With `ORBIT_DATABASE_URL`, the database is on another host. `ORBIT_APP_KEY` encr
 Files and backups still go to `ORBIT_ATTACHMENTS_PATH` and `ORBIT_BACKUPS_PATH` on this server until the root user saves a bucket in **Admin → Storage** and turns on attachments and backups in S3. Do that to make the server replaceable; pre-migration backups always stay local.
 
 Several servers can share one Postgres database; see [Orbit Cloud](#orbit-cloud-one-postgres-several-orbit-servers).
+
+**TLS.** Set `sslmode` in `ORBIT_DATABASE_URL`, for example `postgres://orbit:password@db.internal:5432/orbit?sslmode=verify-full&sslrootcert=/etc/orbit/postgres-ca.crt`:
+
+| `sslmode` | Result |
+| --- | --- |
+| `disable` | No TLS. |
+| `prefer` (default) | TLS when the server offers it, else no TLS. Orbit does not check the certificate. |
+| `require` | TLS, else Orbit does not connect. Orbit does not check the certificate. |
+| `verify-ca` | TLS, and the certificate must come from a trusted CA. |
+| `verify-full` | As `verify-ca`, and the certificate must also match the host name in the URL. Use this on a network that you do not control. |
+
+For `verify-ca` and `verify-full`, Orbit trusts the public web CAs (Mozilla's list, built into the binary), not the CA store of the system. If your server uses a private CA (for example CloudNativePG, or Amazon RDS), set `sslrootcert` to its PEM file and mount the file read-only. UID 65532 must be able to read it. For a client certificate, set `sslcert` and `sslkey`. `orbit db` gives the same URL to `psql`.
 
 ## Orbit Cloud: one Postgres, several Orbit servers
 
