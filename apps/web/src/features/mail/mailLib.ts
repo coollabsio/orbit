@@ -120,7 +120,7 @@ export function frameHeight(event: { source: unknown; data: unknown }, frameWind
   return Math.min(FRAME_MAX_HEIGHT, Math.max(FRAME_MIN_HEIGHT, Math.ceil(height)))
 }
 
-/** What a message frame posts: its height, and whether the mail is plain (no colours of its own: it follows the app theme). */
+/** What a message frame posts: its height, and whether the mail is plain (no text or background colours of its own, or a dark design: it follows the app theme). */
 export interface FrameMessage {
   height: number
   plain: boolean

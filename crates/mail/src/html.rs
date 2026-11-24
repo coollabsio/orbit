@@ -11,7 +11,7 @@
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use base64::Engine as _;
 use rsa::rand_core::{OsRng, RngCore as _};
@@ -80,11 +80,13 @@ pub fn new_nonce() -> String {
 /// Sanitizes `html` and returns the full view document.
 pub fn render_document(html: &str, opts: &RenderOptions<'_>) -> Rendered {
     let blocked = Arc::new(AtomicUsize::new(0));
-    let body = body_builder(opts, Arc::clone(&blocked))
+    let coloured = Arc::new(AtomicBool::new(false));
+    let body = body_builder(opts, Arc::clone(&blocked), Arc::clone(&coloured))
         .clean(html)
         .to_string();
     let css = style_sheets(html);
-    let plain = is_plain(&css, &body);
+    let plain =
+        supports_dark(html, &css) || !(coloured.load(Ordering::Relaxed) || sets_colours(&css));
     let blocked = blocked.load(Ordering::Relaxed);
     Rendered {
         html: document(&css, &body, opts.nonce, plain, blocked),
@@ -163,16 +165,61 @@ fn push_escaped(out: &mut String, text: &str) {
     }
 }
 
-/// A document is plain when the mail brings no colours of its own: no style sheet and no `style`, `bgcolor` or
-/// `color` attribute in the sanitized body. A plain document follows the app theme; any other mail keeps the white
-/// page it was written for. The body is `ammonia`'s serialization, so every attribute is written as ` name="…"`
-/// and a `"` inside a value is `&quot;`; a match in the text only makes the document not plain, which is safe.
-fn is_plain(css: &str, body: &str) -> bool {
-    css.trim().is_empty()
-        && ![" style=\"", " bgcolor=\"", " color=\""]
-            .iter()
-            .any(|attribute| body.contains(attribute))
+/// A document is plain (it follows the app theme) when the mail sets no text or background colour of its own, or
+/// when it says that it supports a dark colour scheme. Any other mail keeps the white page it was written for. Layout
+/// styles (margins, borders, fonts) do not count: Gmail and Apple Mail put them in almost every reply.
+///
+/// `css` sets colours when one of its declarations sets [`COLOUR_PROPERTIES`] to a real colour. The check splits at
+/// `{`, `}` and `;`, so a selector or an `@media` prelude is a piece of its own and never matches a property.
+fn sets_colours(css: &str) -> bool {
+    css.split(['{', '}', ';']).any(|declaration| {
+        let Some((property, value)) = declaration.split_once(':') else {
+            return false;
+        };
+        let value = value.trim().trim_end_matches("!important").trim();
+        COLOUR_PROPERTIES.contains(&property.trim().to_ascii_lowercase().as_str())
+            && !NO_COLOUR_VALUES.contains(&value.to_ascii_lowercase().as_str())
+    })
 }
+
+/// The mail says that it has a dark design: a `<meta name="color-scheme">` (or `supported-color-schemes`) with
+/// `dark`, a `color-scheme` declaration with `dark`, or a `prefers-color-scheme: dark` media query. A plain frame
+/// in the dark theme gets `color-scheme: dark`, so the mail's own dark rules apply.
+fn supports_dark(html: &str, css: &str) -> bool {
+    let html = html.to_ascii_lowercase();
+    let meta = html.split("<meta").skip(1).any(|tag| {
+        let tag = tag.split('>').next().unwrap_or_default();
+        tag.contains("color-scheme") && tag.contains("dark")
+    });
+    let css: String = css
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .map(|c| c.to_ascii_lowercase())
+        .collect();
+    meta || css.contains("prefers-color-scheme:dark")
+        || css.split(['{', '}', ';']).any(|declaration| {
+            declaration.starts_with("color-scheme:") && declaration.contains("dark")
+        })
+}
+
+/// CSS properties that set a text or background colour.
+const COLOUR_PROPERTIES: [&str; 5] = [
+    "color",
+    "background",
+    "background-color",
+    "background-image",
+    "-webkit-text-fill-color",
+];
+/// Values of [`COLOUR_PROPERTIES`] that set no colour of their own.
+const NO_COLOUR_VALUES: [&str; 7] = [
+    "",
+    "transparent",
+    "none",
+    "inherit",
+    "initial",
+    "unset",
+    "currentcolor",
+];
 
 /// The `Content-Security-Policy` of the view document. `img_sources` is a space-separated source list (the image
 /// proxy and attachment origins, may be empty); `frame_ancestors` is the Orbit app origin that may frame it.
@@ -278,7 +325,13 @@ fn csp_sources(sources: &str) -> String {
 
 // ---------------------------------------------------------------- body
 
-fn body_builder(opts: &RenderOptions<'_>, blocked: Arc<AtomicUsize>) -> ammonia::Builder<'static> {
+/// `coloured` becomes true when the body sets a colour: a `bgcolor` or `color` attribute, or a `style` attribute
+/// that [`sets_colours`].
+fn body_builder(
+    opts: &RenderOptions<'_>,
+    blocked: Arc<AtomicUsize>,
+    coloured: Arc<AtomicBool>,
+) -> ammonia::Builder<'static> {
     let mut builder = ammonia::Builder::default();
     builder
         .rm_tags(["area", "map"])
@@ -318,7 +371,14 @@ fn body_builder(opts: &RenderOptions<'_>, blocked: Arc<AtomicUsize>) -> ammonia:
         move |element, attribute, value| match (element, attribute) {
             (_, "style") => {
                 let css = filter_css(value);
+                if sets_colours(&css) {
+                    coloured.store(true, Ordering::Relaxed);
+                }
                 (!css.is_empty()).then_some(Cow::Owned(css))
+            }
+            (_, "bgcolor" | "color") => {
+                coloured.store(true, Ordering::Relaxed);
+                Some(Cow::Borrowed(value))
             }
             ("img", "src") => {
                 image_src(value, &cid_url, proxy_url.as_ref(), &blocked).map(Cow::Owned)

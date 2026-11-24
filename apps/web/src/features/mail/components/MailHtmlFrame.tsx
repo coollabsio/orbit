@@ -9,8 +9,9 @@ import { useTheme } from '@/lib/themeContext'
 /**
  * A message's HTML in a sandboxed frame (spec §6.5). Without `allow-same-origin` the frame has an opaque origin: it
  * cannot read Orbit's cookies, storage or this page. Its one script posts the content height and whether the mail is
- * plain; only a finite number from this frame's own window sets the height (80–20,000 px). A plain mail (no colours
- * of its own) sits on the app background and gets the app theme by `postMessage`; any other mail keeps a white page.
+ * plain; only a finite number from this frame's own window sets the height (80–20,000 px). A plain mail (no text or
+ * background colours of its own, or a dark design) sits on the app background and gets the app theme by
+ * `postMessage`; any other mail keeps a white page.
  */
 /** The longest wait for a frame to say it is ready. */
 const FRAME_SHOW_MS = 1000
