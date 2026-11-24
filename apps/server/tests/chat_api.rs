@@ -4140,3 +4140,108 @@ async fn a_guest_push_names_no_public_channel() {
     assert_eq!(body_for(&ada), Some(json!("@ada @guest see #general")));
     assert_eq!(body_for(&guest), Some(json!("@ada @guest see #channel")));
 }
+
+async fn serve_images() -> std::net::SocketAddr {
+    use axum::routing::get;
+    let router = axum::Router::new()
+        .route(
+            "/a.png",
+            get(|| async { ([(header::CONTENT_TYPE, "image/png")], PNG) }),
+        )
+        .route(
+            "/icon.svg",
+            get(|| async {
+                (
+                    [(header::CONTENT_TYPE, "image/svg+xml")],
+                    "<svg xmlns=\"http://www.w3.org/2000/svg\"><script>alert(1)</script></svg>",
+                )
+            }),
+        )
+        .route(
+            "/page",
+            get(|| async { ([(header::CONTENT_TYPE, "text/html")], "<html>hi</html>") }),
+        )
+        .route(
+            "/big.png",
+            get(|| async {
+                let mut body = PNG.to_vec();
+                body.resize(6 * 1024 * 1024, 0);
+                ([(header::CONTENT_TYPE, "image/png")], body)
+            }),
+        )
+        .route(
+            "/to-localhost",
+            get(|| async { axum::response::Redirect::to("http://localhost:9/a.png") }),
+        );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    address
+}
+
+#[tokio::test]
+async fn an_outside_image_loads_through_orbit_for_a_signed_in_user_only() {
+    use orbit_server::mail_image_proxy::ImageProxy;
+    let fixture = Fixture::new().await;
+    let host = serve_images().await;
+    let app = chat_router(
+        ChatState::new(
+            Arc::clone(&fixture.identity),
+            fixture.uploads.clone(),
+            CookieMode::secure(),
+        )
+        .with_image_proxy(Arc::new(ImageProxy::with_test_hosts(
+            std::collections::HashMap::from([("images.test".to_owned(), host)]),
+        ))),
+    );
+    let get = async |cookie: Option<&str>, url: &str| {
+        let url: String = url::form_urlencoded::byte_serialize(url.as_bytes()).collect();
+        let mut request = Request::builder().uri(format!("/api/v1/image?u={url}"));
+        if let Some(cookie) = cookie {
+            request = request.header(header::COOKIE, cookie);
+        }
+        let response = app
+            .clone()
+            .oneshot(request.body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let status = response.status();
+        let headers = response.headers().clone();
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        (status, headers, bytes)
+    };
+    let image = |path: &str| format!("http://images.test:{}{path}", host.port());
+    let cookie = Some(fixture.owner.cookie.as_str());
+
+    let (status, headers, bytes) = get(cookie, &image("/a.png")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(&bytes[..], PNG);
+    assert_eq!(headers[header::CONTENT_TYPE], "image/png");
+    assert_eq!(headers[header::X_CONTENT_TYPE_OPTIONS], "nosniff");
+    assert_eq!(
+        headers[header::CONTENT_SECURITY_POLICY],
+        "default-src 'none'; sandbox"
+    );
+    assert_eq!(headers[header::CACHE_CONTROL], "private, max-age=86400");
+
+    // Without a session the route is not a proxy for anyone.
+    let (status, _, _) = get(None, &image("/a.png")).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    // A target on the server's own network, also after a redirect, is refused.
+    for url in [
+        format!("http://127.0.0.1:{}/a.png", host.port()),
+        "http://169.254.169.254/latest/meta-data/".to_owned(),
+        "file:///etc/passwd".to_owned(),
+        image("/to-localhost"),
+    ] {
+        let (status, _, _) = get(cookie, &url).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{url}");
+    }
+
+    // Only real PNG, JPEG, GIF, WebP and AVIF bytes, up to 5 MB.
+    for path in ["/icon.svg", "/page", "/big.png", "/missing.png"] {
+        let (status, _, _) = get(cookie, &image(path)).await;
+        assert_eq!(status, StatusCode::BAD_GATEWAY, "{path}");
+    }
+}

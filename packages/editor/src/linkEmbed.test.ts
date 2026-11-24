@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { BlockNoteEditor } from '@blocknote/core'
-import { onlyLinkHref } from './linkEmbed'
+import { autoplaySrc, onlyLinkHref } from './linkEmbed'
 import { mediaEmbed } from './mediaFiles'
 import { createEditorSchemas } from './schema'
 
@@ -53,4 +53,13 @@ describe('onlyLinkHref', () => {
     const node = firstParagraph(instance.prosemirrorView.state.doc)
     expect(onlyLinkHref(node)).toBeNull()
   })
+})
+
+test('a player that the reader started plays at once, and keeps its own query', () => {
+  expect(autoplaySrc('https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ')).toBe(
+    'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?autoplay=1',
+  )
+  expect(autoplaySrc('https://player.vimeo.com/video/226053498?h=abcdef')).toBe(
+    'https://player.vimeo.com/video/226053498?h=abcdef&autoplay=1',
+  )
 })

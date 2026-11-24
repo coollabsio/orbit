@@ -1,6 +1,7 @@
 // Formatting toolbar button that opens the selected image block in the full-screen ImageViewer (as in tasks and chat).
 import { blockHasType, type BlockSchema, type InlineContentSchema, type StyleSchema } from '@blocknote/core'
 import { useBlockNoteEditor, useComponentsContext, useEditorState } from '@blocknote/react'
+import { proxiedImageUrl } from '@orbit/editor/outsideUrl'
 import { SearchZoomIn } from 'reicon-react'
 import type { Attachment } from '@/lib/attachmentLib'
 
@@ -21,7 +22,8 @@ export function ImageZoomButton({ onZoom }: { onZoom: (image: Attachment) => voi
   if (!block) return null
 
   const open = async () => {
-    const url = editor.resolveFileUrl ? await editor.resolveFileUrl(block.props.url) : block.props.url
+    const source = proxiedImageUrl(block.props.url, window.location.origin)
+    const url = editor.resolveFileUrl ? await editor.resolveFileUrl(source) : source
     onZoom({ id: block.id, fileName: block.props.name || 'Image', mimeType: '', fileSize: 0, url })
   }
 

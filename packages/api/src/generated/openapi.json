@@ -41264,6 +41264,118 @@
         ]
       }
     },
+    "/api/v1/image": {
+      "get": {
+        "tags": [
+          "crate::chat_routes::links"
+        ],
+        "summary": "An image on another server, for a signed-in user: the images of messages, comments, pages and link\ncards load through Orbit, so the other server sees Orbit's address, not the reader's, and gets no\ncookie and no `Referer`. Nothing is stored. The fetch rules (no private targets on any hop, 5 MB,\n10 s, PNG/JPEG/GIF/WebP/AVIF only) are the mail image proxy's.",
+        "operationId": "get_content_image",
+        "parameters": [
+          {
+            "name": "u",
+            "in": "query",
+            "description": "An absolute `http(s)` image URL on another server.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContentImageBytes"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "image_not_found: not an http(s) URL, or a target that is not public"
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "image_unavailable: not an allowed image, too large, or the other server failed"
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/integrations/github/manifest/callback": {
       "get": {
         "tags": [
@@ -103974,6 +104086,11 @@
           "contact",
           "seen"
         ]
+      },
+      "ContentImageBytes": {
+        "type": "string",
+        "format": "binary",
+        "description": "Image bytes in the API description."
       },
       "ContextElement": {
         "oneOf": [

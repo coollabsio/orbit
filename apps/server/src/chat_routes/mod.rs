@@ -31,6 +31,7 @@ use crate::auth_routes::CookieMode;
 use crate::link_preview::LinkPreviewer;
 use crate::live::{LiveHub, NewEvent, Recipients};
 use crate::mail::Mailer;
+use crate::mail_image_proxy::ImageProxy;
 use crate::repositories::chat::{
     ChatError, ChatEvent, ChatRepository, Emitted, Written, live_event,
 };
@@ -44,6 +45,8 @@ pub struct ChatState {
     pub(crate) hub: LiveHub,
     pub(crate) cookie_mode: CookieMode,
     pub(crate) link_previews: Arc<LinkPreviewer>,
+    /// Loads outside images for `/api/v1/image` (shared with mail, so the fetch limit is global).
+    pub(crate) image_proxy: Arc<ImageProxy>,
     /// The origin of the webhook URLs that Orbit shows (`ORBIT_PUBLIC_ORIGIN`).
     pub(crate) public_origin: Arc<str>,
     /// Encrypts the signing secrets of interactive webhooks; `None` turns interactivity off.
@@ -66,6 +69,7 @@ impl ChatState {
             identity,
             cookie_mode,
             link_previews: Arc::new(LinkPreviewer::default()),
+            image_proxy: Arc::new(ImageProxy::new()),
             public_origin: Arc::from(""),
             app_key: None,
             clicks: Arc::new(interactions::ClickSender::new(false)),
@@ -99,6 +103,13 @@ impl ChatState {
     #[must_use]
     pub fn with_link_previews(mut self, previewer: LinkPreviewer) -> Self {
         self.link_previews = Arc::new(previewer);
+        self
+    }
+
+    /// Loads outside images with `proxy` (the app shares mail's; tests name local hosts).
+    #[must_use]
+    pub fn with_image_proxy(mut self, proxy: Arc<ImageProxy>) -> Self {
+        self.image_proxy = proxy;
         self
     }
 
@@ -344,6 +355,7 @@ fn json_router(state: ChatState) -> Router {
             "/api/v1/workspaces/{workspace_id}/chat/link-preview",
             get(links::get_chat_link_preview),
         )
+        .route("/api/v1/image", get(links::get_content_image))
         .route(
             "/api/v1/workspaces/{workspace_id}/chat/emoji",
             get(emoji::list_chat_emoji)

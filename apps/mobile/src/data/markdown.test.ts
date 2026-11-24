@@ -44,3 +44,8 @@ test('keeps paragraphs and list structure, drops the markup', () => {
 test('plain text passes through', () => {
   expect(markdownToText('A safe, idempotent development seed record.')).toBe('A safe, idempotent development seed record.')
 })
+
+test('a bare URL keeps its underscores and stars, and a style around it still goes', () => {
+  const url = 'https://upload.example.org/_next/PNG_transparency_demonstration_1.png'
+  expect(markdownToText(`see ${url} and **https://x.com/*a*/b** and _${url}_`)).toBe(`see ${url} and https://x.com/*a*/b and ${url}`)
+})

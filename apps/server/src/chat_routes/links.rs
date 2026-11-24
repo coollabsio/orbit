@@ -1,14 +1,21 @@
-//! Previews of the URLs in messages.
+//! Previews of the URLs in messages, and outside images through Orbit.
 
 use axum::Json;
+use axum::body::Body;
 use axum::extract::{Path, State};
-use axum::http::{HeaderMap, Uri};
+use axum::http::header::{
+    CACHE_CONTROL, CONTENT_DISPOSITION, CONTENT_SECURITY_POLICY, CONTENT_TYPE,
+    X_CONTENT_TYPE_OPTIONS,
+};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri};
+use axum::response::Response;
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
 use super::{Call, ChatState, RequestIdExtension};
 use crate::link_preview::LinkPreview;
-use crate::task_routes::{ApiError, ApiQuery};
+use crate::mail_image_proxy::ImageProxyError;
+use crate::task_routes::{ApiError, ApiQuery, authenticate_session};
 
 #[derive(Deserialize, IntoParams)]
 #[serde(deny_unknown_fields)]
@@ -43,4 +50,74 @@ pub(crate) async fn get_chat_link_preview(
     Ok(Json(ChatLinkPreview {
         preview: state.link_previews.preview(&query.url).await,
     }))
+}
+
+#[derive(Deserialize, IntoParams)]
+#[serde(deny_unknown_fields)]
+#[into_params(parameter_in = Query)]
+pub(crate) struct ContentImageQuery {
+    /// An absolute `http(s)` image URL on another server.
+    u: String,
+}
+
+/// Image bytes in the API description.
+#[derive(ToSchema)]
+#[schema(value_type = String, format = Binary)]
+#[allow(dead_code)]
+struct ContentImageBytes(Vec<u8>);
+
+/// An image on another server, for a signed-in user: the images of messages, comments, pages and link
+/// cards load through Orbit, so the other server sees Orbit's address, not the reader's, and gets no
+/// cookie and no `Referer`. Nothing is stored. The fetch rules (no private targets on any hop, 5 MB,
+/// 10 s, PNG/JPEG/GIF/WebP/AVIF only) are the mail image proxy's.
+#[utoipa::path(get, path = "/api/v1/image", params(ContentImageQuery), responses((status = 200, body = ContentImageBytes, content_type = "application/octet-stream"), (status = 401, description = "authentication_required"), (status = 404, description = "image_not_found: not an http(s) URL, or a target that is not public"), (status = 502, description = "image_unavailable: not an allowed image, too large, or the other server failed")))]
+pub(crate) async fn get_content_image(
+    State(state): State<ChatState>,
+    headers: HeaderMap,
+    uri: Uri,
+    request_id: RequestIdExtension,
+    ApiQuery(query): ApiQuery<ContentImageQuery>,
+) -> Result<Response, ApiError> {
+    let instance = uri.path();
+    authenticate_session(
+        &state.identity,
+        state.cookie_mode,
+        &headers,
+        instance,
+        request_id.as_ref(),
+    )
+    .await?;
+    let image = state.image_proxy.fetch(&query.u).await.map_err(|error| {
+        tracing::debug!(%error, "content image proxy");
+        let (status, code, title, detail) = match error {
+            ImageProxyError::Refused => (
+                StatusCode::NOT_FOUND,
+                "image_not_found",
+                "Image not found",
+                "The image URL is not one that Orbit loads.",
+            ),
+            _ => (
+                StatusCode::BAD_GATEWAY,
+                "image_unavailable",
+                "Image unavailable",
+                "The image could not be loaded.",
+            ),
+        };
+        ApiError::new(status, code, title, detail, instance, request_id.as_ref())
+    })?;
+    let mut response = Response::new(Body::from(image.bytes));
+    let headers = response.headers_mut();
+    headers.insert(CONTENT_TYPE, HeaderValue::from_static(image.content_type));
+    headers.insert(CONTENT_DISPOSITION, HeaderValue::from_static("inline"));
+    headers.insert(X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
+    headers.insert(
+        CONTENT_SECURITY_POLICY,
+        HeaderValue::from_static("default-src 'none'; sandbox"),
+    );
+    // The browser keeps the image for a day, so the other server sees fewer of the reads.
+    headers.insert(
+        CACHE_CONTROL,
+        HeaderValue::from_static("private, max-age=86400"),
+    );
+    Ok(response)
 }

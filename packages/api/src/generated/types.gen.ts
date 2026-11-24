@@ -1467,6 +1467,11 @@ export type ConnectedAccount = {
 
 export type ContactKind = 'member' | 'contact' | 'seen';
 
+/**
+ * Image bytes in the API description.
+ */
+export type ContentImageBytes = Blob | File;
+
 export type ContextElement = {
     text: string;
     type: 'plain_text';
@@ -31782,6 +31787,67 @@ export type PostIncomingWebhookResponses = {
 };
 
 export type PostIncomingWebhookResponse = PostIncomingWebhookResponses[keyof PostIncomingWebhookResponses];
+
+export type GetContentImageData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query: {
+        /**
+         * An absolute `http(s)` image URL on another server.
+         */
+        u: string;
+    };
+    url: '/api/v1/image';
+};
+
+export type GetContentImageErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * image_not_found: not an http(s) URL, or a target that is not public
+     */
+    404: unknown;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * image_unavailable: not an allowed image, too large, or the other server failed
+     */
+    502: unknown;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type GetContentImageError = GetContentImageErrors[keyof GetContentImageErrors];
+
+export type GetContentImageResponses = {
+    200: ContentImageBytes;
+};
+
+export type GetContentImageResponse = GetContentImageResponses[keyof GetContentImageResponses];
 
 export type GithubManifestCallbackData = {
     body?: never;

@@ -574,6 +574,8 @@ impl App {
             cookie_mode,
             &config.http.public_origin,
         );
+        // One image proxy for mail and content images, so its limit on fetches at once is global.
+        let image_proxy = Arc::new(crate::mail_image_proxy::ImageProxy::new());
         let router = metrics.instrument(production_router(
             ApiRoutes {
                 billing: billing.clone(),
@@ -719,6 +721,7 @@ impl App {
                     cookie_mode,
                 )
                 .with_public_origin(&config.http.public_origin)
+                .with_image_proxy(Arc::clone(&image_proxy))
                 .with_mailer(chat_mailer)
                 .with_interactivity(
                     app_key,
@@ -740,7 +743,8 @@ impl App {
                 )
                 .with_health(Arc::clone(&mail_status), mail_dns)
                 .with_certificates(Arc::clone(&mail_certificates))
-                .with_inbound_opt(provider_intake),
+                .with_inbound_opt(provider_intake)
+                .with_image_proxy(image_proxy),
                 webhooks: crate::webhooks::routes::WebhookState::new(
                     Arc::clone(&identity),
                     cookie_mode,
