@@ -108,7 +108,7 @@ pub(super) fn tools() -> Vec<Tool> {
         ),
         write_definition::<UploadDocFileArgs>(
             "upload_doc_file",
-            "Upload a file (an image, a PDF…) to a doc, at most 1 MiB as content_base64. Then put the returned url in the doc's Markdown with update_doc: ![name](url) shows an image, [name](url) links a file.",
+            "Upload a file (an image, a PDF…) to a doc that is not locked, at most 1 MiB as content_base64. Then put the returned url in the doc's Markdown with update_doc: ![name](url) shows an image, [name](url) links a file.",
             false,
         ),
         definition::<DocFileArgs>(
