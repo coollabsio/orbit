@@ -49,6 +49,7 @@ import type {
   InstanceSettingsView,
   JobLimitsBody,
   JobLimitView,
+  LimitsBody,
   LimitsView,
   PageAuditEvent,
   Provider,
@@ -213,7 +214,7 @@ export async function sendTestEmail(client: OrbitClient): Promise<void> {
   await sendTestEmailRequest({ client, throwOnError: true })
 }
 
-export async function saveLimits(client: OrbitClient, body: LimitsView): Promise<InstanceSettingsView> {
+export async function saveLimits(client: OrbitClient, body: LimitsBody): Promise<InstanceSettingsView> {
   return (await saveLimitsRequest({ client, body, throwOnError: true })).data
 }
 
@@ -375,11 +376,21 @@ export function limitsDraft(limits: LimitsView): { workspaces: string; storageGb
 }
 
 /** What the Limits form saves, or `null` when a field is not a number. */
-export function limitsBody(draft: { workspaces: string; storageGb: string }): LimitsView | null {
+export function limitsBody(draft: { workspaces: string; storageGb: string }): LimitsBody | null {
   const workspaces = parseLimit(draft.workspaces)
   const storage = parseLimit(draft.storageGb, BYTES_PER_GB)
   if (workspaces === undefined || storage === undefined) return null
   return { max_owned_workspaces: workspaces, workspace_storage_quota_bytes: storage }
+}
+
+/**
+ * What the outside image card saves: `fetches` (a whole number from 1 to 256) with the other limits unchanged, as a
+ * save sets all of them. `null` when the field is not such a number.
+ */
+export function imageFetchesBody(limits: LimitsView, fetches: string): LimitsBody | null {
+  const value = Number(fetches.trim())
+  if (!fetches.trim() || !Number.isInteger(value) || value < 1 || value > 256) return null
+  return { max_owned_workspaces: limits.max_owned_workspaces, workspace_storage_quota_bytes: limits.workspace_storage_quota_bytes, image_proxy_fetches: value }
 }
 
 export interface S3Draft {

@@ -1,5 +1,6 @@
 import type { ActionElement, AttachmentBlock, ContextElement, MessageBlock } from '@orbit/api/generated/types.gen'
 import { createContext, useContext, useEffect, useState } from 'react'
+import { proxiedImageUrl } from '@orbit/editor/outsideUrl'
 import { toast } from 'sonner'
 import { buttonVariants } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
@@ -43,7 +44,7 @@ function ContextLine({ elements, id }: { elements: ContextElement[]; id: string 
         element.type === 'image' ? (
           <img
             key={index}
-            src={element.image_url}
+            src={proxiedImageUrl(element.image_url, window.location.origin)}
             alt={element.alt_text}
             title={element.alt_text}
             referrerPolicy="no-referrer"
@@ -120,7 +121,7 @@ function AttachmentBox({ attachment, id }: { attachment: AttachmentBlock; id: st
           ) : null}
           {attachment.image_url ? (
             <img
-              src={attachment.image_url}
+              src={proxiedImageUrl(attachment.image_url, window.location.origin)}
               alt=""
               referrerPolicy="no-referrer"
               className="max-h-[360px] max-w-full justify-self-start rounded-md border object-contain"
@@ -235,7 +236,7 @@ function Block({ block, id }: { block: MessageBlock; id: string }) {
             </figcaption>
           ) : null}
           <img
-            src={block.image_url}
+            src={proxiedImageUrl(block.image_url, window.location.origin)}
             alt={block.alt_text}
             title={block.alt_text}
             referrerPolicy="no-referrer"

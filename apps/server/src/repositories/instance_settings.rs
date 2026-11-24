@@ -10,6 +10,7 @@ use thiserror::Error;
 
 use super::environment_settings::EnvironmentSettings;
 use crate::audit::{self, AuditOutcome};
+use crate::mail_image_proxy as image_proxy;
 use crate::sign_in_providers::Provider;
 
 /// The saved mail server. `password` is encrypted under the app key.
@@ -99,6 +100,9 @@ pub struct InstanceLimits {
     pub max_owned_workspaces: Option<u32>,
     /// Bytes of files one workspace may store.
     pub workspace_storage_quota_bytes: Option<u64>,
+    /// Outside images (1–256) that one server loads at once for the image proxy. `ORBIT_IMAGE_PROXY_FETCHES`
+    /// replaces the saved value.
+    pub image_proxy_fetches: u32,
 }
 
 /// What a save does with the stored SMTP password.
@@ -488,7 +492,8 @@ impl InstanceSettingsRepository {
 
     pub async fn limits(&self) -> Result<InstanceLimits, sqlx::Error> {
         let row = sqlx::query(
-            "SELECT max_owned_workspaces, workspace_storage_quota_bytes FROM instance_settings WHERE id = 1",
+            "SELECT max_owned_workspaces, workspace_storage_quota_bytes, image_proxy_fetches \
+             FROM instance_settings WHERE id = 1",
         )
         .fetch_one(self.database.pool())
         .await?;
@@ -501,6 +506,14 @@ impl InstanceSettingsRepository {
             )
             .ok()
             .filter(|limit| *limit > 0),
+            image_proxy_fetches: EnvironmentSettings::of(&self.database)
+                .image_proxy_fetches
+                .unwrap_or_else(|| {
+                    u32::try_from(row.get::<i64, _>("image_proxy_fetches"))
+                        .ok()
+                        .filter(|fetches| (1..=image_proxy::MAX_FETCHES_LIMIT).contains(fetches))
+                        .unwrap_or(image_proxy::DEFAULT_FETCHES)
+                }),
         })
     }
 
@@ -515,13 +528,19 @@ impl InstanceSettingsRepository {
         let storage_quota = limits
             .workspace_storage_quota_bytes
             .map_or(0, |bytes| i64::try_from(bytes).unwrap_or(i64::MAX));
+        // A value that `ORBIT_IMAGE_PROXY_FETCHES` sets is not saved: the saved one comes back when it goes.
+        let image_proxy_fetches = EnvironmentSettings::of(&self.database)
+            .image_proxy_fetches
+            .is_none()
+            .then_some(i64::from(limits.image_proxy_fetches));
         let mut transaction = self.database.immediate_transaction().await?;
         sqlx::query(
             "UPDATE instance_settings SET max_owned_workspaces = $1, workspace_storage_quota_bytes = $2, \
-             updated_at = $3 WHERE id = 1",
+             image_proxy_fetches = COALESCE($3, image_proxy_fetches), updated_at = $4 WHERE id = 1",
         )
         .bind(max_owned_workspaces)
         .bind(storage_quota)
+        .bind(image_proxy_fetches)
         .bind(now.as_millis())
         .execute(&mut *transaction)
         .await?;
@@ -536,6 +555,7 @@ impl InstanceSettingsRepository {
             serde_json::json!({
                 "max_owned_workspaces": max_owned_workspaces,
                 "workspace_storage_quota_bytes": storage_quota,
+                "image_proxy_fetches": image_proxy_fetches,
             }),
             now,
         )

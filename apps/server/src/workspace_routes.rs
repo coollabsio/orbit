@@ -2158,6 +2158,8 @@ struct EnvironmentView {
     backup_schedule: bool,
     /// `ORBIT_S3_KEEP_DELETED_DAYS`.
     s3_keep_deleted_days: bool,
+    /// `ORBIT_IMAGE_PROXY_FETCHES`.
+    image_proxy_fetches: bool,
     /// `ORBIT_GOOGLE_*`, `ORBIT_GITHUB_*`, `ORBIT_OIDC_*`.
     sign_in_providers: Vec<Provider>,
 }
@@ -2173,6 +2175,7 @@ impl From<&EnvironmentSettings> for EnvironmentView {
             backups_in_s3: environment.backups_in_s3.is_some(),
             backup_schedule: environment.backup_schedule.is_some(),
             s3_keep_deleted_days: environment.s3_keep_deleted_days.is_some(),
+            image_proxy_fetches: environment.image_proxy_fetches.is_some(),
             sign_in_providers: environment
                 .sign_in_providers
                 .iter()
@@ -2223,14 +2226,16 @@ struct SignInProviderView {
 }
 
 /// Limits for a shared installation. `null` is unlimited.
-#[derive(Deserialize, Serialize, ToSchema)]
-#[serde(deny_unknown_fields)]
+#[derive(Serialize, ToSchema)]
 struct LimitsView {
     /// Workspaces (not in the trash) one account may own. Instance admins are not limited.
     max_owned_workspaces: Option<u32>,
     /// Bytes of files one workspace may store: attachments, page and chat files, emoji and stickers. A file is
     /// counted once per workspace, however often it is attached.
     workspace_storage_quota_bytes: Option<u64>,
+    /// Outside images (mail, messages, pages, link cards) that one server loads at once through Orbit; more wait.
+    /// One user has at most 6 of them.
+    image_proxy_fetches: u32,
 }
 
 impl From<InstanceLimits> for LimitsView {
@@ -2238,8 +2243,20 @@ impl From<InstanceLimits> for LimitsView {
         Self {
             max_owned_workspaces: limits.max_owned_workspaces,
             workspace_storage_quota_bytes: limits.workspace_storage_quota_bytes,
+            image_proxy_fetches: limits.image_proxy_fetches,
         }
     }
+}
+
+/// The limits to save. `null` or 0 is unlimited.
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+struct LimitsBody {
+    max_owned_workspaces: Option<u32>,
+    workspace_storage_quota_bytes: Option<u64>,
+    /// Outside images (1–256) that one server loads at once. Omitted: unchanged.
+    #[serde(default)]
+    image_proxy_fetches: Option<u32>,
 }
 
 async fn settings_view(
@@ -3538,15 +3555,40 @@ struct StorageOptionsBody {
 
 /// Saves the limits of a shared installation; `null` or 0 is unlimited. A lower limit refuses new workspaces and
 /// uploads only: nothing that exists is removed.
-#[utoipa::path(put, path = "/api/v1/admin/settings/limits", request_body = LimitsView, responses((status = 200, body = InstanceSettingsView)))]
+#[utoipa::path(put, path = "/api/v1/admin/settings/limits", request_body = LimitsBody, responses((status = 200, body = InstanceSettingsView)))]
 async fn save_limits(
     State(state): State<WorkspaceState>,
     headers: HeaderMap,
     request_id: Option<Extension<RequestId>>,
-    ApiJson(body): ApiJson<LimitsView>,
+    ApiJson(body): ApiJson<LimitsBody>,
 ) -> Result<Json<InstanceSettingsView>, ApiError> {
     let instance = "/api/v1/admin/settings/limits";
     let session = require_root(&state, &headers, instance, request_id.as_ref()).await?;
+    let repository = InstanceSettingsRepository::new(state.identity.database().clone());
+    if let (Some(set), Some(wanted)) = (
+        EnvironmentSettings::of(state.identity.database()).image_proxy_fetches,
+        body.image_proxy_fetches,
+    ) && set != wanted
+    {
+        return Err(set_by_environment(
+            "ORBIT_IMAGE_PROXY_FETCHES",
+            instance,
+            request_id.as_ref(),
+        ));
+    }
+    if body
+        .image_proxy_fetches
+        .is_some_and(|fetches| !(1..=crate::mail_image_proxy::MAX_FETCHES_LIMIT).contains(&fetches))
+    {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_image_proxy_fetches",
+            "Invalid number of image fetches",
+            "Load 1 to 256 outside images at once.",
+            instance,
+            request_id.as_ref(),
+        ));
+    }
     let max_owned_workspaces = body.max_owned_workspaces.filter(|limit| *limit > 0);
     let workspace_storage_quota_bytes = body
         .workspace_storage_quota_bytes
@@ -3563,12 +3605,23 @@ async fn save_limits(
             request_id.as_ref(),
         ));
     }
-    InstanceSettingsRepository::new(state.identity.database().clone())
+    let image_proxy_fetches = match body.image_proxy_fetches {
+        Some(fetches) => fetches,
+        None => {
+            repository
+                .limits()
+                .await
+                .map_err(|error| internal(instance, request_id.as_ref()).cause(error))?
+                .image_proxy_fetches
+        }
+    };
+    repository
         .save_limits(
             session.user.id,
             InstanceLimits {
                 max_owned_workspaces,
                 workspace_storage_quota_bytes,
+                image_proxy_fetches,
             },
             request_id_value(request_id.as_ref()),
             TimestampMillis::now(),

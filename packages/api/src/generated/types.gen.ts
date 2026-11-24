@@ -2672,6 +2672,10 @@ export type EnvironmentView = {
      */
     backups_in_s3: boolean;
     /**
+     * `ORBIT_IMAGE_PROXY_FETCHES`.
+     */
+    image_proxy_fetches: boolean;
+    /**
      * `ORBIT_OIDC_PROVISION`.
      */
     oidc_provision: boolean;
@@ -3503,9 +3507,26 @@ export type Limits = {
 };
 
 /**
+ * The limits to save. `null` or 0 is unlimited.
+ */
+export type LimitsBody = {
+    /**
+     * Outside images (1–256) that one server loads at once. Omitted: unchanged.
+     */
+    image_proxy_fetches?: number | null;
+    max_owned_workspaces?: number | null;
+    workspace_storage_quota_bytes?: number | null;
+};
+
+/**
  * Limits for a shared installation. `null` is unlimited.
  */
 export type LimitsView = {
+    /**
+     * Outside images (mail, messages, pages, link cards) that one server loads at once through Orbit; more wait.
+     * One user has at most 6 of them.
+     */
+    image_proxy_fetches: number;
     /**
      * Workspaces (not in the trash) one account may own. Instance admins are not limited.
      */
@@ -27999,7 +28020,7 @@ export type GetInstanceSettingsResponses = {
 export type GetInstanceSettingsResponse = GetInstanceSettingsResponses[keyof GetInstanceSettingsResponses];
 
 export type SaveLimitsData = {
-    body: LimitsView;
+    body: LimitsBody;
     headers?: {
         /**
          * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
@@ -31816,10 +31837,6 @@ export type GetContentImageErrors = {
      */
     401: WorkspaceProblem;
     /**
-     * image_not_found: not an http(s) URL, or a target that is not public
-     */
-    404: unknown;
-    /**
      * contract_mismatch
      */
     409: WorkspaceProblem;
@@ -31832,7 +31849,7 @@ export type GetContentImageErrors = {
      */
     500: WorkspaceProblem;
     /**
-     * image_unavailable: not an allowed image, too large, or the other server failed
+     * image_unavailable: not a public http(s) URL, not an allowed image, too large, or the other server failed
      */
     502: unknown;
     /**

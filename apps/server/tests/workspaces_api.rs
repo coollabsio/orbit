@@ -2600,7 +2600,7 @@ async fn an_account_owns_at_most_the_instance_limit_of_workspaces() {
     assert_eq!(saved.status(), StatusCode::OK);
     assert_eq!(
         response_json(saved).await["limits"],
-        json!({"max_owned_workspaces": 3, "workspace_storage_quota_bytes": null})
+        json!({"max_owned_workspaces": 3, "workspace_storage_quota_bytes": null, "image_proxy_fetches": 32})
     );
     let (user_id, cookie) = create_user(&database, &identity, "tenant@example.com", "Tenant").await;
     let refused = save_limits(cookie.clone(), json!({"max_owned_workspaces": null})).await;
@@ -3406,4 +3406,76 @@ async fn a_token_without_a_task_scope_needs_no_project_and_gets_no_task_access()
             "{name}"
         );
     }
+}
+
+#[tokio::test]
+async fn the_image_proxy_limit_is_saved_in_admin_unless_the_environment_sets_it() {
+    let database = TestDatabase::new().await.unwrap();
+    let identity = Arc::new(IdentityRepository::new((*database).clone()));
+    let (_, root_token) = setup_owner(&identity).await;
+    let cookie = format!("__Host-orbit_session={root_token}");
+    let app = workspace_router(WorkspaceState::new(
+        Arc::clone(&identity),
+        "https://orbit.test".to_owned(),
+        CookieMode::secure(),
+    ))
+    .layer(HttpPlatformLayer::new(OriginPolicy::new(
+        "https://orbit.test",
+    )));
+    let save = |limits: Value| {
+        let (app, cookie) = (app.clone(), cookie.clone());
+        async move {
+            let response = app
+                .oneshot(json_request(
+                    "PUT",
+                    "/api/v1/admin/settings/limits",
+                    &cookie,
+                    limits,
+                ))
+                .await
+                .unwrap();
+            let status = response.status();
+            (status, response_json(response).await)
+        }
+    };
+
+    let (status, view) = save(json!({"max_owned_workspaces": null, "workspace_storage_quota_bytes": null, "image_proxy_fetches": 8})).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(view["limits"]["image_proxy_fetches"], 8);
+    assert_eq!(view["environment"]["image_proxy_fetches"], false);
+    // Left out, it stays.
+    let (_, view) =
+        save(json!({"max_owned_workspaces": 2, "workspace_storage_quota_bytes": null})).await;
+    assert_eq!(view["limits"]["image_proxy_fetches"], 8);
+    for fetches in [0, 257] {
+        let (status, view) = save(json!({"max_owned_workspaces": null, "workspace_storage_quota_bytes": null, "image_proxy_fetches": fetches})).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{fetches}");
+        assert_eq!(view["code"], "invalid_image_proxy_fetches");
+    }
+
+    // `ORBIT_IMAGE_PROXY_FETCHES` replaces the saved value, and Admin cannot change it.
+    orbit_server::repositories::environment_settings::EnvironmentSettings::from_config(
+        &orbit_platform::InstanceConfig {
+            image_proxy_fetches: Some(12),
+            ..orbit_platform::InstanceConfig::default()
+        },
+        &[7; 32],
+    )
+    .unwrap()
+    .install(&database);
+    let (status, view) = save(json!({"max_owned_workspaces": null, "workspace_storage_quota_bytes": null, "image_proxy_fetches": 12})).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(view["limits"]["image_proxy_fetches"], 12);
+    assert_eq!(view["environment"]["image_proxy_fetches"], true);
+    let (status, view) = save(json!({"max_owned_workspaces": null, "workspace_storage_quota_bytes": null, "image_proxy_fetches": 20})).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(view["code"], "set_by_environment");
+    // The saved value is kept for when the variable goes.
+    assert_eq!(
+        database
+            .scalar::<i64>("SELECT image_proxy_fetches FROM instance_settings WHERE id = 1")
+            .await
+            .unwrap(),
+        8
+    );
 }

@@ -3582,7 +3582,8 @@ export const postIncomingWebhook = <ThrowOnError extends boolean = false>(option
  * An image on another server, for a signed-in user: the images of messages, comments, pages and link
  * cards load through Orbit, so the other server sees Orbit's address, not the reader's, and gets no
  * cookie and no `Referer`. Nothing is stored. The fetch rules (no private targets on any hop, 5 MB,
- * 10 s, PNG/JPEG/GIF/WebP/AVIF only) are the mail image proxy's.
+ * 10 s, PNG/JPEG/GIF/WebP/AVIF only) are the mail image proxy's, with at most 6 fetches at once
+ * for one user.
  */
 export const getContentImage = <ThrowOnError extends boolean = false>(options: Options<GetContentImageData, ThrowOnError>): RequestResult<GetContentImageResponses, GetContentImageErrors, ThrowOnError> => (options.client ?? client).get<GetContentImageResponses, GetContentImageErrors, ThrowOnError>({
     security: [{

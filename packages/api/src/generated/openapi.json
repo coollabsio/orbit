@@ -33075,7 +33075,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/LimitsView"
+                "$ref": "#/components/schemas/LimitsBody"
               }
             }
           },
@@ -41269,7 +41269,7 @@
         "tags": [
           "crate::chat_routes::links"
         ],
-        "summary": "An image on another server, for a signed-in user: the images of messages, comments, pages and link\ncards load through Orbit, so the other server sees Orbit's address, not the reader's, and gets no\ncookie and no `Referer`. Nothing is stored. The fetch rules (no private targets on any hop, 5 MB,\n10 s, PNG/JPEG/GIF/WebP/AVIF only) are the mail image proxy's.",
+        "summary": "An image on another server, for a signed-in user: the images of messages, comments, pages and link\ncards load through Orbit, so the other server sees Orbit's address, not the reader's, and gets no\ncookie and no `Referer`. Nothing is stored. The fetch rules (no private targets on any hop, 5 MB,\n10 s, PNG/JPEG/GIF/WebP/AVIF only) are the mail image proxy's, with at most 6 fetches at once\nfor one user.",
         "operationId": "get_content_image",
         "parameters": [
           {
@@ -41322,9 +41322,6 @@
               }
             }
           },
-          "404": {
-            "description": "image_not_found: not an http(s) URL, or a target that is not public"
-          },
           "409": {
             "description": "contract_mismatch",
             "content": {
@@ -41356,7 +41353,7 @@
             }
           },
           "502": {
-            "description": "image_unavailable: not an allowed image, too large, or the other server failed"
+            "description": "image_unavailable: not a public http(s) URL, not an allowed image, too large, or the other server failed"
           },
           "default": {
             "description": "internal_error or another documented stable code",
@@ -106742,6 +106739,7 @@
           "backups_in_s3",
           "backup_schedule",
           "s3_keep_deleted_days",
+          "image_proxy_fetches",
           "sign_in_providers"
         ],
         "properties": {
@@ -106756,6 +106754,10 @@
           "backups_in_s3": {
             "type": "boolean",
             "description": "`ORBIT_S3_BACKUPS`."
+          },
+          "image_proxy_fetches": {
+            "type": "boolean",
+            "description": "`ORBIT_IMAGE_PROXY_FETCHES`."
           },
           "oidc_provision": {
             "type": "boolean",
@@ -108699,10 +108701,51 @@
         },
         "additionalProperties": false
       },
+      "LimitsBody": {
+        "type": "object",
+        "description": "The limits to save. `null` or 0 is unlimited.",
+        "properties": {
+          "image_proxy_fetches": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Outside images (1–256) that one server loads at once. Omitted: unchanged.",
+            "minimum": 0
+          },
+          "max_owned_workspaces": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "workspace_storage_quota_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
       "LimitsView": {
         "type": "object",
         "description": "Limits for a shared installation. `null` is unlimited.",
+        "required": [
+          "image_proxy_fetches"
+        ],
         "properties": {
+          "image_proxy_fetches": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Outside images (mail, messages, pages, link cards) that one server loads at once through Orbit; more wait.\nOne user has at most 6 of them.",
+            "minimum": 0
+          },
           "max_owned_workspaces": {
             "type": [
               "integer",
@@ -108721,8 +108764,7 @@
             "description": "Bytes of files one workspace may store: attachments, page and chat files, emoji and stickers. A file is\ncounted once per workspace, however often it is attached.",
             "minimum": 0
           }
-        },
-        "additionalProperties": false
+        }
       },
       "LinearImport": {
         "type": "object",

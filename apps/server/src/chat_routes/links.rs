@@ -14,7 +14,6 @@ use utoipa::{IntoParams, ToSchema};
 
 use super::{Call, ChatState, RequestIdExtension};
 use crate::link_preview::LinkPreview;
-use crate::mail_image_proxy::ImageProxyError;
 use crate::task_routes::{ApiError, ApiQuery, authenticate_session};
 
 #[derive(Deserialize, IntoParams)]
@@ -69,8 +68,9 @@ struct ContentImageBytes(Vec<u8>);
 /// An image on another server, for a signed-in user: the images of messages, comments, pages and link
 /// cards load through Orbit, so the other server sees Orbit's address, not the reader's, and gets no
 /// cookie and no `Referer`. Nothing is stored. The fetch rules (no private targets on any hop, 5 MB,
-/// 10 s, PNG/JPEG/GIF/WebP/AVIF only) are the mail image proxy's.
-#[utoipa::path(get, path = "/api/v1/image", params(ContentImageQuery), responses((status = 200, body = ContentImageBytes, content_type = "application/octet-stream"), (status = 401, description = "authentication_required"), (status = 404, description = "image_not_found: not an http(s) URL, or a target that is not public"), (status = 502, description = "image_unavailable: not an allowed image, too large, or the other server failed")))]
+/// 10 s, PNG/JPEG/GIF/WebP/AVIF only) are the mail image proxy's, with at most 6 fetches at once
+/// for one user.
+#[utoipa::path(get, path = "/api/v1/image", params(ContentImageQuery), responses((status = 200, body = ContentImageBytes, content_type = "application/octet-stream"), (status = 401, description = "authentication_required"), (status = 502, description = "image_unavailable: not a public http(s) URL, not an allowed image, too large, or the other server failed")))]
 pub(crate) async fn get_content_image(
     State(state): State<ChatState>,
     headers: HeaderMap,
@@ -79,7 +79,7 @@ pub(crate) async fn get_content_image(
     ApiQuery(query): ApiQuery<ContentImageQuery>,
 ) -> Result<Response, ApiError> {
     let instance = uri.path();
-    authenticate_session(
+    let session = authenticate_session(
         &state.identity,
         state.cookie_mode,
         &headers,
@@ -87,24 +87,23 @@ pub(crate) async fn get_content_image(
         request_id.as_ref(),
     )
     .await?;
-    let image = state.image_proxy.fetch(&query.u).await.map_err(|error| {
-        tracing::debug!(%error, "content image proxy");
-        let (status, code, title, detail) = match error {
-            ImageProxyError::Refused => (
-                StatusCode::NOT_FOUND,
-                "image_not_found",
-                "Image not found",
-                "The image URL is not one that Orbit loads.",
-            ),
-            _ => (
+    // One answer for every failure: a 404 for a private target would tell a user which host names
+    // resolve inside Orbit's network.
+    let image = state
+        .image_proxy
+        .fetch_for(session.user.id, &query.u)
+        .await
+        .map_err(|error| {
+            tracing::debug!(%error, "content image proxy");
+            ApiError::new(
                 StatusCode::BAD_GATEWAY,
                 "image_unavailable",
                 "Image unavailable",
                 "The image could not be loaded.",
-            ),
-        };
-        ApiError::new(status, code, title, detail, instance, request_id.as_ref())
-    })?;
+                instance,
+                request_id.as_ref(),
+            )
+        })?;
     let mut response = Response::new(Body::from(image.bytes));
     let headers = response.headers_mut();
     headers.insert(CONTENT_TYPE, HeaderValue::from_static(image.content_type));
