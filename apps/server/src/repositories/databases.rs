@@ -92,7 +92,7 @@ use rows::{
 };
 pub(super) use schema::insert_schema;
 pub use schema::{DatabaseSchema, SchemaProperty, SchemaView};
-pub use search::row_search_lines;
+pub use search::{SEARCH_TEXT_JOB, row_search_lines, search_text_job_kind};
 pub use templates::{DatabaseTemplate, NewTemplate, TemplateChanges};
 pub(super) use templates::{NOT_TEMPLATE, TemplateCopy, is_template};
 pub use timeline::TimelineZoom;

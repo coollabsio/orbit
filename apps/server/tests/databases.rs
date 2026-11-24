@@ -1098,7 +1098,11 @@ async fn a_database_holds_at_most_5000_live_rows() {
         )
         .await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
-    assert_eq!(body["position"], 0);
+    assert_eq!(
+        fixture.database(&db).await["rows"][0]["id"],
+        body["id"],
+        "the new row comes first"
+    );
 }
 
 #[tokio::test]
@@ -1221,7 +1225,7 @@ async fn the_lock_freezes_properties_and_views_but_not_rows_or_values() {
             Some(json!({"after_row_id": id_of(&other)})),
         )
         .await;
-    assert_eq!(moved["position"], 1);
+    assert_eq!(moved["title"], "Still allowed");
     assert_eq!(
         names(&fixture.database(&db).await["rows"]),
         ["Second", "Still allowed"]
@@ -1952,7 +1956,6 @@ async fn moving_a_card_sets_its_group_and_its_place_in_one_request() {
         )
         .await;
     assert_eq!(moved["values"], json!({&priority_id: low}));
-    assert_eq!(moved["position"], 2);
     assert_eq!(names(&fixture.database(&db).await["rows"]), ["A", "C", "B"]);
 
     let (status, body) = fixture
@@ -2875,7 +2878,9 @@ async fn search_finds_rows_by_their_property_values() {
         "person names and property names are not indexed"
     );
 
-    // A rename of the option finds the new name, not the old.
+    // A rename of the option finds the new name, not the old, once the queued job ran; until
+    // then the old text stays.
+    run_search_text_jobs(&fixture).await;
     fixture
         .ok(
             "PATCH",
@@ -2883,6 +2888,8 @@ async fn search_finds_rows_by_their_property_values() {
             Some(json!({"config": {"options": [{"id": reading, "name": "Finished"}]}})),
         )
         .await;
+    assert_eq!(search(&fixture, "reading").await.len(), 1);
+    assert_eq!(run_search_text_jobs(&fixture).await, 1);
     assert!(search(&fixture, "reading").await.is_empty());
     assert_eq!(search(&fixture, "finished").await.len(), 1);
 
@@ -2900,6 +2907,7 @@ async fn search_finds_rows_by_their_property_values() {
             None,
         )
         .await;
+    assert_eq!(run_search_text_jobs(&fixture).await, 1);
     assert!(search(&fixture, "zebra").await.is_empty());
 
     // A copy of the database copies the searchable values of its rows.
@@ -2908,6 +2916,60 @@ async fn search_finds_rows_by_their_property_values() {
         .await;
     assert_eq!(search(&fixture, "finished").await.len(), 2);
     assert_integrity(&fixture).await;
+}
+
+#[tokio::test]
+async fn rows_put_into_one_gap_again_and_again_keep_their_order() {
+    let fixture = Fixture::new().await;
+    let db = fixture.create_database("Order").await;
+    let first = fixture.add_row(&db, json!({"title": "A"})).await;
+    fixture.add_row(&db, json!({"title": "Z"})).await;
+    // Each new row goes right after A; the gap between A and its neighbour runs out on the way.
+    for n in 1..=20 {
+        fixture
+            .ok(
+                "POST",
+                &format!("databases/{db}/rows"),
+                Some(json!({"title": format!("N{n}"), "after_row_id": id_of(&first)})),
+            )
+            .await;
+    }
+    let mut expected = vec!["A".to_owned()];
+    expected.extend((1..=20).rev().map(|n| format!("N{n}")));
+    expected.push("Z".to_owned());
+    assert_eq!(names(&fixture.database(&db).await["rows"]), expected);
+
+    let (status, _) = fixture
+        .call(
+            "POST",
+            &format!("databases/{db}/rows/{}/move", id_of(&first)),
+            Some(json!({"after_row_id": id_of(&first)})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "a row cannot follow itself");
+}
+
+/// Runs the search text jobs that requests queued, as the worker does; returns how many.
+async fn run_search_text_jobs(fixture: &Fixture) -> usize {
+    let payloads: Vec<String> = sqlx::query_scalar(
+        "SELECT payload_json FROM jobs WHERE kind = 'docs.search_text' AND state = 'queued'",
+    )
+    .fetch_all(fixture.database.pool())
+    .await
+    .unwrap();
+    let repository =
+        orbit_server::repositories::databases::DatabaseRepository::new((*fixture.database).clone());
+    for payload in &payloads {
+        repository
+            .run_search_text_job(&serde_json::from_str(payload).unwrap())
+            .await
+            .unwrap();
+    }
+    sqlx::query("DELETE FROM jobs WHERE kind = 'docs.search_text'")
+        .execute(fixture.database.pool())
+        .await
+        .unwrap();
+    payloads.len()
 }
 
 #[tokio::test]

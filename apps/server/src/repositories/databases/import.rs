@@ -10,7 +10,7 @@ use serde_json::json;
 use sqlx::{Any, Transaction};
 use utoipa::ToSchema;
 
-use super::search::{SearchRows, refresh_search_text, search_text};
+use super::search::{refresh_search_text_later, search_text};
 use super::unique_id;
 use super::{
     CellValue, DatabaseError, DatabaseRepository, DatabaseSchema, DatabaseView, MAX_CELL_ITEMS,
@@ -703,14 +703,7 @@ impl DatabaseRepository {
         .await?;
         // A new status property shows its default option on the rows that were already there.
         if plan.changes_schema() || !numbered.is_empty() {
-            refresh_search_text(
-                &mut tx,
-                workspace_id,
-                database_id,
-                &plan.properties,
-                SearchRows::All,
-            )
-            .await?;
+            refresh_search_text_later(&mut tx, database_id, now).await?;
         }
         record_with(
             &mut tx,

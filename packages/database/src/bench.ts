@@ -2,7 +2,7 @@ import type { DatabaseProperty, DatabaseRow, DatabaseView } from './types'
 import { parseDatabase } from './values'
 import { applyView } from './view'
 
-const ROWS = 5_000
+const ROWS = Number(process.env.BENCH_ROWS ?? 5_000)
 const RUNS = 25
 const DAY = 86_400_000
 const now = Date.parse('2026-11-09T10:00:00Z')

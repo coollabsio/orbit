@@ -8,7 +8,7 @@ use orbit_platform::{Database, Id, TimestampMillis};
 use serde_json::{Value, json};
 use sqlx::{Any, Transaction};
 
-use super::search::{SearchRows, refresh_search_text};
+use super::search::{SearchRows, refresh_search_text, refresh_search_text_later};
 use super::templates::Children;
 use super::{
     CellValue, ComputeScope, DatabaseError, DatabaseRepository, DatabaseRow, NOT_TEMPLATE, NewRow,
@@ -19,7 +19,7 @@ use super::{computed, files, relations, search, templates, unique_id};
 use crate::billing::TrialLimit;
 use crate::collab::CollabHub;
 use crate::repositories::billing::ensure_trial_capacity;
-use crate::repositories::pages::renumber;
+use crate::repositories::pages::{PageSpace, renumber_spaced};
 
 impl DatabaseRepository {
     pub async fn create_row(
@@ -156,9 +156,15 @@ impl DatabaseRepository {
         }
         let mut values = parse_values(tx, workspace_id, &properties, &input.values).await?;
         let space = page.space(actor_id);
-        let mut siblings = templates::row_ids(tx, workspace_id, space, database_id, row_id).await?;
-        let index = placement_index(&siblings, input.placement)?;
-        siblings.insert(index, row_id);
+        let position = row_position(
+            tx,
+            workspace_id,
+            space,
+            database_id,
+            row_id,
+            input.placement,
+        )
+        .await?;
         let search_values: HashMap<Id, CellValue> = values
             .iter()
             .filter_map(|(id, value)| Some((*id, value.clone()?)))
@@ -175,7 +181,7 @@ impl DatabaseRepository {
         .bind(space.owner_column())
         .bind(&input.title)
         .bind(&input.icon)
-        .bind(index as i64)
+        .bind(position)
         .bind(actor_id.to_string())
         .bind(actor_id.to_string())
         .bind(now.as_millis())
@@ -183,7 +189,6 @@ impl DatabaseRepository {
         .bind(search::search_text(&properties, &search_values))
         .execute(&mut **tx)
         .await?;
-        renumber(tx, &siblings).await?;
         if let Some(fill) = &fill {
             let copies = templates::copy_into_row(
                 database,
@@ -220,13 +225,17 @@ impl DatabaseRepository {
             now,
         )
         .await?;
-        if !numbered.is_empty() {
-            let rows = if numbered == [row_id] {
-                SearchRows::One(row_id)
-            } else {
-                SearchRows::All
-            };
-            refresh_search_text(tx, workspace_id, database_id, &properties, rows).await?;
+        if numbered == [row_id] {
+            refresh_search_text(
+                tx,
+                workspace_id,
+                database_id,
+                &properties,
+                SearchRows::One(row_id),
+            )
+            .await?;
+        } else if !numbered.is_empty() {
+            refresh_search_text_later(tx, database_id, now).await?;
         }
         record_with(
             tx,
@@ -359,9 +368,6 @@ impl DatabaseRepository {
             tx.rollback().await?;
             return Ok(());
         }
-        let siblings =
-            templates::row_ids(&mut tx, workspace_id, space, database_id, database_id).await?;
-        renumber(&mut tx, &siblings).await?;
         record_with(
             &mut tx,
             workspace_id,
@@ -408,18 +414,21 @@ impl DatabaseRepository {
             )
             .await?;
         }
-        let mut siblings = templates::row_ids(
+        let placement = after.map_or(RowPlacement::First, RowPlacement::After);
+        let position = row_position(
             &mut tx,
             workspace_id,
             page.space(actor_id),
             database_id,
             row_id,
+            placement,
         )
         .await?;
-        let placement = after.map_or(RowPlacement::First, RowPlacement::After);
-        let index = placement_index(&siblings, placement)?;
-        siblings.insert(index, row_id);
-        renumber(&mut tx, &siblings).await?;
+        sqlx::query("UPDATE pages SET position = $1 WHERE id = $2")
+            .bind(position)
+            .bind(row_id.to_string())
+            .execute(&mut *tx)
+            .await?;
         record_with(
             &mut tx,
             workspace_id,
@@ -460,15 +469,118 @@ pub(super) fn insert_index(position: Option<i64>, len: usize) -> usize {
     })
 }
 
-fn placement_index(siblings: &[Id], placement: RowPlacement) -> Result<usize, DatabaseError> {
-    match placement {
-        RowPlacement::Last => Ok(siblings.len()),
-        RowPlacement::First => Ok(0),
-        RowPlacement::After(after) => siblings
-            .iter()
-            .position(|id| *id == after)
-            .map(|index| index + 1)
-            .ok_or_else(|| DatabaseError::invalid("after_row_id")),
+/// Room between the positions of neighbouring rows, so a new or moved row takes the middle of
+/// its neighbours and no other row is written. When two neighbours have no room left (after
+/// about 16 rows put into one gap, or rows numbered `0..n` by page moves), every row of the
+/// database is spread again once.
+const ROW_GAP: i64 = 1 << 16;
+
+/// The position for a row (`row_id`, left out of its siblings) at `placement` among the live rows
+/// of `database_id` in `space`.
+async fn row_position(
+    tx: &mut Transaction<'_, Any>,
+    workspace_id: Id,
+    space: PageSpace,
+    database_id: Id,
+    row_id: Id,
+    placement: RowPlacement,
+) -> Result<i64, DatabaseError> {
+    let siblings = Siblings {
+        workspace_id,
+        space,
+        database_id,
+        row_id,
+    };
+    if let Some(position) = siblings.free_position(tx, placement).await? {
+        return Ok(position);
+    }
+    let ids = templates::row_ids(tx, workspace_id, space, database_id, row_id).await?;
+    renumber_spaced(tx, &ids, ROW_GAP).await?;
+    siblings
+        .free_position(tx, placement)
+        .await?
+        .ok_or(DatabaseError::Corrupt)
+}
+
+struct Siblings {
+    workspace_id: Id,
+    space: PageSpace,
+    database_id: Id,
+    row_id: Id,
+}
+
+enum Edge {
+    First,
+    Last,
+    Row(Id),
+    Next(i64, String),
+}
+
+impl Siblings {
+    /// `None` when `placement` falls between two rows without room.
+    async fn free_position(
+        &self,
+        tx: &mut Transaction<'_, Any>,
+        placement: RowPlacement,
+    ) -> Result<Option<i64>, DatabaseError> {
+        Ok(match placement {
+            RowPlacement::First => Some(
+                self.edge(tx, Edge::First)
+                    .await?
+                    .map_or(0, |(position, _)| position - ROW_GAP),
+            ),
+            RowPlacement::Last => Some(
+                self.edge(tx, Edge::Last)
+                    .await?
+                    .map_or(0, |(position, _)| position + ROW_GAP),
+            ),
+            RowPlacement::After(after) => {
+                let (before, id) = self
+                    .edge(tx, Edge::Row(after))
+                    .await?
+                    .ok_or_else(|| DatabaseError::invalid("after_row_id"))?;
+                match self.edge(tx, Edge::Next(before, id)).await? {
+                    None => Some(before + ROW_GAP),
+                    Some((next, _)) if next - before >= 2 => Some(before + (next - before) / 2),
+                    Some(_) => None,
+                }
+            }
+        })
+    }
+
+    /// `(position, id)` of the sibling at `edge`, in the order `position, id`.
+    async fn edge(
+        &self,
+        tx: &mut Transaction<'_, Any>,
+        edge: Edge,
+    ) -> Result<Option<(i64, String)>, sqlx::Error> {
+        let tail = match &edge {
+            Edge::First => "ORDER BY position, id LIMIT 1",
+            Edge::Last => "ORDER BY position DESC, id DESC LIMIT 1",
+            Edge::Row(_) => "AND id = $6",
+            Edge::Next(..) => {
+                "AND (position > $6 OR (position = $7 AND id > $8)) ORDER BY position, id LIMIT 1"
+            }
+        };
+        let query = sqlx::query(sqlx::AssertSqlSafe(format!(
+            "SELECT position, id FROM pages WHERE workspace_id = $1 \
+             AND teamspace_id IS NOT DISTINCT FROM $2 AND owner_id IS NOT DISTINCT FROM $3 \
+             AND parent_id = $4 AND deleted_at IS NULL AND id <> $5 AND {NOT_TEMPLATE} {tail}"
+        )))
+        .bind(self.workspace_id.to_string())
+        .bind(self.space.teamspace_column())
+        .bind(self.space.owner_column())
+        .bind(self.database_id.to_string())
+        .bind(self.row_id.to_string());
+        let query = match edge {
+            Edge::First | Edge::Last => query,
+            Edge::Row(id) => query.bind(id.to_string()),
+            Edge::Next(position, id) => query.bind(position).bind(position).bind(id),
+        };
+        Ok(query
+            .fetch_optional(&mut **tx)
+            .await?
+            .map(|row| (row.get("position"), row.get("id"))))
     }
 }
 

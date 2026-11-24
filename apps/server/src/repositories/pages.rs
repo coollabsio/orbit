@@ -8,7 +8,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use orbit_platform::Row;
-use orbit_platform::{Backend, Database, Flag, Id, TimestampMillis};
+use orbit_platform::{Backend, Database, Flag, Id, SqlBuilder, TimestampMillis};
 use serde::Serialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -3001,14 +3001,38 @@ pub(super) async fn sibling_ids(
 }
 
 pub(super) async fn renumber(tx: &mut Transaction<'_, Any>, ids: &[Id]) -> Result<(), PageError> {
-    for (position, id) in ids.iter().enumerate() {
-        let position = position as i64;
-        sqlx::query("UPDATE pages SET position = $1 WHERE id = $2 AND position <> $3")
-            .bind(position)
-            .bind(id.to_string())
-            .bind(position)
-            .execute(&mut **tx)
-            .await?;
+    renumber_spaced(tx, ids, 1).await?;
+    Ok(())
+}
+
+/// Gives `ids` the positions `0, step, 2 * step, …` in their order. One statement per batch, and
+/// only rows whose position changes are written.
+pub(super) async fn renumber_spaced(
+    tx: &mut Transaction<'_, Any>,
+    ids: &[Id],
+    step: i64,
+) -> Result<(), sqlx::Error> {
+    const BATCH: usize = 200;
+    for (batch, chunk) in ids.chunks(BATCH).enumerate() {
+        let mut query = SqlBuilder::new("WITH wanted(id, position) AS (VALUES ");
+        for (offset, id) in chunk.iter().enumerate() {
+            if offset > 0 {
+                query.push(", ");
+            }
+            let position = ((batch * BATCH + offset) as i64) * step;
+            query
+                .push("(")
+                .push_bind(id.to_string())
+                .push(", CAST(")
+                .push_bind(position)
+                .push(" AS BIGINT))");
+        }
+        query.push(
+            ") UPDATE pages SET position = (SELECT wanted.position FROM wanted WHERE wanted.id = pages.id) \
+             WHERE pages.id IN (SELECT id FROM wanted) \
+             AND pages.position <> (SELECT wanted.position FROM wanted WHERE wanted.id = pages.id)",
+        );
+        query.build().execute(&mut **tx).await?;
     }
     Ok(())
 }

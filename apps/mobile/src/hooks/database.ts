@@ -132,7 +132,7 @@ export function useCreateRow(databaseId: string, notify: Notify, linkId = '') {
     reconcile: (detail, row) => ({
       ...detail,
       database: { ...detail.database, row_count: detail.database.row_count + 1 },
-      rows: [...detail.rows.map((other) => (other.position >= row.position ? { ...other, position: other.position + 1 } : other)), row],
+      rows: [...detail.rows, row],
     }),
     error: 'Could not add the row.',
   })

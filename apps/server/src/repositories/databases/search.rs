@@ -7,8 +7,8 @@
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 
-use orbit_platform::{Database, Id, Row};
-use serde_json::Value;
+use orbit_platform::{Database, Id, Job, JobKind, JobStore, JobStoreError, Row, TimestampMillis};
+use serde_json::{Value, json};
 use sqlx::{Any, Transaction};
 
 use super::{
@@ -17,7 +17,7 @@ use super::{
 };
 
 /// Rows one backfill transaction computes.
-pub const SEARCH_TEXT_BATCH: i64 = 500;
+pub const SEARCH_TEXT_BATCH: i64 = 200;
 
 /// A row's searchable values: `(property name, text)` per property, in property order. Text,
 /// URL, number (as written), the option names of select, multi-select and status (a status
@@ -67,31 +67,29 @@ pub(super) fn search_text(properties: &[Property], values: &HashMap<Id, CellValu
         .join("\n")
 }
 
-/// Which rows of a database to recompute.
+/// Which rows of a database to recompute. A change for every row uses
+/// [`refresh_search_text_later`].
 #[derive(Clone, Copy)]
 pub(super) enum SearchRows {
-    /// Every row, trashed ones too: a schema change.
-    All,
     One(Id),
+    /// The next batch in id order after this row (from the start when `None`).
+    After(Option<Id>),
     /// Rows not computed yet, at most a batch.
     Missing,
 }
 
 /// Rewrites `property_text` of rows of `database_id` from their stored values; a row whose text
 /// did not change is not written (each write updates the search index). Returns how many rows
-/// were computed.
+/// were computed, and the last of them.
 pub(super) async fn refresh_search_text(
     tx: &mut Transaction<'_, Any>,
     workspace_id: Id,
     database_id: Id,
     properties: &[Property],
     rows: SearchRows,
-) -> Result<usize, DatabaseError> {
+) -> Result<(usize, Option<Id>), DatabaseError> {
     let scope = "FROM pages WHERE pages.workspace_id = $1 AND pages.parent_id = $2";
     let page_sql = match rows {
-        SearchRows::All => {
-            format!("SELECT pages.id AS id, pages.property_text AS property_text {scope}")
-        }
         SearchRows::One(_) => {
             format!(
                 "SELECT pages.id AS id, pages.property_text AS property_text {scope} AND pages.id = $3"
@@ -101,23 +99,36 @@ pub(super) async fn refresh_search_text(
             "SELECT pages.id AS id, pages.property_text AS property_text {scope} \
              AND pages.property_text IS NULL ORDER BY pages.id LIMIT {SEARCH_TEXT_BATCH}"
         ),
+        SearchRows::After(after) => format!(
+            "SELECT pages.id AS id, pages.property_text AS property_text {scope}{} \
+             ORDER BY pages.id LIMIT {SEARCH_TEXT_BATCH}",
+            if after.is_some() {
+                " AND pages.id > $3"
+            } else {
+                ""
+            }
+        ),
     };
     let query = sqlx::query(sqlx::AssertSqlSafe(page_sql))
         .bind(workspace_id.to_string())
         .bind(database_id.to_string());
     let query = match rows {
-        SearchRows::One(id) => query.bind(id.to_string()),
-        SearchRows::All | SearchRows::Missing => query,
+        SearchRows::One(id) | SearchRows::After(Some(id)) => query.bind(id.to_string()),
+        SearchRows::Missing | SearchRows::After(None) => query,
     };
     let pages = query.fetch_all(&mut **tx).await?;
-    let Some(last) = pages.last().map(|page| page.get::<String, _>("id")) else {
-        return Ok(0);
+    let (Some(first), Some(last)) = (
+        pages.first().map(|page| page.get::<String, _>("id")),
+        pages.last().map(|page| page.get::<String, _>("id")),
+    ) else {
+        return Ok((0, None));
     };
-    // The values of exactly these rows: one row, all, or the batch (missing rows up to its last id).
+    // The values of exactly these rows: one row, the missing rows up to the batch's last id, or
+    // the id range of the batch.
     let values_filter = match rows {
-        SearchRows::All => "",
         SearchRows::One(_) => " AND pages.id = $3",
         SearchRows::Missing => " AND pages.property_text IS NULL AND pages.id <= $3",
+        SearchRows::After(_) => " AND pages.id <= $3 AND pages.id >= $4",
     };
     let query = sqlx::query(sqlx::AssertSqlSafe(format!(
         "SELECT page_property_values.page_id AS page_id, page_property_values.property_id AS property_id, \
@@ -128,8 +139,8 @@ pub(super) async fn refresh_search_text(
     .bind(workspace_id.to_string())
     .bind(database_id.to_string());
     let query = match rows {
-        SearchRows::All => query,
-        SearchRows::One(_) | SearchRows::Missing => query.bind(last),
+        SearchRows::After(_) => query.bind(last.clone()).bind(first),
+        SearchRows::One(_) | SearchRows::Missing => query.bind(last.clone()),
     };
     let stored = query.fetch_all(&mut **tx).await?;
     let mut values: HashMap<String, HashMap<Id, CellValue>> = HashMap::new();
@@ -162,7 +173,38 @@ pub(super) async fn refresh_search_text(
                 .await?;
         }
     }
-    Ok(pages.len())
+    Ok((pages.len(), Some(parse_id(&last)?)))
+}
+
+/// Queues the job that computes the search text of every row of `database_id` again, in batches
+/// ([`DatabaseRepository::run_search_text_job`]). A schema change thus writes no row inside its
+/// own write transaction. Until the job reaches a row, docs search matches its old text.
+pub(super) async fn refresh_search_text_later(
+    tx: &mut Transaction<'_, Any>,
+    database_id: Id,
+    now: TimestampMillis,
+) -> Result<(), DatabaseError> {
+    let job = Job::new(
+        search_text_job_kind(),
+        json!({ "database_id": database_id.to_string() }),
+        now,
+    );
+    JobStore::enqueue_in(tx, &job)
+        .await
+        .map_err(|error| match error {
+            JobStoreError::Database(error) => DatabaseError::Unavailable(error),
+            _ => DatabaseError::Corrupt,
+        })?;
+    Ok(())
+}
+
+/// The job of [`DatabaseRepository::run_search_text_job`]: hourly (no payload), and after each
+/// schema change (`{"database_id": …}`).
+pub const SEARCH_TEXT_JOB: &str = "docs.search_text";
+
+#[must_use]
+pub fn search_text_job_kind() -> JobKind {
+    JobKind::new(SEARCH_TEXT_JOB).with_concurrency_limit(1)
 }
 
 /// Computes `property_text` of each page in `pages` that is a row (others are left alone): pages
@@ -203,6 +245,55 @@ pub(super) async fn refresh_rows(
 }
 
 impl DatabaseRepository {
+    /// Runs the search text job: with a `database_id` in `payload`, computes the text of every
+    /// row of that database again; then fills every row that has none. A batch per transaction,
+    /// and safe to run again after a stop.
+    pub async fn run_search_text_job(&self, payload: &Value) -> Result<(), DatabaseError> {
+        if let Some(database_id) = payload
+            .get("database_id")
+            .and_then(Value::as_str)
+            .and_then(|id| id.parse::<Id>().ok())
+        {
+            let mut after = None;
+            while let Some(last) = self.refresh_search_text_batch(database_id, after).await? {
+                after = Some(last);
+            }
+        }
+        while self.fill_search_text().await? > 0 {}
+        Ok(())
+    }
+
+    /// Computes `property_text` again for the next batch of rows of `database_id` after `after`
+    /// (id order), in one short transaction. Returns the batch's last row, `None` at the end.
+    pub async fn refresh_search_text_batch(
+        &self,
+        database_id: Id,
+        after: Option<Id>,
+    ) -> Result<Option<Id>, DatabaseError> {
+        let mut tx = self.database.immediate_transaction().await?;
+        let Some(workspace_id) = sqlx::query_scalar::<_, String>(
+            "SELECT workspace_id FROM pages WHERE id = $1 AND kind = 'database'",
+        )
+        .bind(database_id.to_string())
+        .fetch_optional(&mut *tx)
+        .await?
+        else {
+            return Ok(None);
+        };
+        let workspace_id = parse_id(&workspace_id)?;
+        let properties = properties_in_tx(&mut tx, database_id).await?;
+        let (_, last) = refresh_search_text(
+            &mut tx,
+            workspace_id,
+            database_id,
+            &properties,
+            SearchRows::After(after),
+        )
+        .await?;
+        tx.commit().await?;
+        Ok(last)
+    }
+
     /// Computes `property_text` of up to a batch of rows that have none, all of one database, in
     /// one short transaction. Returns how many rows it computed: 0 when every row has one, so a
     /// caller repeats until then. Idempotent: a computed row is never picked again.
@@ -221,7 +312,7 @@ impl DatabaseRepository {
         let workspace_id = parse_id(&next.get::<String, _>("workspace_id"))?;
         let database_id = parse_id(&next.get::<String, _>("database_id"))?;
         let properties = properties_in_tx(&mut tx, database_id).await?;
-        let filled = refresh_search_text(
+        let (filled, _) = refresh_search_text(
             &mut tx,
             workspace_id,
             database_id,

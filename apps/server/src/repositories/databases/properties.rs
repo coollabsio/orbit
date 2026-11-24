@@ -8,7 +8,7 @@ use orbit_platform::{Id, TimestampMillis};
 use serde_json::Value;
 use sqlx::{Any, Transaction};
 
-use super::search::{SearchRows, refresh_search_text};
+use super::search::refresh_search_text_later;
 use super::{
     CellValue, ComputeScope, DatabaseError, DatabaseProperty, DatabaseRepository, MAX_PROPERTIES,
     NewProperty, Property, PropertyChanges, PropertyKind, PropertyType, PropertyUpdate, ViewColumn,
@@ -150,14 +150,7 @@ impl DatabaseRepository {
             write_view_config(&mut tx, view.id, &view.config, now).await?;
         }
         // A copy brings values, and a new status shows its default option on every row.
-        refresh_search_text(
-            &mut tx,
-            workspace_id,
-            database_id,
-            &properties,
-            SearchRows::All,
-        )
-        .await?;
+        refresh_search_text_later(&mut tx, database_id, now).await?;
         let scope = ComputeScope::utc(workspace_id, actor_id);
         properties[index].kind = relations::sync_pair(
             &mut tx,
@@ -341,14 +334,7 @@ impl DatabaseRepository {
         }
         // A rename of the property itself changes no searchable text.
         if type_change.is_some() || changes.config.is_some() {
-            refresh_search_text(
-                &mut tx,
-                workspace_id,
-                database_id,
-                &properties,
-                SearchRows::All,
-            )
-            .await?;
+            refresh_search_text_later(&mut tx, database_id, now).await?;
         }
         record(
             &mut tx,
@@ -393,14 +379,7 @@ impl DatabaseRepository {
         properties.remove(index);
         formula::refresh_types(&mut tx, &mut properties, now).await?;
         renumber_rows(&mut tx, "database_properties", &properties_ids(&properties)).await?;
-        refresh_search_text(
-            &mut tx,
-            workspace_id,
-            database_id,
-            &properties,
-            SearchRows::All,
-        )
-        .await?;
+        refresh_search_text_later(&mut tx, database_id, now).await?;
         for mut view in raw_views(&mut tx, database_id, Views::All).await? {
             let before = view.config.clone();
             view.config.repair(view.view_type, &properties);
