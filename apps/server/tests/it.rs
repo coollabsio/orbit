@@ -38,6 +38,8 @@ mod database_formulas;
 mod database_gallery_timeline;
 mod database_moves;
 mod database_relations;
+mod database_scale_bench;
+mod database_write_sequence;
 mod databases;
 mod database_templates;
 mod doc_markdown_writes;

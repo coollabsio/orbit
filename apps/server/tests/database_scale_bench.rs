@@ -4,7 +4,7 @@
 //! `BENCH_ROWS=50000 cargo test --release -p orbit-server --test database_scale_bench -- --ignored --nocapture`
 //! (add `ORBIT_TEST_POSTGRES_URL=…` for Postgres). Above `MAX_ROWS`, the row create is refused.
 
-mod database_fixture;
+use crate::database_fixture;
 
 use std::time::Instant;
 

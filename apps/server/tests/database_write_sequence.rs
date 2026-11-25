@@ -1,6 +1,6 @@
 //! Every write that changes `GET /databases/{id}` bumps the workspace's realtime sequence, the
 //! key of the planned snapshot cache (spec 2026-11-24 section 4.1, rollout step 1).
-mod database_fixture;
+use crate::database_fixture;
 
 use std::fmt::Debug;
 
