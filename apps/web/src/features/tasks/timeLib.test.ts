@@ -54,6 +54,16 @@ describe('takeSpend', () => {
     expect(takeSpend(blocks)).toEqual({ blocks, spend: null })
   })
 
+  test('takes a /spend line out of a paragraph with line breaks (Shift+Enter)', () => {
+    const block = { type: 'paragraph', props: {}, content: [{ type: 'text', text: 'Fixed ', styles: {} }, { type: 'text', text: 'the retry\n/spend 1h 30m\nand tests', styles: { bold: true } }], children: [] }
+    expect(takeSpend([block])).toEqual({
+      blocks: [{ ...block, content: [{ type: 'text', text: 'Fixed ', styles: {} }, { type: 'text', text: 'the retry\nand tests', styles: { bold: true } }] }],
+      spend: { minutes: 90 },
+    })
+    expect(takeSpend([line('/spend 2h\nDone')])).toEqual({ blocks: [line('Done')], spend: { minutes: 120 } })
+    expect(takeSpend([line('Done\n/spend 2h')])).toEqual({ blocks: [line('Done')], spend: { minutes: 120 } })
+  })
+
   test('leaves a /spend line in a code block alone', () => {
     const blocks = [{ ...line('/spend 1h'), type: 'codeBlock' }]
     expect(takeSpend(blocks)).toEqual({ blocks, spend: null })
