@@ -1,6 +1,7 @@
+import { fieldActivityText } from '@orbit/api/taskFields'
 import type { User } from '@/features/workspaces/models'
 import { formatTaskIdentifier } from '@/lib/taskLinks'
-import type { AttachmentRecord, AuditEvent, CommentRecord, LabelRecord, ProjectRecord, TaskCycle, TaskMilestone, TaskRecord, TaskRecurrence } from '@orbit/api/generated/types.gen'
+import type { AttachmentRecord, AuditEvent, CommentRecord, LabelRecord, ProjectRecord, TaskCycle, TaskFieldValue, TaskMilestone, TaskRecord, TaskRecurrence } from '@orbit/api/generated/types.gen'
 
 export type StatusCategory = 'unstarted' | 'started' | 'completed' | 'cancelled' | 'duplicate'
 export type TaskPriority = 'none' | 'low' | 'medium' | 'high' | 'urgent'
@@ -118,6 +119,8 @@ export interface Task {
   cycleId?: string | null
   /** Points; null when not estimated. */
   estimate?: number | null
+  /** Custom field values (#87), also for fields the task's project does not show. */
+  fieldValues?: TaskFieldValue[]
   createdAt: string
   updatedAt: string
   comments: TaskComment[]
@@ -378,6 +381,7 @@ export function taskFromRecord(
     milestoneId: record.milestone_id ?? null,
     cycleId: record.cycle_id ?? null,
     estimate: record.estimate ?? null,
+    fieldValues: record.field_values ?? [],
     createdAt: record.created_at,
     updatedAt: record.updated_at,
     comments: comments.map((comment) => ({
@@ -405,7 +409,7 @@ export function taskFromRecord(
         actorId: event.actor_id ?? '',
         actorName: typeof metadata.actor_service_account_name === 'string' ? metadata.actor_service_account_name : undefined,
         actorServiceAccountId: typeof metadata.actor_service_account_id === 'string' ? metadata.actor_service_account_id : undefined,
-        text: sentence?.text ?? genericActivityText(event.action),
+        text: sentence?.text ?? fieldActivityText(event.action, metadata) ?? genericActivityText(event.action),
         related: sentence?.related,
         statusId: sentence?.statusId,
         createdAt: event.occurred_at,

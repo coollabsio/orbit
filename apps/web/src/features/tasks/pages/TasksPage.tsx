@@ -67,6 +67,8 @@ import { createDefaultsFromFilter, type GroupContext } from '@/features/views/gr
 import { groupCreateFields, type GroupValues } from '@/features/views/layoutGroups'
 import { AdvancedFilterDialog } from '@/features/views/components/AdvancedFilterDialog'
 import { DisplayPopover } from '@/features/views/components/DisplayPopover'
+import { displayFields } from '@/features/views/displayMeta'
+import { useProjectTaskFields, useTaskFields } from '@/features/tasks/api/fields'
 import { FilterBar, FilterButton } from '@/features/views/components/FilterBar'
 import { SaveViewDialog, type SaveViewMode } from '@/features/views/components/SaveViewDialog'
 import { ViewChanges } from '@/features/views/components/ViewChanges'
@@ -80,6 +82,7 @@ import { countConditions, DEFAULT_DISPLAY, emptyFilter, isTaskPreset, normalizeV
 
 const EMPTY_PROJECTS: NonNullable<ReturnType<typeof useProjects>['data']> = []
 const EMPTY_LABELS: NonNullable<ReturnType<typeof useLabels>['data']> = []
+const EMPTY_FIELDS: NonNullable<ReturnType<typeof useTaskFields>['data']> = []
 const OPEN_WAIT_MS = 300
 /** The last task open from each list page (its path and query): back on the list, that row has the keyboard focus. */
 const lastOpenTask = new Map<string, string>()
@@ -209,6 +212,10 @@ function WorkspaceTasksPage() {
     : undefined
   const users = membersQuery.data ?? []
   const labels = labelsQuery.data ?? EMPTY_LABELS
+  const taskFields = useTaskFields(workspace.id).data ?? EMPTY_FIELDS
+  const projectTaskFields = useProjectTaskFields(workspace.id, projectFilter ?? undefined).data
+  // Display offers a project page's own fields; filters offer the whole gallery (a value counts in any project)
+  const displayTaskFields = displayFields(taskFields, projectFilter ? projectTaskFields ?? EMPTY_FIELDS : null, display)
   // a project page offers only its project's labels; other pages merge same-named labels of every project
   const pageLabels = projectFilter ? projectLabels(labels, projectFilter) : labels
   const filterOptions: FilterOptions = {
@@ -221,6 +228,7 @@ function WorkspaceTasksPage() {
     cycles,
     currentUserId: currentUser.data?.id ?? '',
     taskRefs,
+    taskFields,
   }
   const presetLabel = source.kind === 'page' && source.preset ? PRESET_LABEL[source.preset] : null
   const state = {
@@ -449,6 +457,7 @@ function WorkspaceTasksPage() {
               defaultDisplay={viewState.view?.state ? normalizeViewState(viewState.view.state).display : DEFAULT_DISPLAY}
               onChange={viewState.setDisplay}
               projectPage={Boolean(projectFilter)}
+              fields={displayTaskFields}
             />
             <Tip label={newTaskTitle} side="bottom"><Button aria-label="New task" className="max-[899px]:w-8 max-[899px]:px-0" onClick={() => openNewTask()}><Plus className="size-4" /><span className="max-[899px]:hidden">New task</span></Button></Tip>
           </PaneHeader>
@@ -516,8 +525,8 @@ function WorkspaceTasksPage() {
                   {layout === 'timeline'
                     ? <TaskTimeline ref={timelineRef} key={workspace.id} tasks={visibleTasks} projects={projects} statuses={statusesQuery.data} users={users} groupBy={display.group_by} properties={display.properties} groupContext={groupContext} pxPerDay={pxPerDay} onZoomChange={setPxPerDay} onOpen={openTask} planning={projectFilter ? { milestones, cycles } : null} />
                     : layout === 'board'
-                    ? <TaskBoard key={`${workspace.id}:${collapseScope}`} tasks={visibleTasks} users={users} labels={labels} statuses={statusesQuery.data} projects={projects} display={display} groupContext={groupContext} collapseScope={collapseScope} activeTaskId={null} onOpen={openTask} />
-                    : <TaskList key={`${workspace.id}:${collapseScope}`} tasks={visibleTasks} users={users} labels={labels} statuses={statusesQuery.data} projects={projects} display={display} groupContext={groupContext} collapseScope={collapseScope} onOpen={openTask} onAdd={(values) => openNewTask({ values })} />}
+                    ? <TaskBoard key={`${workspace.id}:${collapseScope}`} tasks={visibleTasks} users={users} labels={labels} statuses={statusesQuery.data} projects={projects} taskFields={taskFields} display={display} groupContext={groupContext} collapseScope={collapseScope} activeTaskId={null} onOpen={openTask} />
+                    : <TaskList key={`${workspace.id}:${collapseScope}`} tasks={visibleTasks} users={users} labels={labels} statuses={statusesQuery.data} projects={projects} taskFields={taskFields} display={display} groupContext={groupContext} collapseScope={collapseScope} onOpen={openTask} onAdd={(values) => openNewTask({ values })} />}
                 </TaskContextMenu>
               )}
           </div>

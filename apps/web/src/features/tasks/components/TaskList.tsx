@@ -23,11 +23,12 @@ import { PriorityIcon } from './PriorityIcon'
 import { PRIORITY_LABEL, PRIORITY_ORDER } from '@/features/tasks/taskMeta'
 import type { Project, Task, TaskStatusDef } from '@/features/tasks/api/models'
 import type { User } from '@/features/workspaces/models'
-import type { BulkItem, LabelRecord } from '@orbit/api/generated/types.gen'
+import type { BulkItem, LabelRecord, TaskField } from '@orbit/api/generated/types.gen'
 import { assigneeToggleUpdates, dueUpdates, everyTaskHasLabel, labelChoices, labelToggleUpdates, priorityUpdates, statusUpdates } from '@/features/tasks/bulkUpdates'
 import { BulkTaskLimitError, MAX_BULK_TASK_UPDATES, useBulkTasks } from '@/features/tasks/api/tasks'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { DisclosureChevron, GroupIcon } from '@/features/views/components/GroupIcon'
+import { shownCustomFields } from '@/features/views/displayMeta'
 import { estimateTotal, groupTasks, type GroupContext, type TaskGroup } from '@/features/views/grouping'
 import { estimateShortLabel } from '@/features/tasks/planningLib'
 import { canDrag, listSections, ownGroupValues, valuesOf, zoneIdOf, type GroupValues } from '@/features/views/layoutGroups'
@@ -53,6 +54,8 @@ export interface TaskListProps {
   labels: LabelRecord[]
   statuses: TaskStatusDef[]
   projects: Project[]
+  /** The workspace's custom field gallery: `display.custom_fields` resolves against it. */
+  taskFields: readonly TaskField[]
   display: DisplayOptions
   groupContext: GroupContext
   /** Page scope for collapsed groups: `all`, `project:<id>`, `preset:<name>`, `view:<id>`. Key the list by it. */
@@ -91,7 +94,7 @@ const MemoRow = memo(
  * Grouped task list: collapsible group and sub-group headers; rows move between groups by drag and drop.
  * Only the lines near the view are in the DOM (TanStack Virtual); the list has its own scroll.
  */
-export function TaskList({ tasks, users, labels, statuses, projects, display, groupContext, collapseScope, onOpen, onAdd }: TaskListProps) {
+export function TaskList({ tasks, users, labels, statuses, projects, taskFields, display, groupContext, collapseScope, onOpen, onAdd }: TaskListProps) {
   const { workspace } = useWorkspace()
   const [collapsed, toggle] = useCollapsedGroups(`orbit:task_list_collapsed:${workspace.id}:${collapseScope}`)
   // shared with the keyboard: X selects the focused row and task commands act on the selection
@@ -105,6 +108,8 @@ export function TaskList({ tasks, users, labels, statuses, projects, display, gr
   // tasks waiting for a parent: the bulk selection
   const [parentPicker, setParentPicker] = useState<Task[] | null>(null)
   const manual = display.order_by === 'manual'
+  // memoized by hand: the compiler skips this component, and the rows compare it in `rowDeps`
+  const customFields = useMemo(() => shownCustomFields(taskFields, display.custom_fields), [taskFields, display.custom_fields])
 
   const nested = display.sub_issues === 'nested'
   // built in every mode: the bulk "Set parent…" picker excludes descendants from it
@@ -250,7 +255,7 @@ export function TaskList({ tasks, users, labels, statuses, projects, display, gr
   }
 
   // what every row reads apart from its own line: when none of these changes, a mounted row does not render again
-  const rowDeps = [tasks, tree, labels, statuses, users, projects, display.properties, selected, drag, drop, nest.nestAt, dragEnabled, manual, nested, taskTree.collapsed, groupContext, onOpen]
+  const rowDeps = [tasks, tree, labels, statuses, users, projects, display.properties, customFields, selected, drag, drop, nest.nestAt, dragEnabled, manual, nested, taskTree.collapsed, groupContext, onOpen]
   const renderRow = (line: Extract<Line, { kind: 'row' }>, item: VirtualItem, origin: number, lastRowId: string | undefined) => {
     const { task, depth, hasChildren } = line.row
     const { zone } = line
@@ -276,6 +281,7 @@ export function TaskList({ tasks, users, labels, statuses, projects, display, gr
           milestone={task.milestoneId ? milestoneById.get(task.milestoneId) : undefined}
           cycle={task.cycleId ? cycleById.get(task.cycleId) : undefined}
           properties={display.properties}
+          customFields={customFields}
           selected={selected.includes(task.id)}
           dragging={task.id === drag?.taskId}
           draggable={dragEnabled}

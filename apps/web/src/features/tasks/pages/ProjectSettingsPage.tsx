@@ -18,6 +18,7 @@ import { ProjectLabelsCard } from '@/features/tasks/components/ProjectLabelsCard
 import { ProjectCyclesCard } from '@/features/tasks/components/ProjectCyclesCard'
 import { ProjectDocsCard } from '@/features/tasks/components/ProjectDocsCard'
 import { ProjectMilestonesCard } from '@/features/tasks/components/ProjectMilestonesCard'
+import { ProjectFieldsCard } from '@/features/tasks/components/ProjectFieldsCard'
 import { TaskStatusIcon } from '@/features/tasks/components/TaskStatusIcon'
 import { CATEGORY_LABEL, CATEGORY_ORDER, PROJECT_COLORS, STATUS_COLORS, defaultStatusOf, projectStatuses } from '@/features/tasks/taskMeta'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
@@ -45,7 +46,7 @@ import { useIsPhone } from '@/features/chat/pages/useChatViewport'
 import { PROJECT_SETTINGS_GROUPS, projectSettingsItem, projectSettingsPath, type ProjectSettingsSection } from '@/features/tasks/projectSettingsNav'
 
 /** The sections the server changes only for holders of `projects.manage`; milestones, cycles, docs and GitHub stay open. */
-const MANAGED_SECTIONS: ReadonlySet<ProjectSettingsSection> = new Set(['general', 'access', 'statuses', 'labels', 'sub-issues', 'danger-zone'])
+const MANAGED_SECTIONS: ReadonlySet<ProjectSettingsSection> = new Set(['general', 'access', 'statuses', 'labels', 'fields', 'sub-issues', 'danger-zone'])
 
 
 type Editor = { mode: 'new'; category: StatusCategory } | { mode: 'edit'; statusId: string }
@@ -298,6 +299,7 @@ export function ProjectSettingsPage() {
 
               {section === 'labels' ? <ProjectLabelsCard projectId={project.id} readOnly={!canManage} /> : null}
 
+              {section === 'fields' ? <ProjectFieldsCard projectId={project.id} readOnly={!canManage} /> : null}
               {section === 'milestones' ? <ProjectMilestonesCard projectId={project.id} /> : null}
 
               {section === 'cycles' ? <ProjectCyclesCard projectId={project.id} /> : null}

@@ -2,7 +2,8 @@
 //! the layout is in its `README`). Unknown fields are ignored and missing ones default, so a
 //! newer or older minor variant of the format still reads.
 
-use serde::Deserialize;
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 
 use crate::workspace_export::ExportMode;
@@ -58,6 +59,49 @@ pub struct Workspace {
     pub teamspaces: Vec<Teamspace>,
     #[serde(default)]
     pub projects: Vec<Project>,
+    /// The task field gallery; archives written before task fields have none.
+    #[serde(default, deserialize_with = "lenient")]
+    pub task_fields: Vec<TaskField>,
+}
+
+/// A list whose malformed entries (or a value that is not a list) are left out instead of
+/// failing the whole record.
+fn lenient<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: DeserializeOwned,
+{
+    Ok(match Value::deserialize(deserializer)? {
+        Value::Array(items) => items
+            .into_iter()
+            .filter_map(|item| serde_json::from_value(item).ok())
+            .collect(),
+        _ => Vec::new(),
+    })
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct TaskField {
+    pub id: String,
+    pub name: String,
+    pub kind: String,
+    #[serde(default, deserialize_with = "lenient")]
+    pub options: Vec<TaskFieldOption>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct TaskFieldOption {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub color: String,
+}
+
+/// One of a task's `field_values`.
+#[derive(Debug, Deserialize)]
+pub struct FieldValue {
+    pub field_id: String,
+    pub value: Value,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -97,6 +141,9 @@ pub struct Project {
     pub milestones: Vec<Milestone>,
     #[serde(default)]
     pub cycles: Vec<Cycle>,
+    /// Ids of the gallery fields the project shows, in its order.
+    #[serde(default, deserialize_with = "lenient")]
+    pub fields: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -184,6 +231,8 @@ pub struct Task {
     pub comments: Vec<Comment>,
     #[serde(default)]
     pub time_entries: Vec<TimeEntry>,
+    #[serde(default, deserialize_with = "lenient")]
+    pub field_values: Vec<FieldValue>,
 }
 
 /// Time logged on a task.

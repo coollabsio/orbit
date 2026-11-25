@@ -1,3 +1,4 @@
+import { useQueryClient } from '@tanstack/react-query'
 import { router, useLocalSearchParams } from 'expo-router'
 import { useEffect, useState } from 'react'
 import { Alert, Pressable, ScrollView, View } from 'react-native'
@@ -6,6 +7,7 @@ import { ActionSheet, ConfirmDialog, type ConfirmRequest, Dialog, type SheetActi
 import { Badge, Note, RowText, SettingsCard, SettingsRow, SmallOutlineButton } from '../../../../components/settings/Shell'
 import { DayPicker } from '../../../../components/tasks/DayPicker'
 import { ProjectDocsCard } from '../../../../components/tasks/ProjectDocsCard'
+import { ProjectFieldsCard } from '../../../../components/tasks/ProjectFieldsCard'
 import type { TaskCycle, TaskMilestone } from '../../../../data/task-api'
 import {
   cycleDates,
@@ -25,7 +27,9 @@ import {
   targetValue,
 } from '../../../../data/tasks'
 import { pickImage } from '../../../../hooks/account'
+import { fieldKeys } from '../../../../hooks/task-fields'
 import { useCycleWrites, useMilestoneWrites, useSetProjectIcon } from '../../../../hooks/tasks'
+import { useOrbit } from '../../../../orbit-context'
 import type { ProjectRecord } from '../../../../data/orbit'
 import { errorMessage } from '../../../../session-context'
 import { useCycles, useMilestones, useProjects } from '../../../../queries'
@@ -42,12 +46,14 @@ type Form = { kind: 'milestone'; milestone: TaskMilestone | null } | { kind: 'cy
 
 /**
  * A project's settings on the phone: its milestones (progress, target date, order) and its cycles (dates, the current
- * one, moving unfinished tasks on) and its docs teamspace. Opened from the project's task list. Statuses and labels stay
- * on the web.
+ * one, moving unfinished tasks on), its custom fields and its docs teamspace. Opened from the project's task list.
+ * Statuses and labels stay on the web.
  */
 export default function ProjectSettingsScreen() {
   const { projectId } = useLocalSearchParams<{ projectId: string }>()
   const { colors } = useTheme()
+  const { workspaceId } = useOrbit()
+  const queryClient = useQueryClient()
   const projects = useProjects()
   const milestones = useMilestones(projectId)
   const cycles = useCycles(projectId)
@@ -155,7 +161,18 @@ export default function ProjectSettingsScreen() {
         <ScrollView
           contentContainerClassName="px-5 pt-5 pb-8 gap-6"
           keyboardShouldPersistTaps="handled"
-          refreshControl={<PullRefresh onRefresh={() => Promise.all([milestones.refetch(), cycles.refetch()])} />}
+          refreshControl={
+            <PullRefresh
+              onRefresh={() =>
+                Promise.all([
+                  milestones.refetch(),
+                  cycles.refetch(),
+                  queryClient.refetchQueries({ queryKey: fieldKeys.project(workspaceId, projectId) }),
+                  queryClient.refetchQueries({ queryKey: fieldKeys.gallery(workspaceId) }),
+                ])
+              }
+            />
+          }
         >
           {project ? <ProjectIconCard project={project} /> : null}
           <SettingsCard
@@ -204,6 +221,8 @@ export default function ProjectSettingsScreen() {
               )
             })}
           </SettingsCard>
+
+          <ProjectFieldsCard projectId={projectId} />
 
           {project ? <ProjectDocsCard project={project} /> : null}
         </ScrollView>

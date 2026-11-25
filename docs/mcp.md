@@ -239,6 +239,11 @@ chat is read-only there too. See [Orbit public REST API](public-api.md).
 | `list_task_relations` | Required `task_id` | The task's relations (`blocks`, `related`, `duplicate`): `id`, `type`, `direction` and the other `task`. Relations to tasks outside the approved projects are left out. |
 | `list_time_entries` | Required `task_id` | The time logged on the task, by day worked: `items` (`user_id`, `minutes`, `worked_on`, `note`, `billable`, `can_edit`), `total_minutes` (the task's own time) and `sub_issues_minutes` (its live sub-issues in approved projects). |
 | `log_time` | Required `task_id`, `minutes` (1 to 1440); optional `worked_on` (`YYYY-MM-DD`, today by default), `note` (Markdown), `billable`, `user_id` | The new entry. `user_id` logs time for another member and needs the `time.manage` permission; a service account must name the member. |
+| `list_task_fields` | Optional `project_id` | With `project_id`, the custom fields that the approved project shows, in its order; without it, the workspace's whole field gallery by name. Each field: `id`, `name`, `kind`, `options` (`id`, `name`, `color`), `project_count`, `can_manage`, `version`. |
+| `get_task_field_values` | Required `task_id` | The task's custom field values: `field_id`, `name`, `kind`, `value`, and `option_names` for `select` and `multi_select`. Fields without a value are left out. |
+| `set_task_field_value` | Required `task_id`, `field_id`, `value` | Sets or clears (`null`) the value of a field that the task's project shows. Returns the values as `get_task_field_values` does. |
+| `create_task_field` | Required `name`, `kind`; optional `options` (`name`, `color`) | The new gallery field. No project shows it until `set_project_task_fields` adds it. |
+| `set_project_task_fields` | Required `project_id`, `field_ids` | The project's fields, in the new order. A field left out leaves the project; its tasks keep their values. Needs a member who may manage the project. |
 | `get_me` | Optional `workspace_id` | The connection: its user (`null` for a service account), workspace, scopes and approved project IDs, and `workspaces`: every workspace it covers with its own scopes and project IDs. Needs no permission. |
 
 `list_tasks` searches titles and descriptions. `parent_task_id` (a task ID or an identifier
@@ -257,6 +262,18 @@ not counted, and completed means a status in the `completed` category. A cycle's
 ended before now) or `null`. A cycle's `carried_over_count` counts the live tasks that "Move
 unfinished tasks to next cycle" took out of it and that are not back in it. They are not in its
 `task_count`, so a past cycle still shows the work that it did not finish.
+
+Custom task fields (web app: **Settings → Task fields**) have a kind: `text`, `number`, `date`,
+`select`, `multi_select`, `checkbox` or `url`. `set_task_field_value` takes a string for `text`
+and `url` (`http` or `https`), a JSON number for `number`, `YYYY-MM-DD` for `date`, one option
+`id` for `select` (from `list_task_fields`, not the option name), a list of option ids for
+`multi_select`, and `true` for `checkbox`. `null`, `""`, `false` and `[]` clear the value. A value
+that does not fit the kind, or a field that the task's project does not show, is an invalid-argument
+error. A connection limited to some projects lists the whole gallery, as every member but a guest
+sees it, but `project_count` counts only its approved projects. Renaming a field, changing its
+options and deleting it are not tools: they change or delete the values of every project that shows
+the field. Use the web app or the [REST API](public-api.md#custom-task-fields) with a token for all
+projects.
 
 Task results include title, description, project/status IDs, priority,
 assignee/label IDs, due dates, `milestone_id`, `cycle_id`, `estimate` (points, or `null`),
@@ -377,8 +394,8 @@ Service-account tokens support tasks only; docs, chat and mail require a persona
 
 | Permission | Tools |
 | --- | --- |
-| Task read | `list_projects`, `list_tasks`, `get_task`, `list_task_statuses`, `list_labels`, `list_milestones`, `list_cycles`, `list_members`, `list_comments`, `list_task_relations`, `list_time_entries`, `list_task_activity`, `list_task_trash`, `get_trashed_task`, `list_task_github_links`, `list_project_trash`, `get_trashed_project`, `list_project_members` |
-| Task write | `create_task`, `update_task`, `delete_task`, `restore_task`, `create_comment`, `update_comment`, `delete_comment`, `create_project`, `update_project`, `create_task_status`, `update_task_status`, `delete_task_status`, `create_label`, `update_label`, `delete_label`, `create_milestone`, `update_milestone`, `delete_milestone`, `create_cycle`, `update_cycle`, `delete_cycle`, `create_task_relation`, `delete_task_relation`, `log_time`, `bulk_update_tasks`, `reorder_tasks`, `empty_task_trash`, `delete_project`, `restore_project`, `purge_project`, `add_project_member`, `remove_project_member`, `reorder_task_statuses`, `reorder_milestones`, `move_unfinished_cycle_tasks` |
+| Task read | `list_projects`, `list_tasks`, `get_task`, `list_task_statuses`, `list_labels`, `list_milestones`, `list_cycles`, `list_members`, `list_comments`, `list_task_relations`, `list_time_entries`, `list_task_activity`, `list_task_trash`, `get_trashed_task`, `list_task_github_links`, `list_project_trash`, `get_trashed_project`, `list_project_members`, `list_task_fields`, `get_task_field_values` |
+| Task write | `create_task`, `update_task`, `delete_task`, `restore_task`, `create_comment`, `update_comment`, `delete_comment`, `create_project`, `update_project`, `create_task_status`, `update_task_status`, `delete_task_status`, `create_label`, `update_label`, `delete_label`, `create_milestone`, `update_milestone`, `delete_milestone`, `create_cycle`, `update_cycle`, `delete_cycle`, `create_task_relation`, `delete_task_relation`, `log_time`, `bulk_update_tasks`, `reorder_tasks`, `empty_task_trash`, `delete_project`, `restore_project`, `purge_project`, `add_project_member`, `remove_project_member`, `reorder_task_statuses`, `reorder_milestones`, `move_unfinished_cycle_tasks`, `set_task_field_value`, `create_task_field`, `set_project_task_fields` |
 | None | `get_me` |
 | Docs read | `list_docs`, `get_doc`, `list_doc_versions`, `get_doc_version`, `list_doc_trash`, `list_doc_comments`, `list_teamspaces`, `get_database`, `query_database`, `list_database_views`, `search_docs`, `list_recent_docs`, `list_favorite_docs`, `list_doc_descendants`, `preview_database_formula` |
 | Docs write | `create_doc`, `update_doc`, `delete_doc`, `move_doc`, `restore_doc`, `create_doc_comment`, `create_database_row`, `update_database_row`, `trash_database_rows`, `create_database_property`, `update_database_property`, `delete_database_property`, `create_database`, `create_database_view`, `update_database_view`, `delete_database_view`, `create_database_link`, `delete_database_link`, `add_favorite_doc`, `remove_favorite_doc`, `move_favorite_doc`, `duplicate_doc`, `set_doc_lock`, `restore_doc_version`, `purge_doc`, `empty_doc_trash`, `create_teamspace`, `update_teamspace`, `move_teamspace`, `delete_teamspace`, `update_doc_comment`, `delete_doc_comment`, `resolve_doc_thread`, `reopen_doc_thread`, `delete_doc_thread`, `move_database_row`, `create_database_template`, `update_database_template`, `delete_database_template` |

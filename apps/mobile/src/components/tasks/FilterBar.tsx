@@ -3,29 +3,33 @@ import { Pressable, View } from 'react-native'
 
 import {
   appendCondition,
+  CHECK_CHOICES,
   chosenValues,
+  conditionMeta,
   countConditions,
   defaultValue,
-  ESTIMATE_PRESENCE,
-  FIELD_META,
-  fieldsFor,
+  filterTargets,
   isCompleteCondition,
   isFlatFilter,
   listValue,
   MAX_FILTER_CONDITIONS,
   operatorLabel,
   operatorNeedsValue,
+  parseTargetKey,
+  presenceChoices,
   RANGE_DATE_PRESETS,
   selectedOptions,
   SINGLE_DATE_PRESETS,
+  targetKey,
+  targetOf,
   valueOptions,
   valueSummary,
   withOperator,
   type Condition,
-  type FilterField,
   type FilterGroup,
   type FilterOptions,
   type FilterOperator,
+  type FilterTarget,
   type Glyph,
 } from '../../data/tasks-filter'
 import { useTheme } from '../../theme'
@@ -122,15 +126,16 @@ export function FilterBar({
     }
   }
 
-  const pickField = (field: FilterField) => {
-    const operator = FIELD_META[field].defaultOperator
-    setEditor({ kind: 'values', index: null, draft: { field, operator, value: defaultValue(field, operator) }, base: null })
+  const pickField = (target: FilterTarget) => {
+    const meta = conditionMeta(target, options)
+    const operator = meta.defaultOperator
+    setEditor({ kind: 'values', index: null, draft: { ...targetOf(target), operator, value: defaultValue(meta, operator) }, base: null })
   }
 
   const pickOperator = (index: number, operator: FilterOperator) => {
     const condition = conditions[index]
     if (!condition) return
-    const next = withOperator(condition, operator)
+    const next = withOperator(condition, operator, conditionMeta(condition, options))
     if (isCompleteCondition(next)) {
       replaceAt(index, next)
       setEditor(null)
@@ -141,13 +146,16 @@ export function FilterBar({
   if (editor?.kind === 'fields') {
     sheet = {
       title: 'Filter by',
-      options: fieldsFor(options.projectId).map((field) => ({ key: field, label: FIELD_META[field].label, leading: <Icon name={FIELD_META[field].icon} size={14} color={colors.mutedForeground} /> })),
-      onSelect: (key) => pickField(key as FilterField),
+      options: filterTargets(options).map((target) => {
+        const meta = conditionMeta(target, options)
+        return { key: targetKey(target), label: meta.label, leading: <Icon name={meta.icon} size={14} color={colors.mutedForeground} /> }
+      }),
+      onSelect: (key) => pickField(parseTargetKey(key)),
     }
   } else if (editor?.kind === 'operator') {
     const condition = conditions[editor.index]
     if (condition) {
-      const meta = FIELD_META[condition.field]
+      const meta = conditionMeta(condition, options)
       const values = meta.kind === 'list' || meta.kind === 'task' ? listValue(condition).length : 1
       sheet = {
         title: meta.label,
@@ -157,12 +165,19 @@ export function FilterBar({
     }
   } else if (editor?.kind === 'values') {
     const { draft } = editor
-    const meta = FIELD_META[draft.field]
-    if (draft.field === 'estimate') {
+    const meta = conditionMeta(draft, options)
+    const target = targetOf(draft)
+    if (meta.kind === 'presence') {
       sheet = {
         title: meta.label,
-        options: ESTIMATE_PRESENCE.map((choice) => ({ key: choice.operator, label: choice.label, selected: editor.index !== null && choice.operator === draft.operator })),
-        onSelect: (key) => edit({ field: draft.field, operator: key as FilterOperator }, true),
+        options: presenceChoices(draft).map((choice) => ({ key: choice.operator, label: choice.label, selected: editor.index !== null && choice.operator === draft.operator })),
+        onSelect: (key) => edit({ ...target, operator: key as FilterOperator }, true),
+      }
+    } else if (meta.kind === 'check') {
+      sheet = {
+        title: meta.label,
+        options: CHECK_CHOICES.map((choice) => ({ key: String(choice.value), label: choice.label, selected: editor.index !== null && draft.value === choice.value })),
+        onSelect: (key) => edit({ ...target, operator: 'is', value: key === 'true' }, true),
       }
     } else if (meta.kind === 'date') {
       const presets = draft.operator === 'between' ? RANGE_DATE_PRESETS : SINGLE_DATE_PRESETS
@@ -170,19 +185,23 @@ export function FilterBar({
         title: meta.label,
         options: [
           ...presets.map((preset) => ({ key: preset.label, label: preset.label, selected: sameValue(preset.value, draft.value) })),
-          ...(draft.field === 'due_date' ? [{ key: 'is_empty', label: 'No due date' }, { key: 'is_not_empty', label: 'Has a due date' }] : []),
+          ...(draft.field === 'due_date'
+            ? [{ key: 'is_empty', label: 'No due date' }, { key: 'is_not_empty', label: 'Has a due date' }]
+            : meta.operators.includes('is_empty')
+              ? [{ key: 'is_empty', label: 'No date' }, { key: 'is_not_empty', label: 'Has a date' }]
+              : []),
         ],
         onSelect: (key) => {
-          if (key === 'is_empty' || key === 'is_not_empty') return edit({ field: draft.field, operator: key }, true)
+          if (key === 'is_empty' || key === 'is_not_empty') return edit({ ...target, operator: key }, true)
           const preset = presets.find((item) => item.label === key)
-          if (preset) edit({ field: draft.field, operator: draft.operator, value: preset.value }, true)
+          if (preset) edit({ ...target, operator: draft.operator, value: preset.value }, true)
         },
       }
     } else if (meta.kind === 'list') {
       const selected = chosenValues(draft, options)
       sheet = {
         title: meta.label,
-        options: valueOptions(draft.field, options, colors.mutedForeground).map((option) => ({
+        options: valueOptions(draft, options, colors.mutedForeground).map((option) => ({
           key: option.value,
           label: option.label,
           selected: selected.includes(option.value),
@@ -252,13 +271,15 @@ export function FilterBar({
 /** `Field · operator · values ×` as one bordered pill, its parts split by a hairline. */
 function ConditionChip({ condition, options, onOperator, onValues, onRemove }: { condition: Condition; options: FilterOptions; onOperator: () => void; onValues: () => void; onRemove: () => void }) {
   const { colors } = useTheme()
-  const meta = FIELD_META[condition.field]
+  const meta = conditionMeta(condition, options)
   const count = meta.kind === 'list' || meta.kind === 'task' ? listValue(condition).length : 1
   const glyphs = selectedOptions(condition, options, colors.mutedForeground).slice(0, 3)
   const summary = valueSummary(condition, options, colors.mutedForeground)
   const operatorText = operatorLabel(condition.operator, count)
-  // the app has no picker for a Parent or Text value: such a chip (made on the web) can only be removed
-  const editable = meta.kind === 'list' || meta.kind === 'date'
+  // the app has no picker for a Parent or Text value: such a chip (made on the web) can only be removed; a custom
+  // text, number or URL chip can switch between "has a value" and "no value", but not get a typed value
+  const editable = meta.kind !== 'text' && meta.kind !== 'task'
+  const valuesEditable = editable && meta.kind !== 'presence'
   return (
     <View className="h-7 max-w-full flex-row items-stretch overflow-hidden rounded-md border border-border bg-background">
       <Segment first>
@@ -269,7 +290,7 @@ function ConditionChip({ condition, options, onOperator, onValues, onRemove }: {
         <Text className="text-[12px] leading-[16px] text-muted-foreground">{operatorText}</Text>
       </Segment>
       {operatorNeedsValue(condition.operator) ? (
-        <Segment onPress={editable ? onValues : undefined} label={`${meta.label} values: ${summary || 'none'}`} shrink>
+        <Segment onPress={valuesEditable ? onValues : undefined} label={`${meta.label} values: ${summary || 'none'}`} shrink>
           {glyphs.length > 0 ? (
             <View className="flex-row items-center gap-0.5">
               {glyphs.map((option) => (

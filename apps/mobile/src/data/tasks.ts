@@ -56,9 +56,10 @@ const byPriorityThenRecent = (a: TaskRecord, b: TaskRecord) =>
 
 /**
  * Tasks in status groups, in workflow order (Backlog, Todo, In Progress, Done …). Empty groups are left out. A task
- * whose status is not loaded goes to a last "No status" group.
+ * whose status is not loaded goes to a last "No status" group. Inside a group, tasks go by priority, then most
+ * recent; with `keepOrder` (the user chose an ordering) they keep the server's order.
  */
-export function groupTasksByStatus(tasks: readonly TaskRecord[], statuses: readonly StatusRecord[]): StatusGroup[] {
+export function groupTasksByStatus(tasks: readonly TaskRecord[], statuses: readonly StatusRecord[], { keepOrder = false }: { keepOrder?: boolean } = {}): StatusGroup[] {
   const keyById = new Map(statuses.map((status) => [status.id, statusKeyOf(status)]))
   const groups: StatusGroup[] = []
   for (const status of sortStatuses(statuses)) {
@@ -70,7 +71,7 @@ export function groupTasksByStatus(tasks: readonly TaskRecord[], statuses: reado
     const key = keyById.get(task.status_id)
     ;(groups.find((group) => group.key === key) ?? unknown).tasks.push(task)
   }
-  return [...groups, unknown].filter((group) => group.tasks.length > 0).map((group) => ({ ...group, tasks: group.tasks.sort(byPriorityThenRecent) }))
+  return [...groups, unknown].filter((group) => group.tasks.length > 0).map((group) => ({ ...group, tasks: keepOrder ? group.tasks : group.tasks.sort(byPriorityThenRecent) }))
 }
 
 /** Open tasks assigned to the user: due soonest first (no due date last), then by priority. */

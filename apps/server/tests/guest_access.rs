@@ -233,6 +233,10 @@ fn example(document: &Value, schema: &Value, field: &str, path: &str, records: &
             return example(document, variant, field, path, records);
         }
     }
+    // a task's value of the fixture's text field
+    if field == "value" && path.contains("/fields/") {
+        return Value::String("guest sweep".to_owned());
+    }
     if let Some(values) = schema["enum"].as_array() {
         return values[0].clone();
     }
@@ -945,6 +949,24 @@ async fn a_guest_reaches_only_chat() {
             )
             .await,
     );
+    let field = id_of(
+        &server
+            .ok(
+                &owner,
+                "POST",
+                &format!("{base}/task-fields"),
+                json!({"name": "Secret field", "kind": "text"}),
+            )
+            .await,
+    );
+    server
+        .ok(
+            &owner,
+            "PUT",
+            &format!("{base}/projects/{project}/fields"),
+            json!({"field_ids": [field]}),
+        )
+        .await;
     let cycle = id_of(
         &server
             .ok(
@@ -1052,6 +1074,8 @@ async fn a_guest_reaches_only_chat() {
             ("link_id", link),
             ("workspace_webhook_id", workspace_webhook),
             ("milestone_id", milestone),
+            ("field_id", field.clone()),
+            ("field_ids", field),
             ("cycle_id", cycle),
             ("role_id", role),
             ("report_id", report),

@@ -4,19 +4,34 @@
  */
 
 export type GroupOp = 'and' | 'or'
-export type FilterField = 'status' | 'status_category' | 'assignee' | 'creator' | 'label' | 'priority' | 'project' | 'parent' | 'sub_issues' | 'due_date' | 'created_at' | 'updated_at' | 'text' | 'milestone' | 'cycle' | 'estimate'
-export type FilterOperator = 'is' | 'is_not' | 'is_empty' | 'is_not_empty' | 'includes_any' | 'includes_all' | 'excludes' | 'before' | 'after' | 'between' | 'contains'
+export type FilterField = 'status' | 'status_category' | 'assignee' | 'creator' | 'label' | 'priority' | 'project' | 'parent' | 'sub_issues' | 'due_date' | 'created_at' | 'updated_at' | 'text' | 'milestone' | 'cycle' | 'estimate' | 'custom_field'
+export type FilterOperator = 'is' | 'is_not' | 'is_empty' | 'is_not_empty' | 'includes_any' | 'includes_all' | 'excludes' | 'before' | 'after' | 'between' | 'contains' | 'less_than' | 'greater_than'
 export type DateValue = { absolute: string } | { relative: 'today' | 'start_of_week' | 'end_of_week'; offset_days?: number }
-export type Condition = { field: FilterField; operator: FilterOperator; value?: unknown }
+/** `field_id` names the custom task field of a `custom_field` condition; other fields never carry it. */
+export type Condition = { field: FilterField; field_id?: string; operator: FilterOperator; value?: unknown }
 export type FilterGroup = { op: GroupOp; children: FilterNode[] }
 export type FilterNode = FilterGroup | Condition
 export type Layout = 'list' | 'board' | 'timeline'
 export type GroupBy = 'status' | 'assignee' | 'priority' | 'project' | 'label' | 'milestone' | 'cycle' | 'none'
-export type OrderBy = 'manual' | 'priority' | 'created' | 'updated' | 'title' | 'due_date' | 'estimate'
+export type OrderBy = 'manual' | 'priority' | 'created' | 'updated' | 'title' | 'due_date' | 'estimate' | 'custom_field'
 export type TaskProperty = 'id' | 'status' | 'assignee' | 'priority' | 'project' | 'milestone' | 'cycle' | 'estimate' | 'due_date' | 'labels' | 'created' | 'updated' | 'sub_issue_progress'
 export type ShowCompleted = 'all' | 'past_week' | 'past_month' | 'none'
 export type SubIssuesMode = 'nested' | 'flat' | 'hidden'
-export type DisplayOptions = { layout: Layout; group_by: GroupBy; sub_group_by: GroupBy; order_by: OrderBy; order_direction: 'asc' | 'desc'; properties: TaskProperty[]; show_completed: ShowCompleted; show_empty_groups: boolean; sub_issues: SubIssuesMode }
+export type DisplayOptions = {
+  layout: Layout
+  group_by: GroupBy
+  sub_group_by: GroupBy
+  order_by: OrderBy
+  order_direction: 'asc' | 'desc'
+  properties: TaskProperty[]
+  /** Custom task field ids shown on rows and cards after `properties`, in order. Absent means none. */
+  custom_fields?: string[]
+  /** The custom field of `order_by: 'custom_field'`; absent for every other ordering. */
+  order_field_id?: string | null
+  show_completed: ShowCompleted
+  show_empty_groups: boolean
+  sub_issues: SubIssuesMode
+}
 export type ViewState = { filter: FilterGroup; display: DisplayOptions }
 export type TaskPreset = 'mine' | 'overdue' | 'due_soon' | 'current_week' | 'my_week'
 export type PageKey = 'all' | `project:${string}` | `preset:${TaskPreset}`
@@ -74,12 +89,31 @@ export function pageKeyFor(input: { projectId?: string | null; preset?: TaskPres
   return 'all'
 }
 
-/** Board needs a grouping; a sub-group never repeats the group; properties are a set in canonical order. */
+/** Custom fields a row or card can show, as the server allows. */
+export const MAX_CUSTOM_FIELDS = 50
+
+/**
+ * Board needs a grouping; a sub-group never repeats the group; properties are a set in canonical order. Custom fields
+ * keep their order without repeats, and an empty list is dropped (absent and `[]` mean the same). `order_field_id`
+ * stays only with `order_by: 'custom_field'`, which falls back to manual without one (the server needs both or neither).
+ */
 export function normalizeDisplay(display: DisplayOptions): DisplayOptions {
+  const { custom_fields: customFields, order_field_id: orderFieldId, ...rest } = display
   const group_by: GroupBy = display.layout === 'board' && display.group_by === 'none' ? 'status' : display.group_by
   const sub_group_by: GroupBy = group_by === 'none' || display.sub_group_by === group_by ? 'none' : display.sub_group_by
   const properties = TASK_PROPERTIES.filter((property) => display.properties.includes(property))
-  return { ...display, group_by, sub_group_by, properties }
+  const custom = [...new Set(customFields ?? [])].slice(0, MAX_CUSTOM_FIELDS)
+  const byField = display.order_by === 'custom_field'
+  const ordered = byField && orderFieldId ? { order_field_id: orderFieldId } : {}
+  return {
+    ...rest,
+    group_by,
+    sub_group_by,
+    properties,
+    ...(byField && !orderFieldId && { order_by: 'manual' as const }),
+    ...(custom.length > 0 && { custom_fields: custom }),
+    ...ordered,
+  }
 }
 
 /** Milestones and cycles belong to one project: only a single project's page groups and filters by them. */
@@ -114,7 +148,7 @@ function canonicalValue(operator: FilterOperator, value: unknown): unknown {
 
 function canonicalNode(node: FilterNode): unknown {
   if (isGroup(node)) return { op: node.op, children: node.children.map(canonicalNode) }
-  return { field: node.field, operator: node.operator, value: canonicalValue(node.operator, node.value) }
+  return { field: node.field, field_id: node.field_id ?? null, operator: node.operator, value: canonicalValue(node.operator, node.value) }
 }
 
 function sortKeys(value: unknown): unknown {

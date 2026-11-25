@@ -24,6 +24,7 @@
 mod archive;
 mod chat;
 pub mod client;
+mod fields;
 mod model;
 mod pages;
 mod tasks;
@@ -1584,6 +1585,7 @@ impl OrbitImportService {
             "label" => "labels",
             "milestone" => "task_milestones",
             "cycle" => "task_cycles",
+            "task_field" => "task_fields",
             "task" => "tasks",
             "comment" => "task_comments",
             "time_entry" => "task_time_entries",

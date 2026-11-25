@@ -121,7 +121,7 @@ Core files: `TasksPage.tsx`, `components/TaskList.tsx`, `components/TaskBoard.ts
   `orbit_import_links`): copies another Orbit workspace from its export archive, pulled with an export API token
   (`orbit.fetch` job: `/me`, `POST /exports` once, poll up to 24 h, download to storage, read the manifest and tree)
   or uploaded as a ZIP. `mode` comes from the token's scope or the manifest: `full` (owner/admin of the target;
-  teamspaces matched by name, projects with statuses and labels, tasks parents first via `import_task` with creator
+  teamspaces matched by name, the task field gallery (see Custom task fields), projects with statuses, labels and fields, tasks parents first via `import_task` with creator
   and assignees by email, attachments, comments, relations, teamspace pages, the exporter's private pages into the
   importer's private space, public channels matched by name, private channels, DMs) or `personal` (any non-guest;
   only private pages and private channels/DMs, `project_ids`/`teamspace_ids` refused; any import needs
@@ -176,6 +176,45 @@ Core files: server `repositories/tasks/milestones.rs`, `repositories/tasks/cycle
   done. There is no cycle close state and no "back to backlog" policy (bulk-clear the cycle instead).
 - Moving a task to another project keeps the milestone only when that project has one with the same name, and always
   clears the cycle. Recurrence keeps the milestone and estimate, not the cycle.
+
+### Custom task fields (#87)
+
+Core files: server `repositories/tasks/fields.rs`, `task_field_routes.rs` (migration `20261124132943`); shared
+`packages/api/src/taskFields.ts`; web `settings/pages/TaskFieldsPage.tsx`, `ProjectFieldsCard.tsx`,
+`TaskFieldProperties.tsx`, `TaskFieldForm.tsx`; mobile `components/tasks/TaskFields.tsx`.
+
+- The workspace has one field gallery (`task_fields`, Settings → Task fields, `/task-fields`). Kinds: text, number,
+  date (`YYYY-MM-DD`), select, multi_select, checkbox, url; names are unique without case; the kind never changes.
+  Every member but a guest creates fields; the creator, owners and admins (`workspace.update`) change and delete them.
+- A project shows a list of gallery fields in order (`project_task_fields`, project settings → Fields, `PUT
+  /projects/{id}/fields`, needs `projects.manage`). A value can be set only for a field that the task's project shows.
+- One JSON value per task and field (`task_field_values`), checked against the kind; `null`, empty text, `false` and
+  `[]` clear it. Values stay when a task moves to a project without the field or the field leaves the project; a
+  removed select option drops from values on read. Each change writes `task.field_changed` (activity: "changed X").
+- Views: every `TaskRecord` carries `field_values` (one batch query per list page). `display.custom_fields` (ids)
+  shows fields on rows and cards; `order_by: custom_field` + `display.order_field_id` sorts (no value last both ways;
+  select by option order; checkbox unchecked first ascending; cursor = has value, DB sort key, id). Filters:
+  `{ field: custom_field, field_id, operator, value }` with operators per kind (`task_filter::custom_operators`,
+  `less_than`/`greater_than` for numbers); the stored value counts even where the project does not show the field;
+  removed options and deleted fields count as no value. SQL compares the canonical `value_json` (option ids exact or
+  `LIKE '%"id"%'`, dates as quoted `"YYYY-MM-DD"`, numbers by `CAST … AS DOUBLE PRECISION`); only text extraction
+  branches per backend. Mobile: filters, values on list rows and the Display sheet (grouping, ordering incl. fields, shown fields;
+  `data/task-display.ts`, `components/tasks/DisplaySheet.tsx`).
+- Token API (`tasks:read`/`tasks:write`, `token_api/fields.rs`): gallery, project fields, task values. A project-limited
+  token lists the whole gallery (`project_count` counts only its projects) and may create fields, but renaming, option
+  changes and deletes need an all-projects token. MCP (`mcp/fields.rs`): `list_task_fields`, `get_task_field_values`,
+  `set_task_field_value`, `create_task_field`, `set_project_task_fields`; no field update/delete (they change values
+  in every project).
+- Mobile: values in task detail, Settings → Task fields (`settings/task-fields.tsx`), project settings Fields section.
+- Workspace export / Orbit import: `workspace.json` has `task_fields` (gallery with option ids) and each project's
+  `fields` (ids in order); each task file has `field_values` (`{field_id, value}` as stored, removed options left
+  out); no format version bump (old archives import without fields). A personal export has none (no tasks). The
+  import (`orbit_import/fields.rs`, full mode with a project selected) brings the whole gallery before the projects:
+  linked field, else same name (no case) and kind (missing options appended, by name), else a new field, renamed
+  `Name (2)`… when another kind holds the name; at most 200 fields and 100 options, unknown kinds and malformed
+  entries skipped. Options map by name, so values keep their choice; fields append to a project's list; values go
+  through `checked_value` and are inserted per task (`ON CONFLICT DO NOTHING`, no activity rows).
+- Not yet: grouping by a field; real time tracking (timers, time entries) — a number field ("Time spent (h)") stands in for now.
 
 ### Project workflows
 

@@ -9,21 +9,22 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Tip } from '@/components/common/Tip'
 import {
-  FIELD_META,
   MAX_FILTER_CONDITIONS,
   availableFields,
-  defaultValue,
+  fieldMeta,
   isCompleteCondition,
   listValue,
+  newCondition,
   operatorLabel,
   operatorNeedsValue,
   selectedOptions,
   valueSummary,
   withOperator,
+  type FieldChoice,
   type FilterOptions,
 } from '../filterFields'
 import { appendCondition } from '../filterTree'
-import { countConditions, isFlatFilter, type Condition, type FilterField, type FilterGroup, type FilterOperator } from '../viewState'
+import { countConditions, isFlatFilter, type Condition, type FilterGroup, type FilterOperator } from '../viewState'
 import { FilterValuePicker, ValueGlyph } from './FilterValuePicker'
 
 /** Title of the add controls once the tree is at the cap. */
@@ -57,13 +58,13 @@ function AddFilterPopover({ filter, options, onChange, onOpenAdvanced, open, onO
     }
   }
   const close = () => onOpenChange(false)
-  const pickField = (field: FilterField) => {
-    const operator = FIELD_META[field].defaultOperator
+  const pickField = (choice: FieldChoice) => {
+    const condition = newCondition(choice.target, choice.meta)
     // a field without values (Estimate) is complete at once
-    if (!operatorNeedsValue(operator)) {
-      onChange(appendCondition(filter, { field, operator }))
+    if (!operatorNeedsValue(condition.operator)) {
+      onChange(appendCondition(filter, condition))
       close()
-    } else setDraft({ field, operator, value: defaultValue(field, operator) })
+    } else setDraft(condition)
   }
   const change = (next: Condition) => {
     setDraft(next)
@@ -89,12 +90,12 @@ function AddFilterPopover({ filter, options, onChange, onOpenAdvanced, open, onO
             <CommandList>
               <CommandEmpty className="py-4 text-xs text-muted-foreground">No matching fields</CommandEmpty>
               <CommandGroup>
-                {availableFields(options).map((field) => {
-                  const Icon = FIELD_META[field].icon
+                {availableFields(options).map((choice) => {
+                  const Icon = choice.meta.icon
                   return (
-                    <CommandItem key={field} value={field} keywords={[FIELD_META[field].label]} onSelect={() => pickField(field)}>
+                    <CommandItem key={choice.key} value={choice.key} keywords={[choice.meta.label]} onSelect={() => pickField(choice)}>
                       <Icon className="size-3.5 text-muted-foreground" aria-hidden="true" />
-                      {FIELD_META[field].label}
+                      <span className="min-w-0 flex-1 truncate">{choice.meta.label}</span>
                     </CommandItem>
                   )
                 })}
@@ -253,8 +254,9 @@ function ConditionChip({ condition, options, enter, onChange, onRemove }: Condit
   const [animate] = useState(enter)
   const [draft, setDraft] = useState<Condition | null>(null)
   const [operatorOpen, setOperatorOpen] = useState(false)
-  const meta = FIELD_META[condition.field]
+  const meta = fieldMeta(condition, options)
   const Icon = meta.icon
+  const missing = meta.kind === 'missing'
   const shown = draft ?? condition
   const count = meta.kind === 'list' || meta.kind === 'task' ? listValue(shown).length : 1
   const glyphs = selectedOptions(shown, options).slice(0, 3)
@@ -272,18 +274,19 @@ function ConditionChip({ condition, options, enter, onChange, onRemove }: Condit
   }
   const pickOperator = (operator: FilterOperator) => {
     setOperatorOpen(false)
-    const next = withOperator(condition, operator)
+    const next = withOperator(condition, operator, options)
     if (isCompleteCondition(next)) onChange(next)
     else setDraft(next)
   }
 
   return (
     <FilterChip data-filter-chip={condition.field} className={cn(animate && 'animate-filter-chip-enter')}>
-      <ChipSegment>
-        <Icon className="size-3.5" aria-hidden="true" />
-        {meta.label}
+      <ChipSegment className={cn(condition.field === 'custom_field' && 'max-w-40', missing && 'text-destructive')}>
+        <Icon className="size-3.5 shrink-0" aria-hidden="true" />
+        <span className="truncate">{meta.label}</span>
       </ChipSegment>
-      {meta.operators.length > 1 ? (
+      {/* a deleted field's condition matches as "no value"; its chip only names it and offers removal */}
+      {missing ? null : meta.operators.length > 1 ? (
         <DropdownMenu open={operatorOpen} onOpenChange={setOperatorOpen} modal={false}>
           <DropdownMenuTrigger
             render={
@@ -305,7 +308,7 @@ function ConditionChip({ condition, options, enter, onChange, onRemove }: Condit
       ) : (
         <ChipSegment>{operatorText}</ChipSegment>
       )}
-      {operatorNeedsValue(shown.operator) ? (
+      {operatorNeedsValue(shown.operator) && !missing ? (
         <Popover open={draft !== null} onOpenChange={(open) => (open ? setDraft(condition) : closeValues())} modal={false}>
           <PopoverTrigger
             render={

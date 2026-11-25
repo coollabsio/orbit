@@ -1,5 +1,8 @@
-import { Calendar, Diamonds, RefreshCircle, Repeat, Triangle } from 'reicon-react'
+import { Calendar, CheckSquare, Diamonds, RefreshCircle, Repeat, Triangle } from 'reicon-react'
 import { cn } from 'cn'
+import type { TaskField } from '@orbit/api/generated/types.gen'
+import { FIELD_KIND_ICON, fieldValueText, selectedOptions } from '@/features/tasks/fieldsLib'
+import { LabelPill } from './TaskLabels'
 import type { Cycle, Milestone, Project, Task, TaskStatusDef } from '@/features/tasks/api/models'
 import { cycleName, estimateLabel, estimateShortLabel, isMilestoneLate } from '@/features/tasks/planningLib'
 import { isOverdue } from '@/features/tasks/timeline/timelineLib'
@@ -81,6 +84,49 @@ export function DateStamp({ property, iso, className }: { property: 'created' | 
   return (
     <span data-property={property} title={`${property === 'created' ? 'Created' : 'Updated'} ${fullDate(iso)}`} className={cn('shrink-0 whitespace-nowrap tabular-nums', className)}>
       {shortDate(iso)}
+    </span>
+  )
+}
+
+/** `example.com` for a URL value (no `www.`); the text itself when it does not parse. */
+function urlHost(value: string): string {
+  try {
+    return new URL(value).host.replace(/^www\./, '')
+  } catch {
+    return value
+  }
+}
+
+/** Option chips show this many, then "+n". */
+const MAX_OPTION_CHIPS = 2
+
+/**
+ * One custom field's value on a row or card, named in the tooltip: option chips in their colours, a checked box with
+ * the field's name, or the kind's icon and a short value (number, date, URL host, text). Nothing without a value.
+ */
+export function CustomFieldChip({ field, value, className }: { field: TaskField; value: unknown; className?: string }) {
+  const text = fieldValueText(field, value)
+  if (!text) return null
+  const shared = { 'data-property': 'custom_field', 'data-field-id': field.id, title: `${field.name}: ${text}` }
+  if (field.kind === 'select' || field.kind === 'multi_select') {
+    const chosen = selectedOptions(field, value)
+    return (
+      <span {...shared} className={cn('inline-flex max-w-[220px] min-w-0 shrink-0 items-center gap-1', className)}>
+        {chosen.slice(0, MAX_OPTION_CHIPS).map((option) => <LabelPill key={option.id} label={option} className="min-w-0 truncate" />)}
+        {chosen.length > MAX_OPTION_CHIPS ? <span className="shrink-0 text-muted-foreground tabular-nums">+{chosen.length - MAX_OPTION_CHIPS}</span> : null}
+      </span>
+    )
+  }
+  const Icon = field.kind === 'checkbox' ? CheckSquare : FIELD_KIND_ICON[field.kind]
+  const shown = field.kind === 'checkbox'
+    ? field.name
+    : field.kind === 'date' && typeof value === 'string'
+      ? shortDate(`${value}T00:00:00`)
+      : field.kind === 'url' && typeof value === 'string' ? urlHost(value) : text
+  return (
+    <span {...shared} className={cn('inline-flex max-w-[140px] min-w-0 shrink-0 items-center gap-1 whitespace-nowrap text-muted-foreground', field.kind === 'number' && 'tabular-nums', className)}>
+      <Icon aria-hidden className="size-[1.1em] shrink-0" />
+      <span className="truncate">{shown}</span>
     </span>
   )
 }

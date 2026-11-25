@@ -780,6 +780,8 @@ async fn tools_list_includes_required_cache_fields_for_current_protocol() {
                 "get_view",
                 "list_task_attachments",
                 "download_task_attachment",
+                "list_task_fields",
+                "get_task_field_values",
             ]
         );
     }

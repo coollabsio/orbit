@@ -23,6 +23,14 @@ import {
   listCommentAttachments,
   listCycles,
   listMilestones,
+  listProjectTaskFields,
+  listTaskFields,
+  listTaskFieldValues,
+  setProjectTaskFields,
+  setTaskFieldValue,
+  createTaskField,
+  updateTaskField,
+  deleteTaskField,
   listProjectTrash,
   listTaskAttachments,
   listTaskRelations,
@@ -48,6 +56,12 @@ import type {
   TaskCycleBody,
   TaskCycleMoveOutcome,
   TaskCycleUpdateBody,
+  TaskField,
+  TaskFieldBody,
+  TaskFieldKind,
+  TaskFieldOptionInput,
+  TaskFieldUpdateBody,
+  TaskFieldValue,
   TaskMilestone,
   TaskMilestoneBody,
   TaskMilestoneUpdateBody,
@@ -68,6 +82,12 @@ export type {
   TaskCycleBody,
   TaskCycleMoveOutcome,
   TaskCycleUpdateBody,
+  TaskField,
+  TaskFieldBody,
+  TaskFieldKind,
+  TaskFieldOptionInput,
+  TaskFieldUpdateBody,
+  TaskFieldValue,
   TaskMilestone,
   TaskMilestoneBody,
   TaskMilestoneUpdateBody,
@@ -312,4 +332,45 @@ export async function projectOrder(client: OrbitClient, workspaceId: string): Pr
 
 export async function saveProjectOrder(client: OrbitClient, workspaceId: string, projectIds: string[]): Promise<void> {
   await putProjectOrder({ client, path: { workspace_id: workspaceId }, body: { project_ids: projectIds }, throwOnError: true })
+}
+
+// ---- custom task fields (issue #87)
+
+/** The fields a project's tasks show, in order. */
+export async function projectTaskFields(client: OrbitClient, workspaceId: string, projectId: string): Promise<TaskField[]> {
+  return (await listProjectTaskFields(inProject(client, workspaceId, projectId))).data.items
+}
+
+/** The task's values; removed options are gone. */
+export async function taskFieldValues(client: OrbitClient, workspaceId: string, taskId: string): Promise<TaskFieldValue[]> {
+  return (await listTaskFieldValues(task(client, workspaceId, taskId))).data.items
+}
+
+/** Sets or clears (`null`) one value; returns all the task's values. */
+export async function saveTaskFieldValue(client: OrbitClient, workspaceId: string, taskId: string, fieldId: string, value: unknown): Promise<TaskFieldValue[]> {
+  return (await setTaskFieldValue({ client, path: { workspace_id: workspaceId, task_id: taskId, field_id: fieldId }, body: { value }, throwOnError: true })).data.items
+}
+
+/** The workspace's field gallery, by name. */
+export async function taskFields(client: OrbitClient, workspaceId: string): Promise<TaskField[]> {
+  return (await listTaskFields({ client, path: { workspace_id: workspaceId }, throwOnError: true })).data.items
+}
+
+export async function newTaskField(client: OrbitClient, workspaceId: string, body: TaskFieldBody): Promise<TaskField> {
+  return (await createTaskField({ client, path: { workspace_id: workspaceId }, body, throwOnError: true })).data
+}
+
+/** Renames a field or replaces its options (an option keeps its values while its `id` is sent). */
+export async function changeTaskField(client: OrbitClient, workspaceId: string, fieldId: string, body: TaskFieldUpdateBody): Promise<TaskField> {
+  return (await updateTaskField({ client, path: { workspace_id: workspaceId, field_id: fieldId }, body, throwOnError: true })).data
+}
+
+/** Deletes a gallery field with every task's value of it. */
+export async function removeTaskField(client: OrbitClient, workspaceId: string, field: Pick<TaskField, 'id' | 'version'>): Promise<void> {
+  await deleteTaskField({ client, path: { workspace_id: workspaceId, field_id: field.id }, query: { expected_version: field.version }, throwOnError: true })
+}
+
+/** Replaces the fields the project shows, in order; returns them. */
+export async function saveProjectTaskFields(client: OrbitClient, workspaceId: string, projectId: string, fieldIds: string[]): Promise<TaskField[]> {
+  return (await setProjectTaskFields({ ...inProject(client, workspaceId, projectId), body: { field_ids: fieldIds } })).data.items
 }

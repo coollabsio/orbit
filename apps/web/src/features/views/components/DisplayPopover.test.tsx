@@ -3,15 +3,18 @@ import { fireEvent, type RenderResult } from '@testing-library/react'
 import { render } from '@/test/render'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
+import type { TaskField } from '@orbit/api/generated/types.gen'
+import { displayFields } from '../displayMeta'
+import { TASK_FIELDS } from '../testFixtures'
 import { DEFAULT_DISPLAY, type DisplayOptions } from '../viewState'
 import { DisplayPopover } from './DisplayPopover'
 
-function Harness({ initial = DEFAULT_DISPLAY }: { initial?: DisplayOptions }) {
+function Harness({ initial = DEFAULT_DISPLAY, fields }: { initial?: DisplayOptions; fields?: TaskField[] }) {
   const [display, setDisplay] = useState(initial)
   return (
     <>
       <input aria-label="Other field" />
-      <DisplayPopover display={display} defaultDisplay={DEFAULT_DISPLAY} onChange={(patch) => setDisplay((current) => ({ ...current, ...patch }))} />
+      <DisplayPopover display={display} defaultDisplay={DEFAULT_DISPLAY} onChange={(patch) => setDisplay((current) => ({ ...current, ...patch }))} fields={fields} />
       <output data-testid="display">{JSON.stringify(display)}</output>
     </>
   )
@@ -137,4 +140,27 @@ test('timeline offers only the properties it shows and keeps the others', async 
   expect([...group.querySelectorAll('button')].map((chip) => chip.textContent)).toEqual(['ID', 'Status', 'Assignee', 'Priority'])
   await userEvent.click(view.getByRole('button', { name: 'ID' }))
   expect(read(view).properties).toEqual(DEFAULT_DISPLAY.properties.filter((property) => property !== 'id'))
+})
+
+test('custom fields toggle after the built-in properties and order the list', async () => {
+  const view = render(<Harness fields={TASK_FIELDS.slice(0, 2)} />)
+  open(view)
+  await userEvent.click(await view.findByRole('button', { name: 'Budget' }))
+  await userEvent.click(view.getByRole('button', { name: 'Customer' }))
+  expect(read(view).custom_fields).toEqual(['field-budget', 'field-customer'])
+  await userEvent.click(view.getByRole('button', { name: 'Budget' }))
+  expect(read(view).custom_fields).toEqual(['field-customer'])
+  fireEvent.click(view.getByRole('combobox', { name: 'Ordering' }))
+  await userEvent.click(await view.findByRole('option', { name: 'Budget' }))
+  expect(read(view)).toMatchObject({ order_by: 'custom_field', order_field_id: 'field-budget' })
+  fireEvent.click(view.getByRole('combobox', { name: 'Ordering' }))
+  await userEvent.click(await view.findByRole('option', { name: 'Priority' }))
+  expect(read(view).order_by).toBe('priority')
+  expect(read(view).order_field_id).toBeUndefined()
+})
+
+test('a project page offers its own fields, plus a gallery field the display already uses', () => {
+  const [customer, budget, signed] = TASK_FIELDS
+  expect(displayFields(TASK_FIELDS, null, DEFAULT_DISPLAY)).toEqual(TASK_FIELDS)
+  expect(displayFields(TASK_FIELDS, [budget!], { custom_fields: [signed!.id], order_field_id: customer!.id }).map((field) => field.name)).toEqual(['Budget', 'Customer', 'Signed off'])
 })

@@ -1116,3 +1116,497 @@ async fn time_entries_round_trip_through_the_export_and_an_orbit_import() {
     .unwrap();
     assert_eq!(rows[0].get::<i64, _>("created_at"), source_created);
 }
+
+/// Runs an Orbit import of `archive` into `workspace_id` as the owner, selecting every project
+/// of the archive, to the end.
+async fn import_archive(harness: &Harness, workspace_id: &str, archive: &[u8]) {
+    use orbit_platform::{
+        AttachmentMutationCoordinator, LocalBlobStore, ObjectStorage, UploadLimits, UploadService,
+    };
+    use orbit_server::orbit_import::{
+        JobRun, OrbitImportSelection, OrbitImportService, OrbitImportSettings, OrbitImportStatus,
+    };
+    let owner: String =
+        sqlx::query_scalar("SELECT id FROM users WHERE email = 'owner@example.com'")
+            .fetch_one(harness.database.pool())
+            .await
+            .unwrap();
+    let (workspace, owner): (Id, Id) = (workspace_id.parse().unwrap(), owner.parse().unwrap());
+    let uploads = UploadService::new(
+        harness.database.clone(),
+        std::sync::Arc::new(LocalBlobStore::new(
+            harness.root.path().join("import-blobs"),
+        )),
+        AttachmentMutationCoordinator::default(),
+        UploadLimits::new(1024 * 1024, 4 * 1024 * 1024).unwrap(),
+    );
+    let service = OrbitImportService::new(
+        harness.database.clone(),
+        uploads,
+        ObjectStorage::default(),
+        harness.root.path().join("backups"),
+        OrbitImportSettings {
+            app_key: Some([1u8; 32]),
+            max_file_bytes: 1024 * 1024,
+            max_archive_bytes: 64 * 1024 * 1024,
+            allow_local: false,
+        },
+    );
+    let upload = service.prepare_upload(workspace, owner).await.unwrap();
+    std::fs::write(&upload.path, archive).unwrap();
+    let import = service
+        .create_upload(workspace, owner, upload, archive.len() as u64)
+        .await
+        .unwrap();
+    let job = JobRun {
+        cancel: CancellationToken::new(),
+        last_attempt: true,
+    };
+    service.run_fetch(import.id, &job).await.unwrap();
+    let ready = service
+        .get(workspace, owner, import.id, true)
+        .await
+        .unwrap();
+    assert_eq!(ready.status, OrbitImportStatus::Ready, "{:?}", ready.error);
+    let tree = ready.tree.unwrap();
+    service
+        .start(
+            workspace,
+            owner,
+            import.id,
+            OrbitImportSelection {
+                project_ids: tree
+                    .projects
+                    .iter()
+                    .map(|project| project.id.clone())
+                    .collect(),
+                teamspace_ids: Vec::new(),
+                include_private_pages: false,
+                channel_ids: Vec::new(),
+            },
+        )
+        .await
+        .unwrap();
+    service.run_import(import.id, &job).await.unwrap();
+    let done = service
+        .get(workspace, owner, import.id, false)
+        .await
+        .unwrap();
+    assert_eq!(
+        done.status,
+        OrbitImportStatus::Completed,
+        "{:?}",
+        done.error
+    );
+}
+
+/// The archive with each JSON entry passed through `edit(name, json)`.
+fn rewrite_archive(bytes: &[u8], edit: impl Fn(&str, &mut Value)) -> Vec<u8> {
+    use std::io::Write;
+    let mut source = zip::ZipArchive::new(Cursor::new(bytes.to_vec())).unwrap();
+    let mut out = zip::ZipWriter::new(Cursor::new(Vec::new()));
+    for index in 0..source.len() {
+        let mut entry = source.by_index(index).unwrap();
+        let name = entry.name().unwrap().into_owned();
+        let mut content = Vec::new();
+        entry.read_to_end(&mut content).unwrap();
+        if name.ends_with(".json") {
+            let mut value: Value = serde_json::from_slice(&content).unwrap();
+            edit(&name, &mut value);
+            content = serde_json::to_vec(&value).unwrap();
+        }
+        out.start_file(name, zip::write::SimpleFileOptions::default())
+            .unwrap();
+        out.write_all(&content).unwrap();
+    }
+    out.finish().unwrap().into_inner()
+}
+
+/// Field name → (id, kind, options) of a workspace's gallery.
+async fn gallery(database: &Database, workspace_id: &str) -> Vec<(String, String, String, Value)> {
+    sqlx::query(
+        "SELECT id, name, kind, options_json FROM task_fields WHERE workspace_id = $1 ORDER BY lower(name)",
+    )
+    .bind(workspace_id)
+    .fetch_all(database.pool())
+    .await
+    .unwrap()
+    .into_iter()
+    .map(|row| {
+        (
+            row.get::<String, _>("name"),
+            row.get::<String, _>("id"),
+            row.get::<String, _>("kind"),
+            serde_json::from_str(&row.get::<String, _>("options_json")).unwrap(),
+        )
+    })
+    .collect()
+}
+
+/// (project name, field names in order) and (task title, field name, value) of a workspace.
+async fn fields_in_use(
+    database: &Database,
+    workspace_id: &str,
+) -> (Vec<(String, String)>, Vec<(String, String, Value)>) {
+    let shown = sqlx::query(
+        "SELECT projects.name AS project, task_fields.name AS field FROM project_task_fields \
+         JOIN projects ON projects.id = project_task_fields.project_id \
+         JOIN task_fields ON task_fields.id = project_task_fields.field_id \
+         WHERE projects.workspace_id = $1 AND EXISTS (SELECT 1 FROM tasks \
+         WHERE tasks.project_id = projects.id AND tasks.title = 'Fielded') \
+         ORDER BY projects.name, project_task_fields.position",
+    )
+    .bind(workspace_id)
+    .fetch_all(database.pool())
+    .await
+    .unwrap()
+    .into_iter()
+    .map(|row| (row.get("project"), row.get("field")))
+    .collect();
+    let values = sqlx::query(
+        "SELECT tasks.title, task_fields.name, task_field_values.value_json FROM task_field_values \
+         JOIN tasks ON tasks.id = task_field_values.task_id \
+         JOIN task_fields ON task_fields.id = task_field_values.field_id \
+         WHERE tasks.workspace_id = $1 ORDER BY tasks.title, lower(task_fields.name)",
+    )
+    .bind(workspace_id)
+    .fetch_all(database.pool())
+    .await
+    .unwrap()
+    .into_iter()
+    .map(|row| {
+        (
+            row.get("title"),
+            row.get("name"),
+            serde_json::from_str(&row.get::<String, _>("value_json")).unwrap(),
+        )
+    })
+    .collect();
+    (shown, values)
+}
+
+#[tokio::test]
+async fn custom_task_fields_survive_an_export_and_an_import_into_another_workspace() {
+    let harness = Harness::new(false).await;
+    let task = harness.create_task("Fielded").await;
+    let project = harness
+        .scalar("SELECT id FROM projects WHERE workspace_id = $1")
+        .await;
+    let source = &harness;
+    let create = move |name: &str, kind: &str, options: Value| {
+        let body = json!({"name": name, "kind": kind, "options": options});
+        let path = source.workspace("/task-fields");
+        async move { source.ok(&source.owner, "POST", &path, Some(body)).await }
+    };
+    let color = |name: &str| json!({"name": name, "color": "#4cb782"});
+    let stage = create("Stage", "select", json!([color("Open"), color("Done")])).await;
+    let tags = create(
+        "Tags",
+        "multi_select",
+        json!([color("A"), color("B"), color("C")]),
+    )
+    .await;
+    let mut ids = vec![stage["id"].clone(), tags["id"].clone()];
+    for (name, kind) in [
+        ("Points", "number"),
+        ("Notes", "text"),
+        ("Due day", "date"),
+        ("Blocked", "checkbox"),
+        ("Link", "url"),
+    ] {
+        ids.push(create(name, kind, json!([])).await["id"].clone());
+    }
+    create("Unused", "text", json!([])).await;
+    harness
+        .ok(
+            &harness.owner,
+            "PUT",
+            &harness.workspace(&format!("/projects/{project}/fields")),
+            Some(json!({"field_ids": ids})),
+        )
+        .await;
+    let option = |field: &Value, index: usize| field["options"][index]["id"].clone();
+    let values = [
+        json!(option(&stage, 1)),
+        json!([option(&tags, 2), option(&tags, 0)]),
+        json!(12.5),
+        json!("Some notes"),
+        json!("2026-03-01"),
+        json!(true),
+        json!("https://example.com/a"),
+    ];
+    for (field, value) in ids.iter().zip(&values) {
+        harness
+            .ok(
+                &harness.owner,
+                "PUT",
+                &harness.workspace(&format!("/tasks/{task}/fields/{}", field.as_str().unwrap())),
+                Some(json!({"value": value})),
+            )
+            .await;
+    }
+
+    let export = harness.start_export().await;
+    harness.run_export(&export).await;
+    let (status, bytes, _) = harness.download(&harness.owner, &export).await;
+    assert_eq!(status, StatusCode::OK);
+    let mut archive = Archive::new(bytes.clone());
+    let workspace = archive.json("workspace.json");
+    let exported: Vec<&str> = workspace["task_fields"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|field| field["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        exported,
+        [
+            "Blocked", "Due day", "Link", "Notes", "Points", "Stage", "Tags", "Unused"
+        ]
+    );
+    let stage_export = workspace["task_fields"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|field| field["name"] == "Stage")
+        .unwrap();
+    assert_eq!(stage_export["kind"], "select");
+    assert_eq!(stage_export["options"], stage["options"]);
+    let general = workspace["projects"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["id"] == project.as_str())
+        .unwrap();
+    assert_eq!(general["fields"], json!(ids));
+    let task_file = archive
+        .names()
+        .into_iter()
+        .find(|name| name.starts_with("tasks/") && archive.json(name)["id"] == task.as_str())
+        .unwrap();
+    let field_values = archive.json(&task_file)["field_values"].clone();
+    assert_eq!(field_values.as_array().unwrap().len(), 7);
+    for (field, value) in ids.iter().zip(&values) {
+        assert!(
+            field_values
+                .as_array()
+                .unwrap()
+                .contains(&json!({"field_id": field, "value": value})),
+            "{field} = {value} in {field_values}"
+        );
+    }
+
+    // The target already has "Stage" (select, with "Done" only) and a text "Points".
+    let target = harness
+        .ok(
+            &harness.owner,
+            "POST",
+            "/api/v1/workspaces",
+            Some(json!({"name": "Target"})),
+        )
+        .await["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let target_path = format!("/api/v1/workspaces/{target}/task-fields");
+    let existing_stage = harness
+        .ok(
+            &harness.owner,
+            "POST",
+            &target_path,
+            Some(json!({"name": "stage", "kind": "select", "options": [color("Done")]})),
+        )
+        .await;
+    harness
+        .ok(
+            &harness.owner,
+            "POST",
+            &target_path,
+            Some(json!({"name": "Points", "kind": "text"})),
+        )
+        .await;
+    import_archive(&harness, &target, &bytes).await;
+
+    let imported = gallery(&harness.database, &target).await;
+    let names: Vec<(&str, &str)> = imported
+        .iter()
+        .map(|(name, _, kind, _)| (name.as_str(), kind.as_str()))
+        .collect();
+    assert_eq!(
+        names,
+        [
+            ("Blocked", "checkbox"),
+            ("Due day", "date"),
+            ("Link", "url"),
+            ("Notes", "text"),
+            ("Points", "text"),
+            ("Points (2)", "number"),
+            ("stage", "select"),
+            ("Tags", "multi_select"),
+            ("Unused", "text"),
+        ]
+    );
+    let merged = imported.iter().find(|(name, ..)| name == "stage").unwrap();
+    assert_eq!(
+        merged.1,
+        existing_stage["id"].as_str().unwrap(),
+        "merged, not created"
+    );
+    let merged_names: Vec<&str> = merged
+        .3
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|option| option["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(merged_names, ["Done", "Open"]);
+    let (shown, values_here) = fields_in_use(&harness.database, &target).await;
+    let order: Vec<&str> = shown.iter().map(|(_, field)| field.as_str()).collect();
+    assert_eq!(
+        order,
+        [
+            "stage",
+            "Tags",
+            "Points (2)",
+            "Notes",
+            "Due day",
+            "Blocked",
+            "Link"
+        ]
+    );
+    let option_id = |field: &str, name: &str| {
+        let (_, _, _, options) = imported.iter().find(|(n, ..)| n == field).unwrap();
+        options
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|option| option["name"] == name)
+            .unwrap()["id"]
+            .clone()
+    };
+    assert_eq!(
+        values_here,
+        [
+            ("Fielded".to_owned(), "Blocked".to_owned(), json!(true)),
+            (
+                "Fielded".to_owned(),
+                "Due day".to_owned(),
+                json!("2026-03-01")
+            ),
+            (
+                "Fielded".to_owned(),
+                "Link".to_owned(),
+                json!("https://example.com/a")
+            ),
+            (
+                "Fielded".to_owned(),
+                "Notes".to_owned(),
+                json!("Some notes")
+            ),
+            ("Fielded".to_owned(), "Points (2)".to_owned(), json!(12.5)),
+            (
+                "Fielded".to_owned(),
+                "stage".to_owned(),
+                option_id("stage", "Done")
+            ),
+            (
+                "Fielded".to_owned(),
+                "Tags".to_owned(),
+                json!([option_id("Tags", "C"), option_id("Tags", "A")])
+            ),
+        ]
+    );
+
+    // An archive written before task fields: the task still imports, without fields.
+    let old = rewrite_archive(&bytes, |name, value| {
+        if name == "workspace.json" {
+            value.as_object_mut().unwrap().remove("task_fields");
+            for project in value["projects"].as_array_mut().unwrap() {
+                project.as_object_mut().unwrap().remove("fields");
+            }
+        } else if name.starts_with("tasks/") {
+            value.as_object_mut().unwrap().remove("field_values");
+        }
+    });
+    let old_target = harness
+        .ok(
+            &harness.owner,
+            "POST",
+            "/api/v1/workspaces",
+            Some(json!({"name": "Old"})),
+        )
+        .await["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    import_archive(&harness, &old_target, &old).await;
+    assert!(gallery(&harness.database, &old_target).await.is_empty());
+    let titles: Vec<String> =
+        sqlx::query_scalar("SELECT title FROM tasks WHERE workspace_id = $1 AND title = 'Fielded'")
+            .bind(&old_target)
+            .fetch_all(harness.database.pool())
+            .await
+            .unwrap();
+    assert_eq!(titles, ["Fielded"]);
+
+    // Malformed field data is left out; the rest imports.
+    let stage_id = stage["id"].as_str().unwrap().to_owned();
+    let notes_id = ids[3].as_str().unwrap().to_owned();
+    let points_id = ids[2].as_str().unwrap().to_owned();
+    let bad = rewrite_archive(&bytes, |name, value| {
+        if name == "workspace.json" {
+            let fields = value["task_fields"].as_array_mut().unwrap();
+            fields.push(json!({"id": "formula", "name": "Formula", "kind": "formula"}));
+            fields.push(json!({"id": 5, "kind": []}));
+            fields.push(json!({"id": "blank", "name": "   ", "kind": "text"}));
+            fields.push(json!("not a field"));
+            for field in fields.iter_mut() {
+                if field["id"] == stage_id.as_str() {
+                    field["options"] = json!("nope");
+                }
+            }
+            value["projects"][0]["fields"] = json!([stage_id, 7, "missing", notes_id]);
+        } else if name.starts_with("tasks/") {
+            value["field_values"] = json!([
+                {"field_id": stage_id, "value": "forged-option"},
+                {"field_id": points_id, "value": "not a number"},
+                {"field_id": notes_id, "value": "x".repeat(5_000)},
+                {"field_id": "missing", "value": 1},
+                {"no": "field"},
+                {"field_id": notes_id, "value": "Kept"},
+            ]);
+        }
+    });
+    let bad_target = harness
+        .ok(
+            &harness.owner,
+            "POST",
+            "/api/v1/workspaces",
+            Some(json!({"name": "Bad"})),
+        )
+        .await["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    import_archive(&harness, &bad_target, &bad).await;
+    let bad_gallery = gallery(&harness.database, &bad_target).await;
+    let bad_names: Vec<&str> = bad_gallery.iter().map(|(name, ..)| name.as_str()).collect();
+    assert_eq!(
+        bad_names,
+        [
+            "Blocked", "Due day", "Link", "Notes", "Points", "Stage", "Tags", "Unused"
+        ]
+    );
+    let bad_stage = bad_gallery
+        .iter()
+        .find(|(name, ..)| name == "Stage")
+        .unwrap();
+    assert_eq!(bad_stage.3, json!([]), "unreadable options are left out");
+    let (shown, values_here) = fields_in_use(&harness.database, &bad_target).await;
+    let order: Vec<&str> = shown.iter().map(|(_, field)| field.as_str()).collect();
+    assert_eq!(order, ["Stage", "Notes"]);
+    assert_eq!(
+        values_here,
+        [("Fielded".to_owned(), "Notes".to_owned(), json!("Kept"))]
+    );
+}

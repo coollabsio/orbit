@@ -236,9 +236,9 @@ export function LabelChoices({ projectId, value, onChange }: { projectId: string
 }
 
 /** The label palette as round swatches; the chosen one wears a ring in its own colour. */
-function Swatches({ value, onChange }: { value: string; onChange: (color: string) => void }) {
+export function Swatches({ value, onChange, label = 'Label color', className = 'px-4 pt-1 pb-3' }: { value: string; onChange: (color: string) => void; label?: string; className?: string }) {
   return (
-    <View accessibilityRole="radiogroup" accessibilityLabel="Label color" className="flex-row flex-wrap gap-2.5 px-4 pt-1 pb-3">
+    <View accessibilityRole="radiogroup" accessibilityLabel={label} className={`flex-row flex-wrap gap-2.5 ${className}`}>
       {LABEL_PALETTE.map((swatch) => {
         const checked = swatch.color === value
         return (

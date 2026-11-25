@@ -3,11 +3,12 @@ import { memo, useCallback, useLayoutEffect, useRef, useState, type ReactNode } 
 import { defaultRangeExtractor, measureElement as measureSize, useVirtualizer } from '@tanstack/react-virtual'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
-import type { LabelRecord } from '@orbit/api/generated/types.gen'
+import type { LabelRecord, TaskField } from '@orbit/api/generated/types.gen'
 import type { Project, Task, TaskStatusDef } from '@/features/tasks/api/models'
 import { pickerTitle } from '@/features/tasks/relationsLib'
 import { useDuplicateActions } from '@/features/tasks/useDuplicateActions'
 import { DisclosureChevron, GroupIcon } from '@/features/views/components/GroupIcon'
+import { shownCustomFields } from '@/features/views/displayMeta'
 import { estimateTotal, type GroupContext, type TaskGroup } from '@/features/views/grouping'
 import { estimateShortLabel } from '@/features/tasks/planningLib'
 import { boardGrid, canDrag, cellTasks, valuesOf, zoneIdOf, type GroupValues } from '@/features/views/layoutGroups'
@@ -26,7 +27,8 @@ import { SubIssueProgress, completedStatusColor } from './SubIssueProgress'
 import { LabelPill } from './TaskLabels'
 import { NestChip } from './NestChip'
 import { TaskPickerDialog } from './TaskPickerDialog'
-import { CycleChip, DateStamp, EstimateChip, MilestoneChip, MilestoneLate, ProjectChip } from './TaskPropertyChips'
+import { CustomFieldChip, CycleChip, DateStamp, EstimateChip, MilestoneChip, MilestoneLate, ProjectChip } from './TaskPropertyChips'
+import { taskFieldValue } from '@/features/tasks/fieldsLib'
 import { DueDatePicker } from './DueDatePicker'
 import { StatusPicker } from './StatusPicker'
 
@@ -36,6 +38,8 @@ export interface TaskBoardProps {
   labels: LabelRecord[]
   statuses: TaskStatusDef[]
   projects: Project[]
+  /** The workspace's custom field gallery: `display.custom_fields` resolves against it. */
+  taskFields: readonly TaskField[]
   display: DisplayOptions
   groupContext: GroupContext
   /** Page scope for collapsed swim lanes (see TaskList). Key the board by it. */
@@ -73,7 +77,7 @@ function estimatedSize(sizeKey: string, taskId: string) {
  * The board has its own scroll. Each column (or lane cell) is a TanStack virtual list on that scroller, so only the
  * cards near the view are in the DOM.
  */
-export function TaskBoard({ tasks, users, labels, statuses, projects, display, groupContext, collapseScope, activeTaskId, onOpen }: TaskBoardProps) {
+export function TaskBoard({ tasks, users, labels, statuses, projects, taskFields, display, groupContext, collapseScope, activeTaskId, onOpen }: TaskBoardProps) {
   const { workspace } = useWorkspace()
   const duplicates = useDuplicateActions(workspace.id)
   const [duplicateTask, setDuplicateTask] = useState<Task | null>(null)
@@ -127,6 +131,7 @@ export function TaskBoard({ tasks, users, labels, statuses, projects, display, g
       : columns.flatMap((column) => column.tasks.map((task) => task.id)),
   )
   const has = (property: TaskProperty) => display.properties.includes(property)
+  const customFields = shownCustomFields(taskFields, display.custom_fields)
   const statusById = new Map(statuses.map((status) => [status.id, status]))
   const projectById = new Map(projects.map((project) => [project.id, project]))
   const labelById = new Map(labels.map((label) => [label.id, label]))
@@ -146,7 +151,8 @@ export function TaskBoard({ tasks, users, labels, statuses, projects, display, g
     const milestone = has('milestone') && task.milestoneId ? milestoneById.get(task.milestoneId) : undefined
     const cycle = has('cycle') && task.cycleId ? cycleById.get(task.cycleId) : undefined
     const showEstimate = has('estimate') && task.estimate != null
-    const showMeta = showProgress || has('project') || Boolean(milestone) || Boolean(cycle) || showEstimate || showDue || has('created') || has('updated')
+    const showFields = customFields.some((field) => taskFieldValue(task, field.id) !== undefined)
+    const showMeta = showProgress || has('project') || Boolean(milestone) || Boolean(cycle) || showEstimate || showDue || has('created') || has('updated') || showFields
     return (
       <article
         data-board-card
@@ -235,6 +241,7 @@ export function TaskBoard({ tasks, users, labels, statuses, projects, display, g
             {showDue ? <DueDatePicker task={task} status={status} /> : null}
             {has('created') ? <DateStamp property="created" iso={task.createdAt} /> : null}
             {has('updated') ? <DateStamp property="updated" iso={task.updatedAt} /> : null}
+            {showFields ? customFields.map((field) => <CustomFieldChip key={field.id} field={field} value={taskFieldValue(task, field.id)} />) : null}
           </div>
         ) : null}
         {/* bottom-right, clear of the header's assignee and priority that identify the drop target */}
@@ -258,7 +265,7 @@ export function TaskBoard({ tasks, users, labels, statuses, projects, display, g
       {...props}
       scroller={scroller}
       savedTop={savedTop}
-      sizeKey={display.properties.join(',')}
+      sizeKey={`${display.properties.join(',')}|${customFields.map((field) => field.id).join(',')}`}
       dragId={drag?.taskId ?? null}
       drop={drop}
       dragHeight={dragHeight}

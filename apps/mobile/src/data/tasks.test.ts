@@ -26,6 +26,7 @@ const task = (id: string, fields: Partial<TaskRecord>): TaskRecord =>
     assignee_ids: [],
     due_at: null,
     updated_at: '2026-10-01T00:00:00Z',
+    field_values: [],
     ...fields,
   }) as TaskRecord
 
@@ -54,6 +55,14 @@ test('groups tasks by status in workflow order, merging same-named statuses and 
     ['Todo', ['c', 'b']],
     ['Done', ['a']],
     ['No status', ['d']],
+  ])
+})
+
+test('with keepOrder, each group keeps the server order (a chosen sort)', () => {
+  const groups = groupTasksByStatus([task('b', { priority: 'low' }), task('c', { priority: 'urgent' }), task('a', { status_id: 'done' })], STATUSES, { keepOrder: true })
+  expect(groups.map((group) => [group.name, group.tasks.map((item) => item.id)])).toEqual([
+    ['Todo', ['b', 'c']],
+    ['Done', ['a']],
   ])
 })
 

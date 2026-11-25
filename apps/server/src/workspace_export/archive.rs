@@ -22,6 +22,7 @@ use crate::export::names::{
 };
 use crate::export::{ExportEntry, ExportLimits, compressed_type, plan, zip_time};
 use crate::repositories::page_export::{PageExportError, PageExportRepository};
+use crate::repositories::tasks::{TaskFieldKind, TaskFieldOption, live_value};
 
 pub(super) const README: &str = "\
 Orbit workspace export
@@ -44,12 +45,20 @@ manifest.json
 workspace.json
     The workspace (id, name, created_at, exported_at, exported_by), its members (id, name,
     email, role, joined_at), teamspaces, and projects with their statuses (workflow),
-    labels, milestones and cycles. In a personal export, members are only the people who appear in the archive.
+    labels, milestones, cycles and \"fields\" (the ids of the task fields the project shows,
+    in its order), and \"task_fields\": the workspace's task field gallery, each {\"id\",
+    \"name\", \"kind\" (text, number, date, select, multi_select, checkbox or url),
+    \"options\": [{\"id\", \"name\", \"color\"}] (select kinds only), \"created_at\"}.
+    In a personal export, members are only the people who appear in the archive, and there
+    are no projects or task fields.
 
 tasks/<KEY>-<number>.json
     One file per task, also tasks in the trash (\"deleted\": true) and tasks of deleted
     projects: title, Markdown description, status, priority, dates, milestone, cycle,
-    estimate, creator, assignees, labels, relations, comments, time entries, attachments and activity (the task's audit events). A
+    estimate, creator, assignees, labels, relations, comments, time entries, attachments,
+    activity (the task's audit events) and \"field_values\": [{\"field_id\", \"value\"}], where
+    value is a string (text, url, YYYY-MM-DD for a date, the option id for select), a number,
+    true (checkbox) or a list of option ids (multi_select). A
     comment written with a service account's API token has \"author_service_account\"
     {\"id\", \"name\"} (else null); its \"author\" is the member the write was checked as.
     Each of \"time_entries\" has id, user (who worked), minutes, worked_on (a YYYY-MM-DD
@@ -417,8 +426,8 @@ async fn workspace_json(
         })
     })
     .collect();
-    let (teamspaces, projects) = if personal {
-        (Vec::new(), Vec::new())
+    let (teamspaces, projects, task_fields) = if personal {
+        (Vec::new(), Vec::new(), Vec::new())
     } else {
         structure(source).await?
     };
@@ -433,13 +442,17 @@ async fn workspace_json(
             "members": members,
             "teamspaces": teamspaces,
             "projects": projects,
+            "task_fields": task_fields,
         }),
     )
     .await
 }
 
-/// The teamspaces, and the projects with their statuses, labels, milestones and cycles.
-async fn structure(source: &Source<'_>) -> Result<(Vec<Value>, Vec<Value>), ExportError> {
+/// The teamspaces, the projects with their statuses, labels, milestones, cycles and fields, and
+/// the workspace's task field gallery.
+async fn structure(
+    source: &Source<'_>,
+) -> Result<(Vec<Value>, Vec<Value>, Vec<Value>), ExportError> {
     let pool = source.database.pool();
     let workspace = source.workspace_id.to_string();
     let teamspaces: Vec<Value> = sqlx::query(
@@ -539,6 +552,43 @@ async fn structure(source: &Source<'_>) -> Result<(Vec<Value>, Vec<Value>), Expo
             }),
         );
     }
+    let task_fields: Vec<Value> = sqlx::query(
+        "SELECT id, name, kind, options_json, created_at FROM task_fields WHERE workspace_id = $1 \
+         ORDER BY lower(name), id",
+    )
+    .bind(&workspace)
+    .fetch_all(pool)
+    .await?
+    .into_iter()
+    .map(|row| {
+        let options: Value =
+            serde_json::from_str(row.get::<&str, _>("options_json")).unwrap_or_else(|_| json!([]));
+        json!({
+            "id": row.get::<String, _>("id"),
+            "name": row.get::<String, _>("name"),
+            "kind": row.get::<String, _>("kind"),
+            "options": options,
+            "created_at": time(row.get("created_at")),
+        })
+    })
+    .collect();
+    let mut project_fields: HashMap<String, Vec<Value>> = HashMap::new();
+    for row in sqlx::query(
+        "SELECT project_task_fields.project_id, project_task_fields.field_id FROM project_task_fields \
+         JOIN task_fields ON task_fields.id = project_task_fields.field_id \
+         WHERE task_fields.workspace_id = $1 \
+         ORDER BY project_task_fields.position, project_task_fields.field_id",
+    )
+    .bind(&workspace)
+    .fetch_all(pool)
+    .await?
+    {
+        push(
+            &mut project_fields,
+            row.get("project_id"),
+            json!(row.get::<String, _>("field_id")),
+        );
+    }
     let projects: Vec<Value> = sqlx::query(
         "SELECT id, name, project_key, color, deleted_at, created_at FROM projects \
          WHERE workspace_id = $1 ORDER BY created_at, id",
@@ -559,11 +609,12 @@ async fn structure(source: &Source<'_>) -> Result<(Vec<Value>, Vec<Value>), Expo
             "labels": labels.remove(&id).unwrap_or_default(),
             "milestones": milestones.remove(&id).unwrap_or_default(),
             "cycles": cycles.remove(&id).unwrap_or_default(),
+            "fields": project_fields.remove(&id).unwrap_or_default(),
             "id": id,
         })
     })
     .collect();
-    Ok((teamspaces, projects))
+    Ok((teamspaces, projects, task_fields))
 }
 
 async fn tasks(
@@ -726,6 +777,41 @@ async fn tasks(
         );
     }
 
+    let field_specs: HashMap<String, (TaskFieldKind, Vec<TaskFieldOption>)> =
+        fetch("SELECT id, kind, options_json FROM task_fields WHERE workspace_id = $1")
+            .await?
+            .into_iter()
+            .filter_map(|row| {
+                let kind = serde_json::from_value(json!(row.get::<&str, _>("kind"))).ok()?;
+                let options = serde_json::from_str(row.get::<&str, _>("options_json")).ok()?;
+                Some((row.get("id"), (kind, options)))
+            })
+            .collect();
+    let mut field_values = HashMap::new();
+    for row in fetch(
+        "SELECT task_field_values.task_id, task_field_values.field_id, task_field_values.value_json \
+         FROM task_field_values JOIN tasks ON tasks.id = task_field_values.task_id \
+         WHERE tasks.workspace_id = $1 ORDER BY task_field_values.field_id",
+    )
+    .await?
+    {
+        let field_id: String = row.get("field_id");
+        let Some((kind, options)) = field_specs.get(&field_id) else {
+            continue;
+        };
+        let Ok(value) = serde_json::from_str::<Value>(row.get::<&str, _>("value_json")) else {
+            continue;
+        };
+        // As the app reads it: options removed from the field are left out.
+        if let Some(value) = live_value(*kind, options, value) {
+            push(
+                &mut field_values,
+                row.get("task_id"),
+                json!({"field_id": field_id, "value": value}),
+            );
+        }
+    }
+
     let mut names = NameSet::default();
     for row in fetch(
         "SELECT tasks.id, tasks.number, projects.project_key, tasks.project_id, tasks.status_id, \
@@ -786,6 +872,7 @@ async fn tasks(
             "comments": comments.remove(&id).unwrap_or_default(),
             "time_entries": time_entries.remove(&id).unwrap_or_default(),
             "activity": activity.remove(&id).unwrap_or_default(),
+            "field_values": field_values.remove(&id).unwrap_or_default(),
         });
         zip.json(format!("tasks/{file}.json"), &task).await?;
     }

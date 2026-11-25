@@ -43,6 +43,7 @@ mod context;
 mod database_actions;
 mod databases;
 mod doc_actions;
+mod fields;
 mod files;
 mod mail;
 mod notifications;
@@ -633,6 +634,7 @@ fn required_scope(name: &str) -> Option<ApiTokenScope> {
         .or_else(|| notifications::scope(name))
         .or_else(|| views::scope(name))
         .or_else(|| files::scope(name))
+        .or_else(|| fields::scope(name))
     {
         return Some(scope);
     }
@@ -825,6 +827,7 @@ fn tools() -> Vec<Tool> {
     tools.extend(notifications::tools());
     tools.extend(views::tools());
     tools.extend(files::tools());
+    tools.extend(fields::tools());
     tools
 }
 
@@ -983,7 +986,10 @@ impl TaskTools {
             Some(result) => Some(result),
             None => match views::call(&api, &request).await {
                 Some(result) => Some(result),
-                None => files::call(&api, &request).await,
+                None => match files::call(&api, &request).await {
+                    Some(result) => Some(result),
+                    None => fields::call(&api, &request).await,
+                },
             },
         };
         if let Some(result) = inbox_views_files {

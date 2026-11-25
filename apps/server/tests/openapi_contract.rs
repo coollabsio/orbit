@@ -27,7 +27,7 @@ fn openapi_generation_is_byte_stable_and_covers_public_routes() {
 
     let document: serde_json::Value = serde_json::from_str(&first).unwrap();
     assert_eq!(document["info"]["version"], CONTRACT_ID);
-    assert_eq!(document["paths"].as_object().unwrap().len(), 533);
+    assert_eq!(document["paths"].as_object().unwrap().len(), 543);
     let operation_count: usize = document["paths"]
         .as_object()
         .unwrap()
@@ -42,7 +42,7 @@ fn openapi_generation_is_byte_stable_and_covers_public_routes() {
                 .count()
         })
         .sum();
-    assert_eq!(operation_count, 709);
+    assert_eq!(operation_count, 725);
     for path in [
         "/api/v1/setup/status",
         "/api/v1/auth/me",
@@ -1211,7 +1211,9 @@ fn task_query_route_is_documented() {
             "before",
             "after",
             "between",
-            "contains"
+            "contains",
+            "less_than",
+            "greater_than"
         ])
     );
     assert_eq!(
@@ -1527,6 +1529,7 @@ fn public_api_router_routes() -> BTreeSet<(String, String)> {
         ),
         ("views", include_str!("../src/public_api/views.rs")),
         ("files", include_str!("../src/public_api/files.rs")),
+        ("fields", include_str!("../src/public_api/fields.rs")),
     ];
     let mut blocks = vec![
         ("/api/public/v1/workspaces/{workspace_id}", workspace),

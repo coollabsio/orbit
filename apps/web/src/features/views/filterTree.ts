@@ -1,4 +1,4 @@
-import { FIELD_META, MAX_FILTER_CONDITIONS, isCompleteCondition } from './filterFields'
+import { MAX_FILTER_CONDITIONS, isCompleteCondition } from './filterFields'
 import { countConditions, isGroup, type Condition, type FilterGroup, type FilterNode } from './viewState'
 
 export { MAX_FILTER_CONDITIONS }
@@ -87,7 +87,7 @@ export function firstLocalIssue(root: FilterGroup): FilterIssue | null {
       } else if (!isCompleteCondition(child)) {
         return {
           path: `${toIssuePath(childPath)}.value`,
-          message: FIELD_META[child.field].kind === 'text' ? 'Enter text to search for.' : 'Choose a value.',
+          message: child.operator === 'contains' ? 'Enter text to search for.' : child.field === 'custom_field' && !child.field_id ? 'Choose a field.' : 'Choose a value.',
         }
       }
     }

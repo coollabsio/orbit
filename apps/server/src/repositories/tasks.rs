@@ -27,6 +27,7 @@ use crate::collab::{CollabError, CollabHub, CollabWrite, DocKey, DocKind, LinkPo
 use crate::export::markdown::{KeepLinks, blocks_to_markdown};
 
 mod cycles;
+mod fields;
 mod github_links;
 mod milestones;
 mod project_icons;
@@ -34,6 +35,10 @@ mod project_icons;
 pub use project_icons::{ProjectIconError, project_icon_url};
 
 pub use cycles::{CycleChanges, CycleMoveOutcome, CycleRecord};
+pub use fields::{
+    ImportedOption, MAX_FIELDS, MAX_OPTIONS, TaskFieldKind, TaskFieldOption, TaskFieldOptionInput,
+    TaskFieldRecord, TaskFieldValue, checked_value, live_value,
+};
 pub use github_links::GithubLink;
 pub use milestones::{MilestoneChanges, MilestoneRecord};
 
@@ -214,6 +219,9 @@ pub struct TaskRecord {
     pub sub_issue_count: i64,
     /// Direct live children in a completed, cancelled or duplicate status.
     pub sub_issue_closed_count: i64,
+    /// The task's custom field values (by field id), also of fields its project does not show;
+    /// options removed from a field are left out.
+    pub field_values: Vec<TaskFieldValue>,
     /// `GET /tasks/{id}` only: visible ancestors, root first.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ancestors: Option<Vec<TaskRef>>,
@@ -515,6 +523,9 @@ pub enum TaskSort {
     DueDate,
     /// Unestimated tasks sort last in both directions.
     Estimate,
+    /// A task field's value (`task_filter::push_custom_sort_key`); tasks without one sort last
+    /// in both directions.
+    CustomField(Id),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1979,12 +1990,35 @@ impl TaskRepository {
         let scope =
             ProjectScope::of(&require_access(self.database.pool(), workspace_id, actor_id).await?);
         task_filter::validate_filter(&filter.tree)?;
+        let custom_sort = match filter.sort {
+            TaskSort::CustomField(field_id) => Some(field_id),
+            _ => None,
+        };
+        let mut field_ids = task_filter::custom_field_ids(&filter.tree);
+        field_ids.extend(custom_sort);
+        let custom_fields =
+            fields::custom_field_specs(self.database.pool(), workspace_id, &field_ids).await?;
+        task_filter::validate_custom_fields(&filter.tree, &custom_fields)?;
+        let backend = self.database.backend();
         let fingerprint = task_fingerprint(workspace_id, filter);
-        let after = cursor_pair(cursor, &fingerprint)?;
-        let mut query = SqlBuilder::new(format!(
-            "SELECT {} FROM tasks JOIN projects ON projects.id = tasks.project_id WHERE tasks.workspace_id = ",
-            task_columns(self.database.backend(), false, scope)
-        ));
+        // A custom field sorts by (has value, value, id); every other sort by (value, id).
+        let sort_key = custom_sort.map(|field_id| {
+            let spec = custom_fields.get(&field_id);
+            let key_type = task_filter::custom_sort_key_type(spec);
+            let push_key = move |query: &mut SqlBuilder| {
+                task_filter::push_custom_sort_key(query, field_id, spec, backend);
+            };
+            (key_type, push_key)
+        });
+        let mut query = SqlBuilder::new(format!("SELECT {}", task_columns(backend, false, scope)));
+        if let Some((_, push_key)) = &sort_key {
+            query.push(", ");
+            push_key(&mut query);
+            query.push(" AS custom_sort_key");
+        }
+        query.push(
+            " FROM tasks JOIN projects ON projects.id = tasks.project_id WHERE tasks.workspace_id = ",
+        );
         query.push_bind(workspace_id.to_string());
         query
             .push(" AND tasks.deleted_at IS NULL AND projects.deleted_at IS NULL AND ")
@@ -1996,6 +2030,8 @@ impl TaskRepository {
                 scope,
                 actor_id,
                 now,
+                backend,
+                custom_fields: &custom_fields,
             },
         );
         task_filter::push_show_completed(&mut query, filter.show_completed, now);
@@ -2013,44 +2049,103 @@ impl TaskRepository {
                     "tasks.parent_task_id",
                 ));
         }
-        let column = task_sort_column(&filter.sort, &filter.order);
         let (operator, direction) = if filter.order == SortOrder::Asc {
             (">", " ASC")
         } else {
             ("<", " DESC")
         };
-        if let Some((raw_value, id)) = after {
+        if let Some((key_type, push_key)) = &sort_key {
+            match custom_cursor(cursor, &fingerprint)? {
+                Some((Some(raw_value), id)) => {
+                    // after a task with a value: a later value, the same value and a later id,
+                    // or no value (those come last)
+                    query.push(" AND ((");
+                    push_key(&mut query);
+                    query.push(" IS NOT NULL AND (");
+                    push_key(&mut query);
+                    query.push(" ").push(operator).push(" ");
+                    push_sort_key_value(&mut query, *key_type, &raw_value)?;
+                    query.push(" OR (");
+                    push_key(&mut query);
+                    query.push(" = ");
+                    push_sort_key_value(&mut query, *key_type, &raw_value)?;
+                    query
+                        .push(" AND tasks.id ")
+                        .push(operator)
+                        .push(" ")
+                        .push_bind(id.to_string())
+                        .push("))) OR ");
+                    push_key(&mut query);
+                    query.push(" IS NULL)");
+                }
+                Some((None, id)) => {
+                    query.push(" AND ");
+                    push_key(&mut query);
+                    query
+                        .push(" IS NULL AND tasks.id ")
+                        .push(operator)
+                        .push(" ")
+                        .push_bind(id.to_string());
+                }
+                None => {}
+            }
             query
-                .push(" AND (")
+                .push(" ORDER BY custom_sort_key")
+                .push(direction)
+                .push(" NULLS LAST, tasks.id")
+                .push(direction);
+        } else {
+            let column = task_sort_column(&filter.sort, &filter.order);
+            if let Some((raw_value, id)) = cursor_pair(cursor, &fingerprint)? {
+                query
+                    .push(" AND (")
+                    .push(column)
+                    .push(" ")
+                    .push(operator)
+                    .push(" ");
+                push_cursor_value(&mut query, &filter.sort, &raw_value)?;
+                query.push(" OR (").push(column).push(" = ");
+                push_cursor_value(&mut query, &filter.sort, &raw_value)?;
+                query
+                    .push(" AND tasks.id ")
+                    .push(operator)
+                    .push(" ")
+                    .push_bind(id.to_string())
+                    .push("))");
+            }
+            query
+                .push(" ORDER BY ")
                 .push(column)
-                .push(" ")
-                .push(operator)
-                .push(" ");
-            push_cursor_value(&mut query, &filter.sort, &raw_value)?;
-            query.push(" OR (").push(column).push(" = ");
-            push_cursor_value(&mut query, &filter.sort, &raw_value)?;
-            query
-                .push(" AND tasks.id ")
-                .push(operator)
-                .push(" ")
-                .push_bind(id.to_string())
-                .push("))");
+                .push(direction)
+                .push(", tasks.id")
+                .push(direction);
         }
-        query
-            .push(" ORDER BY ")
-            .push(column)
-            .push(direction)
-            .push(", tasks.id")
-            .push(direction);
         let limit = limit.clamp(1, 100);
         query.push(" LIMIT ").push_bind((limit + 1) as i64);
         let rows = query.build().fetch_all(self.database.pool()).await?;
-        let mut tasks = Vec::new();
+        let mut tasks = Vec::with_capacity(rows.len());
         for row in rows {
-            tasks.push(task_from_row(self.database.pool(), row).await?);
+            let key = sort_key
+                .as_ref()
+                .map(|(key_type, _)| custom_sort_key_text(&row, *key_type));
+            tasks.push((
+                task_from_row_without_fields(self.database.pool(), row).await?,
+                key,
+            ));
         }
-        finish_page(tasks, limit, &fingerprint, |task| {
-            task_cursor_key(task, filter)
+        let ids: Vec<Id> = tasks.iter().map(|(task, _)| task.id).collect();
+        let mut values = fields::values_by_task(self.database.pool(), &ids).await?;
+        for (task, _) in &mut tasks {
+            task.field_values = values.remove(&task.id).unwrap_or_default();
+        }
+        let page = finish_page(tasks, limit, &fingerprint, |(task, key)| match key {
+            Some(Some(value)) => vec!["1".to_owned(), value.clone(), task.id.to_string()],
+            Some(None) => vec!["0".to_owned(), String::new(), task.id.to_string()],
+            None => task_cursor_key(task, filter),
+        })?;
+        Ok(Page {
+            items: page.items.into_iter().map(|(task, _)| task).collect(),
+            next_cursor: page.next_cursor,
         })
     }
 
@@ -4555,6 +4650,65 @@ fn cursor_i64_pair(value: Option<&str>, fingerprint: &str) -> Result<Option<(i64
         .transpose()
 }
 
+/// A custom-field sort cursor: the sort key (`None`: the task had no value) and the task id.
+fn custom_cursor(
+    value: Option<&str>,
+    fingerprint: &str,
+) -> Result<Option<(Option<String>, Id)>, TaskError> {
+    let Some(key) = validated_cursor(value, fingerprint)? else {
+        return Ok(None);
+    };
+    let [flag, value, raw_id] = key.as_slice() else {
+        return Err(TaskError::InvalidCursor);
+    };
+    let id = raw_id.parse().map_err(|_| TaskError::InvalidCursor)?;
+    match flag.as_str() {
+        "1" => Ok(Some((Some(value.clone()), id))),
+        "0" => Ok(Some((None, id))),
+        _ => Err(TaskError::InvalidCursor),
+    }
+}
+
+/// The row's `custom_sort_key` as the database computed it, so the cursor compares exactly.
+fn custom_sort_key_text(
+    row: &sqlx::any::AnyRow,
+    key_type: task_filter::SortKeyType,
+) -> Option<String> {
+    match key_type {
+        task_filter::SortKeyType::Real => row
+            .get::<Option<f64>, _>("custom_sort_key")
+            .map(|value| value.to_string()),
+        task_filter::SortKeyType::Integer => row
+            .get::<Option<i64>, _>("custom_sort_key")
+            .map(|value| value.to_string()),
+        task_filter::SortKeyType::Text => row.get::<Option<String>, _>("custom_sort_key"),
+    }
+}
+
+fn push_sort_key_value(
+    query: &mut SqlBuilder,
+    key_type: task_filter::SortKeyType,
+    value: &str,
+) -> Result<(), TaskError> {
+    match key_type {
+        task_filter::SortKeyType::Real => {
+            let number = value
+                .parse::<f64>()
+                .ok()
+                .filter(|number| number.is_finite())
+                .ok_or(TaskError::InvalidCursor)?;
+            query.push_bind(number);
+        }
+        task_filter::SortKeyType::Integer => {
+            query.push_bind(value.parse::<i64>().map_err(|_| TaskError::InvalidCursor)?);
+        }
+        task_filter::SortKeyType::Text => {
+            query.push_bind(value.to_owned());
+        }
+    }
+    Ok(())
+}
+
 fn task_fingerprint(workspace_id: Id, filter: &TaskFilter) -> String {
     // Hash the tree: a 50-condition filter would not fit the 8 KiB cursor limit.
     let tree = serde_json::to_vec(&filter.tree).unwrap_or_default();
@@ -4598,6 +4752,8 @@ fn task_cursor_key(task: &TaskRecord, filter: &TaskFilter) -> Vec<String> {
             .estimate
             .unwrap_or(nulls_last_sentinel(&filter.order))
             .to_string(),
+        // `tasks()` keys these pages by the database's sort key instead.
+        TaskSort::CustomField(_) => String::new(),
     };
     vec![primary, task.id.to_string()]
 }
@@ -4618,6 +4774,8 @@ fn task_sort_column(sort: &TaskSort, order: &SortOrder) -> &'static str {
         (TaskSort::DueDate, SortOrder::Desc) => "COALESCE(tasks.due_at, -9223372036854775807)",
         (TaskSort::Estimate, SortOrder::Asc) => "COALESCE(tasks.estimate, 9223372036854775807)",
         (TaskSort::Estimate, SortOrder::Desc) => "COALESCE(tasks.estimate, -9223372036854775807)",
+        // `tasks()` sorts these by `task_filter::push_custom_sort_key`.
+        (TaskSort::CustomField(_), _) => "tasks.position",
     }
 }
 
@@ -4635,7 +4793,8 @@ fn push_cursor_value(
         | TaskSort::CreatedAt
         | TaskSort::UpdatedAt
         | TaskSort::DueDate
-        | TaskSort::Estimate => {
+        | TaskSort::Estimate
+        | TaskSort::CustomField(_) => {
             query.push_bind(value.parse::<i64>().map_err(|_| TaskError::InvalidCursor)?);
         }
     }
@@ -5777,6 +5936,19 @@ async fn task_from_row(
     pool: &sqlx::AnyPool,
     row: sqlx::any::AnyRow,
 ) -> Result<TaskRecord, TaskError> {
+    let mut task = task_from_row_without_fields(pool, row).await?;
+    task.field_values = fields::values_by_task(pool, &[task.id])
+        .await?
+        .remove(&task.id)
+        .unwrap_or_default();
+    Ok(task)
+}
+
+/// [`task_from_row`] with empty `field_values`, for lists that load them in one query.
+async fn task_from_row_without_fields(
+    pool: &sqlx::AnyPool,
+    row: sqlx::any::AnyRow,
+) -> Result<TaskRecord, TaskError> {
     let id = parse_id(row.get("id"))?;
     let assignee_ids = sqlx::query_scalar::<_, String>(
         "SELECT task_assignees.user_id FROM task_assignees \
@@ -5834,7 +6006,12 @@ async fn task_from_row_tx(
     .into_iter()
     .map(parse_id)
     .collect::<Result<_, _>>()?;
-    task_record_from_row(row, id, assignee_ids, label_ids)
+    let mut task = task_record_from_row(row, id, assignee_ids, label_ids)?;
+    task.field_values = fields::values_by_task(&mut **tx, &[id])
+        .await?
+        .remove(&id)
+        .unwrap_or_default();
+    Ok(task)
 }
 
 /// Correlated subquery rendering the live duplicate target of `task_id_sql` as a JSON object,
@@ -6034,6 +6211,7 @@ fn task_record_from_row(
         parent: parse_task_ref(row.get("parent_json"))?,
         sub_issue_count: row.get("sub_issue_count"),
         sub_issue_closed_count: row.get("sub_issue_closed_count"),
+        field_values: Vec::new(),
         ancestors: None,
         trashed_descendant_count: None,
     })
