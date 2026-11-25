@@ -466,3 +466,6 @@ Follow-up fixes (same day):
   (the benchmark now seeds gap positions, as the job leaves old rows; with `0..n` rows a move spreads all rows,
   2.4 s), full GET 2.6 s (no change). The same rollup fix speeds up every row write that returns the row
   (value updates too).
+- A relation cell write read the ids of every row of the target database to check access
+  (`readable_rows`). It now checks only the pages of the write and the cell's current links
+  (`readable_among`, batches of 500): linking a row to 3 target rows at 50k, Postgres, 118 ms → 21 ms.

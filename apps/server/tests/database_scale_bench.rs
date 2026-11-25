@@ -229,6 +229,8 @@ struct Seeded {
     main: String,
     target: String,
     text: String,
+    relation: String,
+    target_rows: Vec<String>,
 }
 
 async fn seed(fixture: &Fixture, count: usize) -> Seeded {
@@ -383,6 +385,8 @@ async fn seed(fixture: &Fixture, count: usize) -> Seeded {
         main,
         target,
         text: texts[0].clone(),
+        relation,
+        target_rows: target_rows[..3].to_vec(),
     }
 }
 
@@ -577,4 +581,15 @@ async fn full_load_engine_at_scale() {
     assert!(status.is_success(), "{status} {body}");
     timed("delete a text property", started);
     fill().await;
+
+    let started = Instant::now();
+    let (status, body) = fixture
+        .call(
+            "PATCH",
+            &format!("databases/{}/rows/{middle}/values", s.main),
+            Some(json!({ &s.relation: s.target_rows })),
+        )
+        .await;
+    assert!(status.is_success(), "{status} {body}");
+    timed("link a row to 3 target rows", started);
 }

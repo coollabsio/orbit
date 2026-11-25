@@ -11,7 +11,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use orbit_platform::Row;
-use orbit_platform::{Id, TimestampMillis};
+use orbit_platform::{Id, SqlBuilder, TimestampMillis};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sqlx::any::AnyRow;
@@ -292,23 +292,37 @@ pub(super) async fn fill_rollups(
     rollups::fill(tx, scope, properties, rows, depth).await
 }
 
-/// Live rows of `database_id` that `actor_id` can read.
-async fn readable_rows(
+/// Pages per query of [`readable_among`], well below the bind limits of both backends.
+const PAGE_BATCH: usize = 500;
+
+/// The pages of `pages` that are live rows of `database_id` and that `actor_id` can read (as
+/// [`readable`]). Reads only those pages, not the whole database.
+async fn readable_among(
     tx: &mut Transaction<'_, Any>,
     database_id: Id,
     actor_id: Id,
+    pages: &[String],
 ) -> Result<HashSet<String>, DatabaseError> {
-    Ok(sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(format!(
-        "SELECT id FROM pages WHERE parent_id = $1 AND deleted_at IS NULL AND {readable} \
-         AND {NOT_TEMPLATE}",
-        readable = readable(2),
-    )))
-    .bind(database_id.to_string())
-    .bind(actor_id.to_string())
-    .fetch_all(&mut **tx)
-    .await?
-    .into_iter()
-    .collect())
+    let mut readable = HashSet::with_capacity(pages.len());
+    for batch in pages.chunks(PAGE_BATCH) {
+        let mut query = SqlBuilder::new("SELECT id FROM pages WHERE parent_id = ");
+        query
+            .push_bind(database_id.to_string())
+            .push(format_args!(
+                " AND deleted_at IS NULL AND {NOT_TEMPLATE} \
+                 AND (pages.teamspace_id IS NOT NULL OR pages.owner_id = "
+            ))
+            .push_bind(actor_id.to_string())
+            .push(") AND id IN (");
+        let mut list = query.separated(", ");
+        for page in batch {
+            list.push_bind(page.clone());
+        }
+        query.push(")");
+        let rows = query.build().fetch_all(&mut **tx).await?;
+        readable.extend(rows.iter().map(|row| row.get::<String, _>("id")));
+    }
+    Ok(readable)
 }
 
 /// Replaces the visible links of one relation cell (`row_id`, `property_id`) with `ids`, in
@@ -330,10 +344,6 @@ pub(super) async fn write_cell(
         return Err(invalid());
     };
     let (key, mine, other) = config.side(property_id).ok_or_else(invalid)?;
-    let allowed = readable_rows(tx, config.database_id, actor_id).await?;
-    if ids.iter().any(|id| !allowed.contains(&id.to_string())) {
-        return Err(invalid());
-    }
     let current: Vec<(String, i64)> = sqlx::query(sqlx::AssertSqlSafe(format!(
         "SELECT {other} AS page_id, position FROM page_relations \
          WHERE property_id = $1 AND {mine} = $2 ORDER BY position"
@@ -345,6 +355,14 @@ pub(super) async fn write_cell(
     .into_iter()
     .map(|row| (row.get("page_id"), row.get("position")))
     .collect();
+    let mut candidates: Vec<String> = ids.iter().map(ToString::to_string).collect();
+    candidates.extend(current.iter().map(|(page, _)| page.clone()));
+    candidates.sort_unstable();
+    candidates.dedup();
+    let allowed = readable_among(tx, config.database_id, actor_id, &candidates).await?;
+    if ids.iter().any(|id| !allowed.contains(&id.to_string())) {
+        return Err(invalid());
+    }
     let visible: Vec<&str> = current
         .iter()
         .map(|(page, _)| page.as_str())
