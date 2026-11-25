@@ -103,10 +103,11 @@ test('the Email form keeps the saved password when the field is empty and trims 
 
 test('limits: empty or 0 is no limit, storage is in GB, anything else is refused', () => {
   expect([parseLimit(''), parseLimit('0'), parseLimit('3'), parseLimit('1.5', 1_000_000_000), parseLimit('-1'), parseLimit('x')]).toEqual([null, null, 3, 1_500_000_000, undefined, undefined])
-  expect(limitsDraft({ max_owned_workspaces: 2, workspace_storage_quota_bytes: 2_500_000_000 })).toEqual({ workspaces: '2', storageGb: '2.5' })
-  expect(limitsDraft({})).toEqual({ workspaces: '', storageGb: '' })
-  expect(limitsBody({ workspaces: '', storageGb: '10' })).toEqual({ max_owned_workspaces: null, workspace_storage_quota_bytes: 10_000_000_000 })
-  expect(limitsBody({ workspaces: 'many', storageGb: '' })).toBeNull()
+  expect(limitsDraft({ max_owned_workspaces: 2, workspace_storage_quota_bytes: 2_500_000_000, chat_message_max_chars: 20_000 })).toEqual({ workspaces: '2', storageGb: '2.5', chatChars: '20000' })
+  expect(limitsBody({ workspaces: '', storageGb: '10', chatChars: '5000' })).toEqual({ max_owned_workspaces: null, workspace_storage_quota_bytes: 10_000_000_000, chat_message_max_chars: 5000 })
+  expect(limitsBody({ workspaces: 'many', storageGb: '', chatChars: '5000' })).toBeNull()
+  // The chat message length always has a limit, in 100–40000.
+  expect(['', '0', '99', '40001', '1.5'].map((chatChars) => limitsBody({ workspaces: '', storageGb: '', chatChars }))).toEqual([null, null, null, null, null])
 })
 
 test('the bucket form keeps the saved secret key when the field is empty', () => {

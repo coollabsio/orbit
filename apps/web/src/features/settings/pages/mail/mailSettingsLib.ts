@@ -425,7 +425,7 @@ export function megabytes(bytes: number): string {
   return `${Number.isInteger(value) ? value : value.toFixed(1)} MB`
 }
 
-export const TIER_LABELS: Record<SendTier, string> = { new: 'New', standard: 'Standard', custom: 'Custom' }
+export const TIER_LABELS: Record<SendTier, string> = { new: 'New', standard: 'Standard', custom: 'Custom', unlimited: 'Unlimited' }
 
 /** The choices of the undo send delay, in seconds. */
 export const UNDO_SECONDS = [0, 5, 10, 20, 30] as const
@@ -567,7 +567,8 @@ export function localInputValue(iso: string | null | undefined, timeZone: string
 }
 
 /** The limits of a tier as rows: what a member and the workspace may send. */
-export function limitRows(limits: Limits): { label: string; value: string }[] {
+export function limitRows(limits: Limits | null): { label: string; value: string }[] {
+  if (!limits) return [{ label: 'Limits', value: 'None' }]
   const number = (value: number) => value.toLocaleString('en-US')
   return [
     { label: 'Each member', value: `${number(limits.per_user_hour)} an hour, ${number(limits.per_user_day)} a day` },

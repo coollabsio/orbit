@@ -504,8 +504,9 @@ pub(crate) struct MailSendPolicy {
     workspace_id: Id,
     workspace_name: String,
     tier: SendTier,
-    /// The numbers that apply now (the tier's, or the custom ones).
-    limits: Limits,
+    /// The numbers that apply now (the tier's, or the custom ones); `null` on the `unlimited` tier.
+    #[schema(required = true)]
+    limits: Option<Limits>,
     /// Recipients the workspace released in the last hour and day.
     use_hour: i64,
     use_day: i64,

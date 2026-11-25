@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type FormEvent } from 'react'
 import { toast } from 'sonner'
 import { ShieldCross } from 'reicon-react'
 import type { MailSuppression } from '@orbit/api/generated/types.gen'
@@ -8,8 +8,9 @@ import { SettingsCard } from '@/components/common/SettingsCard'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { useDeleteSuppression } from '@/features/mail/api/mutations'
+import { useAddSuppression, useDeleteSuppression } from '@/features/mail/api/mutations'
 import { useSuppressions } from '@/features/mail/api/queries'
+import { SettingsRow } from '@/features/settings/components/SettingsParts'
 import { useCan } from '@/features/workspaces/permissions'
 import { useDebouncedValue } from '@/lib/useDebouncedValue'
 import { MailManagersOnly } from './MailDomainsPage'
@@ -17,7 +18,7 @@ import { mailProblem, since } from './mailSettingsLib'
 
 const REASON_LABELS: Record<string, string> = { hard_bounce: 'Bounced', complaint: 'Complained', manual: 'Added by hand' }
 
-/** Settings → Mail → Suppressions: addresses Orbit no longer sends to, with search and **Remove**. */
+/** Settings → Mail → Suppressions: addresses Orbit no longer sends to, with search, **Add** and **Remove**. */
 export function MailSuppressionsPage() {
   if (!useCan('mail.manage')) return <MailManagersOnly title="Suppressions" />
   return <Suppressions />
@@ -32,7 +33,7 @@ function Suppressions() {
   return (
     <SettingsCard
       title="Suppressions"
-      description="Addresses that bounced hard or marked your mail as spam. Orbit does not send to them, so your domains keep a good reputation. Remove an address only when you know it works again."
+      description="Addresses that bounced hard, marked your mail as spam or that you added. Orbit does not send to them, so your domains keep a good reputation. Remove an address only when you know it works again."
       actions={
         <Input
           type="search"
@@ -45,6 +46,7 @@ function Suppressions() {
       }
       flush
     >
+      <AddSuppressionForm />
       {list.isPending ? <p role="status" className="m-0 p-4 text-sm text-muted-foreground">Loading addresses…</p> : null}
       {list.isError ? (
         <p role="alert" className="m-0 p-4 text-sm text-destructive">
@@ -56,7 +58,7 @@ function Suppressions() {
         <EmptyState
           icon={ShieldCross}
           title={search.trim() ? 'No address matches' : 'No suppressed addresses'}
-          description={search.trim() ? undefined : 'An address shows here when it bounces hard or its owner marks your mail as spam.'}
+          description={search.trim() ? undefined : 'An address shows here when it bounces hard, when its owner marks your mail as spam, or when you add it.'}
         />
       ) : null}
       <ul className="m-0 flex list-none flex-col divide-y p-0">
@@ -70,6 +72,54 @@ function Suppressions() {
         </div>
       ) : null}
     </SettingsCard>
+  )
+}
+
+function AddSuppressionForm() {
+  const add = useAddSuppression()
+  const [address, setAddress] = useState('')
+  const [note, setNote] = useState('')
+
+  function submit(event: FormEvent) {
+    event.preventDefault()
+    const trimmed = address.trim()
+    if (!trimmed || add.isPending) return
+    add.mutate({ address: trimmed, detail: note.trim() || undefined }, {
+      onSuccess: (entry) => {
+        setAddress('')
+        setNote('')
+        toast(`${entry.address} added`)
+      },
+    })
+  }
+
+  return (
+    <div className="border-b">
+      <SettingsRow>
+        <form className="flex w-full flex-wrap items-center gap-2" onSubmit={submit}>
+          <Input
+            type="email"
+            aria-label="Address to suppress"
+            className="w-64 max-w-full"
+            placeholder="name@example.com"
+            value={address}
+            onChange={(event) => setAddress(event.target.value)}
+          />
+          <Input
+            aria-label="Note"
+            className="min-w-40 flex-1"
+            placeholder="Note (optional)"
+            maxLength={500}
+            value={note}
+            onChange={(event) => setNote(event.target.value)}
+          />
+          <Button type="submit" disabled={!address.trim() || add.isPending}>Add address</Button>
+        </form>
+      </SettingsRow>
+      {add.isError ? (
+        <p role="alert" className="m-0 px-4 pb-3 text-xs text-destructive">{mailProblem(add.error, 'The address could not be added.')}</p>
+      ) : null}
+    </div>
   )
 }
 

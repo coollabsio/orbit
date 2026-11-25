@@ -371,7 +371,8 @@ pub fn mail_router(state: MailState) -> Router {
         )
         .route(
             "/api/v1/workspaces/{workspace_id}/mail/suppressions",
-            get(suppressions::list_mail_suppressions),
+            get(suppressions::list_mail_suppressions)
+                .post(suppressions::add_mail_suppression),
         )
         .route(
             "/api/v1/workspaces/{workspace_id}/mail/suppressions/{address}",
@@ -632,6 +633,9 @@ pub(crate) fn detail(code: &'static str) -> &'static str {
         }
         "route_is_default" => "Choose another default route, or clear it, first.",
         "route_in_use" => "Use another route on the domains that use this one first.",
+        "direct_not_available" => {
+            "Orbit Cloud does not send mail directly. Use an SMTP relay or an email API route."
+        }
         "hostname_required" => {
             "Sending directly needs the mail server's host name (ORBIT_MAIL_HOSTNAME)."
         }
@@ -643,6 +647,8 @@ pub(crate) fn detail(code: &'static str) -> &'static str {
         }
         "draft_conflict" => "The draft changed after it was read. Refresh and try again.",
         "draft_files_limit" => "A draft can have up to 50 files.",
+        "suppression_exists" => "This address is on the suppression list already.",
+        "suppression_invalid_address" => "This is not a valid email address.",
         "sending_paused" => {
             "Sending is paused for this workspace because of bounces or complaints. The root user can resume it."
         }

@@ -73,7 +73,8 @@ pub(crate) struct MailSendRouteList {
     routes: Vec<MailSendRouteView>,
     /// Whether workspaces may add their own routes (the instance switch).
     workspace_providers_enabled: bool,
-    /// `ORBIT_MAIL_HOSTNAME` is set, so the `direct` kind can be created.
+    /// `ORBIT_MAIL_HOSTNAME` is set and this is not Orbit Cloud, so the `direct` kind can be
+    /// created.
     direct_available: bool,
     #[schema(value_type = Option<String>)]
     default_route_id: Option<Id>,
@@ -308,11 +309,12 @@ async fn list(
             })
             .collect(),
         workspace_providers_enabled: switch_on(state, instance, request_id).await?,
-        direct_available: state
-            .settings
-            .hostname
-            .as_deref()
-            .is_some_and(|host| !host.trim().is_empty()),
+        direct_available: !state.mail.cloud()
+            && state
+                .settings
+                .hostname
+                .as_deref()
+                .is_some_and(|host| !host.trim().is_empty()),
         default_route_id: default,
         events_base_url: events_base_url(state),
     }))

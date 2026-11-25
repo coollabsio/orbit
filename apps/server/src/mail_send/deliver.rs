@@ -49,8 +49,9 @@ use tokio::time::{Instant, timeout_at};
 
 use super::release::SendJobState;
 use super::{
-    LOCAL_DOMAIN_UNAVAILABLE, LOCAL_MAILBOX_SUSPENDED, LOCAL_TOO_LARGE, Outgoing, RecipientOutcome,
-    SENDING_LEASE_MS, UNREADABLE, adapter_for, domain_of, provider_headers, with_provider_headers,
+    Delivery, LOCAL_DOMAIN_UNAVAILABLE, LOCAL_MAILBOX_SUSPENDED, LOCAL_TOO_LARGE, Outgoing,
+    RecipientOutcome, Refuse, SENDING_LEASE_MS, UNREADABLE, adapter_for, domain_of,
+    provider_headers, with_provider_headers,
 };
 use crate::mail_intake::{InboundMessage, IntakeError, Recipient, Source};
 use crate::repositories::mail::{
@@ -375,7 +376,15 @@ async fn deliver_by_route(
     } else {
         &state.delivery
     };
-    let adapter = adapter_for(&route, &secrets, ctx);
+    // Orbit Cloud never sends from its own servers: port 25 there is for incoming mail only.
+    let adapter: Box<dyn Delivery> = if route.kind == SendRouteKind::Direct && state.mail.cloud() {
+        Box::new(Refuse(
+            "Orbit Cloud does not send mail directly. Use an SMTP relay or an email API route."
+                .to_owned(),
+        ))
+    } else {
+        adapter_for(&route, &secrets, ctx)
+    };
     let bounce_key = state.mail.bounce_key();
     let one_by_one = matches!(
         route.kind,

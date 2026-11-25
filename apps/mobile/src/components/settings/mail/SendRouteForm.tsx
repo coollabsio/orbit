@@ -36,6 +36,7 @@ import {
   settingsBody,
   uuidV7,
 } from '../../../data/mail-settings'
+import { useAuthOptions } from '../../../hooks/account'
 import { useSendRouteWrites } from '../../../hooks/mail-sending'
 import { Button, Input, LabelTip, Text } from '../../../ui'
 import { Dialog } from '../Dialog'
@@ -162,7 +163,9 @@ export function SendRouteForm({
   const ready = routeFormReady(fields, { settings, secrets, maxBytes, editing: Boolean(route) })
   const hasLogin = kind === 'smtp' && (route?.secrets_set.some((secret) => secret === 'username' || secret === 'password') ?? false)
   const help = route ? null : kindHelp(kind)
-  const kindOptions = SEND_ROUTE_KINDS.map((value) => ({
+  // Orbit Cloud never sends from its own servers, so it has no Direct route.
+  const cloud = useAuthOptions().data?.billing_enabled ?? false
+  const kindOptions = SEND_ROUTE_KINDS.filter((value) => value !== 'direct' || !cloud || route?.kind === 'direct').map((value) => ({
     value,
     label: value === 'direct' && !directAvailable ? `${ROUTE_LABELS[value]} (needs ORBIT_MAIL_HOSTNAME)` : ROUTE_LABELS[value],
   }))

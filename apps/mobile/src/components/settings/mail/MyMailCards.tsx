@@ -13,80 +13,113 @@ import { useMailSettingsMe, useSaveMailSettings, useSaveSignature, useSignatures
 import { Button, EmptyState, Input, Text } from '../../../ui'
 import { ConfirmDialog, type ConfirmRequest, Dialog } from '../Dialog'
 import { Note, OptionText, Select, SettingsCard, SettingsRow } from '../Shell'
-import { MailBodyField, plainBodyHtml, VacationForm } from './VacationForm'
+import { MailBodyField, VacationForm } from './VacationForm'
 
 export function SignaturesCard() {
   const addresses = useFromAddresses()
   const list = addresses.data ?? []
   const signatures = useSignatures(list.map((address) => address.address_id))
+  const [editing, setEditing] = useState<{ address: MailFromAddress; saved: string } | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+  const savedFor = (address: MailFromAddress) => signatures.data?.find((signature) => signature.address_id === address.address_id)?.body_html ?? ''
   return (
-    <SettingsCard title="Signatures" description="Added at the end of each new message you write from the address. Each address has its own." flush>
-      {addresses.isPending || (list.length > 0 && signatures.isPending) ? (
-        <SettingsRow first>
-          <Note loading>Loading signatures…</Note>
-        </SettingsRow>
+    <>
+      <SettingsCard title="Signatures" description="Added at the end of each new message you write from the address. Each address has its own." flush>
+        {addresses.isPending || (list.length > 0 && signatures.isPending) ? (
+          <SettingsRow first>
+            <Note loading>Loading signatures…</Note>
+          </SettingsRow>
+        ) : null}
+        {addresses.isError || signatures.isError ? (
+          <SettingsRow first>
+            <Note error>{mailProblem(addresses.error ?? signatures.error, 'The signatures could not be loaded.')}</Note>
+          </SettingsRow>
+        ) : null}
+        {addresses.isSuccess && list.length === 0 ? (
+          <SettingsRow first>
+            <Note>You have no address to send from yet.</Note>
+          </SettingsRow>
+        ) : null}
+        {signatures.data
+          ? list.map((address, index) => {
+              const saved = savedFor(address)
+              return (
+                <SettingsRow key={address.address_id} first={index === 0}>
+                  <View className="min-w-0 flex-1 gap-0.5">
+                    <Text numberOfLines={1} className="font-noto-medium text-[13px] text-foreground">
+                      {address.display_name} <Text className="font-mono text-[12px] text-muted-foreground">&lt;{address.address}&gt;</Text>
+                    </Text>
+                    <Text numberOfLines={1} className="text-[12px] text-muted-foreground">
+                      {htmlToText(saved) || 'No signature'}
+                    </Text>
+                  </View>
+                  <Button
+                    label={saved.trim() ? 'Change' : 'Set signature'}
+                    size="sm"
+                    variant="outline"
+                    onPress={() => {
+                      setNotice(null)
+                      setEditing({ address, saved })
+                    }}
+                  />
+                </SettingsRow>
+              )
+            })
+          : null}
+        {notice ? (
+          <SettingsRow>
+            <Note>{notice}</Note>
+          </SettingsRow>
+        ) : null}
+      </SettingsCard>
+      {editing ? (
+        <SignatureDialog
+          address={editing.address}
+          saved={editing.saved}
+          onClose={(saved) => {
+            setEditing(null)
+            if (saved !== undefined) setNotice(saved ? 'Signature saved' : 'Signature removed')
+          }}
+        />
       ) : null}
-      {addresses.isError || signatures.isError ? (
-        <SettingsRow first>
-          <Note error>{mailProblem(addresses.error ?? signatures.error, 'The signatures could not be loaded.')}</Note>
-        </SettingsRow>
-      ) : null}
-      {addresses.isSuccess && list.length === 0 ? (
-        <SettingsRow first>
-          <Note>You have no address to send from yet.</Note>
-        </SettingsRow>
-      ) : null}
-      {signatures.data
-        ? list.map((address, index) => (
-            <SignatureRow key={address.address_id} first={index === 0} address={address} saved={signatures.data.find((signature) => signature.address_id === address.address_id)?.body_html ?? ''} />
-          ))
-        : null}
-    </SettingsCard>
+    </>
   )
 }
 
-function SignatureRow({ first, address, saved }: { first: boolean; address: MailFromAddress; saved: string }) {
+/** `onClose` gets whether a signature was saved (`false` when it was removed), or `undefined` on cancel. */
+function SignatureDialog({ address, saved, onClose }: { address: MailFromAddress; saved: string; onClose: (saved?: boolean) => void }) {
   const save = useSaveSignature()
   const html = useRef(saved)
-  const [changed, setChanged] = useState(false)
-  const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(null)
-  const unchanged = plainBodyHtml(saved)
 
   function submit() {
-    setNotice(null)
-    save.mutate(
-      { addressId: address.address_id, bodyHtml: html.current },
-      {
-        onSuccess: () => {
-          setChanged(false)
-          setNotice({ text: html.current.trim() ? 'Signature saved' : 'Signature removed', error: false })
-        },
-        onError: (error) => setNotice({ text: mailProblem(error, 'The signature could not be saved.'), error: true }),
-      },
-    )
+    if (save.isPending) return
+    save.mutate({ addressId: address.address_id, bodyHtml: html.current }, { onSuccess: () => onClose(html.current.trim() !== '') })
   }
 
   return (
-    <View className={`gap-2 border-border px-4 py-3 ${first ? '' : 'border-t'}`}>
-      <Text className="font-noto-medium text-[13px] text-foreground">
-        {address.display_name} <Text className="font-mono text-[12px] text-muted-foreground">&lt;{address.address}&gt;</Text>
-      </Text>
-      {/* a new field when the saved signature changes (after a save, or on another device) */}
-      <MailBodyField
-        key={saved}
-        accessibilityLabel={`Signature for ${address.address}`}
-        placeholder="Write your signature…"
-        initialHtml={saved}
-        onChange={(next) => {
-          html.current = next
-          setChanged(next !== unchanged)
-        }}
-      />
-      {notice ? <Note error={notice.error}>{notice.text}</Note> : null}
-      <View className="flex-row">
-        <Button label={save.isPending ? 'Saving…' : 'Save signature'} size="sm" variant="outline" disabled={!changed || save.isPending} onPress={submit} />
+    <Dialog
+      visible
+      title={`Signature for ${address.address}`}
+      onClose={() => (save.isPending ? undefined : onClose())}
+      footer={
+        <>
+          <Button label="Cancel" variant="outline" disabled={save.isPending} onPress={() => onClose()} />
+          <Button label={save.isPending ? 'Saving…' : 'Save'} disabled={save.isPending} onPress={submit} />
+        </>
+      }
+    >
+      <View className="gap-4">
+        <MailBodyField
+          accessibilityLabel={`Signature for ${address.address}`}
+          placeholder="Write your signature…"
+          initialHtml={saved}
+          onChange={(next) => {
+            html.current = next
+          }}
+        />
+        {save.error ? <Note error>{mailProblem(save.error, 'The signature could not be saved.')}</Note> : null}
       </View>
-    </View>
+    </Dialog>
   )
 }
 

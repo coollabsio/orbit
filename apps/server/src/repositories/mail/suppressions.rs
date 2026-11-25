@@ -12,8 +12,8 @@
 //!   policy, content or size refusal (`5.7.x`, `5.3.x`, `5.6.x`) bounces the recipient but does
 //!   not suppress the address. It applies to bounces at send time, to DSNs and to provider
 //!   events.
-//! - A suppressed address is skipped when sending (status `suppressed`). Managers list and
-//!   remove entries; a retry of a recipient removes its entry.
+//! - A suppressed address is skipped when sending (status `suppressed`). Managers list, add
+//!   and remove entries; a retry of a recipient removes its entry.
 
 use orbit_mail::{DsnAction, DsnRecipient, is_hard, parse_bounce_local_part};
 use orbit_platform::{Id, Row, TimestampMillis};
@@ -194,6 +194,61 @@ impl MailRepository {
         .await?
         .rows_affected();
         Ok(added == 1)
+    }
+
+    /// Puts `address` on the list by hand (owners and admins), with an optional note. Returns
+    /// the entry. A 422 `suppression_invalid_address` for an address that is not valid; a 409
+    /// `suppression_exists` when it is on the list already.
+    pub async fn add_manual_suppression(
+        &self,
+        workspace_id: Id,
+        actor_id: Id,
+        address: &str,
+        note: Option<&str>,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<Suppression, MailError> {
+        let address = orbit_mail::normalize_address(address.trim())
+            .map_err(|_| MailError::Unprocessable("suppression_invalid_address"))?
+            .to_string()
+            .to_lowercase();
+        let note = note.map(str::trim).filter(|note| !note.is_empty());
+        let mut transaction = self.database.workspace_transaction(workspace_id).await?;
+        manager(&mut transaction, workspace_id, actor_id).await?;
+        let added = Self::add_suppression(
+            &mut transaction,
+            workspace_id,
+            &address,
+            SuppressionReason::Manual,
+            note,
+            None,
+            now,
+        )
+        .await?;
+        if !added {
+            return Err(MailError::Conflict("suppression_exists"));
+        }
+        crate::audit::record(
+            &mut transaction,
+            workspace_id,
+            Some(actor_id),
+            "mail.suppression_added",
+            crate::audit::AuditOutcome::Success,
+            "mail_suppression",
+            None,
+            request_id,
+            json!({ "address": address }),
+            now,
+        )
+        .await?;
+        transaction.commit().await?;
+        Ok(Suppression {
+            address,
+            reason: SuppressionReason::Manual,
+            detail: note.map(plain_line),
+            recipient_id: None,
+            created_at: now,
+        })
     }
 
     /// Removes `address` from the list (owners and admins). `NotFound` when it is not on it.

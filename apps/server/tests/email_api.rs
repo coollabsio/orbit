@@ -192,7 +192,7 @@ async fn only_the_root_user_saves_mail_settings_and_the_password_is_encrypted() 
     assert_eq!(body["code"], "email_not_configured");
     assert_eq!(
         call(app, "GET", "/api/v1/auth/options", None, None).await.1,
-        json!({"registration_open": false, "email_enabled": false, "passkeys_enabled": false, "billing_enabled": false, "mail_enabled": false, "providers": [], "provider_registration_open": false, "oidc_provision": false, "oidc_name": null, "version": env!("CARGO_PKG_VERSION")})
+        json!({"registration_open": false, "email_enabled": false, "passkeys_enabled": false, "billing_enabled": false, "mail_enabled": false, "providers": [], "provider_registration_open": false, "oidc_provision": false, "oidc_name": null, "chat_message_max_chars": 20000, "version": env!("CARGO_PKG_VERSION")})
     );
 
     let (status, body) = call(
@@ -241,7 +241,7 @@ async fn only_the_root_user_saves_mail_settings_and_the_password_is_encrypted() 
     assert_eq!(body["registration_open"], true);
     assert_eq!(
         call(app, "GET", "/api/v1/auth/options", None, None).await.1,
-        json!({"registration_open": true, "email_enabled": true, "passkeys_enabled": false, "billing_enabled": false, "mail_enabled": false, "providers": [], "provider_registration_open": false, "oidc_provision": false, "oidc_name": null, "version": env!("CARGO_PKG_VERSION")})
+        json!({"registration_open": true, "email_enabled": true, "passkeys_enabled": false, "billing_enabled": false, "mail_enabled": false, "providers": [], "provider_registration_open": false, "oidc_provision": false, "oidc_name": null, "chat_message_max_chars": 20000, "version": env!("CARGO_PKG_VERSION")})
     );
 
     // Mail on (the switch is in Admin → Inbound mail): the web reads it here to show the mail app.

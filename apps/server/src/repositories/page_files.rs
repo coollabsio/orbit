@@ -40,6 +40,9 @@ pub enum PageFileError {
     /// The page or file is missing, trashed, or not visible to the caller.
     #[error("page file target was not found")]
     NotFound,
+    /// The page is locked: no file can be added until it is unlocked.
+    #[error("page is locked")]
+    Locked,
     #[error(transparent)]
     Upload(#[from] UploadError),
     #[error("page file repository is unavailable")]
@@ -217,7 +220,9 @@ impl PageFileRepository {
                     .map_err(|error| match error {
                         PageFileError::Database(error) => UploadError::Database(error),
                         PageFileError::Upload(error) => error,
-                        PageFileError::NotFound => UploadError::Unauthorized,
+                        PageFileError::NotFound | PageFileError::Locked => {
+                            UploadError::Unauthorized
+                        }
                     })
             })
             .await
@@ -252,25 +257,25 @@ async fn require_live_page(
     page_id: Id,
     actor_id: Id,
 ) -> Result<(), PageFileError> {
-    let Flag(allowed) = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
-        "SELECT EXISTS(SELECT 1 FROM pages \
+    let locked: Option<Flag> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+        "SELECT CASE WHEN pages.locked_at IS NULL THEN 0 ELSE 1 END FROM pages \
          JOIN workspaces ON workspaces.id = pages.workspace_id \
          JOIN memberships ON memberships.workspace_id = pages.workspace_id AND memberships.user_id = $1 \
          AND memberships.role <> 'guest' \
          WHERE pages.id = $2 AND pages.workspace_id = $3 AND pages.deleted_at IS NULL \
-         AND workspaces.deleted_at IS NULL AND {visible})",
+         AND workspaces.deleted_at IS NULL AND {visible}",
         visible = visible(4)
     )))
     .bind(actor_id.to_string())
     .bind(page_id.to_string())
     .bind(workspace_id.to_string())
     .bind(actor_id.to_string())
-    .fetch_one(connection)
+    .fetch_optional(connection)
     .await?;
-    if allowed {
-        Ok(())
-    } else {
-        Err(PageFileError::NotFound)
+    match locked {
+        None => Err(PageFileError::NotFound),
+        Some(Flag(true)) => Err(PageFileError::Locked),
+        Some(Flag(false)) => Ok(()),
     }
 }
 

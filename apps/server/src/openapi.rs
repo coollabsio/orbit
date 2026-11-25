@@ -689,6 +689,7 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::mail_routes::admin::get_mail_send_policy,
         crate::mail_routes::suppressions::retry_mail_recipient,
         crate::mail_routes::suppressions::list_mail_suppressions,
+        crate::mail_routes::suppressions::add_mail_suppression,
         crate::mail_routes::suppressions::delete_mail_suppression,
         crate::mail_routes::labels::list_mail_labels,
         crate::mail_routes::labels::create_mail_label,
@@ -3032,6 +3033,7 @@ fn mail_send_route_errors(
     }
     if operation_id.starts_with("create_") || operation_id.starts_with("update_") {
         add_code(responses, "422", "hostname_required");
+        add_code(responses, "422", "direct_not_available");
         add_code(responses, "422", "private_host_refused");
         add_code(responses, "422", "plain_smtp_refused");
     }

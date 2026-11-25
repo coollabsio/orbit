@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useCreateProviderSendRoute, useCreateSendRoute, useUpdateSendRoute } from '@/features/mail/api/mutations'
 import type { ProviderScope } from '@/features/mail/api/queries'
+import { useBillingEnabled } from '@/features/workspaces/billing'
 import { RequiredMark } from '@/features/settings/components/SettingsParts'
 import { CopyButton } from './MailDomainRecords'
 import { ProviderLinks } from './ProviderLinks'
@@ -185,7 +186,9 @@ export function SendRouteForm({
   const ready = routeFormReady(fields, { settings, secrets, maxBytes, editing: Boolean(route) })
   const hasLogin = kind === 'smtp' && (route?.secrets_set.some((name) => name === 'username' || name === 'password') ?? false)
   const help = kindHelp(kind)
-  const kindOptions = SEND_ROUTE_KINDS.map((value) => ({
+  // Orbit Cloud never sends from its own servers, so it has no Direct route.
+  const cloud = useBillingEnabled()
+  const kindOptions = SEND_ROUTE_KINDS.filter((value) => value !== 'direct' || !cloud || route?.kind === 'direct').map((value) => ({
     value,
     label: value === 'direct' && !directAvailable ? `${ROUTE_LABELS[value]} (needs ORBIT_MAIL_HOSTNAME)` : ROUTE_LABELS[value],
   }))

@@ -569,12 +569,17 @@ fn problem(
         ),
         ChatError::Conflict(detail) => (StatusCode::CONFLICT, "chat_conflict", "Conflict", detail),
         ChatError::Invalid { field } => return validation(field, instance, request_id),
-        ChatError::TooLong => (
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "chat_message_too_long",
-            "Message too long",
-            "A message can have at most 4000 characters.",
-        ),
+        ChatError::TooLong { max } => {
+            return ApiError::new(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "chat_message_too_long",
+                "Message too long",
+                "",
+                instance,
+                request_id,
+            )
+            .with_detail(format!("A message can have at most {max} characters."));
+        }
         ChatError::EmojiNameTaken => (
             StatusCode::CONFLICT,
             "emoji_name_taken",

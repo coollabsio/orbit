@@ -283,15 +283,21 @@ impl Fixture {
         }
     }
 
-    /// A send route of `kind` postmark that the outbound `outbound` went through.
+    /// An instance send route of `kind` postmark that the outbound `outbound` went through.
     async fn route(&self, outbound: Id) -> Id {
+        self.route_of(outbound, None, "postmark").await
+    }
+
+    /// A send route of `kind`, of `workspace` (`None`: the instance), that `outbound` went through.
+    async fn route_of(&self, outbound: Id, workspace: Option<Id>, kind: &str) -> Id {
         let route = Id::new_v7();
         sqlx::query(
             "INSERT INTO mail_send_routes (id, workspace_id, kind, name, secrets, settings, \
-             created_at, updated_at) VALUES ($1, $2, 'postmark', 'Route', $3, '{}', 1, 1)",
+             created_at, updated_at) VALUES ($1, $2, $3, 'Route', $4, '{}', 1, 1)",
         )
         .bind(route.to_string())
-        .bind(self.workspace.to_string())
+        .bind(workspace.map(|id| id.to_string()))
+        .bind(kind)
         .bind(vec![0_u8])
         .execute(self.database.pool())
         .await
@@ -389,11 +395,11 @@ fn now() -> i64 {
 }
 
 #[tokio::test]
-async fn cloud_starts_new_selfhosted_standard() {
+async fn cloud_starts_new_selfhosted_unlimited() {
     let cloud = Fixture::with_cloud(true).await;
     assert_eq!(
         cloud.mail.limits_for(cloud.workspace).await.unwrap(),
-        Limits::NEW
+        Some(Limits::NEW)
     );
     let view = cloud
         .mail
@@ -404,14 +410,23 @@ async fn cloud_starts_new_selfhosted_standard() {
     let hosted = Fixture::new().await;
     assert_eq!(
         hosted.mail.limits_for(hosted.workspace).await.unwrap(),
-        Limits::STANDARD
+        None
     );
     let view = hosted
         .mail
         .send_policy(hosted.workspace, TimestampMillis::now())
         .await
         .unwrap();
-    assert_eq!(view.tier, SendTier::Standard);
+    assert_eq!(view.tier, SendTier::Unlimited);
+    assert_eq!(view.limits, None);
+    // Far past every number of the standard tier, the unlimited tier still lets a message go.
+    hosted
+        .sent(hosted.owner_membership, 20_000, 0, now() - MINUTE, "done")
+        .await;
+    assert_eq!(
+        hosted.allows(hosted.owner_membership, 500, now()).await,
+        None
+    );
 }
 
 #[tokio::test]
@@ -463,7 +478,7 @@ async fn custom_limits_apply() {
         )
         .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(f.mail.limits_for(f.workspace).await.unwrap(), custom);
+    assert_eq!(f.mail.limits_for(f.workspace).await.unwrap(), Some(custom));
     let at = now() - MINUTE;
     f.sent(f.owner_membership, 2, 0, at, "done").await;
     assert_eq!(
@@ -491,8 +506,21 @@ async fn custom_limits_apply() {
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(
         f.mail.limits_for(f.workspace).await.unwrap(),
-        Limits::STANDARD
+        Some(Limits::STANDARD)
     );
+    // `unlimited` removes every limit again.
+    let (status, body) = f
+        .call(
+            &f.root_cookie,
+            "PUT",
+            &format!("/api/v1/admin/mail/send-policies/{}", f.workspace),
+            Some(json!({"tier": "unlimited"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["tier"], "unlimited");
+    assert_eq!(body["limits"], serde_json::Value::Null);
+    assert_eq!(f.allows(f.owner_membership, 1, now()).await, None);
 }
 
 #[tokio::test]
@@ -828,6 +856,44 @@ async fn provider_hard_bounce_pauses_without_a_policy_row() {
 }
 
 #[tokio::test]
+async fn own_route_is_not_limited() {
+    let f = Fixture::new().await;
+    f.policy("new", "").await;
+    let at = now() - 10 * MINUTE;
+    let (outbound, _) = f.sent(f.owner_membership, 30, 0, at, "done").await;
+    f.route_of(outbound, Some(f.workspace), "smtp").await;
+    // 30 through the workspace's own relay leave the hour of 30 free
+    assert_eq!(f.allows(f.owner_membership, 1, now()).await, None);
+    // a Direct route of the workspace sends from the server: it counts
+    let (outbound, _) = f.sent(f.owner_membership, 30, 0, at, "done").await;
+    f.route_of(outbound, Some(f.workspace), "direct").await;
+    assert_eq!(
+        f.allows(f.owner_membership, 1, now()).await,
+        Some(at + HOUR)
+    );
+}
+
+#[tokio::test]
+async fn own_route_bounces_do_not_pause() {
+    let f = Fixture::with_cloud(true).await;
+    f.policy("new", "").await;
+    let (outbound, ids) = f
+        .sent(f.owner_membership, 100, 5, now() - HOUR, "done")
+        .await;
+    let route = f.route_of(outbound, Some(f.workspace), "postmark").await;
+    f.event(
+        route,
+        ids[70],
+        ProviderEvent::Bounced {
+            hard: true,
+            diagnostic: Some("550 5.1.1 unknown".to_owned()),
+        },
+    )
+    .await;
+    assert_eq!(f.paused_at().await, None);
+}
+
+#[tokio::test]
 async fn provider_complaints_pause_even_for_suppressed_addresses() {
     let f = Fixture::new().await;
     f.policy("standard", "").await;
@@ -861,7 +927,7 @@ async fn pause_without_a_policy_row_makes_it() {
     f.sent(f.owner_membership, 100, 10, now() - HOUR, "done")
         .await;
     assert!(f.check_pause(now()).await);
-    assert_eq!(f.tier().await, "standard");
+    assert_eq!(f.tier().await, "unlimited");
     assert!(f.paused_at().await.is_some());
 }
 

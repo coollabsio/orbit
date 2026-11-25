@@ -322,4 +322,5 @@ export type ChatEvent =
   /** The client missed events: refetch every chat query. */
   | { type: 'resync' }
 
-export const MESSAGE_MAX_LENGTH = 4000
+/** The message limit until the server says its own (Admin → Limits). */
+export const DEFAULT_MESSAGE_MAX_LENGTH = 20_000

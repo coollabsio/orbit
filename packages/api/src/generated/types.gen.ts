@@ -77,6 +77,17 @@ export type ActiveUserCounts = {
     weekly: number;
 };
 
+export type AddMailSuppressionRequest = {
+    /**
+     * The address that Orbit must not send to.
+     */
+    address: string;
+    /**
+     * Why it is on the list (up to 500 characters).
+     */
+    detail?: string | null;
+};
+
 export type AdminEmailBody = {
     /**
      * The new address.
@@ -458,6 +469,10 @@ export type AuthOptions = {
      * Orbit Cloud: workspaces need a subscription (Settings → Billing) to be writable.
      */
     billing_enabled: boolean;
+    /**
+     * The most characters a chat message can have (Admin → Limits).
+     */
+    chat_message_max_chars: number;
     /**
      * A mail server is saved: password reset links and invitations go out by email.
      */
@@ -1080,7 +1095,8 @@ export type ChatSendBody = {
      */
     also_in_channel?: boolean;
     /**
-     * Markdown source, at most 4000 characters. Mentions are tokens: `<@user_id>`,
+     * Markdown source, at most the message limit (Admin → Limits, 20,000 characters by
+     * default; 422 `chat_message_too_long`). Mentions are tokens: `<@user_id>`,
      * `<#conversation_id>`, `<!channel>`, `<!here>`.
      */
     body: string;
@@ -3445,8 +3461,9 @@ export type IncomingWebhookPayload = {
     mrkdwn?: boolean | null;
     /**
      * Slack mrkdwn or Markdown; mentions are tokens: `<@user_id>`, `<#channel_id>`,
-     * `<!channel>`, `<!here>`. Longer than 4000 characters, it is cut. With `blocks` or
-     * `attachments` it is the plain text for notifications and search, and may be left out.
+     * `<!channel>`, `<!here>`. Longer than the message limit (Admin → Limits, 20,000 characters
+     * by default), it is cut. With `blocks` or `attachments` it is the plain text for
+     * notifications and search, and may be left out.
      */
     text?: string | null;
     /**
@@ -3619,9 +3636,32 @@ export type Limits = {
 };
 
 /**
+ * New limits for a shared installation. `null` or 0 is unlimited.
+ */
+export type LimitsBody = {
+    /**
+     * The most characters a new or edited chat message can have: 100–40000. Omitted: unchanged.
+     * A lower limit does not change existing messages; it applies when one is edited.
+     */
+    chat_message_max_chars?: number | null;
+    /**
+     * Workspaces (not in the trash) one account may own. Instance admins are not limited.
+     */
+    max_owned_workspaces?: number | null;
+    /**
+     * Bytes of files one workspace may store.
+     */
+    workspace_storage_quota_bytes?: number | null;
+};
+
+/**
  * Limits for a shared installation. `null` is unlimited.
  */
 export type LimitsView = {
+    /**
+     * The most characters a new or edited chat message can have. Existing messages keep their text.
+     */
+    chat_message_max_chars: number;
     /**
      * Workspaces (not in the trash) one account may own. Instance admins are not limited.
      */
@@ -5623,10 +5663,7 @@ export type MailSendPolicy = {
      * Percent of them that bounced hard.
      */
     hard_bounce_rate_7d: number;
-    /**
-     * The numbers that apply now (the tier's, or the custom ones).
-     */
-    limits: Limits;
+    limits: null | Limits;
     pause_reason?: string | null;
     /**
      * Set while sending is paused.
@@ -5653,7 +5690,8 @@ export type MailSendPolicyList = {
 export type MailSendRouteList = {
     default_route_id?: string | null;
     /**
-     * `ORBIT_MAIL_HOSTNAME` is set, so the `direct` kind can be created.
+     * `ORBIT_MAIL_HOSTNAME` is set and this is not Orbit Cloud, so the `direct` kind can be
+     * created.
      */
     direct_available: boolean;
     /**
@@ -10975,7 +11013,7 @@ export type SendMailDraftBody = {
 /**
  * A send tier (spec §5.8).
  */
-export type SendTier = 'new' | 'standard' | 'custom';
+export type SendTier = 'new' | 'standard' | 'custom' | 'unlimited';
 
 export type SessionRecord = {
     absolute_expires_at: string;
@@ -27743,7 +27781,7 @@ export type CreateInstanceMailProviderSendRouteErrors = {
      */
     413: TaskProblem;
     /**
-     * validation_failed, hostname_required, private_host_refused, plain_smtp_refused
+     * validation_failed, hostname_required, direct_not_available, private_host_refused, plain_smtp_refused
      */
     422: TaskProblem;
     /**
@@ -28121,7 +28159,7 @@ export type CreateInstanceMailSendRouteErrors = {
      */
     413: TaskProblem;
     /**
-     * validation_failed, hostname_required, private_host_refused, plain_smtp_refused
+     * validation_failed, hostname_required, direct_not_available, private_host_refused, plain_smtp_refused
      */
     422: TaskProblem;
     /**
@@ -28241,7 +28279,7 @@ export type UpdateInstanceMailSendRouteErrors = {
      */
     413: TaskProblem;
     /**
-     * validation_failed, hostname_required, private_host_refused, plain_smtp_refused
+     * validation_failed, hostname_required, direct_not_available, private_host_refused, plain_smtp_refused
      */
     422: TaskProblem;
     /**
@@ -28635,7 +28673,7 @@ export type SetCustomPagePolicyResponses = {
 export type SetCustomPagePolicyResponse = SetCustomPagePolicyResponses[keyof SetCustomPagePolicyResponses];
 
 export type SaveLimitsData = {
-    body: LimitsView;
+    body: LimitsBody;
     headers?: {
         /**
          * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
@@ -47674,7 +47712,7 @@ export type CreateWorkspaceMailProviderSendRouteErrors = {
      */
     413: TaskProblem;
     /**
-     * validation_failed, hostname_required, private_host_refused, plain_smtp_refused
+     * validation_failed, hostname_required, direct_not_available, private_host_refused, plain_smtp_refused
      */
     422: TaskProblem;
     /**
@@ -48030,7 +48068,7 @@ export type CreateWorkspaceMailSendRouteErrors = {
      */
     413: TaskProblem;
     /**
-     * validation_failed, hostname_required, private_host_refused, plain_smtp_refused
+     * validation_failed, hostname_required, direct_not_available, private_host_refused, plain_smtp_refused
      */
     422: TaskProblem;
     /**
@@ -48152,7 +48190,7 @@ export type UpdateWorkspaceMailSendRouteErrors = {
      */
     413: TaskProblem;
     /**
-     * validation_failed, hostname_required, private_host_refused, plain_smtp_refused
+     * validation_failed, hostname_required, direct_not_available, private_host_refused, plain_smtp_refused
      */
     422: TaskProblem;
     /**
@@ -48896,6 +48934,60 @@ export type ListMailSuppressionsResponses = {
 };
 
 export type ListMailSuppressionsResponse = ListMailSuppressionsResponses[keyof ListMailSuppressionsResponses];
+
+export type AddMailSuppressionData = {
+    body: AddMailSuppressionRequest;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/mail/suppressions';
+};
+
+export type AddMailSuppressionErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type AddMailSuppressionError = AddMailSuppressionErrors[keyof AddMailSuppressionErrors];
+
+export type AddMailSuppressionResponses = {
+    201: MailSuppression;
+};
+
+export type AddMailSuppressionResponse = AddMailSuppressionResponses[keyof AddMailSuppressionResponses];
 
 export type DeleteMailSuppressionData = {
     body?: never;
