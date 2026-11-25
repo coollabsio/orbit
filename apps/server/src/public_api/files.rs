@@ -321,7 +321,7 @@ async fn download_file(
     operation_id = "public_upload_doc_file",
     tag = "public-api",
     summary = "Upload a file to a doc",
-    description = "`multipart/form-data` with one `file` field. Put the answer's `url` in the doc's Markdown (`![name](url)` for an image) with `PATCH /docs/{page_id}`, or use it as the cover. The upload limit and the storage quota apply (`413`). Not for service-account tokens (`404`).",
+    description = "`multipart/form-data` with one `file` field. Put the answer's `url` in the doc's Markdown (`![name](url)` for an image) with `PATCH /docs/{page_id}`, or use it as the cover. The upload limit and the storage quota apply (`413`). Not for service-account tokens (`404`). A locked doc answers `423`.",
     params(("workspace_id" = String, Path, description = "The token's workspace, from `GET /me`."), ("page_id" = String, Path)),
     request_body(content = UploadBody, content_type = "multipart/form-data"),
     responses((status = 201, description = "The file", body = TokenPageFile)),

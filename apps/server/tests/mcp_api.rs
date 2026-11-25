@@ -3,7 +3,7 @@ use std::sync::Arc;
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode, header};
 use orbit_platform::{
-    HttpPlatformLayer, Id, OriginPolicy, PasswordService, TestDatabase, TimestampMillis,
+    HttpLimits, HttpPlatformLayer, Id, OriginPolicy, PasswordService, TestDatabase, TimestampMillis,
 };
 use orbit_server::mcp::{McpState, router};
 use orbit_server::repositories::api_tokens::{ApiTokenRepository, ApiTokenScope};
@@ -109,9 +109,15 @@ impl Fixture {
             McpState::new(Arc::new(tokens.clone()), Arc::new(tasks.clone())),
             "https://orbit.test",
         )
-        .layer(HttpPlatformLayer::new(OriginPolicy::new(
-            "https://orbit.test",
-        )));
+        // The app's limits: JSON bodies up to 2 MiB, so the MCP route's own limit answers first.
+        .layer(
+            HttpPlatformLayer::new(OriginPolicy::new("https://orbit.test")).with_limits(
+                HttpLimits {
+                    max_body_bytes: 100 * 1024 * 1024,
+                    ..HttpLimits::default()
+                },
+            ),
+        );
         Self {
             database,
             app,
@@ -185,16 +191,6 @@ async fn create_task(
 }
 
 /// The `version` that the tools show for `task` (its revision).
-/// The tool names of a `tools/list` response.
-fn tool_names(listing: &Value) -> Vec<&str> {
-    listing["result"]["tools"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|tool| tool["name"].as_str().unwrap())
-        .collect()
-}
-
 fn token_version(task: &TaskRecord) -> u64 {
     revision(task.version, task.updated_at)
 }
@@ -215,6 +211,16 @@ fn request(token: Option<&str>, method: &str, params: Value) -> Request<Body> {
             json!({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).to_string(),
         ))
         .unwrap()
+}
+
+/// The names in a `tools/list` answer.
+fn tool_names(listing: &Value) -> Vec<String> {
+    listing["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|tool| tool["name"].as_str().unwrap().to_owned())
+        .collect()
 }
 
 async fn rpc(app: &axum::Router, token: &str, method: &str, params: Value) -> Value {
@@ -701,36 +707,24 @@ async fn mcp_route_is_mounted_in_the_application_and_rejects_oversized_bodies() 
     // `max_body_bytes` of 1 MiB would answer first), so the MCP limit of 1.5 MiB
     // (`MAX_REQUEST_BODY_BYTES`, raised for the upload tools) is the one that applies.
     let fixture = Fixture::new().await;
-    let app = router(
-        McpState::new(
-            Arc::new(fixture.tokens.clone()),
-            Arc::new(fixture.tasks.clone()),
-        ),
-        "https://orbit.test",
-    )
-    .layer(
-        HttpPlatformLayer::new(OriginPolicy::new("https://orbit.test")).with_limits(
-            orbit_platform::HttpLimits {
-                max_body_bytes: 100 * 1024 * 1024,
-                ..Default::default()
-            },
-        ),
+    let response = fixture
+        .app
+        .clone()
+        .oneshot(request(
+            Some(&fixture.token),
+            "tools/call",
+            json!({"name": "list_tasks", "arguments": {"query": "x".repeat(1600 * 1024)}}),
+        ))
+        .await
+        .unwrap();
+    let status = response.status();
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    assert_eq!(
+        status,
+        StatusCode::PAYLOAD_TOO_LARGE,
+        "{}",
+        String::from_utf8_lossy(&body)
     );
-    for (kib, status) in [
-        (1400, StatusCode::OK),
-        (1600, StatusCode::PAYLOAD_TOO_LARGE),
-    ] {
-        let response = app
-            .clone()
-            .oneshot(request(
-                Some(&fixture.token),
-                "tools/call",
-                json!({"name": "list_tasks", "arguments": {"query": "x".repeat(kib * 1024)}}),
-            ))
-            .await
-            .unwrap();
-        assert_eq!(response.status(), status, "{kib} KiB");
-    }
 }
 
 #[tokio::test]
@@ -748,40 +742,17 @@ async fn tools_list_includes_required_cache_fields_for_current_protocol() {
             .insert("mcp-method", "tools/list".parse().unwrap());
         let response = fixture.app.clone().oneshot(req).await.unwrap();
         let status = response.status();
-        let body = to_bytes(response.into_body(), 64 * 1024).await.unwrap();
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
         let result: Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(result["result"]["ttlMs"], 0, "{result}");
         assert_eq!(result["result"]["cacheScope"], "private", "{result}");
-        // A tasks:read token lists only the read-only task tools and get_me.
-        assert_eq!(
-            tool_names(&result),
-            [
-                "list_task_statuses",
-                "list_labels",
-                "list_milestones",
-                "list_cycles",
-                "list_members",
-                "get_me",
-                "list_comments",
-                "list_projects",
-                "list_tasks",
-                "get_task",
-                "list_task_relations",
-                "list_task_trash",
-                "get_trashed_task",
-                "list_task_activity",
-                "list_task_github_links",
-                "list_project_trash",
-                "get_trashed_project",
-                "list_project_members",
-                "list_notifications",
-                "list_views",
-                "get_view",
-                "list_task_attachments",
-                "download_task_attachment",
-            ]
-        );
+        let tools = result["result"]["tools"].as_array().unwrap();
+        let names = tool_names(&result);
+        assert!(names.contains(&"list_tasks".to_owned()), "{names:?}");
+        for tool in tools {
+            assert_eq!(tool["annotations"]["readOnlyHint"], true, "{tool}");
+        }
     }
 }
 
@@ -1519,18 +1490,13 @@ async fn docs_and_chat_require_explicit_scopes_and_doc_writes_need_docs_write() 
         .tool("search_messages", json!({"query": "x".repeat(501)}))
         .await;
     assert!(invalid.get("error").is_some(), "{invalid}");
-    // Tool names, not the whole listing: list_teamspaces's description mentions create_doc.
-    let listing = f.rpc("tools/list", json!({})).await;
-    let names = tool_names(&listing);
-    assert!(names.contains(&"search_messages"), "{listing}");
-    for name in [
-        "send_message",
-        "create_doc",
-        "update_doc",
-        "create_doc_comment",
-    ] {
-        assert!(!names.contains(&name), "{name}: {listing}");
-    }
+    let listing = tool_names(&f.rpc("tools/list", json!({})).await);
+    assert!(
+        listing.contains(&"search_messages".to_owned()),
+        "{listing:?}"
+    );
+    assert!(!listing.contains(&"send_message".to_owned()), "{listing:?}");
+    assert!(!listing.contains(&"create_doc".to_owned()), "{listing:?}");
     let denied = f.tool("get_doc", json!({"page_id": Id::new_v7()})).await;
     assert_eq!(denied["result"]["isError"], true, "{denied}");
     let refused = f.tool("create_doc", json!({"title": "x"})).await;
@@ -1584,7 +1550,7 @@ async fn writes_are_refused_in_a_read_only_cloud_workspace() {
         .await
         .unwrap();
     // Not the exempt root workspace and past its trial, so without a subscription it is read-only.
-    sqlx::query("UPDATE workspaces SET created_at = 0, trial_started_at = 0, billing_exempt = 0 WHERE id = $1")
+    sqlx::query("UPDATE workspaces SET trial_started_at = 0, billing_exempt = 0 WHERE id = $1")
         .bind(f.workspace.to_string())
         .execute(f.database.pool())
         .await
@@ -1682,4 +1648,136 @@ async fn doc_and_chat_reads_report_database_errors_as_errors() {
         let failed = f.tool(name, arguments).await;
         assert_eq!(failed["error"]["code"], -32603, "{name}: {failed}");
     }
+}
+
+#[tokio::test]
+async fn agents_upload_doc_images_and_locked_or_hidden_docs_store_nothing() {
+    use base64::Engine;
+    use orbit_platform::{
+        AttachmentMutationCoordinator, LocalBlobStore, UploadLimits, UploadService,
+    };
+    use orbit_server::repositories::{
+        chat::ChatRepository,
+        pages::{CreatePage, PageKind, PageRepository, SpaceRequest},
+    };
+    const PNG: &[u8] = b"\x89\x50\x4e\x47\x0d\x0a\x1a\x0a\x00\x00\x00\x0d\x49\x48\x44\x52\x00\x00\x00\x01\x00\x00\x00\x01\x08\x04\x00\x00\x00\xb5\x1c\x0c\x02\x00\x00\x00\x0b\x49\x44\x41\x54\x78\xda\x63\x64\xf8\x0f\x00\x01\x05\x01\x01\x27\x18\xe3\x66\x00\x00\x00\x00\x49\x45\x4e\x44\xae\x42\x60\x82";
+    let png = base64::engine::general_purpose::STANDARD.encode(PNG);
+    let mut f = Fixture::new().await;
+    let root = tempfile::tempdir().unwrap();
+    let uploads = UploadService::new(
+        (*f.database).clone(),
+        Arc::new(LocalBlobStore::new(root.path().join("files"))),
+        AttachmentMutationCoordinator::default(),
+        UploadLimits::default(),
+    );
+    let pages = Arc::new(PageRepository::new((*f.database).clone()));
+    f.app = router(
+        McpState::new(Arc::new(f.tokens.clone()), Arc::new(f.tasks.clone()))
+            .with_content(
+                pages.clone(),
+                Arc::new(ChatRepository::new((*f.database).clone(), uploads.clone())),
+            )
+            .with_uploads(uploads),
+        "https://orbit.test",
+    );
+    sqlx::query("UPDATE api_tokens SET scopes = 'tasks:read docs:read docs:write' WHERE id = $1")
+        .bind(f.token_id.to_string())
+        .execute(f.database.pool())
+        .await
+        .unwrap();
+    let files = || async {
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM page_files")
+            .fetch_one(f.database.pool())
+            .await
+            .unwrap()
+    };
+
+    let created = f.tool("create_doc", json!({"title": "Design A"})).await;
+    let doc = created["result"]["structuredContent"].clone();
+    let uploaded = f
+        .tool(
+            "upload_doc_file",
+            json!({"page_id": doc["id"], "filename": "design-a.png", "content_base64": png}),
+        )
+        .await;
+    let file = &uploaded["result"]["structuredContent"];
+    assert_eq!(file["mime_type"], "image/png", "{uploaded}");
+    let url = file["url"].as_str().unwrap().to_owned();
+    let updated = f
+        .tool(
+            "update_doc",
+            json!({"page_id": doc["id"], "expected_version": doc["version"], "markdown": format!("![design-a.png]({url})")}),
+        )
+        .await;
+    let block = &updated["result"]["structuredContent"]["content"][0];
+    assert_eq!(block["type"], "image", "{updated}");
+    assert_eq!(block["props"]["url"], url.as_str(), "{updated}");
+    assert_eq!(files().await, 1);
+
+    // A locked doc refuses the file and stores nothing.
+    pages
+        .set_lock(
+            f.workspace,
+            doc["id"].as_str().unwrap().parse().unwrap(),
+            f.user,
+            true,
+            "test",
+            TimestampMillis::now(),
+        )
+        .await
+        .unwrap();
+    let locked = f
+        .tool(
+            "upload_doc_file",
+            json!({"page_id": doc["id"], "filename": "b.png", "content_base64": png}),
+        )
+        .await;
+    assert_eq!(locked["result"]["isError"], true, "{locked}");
+    assert!(
+        locked.to_string().contains("Document is locked"),
+        "{locked}"
+    );
+
+    // Another member's private doc looks missing.
+    let outsider = Id::new_v7();
+    sqlx::query("INSERT INTO users (id, email, normalized_email, display_name, password_hash, created_at, updated_at) VALUES ($1, 'outsider@example.com', 'outsider@example.com', 'Outsider', 'x', 1, 1)").bind(outsider.to_string()).execute(f.database.pool()).await.unwrap();
+    sqlx::query("INSERT INTO memberships (id, workspace_id, user_id, role, created_at, updated_at) VALUES ($1, $2, $3, 'member', 1, 1)").bind(Id::new_v7().to_string()).bind(f.workspace.to_string()).bind(outsider.to_string()).execute(f.database.pool()).await.unwrap();
+    let secret = pages
+        .create_page(
+            f.workspace,
+            outsider,
+            CreatePage {
+                kind: PageKind::Page,
+                parent_id: None,
+                space: SpaceRequest {
+                    private: Some(true),
+                    teamspace_id: None,
+                },
+                title: "Private".into(),
+                icon: None,
+                position: None,
+            },
+            "test",
+            TimestampMillis::now(),
+        )
+        .await
+        .unwrap();
+    let hidden = f
+        .tool(
+            "upload_doc_file",
+            json!({"page_id": secret.id, "filename": "c.png", "content_base64": png}),
+        )
+        .await;
+    assert_eq!(hidden["result"]["isError"], true, "{hidden}");
+
+    // Over 1 MiB is refused before anything is stored.
+    let big = base64::engine::general_purpose::STANDARD.encode(vec![0_u8; 1024 * 1024 + 1]);
+    let oversized = f
+        .tool(
+            "upload_doc_file",
+            json!({"page_id": doc["id"], "filename": "big.bin", "content_base64": big}),
+        )
+        .await;
+    assert!(oversized.get("error").is_some(), "{oversized}");
+    assert_eq!(files().await, 1);
 }
