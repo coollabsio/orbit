@@ -3,7 +3,7 @@ import { View } from 'react-native'
 
 import { MailSendLimits } from '../../../../components/settings/MailSendLimits'
 import { AdminShell, Note, SetByEnvironment, SettingsCard } from '../../../../components/settings/Shell'
-import { type EnvironmentView, imageFetchesBody, limitsBody, limitsDraft, type LimitsView } from '../../../../data/admin-api'
+import { CHAT_CHARS_MAX, CHAT_CHARS_MIN, type EnvironmentView, imageFetchesBody, limitsBody, limitsDraft, type LimitsView } from '../../../../data/admin-api'
 import { useInstanceSettings, useSaveLimits } from '../../../../hooks/admin'
 import { useMailEnabled } from '../../../../hooks/mail'
 import { errorMessage } from '../../../../session-context'
@@ -47,7 +47,7 @@ function LimitsCard({ limits }: { limits: LimitsView }) {
   }
 
   return (
-    <SettingsCard title="Limits" description="What one account and one workspace may use. Empty or 0 means no limit. A lower limit removes nothing that exists.">
+    <SettingsCard title="Limits" description="What one account and one workspace may use. Empty or 0 means no limit, except for chat messages. A lower limit removes or cuts nothing that exists.">
       <View className="gap-4">
         <Input
           label="Workspaces per account"
@@ -65,7 +65,14 @@ function LimitsCard({ limits }: { limits: LimitsView }) {
           value={draft.storageGb}
           onChangeText={(storageGb) => edit({ storageGb })}
         />
-        {invalid ? <Note error>Enter a number, or leave the field empty for no limit.</Note> : null}
+        <Input
+          label="Chat message length (characters)"
+          help={`The most characters a new or edited chat message can have: ${CHAT_CHARS_MIN}–${CHAT_CHARS_MAX}. Existing messages keep their text. A longer message must be shortened to be edited.`}
+          keyboardType="number-pad"
+          value={draft.chatChars}
+          onChangeText={(chatChars) => edit({ chatChars })}
+        />
+        {invalid ? <Note error>{`Enter a number, or leave the field empty for no limit. The chat message length is ${CHAT_CHARS_MIN}–${CHAT_CHARS_MAX}.`}</Note> : null}
         {save.isError ? <Note error>{errorMessage(save.error)}</Note> : null}
         {save.isSuccess ? <Note>Limits saved.</Note> : null}
         <View className="flex-row justify-end">

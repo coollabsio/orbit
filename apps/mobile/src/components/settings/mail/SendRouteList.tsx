@@ -37,7 +37,7 @@ export function PolicyRows({ policy }: { policy: MailSendPolicy }) {
       </SettingsRow>
       <SettingsRow>
         <View className="min-w-0 flex-1">
-          <LabelTip label="Last 7 days" text="Sending pauses when, over at least 100 recipients in 7 days, more than 5 % bounce hard or more than 0.3 % complain." className="font-noto-medium text-[13px] text-foreground" />
+          <LabelTip label="Last 7 days" text="Sending through a shared route pauses when, over at least 100 of its recipients in 7 days, more than 5 % bounce hard or more than 0.3 % complain." className="font-noto-medium text-[13px] text-foreground" />
         </View>
         <Text className="shrink text-right text-[13px] text-muted-foreground">
           {count(policy.recipients_7d, 'recipient', 'recipients')} · {percent(policy.hard_bounce_rate_7d)} bounced · {percent(policy.complaint_rate_7d)} complained

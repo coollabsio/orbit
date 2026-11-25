@@ -436,6 +436,8 @@ function ResultStep({ workspaceId, item }: { workspaceId: string; item: AsanaImp
       notes.push(`${report.unmatched_assignees} tasks had an assignee with no Orbit member of the same email; they are unassigned and name the assignee. Assign them to a member in Settings → Import.`)
     if (report.missing_files > 0) notes.push(`${report.missing_files} Asana files could not be downloaded.`)
     if (report.skipped_subtasks > 0) notes.push(`${report.skipped_subtasks} subtasks deeper than five levels were not imported.`)
+    if (report.time_entries_imported > 0) notes.push(`${report.time_entries_imported} time entries were imported.`)
+    if (report.skipped_time_entries > 0) notes.push(`${report.skipped_time_entries} time entries were not imported: no duration, more than 24 hours, or no valid day.`)
   }
   return (
     <>

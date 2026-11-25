@@ -31,6 +31,7 @@ use crate::object_storage::Owner;
 use crate::repositories::api_tokens::{
     ApiTokenError, ApiTokenRecord, ApiTokenRepository, ApiTokenScope, IssuedApiToken, TokenProjects,
 };
+use crate::repositories::chat::{MESSAGE_MAX_CHARS_CEILING, MESSAGE_MAX_CHARS_FLOOR};
 use crate::repositories::environment_settings::EnvironmentSettings;
 use crate::repositories::identity::{
     AdminAccountError, AdminUser, AuthenticatedSession, IdentityRepository,
@@ -1098,8 +1099,7 @@ async fn set_member_custom_role(
     request_id: Option<Extension<RequestId>>,
     ApiJson(body): ApiJson<CustomRoleBody>,
 ) -> Result<StatusCode, ApiError> {
-    let instance =
-        format!("/api/v1/workspaces/{workspace_id}/members/{membership_id}/custom-role");
+    let instance = format!("/api/v1/workspaces/{workspace_id}/members/{membership_id}/custom-role");
     let session = authenticate(&state, &headers, &instance, request_id.as_ref()).await?;
     let workspace_id = parse_id(&workspace_id, &instance, request_id.as_ref())?;
     let membership_id = parse_id(&membership_id, &instance, request_id.as_ref())?;
@@ -2236,6 +2236,8 @@ struct LimitsView {
     /// Outside images (mail, messages, pages, link cards) that one server loads at once through Orbit; more wait.
     /// One user has at most 6 of them.
     image_proxy_fetches: u32,
+    /// The most characters a new or edited chat message can have. Existing messages keep their text.
+    chat_message_max_chars: u32,
 }
 
 impl From<InstanceLimits> for LimitsView {
@@ -2244,18 +2246,27 @@ impl From<InstanceLimits> for LimitsView {
             max_owned_workspaces: limits.max_owned_workspaces,
             workspace_storage_quota_bytes: limits.workspace_storage_quota_bytes,
             image_proxy_fetches: limits.image_proxy_fetches,
+            chat_message_max_chars: limits.chat_message_max_chars,
         }
     }
 }
 
-/// The limits to save. `null` or 0 is unlimited.
+/// New limits for a shared installation. `null` or 0 is unlimited.
 #[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 struct LimitsBody {
+    /// Workspaces (not in the trash) one account may own. Instance admins are not limited.
     max_owned_workspaces: Option<u32>,
+    /// Bytes of files one workspace may store.
     workspace_storage_quota_bytes: Option<u64>,
+    /// The most characters a new or edited chat message can have: 100–40000. Omitted: unchanged.
+    /// A lower limit does not change existing messages; it applies when one is edited.
+    #[serde(default)]
+    #[schema(required = false)]
+    chat_message_max_chars: Option<u32>,
     /// Outside images (1–256) that one server loads at once. Omitted: unchanged.
     #[serde(default)]
+    #[schema(required = false)]
     image_proxy_fetches: Option<u32>,
 }
 
@@ -3553,9 +3564,9 @@ struct StorageOptionsBody {
     s3_keep_deleted_days: Option<u32>,
 }
 
-/// Saves the limits of a shared installation; `null` or 0 is unlimited. A lower limit refuses new workspaces and
-/// uploads only: nothing that exists is removed.
-#[utoipa::path(put, path = "/api/v1/admin/settings/limits", request_body = LimitsBody, responses((status = 200, body = InstanceSettingsView)))]
+/// Saves the limits of a shared installation; `null` or 0 is unlimited. A lower limit refuses new workspaces,
+/// uploads and chat messages only: nothing that exists is removed or cut.
+#[utoipa::path(put, path = "/api/v1/admin/settings/limits", request_body = LimitsBody, responses((status = 200, body = InstanceSettingsView), (status = 422, description = "invalid_limits", body = ProblemBody, content_type = "application/problem+json")))]
 async fn save_limits(
     State(state): State<WorkspaceState>,
     headers: HeaderMap,
@@ -3593,35 +3604,43 @@ async fn save_limits(
     let workspace_storage_quota_bytes = body
         .workspace_storage_quota_bytes
         .filter(|limit| *limit > 0);
+    const _: () = assert!(
+        MESSAGE_MAX_CHARS_FLOOR == 100 && MESSAGE_MAX_CHARS_CEILING == 40_000,
+        "the detail names the range"
+    );
+    let chat_range = MESSAGE_MAX_CHARS_FLOOR..=MESSAGE_MAX_CHARS_CEILING;
     if max_owned_workspaces.is_some_and(|limit| limit > 1_000_000)
         || workspace_storage_quota_bytes.is_some_and(|limit| i64::try_from(limit).is_err())
+        || body.chat_message_max_chars.is_some_and(|limit| {
+            !chat_range.contains(&usize::try_from(limit).unwrap_or(usize::MAX))
+        })
     {
         return Err(ApiError::new(
             StatusCode::UNPROCESSABLE_ENTITY,
             "invalid_limits",
             "Invalid limits",
-            "Use at most 1000000 workspaces and a storage quota that fits in 63 bits.",
+            "Use at most 1000000 workspaces, a storage quota that fits in 63 bits and a chat message limit of \
+             100–40000 characters.",
             instance,
             request_id.as_ref(),
         ));
     }
-    let image_proxy_fetches = match body.image_proxy_fetches {
-        Some(fetches) => fetches,
-        None => {
-            repository
-                .limits()
-                .await
-                .map_err(|error| internal(instance, request_id.as_ref()).cause(error))?
-                .image_proxy_fetches
-        }
-    };
+    let saved = repository
+        .limits()
+        .await
+        .map_err(|error| internal(instance, request_id.as_ref()).cause(error))?;
     repository
         .save_limits(
             session.user.id,
             InstanceLimits {
                 max_owned_workspaces,
                 workspace_storage_quota_bytes,
-                image_proxy_fetches,
+                image_proxy_fetches: body
+                    .image_proxy_fetches
+                    .unwrap_or(saved.image_proxy_fetches),
+                chat_message_max_chars: body
+                    .chat_message_max_chars
+                    .unwrap_or(saved.chat_message_max_chars),
             },
             request_id_value(request_id.as_ref()),
             TimestampMillis::now(),

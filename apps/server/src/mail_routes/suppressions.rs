@@ -10,7 +10,7 @@ use utoipa::{IntoParams, ToSchema};
 
 use super::{Call, MailState, RequestIdExtension};
 use crate::repositories::mail::{MailOutboundRecipient, Suppression};
-use crate::task_routes::{ApiError, ApiQuery};
+use crate::task_routes::{ApiError, ApiJson, ApiQuery};
 
 #[derive(Serialize, ToSchema)]
 pub(crate) struct MailSuppression {
@@ -87,6 +87,43 @@ pub(crate) async fn list_mail_suppressions(
         items: page.items.into_iter().map(suppression_view).collect(),
         cursor: page.cursor,
     }))
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct AddMailSuppressionRequest {
+    /// The address that Orbit must not send to.
+    address: String,
+    /// Why it is on the list (up to 500 characters).
+    detail: Option<String>,
+}
+
+/// Puts an address on the suppression list by hand (owners and admins); Orbit skips it when it
+/// sends. A 409 `suppression_exists` when it is on the list already.
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/mail/suppressions", params(("workspace_id" = String, Path)), request_body = AddMailSuppressionRequest, responses((status = 201, body = MailSuppression)))]
+pub(crate) async fn add_mail_suppression(
+    State(state): State<MailState>,
+    Path(workspace): Path<String>,
+    headers: HeaderMap,
+    uri: Uri,
+    request_id: RequestIdExtension,
+    ApiJson(body): ApiJson<AddMailSuppressionRequest>,
+) -> Result<(StatusCode, Json<MailSuppression>), ApiError> {
+    let call = Call::enter(&state, &headers, &uri, &workspace, &request_id).await?;
+    let now = now(&state, &call).await?;
+    let entry = state
+        .mail
+        .add_manual_suppression(
+            call.workspace_id,
+            call.actor_id,
+            &body.address,
+            body.detail.as_deref(),
+            call.request_id(),
+            now,
+        )
+        .await
+        .map_err(|error| call.problem(error))?;
+    Ok((StatusCode::CREATED, Json(suppression_view(entry))))
 }
 
 /// Removes an address from the suppression list (owners and admins); mail to it goes again.

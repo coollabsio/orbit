@@ -914,6 +914,9 @@ impl MailRepository {
         request_id: &str,
     ) -> Result<SendRoute, MailError> {
         let name = clean_name(&input.name)?;
+        if self.cloud && input.kind == SendRouteKind::Direct {
+            return Err(MailError::Unprocessable("direct_not_available"));
+        }
         if !input.secrets.fits(input.kind) || !input.secrets.complete() {
             return Err(MailError::Invalid { field: "secrets" });
         }

@@ -181,11 +181,17 @@ impl MailRepository {
     }
 
     /// Sets whether this is Orbit Cloud: a workspace without a send policy is then `new`, else
-    /// `standard` (spec §5.8).
+    /// `unlimited` (spec §5.8), and no route sends directly from the server.
     #[must_use]
     pub const fn with_cloud(mut self, cloud: bool) -> Self {
         self.cloud = cloud;
         self
+    }
+
+    /// Whether this is Orbit Cloud.
+    #[must_use]
+    pub const fn cloud(&self) -> bool {
+        self.cloud
     }
 
     #[must_use]

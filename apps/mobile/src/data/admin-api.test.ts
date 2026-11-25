@@ -104,14 +104,16 @@ test('the Email form keeps the saved password when the field is empty and trims 
 
 test('limits: empty or 0 is no limit, storage is in GB, anything else is refused', () => {
   expect([parseLimit(''), parseLimit('0'), parseLimit('3'), parseLimit('1.5', 1_000_000_000), parseLimit('-1'), parseLimit('x')]).toEqual([null, null, 3, 1_500_000_000, undefined, undefined])
-  expect(limitsDraft({ max_owned_workspaces: 2, workspace_storage_quota_bytes: 2_500_000_000, image_proxy_fetches: 32 })).toEqual({ workspaces: '2', storageGb: '2.5' })
-  expect(limitsDraft({ image_proxy_fetches: 32 })).toEqual({ workspaces: '', storageGb: '' })
-  expect(limitsBody({ workspaces: '', storageGb: '10' })).toEqual({ max_owned_workspaces: null, workspace_storage_quota_bytes: 10_000_000_000 })
-  expect(limitsBody({ workspaces: 'many', storageGb: '' })).toBeNull()
+  expect(limitsDraft({ max_owned_workspaces: 2, workspace_storage_quota_bytes: 2_500_000_000, image_proxy_fetches: 32, chat_message_max_chars: 20_000 })).toEqual({ workspaces: '2', storageGb: '2.5', chatChars: '20000' })
+  expect(limitsDraft({ max_owned_workspaces: null, workspace_storage_quota_bytes: null, image_proxy_fetches: 32, chat_message_max_chars: 20_000 })).toEqual({ workspaces: '', storageGb: '', chatChars: '20000' })
+  expect(limitsBody({ workspaces: '', storageGb: '10', chatChars: '5000' })).toEqual({ max_owned_workspaces: null, workspace_storage_quota_bytes: 10_000_000_000, chat_message_max_chars: 5000 })
+  expect(limitsBody({ workspaces: 'many', storageGb: '', chatChars: '5000' })).toBeNull()
+  // The chat message length always has a limit, in 100–40000.
+  expect(['', '0', '99', '40001', '1.5'].map((chatChars) => limitsBody({ workspaces: '', storageGb: '', chatChars }))).toEqual([null, null, null, null, null])
 })
 
 test('the image limit is a whole number from 1 to 256, saved with the other limits unchanged', () => {
-  const limits = { max_owned_workspaces: 2, workspace_storage_quota_bytes: null, image_proxy_fetches: 32 }
+  const limits = { max_owned_workspaces: 2, workspace_storage_quota_bytes: null, image_proxy_fetches: 32, chat_message_max_chars: 20_000 }
   expect(imageFetchesBody(limits, ' 8 ')).toEqual({ max_owned_workspaces: 2, workspace_storage_quota_bytes: null, image_proxy_fetches: 8 })
   expect(imageFetchesBody(limits, '256')?.image_proxy_fetches).toBe(256)
   for (const value of ['', '0', '257', '1.5', 'x']) expect(imageFetchesBody(limits, value)).toBeNull()

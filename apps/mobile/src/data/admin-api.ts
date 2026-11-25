@@ -367,20 +367,32 @@ export function parseLimit(value: string, scale = 1): number | null | undefined 
   return number === 0 ? null : Math.round(number * scale)
 }
 
-/** The Limits form's fields: workspaces per account, and storage per workspace in GB. */
-export function limitsDraft(limits: LimitsView): { workspaces: string; storageGb: string } {
+export const CHAT_CHARS_MIN = 100
+export const CHAT_CHARS_MAX = 40_000
+
+export interface LimitsDraft {
+  workspaces: string
+  storageGb: string
+  chatChars: string
+}
+
+/** The Limits form's fields: workspaces per account, storage per workspace in GB, and chat message length. */
+export function limitsDraft(limits: LimitsView): LimitsDraft {
   return {
     workspaces: limits.max_owned_workspaces ? String(limits.max_owned_workspaces) : '',
     storageGb: limits.workspace_storage_quota_bytes ? String(limits.workspace_storage_quota_bytes / BYTES_PER_GB) : '',
+    chatChars: String(limits.chat_message_max_chars),
   }
 }
 
-/** What the Limits form saves, or `null` when a field is not a number. */
-export function limitsBody(draft: { workspaces: string; storageGb: string }): LimitsBody | null {
+/** What the Limits form saves, or `null` when a field is not a number (the chat length always has a limit). */
+export function limitsBody(draft: LimitsDraft): LimitsBody | null {
   const workspaces = parseLimit(draft.workspaces)
   const storage = parseLimit(draft.storageGb, BYTES_PER_GB)
-  if (workspaces === undefined || storage === undefined) return null
-  return { max_owned_workspaces: workspaces, workspace_storage_quota_bytes: storage }
+  const chat = Number(draft.chatChars)
+  const chatValid = draft.chatChars.trim() !== '' && Number.isInteger(chat) && chat >= CHAT_CHARS_MIN && chat <= CHAT_CHARS_MAX
+  if (workspaces === undefined || storage === undefined || !chatValid) return null
+  return { max_owned_workspaces: workspaces, workspace_storage_quota_bytes: storage, chat_message_max_chars: chat }
 }
 
 /**

@@ -19,14 +19,15 @@ use crate::billing::guard::READ_ONLY_DETAIL;
 use crate::push::PushService;
 use crate::repositories::billing;
 use crate::repositories::chat::{
-    BotPost, ChatError, MESSAGE_MAX_CHARS, MessageBlock, WebhookInput, WebhookRecord,
+    BotPost, ChatError, MARKDOWN_MAX_CHARS, MessageBlock, WebhookInput, WebhookRecord,
     WebhookWithSecret, attachment_blocks, check_message_blocks, cut, emoji_name,
     mrkdwn_to_markdown, parse_blocks,
 };
 use crate::task_routes::{ApiError, ApiJson};
 
-/// The largest hook body: far above 4000 characters of text and the Slack fields Orbit ignores.
-const MAX_HOOK_BODY_BYTES: usize = 64 * 1024;
+/// The largest hook body: far above the 40,000-character message ceiling and the Slack fields Orbit
+/// ignores.
+const MAX_HOOK_BODY_BYTES: usize = 256 * 1024;
 
 #[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
@@ -60,8 +61,9 @@ pub(crate) struct ChatWebhookWithUrl {
 #[derive(Deserialize, ToSchema)]
 pub(crate) struct IncomingWebhookPayload {
     /// Slack mrkdwn or Markdown; mentions are tokens: `<@user_id>`, `<#channel_id>`,
-    /// `<!channel>`, `<!here>`. Longer than 4000 characters, it is cut. With `blocks` or
-    /// `attachments` it is the plain text for notifications and search, and may be left out.
+    /// `<!channel>`, `<!here>`. Longer than the message limit (Admin → Limits, 20,000 characters
+    /// by default), it is cut. With `blocks` or `attachments` it is the plain text for
+    /// notifications and search, and may be left out.
     #[schema(required = false)]
     text: Option<String>,
     /// `false` shows `text` as it is, without formatting (Slack's `mrkdwn`).
@@ -333,7 +335,7 @@ fn build_post(
         && let Some(text) = &text
     {
         blocks.push(MessageBlock::Markdown {
-            text: cut(text, MESSAGE_MAX_CHARS),
+            text: cut(text, MARKDOWN_MAX_CHARS),
         });
     }
     blocks.extend(attachments);
@@ -349,9 +351,8 @@ fn build_post(
         })
         .transpose()?;
     Ok(BotPost {
-        text: text
-            .map(|text| cut(&text, MESSAGE_MAX_CHARS))
-            .unwrap_or_default(),
+        // Cut to the instance limit by `bot_message_parts`.
+        text: text.unwrap_or_default(),
         blocks: (!blocks.is_empty()).then_some(blocks),
         // Slack takes any name and icon; Orbit cuts the name and leaves out what it cannot show.
         username: payload

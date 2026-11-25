@@ -54,10 +54,20 @@ function parseLimit(value: string, scale = 1): number | null | undefined {
   return number === 0 ? null : Math.round(number * scale)
 }
 
+const CHAT_CHARS_MIN = 100
+const CHAT_CHARS_MAX = 40_000
+
+/** A whole number of characters in the allowed range; `undefined` otherwise. Chat messages always have a limit. */
+function parseChatLimit(value: string): number | undefined {
+  const number = Number(value)
+  return Number.isInteger(number) && number >= CHAT_CHARS_MIN && number <= CHAT_CHARS_MAX ? number : undefined
+}
+
 function LimitsCard({ limits }: { limits: LimitsView }) {
   const save = useSaveLimits()
   const [workspaces, setWorkspaces] = useState(limits.max_owned_workspaces ? String(limits.max_owned_workspaces) : '')
   const [storage, setStorage] = useState(limits.workspace_storage_quota_bytes ? String(limits.workspace_storage_quota_bytes / BYTES_PER_GB) : '')
+  const [chatChars, setChatChars] = useState(String(limits.chat_message_max_chars))
 
   function submit(event: React.FormEvent) {
     event.preventDefault()
@@ -67,7 +77,12 @@ function LimitsCard({ limits }: { limits: LimitsView }) {
       toast.error('Enter a number, or leave the field empty for no limit.')
       return
     }
-    save.mutate({ max_owned_workspaces: maxOwnedWorkspaces, workspace_storage_quota_bytes: storageQuota }, {
+    const chatMessageMaxChars = parseChatLimit(chatChars)
+    if (chatMessageMaxChars === undefined) {
+      toast.error(`Enter a chat message length from ${CHAT_CHARS_MIN} to ${CHAT_CHARS_MAX}.`)
+      return
+    }
+    save.mutate({ max_owned_workspaces: maxOwnedWorkspaces, workspace_storage_quota_bytes: storageQuota, chat_message_max_chars: chatMessageMaxChars }, {
       onSuccess: () => toast('Limits saved'),
       onError: (error) => toast.error(problemText(error, 'The limits could not be saved.')),
     })
@@ -75,7 +90,7 @@ function LimitsCard({ limits }: { limits: LimitsView }) {
 
   return (
     <form onSubmit={submit}>
-      <SettingsCard title="Limits" description="What one account and one workspace may use. Empty or 0 means no limit. A lower limit removes nothing that exists.">
+      <SettingsCard title="Limits" description="What one account and one workspace may use. Empty or 0 means no limit, except for chat messages. A lower limit removes or cuts nothing that exists.">
         <FieldGrid>
           <Field>
             <FieldLabel htmlFor="limit-workspaces">Workspaces per account <InfoTip text="Workspaces one account may own, not counting the trash. Admins have no limit." /></FieldLabel>
@@ -84,6 +99,10 @@ function LimitsCard({ limits }: { limits: LimitsView }) {
           <Field>
             <FieldLabel htmlFor="limit-storage">Storage per workspace (GB) <InfoTip text="Files, emoji and stickers of one workspace, each file counted once." /></FieldLabel>
             <Input id="limit-storage" type="number" min={0} step="any" placeholder="No limit" value={storage} onChange={(event) => setStorage(event.target.value)} />
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="limit-chat-chars">Chat message length (characters) <InfoTip text={`The most characters a new or edited chat message can have: ${CHAT_CHARS_MIN}–${CHAT_CHARS_MAX}. Existing messages keep their text. A longer message must be shortened to be edited.`} /></FieldLabel>
+            <Input id="limit-chat-chars" type="number" required min={CHAT_CHARS_MIN} max={CHAT_CHARS_MAX} step={1} value={chatChars} onChange={(event) => setChatChars(event.target.value)} />
           </Field>
         </FieldGrid>
         <div className="mt-4 flex justify-end">

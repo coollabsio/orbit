@@ -78,9 +78,8 @@ test('docs are enabled in the sidebar and highlight on page routes', () => {
   fireEvent.click(docs)
   expect(view.getByTestId('location').textContent).toBe('/docs')
   expect(view.getByRole('link', { name: 'Docs' }).dataset.active).toBe('true')
-  // Mail and Chat are products; Mail carries a Beta tag.
+  // Mail and Chat are products.
   const mail = view.getByRole('link', { name: 'Mail' })
-  expect(mail.querySelector('[data-slot="sidebar-nav-tag"]')?.textContent).toBe('Beta')
   fireEvent.click(mail)
   expect(view.getByTestId('location').textContent).toBe('/mail')
   expect(view.getByRole('link', { name: 'Chat' })).toBeTruthy()

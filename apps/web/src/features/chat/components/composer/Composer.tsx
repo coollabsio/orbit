@@ -24,7 +24,8 @@ import { useMentionAutocomplete } from '@/lib/useMentionAutocomplete'
 import { useChatHost } from '../../chatHost'
 import { useChatContext } from '../../api/chatContext'
 import { useSendMessage, useSendTyping } from '../../api/mutations'
-import { MESSAGE_MAX_LENGTH, type Conversation, type Message } from '../../api/types'
+import { useMessageMaxLength } from '../../api/queries'
+import type { Conversation, Message } from '../../api/types'
 import { clearDraft, getDraft, setDraft } from '../../lib/drafts'
 import { completeEmoticon, replaceEmoticons } from '../../lib/emoticons'
 import { encodeMentions, extractMentions } from '../../lib/mentionTokens'
@@ -130,7 +131,7 @@ export function Composer({ ref, conversation, threadRootId = null, replyTo = nul
   const body = encodeMentions(replaceEmoticons(text.trim()), people.members, people.channels)
   const attachments = uploads.flatMap((upload) => (upload.attachment ? [upload.attachment] : []))
   const uploadsReady = uploads.every((upload) => upload.status === 'done')
-  const remaining = MESSAGE_MAX_LENGTH - body.length
+  const remaining = useMessageMaxLength() - body.length
   const canSend = (body !== '' || attachments.length > 0) && uploadsReady && remaining >= 0
   const globalMention = GLOBAL_MENTION.test(text)
 

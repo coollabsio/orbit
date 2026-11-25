@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { apiClient } from '@/api/client'
 import {
   addMailboxAlias,
+  addMailSuppression,
   cancelMailCertificateOrder,
   startMailCertificate,
   verifyMailCertificate,
@@ -1029,6 +1030,17 @@ export function useRotateDkim() {
       required((await rotateMailDomainDkim({ client: apiClient, path: { workspace_id: workspaceId, domain_id: domainId }, throwOnError: true })).data),
     onSuccess: (domain) => queryClient.setQueryData(mailKeys.domain(workspaceId, domain.id), domain),
     onSettled: () => queryClient.invalidateQueries({ queryKey: mailKeys.domains(workspaceId), exact: true }),
+  })
+}
+
+/** Puts an address on the suppression list by hand: Orbit no longer sends to it. */
+export function useAddSuppression() {
+  const queryClient = useQueryClient()
+  const workspaceId = useWorkspaceId()
+  return useMutation({
+    mutationFn: async (body: { address: string; detail?: string }) =>
+      (await addMailSuppression({ client: apiClient, path: { workspace_id: workspaceId }, body, throwOnError: true })).data,
+    onSettled: () => queryClient.invalidateQueries({ queryKey: mailKeys.suppressions(workspaceId) }),
   })
 }
 

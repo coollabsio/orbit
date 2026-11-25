@@ -24,8 +24,8 @@ use serde::de::DeserializeOwned;
 use thiserror::Error;
 
 use super::model::{
-    ATTACHMENT_FIELDS, AsanaAttachment, AsanaProject, AsanaStory, AsanaTask, AsanaUser,
-    AsanaWorkspace, Named, STORY_FIELDS, TASK_FIELDS,
+    ATTACHMENT_FIELDS, AsanaAttachment, AsanaProject, AsanaStory, AsanaTask, AsanaTimeEntry,
+    AsanaUser, AsanaWorkspace, Named, STORY_FIELDS, TASK_FIELDS, TIME_ENTRY_FIELDS,
 };
 use crate::notion::files::sanitize_file_name;
 use crate::task_import::{RateLimiter, backoff, is_transient, parse_retry_after};
@@ -335,6 +335,18 @@ impl AsanaClient {
         self.get_all(
             &format!("/tasks/{gid}/stories"),
             &[("opt_fields", STORY_FIELDS)],
+            usize::MAX,
+        )
+        .await
+    }
+
+    /// `GET /tasks/{gid}/time_tracking_entries`. A domain without time tracking answers 402
+    /// ([`AsanaError::PaymentRequired`]).
+    pub async fn time_entries(&self, task_gid: &str) -> Result<Vec<AsanaTimeEntry>, AsanaError> {
+        let gid = checked_gid(task_gid)?;
+        self.get_all(
+            &format!("/tasks/{gid}/time_tracking_entries"),
+            &[("opt_fields", TIME_ENTRY_FIELDS)],
             usize::MAX,
         )
         .await

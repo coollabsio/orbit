@@ -103,6 +103,8 @@ pub struct InstanceLimits {
     /// Outside images (1–256) that one server loads at once for the image proxy. `ORBIT_IMAGE_PROXY_FETCHES`
     /// replaces the saved value.
     pub image_proxy_fetches: u32,
+    /// The most characters a new or edited chat message can have. Never unlimited.
+    pub chat_message_max_chars: u32,
 }
 
 /// What a save does with the stored SMTP password.
@@ -492,7 +494,8 @@ impl InstanceSettingsRepository {
 
     pub async fn limits(&self) -> Result<InstanceLimits, sqlx::Error> {
         let row = sqlx::query(
-            "SELECT max_owned_workspaces, workspace_storage_quota_bytes, image_proxy_fetches \
+            "SELECT max_owned_workspaces, workspace_storage_quota_bytes, image_proxy_fetches, \
+             chat_message_max_chars \
              FROM instance_settings WHERE id = 1",
         )
         .fetch_one(self.database.pool())
@@ -514,7 +517,17 @@ impl InstanceSettingsRepository {
                         .filter(|fetches| (1..=image_proxy::MAX_FETCHES_LIMIT).contains(fetches))
                         .unwrap_or(image_proxy::DEFAULT_FETCHES)
                 }),
+            chat_message_max_chars: u32::try_from(row.get::<i64, _>("chat_message_max_chars"))
+                .unwrap_or(u32::MAX),
         })
+    }
+
+    /// The most characters a new or edited chat message can have (Admin → Limits).
+    pub async fn chat_message_max_chars(&self) -> Result<usize, sqlx::Error> {
+        let row = sqlx::query("SELECT chat_message_max_chars FROM instance_settings WHERE id = 1")
+            .fetch_one(self.database.pool())
+            .await?;
+        Ok(usize::try_from(row.get::<i64, _>("chat_message_max_chars")).unwrap_or(0))
     }
 
     pub async fn save_limits(
@@ -536,11 +549,13 @@ impl InstanceSettingsRepository {
         let mut transaction = self.database.immediate_transaction().await?;
         sqlx::query(
             "UPDATE instance_settings SET max_owned_workspaces = $1, workspace_storage_quota_bytes = $2, \
-             image_proxy_fetches = COALESCE($3, image_proxy_fetches), updated_at = $4 WHERE id = 1",
+             image_proxy_fetches = COALESCE($3, image_proxy_fetches), chat_message_max_chars = $4, \
+             updated_at = $5 WHERE id = 1",
         )
         .bind(max_owned_workspaces)
         .bind(storage_quota)
         .bind(image_proxy_fetches)
+        .bind(i64::from(limits.chat_message_max_chars))
         .bind(now.as_millis())
         .execute(&mut *transaction)
         .await?;
@@ -556,6 +571,7 @@ impl InstanceSettingsRepository {
                 "max_owned_workspaces": max_owned_workspaces,
                 "workspace_storage_quota_bytes": storage_quota,
                 "image_proxy_fetches": image_proxy_fetches,
+                "chat_message_max_chars": limits.chat_message_max_chars,
             }),
             now,
         )

@@ -1586,6 +1586,7 @@ impl OrbitImportService {
             "cycle" => "task_cycles",
             "task" => "tasks",
             "comment" => "task_comments",
+            "time_entry" => "task_time_entries",
             "attachment" => "attachment_references",
             "page" => "pages",
             "page_file" => "page_files",

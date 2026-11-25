@@ -5,6 +5,7 @@
 import {
   addMailboxAlias,
   addMailboxMember,
+  addMailSuppression,
   createMailbox as createMailboxRequest,
   createMailLabel as createLabelRequest,
   createPersonalMailboxes,
@@ -143,6 +144,10 @@ export async function deleteLabel(client: OrbitClient, workspaceId: string, labe
 
 export async function suppressionPage(client: OrbitClient, workspaceId: string, q: string | undefined, cursor: string | undefined): Promise<MailSuppressionPage> {
   return (await listMailSuppressions({ ...at(client, workspaceId), query: { q, cursor } })).data
+}
+
+export async function addSuppression(client: OrbitClient, workspaceId: string, body: { address: string; detail?: string }): Promise<MailSuppression> {
+  return (await addMailSuppression({ client, path: { workspace_id: workspaceId }, body, throwOnError: true })).data
 }
 
 export async function removeSuppression(client: OrbitClient, workspaceId: string, address: string): Promise<void> {

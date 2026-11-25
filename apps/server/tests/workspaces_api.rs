@@ -2631,9 +2631,27 @@ async fn an_account_owns_at_most_the_instance_limit_of_workspaces() {
     )
     .await;
     assert_eq!(saved.status(), StatusCode::OK);
+    // An omitted chat limit stays as it was (20000 by default).
     assert_eq!(
         response_json(saved).await["limits"],
-        json!({"max_owned_workspaces": 3, "workspace_storage_quota_bytes": null, "image_proxy_fetches": 32})
+        json!({"max_owned_workspaces": 3, "workspace_storage_quota_bytes": null, "image_proxy_fetches": 32, "chat_message_max_chars": 20000})
+    );
+    for outside in [99, 40_001] {
+        let invalid = save_limits(
+            root_cookie.clone(),
+            json!({"max_owned_workspaces": 3, "chat_message_max_chars": outside}),
+        )
+        .await;
+        assert_eq!(invalid.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
+    let saved = save_limits(
+        root_cookie.clone(),
+        json!({"max_owned_workspaces": 3, "chat_message_max_chars": 100}),
+    )
+    .await;
+    assert_eq!(
+        response_json(saved).await["limits"]["chat_message_max_chars"],
+        100
     );
     let (user_id, cookie) = create_user(&database, &identity, "tenant@example.com", "Tenant").await;
     let refused = save_limits(cookie.clone(), json!({"max_owned_workspaces": null})).await;

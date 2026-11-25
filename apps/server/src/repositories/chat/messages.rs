@@ -12,12 +12,11 @@ use super::stickers::load_sticker;
 use super::webhooks::{BotSender, HookTarget, clean_bot_name, clean_icon_url};
 use super::{
     Access, BotRecord, ChatError, ChatEvent, ChatRepository, Conversation, ConversationKind,
-    Events, FollowedThreadRecord, ForwardedRecord, MESSAGE_MAX_CHARS, MESSAGE_SELECT,
-    MentionsRecord, MessageKind, MessagePage, MessageRecord, ReplyToRecord, StickerRecord,
-    ThreadMember, ThreadPage, Written, current_state, finish, hydrate, id_list, in_ids,
-    json_values, load_access, load_actor, load_conversation, load_message, load_message_access,
-    load_thread_member, mentioned_user_ids, parse_id, parse_optional_id, public_for, reachable_dm,
-    thread_state,
+    Events, FollowedThreadRecord, ForwardedRecord, MESSAGE_SELECT, MentionsRecord, MessageKind,
+    MessagePage, MessageRecord, ReplyToRecord, StickerRecord, ThreadMember, ThreadPage, Written,
+    current_state, finish, hydrate, id_list, in_ids, json_values, load_access, load_actor,
+    load_conversation, load_message, load_message_access, load_thread_member, mentioned_user_ids,
+    parse_id, parse_optional_id, public_for, reachable_dm, thread_state,
 };
 
 const DEFAULT_PAGE: usize = 50;
@@ -302,6 +301,7 @@ impl ChatRepository {
         let body = clean_body(
             &input.body,
             !input.file_ids.is_empty() || input.sticker_id.is_some(),
+            self.message_max_chars().await?,
         )?;
         if input.file_ids.len() > MAX_MESSAGE_FILES {
             return Err(ChatError::Invalid { field: "file_ids" });
@@ -460,7 +460,8 @@ impl ChatRepository {
         post: BotPost,
     ) -> Result<Written<MessageRecord>, ChatError> {
         let thread_root_id = post.thread_root_id;
-        let (body, bot, blocks) = bot_message_parts(post, &target.sender)?;
+        let (body, bot, blocks) =
+            bot_message_parts(post, &target.sender, self.message_max_chars().await?)?;
         let now = TimestampMillis::now();
         let mut tx = self.database.immediate_transaction().await?;
         let conversation = load_conversation(&mut tx, target.workspace_id, target.conversation_id)
@@ -723,7 +724,7 @@ impl ChatRepository {
         message_id: Id,
         body: &str,
     ) -> Result<Written<MessageRecord>, ChatError> {
-        let body = clean_body(body, false)?;
+        let body = clean_body(body, false, self.message_max_chars().await?)?;
         let now = TimestampMillis::now();
         let mut tx = self.database.workspace_transaction(workspace_id).await?;
         let (access, message) =
@@ -900,13 +901,13 @@ impl ChatRepository {
 
 /// The stored body: without the two control characters that the search index uses as highlight
 /// markers, without empty lines and spaces at its start and end (as Discord stores a message; API
-/// and MCP clients send such lines too), at most 4000 characters, and not blank (unless the
-/// message has files or a sticker).
-fn clean_body(body: &str, may_be_blank: bool) -> Result<String, ChatError> {
+/// and MCP clients send such lines too), at most `max` characters (Admin → Limits), and not
+/// blank (unless the message has files or a sticker).
+fn clean_body(body: &str, may_be_blank: bool, max: usize) -> Result<String, ChatError> {
     let body = body.replace(['\u{2}', '\u{3}'], "");
     let body = body.trim();
-    if body.chars().count() > MESSAGE_MAX_CHARS {
-        return Err(ChatError::TooLong);
+    if body.chars().count() > max {
+        return Err(ChatError::TooLong { max });
     }
     if body.is_empty() && !may_be_blank {
         return Err(ChatError::Invalid { field: "body" });
@@ -1206,21 +1207,22 @@ pub(super) async fn remove_message(
     Ok(events)
 }
 
-/// The body, author and blocks of an integration's message: `text`, or without it the blocks'
-/// plain text; the webhook's name and icon unless the post sets its own (an emoji wins over an
+/// The body, author and blocks of an integration's message: `text` (cut to `max_chars`), or
+/// without it the blocks' plain text; the webhook's name and icon unless the post sets its own (an emoji wins over an
 /// icon URL, as in Slack).
 pub(super) fn bot_message_parts(
     post: BotPost,
     sender: &BotSender,
+    max_chars: usize,
 ) -> Result<(String, BotRecord, Option<Vec<MessageBlock>>), ChatError> {
     let text = match &post.blocks {
-        Some(blocks) if post.text.trim().is_empty() => fallback_text(blocks, MESSAGE_MAX_CHARS),
-        _ => post.text,
+        Some(blocks) if post.text.trim().is_empty() => fallback_text(blocks, max_chars),
+        _ => super::slack::cut(&post.text, max_chars),
     };
     if text.trim().is_empty() {
         return Err(ChatError::Invalid { field: "text" });
     }
-    let body = clean_body(&text, false)?;
+    let body = clean_body(&text, false, max_chars)?;
     let name = match post.username.as_deref() {
         Some(username) => clean_bot_name(username, "username")?,
         None => sender.name.clone(),

@@ -32,6 +32,7 @@ use crate::repositories::pages::PageError;
 use crate::repositories::task_recurrences::TaskRecurrence;
 use crate::repositories::task_relations::NewTaskRelationType;
 use crate::repositories::tasks::{TaskError, TaskRepository};
+use crate::repositories::time_entries::NewTimeEntry;
 use crate::token_api::{
     DOC_TOO_LARGE_DETAIL, DocMove, DocPatch, NewComment, NewDoc, NewTask, StatusPatch, TaskPatch,
     TaskQuery, TokenApi, TokenApiError, parse_cycle_filter, parse_milestone_filter,
@@ -423,6 +424,22 @@ struct DeleteRelationArgs {
 }
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+struct LogTimeArgs {
+    /// Task id, or its identifier such as ENG-12.
+    task_id: String,
+    /// Whole minutes, 1 to 1440 (1h 30m is 90).
+    minutes: u32,
+    /// The day of the work, YYYY-MM-DD. Default: today in the member's timezone.
+    worked_on: Option<String>,
+    /// What was done, as Markdown.
+    note: Option<String>,
+    billable: Option<bool>,
+    /// The member who did the work, from list_members. Default: you. Logging for someone else
+    /// needs the time.manage permission.
+    user_id: Option<String>,
+}
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 struct UpdateProjectArgs {
     project_id: String,
     /// The `version` that you read.
@@ -628,6 +645,7 @@ fn required_scope(name: &str) -> Option<ApiTokenScope> {
         | "create_project"
         | "create_task_relation"
         | "delete_task_relation"
+        | "log_time"
         | "update_project"
         | "create_task_status"
         | "update_task_status"
@@ -779,6 +797,15 @@ fn tools() -> Vec<Tool> {
             "create_task_relation",
             "Link two live tasks of approved projects: type blocks (task_id blocks other_task_id), blocked_by or related. A relation that already links the two tasks is replaced; the same relation again is returned unchanged. A duplicate relation, or a blocks relation in the other direction, is refused: delete it first. Mark duplicates in the web app.",
             true,
+        ),
+        definition::<TaskArgs>(
+            "list_time_entries",
+            "List the time logged on a live task in an approved project, by day worked: user_id, minutes, worked_on (YYYY-MM-DD), note, billable. total_minutes is the task's own time; sub_issues_minutes is the time of its live sub-issues in approved projects.",
+        ),
+        write_definition::<LogTimeArgs>(
+            "log_time",
+            "Log time spent on a live task in an approved project: minutes (1 to 1440), the day worked (today by default) and a Markdown note on what was done. user_id logs the time for another member and needs the time.manage permission.",
+            false,
         ),
         write_definition::<DeleteRelationArgs>(
             "delete_task_relation",
@@ -1345,6 +1372,28 @@ impl TaskTools {
                     }
                     result => result.map(|relation| json!(relation)),
                 }
+            }
+            "list_time_entries" => {
+                let a: TaskArgs = arguments(&request)?;
+                api.time_entries(&a.task_id)
+                    .await
+                    .map(|entries| json!(entries))
+            }
+            "log_time" => {
+                let a: LogTimeArgs = arguments(&request)?;
+                let user_id = a.user_id.as_deref().map(parse_id).transpose()?;
+                api.log_time(
+                    &a.task_id,
+                    NewTimeEntry {
+                        user_id,
+                        minutes: a.minutes,
+                        worked_on: a.worked_on,
+                        note: a.note.unwrap_or_default(),
+                        billable: a.billable.unwrap_or(false),
+                    },
+                )
+                .await
+                .map(|entry| json!(entry))
             }
             "delete_task_relation" => {
                 let a: DeleteRelationArgs = arguments(&request)?;

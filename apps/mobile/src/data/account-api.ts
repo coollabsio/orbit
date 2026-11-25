@@ -81,6 +81,7 @@ import type { MemberRecord, OrbitClient, User, WorkspaceRecord } from './orbit'
 import type { OAuthConnection } from '@orbit/api/mcp'
 import { STORAGE_FILES_PAGE } from '@orbit/api/storage'
 import { relativeTime } from './format'
+import type { ProjectPermission } from './permissions'
 
 export type { InvitationRecord, MemberProjectGrant, NotificationPrefs, OwnedWorkspace, PasskeyRecord, PushSubscriptionRecord, RoleProjectGrant, RolesResponse, SessionRecord, TotpSetup, TwoFactorStatus, WorkspaceBucketView, WorkspaceRoleRecord, WorkspaceStorage }
 
@@ -520,7 +521,7 @@ export async function revokeMemberProjectGrant(client: OrbitClient, workspaceId:
 }
 
 /** What each permission lets a member do, in words; `help` shows behind the info icon. */
-export const PERMISSION_LABELS: Record<Permission, { label: string; help: string }> = {
+export const PERMISSION_LABELS: Record<ProjectPermission, { label: string; help: string }> = {
   'workspace.update': { label: 'Edit workspace settings', help: 'Rename the workspace and change its general, storage and integration settings.' },
   'workspace.delete': { label: 'Delete the workspace', help: 'Move the workspace to the trash.' },
   'workspace.transfer': { label: 'Transfer ownership', help: 'Make another member the owner.' },
@@ -532,6 +533,7 @@ export const PERMISSION_LABELS: Record<Permission, { label: string; help: string
   'pages.purge': { label: 'Permanently delete pages and tasks (all projects)', help: "Permanently delete teamspace docs, and the tasks of every project." },
   'views.manage_shared': { label: 'Manage shared views', help: 'Edit and delete workspace views that other members made.' },
   'comments.moderate': { label: 'Moderate comments', help: 'Delete task comments that other members wrote.' },
+  'time.manage': { label: 'Manage time entries', help: 'Log time for other members, and edit or delete the time they logged.' },
   'chat.manage': { label: 'Manage chat', help: "Manage chat categories and channel order, edit and archive other members' channels, delete their messages, and manage emoji and stickers." },
   'mail.manage': { label: 'Manage mail', help: "Manage the workspace's mail domains, mailboxes and their addresses and members, labels and failed receipts." },
   'billing.manage': { label: 'Manage billing', help: "Subscribe to and manage the workspace's Orbit Cloud plan." },
