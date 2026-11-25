@@ -633,6 +633,9 @@ pub(crate) fn detail(code: &'static str) -> &'static str {
         }
         "route_is_default" => "Choose another default route, or clear it, first.",
         "route_in_use" => "Use another route on the domains that use this one first.",
+        "direct_not_available" => {
+            "Orbit Cloud does not send mail directly. Use an SMTP relay or an email API route."
+        }
         "hostname_required" => {
             "Sending directly needs the mail server's host name (ORBIT_MAIL_HOSTNAME)."
         }

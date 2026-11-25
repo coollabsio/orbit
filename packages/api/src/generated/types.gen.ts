@@ -5542,10 +5542,7 @@ export type MailSendPolicy = {
      * Percent of them that bounced hard.
      */
     hard_bounce_rate_7d: number;
-    /**
-     * The numbers that apply now (the tier's, or the custom ones).
-     */
-    limits: Limits;
+    limits: null | Limits;
     pause_reason?: string | null;
     /**
      * Set while sending is paused.
@@ -5572,7 +5569,8 @@ export type MailSendPolicyList = {
 export type MailSendRouteList = {
     default_route_id?: string | null;
     /**
-     * `ORBIT_MAIL_HOSTNAME` is set, so the `direct` kind can be created.
+     * `ORBIT_MAIL_HOSTNAME` is set and this is not Orbit Cloud, so the `direct` kind can be
+     * created.
      */
     direct_available: boolean;
     /**
@@ -10851,7 +10849,7 @@ export type SendMailDraftBody = {
 /**
  * A send tier (spec §5.8).
  */
-export type SendTier = 'new' | 'standard' | 'custom';
+export type SendTier = 'new' | 'standard' | 'custom' | 'unlimited';
 
 export type SessionRecord = {
     absolute_expires_at: string;
@@ -27218,7 +27216,7 @@ export type CreateInstanceMailProviderSendRouteErrors = {
      */
     413: TaskProblem;
     /**
-     * validation_failed, hostname_required, private_host_refused, plain_smtp_refused
+     * validation_failed, hostname_required, direct_not_available, private_host_refused, plain_smtp_refused
      */
     422: TaskProblem;
     /**
@@ -27596,7 +27594,7 @@ export type CreateInstanceMailSendRouteErrors = {
      */
     413: TaskProblem;
     /**
-     * validation_failed, hostname_required, private_host_refused, plain_smtp_refused
+     * validation_failed, hostname_required, direct_not_available, private_host_refused, plain_smtp_refused
      */
     422: TaskProblem;
     /**
@@ -27716,7 +27714,7 @@ export type UpdateInstanceMailSendRouteErrors = {
      */
     413: TaskProblem;
     /**
-     * validation_failed, hostname_required, private_host_refused, plain_smtp_refused
+     * validation_failed, hostname_required, direct_not_available, private_host_refused, plain_smtp_refused
      */
     422: TaskProblem;
     /**
@@ -46853,7 +46851,7 @@ export type CreateWorkspaceMailProviderSendRouteErrors = {
      */
     413: TaskProblem;
     /**
-     * validation_failed, hostname_required, private_host_refused, plain_smtp_refused
+     * validation_failed, hostname_required, direct_not_available, private_host_refused, plain_smtp_refused
      */
     422: TaskProblem;
     /**
@@ -47209,7 +47207,7 @@ export type CreateWorkspaceMailSendRouteErrors = {
      */
     413: TaskProblem;
     /**
-     * validation_failed, hostname_required, private_host_refused, plain_smtp_refused
+     * validation_failed, hostname_required, direct_not_available, private_host_refused, plain_smtp_refused
      */
     422: TaskProblem;
     /**
@@ -47331,7 +47329,7 @@ export type UpdateWorkspaceMailSendRouteErrors = {
      */
     413: TaskProblem;
     /**
-     * validation_failed, hostname_required, private_host_refused, plain_smtp_refused
+     * validation_failed, hostname_required, direct_not_available, private_host_refused, plain_smtp_refused
      */
     422: TaskProblem;
     /**

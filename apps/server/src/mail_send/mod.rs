@@ -335,7 +335,7 @@ impl Delivery for Shared {
 
 /// An adapter that cannot send (a setting or secret is missing): every recipient is deferred, so
 /// the message goes out once the admin fixes the route.
-struct Refuse(String);
+pub(super) struct Refuse(pub(super) String);
 
 impl Delivery for Refuse {
     fn deliver<'a>(

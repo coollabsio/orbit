@@ -1,5 +1,9 @@
 //! Send limits (spec §5.8): the numbers of a workspace's tier and the sliding windows they apply to.
 //!
+//! The limits and the pause cover only mail through a shared route: an instance route (the
+//! default route of every workspace without its own) or a Direct route (the server's own IP).
+//! A workspace's own relay or API provider enforces its own limits, so Orbit adds none.
+//!
 //! A recipient counts (Bcc included) when its message is released (`mail_outbound_recipients.
 //! released_at`). Task "release" inserts those rows, so a message that is `held` and already due
 //! but not yet released has no rows: the gate counts the recipients of such a message from its
@@ -31,15 +35,56 @@ const PROMOTE_HARD_BP: i64 = 200;
 const PROMOTE_COMPLAINT_BP: i64 = 10;
 const ADMIN_LIST_MAX: i64 = 500;
 
+/// Whether the route in `column` is shared, as SQL. A message without a route counts as shared.
+pub(super) fn shared_route(column: &str) -> String {
+    format!(
+        "({column} IS NULL OR {column} IN (SELECT id FROM mail_send_routes \
+         WHERE workspace_id IS NULL OR kind = 'direct'))"
+    )
+}
+
+/// Whether the limits and the pause cover a message through `route_id`: it is shared (see the
+/// module docs), or unknown.
+pub(super) async fn route_limited(
+    connection: &mut AnyConnection,
+    route_id: Option<Id>,
+) -> Result<bool, MailError> {
+    let Some(route_id) = route_id else {
+        return Ok(true);
+    };
+    let own: Option<String> = sqlx::query_scalar(
+        "SELECT id FROM mail_send_routes WHERE id = $1 AND workspace_id IS NOT NULL \
+         AND kind <> 'direct'",
+    )
+    .bind(route_id.to_string())
+    .fetch_optional(&mut *connection)
+    .await?;
+    Ok(own.is_none())
+}
+
+/// Whether sending through shared routes is paused for the workspace.
+pub(super) async fn paused(
+    connection: &mut AnyConnection,
+    workspace_id: Id,
+) -> Result<bool, MailError> {
+    let paused: Option<i64> =
+        sqlx::query_scalar("SELECT paused_at FROM mail_send_policies WHERE workspace_id = $1")
+            .bind(workspace_id.to_string())
+            .fetch_optional(&mut *connection)
+            .await?
+            .flatten();
+    Ok(paused.is_some())
+}
+
 /// `mail.send_policy`: one run at a time on the cluster.
 #[must_use]
 pub fn send_policy_kind() -> JobKind {
     JobKind::new(SEND_POLICY_JOB).with_concurrency_limit(1)
 }
 
-/// The tier a workspace without a policy row has: `new` on Orbit Cloud, else `standard`.
+/// The tier a workspace without a policy row has: `new` on Orbit Cloud, else `unlimited`.
 pub(super) const fn default_tier(cloud: bool) -> &'static str {
-    if cloud { "new" } else { "standard" }
+    if cloud { "new" } else { "unlimited" }
 }
 
 /// A send tier (spec §5.8).
@@ -49,6 +94,7 @@ pub enum SendTier {
     New,
     Standard,
     Custom,
+    Unlimited,
 }
 
 impl SendTier {
@@ -58,6 +104,7 @@ impl SendTier {
             Self::New => "new",
             Self::Standard => "standard",
             Self::Custom => "custom",
+            Self::Unlimited => "unlimited",
         }
     }
 
@@ -66,6 +113,7 @@ impl SendTier {
             "new" => Some(Self::New),
             "standard" => Some(Self::Standard),
             "custom" => Some(Self::Custom),
+            "unlimited" => Some(Self::Unlimited),
             _ => None,
         }
     }
@@ -77,8 +125,9 @@ pub struct SendPolicyView {
     pub workspace_id: Id,
     pub workspace_name: String,
     pub tier: SendTier,
-    pub limits: Limits,
-    /// Recipients released by the workspace in the last hour and day.
+    /// `None` on the `unlimited` tier.
+    pub limits: Option<Limits>,
+    /// Recipients released by the workspace through shared routes in the last hour and day.
     pub use_hour: i64,
     pub use_day: i64,
     /// Percent of the recipients released in 7 days that bounced hard / complained.
@@ -91,7 +140,8 @@ pub struct SendPolicyView {
     pub first_release_at: Option<TimestampMillis>,
 }
 
-/// Hard bounces and complaints among the recipients released in the 7 days up to `now`:
+/// Hard bounces and complaints among the recipients released through a shared route in the 7
+/// days up to `now`:
 /// (recipients, hard bounces, complaints). A complaint is a recipient a provider reported a
 /// complaint about (`complained_at`) in the window, also when its address was on the
 /// suppression list already. After a resume (`mail_send_policies.resumed_at`) only recipients
@@ -110,13 +160,14 @@ async fn rates(
             .await?
             .flatten();
     let since = (now - WEEK_MS).max(resumed.unwrap_or(i64::MIN));
-    let row = sqlx::query(
+    let shared = shared_route("o.route_id");
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(
         "SELECT COUNT(*) AS total, \
          CAST(COALESCE(SUM(CASE WHEN r.bounce_kind = 'hard' THEN 1 ELSE 0 END), 0) AS BIGINT) AS hard \
          FROM mail_outbound_recipients r JOIN mail_outbound o ON o.id = r.outbound_id \
          WHERE r.workspace_id = $1 AND o.automatic = 0 AND r.released_at > $2 \
-         AND r.released_at <= $3",
-    )
+         AND r.released_at <= $3 AND {shared}"
+    )))
     .bind(workspace_id.to_string())
     .bind(since)
     .bind(now)
@@ -130,7 +181,8 @@ async fn rates(
     let mut complaints = sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(format!(
         "SELECT COUNT(*) FROM mail_outbound_recipients r \
          JOIN mail_outbound o ON o.id = r.outbound_id WHERE r.workspace_id = $1 \
-         AND o.automatic = 0 AND r.complained_at > $2 AND r.complained_at <= $3{resumed_filter}"
+         AND o.automatic = 0 AND r.complained_at > $2 AND r.complained_at <= $3 \
+         AND {shared}{resumed_filter}"
     )))
     .bind(workspace_id.to_string())
     .bind(now - WEEK_MS)
@@ -263,14 +315,15 @@ impl MailRepository {
     }
 }
 
-/// The limits of the workspace: its tier's numbers from the instance settings, or its own when the
-/// tier is `custom`. A workspace without a policy row is `new` on Orbit Cloud (`cloud`), else
-/// `standard`. Numbers that cannot be read fail closed to the `new` tier.
+/// The limits of the workspace: its tier's numbers from the instance settings, its own when the
+/// tier is `custom`, or `None` when the tier is `unlimited`. A workspace without a policy row is
+/// `new` on Orbit Cloud (`cloud`), else `unlimited`. Numbers that cannot be read fail closed to the
+/// `new` tier.
 pub(super) async fn load_limits(
     connection: &mut AnyConnection,
     workspace_id: Id,
     cloud: bool,
-) -> Result<Limits, MailError> {
+) -> Result<Option<Limits>, MailError> {
     let policy =
         sqlx::query("SELECT tier, custom_limits FROM mail_send_policies WHERE workspace_id = $1")
             .bind(workspace_id.to_string())
@@ -283,8 +336,11 @@ pub(super) async fn load_limits(
         ),
         None => (default_tier(cloud).to_owned(), None),
     };
+    if tier == "unlimited" {
+        return Ok(None);
+    }
     if tier == "custom" {
-        return Ok(
+        return Ok(Some(
             match custom.as_deref().map(serde_json::from_str::<Limits>) {
                 Some(Ok(limits)) => limits,
                 _ => {
@@ -292,7 +348,7 @@ pub(super) async fn load_limits(
                     Limits::NEW
                 }
             },
-        );
+        ));
     }
     let tiers: Option<String> =
         sqlx::query_scalar("SELECT mail_send_tiers FROM instance_settings WHERE id = 1")
@@ -300,13 +356,13 @@ pub(super) async fn load_limits(
             .await?;
     let Some(Ok(tiers)) = tiers.as_deref().map(serde_json::from_str::<Tiers>) else {
         tracing::warn!("mail_send_tiers is missing or malformed");
-        return Ok(Limits::NEW);
+        return Ok(Some(Limits::NEW));
     };
-    Ok(if tier == "new" {
+    Ok(Some(if tier == "new" {
         tiers.new.unwrap_or(Limits::NEW)
     } else {
         tiers.standard.unwrap_or(Limits::NEW)
-    })
+    }))
 }
 
 /// The recipients of due, unreleased messages in the window (they have no recipient rows yet),
@@ -323,11 +379,14 @@ async fn due_held(
         "SELECT o.release_at, d.to_addrs, d.cc_addrs, d.bcc_addrs FROM mail_outbound o \
          JOIN mail_drafts d ON d.id = o.draft_id WHERE o.status = 'held' AND o.release_at > ",
     );
+    let shared = shared_route("o.route_id");
     due.push_bind(since);
     due.push(" AND o.release_at <= ");
     due.push_bind(now);
     due.push(" AND o.workspace_id = ");
     due.push_bind(workspace_id.to_string());
+    due.push(" AND ");
+    due.push(&shared);
     if let Some(membership_id) = membership_id {
         due.push(" AND o.membership_id = ");
         due.push_bind(membership_id.to_string());
@@ -353,7 +412,8 @@ async fn due_held(
     Ok(list)
 }
 
-/// The filter of the released recipients of a scope in a window, without those of `exclude`.
+/// The filter of the recipients of a scope released through a shared route in a window, without
+/// those of `exclude`.
 fn released_filter(
     head: &str,
     workspace_id: Id,
@@ -368,6 +428,9 @@ fn released_filter(
     sql.push_bind(now);
     sql.push(" AND workspace_id = ");
     sql.push_bind(workspace_id.to_string());
+    sql.push(" AND outbound_id IN (SELECT o.id FROM mail_outbound o WHERE ");
+    sql.push(&shared_route("o.route_id"));
+    sql.push(")");
     if let Some(membership_id) = membership_id {
         sql.push(" AND membership_id = ");
         sql.push_bind(membership_id.to_string());
@@ -457,8 +520,8 @@ fn next_ok(list: &[(i64, i64)], now: i64, window: i64, limit: i64, count: i64) -
 }
 
 impl MailRepository {
-    /// The limits that apply to the workspace.
-    pub async fn limits_for(&self, workspace_id: Id) -> Result<Limits, MailError> {
+    /// The limits that apply to the workspace: `None` when it has none.
+    pub async fn limits_for(&self, workspace_id: Id) -> Result<Option<Limits>, MailError> {
         let mut connection = self.database.pool().acquire().await?;
         load_limits(&mut connection, workspace_id, self.cloud).await
     }
@@ -477,7 +540,9 @@ impl MailRepository {
         now: TimestampMillis,
         exclude: Option<Id>,
     ) -> Result<Option<TimestampMillis>, MailError> {
-        let limits = load_limits(transaction, workspace_id, self.cloud).await?;
+        let Some(limits) = load_limits(transaction, workspace_id, self.cloud).await? else {
+            return Ok(None);
+        };
         let now = now.as_millis();
         let mut later = None;
         for (member, window, limit) in [
@@ -624,11 +689,13 @@ impl MailRepository {
         let limits = load_limits(connection, workspace_id, self.cloud).await?;
         let now = now.as_millis();
         let mut used = [0_i64; 2];
+        let shared = shared_route("o.route_id");
         for (slot, window) in used.iter_mut().zip([HOUR_MS, DAY_MS]) {
-            *slot = sqlx::query_scalar(
+            *slot = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
                 "SELECT COUNT(*) FROM mail_outbound_recipients WHERE workspace_id = $1 \
-                 AND released_at > $2 AND released_at <= $3",
-            )
+                 AND released_at > $2 AND released_at <= $3 \
+                 AND outbound_id IN (SELECT o.id FROM mail_outbound o WHERE {shared})"
+            )))
             .bind(workspace_id.to_string())
             .bind(now - window)
             .bind(now)
@@ -714,7 +781,7 @@ impl MailRepository {
     }
 
     /// Sets the workspace's tier (instance admins). `custom` needs `custom` limits (all numbers
-    /// at least 1); the other tiers drop them. Makes the policy row when there is none.
+    /// at least 1); the other tiers drop them. `unlimited` removes every limit. Makes the policy row when there is none.
     pub async fn set_send_policy(
         &self,
         workspace_id: Id,

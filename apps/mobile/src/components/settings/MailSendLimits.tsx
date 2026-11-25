@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { View } from 'react-native'
 
 import type { SendTier } from '@orbit/api/generated/types.gen'
-import { LIMIT_FIELDS, type LimitTexts, limitNumbers, limitsValid, limitTexts, type MailSendPolicy, type TierLimits } from '../../data/admin-mail-api'
+import { LIMIT_FIELDS, type LimitTexts, limitNumbers, limitsValid, limitTexts, type MailSendPolicy, STANDARD_LIMITS, type TierLimits } from '../../data/admin-mail-api'
 import { count, limitRows, mailProblem, percent, since, TIER_LABELS } from '../../data/mail-settings'
 import { useAuthOptions } from '../../hooks/account'
 import { useSendLimitWrites, useSendPolicies, useSendTiers } from '../../hooks/admin-mail'
@@ -45,8 +45,8 @@ function TierDefaultsCard() {
       title="Tier limits"
       description={
         cloud
-          ? 'A new workspace starts on New. Orbit moves it to Standard after 14 days of sending without a pause, with under 2 % hard bounces and under 0.1 % complaints. Sending pauses when, over at least 100 recipients in 7 days, more than 5 % bounce hard or more than 0.3 % complain.'
-          : 'A new workspace starts on Standard. A workspace on New moves to Standard after 14 days of sending without a pause, with under 2 % hard bounces and under 0.1 % complaints. Sending pauses when, over at least 100 recipients in 7 days, more than 5 % bounce hard or more than 0.3 % complain.'
+          ? 'Limits and the pause apply only to mail sent through a shared route: the instance default route or Direct. A workspace\'s own relay or email API has none. A new workspace starts on New. Orbit moves it to Standard after 14 days of sending without a pause, with under 2 % hard bounces and under 0.1 % complaints. Sending pauses when, over at least 100 recipients in 7 days, more than 5 % bounce hard or more than 0.3 % complain.'
+          : 'Limits and the pause apply only to mail sent through a shared route: the instance default route or Direct. A workspace\'s own relay or email API has none. A new workspace starts on Unlimited: it has no send limits. To limit a workspace, choose New, Standard or Custom under Sending by workspace. A workspace on New moves to Standard after 14 days of sending without a pause, with under 2 % hard bounces and under 0.1 % complaints. Sending pauses when, over at least 100 recipients in 7 days, more than 5 % bounce hard or more than 0.3 % complain.'
       }
     >
       {tiers.isPending ? <Note loading>Loading tier limits…</Note> : null}
@@ -124,7 +124,9 @@ function PolicyRow({ policy, first, onSetLimits }: { policy: MailSendPolicy; fir
           {policy.paused_at ? <Badge label="Paused" tone="destructive" /> : null}
         </View>
         <Text className="text-[12px] leading-[17px] text-muted-foreground">
-          {number(policy.use_hour)} of {number(policy.limits.per_ws_hour)} this hour · {number(policy.use_day)} of {number(policy.limits.per_ws_day)} today
+          {policy.limits
+            ? `${number(policy.use_hour)} of ${number(policy.limits.per_ws_hour)} this hour · ${number(policy.use_day)} of ${number(policy.limits.per_ws_day)} today`
+            : `${number(policy.use_hour)} this hour · ${number(policy.use_day)} today`}
         </Text>
         <Text className="text-[12px] leading-[17px] text-muted-foreground">
           7 days: {count(policy.recipients_7d, 'recipient', 'recipients')} · {percent(policy.hard_bounce_rate_7d)} bounced · {percent(policy.complaint_rate_7d)} complained
@@ -165,6 +167,7 @@ const TIER_OPTIONS: { value: SendTier; label: string }[] = [
   { value: 'new', label: 'New' },
   { value: 'standard', label: 'Standard' },
   { value: 'custom', label: 'Custom' },
+  { value: 'unlimited', label: 'Unlimited' },
 ]
 
 /** **Set limits**: a tier, or custom numbers (1 to 10,000,000 each). */
@@ -172,7 +175,7 @@ function LimitsForm({ policy, onClose }: { policy: MailSendPolicy; onClose: () =
   const save = useSendLimitWrites().policy
   const tiers = useSendTiers()
   const [tier, setTier] = useState<SendTier>(policy.tier)
-  const [texts, setTexts] = useState(() => limitTexts(policy.limits))
+  const [texts, setTexts] = useState(() => limitTexts(policy.limits ?? STANDARD_LIMITS))
   const numbers = limitNumbers(texts)
   const valid = tier !== 'custom' || limitsValid(numbers)
   const close = () => {
@@ -182,7 +185,7 @@ function LimitsForm({ policy, onClose }: { policy: MailSendPolicy; onClose: () =
     if (!valid || save.isPending) return
     save.mutate({ workspaceId: policy.workspace_id, body: { tier, custom_limits: tier === 'custom' ? numbers : null } }, { onSuccess: onClose })
   }
-  const tierLimits = tier === 'custom' ? null : tiers.data?.[tier]
+  const tierLimits = tier === 'new' || tier === 'standard' ? tiers.data?.[tier] : null
 
   return (
     <Dialog
@@ -197,7 +200,7 @@ function LimitsForm({ policy, onClose }: { policy: MailSendPolicy; onClose: () =
       }
     >
       <View className="gap-2">
-        <LabelTip label="Tier" text="New and Standard use the tier limits above on this page. A workspace on Custom keeps its own numbers: Orbit does not promote it." />
+        <LabelTip label="Tier" text="New and Standard use the tier limits above on this page. A workspace on Custom keeps its own numbers: Orbit does not promote it. Unlimited has no send limits." />
         <Select label="Tier" value={tier} options={TIER_OPTIONS} onChange={setTier} />
       </View>
       {tier === 'custom' ? <LimitInputs texts={texts} onChange={setTexts} /> : null}

@@ -31261,7 +31261,7 @@
             }
           },
           "422": {
-            "description": "validation_failed, hostname_required, private_host_refused, plain_smtp_refused",
+            "description": "validation_failed, hostname_required, direct_not_available, private_host_refused, plain_smtp_refused",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -32080,7 +32080,7 @@
             }
           },
           "422": {
-            "description": "validation_failed, hostname_required, private_host_refused, plain_smtp_refused",
+            "description": "validation_failed, hostname_required, direct_not_available, private_host_refused, plain_smtp_refused",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -32340,7 +32340,7 @@
             }
           },
           "422": {
-            "description": "validation_failed, hostname_required, private_host_refused, plain_smtp_refused",
+            "description": "validation_failed, hostname_required, direct_not_available, private_host_refused, plain_smtp_refused",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -75715,7 +75715,7 @@
             }
           },
           "422": {
-            "description": "validation_failed, hostname_required, private_host_refused, plain_smtp_refused",
+            "description": "validation_failed, hostname_required, direct_not_available, private_host_refused, plain_smtp_refused",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -76482,7 +76482,7 @@
             }
           },
           "422": {
-            "description": "validation_failed, hostname_required, private_host_refused, plain_smtp_refused",
+            "description": "validation_failed, hostname_required, direct_not_available, private_host_refused, plain_smtp_refused",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -76757,7 +76757,7 @@
             }
           },
           "422": {
-            "description": "validation_failed, hostname_required, private_host_refused, plain_smtp_refused",
+            "description": "validation_failed, hostname_required, direct_not_available, private_host_refused, plain_smtp_refused",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -114069,8 +114069,15 @@
             "description": "Percent of them that bounced hard."
           },
           "limits": {
-            "$ref": "#/components/schemas/Limits",
-            "description": "The numbers that apply now (the tier's, or the custom ones)."
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Limits",
+                "description": "The numbers that apply now (the tier's, or the custom ones); `null` on the `unlimited` tier."
+              }
+            ]
           },
           "pause_reason": {
             "type": [
@@ -114142,7 +114149,7 @@
           },
           "direct_available": {
             "type": "boolean",
-            "description": "`ORBIT_MAIL_HOSTNAME` is set, so the `direct` kind can be created."
+            "description": "`ORBIT_MAIL_HOSTNAME` is set and this is not Orbit Cloud, so the `direct` kind can be\ncreated."
           },
           "events_base_url": {
             "type": "string",
@@ -126292,7 +126299,8 @@
         "enum": [
           "new",
           "standard",
-          "custom"
+          "custom",
+          "unlimited"
         ]
       },
       "SessionRecord": {

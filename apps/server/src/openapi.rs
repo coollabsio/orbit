@@ -2976,6 +2976,7 @@ fn mail_send_route_errors(
     }
     if operation_id.starts_with("create_") || operation_id.starts_with("update_") {
         add_code(responses, "422", "hostname_required");
+        add_code(responses, "422", "direct_not_available");
         add_code(responses, "422", "private_host_refused");
         add_code(responses, "422", "plain_smtp_refused");
     }

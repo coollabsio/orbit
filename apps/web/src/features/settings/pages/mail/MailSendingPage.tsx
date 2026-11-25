@@ -53,8 +53,8 @@ function SendLimitsCard() {
       title="Limits"
       description={
         cloud
-          ? 'Recipients are counted, not messages. A new workspace starts on New and moves to Standard after two weeks of good sending.'
-          : 'Recipients are counted, not messages. Your server admin sets the limits of each workspace.'
+          ? 'Limits apply only to mail sent through a shared route: the server’s default route or Direct. Your own relay or email API has no Orbit limits. Recipients are counted, not messages.'
+          : 'Limits apply only to mail sent through a shared route: the server’s default route or Direct. Your own relay or email API has no Orbit limits. A workspace has no limits until your server admin sets them.'
       }
       flush
     >
@@ -88,7 +88,7 @@ export function PolicyRows({ policy }: { policy: MailSendPolicy }) {
       <SettingsRow className="flex-nowrap">
         <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[0.8125rem] font-medium text-foreground">
           Last 7 days
-          <InfoTip text="Sending pauses when, over at least 100 recipients in 7 days, more than 5 % bounce hard or more than 0.3 % complain." />
+          <InfoTip text="Sending through a shared route pauses when, over at least 100 of its recipients in 7 days, more than 5 % bounce hard or more than 0.3 % complain." />
         </span>
         <span className="text-[0.8125rem] text-muted-foreground">
           {count(policy.recipients_7d, 'recipient', 'recipients')} · {percent(policy.hard_bounce_rate_7d)} bounced · {percent(policy.complaint_rate_7d)} complained
