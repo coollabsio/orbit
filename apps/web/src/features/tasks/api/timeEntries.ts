@@ -1,9 +1,18 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { type QueryClient, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/api/client'
 import { queryKeys } from '@/api/queryKeys'
 import type { TaskTimeEntries, TimeEntry, TimeEntryInput } from './models'
 
 const JSON_HEADERS = { 'Content-Type': 'application/json' }
+
+/** Every task's time, not only this task's: a parent's sub-issue total changes too. */
+export function invalidateTimeEntries(queryClient: QueryClient, workspaceId: string) {
+  const prefix = queryKeys.timeEntries(workspaceId, '')
+  return queryClient.invalidateQueries({
+    predicate: ({ queryKey }) => queryKey.length === prefix.length && queryKey.at(-1) === prefix.at(-1)
+      && prefix.slice(0, -2).every((part, index) => queryKey[index] === part),
+  })
+}
 
 export function useTaskTimeEntries(workspaceId: string, taskId: string | undefined) {
   return useQuery({
@@ -32,11 +41,11 @@ export function useCreateTimeEntry(workspaceId: string, taskId: string) {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (input: TimeEntryInput) => postTimeEntry(workspaceId, taskId, input),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: queryKeys.timeEntries(workspaceId, taskId) }),
+    onSuccess: () => void invalidateTimeEntries(queryClient, workspaceId),
   })
 }
 
-export function useUpdateTimeEntry(workspaceId: string, taskId: string) {
+export function useUpdateTimeEntry(workspaceId: string) {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: async ({ entryId, version, changes }: { entryId: string; version: number; changes: Partial<TimeEntryInput> }) => (await apiClient.patch<{ 200: TimeEntry }, unknown, true>({
@@ -46,11 +55,11 @@ export function useUpdateTimeEntry(workspaceId: string, taskId: string) {
       headers: JSON_HEADERS,
       throwOnError: true,
     })).data,
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: queryKeys.timeEntries(workspaceId, taskId) }),
+    onSuccess: () => void invalidateTimeEntries(queryClient, workspaceId),
   })
 }
 
-export function useDeleteTimeEntry(workspaceId: string, taskId: string) {
+export function useDeleteTimeEntry(workspaceId: string) {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: async (entryId: string) => {
@@ -60,6 +69,6 @@ export function useDeleteTimeEntry(workspaceId: string, taskId: string) {
         throwOnError: true,
       })
     },
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: queryKeys.timeEntries(workspaceId, taskId) }),
+    onSuccess: () => void invalidateTimeEntries(queryClient, workspaceId),
   })
 }

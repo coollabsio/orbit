@@ -1,7 +1,7 @@
 import { createOrbitClient } from '@orbit/api/client'
 import { describe, expect, test } from 'bun:test'
 
-import { createTimeEntry, dayDate, deleteTimeEntry, formatDuration, parseDuration, takeSpend, timeTotalLabel, todayLocal, updateTimeEntry } from './time'
+import { createTimeEntry, dayDate, deleteTimeEntry, formatDuration, parseDuration, takeSpend, timeTotalLabel, todayLocal, updateTimeEntry, workedOnLabel } from './time'
 
 test('a duration reads hours, minutes, both, decimals and bare minutes, in any case and spacing', () => {
   expect(parseDuration('1h 30m')).toBe(90)
@@ -12,10 +12,11 @@ test('a duration reads hours, minutes, both, decimals and bare minutes, in any c
   expect(parseDuration('45')).toBe(45)
   expect(parseDuration(' 1 H  30 M ')).toBe(90)
   expect(parseDuration('24h')).toBe(1440)
+  expect(parseDuration('.5h')).toBe(30)
 })
 
 test('a duration refuses days, weeks, zero, negatives, more than a day and garbage', () => {
-  for (const text of ['1d', '1w', '2h 1d', '0', '0h', '0m', '-30', '-1h', '24h 1m', '1441', '', '   ', 'h', 'm', 'abc', '1h30', '30m 1h', '1.5m']) {
+  for (const text of ['1d', '1w', '2h 1d', '0', '0h', '0m', '-30', '-1h', '24h 1m', '1441', '', '   ', 'h', 'm', 'abc', '1h30', '30m 1h', '1.5m', '1 30', '1 5', '2 4h']) {
     expect([text, parseDuration(text)]).toEqual([text, null])
   }
 })
@@ -29,6 +30,12 @@ test('today and a worked-on day are local days', () => {
   expect(todayLocal(new Date(2026, 0, 5, 23, 59))).toBe('2026-01-05')
   const day = dayDate('2026-11-10')
   expect([day.getFullYear(), day.getMonth(), day.getDate()]).toEqual([2026, 10, 10])
+})
+
+test('a worked-on day shows its year only when it is not this year', () => {
+  const now = new Date(2026, 10, 24)
+  expect(workedOnLabel('2026-11-10', now)).toBe(new Date(2026, 10, 10).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }))
+  expect(workedOnLabel('2025-12-31', now)).toContain('2025')
 })
 
 test('the Time property adds the sub-issues only when they logged time', () => {
@@ -74,6 +81,11 @@ describe('takeSpend', () => {
 
   test('leaves a comment without a /spend line alone', () => {
     expect(takeSpend('see /spend 1h')).toEqual({ body: 'see /spend 1h', spend: null })
+  })
+
+  test('leaves a /spend line in a fenced code block alone', () => {
+    const body = 'Use:\n```\n/spend 1h\n```'
+    expect(takeSpend(body)).toEqual({ body, spend: null })
   })
 
   test('refuses a /spend line it cannot read', () => {

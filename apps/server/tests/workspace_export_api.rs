@@ -918,6 +918,16 @@ async fn time_entries_round_trip_through_the_export_and_an_orbit_import() {
             Some(json!({"minutes": 30, "worked_on": "2026-11-21", "note": "Review"})),
         )
         .await;
+    // Logged with a comment (`/spend`): the import links the entry to the imported comment.
+    let comment = harness
+        .ok(
+            &harness.owner,
+            "POST",
+            &harness.workspace(&format!("/tasks/{task_id}/comments")),
+            Some(json!({"body": "Wrote the docs",
+                        "time": {"minutes": 45, "worked_on": "2026-11-22"}})),
+        )
+        .await;
 
     let export_id = harness.start_export().await;
     harness.run_export(&export_id).await;
@@ -931,7 +941,9 @@ async fn time_entries_round_trip_through_the_export_and_an_orbit_import() {
         .unwrap();
     let task = archive.json(&task_file);
     let logged = task["time_entries"].as_array().unwrap();
-    assert_eq!(logged.len(), 2, "{task}");
+    assert_eq!(logged.len(), 3, "{task}");
+    assert_eq!(logged[0]["comment_id"], Value::Null);
+    assert_eq!(logged[2]["comment_id"], comment["id"]);
     assert_eq!(logged[0]["user"]["name"], "Mia Member");
     assert_eq!(logged[0]["created_by"]["name"], "Owner");
     assert_eq!(logged[0]["minutes"], 90);
@@ -1072,7 +1084,28 @@ async fn time_entries_round_trip_through_the_export_and_an_orbit_import() {
                 "**Uma Unmatched**\n\nReview".to_owned(),
                 0
             ),
+            (
+                owner_id.clone(),
+                owner_id.clone(),
+                45,
+                "2026-11-22".to_owned(),
+                "Wrote the docs".to_owned(),
+                0
+            ),
         ]
+    );
+    let linked: Option<String> = sqlx::query_scalar(
+        "SELECT task_comments.body FROM task_time_entries \
+         JOIN task_comments ON task_comments.id = task_time_entries.comment_id \
+         WHERE task_time_entries.workspace_id = $1 AND task_time_entries.minutes = 45",
+    )
+    .bind(&target)
+    .fetch_optional(harness.database.pool())
+    .await
+    .unwrap();
+    assert!(
+        linked.is_some_and(|body| body.contains("Wrote the docs")),
+        "the imported entry names the imported comment"
     );
     let source_created: i64 = sqlx::query_scalar(
         "SELECT created_at FROM task_time_entries WHERE workspace_id = $1 AND minutes = 90",

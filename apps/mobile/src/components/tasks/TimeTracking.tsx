@@ -2,7 +2,8 @@ import { useState } from 'react'
 import { Pressable, View } from 'react-native'
 
 import type { Person } from '../../data/chat'
-import { dayDate, dayValue, formatDuration, parseDuration, type TaskTime, type TimeEntry, type TimeEntryDraft, todayLocal, workedOnLabel } from '../../data/time'
+import { markdownToText } from '../../data/markdown'
+import { dayDate, dayValue, formatDuration, parseDuration, type TimeEntry, type TimeEntryDraft, todayLocal, workedOnLabel } from '../../data/time'
 import { useTheme } from '../../theme'
 import { Avatar, Button, Icon, IconButton, Input, LabelTip, Text } from '../../ui'
 import { Toggle } from '../settings/Shell'
@@ -13,49 +14,37 @@ const DURATION_HELP = 'Write hours and minutes, such as 1h 30m, 90m or 1.5h. A n
 const BILLABLE_HELP = 'Billable time counts toward what you bill a client.'
 
 /**
- * The task's time entries under the properties: `Ada logged 1h 30m · Nov 10` and the note. An entry the user may
- * change opens its menu from the more button or a long press.
+ * A time entry in the activity feed, as the web card: `Ada logged 1h 30m · Nov 10` and the note. An entry the user
+ * may change opens its menu from the more button or a long press.
  */
-export function TimeSection({ time, nameOf, onLog, onEntryMenu }: { time: TaskTime | undefined; nameOf: (userId: string) => string; onLog: () => void; onEntryMenu: (entry: TimeEntry) => void }) {
+export function TimeEntryCard({ entry, nameOf, onMenu }: { entry: TimeEntry; nameOf: (userId: string) => string; onMenu: (entry: TimeEntry) => void }) {
   const { colors } = useTheme()
-  const items = time?.items ?? []
+  const name = nameOf(entry.user_id)
+  const note = entry.note?.trim() ? markdownToText(entry.note) : ''
   return (
-    <View>
-      <View className="flex-row items-center justify-between mb-1">
-        <Text className="font-noto-semibold text-[14px] leading-[20px]">Time</Text>
-        <Button label="Log time" variant="ghost" size="sm" icon="timer" onPress={onLog} />
+    <Pressable
+      accessibilityLabel={`${name} logged ${formatDuration(entry.minutes)} on ${workedOnLabel(entry.worked_on)}`}
+      disabled={!entry.can_edit}
+      onLongPress={() => onMenu(entry)}
+      className="my-3 flex-row gap-2 rounded-lg border border-border bg-card/50 px-3.5 py-2.5 active:bg-muted"
+    >
+      <Avatar id={entry.user_id} name={name} size={20} />
+      <View className="flex-1 min-w-0">
+        <View className="min-h-5 flex-row items-center gap-1.5">
+          <Text numberOfLines={1} className="text-[13px] leading-[18px] shrink text-muted-foreground">
+            <Text className="font-noto-semibold text-[13px] leading-[18px] text-foreground">{name}</Text> logged{' '}
+            <Text className="font-noto-medium text-[13px] leading-[18px] text-foreground">{formatDuration(entry.minutes)}</Text> · {workedOnLabel(entry.worked_on)}
+          </Text>
+          {entry.billable ? <Icon name="card" size={12} color={colors.mutedForeground} /> : null}
+        </View>
+        {note ? (
+          <Text selectable className="text-[13px] leading-[19px] mt-0.5">
+            {note}
+          </Text>
+        ) : null}
       </View>
-      {time && items.length === 0 ? <Text className="text-[12px] leading-[16px] text-muted-foreground">No time logged yet.</Text> : null}
-      {items.map((entry) => {
-        const name = nameOf(entry.user_id)
-        return (
-          <Pressable
-            key={entry.id}
-            accessibilityLabel={`${name} logged ${formatDuration(entry.minutes)} on ${workedOnLabel(entry.worked_on)}`}
-            disabled={!entry.can_edit}
-            onLongPress={() => onEntryMenu(entry)}
-            className="flex-row gap-2 py-2 rounded-lg active:bg-muted"
-          >
-            <Avatar id={entry.user_id} name={name} size={20} />
-            <View className="flex-1 min-w-0">
-              <View className="min-h-5 flex-row items-center gap-1.5">
-                <Text numberOfLines={1} className="text-[13px] leading-[18px] shrink text-muted-foreground">
-                  <Text className="font-noto-semibold text-[13px] leading-[18px] text-foreground">{name}</Text> logged{' '}
-                  <Text className="font-noto-medium text-[13px] leading-[18px] text-foreground">{formatDuration(entry.minutes)}</Text> · {workedOnLabel(entry.worked_on)}
-                </Text>
-                {entry.billable ? <Icon name="card" size={12} color={colors.mutedForeground} /> : null}
-              </View>
-              {entry.note ? (
-                <Text selectable className="text-[13px] leading-[19px] mt-0.5">
-                  {entry.note}
-                </Text>
-              ) : null}
-            </View>
-            {entry.can_edit ? <IconButton icon="more" label="Time entry actions" color={colors.mutedForeground} onPress={() => onEntryMenu(entry)} /> : null}
-          </Pressable>
-        )
-      })}
-    </View>
+      {entry.can_edit ? <IconButton icon="more" label="Time entry actions" color={colors.mutedForeground} onPress={() => onMenu(entry)} /> : null}
+    </Pressable>
   )
 }
 

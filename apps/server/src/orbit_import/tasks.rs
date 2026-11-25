@@ -24,7 +24,7 @@ use crate::task_import::{
     project_statuses, rewrite_links, with_source_details,
 };
 
-/// Time entries per write transaction and INSERT (11 binds each).
+/// Time entries per write transaction and INSERT (12 binds each).
 const TIME_ENTRY_BATCH: usize = 200;
 
 /// Sub-task levels kept below a root; a deeper task (or a parent cycle) starts a new tree.
@@ -955,9 +955,20 @@ async fn fill_task(
     Ok(())
 }
 
-/// A time entry ready to insert: `(source id, user, minutes, worked_on, note, billable,
-/// created_by, created_at, updated_at)`.
-type NewEntry = (String, Id, i64, String, String, i64, Id, i64, i64);
+/// A time entry ready to insert.
+struct NewEntry {
+    source_id: String,
+    user_id: Id,
+    minutes: i64,
+    worked_on: String,
+    note: String,
+    billable: i64,
+    created_by: Id,
+    /// The imported comment it was logged with.
+    comment_id: Option<Id>,
+    created_at: i64,
+    updated_at: i64,
+}
 
 /// The task's time entries that no earlier import or attempt created. Each batch is written
 /// with its links in one transaction, so a retry never logs an entry twice. Time of a person
@@ -1015,27 +1026,31 @@ async fn import_time_entries(
         let updated_at = parse_instant_millis(&entry.updated_at)
             .unwrap_or(created_at)
             .max(created_at);
-        pending.push((
-            entry.id.clone(),
-            user.unwrap_or(run.user_id),
+        // The comments are imported first, so the link names the new comment.
+        let comment_id = match entry.comment_id.as_deref() {
+            Some(comment) => service.linked(run, "comment", comment).await?,
+            None => None,
+        };
+        pending.push(NewEntry {
+            source_id: entry.id.clone(),
+            user_id: user.unwrap_or(run.user_id),
             minutes,
             worked_on,
             note,
-            i64::from(entry.billable),
+            billable: i64::from(entry.billable),
             created_by,
+            comment_id,
             created_at,
             updated_at,
-        ));
+        });
     }
     for batch in pending.chunks(TIME_ENTRY_BATCH) {
         let ids: Vec<Id> = batch.iter().map(|_| Id::new_v7()).collect();
         let mut query = SqlBuilder::new(
             "INSERT INTO task_time_entries (id, workspace_id, task_id, user_id, minutes, worked_on, \
-             note, billable, created_by, version, created_at, updated_at) VALUES ",
+             note, billable, created_by, comment_id, version, created_at, updated_at) VALUES ",
         );
         for (offset, (id, entry)) in ids.iter().zip(batch).enumerate() {
-            let (_, user, minutes, worked_on, note, billable, created_by, created_at, updated_at) =
-                entry;
             if offset > 0 {
                 query.push(", ");
             }
@@ -1047,21 +1062,23 @@ async fn import_time_entries(
                 .push(", ")
                 .push_bind(task_id.to_string())
                 .push(", ")
-                .push_bind(user.to_string())
+                .push_bind(entry.user_id.to_string())
                 .push(", ")
-                .push_bind(*minutes)
+                .push_bind(entry.minutes)
                 .push(", ")
-                .push_bind(worked_on.clone())
+                .push_bind(entry.worked_on.clone())
                 .push(", ")
-                .push_bind(note.clone())
+                .push_bind(entry.note.clone())
                 .push(", ")
-                .push_bind(*billable)
+                .push_bind(entry.billable)
                 .push(", ")
-                .push_bind(created_by.to_string())
+                .push_bind(entry.created_by.to_string())
+                .push(", ")
+                .push_bind(entry.comment_id.map(|id| id.to_string()))
                 .push(", 0, ")
-                .push_bind(*created_at)
+                .push_bind(entry.created_at)
                 .push(", ")
-                .push_bind(*updated_at)
+                .push_bind(entry.updated_at)
                 .push(")");
         }
         let mut tx = service
@@ -1076,7 +1093,7 @@ async fn import_time_entries(
                 &run.source_workspace_id,
                 &run.link_scope,
                 "time_entry",
-                &entry.0,
+                &entry.source_id,
                 *id,
             )
             .await?;

@@ -18,7 +18,7 @@ import { TimeEntryDialog } from './TimeEntryDialog'
 /** A time entry in the activity feed: who logged how long for which day, and the note. */
 export function TimeEntryItem({ task, state, entry }: { task: Task; state: TaskViewState; entry: TimeEntry }) {
   const { workspace } = useWorkspace()
-  const deleteEntry = useDeleteTimeEntry(workspace.id, task.id)
+  const deleteEntry = useDeleteTimeEntry(workspace.id)
   const [editing, setEditing] = useState(false)
   const person = state.users.find((user) => user.id === entry.user_id)
   const name = person?.name ?? 'Someone'

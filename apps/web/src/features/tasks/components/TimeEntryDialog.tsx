@@ -36,7 +36,7 @@ export function TimeEntryDialog({ task, users, currentUserId, entry, onClose }: 
   const project = useProjects(workspace.id).data?.find((item) => item.id === task.projectId)
   const members = useProjectAudience(workspace.id, project, users).filter((user) => !user.suspended || user.id === entry?.user_id)
   const createEntry = useCreateTimeEntry(workspace.id, task.id)
-  const updateEntry = useUpdateTimeEntry(workspace.id, task.id)
+  const updateEntry = useUpdateTimeEntry(workspace.id)
   const [duration, setDuration] = useState(entry ? formatDuration(entry.minutes) : '')
   const [durationTouched, setDurationTouched] = useState(false)
   const [workedOn, setWorkedOn] = useState(entry?.worked_on ?? todayLocalDate())

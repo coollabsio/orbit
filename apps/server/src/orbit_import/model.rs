@@ -201,6 +201,9 @@ pub struct TimeEntry {
     #[serde(default)]
     pub billable: bool,
     pub created_by: Option<Person>,
+    /// The source comment it was logged with (`/spend`).
+    #[serde(default)]
+    pub comment_id: Option<String>,
     #[serde(default)]
     pub created_at: String,
     #[serde(default)]

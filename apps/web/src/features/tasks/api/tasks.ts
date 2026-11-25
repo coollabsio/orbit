@@ -50,8 +50,8 @@ import { isTaskUuid, normalizeTaskParam, taskSlug } from '@/lib/taskLinks'
 import { loadFailed } from '@/lib/connection'
 import { toast } from 'sonner'
 import { isEmptyRichText } from '@/features/tasks/lib/richText'
-import { takeSpend } from '@/features/tasks/timeLib'
-import { postTimeEntry } from './timeEntries'
+import { takeSpend, todayLocalDate } from '@/features/tasks/timeLib'
+import { invalidateTimeEntries, postTimeEntry } from './timeEntries'
 
 type ApiClient = ReturnType<typeof createApiClient>
 export type TaskFilters = NonNullable<ListTasksData['query']>
@@ -589,9 +589,10 @@ export function useCreateTaskComment(workspaceId: string, taskId: string) {
         throw failure
       }
       const { blocks, spend } = taken
-      const time = spend ? { minutes: spend.minutes, worked_on: spend.workedOn } : undefined
-      if (spend && isEmptyRichText(blocks)) {
-        await postTimeEntry(workspaceId, taskId, { minutes: spend.minutes, worked_on: spend.workedOn })
+      // the local day, as the Log time dialog sends: the server's default is the profile's timezone
+      const time = spend ? { minutes: spend.minutes, worked_on: spend.workedOn ?? todayLocalDate() } : undefined
+      if (time && isEmptyRichText(blocks)) {
+        await postTimeEntry(workspaceId, taskId, time)
         return null
       }
       const response = await createComment({
@@ -604,7 +605,7 @@ export function useCreateTaskComment(workspaceId: string, taskId: string) {
     },
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.comments(workspaceId, taskId) })
-      void queryClient.invalidateQueries({ queryKey: queryKeys.timeEntries(workspaceId, taskId) })
+      invalidateTimeEntries(queryClient, workspaceId)
     },
   })
 }

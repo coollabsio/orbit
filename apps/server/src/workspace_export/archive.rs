@@ -53,7 +53,8 @@ tasks/<KEY>-<number>.json
     comment written with a service account's API token has \"author_service_account\"
     {\"id\", \"name\"} (else null); its \"author\" is the member the write was checked as.
     Each of \"time_entries\" has id, user (who worked), minutes, worked_on (a YYYY-MM-DD
-    day), note (Markdown), billable, created_by (who logged it), created_at and updated_at.
+    day), note (Markdown), billable, created_by (who logged it), comment_id (the comment it
+    was logged with, else null), created_at and updated_at.
 
 pages/<Teamspace>/<Page>.md, pages/Private/<Page>.md
     Every live page as Markdown, with its sub-pages in the folder <Page>/ next to it and its
@@ -681,7 +682,7 @@ async fn tasks(
     }
     let mut time_entries = HashMap::new();
     for row in fetch(
-        "SELECT id, task_id, user_id, minutes, worked_on, note, billable, created_by, created_at, updated_at \
+        "SELECT id, task_id, user_id, minutes, worked_on, note, billable, created_by, comment_id, created_at, updated_at \
          FROM task_time_entries WHERE workspace_id = $1 ORDER BY worked_on, created_at, id",
     )
     .await?
@@ -697,6 +698,7 @@ async fn tasks(
                 "note": row.get::<String, _>("note"),
                 "billable": row.get::<i64, _>("billable") != 0,
                 "created_by": people.of(row.get("created_by")),
+                "comment_id": row.get::<Option<String>, _>("comment_id"),
                 "created_at": time(row.get("created_at")),
                 "updated_at": time(row.get("updated_at")),
             }),

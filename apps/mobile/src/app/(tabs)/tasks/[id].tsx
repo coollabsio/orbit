@@ -27,7 +27,7 @@ import {
 import { DuplicateBanner, RelationsSection, SubIssuesSection } from '../../../components/tasks/sections'
 import { Sheet, useSheet } from '../../../components/tasks/Sheet'
 import { TaskPulls } from '../../../components/tasks/TaskPulls'
-import { TimeEntryForm, TimeSection } from '../../../components/tasks/TimeTracking'
+import { TimeEntryCard, TimeEntryForm } from '../../../components/tasks/TimeTracking'
 import { activityRows, buildFeed, type ActivityRow, type CommentThread, foldRun } from '../../../data/activity'
 import { relativeAgo } from '../../../data/format'
 import { keys } from '../../../data/keys'
@@ -167,11 +167,12 @@ export default function TaskScreen() {
     // and a comment of only that line logs the time without a comment
     mutationFn: async (text: string) => {
       const { body, spend } = takeSpend(text)
-      if (spend && !body) {
-        await createTimeEntry(client, workspaceId, id, { minutes: spend.minutes, worked_on: spend.workedOn ?? todayLocal(), note: '', billable: false })
+      // the local day, as the Log time form sends: the server's default is the profile's timezone
+      const time = spend ? { minutes: spend.minutes, worked_on: spend.workedOn ?? todayLocal() } : undefined
+      if (time && !body) {
+        await createTimeEntry(client, workspaceId, id, { ...time, note: '', billable: false })
         return null
       }
-      const time = spend ? { minutes: spend.minutes, worked_on: spend.workedOn } : undefined
       return api.addComment(client, workspaceId, id, linkTaskIdsInMarkdown(body, (projects.data ?? []).map((project) => project.key), session.server), mentionedUserIds(body, mentionable), time)
     },
     onSuccess: (comment) => {
@@ -180,7 +181,8 @@ export default function TaskScreen() {
       if (comment) queryClient.setQueryData<api.CommentRecord[]>(keys.comments(workspaceId, id), (list) => (list ? [...list, comment] : [comment]))
     },
     onError: (error) => Alert.alert('Could not add the comment', errorMessage(error)),
-    onSettled: () => void time.refetch(),
+    // every task detail, as useTimeEntryWrites does: a parent's sub-issue total changes too
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: ['task', workspaceId] }),
   })
 
   const trash = useMutation({
@@ -214,8 +216,8 @@ export default function TaskScreen() {
         return other ? identifier(other, projects.data ?? []) : 'another task'
       },
     })
-    return buildFeed(rows, comments.data)
-  }, [activity.data, comments.data, cycles.data, labels.data, milestones.data, people, projects.data, queryClient, statuses.data, workspaceId])
+    return buildFeed(rows, comments.data, time.data?.items)
+  }, [activity.data, comments.data, time.data, cycles.data, labels.data, milestones.data, people, projects.data, queryClient, statuses.data, workspaceId])
 
   /** Uploads each picked file at once, as the web composer does; the comment links them when it is sent. */
   const attach = async (source: FileSource) => {
@@ -511,8 +513,6 @@ export default function TaskScreen() {
 
           <TaskPulls taskId={current.id} />
 
-          <TimeSection time={time.data} nameOf={nameOf} onLog={() => sheets.open({ kind: 'log-time' })} onEntryMenu={(entry) => sheets.open({ kind: 'time-menu', entry })} />
-
           <View>
             <Text className="font-noto-semibold text-[14px] leading-[20px] mb-2">Activity</Text>
             {activity.isError || comments.isError ? (
@@ -523,6 +523,8 @@ export default function TaskScreen() {
               feed.map((entry) =>
                 entry.kind === 'thread' ? (
                   <Thread key={entry.thread.root.id} thread={entry.thread} nameOf={nameOf} filesOf={filesOf} spentOf={(commentId) => time.data?.items.find((item) => item.comment_id === commentId)} />
+                ) : entry.kind === 'time' ? (
+                  <TimeEntryCard key={entry.entry.id} entry={entry.entry} nameOf={nameOf} onMenu={(item) => sheets.open({ kind: 'time-menu', entry: item })} />
                 ) : (
                   <Timeline
                     key={entry.items[0]!.id}

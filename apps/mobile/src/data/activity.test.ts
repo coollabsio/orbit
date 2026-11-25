@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 
 import { activityRows, buildFeed, foldRun, type ActivityContext, type ActivityRow } from './activity'
 import type { CommentRecord, TaskActivityEvent } from './orbit'
+import type { TimeEntry } from './time'
 
 const context: ActivityContext = {
   statuses: [
@@ -108,6 +109,45 @@ describe('buildFeed', () => {
       ['root+reply'],
       ['c'],
     ])
+  })
+
+  const entry = (id: string, created_at: string, comment_id: string | null = null): TimeEntry => ({
+    id,
+    workspace_id: 'w',
+    task_id: 't',
+    project_id: 'p1',
+    user_id: 'ada',
+    minutes: 30,
+    worked_on: '2026-10-01',
+    note: null,
+    billable: false,
+    created_by: 'ada',
+    comment_id,
+    version: 1,
+    created_at,
+    updated_at: created_at,
+    can_edit: true,
+  })
+  const shape = (feed: ReturnType<typeof buildFeed>) =>
+    feed.map((item) => (item.kind === 'activity' ? `rows:${item.items.map((row) => row.id)}` : item.kind === 'thread' ? `thread:${item.thread.root.id}` : `time:${item.entry.id}`))
+
+  test('puts time entries in by when they were logged, splitting a run of rows', () => {
+    const row = (id: string, createdAt: string): ActivityRow => ({ id, actorId: 'ada', text: id, createdAt })
+    const feed = buildFeed(
+      [row('a', '2026-10-15T09:00:00Z'), row('b', '2026-10-15T11:00:00Z')],
+      [comment('root', '2026-10-15T12:00:00Z')],
+      [entry('late', '2026-10-15T13:00:00Z'), entry('early', '2026-10-15T10:00:00Z')],
+    )
+    expect(shape(feed)).toEqual(['rows:a', 'time:early', 'rows:b', 'thread:root', 'time:late'])
+  })
+
+  test('hides an entry whose comment is shown, and shows one whose comment is gone', () => {
+    const feed = buildFeed(
+      [],
+      [comment('root', '2026-10-15T10:00:00Z'), comment('reply', '2026-10-15T10:30:00Z', 'root')],
+      [entry('on-root', '2026-10-15T10:00:01Z', 'root'), entry('on-reply', '2026-10-15T10:30:01Z', 'reply'), entry('orphan', '2026-10-15T11:00:00Z', 'deleted'), entry('plain', '2026-10-15T12:00:00Z')],
+    )
+    expect(shape(feed)).toEqual(['thread:root', 'time:orphan', 'time:plain'])
   })
 })
 

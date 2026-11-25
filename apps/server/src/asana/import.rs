@@ -15,8 +15,9 @@
 //!   listed under another project is skipped).
 //! - Phase B, per task, parents first: create the Orbit task (its id recorded first) silently,
 //!   without notifications.
-//! - Phase C, per task: comments and time tracking entries (each skipping as many as the
-//!   importer already wrote on the task), Asana-hosted files (skipping ones already attached), and "blocked by" relations.
+//! - Phase C, per task: comments (skipping as many as the importer already wrote on the task),
+//!   time tracking entries (skipping ones already imported, by Asana gid), Asana-hosted files
+//!   (skipping ones already attached), and "blocked by" relations.
 //!
 //! A task that fails is recorded and the import continues; a revoked token fails the import.
 //! What was imported before a failure or cancellation stays.
@@ -1635,7 +1636,8 @@ impl AsanaImportService {
             run.report.comments_imported += 1;
         }
 
-        self.import_time_entries(run, &item.asana_gid, task_id)
+        let skipped_time_entries = self
+            .import_time_entries(run, &item.asana_gid, task_id)
             .await?;
 
         // Asana-hosted files. The download URL lives about two minutes, so each attachment
@@ -1741,34 +1743,30 @@ impl AsanaImportService {
                 Err(_) => {}
             }
         }
+        // Counted once, when the task is filled: a retry of the task meets the same entries.
+        run.report.skipped_time_entries += skipped_time_entries;
         Ok(())
     }
 
-    /// The task's Asana time tracking entries, in Asana order. As for comments, the entries
-    /// the importer already wrote on the task are the first ones, so a retry skips that many.
-    /// Each batch is one transaction. A domain without time tracking (402) has none.
+    /// The task's Asana time tracking entries, in Asana order, and the number Orbit cannot
+    /// hold. Each entry keeps its Asana gid (`external_id`), so a retry, or a later import that
+    /// reuses the task, skips the entries already written. Each batch is one transaction. A
+    /// domain without time tracking (402) has none.
     async fn import_time_entries(
         &self,
         run: &mut Run<'_>,
         asana_gid: &str,
         task_id: Id,
-    ) -> Result<(), Failure> {
+    ) -> Result<u32, Failure> {
         let entries = match run.client.time_entries(asana_gid).await {
             Ok(entries) => entries,
             Err(
                 AsanaError::PaymentRequired { .. }
                 | AsanaError::Forbidden { .. }
                 | AsanaError::NotFound { .. },
-            ) => return Ok(()),
+            ) => return Ok(0),
             Err(error) => return Err(Failure::from(error)),
         };
-        let written: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM task_time_entries WHERE task_id = $1 AND created_by = $2",
-        )
-        .bind(task_id.to_string())
-        .bind(run.user_id.to_string())
-        .fetch_one(self.database().pool())
-        .await?;
         let now = TimestampMillis::now().as_millis();
         let mut pending: Vec<TimeEntryRow> = Vec::new();
         let mut skipped = 0;
@@ -1809,6 +1807,7 @@ impl AsanaImportService {
                 .and_then(parse_instant_millis)
                 .unwrap_or(now);
             pending.push(TimeEntryRow {
+                external_id: format!("asana:{}", entry.gid),
                 user_id: user.unwrap_or(run.user_id),
                 minutes,
                 worked_on,
@@ -1817,17 +1816,10 @@ impl AsanaImportService {
                 created_at,
             });
         }
-        // A retry would count them again once the first attempt wrote some entries.
-        if written == 0 {
-            run.report.skipped_time_entries += skipped;
-        }
-        let pending = pending
-            .get(usize::try_from(written).unwrap_or(usize::MAX)..)
-            .unwrap_or_default();
         for batch in pending.chunks(TIME_ENTRY_BATCH) {
             let mut query = SqlBuilder::new(
                 "INSERT INTO task_time_entries (id, workspace_id, task_id, user_id, minutes, \
-                 worked_on, note, billable, created_by, version, created_at, updated_at) VALUES ",
+                 worked_on, note, billable, created_by, version, created_at, updated_at, external_id) VALUES ",
             );
             for (offset, entry) in batch.iter().enumerate() {
                 if offset > 0 {
@@ -1856,17 +1848,20 @@ impl AsanaImportService {
                     .push_bind(entry.created_at)
                     .push(", ")
                     .push_bind(entry.created_at)
+                    .push(", ")
+                    .push_bind(entry.external_id.clone())
                     .push(")");
             }
+            query.push(" ON CONFLICT (task_id, external_id) DO NOTHING");
             let mut tx = self
                 .database()
                 .workspace_transaction(run.workspace_id)
                 .await?;
-            query.build().execute(&mut *tx).await?;
+            let inserted = query.build().execute(&mut *tx).await?.rows_affected();
             tx.commit().await?;
-            run.report.time_entries_imported += u32::try_from(batch.len()).unwrap_or(u32::MAX);
+            run.report.time_entries_imported += u32::try_from(inserted).unwrap_or(u32::MAX);
         }
-        Ok(())
+        Ok(skipped)
     }
 
     /// Whether to stop before the next item; a workspace that became read-only fails the
@@ -2170,6 +2165,8 @@ fn priority(task: &AsanaTask) -> &'static str {
 
 /// A time tracking entry ready to insert; `created_by` is always the importer.
 struct TimeEntryRow {
+    /// `asana:<gid>`.
+    external_id: String,
     user_id: Id,
     minutes: i64,
     worked_on: String,

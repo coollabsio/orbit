@@ -43,19 +43,19 @@ export interface TimeEntryDraft {
   user_id?: string
 }
 
-const HOURS_MINUTES = /^(?:(\d+(?:\.\d+)?)h)?(?:(\d+)m)?$/
+const HOURS_MINUTES = /^(?:(\d+(?:\.\d+)?|\.\d+)\s*h)?\s*(?:(\d+)\s*m)?$/
 
 /**
  * Minutes from `1h 30m`, `1h30m`, `90m`, `1.5h`, `2h` or `45` (a bare number is minutes). Case and spaces do not
  * matter. Null for anything else, for zero, and for more than a day.
  */
 export function parseDuration(text: string): number | null {
-  const compact = text.toLowerCase().replace(/\s+/g, '')
+  const input = text.trim().toLowerCase()
   let minutes: number
-  if (/^\d+$/.test(compact)) {
-    minutes = Number(compact)
+  if (/^\d+$/.test(input)) {
+    minutes = Number(input)
   } else {
-    const match = HOURS_MINUTES.exec(compact)
+    const match = HOURS_MINUTES.exec(input)
     if (!match || (match[1] === undefined && match[2] === undefined)) return null
     minutes = Math.round(Number(match[1] ?? 0) * 60) + Number(match[2] ?? 0)
   }
@@ -84,8 +84,11 @@ export function dayDate(day: string): Date {
   return new Date(year!, month! - 1, date!)
 }
 
-/** `Nov 10`. */
-export const workedOnLabel = (day: string, locale?: string) => dayDate(day).toLocaleDateString(locale, { month: 'short', day: 'numeric' })
+/** `Nov 10`, with the year when it is not this year. */
+export function workedOnLabel(day: string, now: Date = new Date()): string {
+  const date = dayDate(day)
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', ...(date.getFullYear() === now.getFullYear() ? {} : { year: 'numeric' }) })
+}
 
 /** The Time property: `1h 30m`, and `+2h sub-issues` when the sub-issues logged time. */
 export function timeTotalLabel(time: Pick<TaskTime, 'total_minutes' | 'sub_issues_minutes'>): { own: string; subIssues: string | null } {
@@ -160,8 +163,11 @@ export interface Spend {
  */
 export function takeSpend(body: string): { body: string; spend: Spend | null } {
   const lines = body.split('\n')
+  let fenced = false
   for (const [index, line] of lines.entries()) {
-    const match = SPEND_LINE.exec(line.trim())
+    // a line in a fenced code block only shows the syntax, as a web code block does
+    if (/^\s*(```|~~~)/.test(line)) fenced = !fenced
+    const match = fenced ? null : SPEND_LINE.exec(line.trim())
     if (!match) continue
     const minutes = parseDuration(match[1]!)
     if (minutes === null) throw new Error(`Could not read “${match[1]}” in /spend. Use 1h 30m, 90m or 1.5h, up to 24h.`)

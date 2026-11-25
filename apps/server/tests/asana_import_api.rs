@@ -768,6 +768,26 @@ async fn resumes_after_a_restart_without_duplicates() {
     .execute(h.database.pool())
     .await
     .unwrap();
+    // The importer logs their own time on the task meanwhile, and the Asana entries are gone
+    // (the crash came before they were written). A retry must not take the importer's own
+    // entry for an imported one.
+    let design = h.orbit_id(&id, "task", "400").await;
+    sqlx::query("DELETE FROM task_time_entries WHERE task_id = $1")
+        .bind(&design)
+        .execute(h.database.pool())
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO task_time_entries (id, workspace_id, task_id, user_id, minutes, worked_on, note, \
+         billable, created_by, version, created_at, updated_at) \
+         SELECT $1, workspace_id, id, $2, 15, '2024-06-01', 'Review', 0, $2, 0, 0, 0 FROM tasks WHERE id = $3",
+    )
+    .bind(Id::new_v7().to_string())
+    .bind(h.owner_id.to_string())
+    .bind(&design)
+    .execute(h.database.pool())
+    .await
+    .unwrap();
     h.run(&id, &JobRun::default()).await;
 
     let import = h.view(&id).await;
@@ -785,12 +805,19 @@ async fn resumes_after_a_restart_without_duplicates() {
         count("SELECT COUNT(*) FROM task_statuses WHERE project_id IN (SELECT orbit_id FROM asana_import_items WHERE import_id = $1 AND kind = 'project')").await,
         7 + 6
     );
-    let design = h.orbit_id(&id, "task", "400").await;
     assert_eq!(h.comments(&design).await.len(), 1);
+    let minutes: Vec<i64> = h
+        .time_entries(&design)
+        .await
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|entry| entry["minutes"].as_i64().unwrap())
+        .collect();
     assert_eq!(
-        h.time_entries(&design).await.as_array().unwrap().len(),
-        2,
-        "time entries written before the restart are not copied again"
+        minutes,
+        [90, 30, 15],
+        "both Asana entries are imported once, next to the importer's own entry"
     );
     assert_eq!(
         h.scalar(

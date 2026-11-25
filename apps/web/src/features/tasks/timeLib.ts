@@ -50,11 +50,11 @@ export interface Spend {
   workedOn?: string
 }
 
-/** The plain text of a block's inline content, or null for a block that is not plain text. */
+/** The plain text of a paragraph block, or null for another block (a code block only shows the syntax). */
 function blockText(block: unknown): string | null {
   if (typeof block !== 'object' || block === null) return null
-  const { content, children } = block as { content?: unknown; children?: unknown }
-  if (!Array.isArray(content) || (Array.isArray(children) && children.length > 0)) return null
+  const { type, content, children } = block as { type?: unknown; content?: unknown; children?: unknown }
+  if (type !== 'paragraph' || !Array.isArray(content) || (Array.isArray(children) && children.length > 0)) return null
   let text = ''
   for (const item of content) {
     if (typeof item !== 'object' || item === null || (item as { type?: unknown }).type !== 'text') return null

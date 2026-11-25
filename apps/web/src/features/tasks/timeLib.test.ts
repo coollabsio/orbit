@@ -54,6 +54,11 @@ describe('takeSpend', () => {
     expect(takeSpend(blocks)).toEqual({ blocks, spend: null })
   })
 
+  test('leaves a /spend line in a code block alone', () => {
+    const blocks = [{ ...line('/spend 1h'), type: 'codeBlock' }]
+    expect(takeSpend(blocks)).toEqual({ blocks, spend: null })
+  })
+
   test('refuses a /spend line it cannot read', () => {
     expect(() => takeSpend([line('/spend 3d')])).toThrow('Could not read')
     expect(() => takeSpend([line('/spend 25h')])).toThrow('Could not read')
