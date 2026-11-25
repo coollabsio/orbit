@@ -214,7 +214,7 @@ Core files: server `repositories/tasks/fields.rs`, `task_field_routes.rs` (migra
   `Name (2)`… when another kind holds the name; at most 200 fields and 100 options, unknown kinds and malformed
   entries skipped. Options map by name, so values keep their choice; fields append to a project's list; values go
   through `checked_value` and are inserted per task (`ON CONFLICT DO NOTHING`, no activity rows).
-- Not yet: grouping by a field; real time tracking (timers, time entries) — a number field ("Time spent (h)") stands in for now.
+- Not yet: grouping by a field; timers (time entries are built in: `task_time_entries`, #95).
 
 ### Project workflows
 

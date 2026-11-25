@@ -34,7 +34,7 @@ export function TaskFieldsPage() {
   }
 
   return (
-    <SettingsCard title="Task fields" description="Custom fields that any project of the workspace can add to its tasks, for example a customer, a budget or the time spent. Add a field to a project in its settings, under Fields." flush>
+    <SettingsCard title="Task fields" description="Custom fields that any project of the workspace can add to its tasks, for example a customer, a customer group or a budget. Add a field to a project in its settings, under Fields." flush>
       <div className="flex flex-col divide-y">
         <SettingsRow>
           <TaskFieldForm submitLabel="Create field" pending={createField.isPending} onSubmit={async (body) => { await createField.mutateAsync(body) }} />

@@ -37,7 +37,7 @@ export default function TaskFieldsScreen() {
     <SettingsShell title="Settings" nav={WORKSPACE_NAV} onRefresh={() => fields.refetch()}>
       <SettingsCard
         title="Task fields"
-        description="Custom fields that any project of the workspace can add to its tasks, for example a customer, a budget or the time spent. Add a field to a project in its settings, under Fields."
+        description="Custom fields that any project of the workspace can add to its tasks, for example a customer, a customer group or a budget. Add a field to a project in its settings, under Fields."
         flush
         actions={<SmallOutlineButton label="New field" icon="plus" onPress={() => setForm({ field: null })} />}
       >
