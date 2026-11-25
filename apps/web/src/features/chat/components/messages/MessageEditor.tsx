@@ -2,7 +2,8 @@ import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { Button } from '@/components/ui/button'
 import { Kbd } from '@/components/ui/kbd'
 import { Textarea } from '@/components/ui/textarea'
-import { MESSAGE_MAX_LENGTH, type Message } from '../../api/types'
+import { useMessageMaxLength } from '../../api/queries'
+import type { Message } from '../../api/types'
 import { replaceEmoticons } from '../../lib/emoticons'
 import { decodeMentions, encodeMentions } from '../../lib/mentionTokens'
 import { useAutosize } from '../composer/useAutosize'
@@ -25,7 +26,8 @@ export function MessageEditor({ message }: { message: Message }) {
 
   const typed = encodeMentions(text.trim(), people.members, people.channels)
   const body = encodeMentions(replaceEmoticons(text.trim()), people.members, people.channels)
-  const tooLong = body.length > MESSAGE_MAX_LENGTH
+  const maxLength = useMessageMaxLength()
+  const tooLong = body.length > maxLength
   const canSave = !tooLong && (body !== '' || message.attachments.length > 0)
 
   function save() {
@@ -68,7 +70,7 @@ export function MessageEditor({ message }: { message: Message }) {
           Cancel
         </Button>
         {tooLong ? (
-          <span className="text-destructive">{body.length - MESSAGE_MAX_LENGTH} characters over the limit</span>
+          <span className="text-destructive">{body.length - maxLength} characters over the limit</span>
         ) : (
           <span className="max-[899px]:hidden">
             <Kbd>Enter</Kbd> to save, <Kbd>Esc</Kbd> to cancel

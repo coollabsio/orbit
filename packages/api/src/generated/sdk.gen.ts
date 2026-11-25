@@ -2643,8 +2643,8 @@ export const getInstanceSettings = <ThrowOnError extends boolean = false>(option
 });
 
 /**
- * Saves the limits of a shared installation; `null` or 0 is unlimited. A lower limit refuses new workspaces and
- * uploads only: nothing that exists is removed.
+ * Saves the limits of a shared installation; `null` or 0 is unlimited. A lower limit refuses new workspaces,
+ * uploads and chat messages only: nothing that exists is removed or cut.
  */
 export const saveLimits = <ThrowOnError extends boolean = false>(options: Options<SaveLimitsData, ThrowOnError>): RequestResult<SaveLimitsResponses, SaveLimitsErrors, ThrowOnError> => (options.client ?? client).put<SaveLimitsResponses, SaveLimitsErrors, ThrowOnError>({
     security: [{

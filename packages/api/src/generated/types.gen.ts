@@ -462,6 +462,10 @@ export type AuthOptions = {
      */
     billing_enabled: boolean;
     /**
+     * The most characters a chat message can have (Admin → Limits).
+     */
+    chat_message_max_chars: number;
+    /**
      * A mail server is saved: password reset links and invitations go out by email.
      */
     email_enabled: boolean;
@@ -1083,7 +1087,8 @@ export type ChatSendBody = {
      */
     also_in_channel?: boolean;
     /**
-     * Markdown source, at most 4000 characters. Mentions are tokens: `<@user_id>`,
+     * Markdown source, at most the message limit (Admin → Limits, 20,000 characters by
+     * default; 422 `chat_message_too_long`). Mentions are tokens: `<@user_id>`,
      * `<#conversation_id>`, `<!channel>`, `<!here>`.
      */
     body: string;
@@ -3339,8 +3344,9 @@ export type IncomingWebhookPayload = {
     mrkdwn?: boolean | null;
     /**
      * Slack mrkdwn or Markdown; mentions are tokens: `<@user_id>`, `<#channel_id>`,
-     * `<!channel>`, `<!here>`. Longer than 4000 characters, it is cut. With `blocks` or
-     * `attachments` it is the plain text for notifications and search, and may be left out.
+     * `<!channel>`, `<!here>`. Longer than the message limit (Admin → Limits, 20,000 characters
+     * by default), it is cut. With `blocks` or `attachments` it is the plain text for
+     * notifications and search, and may be left out.
      */
     text?: string | null;
     /**
@@ -3509,9 +3515,32 @@ export type Limits = {
 };
 
 /**
+ * New limits for a shared installation. `null` or 0 is unlimited.
+ */
+export type LimitsBody = {
+    /**
+     * The most characters a new or edited chat message can have: 100–40000. Omitted: unchanged.
+     * A lower limit does not change existing messages; it applies when one is edited.
+     */
+    chat_message_max_chars?: number | null;
+    /**
+     * Workspaces (not in the trash) one account may own. Instance admins are not limited.
+     */
+    max_owned_workspaces?: number | null;
+    /**
+     * Bytes of files one workspace may store.
+     */
+    workspace_storage_quota_bytes?: number | null;
+};
+
+/**
  * Limits for a shared installation. `null` is unlimited.
  */
 export type LimitsView = {
+    /**
+     * The most characters a new or edited chat message can have. Existing messages keep their text.
+     */
+    chat_message_max_chars: number;
     /**
      * Workspaces (not in the trash) one account may own. Instance admins are not limited.
      */
@@ -28025,7 +28054,7 @@ export type GetInstanceSettingsResponses = {
 export type GetInstanceSettingsResponse = GetInstanceSettingsResponses[keyof GetInstanceSettingsResponses];
 
 export type SaveLimitsData = {
-    body: LimitsView;
+    body: LimitsBody;
     headers?: {
         /**
          * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.

@@ -251,7 +251,11 @@ impl ChatRepository {
         response: &ResponseTarget,
         post: BotPost,
     ) -> Result<Written<MessageRecord>, ChatError> {
-        let (body, bot, blocks) = bot_message_parts(post, &response.target.sender)?;
+        let (body, bot, blocks) = bot_message_parts(
+            post,
+            &response.target.sender,
+            self.message_max_chars().await?,
+        )?;
         let mut tx = self.database.immediate_transaction().await?;
         let message = Self::original(&mut tx, response).await?;
         sqlx::query(
@@ -294,7 +298,11 @@ impl ChatRepository {
         response: &ResponseTarget,
         post: BotPost,
     ) -> Result<Written<MessageRecord>, ChatError> {
-        let (body, bot, blocks) = bot_message_parts(post, &response.target.sender)?;
+        let (body, bot, blocks) = bot_message_parts(
+            post,
+            &response.target.sender,
+            self.message_max_chars().await?,
+        )?;
         let mut conn = self.database.pool().acquire().await?;
         let interactive = webhook_interactive(&mut conn, bot.webhook_id).await?;
         let message = MessageRecord {

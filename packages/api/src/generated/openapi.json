@@ -33067,7 +33067,7 @@
         "tags": [
           "crate::workspace_routes"
         ],
-        "summary": "Saves the limits of a shared installation; `null` or 0 is unlimited. A lower limit refuses new workspaces and\nuploads only: nothing that exists is removed.",
+        "summary": "Saves the limits of a shared installation; `null` or 0 is unlimited. A lower limit refuses new workspaces,\nuploads and chat messages only: nothing that exists is removed or cut.",
         "operationId": "save_limits",
         "parameters": [
           {
@@ -33084,7 +33084,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/LimitsView"
+                "$ref": "#/components/schemas/LimitsBody"
               }
             }
           },
@@ -101744,12 +101744,19 @@
           "providers",
           "provider_registration_open",
           "oidc_provision",
+          "chat_message_max_chars",
           "version"
         ],
         "properties": {
           "billing_enabled": {
             "type": "boolean",
             "description": "Orbit Cloud: workspaces need a subscription (Settings → Billing) to be writable."
+          },
+          "chat_message_max_chars": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The most characters a chat message can have (Admin → Limits).",
+            "minimum": 0
           },
           "email_enabled": {
             "type": "boolean",
@@ -103313,7 +103320,7 @@
           },
           "body": {
             "type": "string",
-            "description": "Markdown source, at most 4000 characters. Mentions are tokens: `<@user_id>`,\n`<#conversation_id>`, `<!channel>`, `<!here>`."
+            "description": "Markdown source, at most the message limit (Admin → Limits, 20,000 characters by\ndefault; 422 `chat_message_too_long`). Mentions are tokens: `<@user_id>`,\n`<#conversation_id>`, `<!channel>`, `<!here>`."
           },
           "file_ids": {
             "type": "array",
@@ -108448,7 +108455,7 @@
               "string",
               "null"
             ],
-            "description": "Slack mrkdwn or Markdown; mentions are tokens: `<@user_id>`, `<#channel_id>`,\n`<!channel>`, `<!here>`. Longer than 4000 characters, it is cut. With `blocks` or\n`attachments` it is the plain text for notifications and search, and may be left out."
+            "description": "Slack mrkdwn or Markdown; mentions are tokens: `<@user_id>`, `<#channel_id>`,\n`<!channel>`, `<!here>`. Longer than the message limit (Admin → Limits, 20,000 characters\nby default), it is cut. With `blocks` or `attachments` it is the plain text for\nnotifications and search, and may be left out."
           },
           "thread_ts": {
             "type": [
@@ -108893,10 +108900,53 @@
         },
         "additionalProperties": false
       },
+      "LimitsBody": {
+        "type": "object",
+        "description": "New limits for a shared installation. `null` or 0 is unlimited.",
+        "properties": {
+          "chat_message_max_chars": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The most characters a new or edited chat message can have: 100–40000. Omitted: unchanged.\nA lower limit does not change existing messages; it applies when one is edited.",
+            "minimum": 0
+          },
+          "max_owned_workspaces": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Workspaces (not in the trash) one account may own. Instance admins are not limited.",
+            "minimum": 0
+          },
+          "workspace_storage_quota_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Bytes of files one workspace may store.",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
       "LimitsView": {
         "type": "object",
         "description": "Limits for a shared installation. `null` is unlimited.",
+        "required": [
+          "chat_message_max_chars"
+        ],
         "properties": {
+          "chat_message_max_chars": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The most characters a new or edited chat message can have. Existing messages keep their text.",
+            "minimum": 0
+          },
           "max_owned_workspaces": {
             "type": [
               "integer",

@@ -14,7 +14,7 @@ use utoipa::ToSchema;
 const MAX_BLOCKS: usize = 50;
 const MAX_RICH_ELEMENTS: usize = 50;
 const MAX_INLINE_ELEMENTS: usize = 100;
-const MARKDOWN_MAX_CHARS: usize = 4000;
+pub const MARKDOWN_MAX_CHARS: usize = 4000;
 const ID_MAX_CHARS: usize = 64;
 const MAX_FIELDS: usize = 10;
 const MAX_CONTEXT_ELEMENTS: usize = 10;

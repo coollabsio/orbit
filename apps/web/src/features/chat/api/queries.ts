@@ -1,10 +1,11 @@
 import { type InfiniteData, useInfiniteQuery, useQuery } from '@tanstack/react-query'
+import { useAuthOptions } from '@/features/auth/api'
 import { type ChatBadges, chatBadges, type UnreadGroup, unreadGroups } from '../lib/sidebar'
 import { useChatContext } from './chatContext'
 import type { ChatClient, MessageCursor, SearchInput } from './client'
 import { chatKeys } from './keys'
 import { liveStaleTime } from './persist'
-import { ChatError, type Conversation, type ConversationState, type FollowedThread, type Message, type MessagePage } from './types'
+import { ChatError, DEFAULT_MESSAGE_MAX_LENGTH, type Conversation, type ConversationState, type FollowedThread, type Message, type MessagePage } from './types'
 
 /**
  * Chat queries never go stale on their own: `applyChatEvent` keeps them current. `resync` invalidates them. A list
@@ -295,4 +296,9 @@ export function useUnreadGroups(): UnreadGroup[] {
   const states = useConversationStates().data
   const threads = useUnreadThreads().data
   return unreadGroups(conversations ?? [], states ?? [], threads ?? [])
+}
+
+/** The most characters a message can have (Admin → Limits). */
+export function useMessageMaxLength() {
+  return useAuthOptions().data?.chat_message_max_chars ?? DEFAULT_MESSAGE_MAX_LENGTH
 }
