@@ -271,6 +271,10 @@ pub fn workspace_router(state: WorkspaceState) -> Router {
             put(set_oidc_provision),
         )
         .route(
+            "/api/v1/admin/settings/frame-origins",
+            put(set_frame_origins),
+        )
+        .route(
             "/api/v1/admin/settings/smtp",
             put(save_smtp).delete(remove_smtp),
         )
@@ -2134,6 +2138,8 @@ struct InstanceSettingsView {
     /// The OAuth clients of the sign-in providers that are on: Google and GitHub saved here or set by the
     /// environment, and OpenID Connect from `ORBIT_OIDC_*`. A provider that is not listed is off.
     sign_in_providers: Vec<SignInProviderView>,
+    /// The https origins whose pages workspaces may show as custom pages; the app may frame them.
+    frame_origins: Vec<String>,
     /// The settings that `ORBIT_*` environment variables set. They replace the saved values, and changing them
     /// here gives 409 `set_by_environment`.
     environment: EnvironmentView,
@@ -2146,6 +2152,8 @@ struct EnvironmentView {
     registration_open: bool,
     /// `ORBIT_OIDC_PROVISION`.
     oidc_provision: bool,
+    /// `ORBIT_FRAME_ORIGINS`.
+    frame_origins: bool,
     /// `ORBIT_SMTP_*`.
     smtp: bool,
     /// `ORBIT_S3_*`: the bucket.
@@ -2167,6 +2175,7 @@ impl From<&EnvironmentSettings> for EnvironmentView {
         Self {
             registration_open: environment.registration_open.is_some(),
             oidc_provision: environment.oidc_provision.is_some(),
+            frame_origins: environment.frame_origins.is_some(),
             smtp: environment.smtp.is_some(),
             s3: environment.s3.is_some(),
             attachments_in_s3: environment.attachments_in_s3.is_some(),
@@ -2318,6 +2327,9 @@ async fn settings_view(
         mail: InstanceMailView { mail_enabled },
         registration_open: settings.registration_open,
         oidc_provision: settings.oidc_provision,
+        frame_origins: crate::frame_origins::of(state.identity.database())
+            .get()
+            .to_vec(),
         registration_ready,
         smtp: settings.smtp.map(|smtp| SmtpView {
             host: smtp.host,
@@ -2589,6 +2601,63 @@ async fn set_oidc_provision(
                 internal(instance, request_id.as_ref()).cause(error)
             }
         })?;
+    settings_view(&state, instance, request_id.as_ref()).await
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+struct FrameOriginsBody {
+    /// https origins without a path, such as `https://grafana.example.com`; at most 20. Not Orbit's own origin.
+    origins: Vec<String>,
+}
+
+/// Saves the custom page origins. Every server uses them at once: the app may frame them, and custom page URLs
+/// must be on one of them. 422 `invalid_frame_origin` names an entry that is not an https origin.
+#[utoipa::path(put, path = "/api/v1/admin/settings/frame-origins", request_body = FrameOriginsBody, responses((status = 200, body = InstanceSettingsView)))]
+async fn set_frame_origins(
+    State(state): State<WorkspaceState>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<FrameOriginsBody>,
+) -> Result<Json<InstanceSettingsView>, ApiError> {
+    let instance = "/api/v1/admin/settings/frame-origins";
+    let session = require_root(&state, &headers, instance, request_id.as_ref()).await?;
+    let database = state.identity.database();
+    if EnvironmentSettings::of(database).frame_origins.is_some() {
+        return Err(set_by_environment(
+            "ORBIT_FRAME_ORIGINS",
+            instance,
+            request_id.as_ref(),
+        ));
+    }
+    let origins = orbit_platform::frame_origin_list(
+        body.origins.iter().map(String::as_str),
+        &state.public_origin,
+    )
+    .map_err(|entry| {
+        ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_frame_origin",
+            "Invalid origin",
+            format!(
+                "{entry:?} is not allowed. Use https origins without a path, such as https://grafana.example.com, at most {} of them, and not Orbit's own address.",
+                orbit_platform::MAX_FRAME_ORIGINS
+            ),
+            instance,
+            request_id.as_ref(),
+        )
+    })?;
+    InstanceSettingsRepository::new(database.clone())
+        .set_frame_origins(
+            session.user.id,
+            &origins,
+            request_id_value(request_id.as_ref()),
+            TimestampMillis::now(),
+        )
+        .await
+        .map_err(|error| internal(instance, request_id.as_ref()).cause(error))?;
+    crate::frame_origins::of(database).set(origins);
+    crate::cluster::Cluster::of(database).send(crate::cluster::Message::FrameOriginsChanged);
     settings_view(&state, instance, request_id.as_ref()).await
 }
 

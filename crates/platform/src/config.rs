@@ -1053,6 +1053,14 @@ impl Config {
                 detail: "the delay cannot exceed 300 seconds".to_owned(),
             });
         }
+        if let Some(origins) = &self.instance.frame_origins
+            && crate::frame_origin(&self.http.public_origin).is_some_and(|own| origins.contains(&own))
+        {
+            return Err(ConfigError::InvalidSetting {
+                key: "ORBIT_FRAME_ORIGINS",
+                detail: "cannot contain Orbit's own origin (ORBIT_PUBLIC_ORIGIN)".to_owned(),
+            });
+        }
         self.rate_limits.validate()?;
         self.mail.validate()?;
         match &self.billing {

@@ -100,6 +100,7 @@ export const queryKeys = {
   /** Under `tasks.all`, so every task mutation's existing invalidation and optimistic patch reaches it. */
   taskQuery: (workspaceId: string, body: object) => [...workspace(workspaceId), 'tasks', 'query', body] as const,
   teamspaces: (workspaceId: string) => [...workspace(workspaceId), 'teamspaces'] as const,
+  customPages: (workspaceId: string) => [...workspace(workspaceId), 'custom-pages'] as const,
   pages: {
     all: (workspaceId: string) => [...workspace(workspaceId), 'pages'] as const,
     tree: (workspaceId: string) => [...workspace(workspaceId), 'pages', 'tree'] as const,

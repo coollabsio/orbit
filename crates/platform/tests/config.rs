@@ -789,6 +789,36 @@ fn mail_max_message_bytes_below_1mib_refused() {
 }
 
 #[test]
+fn frame_origins_are_https_origins_other_than_orbit() {
+    let config = load([(
+        "ORBIT_FRAME_ORIGINS",
+        " https://Grafana.example.com/ , https://board.example.com:8443,",
+    )])
+    .unwrap();
+    assert_eq!(
+        config.instance.frame_origins.unwrap(),
+        ["https://grafana.example.com", "https://board.example.com:8443"]
+    );
+
+    for origins in [
+        "http://grafana.example.com",
+        "https://grafana.example.com/d/1",
+        "https://*.example.com",
+        "https://user@grafana.example.com",
+        "grafana.example.com",
+    ] {
+        let error = load([("ORBIT_FRAME_ORIGINS", origins)]).unwrap_err();
+        assert_eq!(invalid_key(error), "ORBIT_FRAME_ORIGINS", "{origins}");
+    }
+    let error = load([
+        ("ORBIT_PUBLIC_ORIGIN", "https://orbit.example"),
+        ("ORBIT_FRAME_ORIGINS", "https://orbit.example"),
+    ])
+    .unwrap_err();
+    assert_eq!(invalid_key(error), "ORBIT_FRAME_ORIGINS");
+}
+
+#[test]
 fn mail_content_origin_must_be_an_origin() {
     let error = load([("ORBIT_MAIL_CONTENT_ORIGIN", "https://mail.example.com/x")]).unwrap_err();
 

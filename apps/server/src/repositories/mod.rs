@@ -5,6 +5,7 @@ pub mod attachments;
 pub mod backup_items;
 pub mod billing;
 pub mod chat;
+pub mod custom_pages;
 pub mod databases;
 pub mod environment_settings;
 pub mod identity;

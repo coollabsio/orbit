@@ -141,6 +141,7 @@ function useSettingsWrite<T>(write: (client: ReturnType<typeof useOrbit>['client
 
 export const useSetRegistration = () => useSettingsWrite(admin.setRegistration)
 export const useSetOidcProvision = () => useSettingsWrite(admin.setOidcProvision)
+export const useSetFrameOrigins = () => useSettingsWrite(admin.setFrameOrigins)
 export const useSaveSmtp = () => useSettingsWrite(admin.saveSmtp)
 export const useRemoveSmtp = () => useSettingsWrite((client, _: void) => admin.removeSmtp(client))
 export const useSaveSignInProvider = () => useSettingsWrite(admin.saveSignInProvider)

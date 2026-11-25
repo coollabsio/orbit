@@ -58,6 +58,22 @@ pub struct Workspace {
     pub teamspaces: Vec<Teamspace>,
     #[serde(default)]
     pub projects: Vec<Project>,
+    #[serde(default)]
+    pub custom_pages: Vec<CustomPage>,
+}
+
+/// A custom page of the sidebar. The fields are checked again before it is created.
+#[derive(Clone, Debug, Deserialize)]
+pub struct CustomPage {
+    #[serde(default)]
+    pub slug: String,
+    #[serde(default)]
+    pub name: String,
+    pub icon: Option<String>,
+    #[serde(default)]
+    pub url: String,
+    #[serde(default)]
+    pub admins_only: bool,
 }
 
 #[derive(Clone, Debug, Deserialize)]

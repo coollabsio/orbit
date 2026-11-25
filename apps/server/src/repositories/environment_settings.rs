@@ -32,6 +32,8 @@ pub struct EnvironmentSettings {
     pub sign_in_providers: Vec<SavedSignInProvider>,
     /// `ORBIT_OIDC_PROVISION`.
     pub oidc_provision: Option<bool>,
+    /// `ORBIT_FRAME_ORIGINS`.
+    pub frame_origins: Option<Vec<String>>,
 }
 
 impl EnvironmentSettings {
@@ -117,6 +119,7 @@ impl EnvironmentSettings {
             s3_keep_deleted_days: config.s3_keep_deleted_days,
             sign_in_providers,
             oidc_provision: config.oidc_provision,
+            frame_origins: config.frame_origins.clone(),
         })
     }
 

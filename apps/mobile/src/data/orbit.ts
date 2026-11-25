@@ -24,6 +24,7 @@ import {
   listNotifications,
   listPages,
   listProjects,
+  listCustomPages,
   listStatuses,
   listTaskActivity,
   listTasks,
@@ -43,6 +44,7 @@ import {
 import type {
   ProjectMemberRecord,
   AuthUserResponse,
+  CustomPageList,
   CategoryRecord,
   CommentRecord,
   ConversationRecord,
@@ -220,6 +222,11 @@ export async function trashTask(client: OrbitClient, workspaceId: string, task: 
 
 export function labels(client: OrbitClient, workspaceId: string): Promise<LabelRecord[]> {
   return allPages(async (cursor) => (await listLabels({ ...at(client, workspaceId), query: { cursor, limit: 100 } })).data)
+}
+
+/** The workspace's custom pages (#94) that the user sees. The app opens them in the in-app browser. */
+export async function customPages(client: OrbitClient, workspaceId: string): Promise<CustomPageList> {
+  return (await listCustomPages(at(client, workspaceId))).data
 }
 
 export function projects(client: OrbitClient, workspaceId: string): Promise<ProjectRecord[]> {

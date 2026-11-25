@@ -14,7 +14,7 @@ use axum::routing::{get, post};
 use axum::{Extension, Json, Router};
 use ipnet::IpNet;
 use orbit_platform::{
-    ClientIp, HealthCheck, HealthRegistry, HttpLimits, HttpPlatformLayer, Id, OriginPolicy,
+    ClientIp, FrameOrigins, HealthCheck, HealthRegistry, HttpLimits, HttpPlatformLayer, Id, OriginPolicy,
     RateLimitConfig, RequestId, RequestTransport,
 };
 use serde_json::Value;
@@ -845,25 +845,34 @@ async fn csp_allows_only_the_verified_bootstrap_hash_and_local_image_variants() 
     );
 }
 
-/// The app frames the sandboxed mail view document: from its own origin, or from `ORBIT_MAIL_CONTENT_ORIGIN`.
+/// The app frames the sandboxed mail view document (from its own origin, or from `ORBIT_MAIL_CONTENT_ORIGIN`) and the
+/// custom page origins, which the root user can change while the server runs.
 #[tokio::test]
-async fn csp_frames_the_mail_content_origin() {
+async fn csp_frames_the_mail_content_origin_and_the_current_custom_page_origins() {
+    let origins = FrameOrigins::default();
     let app = Router::new()
         .route("/", get(|| async { StatusCode::OK }))
         .layer(
             HttpPlatformLayer::new(OriginPolicy::new("https://orbit.test"))
-                .with_csp_frame_source("https://mail.orbit-content.test"),
+                .with_csp_frame_source("https://mail.orbit-content.test")
+                .with_frame_origins(origins.clone()),
         );
-    let response = app
-        .oneshot(Request::get("/").body(Body::empty()).unwrap())
-        .await
-        .unwrap();
-    let csp = response.headers()[CONTENT_SECURITY_POLICY]
-        .to_str()
-        .unwrap();
-    assert!(
-        csp.contains("frame-src 'self' https://mail.orbit-content.test blob: "),
-        "{csp}"
+    let frame_src = |app: Router| async move {
+        let response = app
+            .oneshot(Request::get("/").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let csp = response.headers()[CONTENT_SECURITY_POLICY].to_str().unwrap().to_owned();
+        csp.split("; ").find(|part| part.starts_with("frame-src")).unwrap().to_owned()
+    };
+    assert_eq!(
+        frame_src(app.clone()).await,
+        "frame-src 'self' https://mail.orbit-content.test blob: https://www.youtube-nocookie.com https://player.vimeo.com"
+    );
+    origins.set(vec!["https://grafana.example.com".to_owned()]);
+    assert_eq!(
+        frame_src(app).await,
+        "frame-src 'self' https://mail.orbit-content.test https://grafana.example.com blob: https://www.youtube-nocookie.com https://player.vimeo.com"
     );
 }
 

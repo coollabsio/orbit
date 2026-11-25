@@ -1550,6 +1550,23 @@ export type CreateAsanaImportBody = {
     token: string;
 };
 
+export type CreateCustomPageBody = {
+    admins_only?: boolean;
+    icon?: string | null;
+    /**
+     * 1 to 60 characters after trimming.
+     */
+    name: string;
+    /**
+     * 1 to 48 lowercase letters, digits and single hyphens; the page opens at `/pages/{slug}`.
+     */
+    slug: string;
+    /**
+     * An https URL on one of `frame_origins`.
+     */
+    url: string;
+};
+
 export type CreateDatabaseFromCsvBody = {
     /**
      * One per CSV column; targets are `{new: type}` or `"skip"`.
@@ -1970,6 +1987,52 @@ export type CustomEmojiRecord = {
      * Same-origin image path. The image of an id never changes.
      */
     url: string;
+};
+
+export type CustomPage = {
+    /**
+     * Only owners and admins see the page.
+     */
+    admins_only: boolean;
+    created_at: string;
+    icon: string | null;
+    id: string;
+    name: string;
+    /**
+     * The page's address in Orbit: `/pages/{slug}`. Unique in the workspace.
+     */
+    slug: string;
+    updated_at: string;
+    /**
+     * The https URL the page frames.
+     */
+    url: string;
+    version: number;
+    workspace_id: string;
+};
+
+export type CustomPageList = {
+    /**
+     * Whether the caller may add, change and remove pages.
+     */
+    can_manage: boolean;
+    /**
+     * The origins a page URL may use (Admin, or `ORBIT_FRAME_ORIGINS`). A page whose origin left the list is not framed.
+     */
+    frame_origins: Array<string>;
+    items: Array<CustomPage>;
+};
+
+export type CustomPageUpdateBody = {
+    admins_only?: boolean | null;
+    expected_version: number;
+    /**
+     * Absent: unchanged. `null`: cleared.
+     */
+    icon?: string | null;
+    name?: string | null;
+    slug?: string | null;
+    url?: string | null;
 };
 
 export type CustomRoleBody = {
@@ -2667,6 +2730,10 @@ export type EnvironmentView = {
      */
     backups_in_s3: boolean;
     /**
+     * `ORBIT_FRAME_ORIGINS`.
+     */
+    frame_origins: boolean;
+    /**
      * `ORBIT_OIDC_PROVISION`.
      */
     oidc_provision: boolean;
@@ -2821,6 +2888,13 @@ export type ForwardedRecord = {
      */
     created_at: string;
     message_id: string;
+};
+
+export type FrameOriginsBody = {
+    /**
+     * https origins without a path, such as `https://grafana.example.com`; at most 20. Not Orbit's own origin.
+     */
+    origins: Array<string>;
 };
 
 export type GithubActor = {
@@ -3363,6 +3437,10 @@ export type InstanceSettingsView = {
      * here gives 409 `set_by_environment`.
      */
     environment: EnvironmentView;
+    /**
+     * The https origins whose pages workspaces may show as custom pages; the app may frame them.
+     */
+    frame_origins: Array<string>;
     limits: LimitsView;
     mail: InstanceMailView;
     /**
@@ -6710,6 +6788,7 @@ export type OrbitImport = {
 
 export type OrbitImportCreated = {
     channels?: number;
+    custom_pages?: number;
     files?: number;
     messages?: number;
     pages?: number;
@@ -6771,6 +6850,10 @@ export type OrbitImportReport = {
  */
 export type OrbitImportSelection = {
     channel_ids?: Array<string>;
+    /**
+     * The sidebar's custom pages; a page whose address this workspace already uses is skipped.
+     */
+    include_custom_pages?: boolean;
     include_private_pages?: boolean;
     project_ids?: Array<string>;
     teamspace_ids?: Array<string>;
@@ -6804,6 +6887,10 @@ export type OrbitImportStatus = 'scanning' | 'ready' | 'queued' | 'importing' | 
  */
 export type OrbitImportTree = {
     channels: Array<OrbitImportTreeChannel>;
+    /**
+     * The sidebar's custom pages (full exports only). Absent in a tree stored before them.
+     */
+    custom_page_count: number;
     /**
      * Private pages of the member who made the export.
      */
@@ -28013,6 +28100,62 @@ export type GetInstanceSettingsResponses = {
 
 export type GetInstanceSettingsResponse = GetInstanceSettingsResponses[keyof GetInstanceSettingsResponses];
 
+export type SetFrameOriginsData = {
+    body: FrameOriginsBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/admin/settings/frame-origins';
+};
+
+export type SetFrameOriginsErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden, installation_admin_required
+     */
+    403: WorkspaceProblem;
+    /**
+     * contract_mismatch, set_by_environment
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * invalid_frame_origin
+     */
+    422: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type SetFrameOriginsError = SetFrameOriginsErrors[keyof SetFrameOriginsErrors];
+
+export type SetFrameOriginsResponses = {
+    200: InstanceSettingsView;
+};
+
+export type SetFrameOriginsResponse = SetFrameOriginsResponses[keyof SetFrameOriginsResponses];
+
 export type SaveLimitsData = {
     body: LimitsView;
     headers?: {
@@ -37808,6 +37951,246 @@ export type ListUnreadChatThreadsResponses = {
 };
 
 export type ListUnreadChatThreadsResponse = ListUnreadChatThreadsResponses[keyof ListUnreadChatThreadsResponses];
+
+export type ListCustomPagesData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/custom-pages';
+};
+
+export type ListCustomPagesErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * custom_page_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type ListCustomPagesError = ListCustomPagesErrors[keyof ListCustomPagesErrors];
+
+export type ListCustomPagesResponses = {
+    200: CustomPageList;
+};
+
+export type ListCustomPagesResponse = ListCustomPagesResponses[keyof ListCustomPagesResponses];
+
+export type CreateCustomPageData = {
+    body: CreateCustomPageBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/custom-pages';
+};
+
+export type CreateCustomPageErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * custom_page_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch, custom_page_slug_taken
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * validation_failed, custom_page_origin_not_allowed
+     */
+    422: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type CreateCustomPageError = CreateCustomPageErrors[keyof CreateCustomPageErrors];
+
+export type CreateCustomPageResponses = {
+    201: CustomPage;
+};
+
+export type CreateCustomPageResponse = CreateCustomPageResponses[keyof CreateCustomPageResponses];
+
+export type DeleteCustomPageData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        page_id: string;
+    };
+    query: {
+        expected_version: number;
+    };
+    url: '/api/v1/workspaces/{workspace_id}/custom-pages/{page_id}';
+};
+
+export type DeleteCustomPageErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * custom_page_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch, conflict
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type DeleteCustomPageError = DeleteCustomPageErrors[keyof DeleteCustomPageErrors];
+
+export type DeleteCustomPageResponses = {
+    204: void;
+};
+
+export type DeleteCustomPageResponse = DeleteCustomPageResponses[keyof DeleteCustomPageResponses];
+
+export type UpdateCustomPageData = {
+    body: CustomPageUpdateBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        page_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/custom-pages/{page_id}';
+};
+
+export type UpdateCustomPageErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * custom_page_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch, custom_page_slug_taken, conflict
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * validation_failed, custom_page_origin_not_allowed
+     */
+    422: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type UpdateCustomPageError = UpdateCustomPageErrors[keyof UpdateCustomPageErrors];
+
+export type UpdateCustomPageResponses = {
+    200: CustomPage;
+};
+
+export type UpdateCustomPageResponse = UpdateCustomPageResponses[keyof UpdateCustomPageResponses];
 
 export type CreateDatabaseFromCsvData = {
     body: CreateDatabaseFromCsvBody;

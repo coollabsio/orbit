@@ -311,6 +311,37 @@ impl InstanceSettingsRepository {
         Ok(())
     }
 
+    /// Saves the custom page origins (already checked), one per line. The caller reloads them
+    /// ([`crate::frame_origins::reload`]) and tells the other servers.
+    pub async fn set_frame_origins(
+        &self,
+        actor_id: Id,
+        origins: &[String],
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<(), sqlx::Error> {
+        let mut transaction = self.database.immediate_transaction().await?;
+        sqlx::query("UPDATE instance_settings SET frame_origins = $1, updated_at = $2 WHERE id = 1")
+            .bind(origins.join("\n"))
+            .bind(now.as_millis())
+            .execute(&mut *transaction)
+            .await?;
+        audit::record_global(
+            &mut transaction,
+            Some(actor_id),
+            "instance.frame_origins_changed",
+            AuditOutcome::Success,
+            "installation",
+            None,
+            request_id,
+            serde_json::json!({ "origins": origins }),
+            now,
+        )
+        .await?;
+        transaction.commit().await?;
+        Ok(())
+    }
+
     /// Mail is on for this installation (off until the root user turns it on). Off hides the mail
     /// app and refuses the workspace mail API; mail for domains added before still arrives.
     pub async fn mail_enabled(&self) -> Result<bool, sqlx::Error> {

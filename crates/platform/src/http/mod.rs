@@ -76,7 +76,14 @@ impl HttpPlatformLayer {
     /// Lets the app frame pages of `origin` (the mail view documents' own origin, when they have one).
     #[must_use]
     pub fn with_csp_frame_source(mut self, origin: impl Into<String>) -> Self {
-        self.csp.frame_source = Some(origin.into());
+        self.csp.frame_sources.push(origin.into());
+        self
+    }
+
+    /// Lets the app frame the custom page origins: each response reads the current list.
+    #[must_use]
+    pub fn with_frame_origins(mut self, origins: crate::FrameOrigins) -> Self {
+        self.csp.frame_origins = origins;
         self
     }
 

@@ -29,6 +29,7 @@ use crate::page_routes::{PageState, page_router};
 use crate::static_assets::StaticAssets;
 use crate::task_routes::{TaskState, task_router};
 use crate::teamspace_routes::{TeamspaceState, teamspace_router};
+use crate::custom_page_routes::{CustomPageState, custom_page_router};
 use crate::trello_import_routes::{TrelloImportState, trello_import_router};
 use crate::view_routes::view_router;
 use crate::workspace_export_routes::{WorkspaceExportState, workspace_export_router};
@@ -51,6 +52,7 @@ pub struct ApiRoutes {
     pub exports: ExportState,
     pub workspace_exports: WorkspaceExportState,
     pub teamspaces: TeamspaceState,
+    pub custom_pages: CustomPageState,
     pub attachments: AttachmentState,
     pub integrations: IntegrationState,
     pub imports: ImportState,
@@ -78,6 +80,7 @@ pub fn production_router(
     let mail_content_origin = api.mail.content_origin.clone();
     let session_cookie = api.auth.cookie_mode().session_cookie_name();
     let database = api.auth.database().clone();
+    let frame_origins = crate::frame_origins::of(&database);
     let realtime = crate::realtime::router(api.tasks.clone());
     let views = view_router(api.tasks.clone());
     let identity = std::sync::Arc::clone(&api.tasks.identity);
@@ -101,6 +104,7 @@ pub fn production_router(
         .merge(export_router(api.exports))
         .merge(workspace_export_router(api.workspace_exports))
         .merge(teamspace_router(api.teamspaces))
+        .merge(custom_page_router(api.custom_pages))
         .merge(attachment_router(api.attachments))
         .merge(integration_router(api.integrations))
         .merge(import_router(api.imports))
@@ -146,7 +150,8 @@ pub fn production_router(
         let layer = match mail_content_origin {
             Some(origin) => layer.with_csp_frame_source(origin),
             None => layer,
-        };
+        }
+        .with_frame_origins(frame_origins);
         if require_secure_transport {
             layer.require_secure_transport()
         } else {

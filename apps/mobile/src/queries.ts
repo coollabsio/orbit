@@ -127,6 +127,11 @@ export function useUnreadNotifications(enabled = true) {
   return useQuery({ queryKey: keys.unreadNotifications(workspaceId), queryFn: () => api.unreadNotifications(client, workspaceId), enabled })
 }
 
+export function useCustomPages() {
+  const { client, workspaceId } = useOrbit()
+  return useQuery({ queryKey: keys.customPages(workspaceId), queryFn: () => api.customPages(client, workspaceId) })
+}
+
 export function usePages() {
   const { client, workspaceId } = useOrbit()
   return useQuery({ queryKey: keys.pages(workspaceId), queryFn: () => api.pages(client, workspaceId) })

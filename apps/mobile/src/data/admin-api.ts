@@ -31,6 +31,7 @@ import {
   setAccountSuspension,
   setInstanceAdmin,
   setOidcProvision as setOidcProvisionRequest,
+  setFrameOrigins as setFrameOriginsRequest,
   setRegistration as setRegistrationRequest,
   startImageCompression as startImageCompressionRequest,
 } from '@orbit/api/generated/sdk.gen'
@@ -186,6 +187,11 @@ export async function instanceSettings(client: OrbitClient): Promise<InstanceSet
 // Each settings write answers with the whole settings.
 export async function setRegistration(client: OrbitClient, open: boolean): Promise<InstanceSettingsView> {
   return (await setRegistrationRequest({ client, body: { open }, throwOnError: true })).data
+}
+
+/** The custom page origins (Admin → General): https origins that workspaces may show as pages. */
+export async function setFrameOrigins(client: OrbitClient, origins: string[]): Promise<InstanceSettingsView> {
+  return (await setFrameOriginsRequest({ client, body: { origins }, throwOnError: true })).data
 }
 
 export async function setOidcProvision(client: OrbitClient, on: boolean): Promise<InstanceSettingsView> {

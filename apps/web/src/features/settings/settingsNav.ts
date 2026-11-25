@@ -1,5 +1,5 @@
 import { useContext, type ComponentType } from 'react'
-import { ArchiveBox, Flag, UserBlock, Brush, Card, Chart, ClipboardText, CloudConnection, Cpu, SecurityUser, Driver, Key, Keyboard, Link2, Lock, Login, Notification as Bell, Setting2 as Settings, ShieldTick as ShieldCheck, SmileCircle, Sms as Mail, Sticker, Danger as TriangleAlert, DocumentDownload, Import, User, People as Users, Global, Routing, DirectInbox, Tag, SmsTracking, Send2, ShieldCross, UserTag } from 'reicon-react'
+import { ArchiveBox, Flag, UserBlock, Brush, Card, Chart, ClipboardText, CloudConnection, Cpu, SecurityUser, Driver, Key, Keyboard, Link2, Lock, Login, Notification as Bell, Setting2 as Settings, ShieldTick as ShieldCheck, SmileCircle, Sms as Mail, Sticker, Danger as TriangleAlert, DocumentDownload, Import, User, People as Users, Global, Routing, DirectInbox, Tag, SmsTracking, Send2, ShieldCross, UserTag, Monitor } from 'reicon-react'
 import type { Permission } from '@orbit/api/generated/types.gen'
 import { RobotIcon } from '@/components/common/icons/RobotIcon'
 import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
@@ -79,6 +79,7 @@ const AREAS: Record<SettingsAreaName, SettingsArea> = {
           // every member but a guest may create a personal export token there
           { to: '/settings/api-tokens', label: 'API tokens', icon: Key, permission: 'workspace.export_personal' },
           { to: '/settings/webhooks', label: 'Webhooks', icon: Global, permission: 'integrations.manage' },
+          { to: '/settings/custom-pages', label: 'Custom pages', icon: Monitor, permission: 'workspace.update' },
         ],
       },
       {

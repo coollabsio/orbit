@@ -48,6 +48,7 @@ use crate::notion::import::clamp;
 use crate::obsidian::archive::{ArchiveStore, Location};
 use crate::repositories::attachments::AttachmentRepository;
 use crate::repositories::chat::ChatRepository;
+use crate::repositories::custom_pages::{CustomPageError, CustomPageRepository, NewCustomPage};
 use crate::repositories::membership;
 use crate::repositories::page_comments::PageCommentRepository;
 use crate::repositories::page_files::PageFileRepository;
@@ -333,6 +334,10 @@ pub struct OrbitImportTree {
     pub teamspaces: Vec<OrbitImportTreeTeamspace>,
     /// Private pages of the member who made the export.
     pub private_page_count: u64,
+    /// The sidebar's custom pages (full exports only). Absent in a tree stored before them.
+    #[serde(default)]
+    #[schema(required = true)]
+    pub custom_page_count: u64,
     pub channels: Vec<OrbitImportTreeChannel>,
 }
 
@@ -343,6 +348,8 @@ pub struct OrbitImportSelection {
     pub project_ids: Vec<String>,
     pub teamspace_ids: Vec<String>,
     pub include_private_pages: bool,
+    /// The sidebar's custom pages; a page whose address this workspace already uses is skipped.
+    pub include_custom_pages: bool,
     pub channel_ids: Vec<String>,
 }
 
@@ -355,6 +362,7 @@ pub struct OrbitImportCreated {
     pub channels: u64,
     pub messages: u64,
     pub files: u64,
+    pub custom_pages: u64,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, ToSchema)]
@@ -1374,6 +1382,7 @@ impl OrbitImportService {
         };
 
         self.plan(&mut run, &workspace).await?;
+        self.import_custom_pages(&mut run, &workspace).await?;
         tasks::import_structure(self, &mut run, &workspace).await?;
         tasks::import_tasks(self, &mut run, &workspace).await?;
         pages::import_pages(self, &mut run).await?;
@@ -1481,6 +1490,45 @@ impl OrbitImportService {
             .execute(&mut *tx)
             .await?;
         tx.commit().await?;
+        Ok(())
+    }
+
+    /// The selected custom pages, in one step: a page whose fields are invalid is left out, and one whose address
+    /// this workspace already uses (also from an earlier run of this import) is skipped.
+    async fn import_custom_pages(
+        &self,
+        run: &mut Run,
+        workspace: &model::Workspace,
+    ) -> Result<(), Failure> {
+        if run.mode != ExportMode::Full || !run.selection.include_custom_pages {
+            return Ok(());
+        }
+        let pages: Vec<NewCustomPage> = workspace
+            .custom_pages
+            .iter()
+            .filter_map(|page| {
+                NewCustomPage::checked(
+                    &page.slug,
+                    &page.name,
+                    page.icon.as_deref(),
+                    &page.url,
+                    page.admins_only,
+                )
+            })
+            .collect();
+        let created = CustomPageRepository::new(self.database().clone())
+            .import_pages(
+                run.workspace_id,
+                run.user_id,
+                &pages,
+                TimestampMillis::now(),
+            )
+            .await
+            .map_err(|error| match error {
+                CustomPageError::Unavailable(error) => Failure::from(error),
+                other => Failure::Transient(other.to_string()),
+            })?;
+        run.report.created.custom_pages += created;
         Ok(())
     }
 
@@ -2072,7 +2120,9 @@ fn checked_selection(
         Ok(kept)
     }
     if mode == ExportMode::Personal
-        && (!selection.project_ids.is_empty() || !selection.teamspace_ids.is_empty())
+        && (!selection.project_ids.is_empty()
+            || !selection.teamspace_ids.is_empty()
+            || selection.include_custom_pages)
     {
         return Err(OrbitImportError::Invalid {
             field: "project_ids",
@@ -2090,6 +2140,7 @@ fn checked_selection(
             "teamspace_ids",
         )?,
         include_private_pages: selection.include_private_pages,
+        include_custom_pages: selection.include_custom_pages,
         channel_ids: keep(
             selection.channel_ids,
             |id| tree.channels.iter().any(|channel| channel.id == id),
@@ -2098,7 +2149,7 @@ fn checked_selection(
     };
     let count =
         selection.project_ids.len() + selection.teamspace_ids.len() + selection.channel_ids.len();
-    if count == 0 && !selection.include_private_pages {
+    if count == 0 && !selection.include_private_pages && !selection.include_custom_pages {
         return Err(OrbitImportError::Invalid { field: "selection" });
     }
     if count > MAX_SELECTED {
@@ -2144,6 +2195,7 @@ fn build_tree(archive: &Archive) -> Result<OrbitImportTree, ArchiveError> {
         }
     }
     if manifest.mode == ExportMode::Full {
+        tree.custom_page_count = workspace.custom_pages.len() as u64;
         tree.teamspaces = workspace
             .teamspaces
             .iter()

@@ -42,6 +42,8 @@ pub(crate) enum Message {
     Collab(CollabMessage),
     /// The root user saved the storage settings (Admin → Storage).
     StorageChanged,
+    /// The root user saved the custom page origins (Admin → General).
+    FrameOriginsChanged,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -237,6 +239,7 @@ async fn serve(
                     match envelope.message {
                         Message::Beat => {}
                         Message::StorageChanged => reload_storage(database).await,
+                        Message::FrameOriginsChanged => reload_frame_origins(database).await,
                         Message::Live(message) => live.receive(&envelope.server, message).await,
                         Message::Collab(message) => {
                             // Access changed: the live and event sockets check theirs too.
@@ -256,6 +259,7 @@ async fn serve(
                     live.catch_up().await;
                     live.joined_cluster();
                     reload_storage(database).await;
+                    reload_frame_origins(database).await;
                     if let Some(collab) = CollabHub::existing(database) {
                         collab.catch_up_all().await;
                     }
@@ -266,6 +270,7 @@ async fn serve(
                 send(Message::Beat).await;
                 live.tick(SERVER_TIMEOUT).await;
                 reload_storage(database).await;
+                reload_frame_origins(database).await;
                 if !warned_local_attachments
                     && cluster.others() > 0
                     && crate::object_storage::attachments_in_s3(database) == Some(false)
@@ -283,6 +288,12 @@ async fn serve(
                 }
             }
         }
+    }
+}
+
+async fn reload_frame_origins(database: &Database) {
+    if let Err(error) = crate::frame_origins::reload(database).await {
+        tracing::warn!(%error, "custom page origins saved by another server");
     }
 }
 

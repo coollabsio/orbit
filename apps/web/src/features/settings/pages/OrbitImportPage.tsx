@@ -316,16 +316,18 @@ function Chooser({ workspaceId, item, tree }: { workspaceId: string; item: Orbit
   const [projects, setProjects] = useState<ReadonlySet<string>>(() => new Set(initial.project_ids))
   const [teamspaces, setTeamspaces] = useState<ReadonlySet<string>>(() => new Set(initial.teamspace_ids))
   const [privatePages, setPrivatePages] = useState(initial.include_private_pages)
+  const [customPages, setCustomPages] = useState(initial.include_custom_pages)
   const [channels, setChannels] = useState<ReadonlySet<string>>(() => new Set(initial.channel_ids))
   const start = useStartOrbitImport(workspaceId)
   const selection = {
     project_ids: full ? [...projects] : [],
     teamspace_ids: full ? [...teamspaces] : [],
     include_private_pages: privatePages,
+    include_custom_pages: full && customPages,
     channel_ids: [...channels],
   }
-  const empty = !selection.project_ids.length && !selection.teamspace_ids.length && !privatePages && !selection.channel_ids.length
-  const nothing = (full ? tree.projects.length + tree.teamspaces.length : 0) + tree.private_page_count + tree.channels.length === 0
+  const empty = !selection.project_ids.length && !selection.teamspace_ids.length && !privatePages && !selection.include_custom_pages && !selection.channel_ids.length
+  const nothing = (full ? tree.projects.length + tree.teamspaces.length + tree.custom_page_count : 0) + tree.private_page_count + tree.channels.length === 0
 
   return (
     <div className="flex flex-col">
@@ -364,6 +366,15 @@ function Chooser({ workspaceId, item, tree }: { workspaceId: string; item: Orbit
               My private pages
             </button>
             <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{plural(tree.private_page_count, 'page', 'pages')}</span>
+          </div>
+        ) : null}
+        {full && tree.custom_page_count > 0 ? (
+          <div className="flex h-8 items-center gap-2 rounded-md px-2 text-[0.8125rem] text-foreground transition-colors duration-150 ease-out hover:bg-sidebar-accent/50">
+            <Checkbox aria-label="Import the custom pages" checked={customPages} onCheckedChange={setCustomPages} />
+            <button type="button" tabIndex={-1} className="min-w-0 flex-1 truncate text-left text-xs font-semibold" onClick={() => setCustomPages(!customPages)}>
+              Custom pages
+            </button>
+            <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{plural(tree.custom_page_count, 'page', 'pages')}</span>
           </div>
         ) : null}
         {CHANNEL_GROUPS.map((group) => (
@@ -496,6 +507,7 @@ function ResultStep({ item }: { item: OrbitImport }) {
             <ImportStat label="Channels" value={report.created.channels ?? 0} />
             <ImportStat label="Messages" value={report.created.messages ?? 0} />
             <ImportStat label="Files" value={report.created.files ?? 0} />
+            {report.created.custom_pages ? <ImportStat label="Custom pages" value={report.created.custom_pages} /> : null}
           </div>
         ) : null}
         {report && report.skipped_existing > 0 ? (

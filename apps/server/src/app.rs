@@ -70,6 +70,7 @@ use crate::socket_ticket::SocketTickets;
 use crate::static_assets::{FRONTEND_REVISION, StaticAssetError, StaticAssets};
 use crate::task_routes::TaskState;
 use crate::teamspace_routes::TeamspaceState;
+use crate::custom_page_routes::CustomPageState;
 use crate::trello::client::TrelloClientConfig;
 use crate::trello::import::{TrelloImportService, TrelloImportSettings};
 use crate::trello_import_routes::TrelloImportState;
@@ -248,6 +249,9 @@ impl App {
                 .map_err(|error| AppError::Config(format!("object storage: {error}")))?;
             environment.install(&database);
         }
+        crate::frame_origins::reload(&database)
+            .await
+            .map_err(|error| AppError::Database(error.to_string()))?;
         let object_storage = ObjectStorage::default();
         let storage_settings = crate::object_storage::load_saved(&database)
             .await
@@ -672,6 +676,7 @@ impl App {
                     cookie_mode,
                 ),
                 teamspaces: TeamspaceState::new(Arc::clone(&identity), cookie_mode),
+                custom_pages: CustomPageState::new(Arc::clone(&identity), cookie_mode),
                 attachments: attachment_state.clone(),
                 integrations: IntegrationState::new(
                     Arc::new(ApiTokenRepository::new(database.clone())),
