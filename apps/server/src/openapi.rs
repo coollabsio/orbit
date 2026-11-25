@@ -121,6 +121,7 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::workspace_routes::get_instance_settings,
         crate::workspace_routes::set_registration,
         crate::workspace_routes::set_oidc_provision,
+        crate::workspace_routes::set_custom_page_policy,
         crate::workspace_routes::save_smtp,
         crate::workspace_routes::remove_smtp,
         crate::workspace_routes::send_test_email,
@@ -513,6 +514,10 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::teamspace_routes::update_teamspace,
         crate::teamspace_routes::delete_teamspace,
         crate::teamspace_routes::move_teamspace,
+        crate::custom_page_routes::list_custom_pages,
+        crate::custom_page_routes::create_custom_page,
+        crate::custom_page_routes::update_custom_page,
+        crate::custom_page_routes::delete_custom_page,
         crate::import_routes::create_notion_import,
         crate::import_routes::list_notion_imports,
         crate::import_routes::get_notion_import,
@@ -1783,6 +1788,11 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             add_code(&mut responses, "403", "installation_admin_required");
             add_code(&mut responses, "409", "email_not_configured");
         }
+        "set_custom_page_policy" => {
+            add_code(&mut responses, "403", "installation_admin_required");
+            add_code(&mut responses, "409", "set_by_environment");
+            add_code(&mut responses, "422", "invalid_frame_origin");
+        }
         "set_oidc_provision" => {
             add_code(&mut responses, "403", "installation_admin_required");
             add_code(&mut responses, "409", "oidc_not_configured");
@@ -1974,6 +1984,23 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
         id if page_operation(id) => page_errors(id, &mut responses),
         id if database_operation(id) => database_errors(id, &mut responses),
         id if teamspace_operation(id) => teamspace_errors(id, &mut responses),
+        "list_custom_pages" | "create_custom_page" | "update_custom_page" | "delete_custom_page" => {
+            add_code(&mut responses, "404", "custom_page_not_found");
+            if operation_id != "list_custom_pages" {
+                add_code(&mut responses, "403", "workspace_action_forbidden");
+            }
+            if matches!(operation_id, "create_custom_page" | "update_custom_page") {
+                add_code(&mut responses, "409", "custom_page_slug_taken");
+                if operation_id == "create_custom_page" {
+                    add_code(&mut responses, "409", "custom_page_limit");
+                }
+                add_code(&mut responses, "422", "validation_failed");
+                add_code(&mut responses, "422", "custom_page_origin_not_allowed");
+            }
+            if matches!(operation_id, "update_custom_page" | "delete_custom_page") {
+                add_code(&mut responses, "409", "conflict");
+            }
+        }
         id if id.contains("chat") => chat_errors(id, &mut responses),
         id if id.contains("send_route") || id == "set_mail_send_default" => {
             mail_send_route_errors(id, &mut responses);
@@ -2055,6 +2082,7 @@ fn invalid_request_operation(operation_id: &str) -> bool {
             | "registration_complete"
             | "set_registration"
             | "set_oidc_provision"
+            | "set_custom_page_policy"
             | "save_smtp"
             | "save_s3"
             | "save_sign_in_provider"

@@ -29,6 +29,7 @@ export const keys = {
   pages: (workspaceId: string) => ['pages', workspaceId] as const,
   page: (workspaceId: string, pageId: string) => ['page', workspaceId, pageId] as const,
   teamspaces: (workspaceId: string) => ['teamspaces', workspaceId] as const,
+  customPages: (workspaceId: string) => ['custom-pages', workspaceId] as const,
   /** A linked view's detail sits under the database's own key, so refreshing the database refreshes it too. */
   database: (workspaceId: string, databaseId: string, linkId = '') => (linkId ? ['database', workspaceId, databaseId, linkId] : ['database', workspaceId, databaseId]),
 }

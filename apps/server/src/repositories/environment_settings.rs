@@ -34,6 +34,8 @@ pub struct EnvironmentSettings {
     pub sign_in_providers: Vec<SavedSignInProvider>,
     /// `ORBIT_OIDC_PROVISION`.
     pub oidc_provision: Option<bool>,
+    /// `ORBIT_FRAME_ORIGINS`.
+    pub frame_policy: Option<orbit_platform::FramePolicy>,
 }
 
 impl EnvironmentSettings {
@@ -120,6 +122,7 @@ impl EnvironmentSettings {
             image_proxy_fetches: config.image_proxy_fetches,
             sign_in_providers,
             oidc_provision: config.oidc_provision,
+            frame_policy: config.frame_policy.clone(),
         })
     }
 

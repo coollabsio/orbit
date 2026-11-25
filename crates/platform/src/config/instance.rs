@@ -40,6 +40,7 @@ const OIDC_CLIENT_ID: &str = "ORBIT_OIDC_CLIENT_ID";
 const OIDC_CLIENT_SECRET: &str = "ORBIT_OIDC_CLIENT_SECRET";
 const OIDC_DISPLAY_NAME: &str = "ORBIT_OIDC_DISPLAY_NAME";
 const OIDC_PROVISION: &str = "ORBIT_OIDC_PROVISION";
+const FRAME_ORIGINS: &str = "ORBIT_FRAME_ORIGINS";
 
 const SECRETS: [&str; 5] = [
     SMTP_PASSWORD,
@@ -66,7 +67,7 @@ const S3_KEYS: [&str; 7] = [
     S3_SECRET_ACCESS_KEY,
     S3_PATH_STYLE,
 ];
-const OTHER_KEYS: [&str; 15] = [
+const OTHER_KEYS: [&str; 16] = [
     OPEN_REGISTRATION,
     AUTOMATIC_BACKUPS,
     S3_ATTACHMENTS,
@@ -82,6 +83,7 @@ const OTHER_KEYS: [&str; 15] = [
     OIDC_CLIENT_SECRET,
     OIDC_DISPLAY_NAME,
     OIDC_PROVISION,
+    FRAME_ORIGINS,
 ];
 
 /// The variable is read by [`InstanceConfig::from_environment`].
@@ -210,6 +212,9 @@ pub struct InstanceConfig {
     pub oidc: Option<OidcConfig>,
     /// A first OpenID Connect sign-in creates an account, also when registration is closed.
     pub oidc_provision: Option<bool>,
+    /// The custom page policy (`ORBIT_FRAME_ORIGINS`: `any`, `off` or comma-separated origins), in place of the
+    /// one saved in Admin.
+    pub frame_policy: Option<crate::FramePolicy>,
 }
 
 impl InstanceConfig {
@@ -283,6 +288,19 @@ impl InstanceConfig {
             github: oauth_client(&values, GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET)?,
             oidc: oidc(&values)?,
             oidc_provision: values.flag(OIDC_PROVISION)?,
+            frame_policy: values
+                .text(FRAME_ORIGINS)
+                .map(|value| {
+                    crate::FramePolicy::from_env(&value, "").map_err(|entry| {
+                        invalid(
+                            FRAME_ORIGINS,
+                            &format!(
+                                "{entry:?} must be `any`, `off`, or an https origin without a path, query or wildcard"
+                            ),
+                        )
+                    })
+                })
+                .transpose()?,
         };
         if config.registration_open == Some(true)
             && config.smtp.is_none()
@@ -362,6 +380,12 @@ impl InstanceConfig {
         }
         if let Some(provision) = self.oidc_provision {
             push(OIDC_PROVISION, &provision.to_string());
+        }
+        if let Some(policy) = &self.frame_policy {
+            match policy {
+                crate::FramePolicy::Listed(origins) => push(FRAME_ORIGINS, &origins.join(",")),
+                policy => push(FRAME_ORIGINS, policy.mode()),
+            }
         }
         lines
     }

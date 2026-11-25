@@ -60,6 +60,8 @@ pub mod static_assets;
 pub mod task_import;
 pub mod task_routes;
 pub mod teamspace_routes;
+pub mod custom_page_routes;
+pub mod frame_origins;
 pub mod token_api;
 pub mod trello;
 pub mod trello_import_routes;

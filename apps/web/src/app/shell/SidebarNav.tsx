@@ -4,7 +4,7 @@ import { useBindings } from '@/shortcuts/useCommand'
 import { createContext, Fragment, useContext, useEffect, useState, type ComponentType, type ReactNode } from 'react'
 import { Link, useLocation, useMatch, useNavigate, useResolvedPath, type LinkProps } from 'react-router'
 import { cva, type VariantProps } from 'class-variance-authority'
-import { Calendar, ChevronDown, CalendarTick, Danger, SecurityUser, Home2 as Home, Layer, Message as MessageSquare, DocumentText as FileText, Search4 as Search, Setting2 as Settings, Sms as Mail, Star, TaskSquare as SquareCheck, Timer, Folder, Add as Plus, Trash } from 'reicon-react'
+import { Calendar, ChevronDown, CalendarTick, Danger, SecurityUser, Home2 as Home, Layer, Message as MessageSquare, DocumentText as FileText, Search4 as Search, Setting2 as Settings, Sms as Mail, Star, TaskSquare as SquareCheck, Timer, Folder, Add as Plus, Trash, Monitor } from 'reicon-react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
@@ -20,6 +20,7 @@ import { ProviderMark } from '@/components/common/icons/ProviderMark'
 import { NewProjectModal } from '@/features/tasks/components/NewProjectModal'
 import { savedViewsQueryOptions } from '@/features/views/api/views'
 import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
+import { useCustomPages } from '@/features/pages/api'
 import { useIsGuest } from '@/features/workspaces/permissions'
 import { isAdminLimitsPath, phonePath, settingsAreaOf, useAdminLimitsItems, useSettingsArea, type SettingsAreaName } from '@/features/settings/settingsNav'
 import { useIsPhone } from '@/features/chat/pages/useChatViewport'
@@ -211,6 +212,36 @@ function projectIcon({ color, icon_url }: Pick<ProjectRecord, 'color' | 'icon_ur
     projectIcons.set(key, icon)
   }
   return icon
+}
+
+// One icon component per emoji, so a custom page's tile keeps its identity between renders.
+const emojiIcons = new Map<string, SidebarNavIcon>()
+function emojiIcon(emoji: string | null): SidebarNavIcon {
+  if (!emoji) return Monitor
+  let icon = emojiIcons.get(emoji)
+  if (!icon) {
+    icon = ({ className }) => <span aria-hidden="true" className={cn('text-sm leading-none', className)}>{emoji}</span>
+    emojiIcons.set(emoji, icon)
+  }
+  return icon
+}
+
+/** The workspace's custom pages (#94), below the built-in apps. Nothing shows while there are none. */
+function CustomPageLinks({ onNavigate }: { onNavigate?: () => void }) {
+  const workspaceId = useContext(WorkspaceContext)?.workspace.id
+  return workspaceId ? <CustomPageList workspaceId={workspaceId} onNavigate={onNavigate} /> : null
+}
+
+function CustomPageList({ workspaceId, onNavigate }: { workspaceId: string; onNavigate?: () => void }) {
+  const collapsed = useContext(SidebarNavCollapsed)
+  const pages = useCustomPages(workspaceId).data?.items ?? []
+  if (pages.length === 0) return null
+  return (
+    <>
+      <SidebarSection label="Pages" collapsed={collapsed} />
+      {pages.map((page) => <SidebarNavItem key={page.id} to={`/pages/${page.slug}`} icon={emojiIcon(page.icon)} label={page.name} onClick={onNavigate} />)}
+    </>
+  )
 }
 
 /**
@@ -638,6 +669,7 @@ export function SidebarNav({
                   ) : (
                     <SidebarNavComingSoon key={link.to} icon={link.icon} label={link.label} />
                   ))}
+                  <CustomPageLinks onNavigate={onNavigate} />
                   <SidebarSection label="Manage" collapsed={collapsed} />
                   <SidebarNavItem to="/settings" icon={Settings} label="Settings" onClick={onNavigate} />
                   {isRoot ? (

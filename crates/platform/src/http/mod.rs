@@ -76,7 +76,7 @@ impl HttpPlatformLayer {
     /// Lets the app frame pages of `origin` (the mail view documents' own origin, when they have one).
     #[must_use]
     pub fn with_csp_frame_source(mut self, origin: impl Into<String>) -> Self {
-        self.csp.frame_source = Some(origin.into());
+        self.csp.frame_sources.push(origin.into());
         self
     }
 
@@ -525,7 +525,13 @@ fn finish_response(
     response
         .headers_mut()
         .insert(HeaderName::from_static("x-request-id"), request_id);
-    add_security_headers(response.headers_mut(), secure, csp);
+    let custom = response.extensions_mut().remove::<crate::CspFrameSources>();
+    add_security_headers(
+        response.headers_mut(),
+        secure,
+        csp,
+        custom.as_ref().map_or(&[], |sources| sources.0.as_slice()),
+    );
     response
 }
 

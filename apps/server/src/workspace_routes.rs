@@ -272,6 +272,10 @@ pub fn workspace_router(state: WorkspaceState) -> Router {
             put(set_oidc_provision),
         )
         .route(
+            "/api/v1/admin/settings/custom-pages",
+            put(set_custom_page_policy),
+        )
+        .route(
             "/api/v1/admin/settings/smtp",
             put(save_smtp).delete(remove_smtp),
         )
@@ -2134,6 +2138,8 @@ struct InstanceSettingsView {
     /// The OAuth clients of the sign-in providers that are on: Google and GitHub saved here or set by the
     /// environment, and OpenID Connect from `ORBIT_OIDC_*`. A provider that is not listed is off.
     sign_in_providers: Vec<SignInProviderView>,
+    /// Which URLs workspace admins may use for custom pages: `ORBIT_FRAME_ORIGINS`, or else the saved policy.
+    custom_pages: crate::frame_origins::CustomPagePolicy,
     /// The settings that `ORBIT_*` environment variables set. They replace the saved values, and changing them
     /// here gives 409 `set_by_environment`.
     environment: EnvironmentView,
@@ -2146,6 +2152,8 @@ struct EnvironmentView {
     registration_open: bool,
     /// `ORBIT_OIDC_PROVISION`.
     oidc_provision: bool,
+    /// `ORBIT_FRAME_ORIGINS`.
+    frame_origins: bool,
     /// `ORBIT_SMTP_*`.
     smtp: bool,
     /// `ORBIT_S3_*`: the bucket.
@@ -2169,6 +2177,7 @@ impl From<&EnvironmentSettings> for EnvironmentView {
         Self {
             registration_open: environment.registration_open.is_some(),
             oidc_provision: environment.oidc_provision.is_some(),
+            frame_origins: environment.frame_policy.is_some(),
             smtp: environment.smtp.is_some(),
             s3: environment.s3.is_some(),
             attachments_in_s3: environment.attachments_in_s3.is_some(),
@@ -2346,6 +2355,12 @@ async fn settings_view(
         mail: InstanceMailView { mail_enabled },
         registration_open: settings.registration_open,
         oidc_provision: settings.oidc_provision,
+        custom_pages: match &EnvironmentSettings::of(state.identity.database()).frame_policy {
+            Some(policy) => crate::frame_origins::view(policy),
+            None => crate::frame_origins::saved(state.identity.database())
+                .await
+                .map_err(|error| internal(instance, request_id).cause(error))?,
+        },
         registration_ready,
         smtp: settings.smtp.map(|smtp| SmtpView {
             host: smtp.host,
@@ -2617,6 +2632,67 @@ async fn set_oidc_provision(
                 internal(instance, request_id.as_ref()).cause(error)
             }
         })?;
+    settings_view(&state, instance, request_id.as_ref()).await
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+struct CustomPagePolicyBody {
+    mode: crate::frame_origins::CustomPageMode,
+    /// https origins without a path, such as `https://grafana.example.com`, for the `listed` mode. Kept in the other
+    /// modes. Not Orbit's own origin.
+    #[serde(default)]
+    origins: Vec<String>,
+}
+
+/// Saves which URLs workspace admins may use for custom pages. Every server uses it at once. A page that the new
+/// policy does not allow stays, but the app does not frame it. 422 `invalid_frame_origin` names an entry that is not
+/// an https origin.
+#[utoipa::path(put, path = "/api/v1/admin/settings/custom-pages", request_body = CustomPagePolicyBody, responses((status = 200, body = InstanceSettingsView)))]
+async fn set_custom_page_policy(
+    State(state): State<WorkspaceState>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<CustomPagePolicyBody>,
+) -> Result<Json<InstanceSettingsView>, ApiError> {
+    let instance = "/api/v1/admin/settings/custom-pages";
+    let session = require_root(&state, &headers, instance, request_id.as_ref()).await?;
+    let database = state.identity.database();
+    if EnvironmentSettings::of(database).frame_policy.is_some() {
+        return Err(set_by_environment(
+            "ORBIT_FRAME_ORIGINS",
+            instance,
+            request_id.as_ref(),
+        ));
+    }
+    let origins = orbit_platform::frame_origin_list(
+        body.origins.iter().map(String::as_str),
+        &state.public_origin,
+    )
+    .map_err(|entry| {
+        ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_frame_origin",
+            "Invalid origin",
+            format!(
+                "{entry:?} is not allowed. Use https origins without a path, such as https://grafana.example.com, and not Orbit's own address."
+            ),
+            instance,
+            request_id.as_ref(),
+        )
+    })?;
+    InstanceSettingsRepository::new(database.clone())
+        .set_custom_page_policy(
+            session.user.id,
+            &crate::frame_origins::CustomPagePolicy {
+                mode: body.mode,
+                origins,
+            },
+            request_id_value(request_id.as_ref()),
+            TimestampMillis::now(),
+        )
+        .await
+        .map_err(|error| internal(instance, request_id.as_ref()).cause(error))?;
     settings_view(&state, instance, request_id.as_ref()).await
 }
 

@@ -3,7 +3,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use orbit_platform::{Config, EnvironmentMode};
+use orbit_platform::{Config, EnvironmentMode, FramePolicy};
 
 static NEXT_FIXTURE: AtomicU64 = AtomicU64::new(0);
 
@@ -786,6 +786,39 @@ fn mail_max_message_bytes_below_1mib_refused() {
     let error = load([("ORBIT_MAIL_MAX_MESSAGE_BYTES", "1048575")]).unwrap_err();
 
     assert_eq!(invalid_key(error), "ORBIT_MAIL_MAX_MESSAGE_BYTES");
+}
+
+#[test]
+fn frame_origins_are_a_mode_or_https_origins_other_than_orbit() {
+    let config = load([(
+        "ORBIT_FRAME_ORIGINS",
+        " https://Grafana.example.com/ , https://board.example.com:8443,",
+    )])
+    .unwrap();
+    assert_eq!(
+        config.instance.frame_policy.unwrap().origins(),
+        ["https://grafana.example.com", "https://board.example.com:8443"]
+    );
+    for (value, policy) in [("any", FramePolicy::Any), ("off", FramePolicy::Off)] {
+        assert_eq!(load([("ORBIT_FRAME_ORIGINS", value)]).unwrap().instance.frame_policy, Some(policy));
+    }
+
+    for origins in [
+        "http://grafana.example.com",
+        "https://grafana.example.com/d/1",
+        "https://*.example.com",
+        "https://user@grafana.example.com",
+        "grafana.example.com",
+    ] {
+        let error = load([("ORBIT_FRAME_ORIGINS", origins)]).unwrap_err();
+        assert_eq!(invalid_key(error), "ORBIT_FRAME_ORIGINS", "{origins}");
+    }
+    let error = load([
+        ("ORBIT_PUBLIC_ORIGIN", "https://orbit.example"),
+        ("ORBIT_FRAME_ORIGINS", "https://orbit.example"),
+    ])
+    .unwrap_err();
+    assert_eq!(invalid_key(error), "ORBIT_FRAME_ORIGINS");
 }
 
 #[test]

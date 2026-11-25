@@ -877,6 +877,176 @@ async fn a_new_export_deletes_the_oldest_beyond_three_ready_ones() {
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
+#[tokio::test]
+async fn custom_pages_go_into_a_full_export_and_an_orbit_import_brings_them_back() {
+    let mut harness = Harness::new(false).await;
+    harness
+        .ok(
+            &harness.owner,
+            "PUT",
+            "/api/v1/admin/settings/custom-pages",
+            Some(json!({"mode": "listed", "origins": ["https://grafana.example.com"]})),
+        )
+        .await;
+    for page in [
+        json!({"slug": "deploys", "name": "Deploys", "icon": "🚀", "url": "https://grafana.example.com/d/deploys"}),
+        json!({"slug": "oncall", "name": "On-call", "url": "https://grafana.example.com/oncall", "admins_only": true}),
+    ] {
+        harness
+            .ok(
+                &harness.owner,
+                "POST",
+                &harness.workspace("/custom-pages"),
+                Some(page),
+            )
+            .await;
+    }
+    let export_id = harness.start_export().await;
+    harness.run_export(&export_id).await;
+    let (status, zip, _) = harness.download(&harness.owner, &export_id).await;
+    assert_eq!(status, StatusCode::OK);
+    let exported = Archive::new(zip.clone()).json("workspace.json")["custom_pages"].clone();
+    let fields: Vec<(&str, &str, bool)> = exported
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|page| {
+            (
+                page["slug"].as_str().unwrap(),
+                page["url"].as_str().unwrap(),
+                page["admins_only"].as_bool().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        fields,
+        [
+            ("deploys", "https://grafana.example.com/d/deploys", false),
+            ("oncall", "https://grafana.example.com/oncall", true),
+        ]
+    );
+    assert_eq!(exported[0]["icon"], "🚀");
+
+    // Another workspace already has a page at /pages/deploys: the import keeps it and adds the other.
+    let target = harness
+        .ok(
+            &harness.owner,
+            "POST",
+            "/api/v1/workspaces",
+            Some(json!({"name": "Target"})),
+        )
+        .await;
+    let target = format!(
+        "/api/v1/workspaces/{}",
+        target["id"]
+            .as_str()
+            .or(target["workspace"]["id"].as_str())
+            .unwrap()
+    );
+    harness
+        .ok(
+            &harness.owner,
+            "POST",
+            &format!("{target}/custom-pages"),
+            Some(json!({"slug": "deploys", "name": "Our deploys", "url": "https://grafana.example.com/ours"})),
+        )
+        .await;
+    let boundary = "custom-pages-import";
+    let mut body = format!(
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"export.zip\"\r\nContent-Type: application/zip\r\n\r\n"
+    )
+    .into_bytes();
+    body.extend_from_slice(&zip);
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    let request = harness
+        .request(
+            &harness.owner,
+            "POST",
+            &format!("{target}/imports/orbit/upload"),
+        )
+        .header(
+            header::CONTENT_TYPE,
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(Body::from(body))
+        .unwrap();
+    let (status, bytes, _) = harness.send(request).await;
+    assert_eq!(
+        status,
+        StatusCode::CREATED,
+        "{}",
+        String::from_utf8_lossy(&bytes)
+    );
+    let import: Value = serde_json::from_slice(&bytes).unwrap();
+    let import = format!("{target}/imports/orbit/{}", import["id"].as_str().unwrap());
+
+    let stop = harness.serve().await;
+    let wait = async |status: &str| {
+        for _ in 0..300 {
+            let item = harness
+                .ok(
+                    &harness.owner,
+                    "GET",
+                    &format!("{import}?include=tree"),
+                    None,
+                )
+                .await;
+            if item["status"] == status {
+                return item;
+            }
+            assert!(
+                !matches!(
+                    item["status"].as_str(),
+                    Some("failed" | "cancelled" | "expired")
+                ),
+                "{item}"
+            );
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        panic!("the import did not become {status}");
+    };
+    let ready = wait("ready").await;
+    assert_eq!(ready["tree"]["custom_page_count"], 2, "{ready}");
+    harness
+        .ok(
+            &harness.owner,
+            "POST",
+            &format!("{import}/start"),
+            Some(json!({"selection": {"include_custom_pages": true}})),
+        )
+        .await;
+    let done = wait("completed").await;
+    assert_eq!(done["report"]["created"]["custom_pages"], 1, "{done}");
+    let list = harness
+        .ok(
+            &harness.owner,
+            "GET",
+            &format!("{target}/custom-pages"),
+            None,
+        )
+        .await;
+    let pages: Vec<(&str, &str, bool)> = list["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|page| {
+            (
+                page["slug"].as_str().unwrap(),
+                page["name"].as_str().unwrap(),
+                page["admins_only"].as_bool().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        pages,
+        [
+            ("oncall", "On-call", true),
+            ("deploys", "Our deploys", false)
+        ]
+    );
+    stop.await;
+}
+
 async fn user_id(database: &Database, email: &str) -> String {
     sqlx::query_scalar("SELECT id FROM users WHERE email = $1")
         .bind(email)
