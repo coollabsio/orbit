@@ -364,6 +364,8 @@ export function importNotes<K extends ImportKind>(kind: K, item: ImportRecord<K>
     push(report.unmatched_assignees, `${report.unmatched_assignees} tasks had an assignee with no Orbit member of the same email; they are unassigned and name the assignee. Assign them to a member in Settings → Import.`)
     push(report.missing_files, `${report.missing_files} Asana files could not be downloaded.`)
     push(report.skipped_subtasks, `${report.skipped_subtasks} subtasks deeper than five levels were not imported.`)
+    push(report.time_entries_imported, `${report.time_entries_imported} time entries were imported.`)
+    push(report.skipped_time_entries, `${report.skipped_time_entries} time entries were not imported: no duration, more than 24 hours, or no valid day.`)
   } else if (kind === 'linear') {
     const report = (item as LinearImport).report
     if (!report) return notes

@@ -198,6 +198,32 @@ pub struct Task {
     pub attachments: Vec<File>,
     #[serde(default)]
     pub comments: Vec<Comment>,
+    #[serde(default)]
+    pub time_entries: Vec<TimeEntry>,
+}
+
+/// Time logged on a task.
+#[derive(Debug, Deserialize)]
+pub struct TimeEntry {
+    #[serde(default)]
+    pub id: String,
+    pub user: Option<Person>,
+    #[serde(default)]
+    pub minutes: i64,
+    #[serde(default)]
+    pub worked_on: String,
+    #[serde(default)]
+    pub note: String,
+    #[serde(default)]
+    pub billable: bool,
+    pub created_by: Option<Person>,
+    /// The source comment it was logged with (`/spend`).
+    #[serde(default)]
+    pub comment_id: Option<String>,
+    #[serde(default)]
+    pub created_at: String,
+    #[serde(default)]
+    pub updated_at: String,
 }
 
 #[derive(Debug, Default, Deserialize)]

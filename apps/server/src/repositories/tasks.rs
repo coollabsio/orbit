@@ -727,7 +727,7 @@ impl TaskRepository {
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn record_write(
+    pub(super) async fn record_write(
         &self,
         tx: &mut Transaction<'_, Any>,
         workspace_id: Id,
@@ -3568,8 +3568,13 @@ impl TaskRepository {
         project_from_row(row)
     }
 
+    /// The projects an API token was granted; `None` without a token grant.
+    pub(super) fn granted_projects(&self) -> Option<&[Id]> {
+        self.project_grant.as_deref()
+    }
+
     /// An API token reads only the projects it was granted.
-    fn require_granted_project(&self, project_id: Id) -> Result<(), TaskError> {
+    pub(super) fn require_granted_project(&self, project_id: Id) -> Result<(), TaskError> {
         if self
             .project_grant
             .as_ref()
@@ -3683,23 +3688,54 @@ impl TaskRepository {
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<CommentRecord, TaskError> {
-        let id = Id::new_v7();
         let mut tx = self.database.workspace_transaction(workspace_id).await?;
-        let actor = require_task_tx(&mut tx, workspace_id, task_id, actor_id).await?;
+        let record = self
+            .insert_comment_in_tx(
+                &mut tx,
+                workspace_id,
+                task_id,
+                actor_id,
+                parent_id,
+                content,
+                source,
+                request_id,
+                now,
+            )
+            .await?;
+        tx.commit().await?;
+        Ok(record)
+    }
+
+    /// [`Self::import_comment`] inside the caller's write transaction.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) async fn insert_comment_in_tx(
+        &self,
+        tx: &mut Transaction<'_, Any>,
+        workspace_id: Id,
+        task_id: Id,
+        actor_id: Id,
+        parent_id: Option<Id>,
+        content: CommentContent,
+        source: ImportedComment,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<CommentRecord, TaskError> {
+        let id = Id::new_v7();
+        let actor = require_task_tx(tx, workspace_id, task_id, actor_id).await?;
         if let Some(grant) = &self.project_grant {
             let project: String = sqlx::query_scalar(
                 "SELECT project_id FROM tasks WHERE id = $1 AND workspace_id = $2",
             )
             .bind(task_id.to_string())
             .bind(workspace_id.to_string())
-            .fetch_one(&mut *tx)
+            .fetch_one(&mut **tx)
             .await?;
             if !grant.iter().any(|id| id.to_string() == project) {
                 return Err(TaskError::NotFound);
             }
         }
         if let Some(parent_id) = parent_id {
-            let exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM task_comments WHERE id = $1 AND workspace_id = $2 AND task_id = $3").bind(parent_id.to_string()).bind(workspace_id.to_string()).bind(task_id.to_string()).fetch_one(&mut *tx).await?;
+            let exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM task_comments WHERE id = $1 AND workspace_id = $2 AND task_id = $3").bind(parent_id.to_string()).bind(workspace_id.to_string()).bind(task_id.to_string()).fetch_one(&mut **tx).await?;
             if exists != 1 {
                 return Err(TaskError::NotFound);
             }
@@ -3710,21 +3746,21 @@ impl TaskRepository {
             )
             .bind(task_id.to_string())
             .bind(workspace_id.to_string())
-            .fetch_one(&mut *tx)
+            .fetch_one(&mut **tx)
             .await?,
         )?;
-        let (body, blocks) = comment_content(&mut tx, workspace_id, task_id, &content).await?;
+        let (body, blocks) = comment_content(tx, workspace_id, task_id, &content).await?;
         let mentioned_user_ids = match content {
             CommentContent::Blocks(_) => {
                 let mentioned = mentioned_users(&blocks).into_keys().collect::<Vec<_>>();
-                mentionable(&mut tx, workspace_id, mentioned, actor_id).await?
+                mentionable(tx, workspace_id, mentioned, actor_id).await?
             }
             CommentContent::Markdown {
                 mentioned_user_ids, ..
             } => mentioned_user_ids,
         };
         if let Some(author_id) = source.author_id {
-            validate_member(&mut tx, workspace_id, author_id, "author_id").await?;
+            validate_member(tx, workspace_id, author_id, "author_id").await?;
         }
         // A member named as the author replaces the token's service account.
         let author_id = source.author_id.unwrap_or(actor_id);
@@ -3734,7 +3770,7 @@ impl TaskRepository {
         let created_at = source.created_at.unwrap_or(now);
         let updated_at = source.updated_at.unwrap_or(created_at);
         let inserted = sqlx::query("INSERT INTO task_comments (id, workspace_id, task_id, author_id, parent_id, body, body_json, version, created_at, updated_at, author_service_account_id, external_id) VALUES ($1, $2, $3, $4, $5, $6, $7, 0, $8, $9, $10, $11)")
-            .bind(id.to_string()).bind(workspace_id.to_string()).bind(task_id.to_string()).bind(author_id.to_string()).bind(parent_id.map(|id| id.to_string())).bind(&body).bind(Value::Array(blocks.clone()).to_string()).bind(created_at.as_millis()).bind(updated_at.as_millis()).bind(service_account.map(|(id, _)| id.to_string())).bind(source.external_id.as_deref()).execute(&mut *tx).await;
+            .bind(id.to_string()).bind(workspace_id.to_string()).bind(task_id.to_string()).bind(author_id.to_string()).bind(parent_id.map(|id| id.to_string())).bind(&body).bind(Value::Array(blocks.clone()).to_string()).bind(created_at.as_millis()).bind(updated_at.as_millis()).bind(service_account.map(|(id, _)| id.to_string())).bind(source.external_id.as_deref()).execute(&mut **tx).await;
         // Another request wrote the same `external_id` first.
         if is_unique_violation(&inserted) {
             return Err(TaskError::Conflict);
@@ -3742,7 +3778,7 @@ impl TaskRepository {
         inserted?;
         if self.notifies() {
             notify_users(
-                &mut tx,
+                tx,
                 workspace_id,
                 actor_id,
                 NotificationRequest {
@@ -3756,7 +3792,7 @@ impl TaskRepository {
             .await?;
         }
         self.record_write(
-            &mut tx,
+            tx,
             workspace_id,
             actor_id,
             ("comment.created", "comment"),
@@ -3766,7 +3802,6 @@ impl TaskRepository {
             now,
         )
         .await?;
-        tx.commit().await?;
         Ok(CommentRecord {
             id,
             workspace_id,
@@ -4705,7 +4740,7 @@ pub(super) async fn require_project_tx(
     }
 }
 
-async fn require_task_tx(
+pub(super) async fn require_task_tx(
     tx: &mut Transaction<'_, Any>,
     workspace_id: Id,
     task_id: Id,
@@ -4814,7 +4849,7 @@ async fn validate_project_status(
 }
 
 /// `user_id` is an active member of the workspace who is not a guest.
-async fn validate_member(
+pub(super) async fn validate_member(
     tx: &mut Transaction<'_, Any>,
     workspace_id: Id,
     user_id: Id,
@@ -5519,7 +5554,11 @@ fn is_unique_violation(result: &Result<sqlx::any::AnyQueryResult, sqlx::Error>) 
     matches!(result, Err(sqlx::Error::Database(error)) if error.is_unique_violation())
 }
 
-fn check_version<T: Serialize>(expected: u64, current: u64, record: &T) -> Result<(), TaskError> {
+pub(super) fn check_version<T: Serialize>(
+    expected: u64,
+    current: u64,
+    record: &T,
+) -> Result<(), TaskError> {
     if expected == current {
         Ok(())
     } else {

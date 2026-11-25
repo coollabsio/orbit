@@ -3,7 +3,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
-import type { Task, TaskViewState } from '@/features/tasks/api/models'
+import type { Task, TaskViewState, TimeEntry } from '@/features/tasks/api/models'
+import { queryKeys } from '@/api/queryKeys'
 import { ActivityFeed } from './ActivityFeed'
 import { testWorkspace } from '@/test/workspace'
 import { NO_MEMBER_ABILITIES } from '@/features/workspaces/models'
@@ -86,4 +87,53 @@ test('relation activity links the other task', () => {
   expect(view.getByRole('listitem').textContent).toContain('added blocker ORB-77AA')
   fireEvent.click(view.getByRole('button', { name: 'ORB-77AA' }))
   expect(opened).toEqual(['task-77aa'])
+})
+
+test('shows logged time between the activities, by when it was logged', () => {
+  const client = new QueryClient()
+  const entry: TimeEntry = {
+    id: 'time-1', workspace_id: workspace.id, task_id: task.id, project_id: 'project-1', user_id: 'user-1',
+    minutes: 90, worked_on: '2026-09-10', note: 'Fixed the **parser**', billable: true, created_by: 'user-1', comment_id: null, version: 0,
+    created_at: '2026-09-17T10:01:30.000Z', updated_at: '2026-09-17T10:01:30.000Z', can_edit: true,
+  }
+  client.setQueryData(queryKeys.timeEntries(workspace.id, task.id), { items: [entry], total_minutes: 90, sub_issues_minutes: 0 })
+  const twoEvents = { ...task, activity: task.activity.slice(0, 3) }
+  const view = render(
+    <QueryClientProvider client={client}>
+      <WorkspaceContext.Provider value={{ workspace, workspaces: [workspace], selectWorkspace: mock(() => {}) }}>
+        <ActivityFeed task={twoEvents} state={{ ...state, tasks: [twoEvents] }} />
+      </WorkspaceContext.Provider>
+    </QueryClientProvider>,
+  )
+
+  const card = view.container.querySelector('[data-slot="time-entry"]')!
+  expect(card.textContent).toContain('Andras logged 1h 30m')
+  expect(card.textContent).toContain('Billable')
+  expect(card.querySelector('strong')?.textContent).toBe('parser')
+  expect(view.getByRole('button', { name: 'Time entry actions' })).toBeTruthy()
+  // logged after the second activity, before the third: it splits the run
+  const order = [...view.container.querySelectorAll('li, [data-slot="time-entry"]')].map((node) => node.getAttribute('data-slot') === 'time-entry' ? 'time' : node.textContent?.match(/Activity \d/)?.[0])
+  expect(order).toEqual(['Activity 1', 'Activity 2', 'time', 'Activity 3'])
+})
+
+test('shows time logged with a comment as a badge on that comment, not as its own card', () => {
+  const client = new QueryClient()
+  const comment = { id: 'comment-1', authorId: 'user-1', body: 'Paired on it', bodyJson: null, canEdit: true, canDelete: true, createdAt: '2026-09-17T10:01:30.000Z', version: 0 }
+  const entry: TimeEntry = {
+    id: 'time-1', workspace_id: workspace.id, task_id: task.id, project_id: 'project-1', user_id: 'user-1',
+    minutes: 45, worked_on: '2026-09-17', note: 'Paired on it', billable: false, created_by: 'user-1', comment_id: 'comment-1', version: 0,
+    created_at: '2026-09-17T10:01:30.000Z', updated_at: '2026-09-17T10:01:30.000Z', can_edit: true,
+  }
+  client.setQueryData(queryKeys.timeEntries(workspace.id, task.id), { items: [entry], total_minutes: 45, sub_issues_minutes: 0 })
+  const withComment = { ...task, comments: [comment] }
+  const view = render(
+    <QueryClientProvider client={client}>
+      <WorkspaceContext.Provider value={{ workspace, workspaces: [workspace], selectWorkspace: mock(() => {}) }}>
+        <ActivityFeed task={withComment} state={{ ...state, tasks: [withComment] }} />
+      </WorkspaceContext.Provider>
+    </QueryClientProvider>,
+  )
+
+  expect(view.container.querySelector('[data-slot="time-entry"]')).toBeNull()
+  expect(view.container.querySelector('[data-slot="comment-time"]')?.textContent?.trim()).toBe('45m')
 })

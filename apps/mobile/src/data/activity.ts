@@ -8,6 +8,7 @@ import { recurrenceChangeText } from '@orbit/api/recurrence'
 import { shortDate } from './format'
 import type { CommentRecord, TaskActivityEvent } from './orbit'
 import { estimateLabel, PRIORITY_LABEL, type Priority } from './tasks'
+import type { TimeEntry } from './time'
 
 interface Named {
   id: string
@@ -43,7 +44,7 @@ export interface CommentThread {
   replies: CommentRecord[]
 }
 
-export type FeedEntry = { kind: 'activity'; items: ActivityRow[] } | { kind: 'thread'; thread: CommentThread }
+export type FeedEntry = { kind: 'activity'; items: ActivityRow[] } | { kind: 'thread'; thread: CommentThread } | { kind: 'time'; entry: TimeEntry }
 
 const RELATION_FALLBACK: Record<string, string> = {
   'task.marked_duplicate': 'marked as duplicate',
@@ -174,21 +175,32 @@ export function activityRows(events: readonly TaskActivityEvent[], context: Acti
   })
 }
 
-/** Rows and comment threads in time order; consecutive rows share one timeline block, as on the web. */
-export function buildFeed(rows: readonly ActivityRow[], comments: readonly CommentRecord[]): FeedEntry[] {
+/**
+ * Rows, comment threads and time entries in time order (an entry by when it was logged, not its work day);
+ * consecutive rows share one timeline block, as on the web.
+ */
+export function buildFeed(rows: readonly ActivityRow[], comments: readonly CommentRecord[], timeEntries: readonly TimeEntry[] = []): FeedEntry[] {
   const byTime = (a: CommentRecord, b: CommentRecord) => a.created_at.localeCompare(b.created_at)
   const threads = comments
     .filter((comment) => !comment.parent_id)
     .sort(byTime)
     .map((root) => ({ root, replies: comments.filter((comment) => comment.parent_id === root.id).sort(byTime) }))
+  // time logged with a comment (`/spend`) shows on that comment, as on the web
+  const commentIds = new Set(comments.map((comment) => comment.id))
+  const entries = timeEntries.filter((entry) => !entry.comment_id || !commentIds.has(entry.comment_id))
   const mixed = [
     ...rows.map((row) => ({ at: row.createdAt, row })),
     ...threads.map((thread) => ({ at: thread.root.created_at, thread })),
+    ...entries.map((entry) => ({ at: entry.created_at, entry })),
   ].sort((a, b) => a.at.localeCompare(b.at))
   const feed: FeedEntry[] = []
   for (const item of mixed) {
     if ('thread' in item) {
       feed.push({ kind: 'thread', thread: item.thread })
+      continue
+    }
+    if ('entry' in item) {
+      feed.push({ kind: 'time', entry: item.entry })
       continue
     }
     const last = feed.at(-1)

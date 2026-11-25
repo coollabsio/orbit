@@ -4,7 +4,7 @@ import { cn } from 'cn'
 import { useQueryClient } from '@tanstack/react-query'
 import { confirmAction } from '@/components/common/confirmAction'
 import { recurrenceLabel } from '@orbit/api/recurrence'
-import { Add as Plus, ArrowLeft, Calendar, Diamonds, Hierarchy2, Link2, RefreshCircle, Repeat, Tag, TaskSquare as SquareCheck, Triangle, User as UserIcon, Xmark as X } from 'reicon-react'
+import { Add as Plus, ArrowLeft, Calendar, Clock, Diamonds, Hierarchy2, Link2, RefreshCircle, Repeat, Tag, TaskSquare as SquareCheck, Triangle, User as UserIcon, Xmark as X } from 'reicon-react'
 import { Badge } from '@/components/ui/badge'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Tip } from '@/components/common/Tip'
@@ -57,6 +57,9 @@ import { LabelPicker, LabelPill } from './TaskLabels'
 import { TaskDescriptionEditor, type TaskDescriptionHandle } from './TaskDescriptionEditor'
 import { TaskTextFields } from './TaskTextFields'
 import { RecurrenceEditor } from './RecurrenceEditor'
+import { TimeEntryDialog } from './TimeEntryDialog'
+import { useTaskTimeEntries } from '@/features/tasks/api/timeEntries'
+import { formatDuration } from '@/features/tasks/timeLib'
 
 interface TaskDetailProps {
   task: Task | undefined
@@ -164,6 +167,9 @@ export function TaskDetail({ task, project, state, onClose, onOpenTask, onOpenPr
   useCommand('task.addSubIssue', task ? () => setComposingSubIssue(true) : null)
   const [relationMenuOpen, setRelationMenuOpen] = useState(false)
   useCommand('task.addRelation', task ? () => setRelationMenuOpen(true) : null)
+  const time = useTaskTimeEntries(workspace.id, task?.id).data
+  const [loggingTime, setLoggingTime] = useState(false)
+  useCommand('task.logTime', task ? () => setLoggingTime(true) : null)
 
   return (
     <Pane>
@@ -528,6 +534,20 @@ export function TaskDetail({ task, project, state, onClose, onOpenTask, onOpenPr
                 </PopoverContent>
               </Popover>
             </PropertyGroup>
+
+            <PropertyGroup title="Time">
+              {time && (time.total_minutes > 0 || time.sub_issues_minutes > 0) ? (
+                <p className="flex items-center gap-1.5 text-[0.8125rem] tabular-nums" aria-label="Time logged">
+                  <Clock className="size-3.5 text-muted-foreground" aria-hidden="true" />
+                  {formatDuration(time.total_minutes)}
+                  {time.sub_issues_minutes > 0 ? <span className="text-xs text-muted-foreground">+{formatDuration(time.sub_issues_minutes)} sub-issues</span> : null}
+                </p>
+              ) : null}
+              <PropertyButton type="button" className="text-muted-foreground" onClick={() => setLoggingTime(true)}>
+                <Plus className="size-3.5" aria-hidden="true" />
+                Log time
+              </PropertyButton>
+            </PropertyGroup>
           </aside>
 
           <div className="col-start-1 min-w-0 min-[900px]:mx-auto min-[900px]:w-full min-[900px]:max-w-[840px] min-[900px]:px-10 min-[900px]:pb-12">
@@ -549,6 +569,7 @@ export function TaskDetail({ task, project, state, onClose, onOpenTask, onOpenPr
               onSelect={choose}
             />
           ) : null}
+          {loggingTime ? <TimeEntryDialog task={task} users={users} currentUserId={state.currentUserId} onClose={() => setLoggingTime(false)} /> : null}
           {parentPicker ? (
             <TaskPickerDialog
               open

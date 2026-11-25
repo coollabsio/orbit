@@ -139,6 +139,43 @@ export interface Task {
   version: number
 }
 
+/** Time someone logged on a task. `worked_on` is a `YYYY-MM-DD` day; `note` is Markdown. */
+export interface TimeEntry {
+  id: string
+  workspace_id: string
+  task_id: string
+  project_id: string
+  user_id: string
+  minutes: number
+  worked_on: string
+  note: string
+  billable: boolean
+  created_by: string
+  /** The comment it was logged with (`/spend`); null otherwise or once that comment is deleted. */
+  comment_id: string | null
+  version: number
+  created_at: string
+  updated_at: string
+  /** The caller may edit and delete it: their own time, or `time.manage` in the project. */
+  can_edit: boolean
+}
+
+/** A task's time: its entries (oldest work day first), their sum, and the sum of its sub-issues' time. */
+export interface TaskTimeEntries {
+  items: TimeEntry[]
+  total_minutes: number
+  sub_issues_minutes: number
+}
+
+export interface TimeEntryInput {
+  minutes: number
+  worked_on: string
+  note?: string
+  billable?: boolean
+  /** Defaults to the caller; another member needs `time.manage`. */
+  user_id?: string
+}
+
 export interface TaskViewState {
   currentUserId: string
   users: User[]

@@ -113,6 +113,7 @@ mod storage_api;
 mod task_collab_api;
 mod tasks_api;
 mod teamspaces_api;
+mod time_entries_api;
 mod trello_client;
 mod trello_import_api;
 mod two_factor_api;

@@ -299,6 +299,14 @@ export type AsanaImportReport = {
      */
     skipped_subtasks: number;
     /**
+     * Time tracking entries Orbit cannot hold (0 or more than 1,440 minutes, no valid day).
+     */
+    skipped_time_entries: number;
+    /**
+     * Asana time tracking entries added to the tasks.
+     */
+    time_entries_imported: number;
+    /**
      * Tasks whose Asana assignee has no Orbit member with the same email (left unassigned).
      */
     unmatched_assignees: number;
@@ -1359,6 +1367,7 @@ export type CommentBody = {
      */
     mentioned_user_ids?: Array<string>;
     parent_id?: string | null;
+    time?: null | CommentTimeBody;
 };
 
 export type CommentRecord = {
@@ -1397,6 +1406,17 @@ export type CommentRecord = {
     updated_at: string;
     version: number;
     workspace_id: string;
+};
+
+export type CommentTimeBody = {
+    /**
+     * Whole minutes, 1 to 1440.
+     */
+    minutes: number;
+    /**
+     * The day of the work, `YYYY-MM-DD`; today in the caller's timezone by default.
+     */
+    worked_on?: string | null;
 };
 
 export type CommentUpdateBody = {
@@ -7806,7 +7826,7 @@ export type PasswordConfirmationBody = {
  * A workspace capability that depends on the member's role. Actions open to
  * every member (tasks, projects, attachments, docs) are not listed here.
  */
-export type Permission = 'workspace.update' | 'workspace.delete' | 'workspace.transfer' | 'members.manage' | 'audit.view' | 'api_tokens.manage' | 'integrations.manage' | 'teamspaces.delete' | 'pages.purge' | 'views.manage_shared' | 'comments.moderate' | 'chat.manage' | 'mail.manage' | 'billing.manage' | 'storage.manage' | 'workspace.export' | 'workspace.export_personal' | 'roles.manage' | 'projects.view_private' | 'tasks.purge' | 'projects.manage';
+export type Permission = 'workspace.update' | 'workspace.delete' | 'workspace.transfer' | 'members.manage' | 'audit.view' | 'api_tokens.manage' | 'integrations.manage' | 'teamspaces.delete' | 'pages.purge' | 'views.manage_shared' | 'comments.moderate' | 'chat.manage' | 'mail.manage' | 'billing.manage' | 'storage.manage' | 'workspace.export' | 'workspace.export_personal' | 'roles.manage' | 'projects.view_private' | 'tasks.purge' | 'projects.manage' | 'time.manage';
 
 export type PersonalMailboxOverride = {
     local_part: string;
@@ -9046,6 +9066,28 @@ export type PublicLockDocBody = {
     locked: boolean;
 };
 
+export type PublicLogTimeBody = {
+    billable?: boolean;
+    /**
+     * Whole minutes, 1 to 1440.
+     */
+    minutes: number;
+    /**
+     * Markdown, up to 10,000 characters.
+     */
+    note?: string;
+    /**
+     * The member who did the work. Default: the token's user. Logging for someone else needs
+     * `time.manage`; a service-account token must name the member.
+     */
+    user_id?: string | null;
+    /**
+     * The day of the work, `YYYY-MM-DD`. Default: today in the member's profile timezone (UTC
+     * when it has none).
+     */
+    worked_on?: string | null;
+};
+
 export type PublicMailContact = {
     address: string;
     /**
@@ -10241,6 +10283,18 @@ export type PublicUpdateTeamspaceBody = {
      * teamspace for global docs.
      */
     project_id?: string | null;
+};
+
+export type PublicUpdateTimeEntryBody = {
+    billable?: boolean | null;
+    /**
+     * The entry's `version` as read; the edit fails with `409` when it changed since.
+     */
+    expected_version?: number | null;
+    minutes?: number | null;
+    note?: string | null;
+    user_id?: string | null;
+    worked_on?: string | null;
 };
 
 /**
@@ -11636,6 +11690,21 @@ export type TaskRelationRecord = {
 export type TaskRelationType = 'blocks' | 'related' | 'duplicate';
 
 /**
+ * The time logged on a task, oldest day first, with the totals shown on the task.
+ */
+export type TaskTimeEntries = {
+    items: Array<TimeEntryRecord>;
+    /**
+     * Minutes logged on its live sub-issues, at every depth, that the caller sees.
+     */
+    sub_issues_minutes: number;
+    /**
+     * Minutes logged on the task itself.
+     */
+    total_minutes: number;
+};
+
+/**
  * Result of emptying the tasks trash.
  */
 export type TaskTrashEmptied = {
@@ -11806,6 +11875,78 @@ export type ThreadStateRecord = {
 export type TierLimits = {
     new: Limits;
     standard: Limits;
+};
+
+export type TimeEntryBody = {
+    billable?: boolean;
+    /**
+     * Whole minutes, 1 to 1440.
+     */
+    minutes: number;
+    /**
+     * Markdown.
+     */
+    note?: string;
+    /**
+     * The member who did the work; the caller by default. Logging for someone else needs
+     * `time.manage`.
+     */
+    user_id?: string | null;
+    /**
+     * The day of the work, `YYYY-MM-DD`, in the person's timezone; today by default.
+     */
+    worked_on?: string | null;
+};
+
+export type TimeEntryRecord = {
+    billable: boolean;
+    /**
+     * Whether the caller may edit and delete this entry.
+     */
+    can_edit: boolean;
+    /**
+     * The comment the time was logged with (`/spend`); `null` otherwise or once it is deleted.
+     */
+    comment_id: string | null;
+    created_at: string;
+    /**
+     * The member who logged the entry; an owner or admin can log time for someone else.
+     */
+    created_by: string;
+    id: string;
+    /**
+     * Whole minutes, 1 to 1440.
+     */
+    minutes: number;
+    /**
+     * Markdown; empty when the entry has no note.
+     */
+    note: string;
+    project_id: string;
+    task_id: string;
+    updated_at: string;
+    /**
+     * The member who did the work.
+     */
+    user_id: string;
+    version: number;
+    /**
+     * The calendar day of the work, `YYYY-MM-DD`, in the person's timezone.
+     */
+    worked_on: string;
+    workspace_id: string;
+};
+
+export type TimeEntryUpdateBody = {
+    billable?: boolean | null;
+    /**
+     * When given, the edit fails with 409 unless the entry still has this version.
+     */
+    expected_version?: number | null;
+    minutes?: number | null;
+    note?: string | null;
+    user_id?: string | null;
+    worked_on?: string | null;
 };
 
 export type TotpSetup = {
@@ -24929,6 +25070,162 @@ export type PublicRestoreTaskResponses = {
 
 export type PublicRestoreTaskResponse = PublicRestoreTaskResponses[keyof PublicRestoreTaskResponses];
 
+export type PublicListTimeEntriesData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        /**
+         * The token's workspace, from `GET /me`.
+         */
+        workspace_id: string;
+        /**
+         * A task UUID or identifier such as `ENG-12` (any letter case).
+         */
+        task: string;
+    };
+    query?: never;
+    url: '/api/public/v1/workspaces/{workspace_id}/tasks/{task}/time-entries';
+};
+
+export type PublicListTimeEntriesErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: Problem;
+    /**
+     * unauthorized
+     */
+    401: Problem;
+    /**
+     * insufficient_scope
+     */
+    403: Problem;
+    /**
+     * not_found
+     */
+    404: Problem;
+    /**
+     * contract_mismatch
+     */
+    409: Problem;
+    /**
+     * request_too_large
+     */
+    413: Problem;
+    /**
+     * rate_limit_exceeded
+     */
+    429: Problem;
+    /**
+     * internal_error
+     */
+    500: Problem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: Problem;
+};
+
+export type PublicListTimeEntriesError = PublicListTimeEntriesErrors[keyof PublicListTimeEntriesErrors];
+
+export type PublicListTimeEntriesResponses = {
+    /**
+     * The entries and totals
+     */
+    200: TaskTimeEntries;
+};
+
+export type PublicListTimeEntriesResponse = PublicListTimeEntriesResponses[keyof PublicListTimeEntriesResponses];
+
+export type PublicLogTimeData = {
+    body: PublicLogTimeBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        /**
+         * The token's workspace, from `GET /me`.
+         */
+        workspace_id: string;
+        /**
+         * A task UUID or identifier such as `ENG-12` (any letter case).
+         */
+        task: string;
+    };
+    query?: never;
+    url: '/api/public/v1/workspaces/{workspace_id}/tasks/{task}/time-entries';
+};
+
+export type PublicLogTimeErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: Problem;
+    /**
+     * unauthorized
+     */
+    401: Problem;
+    /**
+     * workspace_read_only
+     */
+    402: Problem;
+    /**
+     * insufficient_scope, origin_forbidden
+     */
+    403: Problem;
+    /**
+     * not_found
+     */
+    404: Problem;
+    /**
+     * contract_mismatch
+     */
+    409: Problem;
+    /**
+     * request_too_large
+     */
+    413: Problem;
+    /**
+     * validation_failed
+     */
+    422: Problem;
+    /**
+     * rate_limit_exceeded
+     */
+    429: Problem;
+    /**
+     * internal_error
+     */
+    500: Problem;
+    /**
+     * service_unavailable
+     */
+    503: Problem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: Problem;
+};
+
+export type PublicLogTimeError = PublicLogTimeErrors[keyof PublicLogTimeErrors];
+
+export type PublicLogTimeResponses = {
+    /**
+     * The new entry
+     */
+    201: TimeEntryRecord;
+};
+
+export type PublicLogTimeResponse = PublicLogTimeResponses[keyof PublicLogTimeResponses];
+
 export type PublicListTeamspacesData = {
     body?: never;
     headers?: {
@@ -25308,6 +25605,164 @@ export type PublicMoveTeamspaceResponses = {
 };
 
 export type PublicMoveTeamspaceResponse = PublicMoveTeamspaceResponses[keyof PublicMoveTeamspaceResponses];
+
+export type PublicDeleteTimeEntryData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        /**
+         * The token's workspace, from `GET /me`.
+         */
+        workspace_id: string;
+        entry_id: string;
+    };
+    query?: never;
+    url: '/api/public/v1/workspaces/{workspace_id}/time-entries/{entry_id}';
+};
+
+export type PublicDeleteTimeEntryErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: Problem;
+    /**
+     * unauthorized
+     */
+    401: Problem;
+    /**
+     * workspace_read_only
+     */
+    402: Problem;
+    /**
+     * insufficient_scope, origin_forbidden
+     */
+    403: Problem;
+    /**
+     * not_found
+     */
+    404: Problem;
+    /**
+     * contract_mismatch
+     */
+    409: Problem;
+    /**
+     * request_too_large
+     */
+    413: Problem;
+    /**
+     * rate_limit_exceeded
+     */
+    429: Problem;
+    /**
+     * internal_error
+     */
+    500: Problem;
+    /**
+     * service_unavailable
+     */
+    503: Problem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: Problem;
+};
+
+export type PublicDeleteTimeEntryError = PublicDeleteTimeEntryErrors[keyof PublicDeleteTimeEntryErrors];
+
+export type PublicDeleteTimeEntryResponses = {
+    /**
+     * The entry is deleted
+     */
+    204: void;
+};
+
+export type PublicDeleteTimeEntryResponse = PublicDeleteTimeEntryResponses[keyof PublicDeleteTimeEntryResponses];
+
+export type PublicUpdateTimeEntryData = {
+    body: PublicUpdateTimeEntryBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        /**
+         * The token's workspace, from `GET /me`.
+         */
+        workspace_id: string;
+        entry_id: string;
+    };
+    query?: never;
+    url: '/api/public/v1/workspaces/{workspace_id}/time-entries/{entry_id}';
+};
+
+export type PublicUpdateTimeEntryErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: Problem;
+    /**
+     * unauthorized
+     */
+    401: Problem;
+    /**
+     * workspace_read_only
+     */
+    402: Problem;
+    /**
+     * insufficient_scope, origin_forbidden
+     */
+    403: Problem;
+    /**
+     * not_found
+     */
+    404: Problem;
+    /**
+     * contract_mismatch, conflict, task_conflict
+     */
+    409: Problem;
+    /**
+     * request_too_large
+     */
+    413: Problem;
+    /**
+     * validation_failed
+     */
+    422: Problem;
+    /**
+     * rate_limit_exceeded
+     */
+    429: Problem;
+    /**
+     * internal_error
+     */
+    500: Problem;
+    /**
+     * service_unavailable
+     */
+    503: Problem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: Problem;
+};
+
+export type PublicUpdateTimeEntryError = PublicUpdateTimeEntryErrors[keyof PublicUpdateTimeEntryErrors];
+
+export type PublicUpdateTimeEntryResponses = {
+    /**
+     * The entry with its new version
+     */
+    200: TimeEntryRecord;
+};
+
+export type PublicUpdateTimeEntryResponse = PublicUpdateTimeEntryResponses[keyof PublicUpdateTimeEntryResponses];
 
 export type PublicReorderViewFavoritesData = {
     body: PublicViewFavoritesOrderBody;
@@ -56494,6 +56949,124 @@ export type RestoreTaskResponses = {
 
 export type RestoreTaskResponse = RestoreTaskResponses[keyof RestoreTaskResponses];
 
+export type ListTimeEntriesData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        task_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/tasks/{task_id}/time-entries';
+};
+
+export type ListTimeEntriesErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ListTimeEntriesError = ListTimeEntriesErrors[keyof ListTimeEntriesErrors];
+
+export type ListTimeEntriesResponses = {
+    200: TaskTimeEntries;
+};
+
+export type ListTimeEntriesResponse = ListTimeEntriesResponses[keyof ListTimeEntriesResponses];
+
+export type CreateTimeEntryData = {
+    body: TimeEntryBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        task_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/tasks/{task_id}/time-entries';
+};
+
+export type CreateTimeEntryErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, task_action_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type CreateTimeEntryError = CreateTimeEntryErrors[keyof CreateTimeEntryErrors];
+
+export type CreateTimeEntryResponses = {
+    201: TimeEntryRecord;
+};
+
+export type CreateTimeEntryResponse = CreateTimeEntryResponses[keyof CreateTimeEntryResponses];
+
 export type ListTeamspacesData = {
     body?: never;
     headers?: {
@@ -56800,6 +57373,128 @@ export type MoveTeamspaceResponses = {
 };
 
 export type MoveTeamspaceResponse = MoveTeamspaceResponses[keyof MoveTeamspaceResponses];
+
+export type DeleteTimeEntryData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        entry_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/time-entries/{entry_id}';
+};
+
+export type DeleteTimeEntryErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden, task_action_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type DeleteTimeEntryError = DeleteTimeEntryErrors[keyof DeleteTimeEntryErrors];
+
+export type DeleteTimeEntryResponses = {
+    204: void;
+};
+
+export type DeleteTimeEntryResponse = DeleteTimeEntryResponses[keyof DeleteTimeEntryResponses];
+
+export type UpdateTimeEntryData = {
+    body: TimeEntryUpdateBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        entry_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/time-entries/{entry_id}';
+};
+
+export type UpdateTimeEntryErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden, task_action_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch, task_conflict, conflict
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * validation_failed
+     */
+    422: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type UpdateTimeEntryError = UpdateTimeEntryErrors[keyof UpdateTimeEntryErrors];
+
+export type UpdateTimeEntryResponses = {
+    200: TimeEntryRecord;
+};
+
+export type UpdateTimeEntryResponse = UpdateTimeEntryResponses[keyof UpdateTimeEntryResponses];
 
 export type TransferOwnershipData = {
     body: TransferBody;

@@ -186,6 +186,10 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::public_api::relations::relations,
         crate::public_api::relations::create_relation,
         crate::public_api::relations::delete_relation,
+        crate::public_api::time_entries::time_entries,
+        crate::public_api::time_entries::log_time,
+        crate::public_api::time_entries::update_time_entry,
+        crate::public_api::time_entries::delete_time_entry,
         crate::public_api::docs,
         crate::public_api::doc,
         crate::public_api::create_doc,
@@ -397,6 +401,10 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::task_routes::list_task_relations,
         crate::task_routes::create_task_relation,
         crate::task_routes::delete_task_relation,
+        crate::task_routes::list_time_entries,
+        crate::task_routes::create_time_entry,
+        crate::task_routes::update_time_entry,
+        crate::task_routes::delete_time_entry,
         crate::task_routes::list_github_links,
         crate::task_routes::list_task_activity,
         crate::task_routes::create_task,
@@ -1006,6 +1014,9 @@ fn public_api_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             | "public_delete_cycle"
             | "public_delete_status"
             | "public_delete_label"
+            | "public_log_time"
+            | "public_update_time_entry"
+            | "public_delete_time_entry"
     );
     if write {
         add_code(&mut responses, "400", "invalid_request");
@@ -1044,6 +1055,8 @@ fn public_api_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             | "public_create_database_view"
             | "public_update_database_view"
             | "public_create_database_link"
+            | "public_log_time"
+            | "public_update_time_entry"
     ) {
         add_code(&mut responses, "422", "validation_failed");
     }
@@ -1064,6 +1077,7 @@ fn public_api_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             | "public_delete_cycle"
             | "public_delete_status"
             | "public_delete_label"
+            | "public_update_time_entry"
     ) {
         add_code(&mut responses, "409", "conflict");
     }
@@ -1074,6 +1088,7 @@ fn public_api_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             | "public_delete_task"
             | "public_create_comment"
             | "public_restore_task"
+            | "public_update_time_entry"
     ) {
         add_code(&mut responses, "409", "task_conflict");
     }
@@ -2483,6 +2498,10 @@ fn task_operation(operation_id: &str) -> bool {
             | "create_comment"
             | "update_comment"
             | "delete_comment"
+            | "list_time_entries"
+            | "create_time_entry"
+            | "update_time_entry"
+            | "delete_time_entry"
     )
 }
 
@@ -2526,6 +2545,8 @@ fn task_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec<&'
             | "update_comment"
             | "create_task_relation"
             | "delete_task_relation"
+            | "create_time_entry"
+            | "update_time_entry"
     ) || operation_id == "list_tasks"
     {
         add_code(responses, "422", "validation_failed");
@@ -2575,6 +2596,7 @@ fn task_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec<&'
             | "delete_task"
             | "update_comment"
             | "delete_comment"
+            | "update_time_entry"
     ) {
         add_code(responses, "409", "task_conflict");
         add_code(responses, "409", "conflict");
@@ -2588,7 +2610,14 @@ fn task_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec<&'
         add_code(responses, "409", "github_content_read_only");
         add_code(responses, "409", "github_linked_move");
     }
-    if matches!(operation_id, "update_comment" | "delete_comment") {
+    if matches!(
+        operation_id,
+        "update_comment"
+            | "delete_comment"
+            | "create_time_entry"
+            | "update_time_entry"
+            | "delete_time_entry"
+    ) {
         add_code(responses, "403", "task_action_forbidden");
     }
     if matches!(
