@@ -368,7 +368,8 @@ function Editor({ source, editable, theme, server, actions, editorRef }: EditorP
         return true
       },
     },
-    // Orbit files need the session, which only the app has; other URLs load as they are.
+    // Orbit files need the session, which only the app has; an outside image block comes here as Orbit's image
+    // proxy path (`ProxiedImageBlock`).
     resolveFileUrl: (url: string) => {
       if (!url.startsWith('/')) return Promise.resolve(url)
       let file = files.get(url)

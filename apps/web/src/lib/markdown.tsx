@@ -3,6 +3,7 @@
 // mentionify -> linkify. Custom regex parser, zero dependencies. Shared by
 // message content and embed cards.
 import { Fragment } from 'react'
+import { proxiedImageUrl } from '@orbit/editor/outsideUrl'
 import { appNavigate, internalPath } from './navigateBridge'
 import { CodeBlock } from '@/components/common/CodeBlock'
 import { EmojiShortcode } from '@/components/common/Emoji'
@@ -195,11 +196,12 @@ export type MarkdownOptions = { chat?: boolean }
  * character shows without the backslash and starts nothing (`\*not bold\*`, `\:warning:`). Before a letter, a digit
  * or a space the backslash stays (`C:\Users`), and inline code keeps every backslash. A URL in angle brackets
  * (`<https://…>`) is the link alone, as in Discord: the brackets do not show and the host draws no chip or card for it.
+ * A bare URL keeps its `_`, `*` and `:` as written.
  * `||text||` is a spoiler in chat and `***text***` is bold italic. A style can hold another one (`**bold with *italic* inside**`).
  */
 export function renderMarkdownText(text: string, keyPrefix: string, mentionTokens: MentionToken[] = [], options: MarkdownOptions = {}): React.ReactNode[] {
   const tokenRegex =
-    /(\\[!-/:-@[-`{-~]|<https?:\/\/[^\s<>]+>|<img\b[^>]*>|!\[[^\]\n]*\]\(https?:\/\/[^\s)]+\)|\[[^\]\n]+\]\(https?:\/\/[^\s)]+\)|:[a-z0-9_+-]+:|`[^`]+`|\|\|.+?\|\||\*\*\*[^*]+?\*\*\*|\*\*(?!\*)(?:[^*]|\*(?!\*))+?\*\*|__(?!_)(?:[^_]|_(?!_))+?__|~~[^~]+?~~|\*[^*\s](?:[^*]|\*\*[^*]+?\*\*)*?\*(?!\*)|\*[^*\s][^*]*?\*|_[^_\s][^_]*?_)/g
+    /(\\[!-/:-@[-`{-~]|<https?:\/\/[^\s<>]+>|<img\b[^>]*>|!\[[^\]\n]*\]\(https?:\/\/[^\s)]+\)|\[[^\]\n]+\]\(https?:\/\/[^\s)]+\)|https?:\/\/[^\s<>]*[^\s<>*_~]|:[a-z0-9_+-]+:|`[^`]+`|\|\|.+?\|\||\*\*\*[^*]+?\*\*\*|\*\*(?!\*)(?:[^*]|\*(?!\*))+?\*\*|__(?!_)(?:[^_]|_(?!_))+?__|~~[^~]+?~~|\*[^*\s](?:[^*]|\*\*[^*]+?\*\*)*?\*(?!\*)|\*[^*\s][^*]*?\*|(?<!\w)_[^_\s](?:[^_]|_(?=\w))*?_(?!\w))/g
   const parts: React.ReactNode[] = []
   let lastIndex = 0
   let tokenIndex = 0
@@ -229,14 +231,18 @@ export function renderMarkdownText(text: string, keyPrefix: string, mentionToken
           </a>
         ),
       )
+    } else if (token.startsWith('http')) {
+      // A bare URL is one token, so its `_` and `*` start no style (`PNG_transparency_demo.png`).
+      parts.push(...linkifyText(token, key))
     } else if (token.startsWith('<img') || token.startsWith('![')) {
       const htmlSource = token.match(/\ssrc\s*=\s*(["'])(.*?)\1/i)?.[2]
       const htmlAlt = token.match(/\salt\s*=\s*(["'])(.*?)\1/i)?.[2]
       const markdownImage = token.match(/^!\[([^\]\n]*)\]\((https?:\/\/[^\s)]+)\)$/)
       const src = markdownImage?.[2] || htmlSource
       const alt = markdownImage?.[1] ?? htmlAlt ?? 'Image'
+      // An image of another server loads through Orbit, so that server does not learn who read the text (a tracking pixel).
       parts.push(src && /^https?:\/\//i.test(src)
-        ? <img key={key} src={src} alt={alt} loading="lazy" className="my-2 block h-auto max-w-full rounded-md" />
+        ? <img key={key} src={proxiedImageUrl(src, window.location.origin)} alt={alt} loading="lazy" className="my-2 block h-auto max-w-full rounded-md" />
         : token)
     } else if (token.startsWith('[')) {
       const linkMatch = token.match(/^\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)$/)

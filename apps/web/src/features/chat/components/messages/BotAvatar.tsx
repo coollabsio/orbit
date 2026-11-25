@@ -1,5 +1,6 @@
 import { useContext, useEffect, useState } from 'react'
 import { Cpu } from 'reicon-react'
+import { proxiedImageUrl } from '@orbit/editor/outsideUrl'
 import { Emoji } from '@/components/common/Emoji'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import type { MessageBot } from '@/features/chat/api/types'
@@ -23,7 +24,7 @@ export function BotAvatar({ bot, size = 24 }: { bot: Pick<MessageBot, 'name' | '
   const emoji = useNamedEmoji(bot.iconEmoji)
   return (
     <Avatar data-slot="bot-avatar" className="after:border-transparent" style={{ width: size, height: size }} title={bot.name}>
-      {bot.iconUrl && !emoji ? <AvatarImage src={bot.iconUrl} alt="" loading="eager" referrerPolicy="no-referrer" /> : null}
+      {bot.iconUrl && !emoji ? <AvatarImage src={proxiedImageUrl(bot.iconUrl, window.location.origin)} alt="" loading="eager" referrerPolicy="no-referrer" /> : null}
       <AvatarFallback className="bg-muted text-muted-foreground">
         {emoji ? (
           <Emoji value={emoji} className="size-[62%]" />

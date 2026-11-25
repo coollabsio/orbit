@@ -7,7 +7,8 @@ const TEXT_EXTENSIONS = new Set(['txt', 'md', 'markdown', 'csv', 'json', 'log', 
 
 export type FilePreviewKind = 'video' | 'audio' | 'pdf' | 'text' | 'file'
 
-export type MediaEmbed = { kind: 'iframe' | 'video' | 'audio'; src: string; title: string }
+/** `poster`: the video's picture before play (YouTube only; Vimeo has none without its API). */
+export type MediaEmbed = { kind: 'iframe' | 'video' | 'audio'; src: string; title: string; poster?: string }
 
 /** The extension of a file name or a URL path, without the dot. Empty when there is none. */
 export function fileExtension(value: string): string {
@@ -55,7 +56,7 @@ export function mediaEmbed(href: string, title: string): MediaEmbed | null {
   }
   if (url.protocol !== 'https:') return null
   const youtube = youtubeEmbed(url)
-  if (youtube) return { kind: 'iframe', src: youtube, title }
+  if (youtube) return { kind: 'iframe', src: youtube, title, poster: `https://i.ytimg.com/vi/${youtube.slice(youtube.lastIndexOf('/') + 1)}/hqdefault.jpg` }
   const vimeo = vimeoEmbed(url)
   if (vimeo) return { kind: 'iframe', src: vimeo, title }
   const kind = filePreviewKind('', url.pathname)

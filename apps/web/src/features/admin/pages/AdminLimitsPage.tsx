@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
-import type { LimitsView } from '@orbit/api/generated/types.gen'
+import type { EnvironmentView, LimitsView } from '@orbit/api/generated/types.gen'
 import { ApiProblem } from '@orbit/api/problem'
 import { SettingsCard } from '@/components/common/SettingsCard'
 import { Button } from '@/components/ui/button'
@@ -9,6 +9,7 @@ import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { useInstanceSettings, useSaveLimits } from '@/features/admin/api'
 import { SendPoliciesCard, TierDefaultsCard } from '@/features/admin/components/MailSendingAdmin'
+import { SetByEnvironment } from '@/features/admin/components/SetByEnvironment'
 import { useMailEnabled } from '@/features/mail/enabled'
 import { FieldGrid } from '@/features/settings/components/SettingsParts'
 import { LoadingText } from '@/components/ui/spinner'
@@ -22,8 +23,14 @@ export function AdminLimitsPage() {
   const settings = useInstanceSettings()
   if (settings.isPending) return <SettingsCard title="Limits"><p><LoadingText>Loading settings…</LoadingText></p></SettingsCard>
   if (settings.isError) return <SettingsCard title="Limits"><p role="alert">Settings could not be loaded. <Button variant="ghost" onClick={() => void settings.refetch()}>Retry</Button></p></SettingsCard>
-  // Remount on save so the form shows what the server stored.
-  return <LimitsCard key={JSON.stringify(settings.data.limits)} limits={settings.data.limits} />
+  // Remount on save so the forms show what the server stored.
+  const key = JSON.stringify(settings.data.limits)
+  return (
+    <>
+      <LimitsCard key={key} limits={settings.data.limits} />
+      <ImageFetchesCard key={`images-${key}`} limits={settings.data.limits} environment={settings.data.environment} />
+    </>
+  )
 }
 
 /** Limits → Email: the send limits of the tiers and of each workspace. */
@@ -101,6 +108,45 @@ function LimitsCard({ limits }: { limits: LimitsView }) {
         <div className="mt-4 flex justify-end">
           <Button type="submit" disabled={save.isPending}>{save.isPending ? 'Saving…' : 'Save limits'}</Button>
         </div>
+      </SettingsCard>
+    </form>
+  )
+}
+
+/** Outside images that one server loads at once through Orbit (mail, messages, pages, link cards). */
+function ImageFetchesCard({ limits, environment }: { limits: LimitsView; environment: EnvironmentView }) {
+  const save = useSaveLimits()
+  const [fetches, setFetches] = useState(String(limits.image_proxy_fetches))
+
+  function submit(event: React.FormEvent) {
+    event.preventDefault()
+    const value = Number(fetches)
+    if (!Number.isInteger(value) || value < 1 || value > 256) {
+      toast.error('Enter a whole number from 1 to 256.')
+      return
+    }
+    // The other limits go along unchanged: a save sets all of them.
+    save.mutate({ max_owned_workspaces: limits.max_owned_workspaces, workspace_storage_quota_bytes: limits.workspace_storage_quota_bytes, image_proxy_fetches: value }, {
+      onSuccess: () => toast('Image limit saved'),
+      onError: (error) => toast.error(problemText(error, 'The image limit could not be saved.')),
+    })
+  }
+
+  return (
+    <form onSubmit={submit}>
+      <SettingsCard title="Outside images" description="Images from other servers (in mail, messages, pages and link cards) load through Orbit, so those servers do not learn who reads them.">
+        <FieldGrid>
+          <Field>
+            <FieldLabel htmlFor="limit-image-fetches">Images loaded at once per server <InfoTip text="More images wait for a free turn, up to 10 seconds. One user has at most 6 at once. Each image can use up to 5 MB of memory while it loads. Every server applies a change within a minute." /></FieldLabel>
+            <Input id="limit-image-fetches" type="number" min={1} max={256} step={1} value={fetches} disabled={environment.image_proxy_fetches || save.isPending} onChange={(event) => setFetches(event.target.value)} />
+            {environment.image_proxy_fetches ? <SetByEnvironment variable="ORBIT_IMAGE_PROXY_FETCHES" /> : null}
+          </Field>
+        </FieldGrid>
+        {environment.image_proxy_fetches ? null : (
+          <div className="mt-4 flex justify-end">
+            <Button type="submit" disabled={save.isPending}>{save.isPending ? 'Saving…' : 'Save image limit'}</Button>
+          </div>
+        )}
       </SettingsCard>
     </form>
   )

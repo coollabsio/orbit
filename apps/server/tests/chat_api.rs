@@ -4201,3 +4201,175 @@ async fn a_guest_push_names_no_public_channel() {
     assert_eq!(body_for(&ada), Some(json!("@ada @guest see #general")));
     assert_eq!(body_for(&guest), Some(json!("@ada @guest see #channel")));
 }
+
+async fn serve_images() -> std::net::SocketAddr {
+    use axum::routing::get;
+    let router = axum::Router::new()
+        .route(
+            "/a.png",
+            get(|| async { ([(header::CONTENT_TYPE, "image/png")], PNG) }),
+        )
+        .route(
+            "/icon.svg",
+            get(|| async {
+                (
+                    [(header::CONTENT_TYPE, "image/svg+xml")],
+                    "<svg xmlns=\"http://www.w3.org/2000/svg\"><script>alert(1)</script></svg>",
+                )
+            }),
+        )
+        .route(
+            "/page",
+            get(|| async { ([(header::CONTENT_TYPE, "text/html")], "<html>hi</html>") }),
+        )
+        .route(
+            "/big.png",
+            get(|| async {
+                let mut body = PNG.to_vec();
+                body.resize(6 * 1024 * 1024, 0);
+                ([(header::CONTENT_TYPE, "image/png")], body)
+            }),
+        )
+        .route(
+            "/to-localhost",
+            get(|| async { axum::response::Redirect::to("http://localhost:9/a.png") }),
+        );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    address
+}
+
+#[tokio::test]
+async fn an_outside_image_loads_through_orbit_for_a_signed_in_user_only() {
+    use orbit_server::mail_image_proxy::ImageProxy;
+    let fixture = Fixture::new().await;
+    let host = serve_images().await;
+    let app = chat_router(
+        ChatState::new(
+            Arc::clone(&fixture.identity),
+            fixture.uploads.clone(),
+            CookieMode::secure(),
+        )
+        .with_image_proxy(Arc::new(ImageProxy::with_test_hosts(
+            std::collections::HashMap::from([("images.test".to_owned(), host)]),
+        ))),
+    );
+    let get = async |cookie: Option<&str>, url: &str| {
+        let url: String = url::form_urlencoded::byte_serialize(url.as_bytes()).collect();
+        let mut request = Request::builder().uri(format!("/api/v1/image?u={url}"));
+        if let Some(cookie) = cookie {
+            request = request.header(header::COOKIE, cookie);
+        }
+        let response = app
+            .clone()
+            .oneshot(request.body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let status = response.status();
+        let headers = response.headers().clone();
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        (status, headers, bytes)
+    };
+    let image = |path: &str| format!("http://images.test:{}{path}", host.port());
+    let cookie = Some(fixture.owner.cookie.as_str());
+
+    let (status, headers, bytes) = get(cookie, &image("/a.png")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(&bytes[..], PNG);
+    assert_eq!(headers[header::CONTENT_TYPE], "image/png");
+    assert_eq!(headers[header::X_CONTENT_TYPE_OPTIONS], "nosniff");
+    assert_eq!(
+        headers[header::CONTENT_SECURITY_POLICY],
+        "default-src 'none'; sandbox"
+    );
+    assert_eq!(headers[header::CACHE_CONTROL], "private, max-age=86400");
+
+    // Without a session the route is not a proxy for anyone.
+    let (status, _, _) = get(None, &image("/a.png")).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    // A target on the server's own network, also after a redirect, is refused with the same answer as
+    // a failed fetch, so the status does not tell which host names are private.
+    for url in [
+        format!("http://127.0.0.1:{}/a.png", host.port()),
+        "http://169.254.169.254/latest/meta-data/".to_owned(),
+        "file:///etc/passwd".to_owned(),
+        image("/to-localhost"),
+    ] {
+        let (status, _, _) = get(cookie, &url).await;
+        assert_eq!(status, StatusCode::BAD_GATEWAY, "{url}");
+    }
+
+    // Only real PNG, JPEG, GIF, WebP and AVIF bytes, up to 5 MB.
+    for path in ["/icon.svg", "/page", "/big.png", "/missing.png"] {
+        let (status, _, _) = get(cookie, &image(path)).await;
+        assert_eq!(status, StatusCode::BAD_GATEWAY, "{path}");
+    }
+}
+
+#[tokio::test]
+async fn one_user_waits_past_six_content_images_while_another_user_goes_on() {
+    use orbit_server::mail_image_proxy::{ImageProxy, MAX_USER_FETCHES};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let arrived = Arc::new(AtomicUsize::new(0));
+    let release = Arc::new(tokio::sync::Semaphore::new(0));
+    let router = axum::Router::new()
+        .route(
+            "/a.png",
+            axum::routing::get(|| async { ([(header::CONTENT_TYPE, "image/png")], PNG) }),
+        )
+        .route(
+            "/slow.png",
+            axum::routing::get({
+                let (arrived, release) = (Arc::clone(&arrived), Arc::clone(&release));
+                move || async move {
+                    arrived.fetch_add(1, Ordering::SeqCst);
+                    let _go = release.acquire().await.unwrap();
+                    ([(header::CONTENT_TYPE, "image/png")], PNG)
+                }
+            }),
+        );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let host = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    let proxy = Arc::new(ImageProxy::with_test_hosts(
+        std::collections::HashMap::from([("images.test".to_owned(), host)]),
+    ));
+    let image = |path: &str| format!("http://images.test:{}{path}", host.port());
+    let (busy, other) = (orbit_platform::Id::new_v7(), orbit_platform::Id::new_v7());
+
+    let slow: Vec<_> = (0..MAX_USER_FETCHES)
+        .map(|_| {
+            let (proxy, url) = (Arc::clone(&proxy), image("/slow.png"));
+            tokio::spawn(async move { proxy.fetch_for(busy, &url).await })
+        })
+        .collect();
+    while arrived.load(Ordering::SeqCst) < MAX_USER_FETCHES {
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+
+    // The busy user's next image waits for one of their own fetches; another user's does not.
+    let wait = std::time::Duration::from_millis(300);
+    assert!(
+        tokio::time::timeout(wait, proxy.fetch_for(busy, &image("/a.png")))
+            .await
+            .is_err()
+    );
+    let image_of_other = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        proxy.fetch_for(other, &image("/a.png")),
+    )
+    .await
+    .expect("another user does not wait");
+    assert_eq!(image_of_other.unwrap().bytes, PNG);
+
+    release.add_permits(MAX_USER_FETCHES);
+    for fetch in slow {
+        assert_eq!(fetch.await.unwrap().unwrap().bytes, PNG);
+    }
+    assert_eq!(
+        proxy.fetch_for(busy, &image("/a.png")).await.unwrap().bytes,
+        PNG
+    );
+}

@@ -2158,6 +2158,8 @@ struct EnvironmentView {
     backup_schedule: bool,
     /// `ORBIT_S3_KEEP_DELETED_DAYS`.
     s3_keep_deleted_days: bool,
+    /// `ORBIT_IMAGE_PROXY_FETCHES`.
+    image_proxy_fetches: bool,
     /// `ORBIT_GOOGLE_*`, `ORBIT_GITHUB_*`, `ORBIT_OIDC_*`.
     sign_in_providers: Vec<Provider>,
 }
@@ -2173,6 +2175,7 @@ impl From<&EnvironmentSettings> for EnvironmentView {
             backups_in_s3: environment.backups_in_s3.is_some(),
             backup_schedule: environment.backup_schedule.is_some(),
             s3_keep_deleted_days: environment.s3_keep_deleted_days.is_some(),
+            image_proxy_fetches: environment.image_proxy_fetches.is_some(),
             sign_in_providers: environment
                 .sign_in_providers
                 .iter()
@@ -2223,14 +2226,16 @@ struct SignInProviderView {
 }
 
 /// Limits for a shared installation. `null` is unlimited.
-#[derive(Deserialize, Serialize, ToSchema)]
-#[serde(deny_unknown_fields)]
+#[derive(Serialize, ToSchema)]
 struct LimitsView {
     /// Workspaces (not in the trash) one account may own. Instance admins are not limited.
     max_owned_workspaces: Option<u32>,
     /// Bytes of files one workspace may store: attachments, page and chat files, emoji and stickers. A file is
     /// counted once per workspace, however often it is attached.
     workspace_storage_quota_bytes: Option<u64>,
+    /// Outside images (mail, messages, pages, link cards) that one server loads at once through Orbit; more wait.
+    /// One user has at most 6 of them.
+    image_proxy_fetches: u32,
     /// The most characters a new or edited chat message can have. Existing messages keep their text.
     chat_message_max_chars: u32,
 }
@@ -2240,6 +2245,7 @@ impl From<InstanceLimits> for LimitsView {
         Self {
             max_owned_workspaces: limits.max_owned_workspaces,
             workspace_storage_quota_bytes: limits.workspace_storage_quota_bytes,
+            image_proxy_fetches: limits.image_proxy_fetches,
             chat_message_max_chars: limits.chat_message_max_chars,
         }
     }
@@ -2258,6 +2264,10 @@ struct LimitsBody {
     #[serde(default)]
     #[schema(required = false)]
     chat_message_max_chars: Option<u32>,
+    /// Outside images (1–256) that one server loads at once. Omitted: unchanged.
+    #[serde(default)]
+    #[schema(required = false)]
+    image_proxy_fetches: Option<u32>,
 }
 
 async fn settings_view(
@@ -3565,6 +3575,31 @@ async fn save_limits(
 ) -> Result<Json<InstanceSettingsView>, ApiError> {
     let instance = "/api/v1/admin/settings/limits";
     let session = require_root(&state, &headers, instance, request_id.as_ref()).await?;
+    let repository = InstanceSettingsRepository::new(state.identity.database().clone());
+    if let (Some(set), Some(wanted)) = (
+        EnvironmentSettings::of(state.identity.database()).image_proxy_fetches,
+        body.image_proxy_fetches,
+    ) && set != wanted
+    {
+        return Err(set_by_environment(
+            "ORBIT_IMAGE_PROXY_FETCHES",
+            instance,
+            request_id.as_ref(),
+        ));
+    }
+    if body
+        .image_proxy_fetches
+        .is_some_and(|fetches| !(1..=crate::mail_image_proxy::MAX_FETCHES_LIMIT).contains(&fetches))
+    {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_image_proxy_fetches",
+            "Invalid number of image fetches",
+            "Load 1 to 256 outside images at once.",
+            instance,
+            request_id.as_ref(),
+        ));
+    }
     let max_owned_workspaces = body.max_owned_workspaces.filter(|limit| *limit > 0);
     let workspace_storage_quota_bytes = body
         .workspace_storage_quota_bytes
@@ -3590,24 +3625,22 @@ async fn save_limits(
             request_id.as_ref(),
         ));
     }
-    let repository = InstanceSettingsRepository::new(state.identity.database().clone());
-    let chat_message_max_chars = match body.chat_message_max_chars {
-        Some(limit) => limit,
-        None => {
-            repository
-                .limits()
-                .await
-                .map_err(|error| internal(instance, request_id.as_ref()).cause(error))?
-                .chat_message_max_chars
-        }
-    };
+    let saved = repository
+        .limits()
+        .await
+        .map_err(|error| internal(instance, request_id.as_ref()).cause(error))?;
     repository
         .save_limits(
             session.user.id,
             InstanceLimits {
                 max_owned_workspaces,
                 workspace_storage_quota_bytes,
-                chat_message_max_chars,
+                image_proxy_fetches: body
+                    .image_proxy_fetches
+                    .unwrap_or(saved.image_proxy_fetches),
+                chat_message_max_chars: body
+                    .chat_message_max_chars
+                    .unwrap_or(saved.chat_message_max_chars),
             },
             request_id_value(request_id.as_ref()),
             TimestampMillis::now(),

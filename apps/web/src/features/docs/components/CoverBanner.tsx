@@ -1,5 +1,6 @@
 import { useRef, useState, type ComponentProps } from 'react'
 import { cn } from 'cn'
+import { proxiedImageUrl } from '@orbit/editor/outsideUrl'
 import { Button } from '@/components/ui/button'
 import {
   coverObjectPosition,
@@ -105,7 +106,8 @@ export function CoverBanner({
       <img
         ref={imgRef}
         className="pointer-events-none size-full object-cover"
-        src={url}
+        // a cover on another server loads through Orbit, which hides the reader from it
+        src={proxiedImageUrl(url, window.location.origin)}
         alt=""
         draggable={false}
         style={{ objectPosition: coverObjectPosition(pos) }}
