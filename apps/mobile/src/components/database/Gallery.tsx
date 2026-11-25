@@ -3,12 +3,14 @@
  * page's cover, its body's first image or text, or a files property's first image), the title and the card properties.
  */
 import { cardFace, galleryOf, type CardFace } from '@orbit/database/gallery'
+import { proxiedImageUrl } from '@orbit/editor/outsideUrl'
 import type { Database, Row, ViewConfig, ViewContext } from '@orbit/database/types'
 import { filledProperties } from '@orbit/database/values'
 import { router } from 'expo-router'
 import type { ReactElement } from 'react'
 import { FlatList, Image, Pressable, View } from 'react-native'
 
+import { useServerImage } from '../../hooks/chat'
 import { useOrbit } from '../../orbit-context'
 import { Text } from '../../ui'
 import { CellValue, RowTitle } from './cells'
@@ -66,11 +68,13 @@ export function Gallery({ database, config, rows, ctx, header, empty, refresh }:
 
 function Preview({ face, fitImage }: { face: CardFace; fitImage: boolean }) {
   const { session } = useOrbit()
+  const image = useServerImage()
   return (
     <View className="aspect-[3/2] w-full overflow-hidden border-b border-border bg-muted">
       {face.kind === 'image' ? (
         <Image
-          source={/^https?:/.test(face.url) ? { uri: face.url } : { uri: `${session.server}${face.url}`, headers: { Authorization: `Bearer ${session.token}` } }}
+          // an image on another server loads through Orbit, which hides the reader from it
+          source={image(proxiedImageUrl(face.url, new URL(session.server).origin))}
           resizeMode={fitImage ? 'contain' : 'cover'}
           className="size-full"
           accessibilityIgnoresInvertColors

@@ -42,17 +42,23 @@ function inline(text: string): string {
   // Code spans first, so nothing inside them is read as markup.
   return text
     .split(/(`[^`]+`)/)
-    .map((part, index) =>
-      index % 2 === 1
-        ? part.slice(1, -1)
-        : part
-            .replace(/!\[([^\]]*)\]\([^)]*\)/g, (_match, alt: string) => alt || 'Image')
-            .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
-            .replace(/<((?:https?|mailto):[^>\s]+)>/g, '$1')
-            .replace(/(\*\*|__)(?=\S)(.+?)(?<=\S)\1/g, '$2')
-            .replace(/~~(?=\S)(.+?)(?<=\S)~~/g, '$1')
-            .replace(/(^|[^\w*])\*(?=\S)(.+?)(?<=\S)\*(?![\w*])/g, '$1$2')
-            .replace(/(^|[^\w])_(?=\S)(.+?)(?<=\S)_(?!\w)/g, '$1$2'),
-    )
+    .map((part, index) => (index % 2 === 1 ? part.slice(1, -1) : styles(part)))
     .join('')
+}
+
+function styles(text: string): string {
+  const urls: string[] = []
+  return (
+    text
+      .replace(/!\[([^\]]*)\]\([^)]*\)/g, (_match, alt: string) => alt || 'Image')
+      .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+      .replace(/<((?:https?|mailto):[^>\s]+)>/g, '$1')
+      // A bare URL keeps its `_` and `*` (`PNG_transparency_demo.png`): it is set aside while the styles go.
+      .replace(/https?:\/\/[^\s<>]*[^\s<>*_~]/g, (url) => `\uE000${urls.push(url) - 1}\uE001`)
+      .replace(/(\*\*|__)(?=\S)(.+?)(?<=\S)\1/g, '$2')
+      .replace(/~~(?=\S)(.+?)(?<=\S)~~/g, '$1')
+      .replace(/(^|[^\w*])\*(?=\S)(.+?)(?<=\S)\*(?![\w*])/g, '$1$2')
+      .replace(/(^|[^\w])_(?=\S)(.+?)(?<=\S)_(?!\w)/g, '$1$2')
+      .replace(/\uE000(\d+)\uE001/g, (_match, index: string) => urls[Number(index)])
+  )
 }

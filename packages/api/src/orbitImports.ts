@@ -43,6 +43,7 @@ export function fullSelection(mode: OrbitImport['mode'], tree: OrbitImportTree):
     project_ids: mode === 'full' ? tree.projects.map((project) => project.id) : [],
     teamspace_ids: mode === 'full' ? tree.teamspaces.map((teamspace) => teamspace.id) : [],
     include_private_pages: tree.private_page_count > 0,
+    include_custom_pages: mode === 'full' && tree.custom_page_count > 0,
     channel_ids: tree.channels.map((channel) => channel.id),
   }
 }

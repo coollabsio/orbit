@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { type Href, router } from 'expo-router'
+import * as WebBrowser from 'expo-web-browser'
 import type { ReactNode } from 'react'
 import { Pressable, ScrollView, View } from 'react-native'
 
@@ -9,7 +10,7 @@ import { keys } from '../../data/keys'
 import * as api from '../../data/orbit'
 import { dueLabel, identifier } from '../../data/tasks'
 import { useOrbit } from '../../orbit-context'
-import { usePages, usePeople, useProjects, useStatuses, useUnreadNotifications } from '../../queries'
+import { useCustomPages, usePages, usePeople, useProjects, useStatuses, useUnreadNotifications } from '../../queries'
 import { alpha, useTheme } from '../../theme'
 import { Icon, PullRefresh, SafeAreaView, StatusIcon, Text } from '../../ui'
 
@@ -29,6 +30,7 @@ export default function HomeScreen() {
   const statuses = useStatuses()
   const people = usePeople()
   const pages = usePages()
+  const customPages = useCustomPages()
   const unread = useUnreadNotifications()
   // the web's cards: the first rows of the "My week" and "Overdue" task pages
   const week = useQuery({
@@ -42,11 +44,13 @@ export default function HomeScreen() {
   const now = new Date()
   const firstName = user.display_name.split(' ')[0] ?? user.display_name
 
-  const queries = [week, overdue, unread, pages, projects, statuses]
+  const queries = [week, overdue, unread, pages, projects, statuses, customPages]
   const refresh = () => Promise.all(queries.map((query) => query.refetch()))
   const weekTasks = week.data?.items ?? []
   const weekCount = `${weekTasks.length}${week.data?.more ? '+' : ''}`
   const unreadItems = unread.data ?? []
+  // a page whose origin left the operator's list is not shown, as on the web
+  const shownPages = customPages.data?.items.filter((page) => !customPages.data.blocked.includes(page.id)) ?? []
   const recentDocs = [...(pages.data ?? [])].sort((a, b) => b.updated_at.localeCompare(a.updated_at)).slice(0, CARD_LIMIT)
   const statusOf = (task: api.TaskRecord) => statuses.data?.find((status) => status.id === task.status_id)
   const taskRow = (task: api.TaskRecord, index: number, list: readonly api.TaskRecord[]) => {
@@ -115,6 +119,21 @@ export default function HomeScreen() {
             )}
           </HomeCard>
 
+          {/* the workspace's own dashboards and tools: the web frames them, the app opens them in the in-app browser */}
+          {shownPages.length > 0 ? (
+            <HomeCard title="Pages">
+              {shownPages.map((page, index, list) => (
+                <CardRow key={page.id} onPress={() => void WebBrowser.openBrowserAsync(page.url).catch(() => undefined)} last={index === list.length - 1}>
+                  {page.icon ? <Text className="text-[16px]">{page.icon}</Text> : <Icon name="monitor" size={16} color={alpha(colors.mutedForeground, 0.7)} />}
+                  <Text numberOfLines={1} className="text-[13px] flex-1">
+                    {page.name}
+                  </Text>
+                  <Icon name="arrowUpRight" size={14} color={alpha(colors.mutedForeground, 0.7)} />
+                </CardRow>
+              ))}
+            </HomeCard>
+          ) : null}
+
           <HomeCard title="Recently updated docs" href="/docs">
             {recentDocs.length === 0 ? (
               <CardEmpty>No docs yet.</CardEmpty>
@@ -136,31 +155,31 @@ export default function HomeScreen() {
   )
 }
 
-/** A card with a muted title and "View all" on the card surface, the rows on an inset background panel. */
-function HomeCard({ title, href, children }: { title: string; href: Href; children: ReactNode }) {
+/** A card with a muted title and "View all" (with `href`) on the card surface, the rows on an inset background panel. */
+function HomeCard({ title, href, children }: { title: string; href?: Href; children: ReactNode }) {
   return (
     <View className="rounded-lg bg-card shadow-[0_0_0_1px_var(--color-border)]">
       <View className="min-h-12 flex-row items-center py-2 pr-2 pl-4">
         <Text className="font-noto-medium text-[14px] flex-1 text-muted-foreground">{title}</Text>
-        <Pressable
+        {href ? <Pressable
           accessibilityRole="link"
           accessibilityLabel={`View all: ${title}`}
           onPress={() => router.navigate(href)}
           className="h-8 px-2.5 rounded-lg justify-center active:bg-muted"
         >
           <Text className="font-noto-medium text-[14px] text-muted-foreground">View all</Text>
-        </Pressable>
+        </Pressable> : null}
       </View>
       <View className="rounded-lg overflow-hidden bg-background shadow-[0_0_0_1px_var(--color-muted)]">{children}</View>
     </View>
   )
 }
 
-function CardRow({ href, last, children }: { href: Href; last: boolean; children: ReactNode }) {
+function CardRow({ href, onPress, last, children }: { href?: Href; onPress?: () => void; last: boolean; children: ReactNode }) {
   return (
     <Pressable
       accessibilityRole="link"
-      onPress={() => router.navigate(href)}
+      onPress={onPress ?? (() => href && router.navigate(href))}
       className={`min-h-10 flex-row items-center gap-2.5 px-3 py-1.5 border-border active:bg-foreground/2 ${last ? 'border-b-0' : 'border-b'}`}
     >
       {children}

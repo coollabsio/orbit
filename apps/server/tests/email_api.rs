@@ -854,7 +854,7 @@ async fn environment_settings_replace_the_saved_ones_and_admin_cannot_change_the
     );
     assert_eq!(
         body["environment"],
-        json!({"registration_open": true, "oidc_provision": false, "smtp": true, "s3": false,
+        json!({"registration_open": true, "oidc_provision": false, "frame_origins": false, "smtp": true, "s3": false,
                "attachments_in_s3": false, "backups_in_s3": false, "backup_schedule": false,
                "s3_keep_deleted_days": false, "sign_in_providers": ["github"]})
     );

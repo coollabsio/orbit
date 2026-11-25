@@ -51,6 +51,39 @@ Orbit reads its configuration only from environment variables that start with `O
 
 Create the app key once with `openssl rand -base64 32` and keep a copy outside the server. Orbit does not start without it. See [Email, registration and the app key](#email-registration-and-the-app-key).
 
+## Custom pages
+
+Workspace owners and admins can add web pages (dashboards, internal tools) to the sidebar in **Settings → Custom
+pages**. A page opens at `/pages/<address>` in a sandboxed iframe, without `allow-top-navigation` and without a
+referrer. A path or query after `/pages/<address>/` is added to the page URL, so a link to one report works in chat;
+the origin never changes.
+
+1. As the root user, choose which sites pages may use in **Admin → General → Custom pages**:
+   - **Any https site** (the default, for example on a hosted Orbit): each workspace admin adds the sites they need.
+   - **Only these sites**: pages must be on one of the `https://` origins that you list, one per line. Orbit refuses
+     `http://`, paths and wildcards. The list has no size limit.
+   - **Off**: no custom pages show, and none can be added. The pages stay for later.
+
+   No mode allows Orbit's own origin. Every server uses a change at once; no restart is needed.
+   `ORBIT_FRAME_ORIGINS` sets the choice instead (`any`, `off`, or a comma-separated list of origins), and Admin then
+   shows it read-only.
+2. Make each site allow Orbit as a parent: `Content-Security-Policy: frame-ancestors https://orbit.example.com`, and
+   no `X-Frame-Options: DENY` or `SAMEORIGIN`. When the site refuses, the page stays empty; the page header has
+   **Open in new tab**.
+3. Browsers block third-party cookies, so a framed site on another domain often cannot keep its own sign-in. Put the
+   site on a subdomain of Orbit's domain (the same site, for example `grafana.orbit.example.com`), or use a page that
+   needs no sign-in.
+
+A page whose origin you later remove from the list stays in the workspace's list, but Orbit does not frame it.
+
+The app's HTML document allows in its `frame-src` only the origins of the pages that the signed-in user sees, in all
+their workspaces (at most 2 KB of origins: the oldest membership first). Thus the policy never goes into a header, a
+user does not learn the sites of other workspaces, and a workspace cannot make the header too large for a proxy. A
+workspace has at most 50 pages. A tab that was open before a page was added asks for a reload to show it.
+Backups keep the pages with the rest of the database. A full workspace export has them in `workspace.json`, and an
+Orbit import adds them (**Custom pages** in its list) unless the workspace already uses the same address.
+The mobile app opens custom pages in the in-app browser.
+
 ## Instance settings from environment variables
 
 The root user saves outgoing email, S3 storage, sign-in providers, open registration and automatic backups in Admin. A declarative deployment (Kubernetes, GitOps, Docker Compose) can set them with the variables below instead. When a variable is set, it replaces the saved value, and Admin shows the setting read-only with the name of the variable. Admin answers a change of it with `409 set_by_environment`. Orbit does not write these values to the database: when you remove a variable, Orbit uses the saved value again after a restart. A setting without a variable keeps the value saved in Admin.
@@ -77,9 +110,11 @@ The variables of one group are set together. For example, `ORBIT_SMTP_HOST` need
 | `ORBIT_S3_BACKUPS` | saved value | `true` or `false`: backups in S3. `true` requires the `ORBIT_S3_*` bucket. |
 | `ORBIT_AUTOMATIC_BACKUPS` | saved value | `off`, `hourly` or `daily`. |
 | `ORBIT_S3_KEEP_DELETED_DAYS` | saved value (40) | 1 to 365: the days a deleted or replaced attachment file stays in S3 before Orbit deletes it. Backups do not contain S3 files, so a restore from a backup older than this can miss files. |
+| `ORBIT_IMAGE_PROXY_FETCHES` | saved value (32) | 1 to 256: the outside images (in mail, messages, pages and link cards) that one server loads at once through Orbit. More wait, up to 10 seconds; one user has at most 6 at once. Each image can use up to 5 MB of memory while it loads. Admin → Limits sets it when the variable is not set, and every server applies a change within a minute. |
 | `ORBIT_OPEN_REGISTRATION` | saved value | `true` or `false`. `true` requires `ORBIT_SMTP_*` or a provider variable below. On Orbit Cloud, it requires `ORBIT_SMTP_*`. |
 | `ORBIT_GOOGLE_CLIENT_ID`, `ORBIT_GOOGLE_CLIENT_SECRET`, `ORBIT_GOOGLE_CLIENT_SECRET_FILE` | none | The Google OAuth client. Set the ID and the secret together. See [Sign in with Google and GitHub](#sign-in-with-google-and-github). |
 | `ORBIT_GITHUB_CLIENT_ID`, `ORBIT_GITHUB_CLIENT_SECRET`, `ORBIT_GITHUB_CLIENT_SECRET_FILE` | none | The GitHub OAuth client. Set the ID and the secret together. |
+| `ORBIT_FRAME_ORIGINS` | saved value (`any`) | Which sites custom pages may use: `any` (any https site), `off`, or comma-separated `https://` origins, for example `https://grafana.example.com,https://deploys.example.com`. Replaces **Admin → General → Custom pages**. No path, wildcard or Orbit's own origin. See [Custom pages](#custom-pages). |
 | `ORBIT_OIDC_ISSUER` | saved provider | The issuer URL of an OpenID Connect provider, for example `https://auth.example.com/application/o/orbit/`. Requires `ORBIT_OIDC_CLIENT_ID` and `ORBIT_OIDC_CLIENT_SECRET`. See [Sign in with OpenID Connect](#sign-in-with-openid-connect). |
 | `ORBIT_OIDC_CLIENT_ID`, `ORBIT_OIDC_CLIENT_SECRET`, `ORBIT_OIDC_CLIENT_SECRET_FILE` | none | The client that the provider issued to Orbit. |
 | `ORBIT_OIDC_DISPLAY_NAME` | `SSO` | The name on the sign-in button ("Continue with SSO"), at most 50 characters. |

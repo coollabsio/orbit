@@ -31,6 +31,7 @@ import {
   setAccountSuspension,
   setInstanceAdmin,
   setOidcProvision as setOidcProvisionRequest,
+  setCustomPagePolicy as setCustomPagePolicyRequest,
   setRegistration as setRegistrationRequest,
   startImageCompression as startImageCompressionRequest,
 } from '@orbit/api/generated/sdk.gen'
@@ -46,6 +47,7 @@ import type {
   BackupSummary,
   CompressionStatus,
   EnvironmentView,
+  CustomPagePolicyBody,
   InstanceSettingsView,
   JobLimitsBody,
   JobLimitView,
@@ -187,6 +189,11 @@ export async function instanceSettings(client: OrbitClient): Promise<InstanceSet
 // Each settings write answers with the whole settings.
 export async function setRegistration(client: OrbitClient, open: boolean): Promise<InstanceSettingsView> {
   return (await setRegistrationRequest({ client, body: { open }, throwOnError: true })).data
+}
+
+/** Which sites workspaces may show as custom pages (Admin → General): any https site, listed origins, or none. */
+export async function setCustomPagePolicy(client: OrbitClient, body: CustomPagePolicyBody): Promise<InstanceSettingsView> {
+  return (await setCustomPagePolicyRequest({ client, body, throwOnError: true })).data
 }
 
 export async function setOidcProvision(client: OrbitClient, on: boolean): Promise<InstanceSettingsView> {
@@ -393,6 +400,16 @@ export function limitsBody(draft: LimitsDraft): LimitsBody | null {
   const chatValid = draft.chatChars.trim() !== '' && Number.isInteger(chat) && chat >= CHAT_CHARS_MIN && chat <= CHAT_CHARS_MAX
   if (workspaces === undefined || storage === undefined || !chatValid) return null
   return { max_owned_workspaces: workspaces, workspace_storage_quota_bytes: storage, chat_message_max_chars: chat }
+}
+
+/**
+ * What the outside image card saves: `fetches` (a whole number from 1 to 256) with the other limits unchanged, as a
+ * save sets all of them. `null` when the field is not such a number.
+ */
+export function imageFetchesBody(limits: LimitsView, fetches: string): LimitsBody | null {
+  const value = Number(fetches.trim())
+  if (!fetches.trim() || !Number.isInteger(value) || value < 1 || value > 256) return null
+  return { max_owned_workspaces: limits.max_owned_workspaces, workspace_storage_quota_bytes: limits.workspace_storage_quota_bytes, image_proxy_fetches: value }
 }
 
 export interface S3Draft {

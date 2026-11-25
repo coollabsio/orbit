@@ -28,10 +28,14 @@ pub struct EnvironmentSettings {
     pub backups_in_s3: Option<bool>,
     pub backup_schedule: Option<BackupSchedule>,
     pub s3_keep_deleted_days: Option<u32>,
+    /// `ORBIT_IMAGE_PROXY_FETCHES`.
+    pub image_proxy_fetches: Option<u32>,
     /// `ORBIT_GOOGLE_*`, `ORBIT_GITHUB_*` and `ORBIT_OIDC_*`.
     pub sign_in_providers: Vec<SavedSignInProvider>,
     /// `ORBIT_OIDC_PROVISION`.
     pub oidc_provision: Option<bool>,
+    /// `ORBIT_FRAME_ORIGINS`.
+    pub frame_policy: Option<orbit_platform::FramePolicy>,
 }
 
 impl EnvironmentSettings {
@@ -115,8 +119,10 @@ impl EnvironmentSettings {
             backups_in_s3: config.backups_in_s3,
             backup_schedule: config.backup_schedule,
             s3_keep_deleted_days: config.s3_keep_deleted_days,
+            image_proxy_fetches: config.image_proxy_fetches,
             sign_in_providers,
             oidc_provision: config.oidc_provision,
+            frame_policy: config.frame_policy.clone(),
         })
     }
 

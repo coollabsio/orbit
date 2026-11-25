@@ -95,12 +95,21 @@ test('a URL in angle brackets is one plain link without the brackets', () => {
 })
 
 test('a URL in angle brackets stays text in code and after a backslash; an image tag is still an image', () => {
-  const view = preview('`<https://x.com>` \\<https://y.com> <img src="https://z.com/i.png" alt="pic">')
+  const view = preview(`\`<https://x.com>\` \\<https://y.com> <img src="${window.location.origin}/i.png" alt="pic">`)
 
   expect(view.container.querySelector('code')?.textContent).toBe('<https://x.com>')
   expect(view.getAllByRole('link').map((link) => link.textContent)).toEqual(['https://y.com'])
   expect(view.container.textContent).toBe('<https://x.com> <https://y.com> ')
-  expect(view.getByRole('img').getAttribute('src')).toBe('https://z.com/i.png')
+  expect(view.getByRole('img').getAttribute('src')).toBe(`${window.location.origin}/i.png`)
+})
+
+test('an image of another server loads through Orbit, not from that server', () => {
+  const view = preview('![chart](https://z.com/a.png) <img src="https://z.com/b.png?x=1&y=2" alt="pic">')
+
+  expect(Array.from(view.container.querySelectorAll('img')).map((image) => [image.getAttribute('alt'), image.getAttribute('src')])).toEqual([
+    ['chart', '/api/v1/image?u=https%3A%2F%2Fz.com%2Fa.png'],
+    ['pic', '/api/v1/image?u=https%3A%2F%2Fz.com%2Fb.png%3Fx%3D1%26y%3D2'],
+  ])
 })
 
 test('a link to this app in angle brackets is a plain link, also when the host draws chips', () => {
@@ -222,4 +231,21 @@ test('__text__ is underline with the option, also in a list, a quote and a table
   expect(Array.from(other.querySelectorAll('strong')).map((node) => node.textContent)).toEqual(['a', 'b', 'c', 'd', 'e'])
   expect(other.querySelector('u')).toBeNull()
   expect(render(<div>{renderMarkdownBlocks('**x**', 'test', [], { chat: true })}</div>).container.querySelector('strong')?.textContent).toBe('x')
+})
+
+test('a bare URL keeps its underscores and stars, and a style around it still works', () => {
+  const url = 'https://upload.example.org/a/PNG_transparency_demonstration_1.png'
+  const view = preview(`see ${url} and **https://x.com/*a*/b** and _${url}_`)
+
+  expect(view.getAllByRole('link').map((link) => link.getAttribute('href'))).toEqual([url, 'https://x.com/*a*/b', url])
+  expect(view.container.querySelectorAll('em')).toHaveLength(1)
+  expect(view.container.querySelector('em')?.textContent).toBe(url)
+  expect(view.container.querySelector('strong')?.textContent).toBe('https://x.com/*a*/b')
+})
+
+test('an underscore inside a word starts no italic', () => {
+  const view = preview('snake_case_name and _italic_')
+
+  expect(Array.from(view.container.querySelectorAll('em')).map((em) => em.textContent)).toEqual(['italic'])
+  expect(view.container.textContent).toBe('snake_case_name and italic')
 })

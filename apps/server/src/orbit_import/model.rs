@@ -62,6 +62,8 @@ pub struct Workspace {
     /// The task field gallery; archives written before task fields have none.
     #[serde(default, deserialize_with = "lenient")]
     pub task_fields: Vec<TaskField>,
+    #[serde(default)]
+    pub custom_pages: Vec<CustomPage>,
 }
 
 /// A list whose malformed entries (or a value that is not a list) are left out instead of
@@ -102,6 +104,20 @@ pub struct TaskFieldOption {
 pub struct FieldValue {
     pub field_id: String,
     pub value: Value,
+}
+
+/// A custom page of the sidebar. The fields are checked again before it is created.
+#[derive(Clone, Debug, Deserialize)]
+pub struct CustomPage {
+    #[serde(default)]
+    pub slug: String,
+    #[serde(default)]
+    pub name: String,
+    pub icon: Option<String>,
+    #[serde(default)]
+    pub url: String,
+    #[serde(default)]
+    pub admins_only: bool,
 }
 
 #[derive(Clone, Debug, Deserialize)]

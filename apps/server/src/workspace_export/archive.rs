@@ -44,14 +44,15 @@ manifest.json
 
 workspace.json
     The workspace (id, name, created_at, exported_at, exported_by), its members (id, name,
-    email, role, joined_at), teamspaces, and projects with their statuses (workflow),
+    email, role, joined_at), teamspaces, projects with their statuses (workflow),
     labels, milestones, cycles and \"fields\" (the ids of the task fields the project shows,
-    in its order), and \"task_fields\": the workspace's task field gallery, each {\"id\",
+    in its order), \"task_fields\": the workspace's task field gallery, each {\"id\",
     \"name\", \"kind\" (text, number, date, select, multi_select, checkbox, url or
     time_tracking, which has no values: its tasks' time entries are the time),
-    \"options\": [{\"id\", \"name\", \"color\"}] (select kinds only), \"created_at\"}.
-    In a personal export, members are only the people who appear in the archive, and there
-    are no projects or task fields.
+    \"options\": [{\"id\", \"name\", \"color\"}] (select kinds only), \"created_at\"},
+    and custom_pages (the sidebar's web pages: id, slug, name, icon, url, admins_only,
+    created_at, updated_at). In a personal export, members are only the people who appear
+    in the archive, and there are no projects, task fields or custom pages.
 
 tasks/<KEY>-<number>.json
     One file per task, also tasks in the trash (\"deleted\": true) and tasks of deleted
@@ -432,6 +433,11 @@ async fn workspace_json(
     } else {
         structure(source).await?
     };
+    let custom_pages = if personal {
+        Vec::new()
+    } else {
+        custom_pages(source).await?
+    };
     zip.json(
         "workspace.json".to_owned(),
         &json!({
@@ -444,9 +450,35 @@ async fn workspace_json(
             "teamspaces": teamspaces,
             "projects": projects,
             "task_fields": task_fields,
+            "custom_pages": custom_pages,
         }),
     )
     .await
+}
+
+/// The custom pages of the sidebar (a full export is only for owners and admins, who see them all).
+async fn custom_pages(source: &Source<'_>) -> Result<Vec<Value>, ExportError> {
+    Ok(sqlx::query(
+        "SELECT id, slug, name, icon, url, admins_only, created_at, updated_at FROM custom_pages \
+         WHERE workspace_id = $1 ORDER BY lower(name), id",
+    )
+    .bind(source.workspace_id.to_string())
+    .fetch_all(source.database.pool())
+    .await?
+    .into_iter()
+    .map(|row| {
+        json!({
+            "id": row.get::<String, _>("id"),
+            "slug": row.get::<String, _>("slug"),
+            "name": row.get::<String, _>("name"),
+            "icon": row.get::<Option<String>, _>("icon"),
+            "url": row.get::<String, _>("url"),
+            "admins_only": row.get::<bool, _>("admins_only"),
+            "created_at": time(row.get("created_at")),
+            "updated_at": time(row.get("updated_at")),
+        })
+    })
+    .collect())
 }
 
 /// The teamspaces, the projects with their statuses, labels, milestones, cycles and fields, and

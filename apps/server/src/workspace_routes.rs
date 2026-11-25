@@ -276,6 +276,10 @@ pub fn workspace_router(state: WorkspaceState) -> Router {
             put(set_oidc_provision),
         )
         .route(
+            "/api/v1/admin/settings/custom-pages",
+            put(set_custom_page_policy),
+        )
+        .route(
             "/api/v1/admin/settings/smtp",
             put(save_smtp).delete(remove_smtp),
         )
@@ -2172,6 +2176,8 @@ struct InstanceSettingsView {
     /// The OAuth clients of the sign-in providers that are on: Google and GitHub saved here or set by the
     /// environment, and OpenID Connect from `ORBIT_OIDC_*`. A provider that is not listed is off.
     sign_in_providers: Vec<SignInProviderView>,
+    /// Which URLs workspace admins may use for custom pages: `ORBIT_FRAME_ORIGINS`, or else the saved policy.
+    custom_pages: crate::frame_origins::CustomPagePolicy,
     /// The settings that `ORBIT_*` environment variables set. They replace the saved values, and changing them
     /// here gives 409 `set_by_environment`.
     environment: EnvironmentView,
@@ -2184,6 +2190,8 @@ struct EnvironmentView {
     registration_open: bool,
     /// `ORBIT_OIDC_PROVISION`.
     oidc_provision: bool,
+    /// `ORBIT_FRAME_ORIGINS`.
+    frame_origins: bool,
     /// `ORBIT_SMTP_*`.
     smtp: bool,
     /// `ORBIT_S3_*`: the bucket.
@@ -2196,6 +2204,8 @@ struct EnvironmentView {
     backup_schedule: bool,
     /// `ORBIT_S3_KEEP_DELETED_DAYS`.
     s3_keep_deleted_days: bool,
+    /// `ORBIT_IMAGE_PROXY_FETCHES`.
+    image_proxy_fetches: bool,
     /// `ORBIT_GOOGLE_*`, `ORBIT_GITHUB_*`, `ORBIT_OIDC_*`.
     sign_in_providers: Vec<Provider>,
 }
@@ -2205,12 +2215,14 @@ impl From<&EnvironmentSettings> for EnvironmentView {
         Self {
             registration_open: environment.registration_open.is_some(),
             oidc_provision: environment.oidc_provision.is_some(),
+            frame_origins: environment.frame_policy.is_some(),
             smtp: environment.smtp.is_some(),
             s3: environment.s3.is_some(),
             attachments_in_s3: environment.attachments_in_s3.is_some(),
             backups_in_s3: environment.backups_in_s3.is_some(),
             backup_schedule: environment.backup_schedule.is_some(),
             s3_keep_deleted_days: environment.s3_keep_deleted_days.is_some(),
+            image_proxy_fetches: environment.image_proxy_fetches.is_some(),
             sign_in_providers: environment
                 .sign_in_providers
                 .iter()
@@ -2261,14 +2273,16 @@ struct SignInProviderView {
 }
 
 /// Limits for a shared installation. `null` is unlimited.
-#[derive(Deserialize, Serialize, ToSchema)]
-#[serde(deny_unknown_fields)]
+#[derive(Serialize, ToSchema)]
 struct LimitsView {
     /// Workspaces (not in the trash) one account may own. Instance admins are not limited.
     max_owned_workspaces: Option<u32>,
     /// Bytes of files one workspace may store: attachments, page and chat files, emoji and stickers. A file is
     /// counted once per workspace, however often it is attached.
     workspace_storage_quota_bytes: Option<u64>,
+    /// Outside images (mail, messages, pages, link cards) that one server loads at once through Orbit; more wait.
+    /// One user has at most 6 of them.
+    image_proxy_fetches: u32,
     /// The most characters a new or edited chat message can have. Existing messages keep their text.
     chat_message_max_chars: u32,
 }
@@ -2278,6 +2292,7 @@ impl From<InstanceLimits> for LimitsView {
         Self {
             max_owned_workspaces: limits.max_owned_workspaces,
             workspace_storage_quota_bytes: limits.workspace_storage_quota_bytes,
+            image_proxy_fetches: limits.image_proxy_fetches,
             chat_message_max_chars: limits.chat_message_max_chars,
         }
     }
@@ -2296,6 +2311,10 @@ struct LimitsBody {
     #[serde(default)]
     #[schema(required = false)]
     chat_message_max_chars: Option<u32>,
+    /// Outside images (1–256) that one server loads at once. Omitted: unchanged.
+    #[serde(default)]
+    #[schema(required = false)]
+    image_proxy_fetches: Option<u32>,
 }
 
 async fn settings_view(
@@ -2374,6 +2393,12 @@ async fn settings_view(
         mail: InstanceMailView { mail_enabled },
         registration_open: settings.registration_open,
         oidc_provision: settings.oidc_provision,
+        custom_pages: match &EnvironmentSettings::of(state.identity.database()).frame_policy {
+            Some(policy) => crate::frame_origins::view(policy),
+            None => crate::frame_origins::saved(state.identity.database())
+                .await
+                .map_err(|error| internal(instance, request_id).cause(error))?,
+        },
         registration_ready,
         smtp: settings.smtp.map(|smtp| SmtpView {
             host: smtp.host,
@@ -2645,6 +2670,67 @@ async fn set_oidc_provision(
                 internal(instance, request_id.as_ref()).cause(error)
             }
         })?;
+    settings_view(&state, instance, request_id.as_ref()).await
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+struct CustomPagePolicyBody {
+    mode: crate::frame_origins::CustomPageMode,
+    /// https origins without a path, such as `https://grafana.example.com`, for the `listed` mode. Kept in the other
+    /// modes. Not Orbit's own origin.
+    #[serde(default)]
+    origins: Vec<String>,
+}
+
+/// Saves which URLs workspace admins may use for custom pages. Every server uses it at once. A page that the new
+/// policy does not allow stays, but the app does not frame it. 422 `invalid_frame_origin` names an entry that is not
+/// an https origin.
+#[utoipa::path(put, path = "/api/v1/admin/settings/custom-pages", request_body = CustomPagePolicyBody, responses((status = 200, body = InstanceSettingsView)))]
+async fn set_custom_page_policy(
+    State(state): State<WorkspaceState>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<CustomPagePolicyBody>,
+) -> Result<Json<InstanceSettingsView>, ApiError> {
+    let instance = "/api/v1/admin/settings/custom-pages";
+    let session = require_root(&state, &headers, instance, request_id.as_ref()).await?;
+    let database = state.identity.database();
+    if EnvironmentSettings::of(database).frame_policy.is_some() {
+        return Err(set_by_environment(
+            "ORBIT_FRAME_ORIGINS",
+            instance,
+            request_id.as_ref(),
+        ));
+    }
+    let origins = orbit_platform::frame_origin_list(
+        body.origins.iter().map(String::as_str),
+        &state.public_origin,
+    )
+    .map_err(|entry| {
+        ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_frame_origin",
+            "Invalid origin",
+            format!(
+                "{entry:?} is not allowed. Use https origins without a path, such as https://grafana.example.com, and not Orbit's own address."
+            ),
+            instance,
+            request_id.as_ref(),
+        )
+    })?;
+    InstanceSettingsRepository::new(database.clone())
+        .set_custom_page_policy(
+            session.user.id,
+            &crate::frame_origins::CustomPagePolicy {
+                mode: body.mode,
+                origins,
+            },
+            request_id_value(request_id.as_ref()),
+            TimestampMillis::now(),
+        )
+        .await
+        .map_err(|error| internal(instance, request_id.as_ref()).cause(error))?;
     settings_view(&state, instance, request_id.as_ref()).await
 }
 
@@ -3603,6 +3689,31 @@ async fn save_limits(
 ) -> Result<Json<InstanceSettingsView>, ApiError> {
     let instance = "/api/v1/admin/settings/limits";
     let session = require_root(&state, &headers, instance, request_id.as_ref()).await?;
+    let repository = InstanceSettingsRepository::new(state.identity.database().clone());
+    if let (Some(set), Some(wanted)) = (
+        EnvironmentSettings::of(state.identity.database()).image_proxy_fetches,
+        body.image_proxy_fetches,
+    ) && set != wanted
+    {
+        return Err(set_by_environment(
+            "ORBIT_IMAGE_PROXY_FETCHES",
+            instance,
+            request_id.as_ref(),
+        ));
+    }
+    if body
+        .image_proxy_fetches
+        .is_some_and(|fetches| !(1..=crate::mail_image_proxy::MAX_FETCHES_LIMIT).contains(&fetches))
+    {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_image_proxy_fetches",
+            "Invalid number of image fetches",
+            "Load 1 to 256 outside images at once.",
+            instance,
+            request_id.as_ref(),
+        ));
+    }
     let max_owned_workspaces = body.max_owned_workspaces.filter(|limit| *limit > 0);
     let workspace_storage_quota_bytes = body
         .workspace_storage_quota_bytes
@@ -3628,24 +3739,22 @@ async fn save_limits(
             request_id.as_ref(),
         ));
     }
-    let repository = InstanceSettingsRepository::new(state.identity.database().clone());
-    let chat_message_max_chars = match body.chat_message_max_chars {
-        Some(limit) => limit,
-        None => {
-            repository
-                .limits()
-                .await
-                .map_err(|error| internal(instance, request_id.as_ref()).cause(error))?
-                .chat_message_max_chars
-        }
-    };
+    let saved = repository
+        .limits()
+        .await
+        .map_err(|error| internal(instance, request_id.as_ref()).cause(error))?;
     repository
         .save_limits(
             session.user.id,
             InstanceLimits {
                 max_owned_workspaces,
                 workspace_storage_quota_bytes,
-                chat_message_max_chars,
+                image_proxy_fetches: body
+                    .image_proxy_fetches
+                    .unwrap_or(saved.image_proxy_fetches),
+                chat_message_max_chars: body
+                    .chat_message_max_chars
+                    .unwrap_or(saved.chat_message_max_chars),
             },
             request_id_value(request_id.as_ref()),
             TimestampMillis::now(),

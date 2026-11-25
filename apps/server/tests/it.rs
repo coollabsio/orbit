@@ -25,6 +25,7 @@ mod cloud_limits;
 mod collab_api;
 mod collab_convert;
 mod collab_reconcile;
+mod custom_pages_api;
 mod database_api_fixes;
 mod database_api_tools;
 mod database_buttons;

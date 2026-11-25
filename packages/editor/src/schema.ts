@@ -5,12 +5,14 @@ import { BlockNoteSchema, defaultBlockSpecs, defaultInlineContentSpecs, defaultS
 import {
   createReactBlockSpec,
   createReactInlineContentSpec,
+  ImageToExternalHTML,
   type ReactCustomBlockImplementation,
   type ReactInlineContentImplementation,
 } from '@blocknote/react'
 import { codeBlockSpec, type CodeBlockOptions } from './codeHighlight'
 import { FileExternalHtml, FilePreview } from './FilePreview'
 import { isolateEvents } from './isolation'
+import { ProxiedImageBlock } from './ProxiedImage'
 import { linkEmbedExtension } from './linkEmbed'
 
 /**
@@ -39,6 +41,16 @@ const fileWithPreview = createReactBlockSpec(fileBlock.config, {
   parse: fileBlock.implementation.parse,
   render: FilePreview,
   toExternalHTML: FileExternalHtml,
+})()
+
+// Same image props as BlockNote. Only the view changes: an outside image loads through Orbit.
+const imageBlock = baseBlockSpecs.image
+const proxiedImage = createReactBlockSpec(imageBlock.config, {
+  meta: imageBlock.implementation.meta,
+  parse: imageBlock.implementation.parse,
+  render: ProxiedImageBlock,
+  toExternalHTML: ImageToExternalHTML,
+  runsBefore: ['file'],
 })()
 
 const paragraphBlock = baseBlockSpecs.paragraph
@@ -129,6 +141,7 @@ export function createEditorSchemas(views: EditorViews) {
     blockSpecs: {
       ...baseBlockSpecs,
       file: fileWithPreview,
+      image: proxiedImage,
       paragraph: paragraphWithEmbed,
       codeBlock,
       page: createReactBlockSpec(pageBlockConfig, views.page)(),
@@ -146,6 +159,7 @@ export function createEditorSchemas(views: EditorViews) {
     blockSpecs: {
       ...baseBlockSpecs,
       file: fileWithPreview,
+      image: proxiedImage,
       paragraph: paragraphWithEmbed,
       codeBlock,
       callout: callout(),

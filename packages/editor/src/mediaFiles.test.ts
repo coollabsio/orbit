@@ -31,6 +31,7 @@ describe('mediaEmbed', () => {
       kind: 'iframe',
       src: 'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ',
       title: 'External video',
+      poster: 'https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg',
     })
     expect(mediaEmbed('https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=3', 'Watch')?.src).toBe('https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ')
     expect(mediaEmbed('https://youtube.com/shorts/dQw4w9WgXcQ', 'Short')?.src).toBe('https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ')

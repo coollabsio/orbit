@@ -1,4 +1,5 @@
 import { useState, type ComponentProps } from 'react'
+import { proxiedImageUrl } from '@orbit/editor/outsideUrl'
 import { Heart, Message as Replies, Play, Repeat } from 'reicon-react'
 import { useLinkPreview } from '../../api/queries'
 import type { LinkPreview } from '../../api/types'
@@ -6,11 +7,14 @@ import type { LinkPreview } from '../../api/types'
 const COUNT = new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 })
 const POSTED = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
 
-/** An image of another site. Without a source, and when it does not load, it takes no space. The site does not learn where the reader is. */
+/**
+ * An image of another site, loaded through Orbit, so the site does not learn who reads the message or where they
+ * are. Without a source, and when it does not load, it takes no space.
+ */
 function EmbedImage({ src, className, ...props }: Omit<ComponentProps<'img'>, 'alt'>) {
   const [failed, setFailed] = useState(false)
   if (!src || failed) return null
-  return <img src={src} alt="" referrerPolicy="no-referrer" className={className} onError={() => setFailed(true)} {...props} />
+  return <img src={proxiedImageUrl(src, window.location.origin)} alt="" referrerPolicy="no-referrer" className={className} onError={() => setFailed(true)} {...props} />
 }
 
 /** The mark of a video on its poster. */
@@ -54,6 +58,7 @@ const escapeAttribute = (value: string) => value.replace(/&/g, '&amp;').replace(
 /**
  * The video of a post, played in place. X's video host refuses a request that names another site as its referrer, and a
  * `<video>` has no referrer setting of its own, so the player is a small document of its own that sends none.
+ * It has no poster: the sandboxed document cannot load it through Orbit, and the video starts at once.
  */
 function PostVideo({ preview }: { preview: LinkPreview }) {
   const [playing, setPlaying] = useState(false)
@@ -71,7 +76,7 @@ function PostVideo({ preview }: { preview: LinkPreview }) {
           allow="autoplay; fullscreen; picture-in-picture"
           allowFullScreen
           className="size-full border-0"
-          srcDoc={`<!doctype html><html style="height:100%"><head><meta name="referrer" content="no-referrer"></head><body style="height:100%;margin:0;overflow:hidden;background:#000"><video src="${escapeAttribute(preview.videoUrl ?? '')}" poster="${escapeAttribute(preview.imageUrl ?? '')}" controls autoplay playsinline style="display:block;width:100%;height:100%"></video></body></html>`}
+          srcDoc={`<!doctype html><html style="height:100%"><head><meta name="referrer" content="no-referrer"></head><body style="height:100%;margin:0;overflow:hidden;background:#000"><video src="${escapeAttribute(preview.videoUrl ?? '')}" controls autoplay playsinline style="display:block;width:100%;height:100%"></video></body></html>`}
         />
       ) : (
         <button type="button" aria-label="Play video" className="group/play relative block size-full outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset" onClick={() => setPlaying(true)}>

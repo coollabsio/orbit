@@ -1,4 +1,5 @@
 import { parseGithubPullUrl } from '@orbit/api/github'
+import { proxiedImageUrl } from '@orbit/editor/outsideUrl'
 import type { LinkPreview } from '@orbit/api/generated/types.gen'
 import { useQuery } from '@tanstack/react-query'
 import { router } from 'expo-router'
@@ -14,6 +15,7 @@ import { keys } from '../../data/keys'
 import { extractLinkUrls, linkTaskIds, orbitLinkTarget } from '../../data/link-cards'
 import * as api from '../../data/orbit'
 import { identifier } from '../../data/tasks'
+import { useServerImage } from '../../hooks/chat'
 import { useIsGuest, useOrbit } from '../../orbit-context'
 import { useMembers, usePages, useProjects, useStatuses, useTeamspaces } from '../../queries'
 import { alpha, cssColors, useTheme } from '../../theme'
@@ -122,16 +124,19 @@ function LinkEmbed({ url }: { url: string }) {
 }
 
 /**
- * An image of another site. Without a source, and when it does not load, it takes no space. `fit` keeps the image's
- * own shape (a bare image, a post's photo); otherwise the class sets the box.
+ * An image of another site, loaded through Orbit, so the site does not learn who reads the message or where they
+ * are. Without a source, and when it does not load, it takes no space. `fit` keeps the image's own shape (a bare
+ * image, a post's photo); otherwise the class sets the box.
  */
 function EmbedImage({ uri, fit = false, className = '' }: { uri: string | null | undefined; fit?: boolean; className?: string }) {
+  const { session } = useOrbit()
+  const image = useServerImage()
   const [failed, setFailed] = useState(false)
   const [ratio, setRatio] = useState<number | null>(null)
   if (!uri || failed) return null
   return (
     <Image
-      source={{ uri }}
+      source={image(proxiedImageUrl(uri, new URL(session.server).origin))}
       onError={() => setFailed(true)}
       onLoad={(event) => {
         // iOS and Android give the image's size; the web preview does not, and keeps the 16:9 box

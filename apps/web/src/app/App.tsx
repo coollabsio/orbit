@@ -62,6 +62,8 @@ import { MailSuppressionsPage } from '@/features/settings/pages/mail/MailSuppres
 import { MyMailPage } from '@/features/settings/pages/mail/MyMailPage'
 import { MailPage } from '@/features/mail/pages/MailPage'
 import { WebhooksPage } from '@/features/settings/pages/WebhooksPage'
+import { CustomPagesPage } from '@/features/settings/pages/CustomPagesPage'
+import { CustomPageView } from '@/features/pages/CustomPageView'
 import { MailGate } from '@/features/mail/MailGate'
 import { FileStoragePage } from '@/features/settings/pages/FileStoragePage'
 import { ProfilePage } from '@/features/profile/pages/ProfilePage'
@@ -159,6 +161,7 @@ export default function App() {
                   <Route path="chat/*" element={<Navigate to="/tasks" replace />} />
                 )}
                 <Route path="dm/*" element={<Navigate to={chatEnabled ? '/chat' : '/tasks'} replace />} />
+                <Route path="pages/:slug/*" element={<CustomPageView />} />
                 <Route path="activity" element={<InboxPage />} />
                 <Route path="inbox" element={<MovedTo path="/activity" />} />
                 <Route path="profile" element={<AccountLayout />}>
@@ -227,6 +230,7 @@ export default function App() {
                     <Route path="mail/me" element={<MyMailPage />} />
                   </Route>
                   <Route path="webhooks" element={<WebhooksPage />} />
+                  <Route path="custom-pages" element={<CustomPagesPage />} />
                   <Route path="file-storage" element={<FileStoragePage />} />
                 </Route>
                 <Route path="*" element={<Navigate to="/tasks" replace />} />

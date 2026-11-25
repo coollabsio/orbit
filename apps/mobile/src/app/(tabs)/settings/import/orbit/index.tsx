@@ -173,16 +173,18 @@ function Chooser({ item, tree }: { item: OrbitImport; tree: OrbitImportTree }) {
   const [projects, setProjects] = useState<ReadonlySet<string>>(() => new Set(initial.project_ids))
   const [teamspaces, setTeamspaces] = useState<ReadonlySet<string>>(() => new Set(initial.teamspace_ids))
   const [privatePages, setPrivatePages] = useState(initial.include_private_pages)
+  const [customPages, setCustomPages] = useState(initial.include_custom_pages)
   const [channels, setChannels] = useState<ReadonlySet<string>>(() => new Set(initial.channel_ids))
   const start = useStartImport('orbit')
   const selection = {
     project_ids: full ? [...projects] : [],
     teamspace_ids: full ? [...teamspaces] : [],
     include_private_pages: privatePages,
+    include_custom_pages: full && customPages,
     channel_ids: [...channels],
   }
-  const empty = !selection.project_ids.length && !selection.teamspace_ids.length && !privatePages && !selection.channel_ids.length
-  const nothing = (full ? tree.projects.length + tree.teamspaces.length : 0) + tree.private_page_count + tree.channels.length === 0
+  const empty = !selection.project_ids.length && !selection.teamspace_ids.length && !privatePages && !selection.include_custom_pages && !selection.channel_ids.length
+  const nothing = (full ? tree.projects.length + tree.teamspaces.length + tree.custom_page_count : 0) + tree.private_page_count + tree.channels.length === 0
   return (
     <View className="flex-1">
       <ScrollView className="flex-1" contentContainerClassName="gap-3 p-2">
@@ -197,6 +199,12 @@ function Chooser({ item, tree }: { item: OrbitImport; tree: OrbitImportTree }) {
           <ChoiceRow label="my private pages" checked={privatePages} onToggle={() => setPrivatePages(!privatePages)}>
             <Text className="min-w-0 flex-1 font-noto-semibold text-[12px] leading-[16px]">My private pages</Text>
             <Text className="text-[12px] text-muted-foreground tabular-nums">{plural(tree.private_page_count, 'page', 'pages')}</Text>
+          </ChoiceRow>
+        ) : null}
+        {full && tree.custom_page_count > 0 ? (
+          <ChoiceRow label="custom pages" checked={customPages} onToggle={() => setCustomPages(!customPages)}>
+            <Text className="min-w-0 flex-1 font-noto-semibold text-[12px] leading-[16px]">Custom pages</Text>
+            <Text className="text-[12px] text-muted-foreground tabular-nums">{plural(tree.custom_page_count, 'page', 'pages')}</Text>
           </ChoiceRow>
         ) : null}
         {CHANNEL_GROUPS.map((group) => (
@@ -233,7 +241,7 @@ function Result({ item }: { item: OrbitImport }) {
       source={SOURCE}
       item={item}
       summary={item.error ? <Text className="text-[14px] leading-[20px] text-muted-foreground">{item.error}</Text> : null}
-      stats={created ? [['Projects', created.projects ?? 0], ['Tasks', created.tasks ?? 0], ['Pages', created.pages ?? 0], ['Channels', created.channels ?? 0], ['Messages', created.messages ?? 0], ['Files', created.files ?? 0]] : null}
+      stats={created ? [['Projects', created.projects ?? 0], ['Tasks', created.tasks ?? 0], ['Pages', created.pages ?? 0], ['Channels', created.channels ?? 0], ['Messages', created.messages ?? 0], ['Files', created.files ?? 0], ...(created.custom_pages ? [['Custom pages', created.custom_pages] as const] : [])] : null}
       columns={2}
       notes={importNotes('orbit', item).map((note) => <NoteLine key={note}>{note}</NoteLine>)}
       notesTitle="Notes"
