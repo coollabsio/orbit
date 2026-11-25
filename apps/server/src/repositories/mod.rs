@@ -26,6 +26,7 @@ pub mod task_recurrences;
 pub mod task_relations;
 pub mod tasks;
 pub mod teamspaces;
+pub mod time_entries;
 pub mod two_factor;
 pub mod views;
 pub mod workspace_roles;

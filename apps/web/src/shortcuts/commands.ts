@@ -75,6 +75,7 @@ const REGISTRY = [
   { id: 'task.moveToProject', title: 'Move to project', group: 'Task', keys: 'Shift+P', context: 'task-target' },
   { id: 'task.addSubIssue', title: 'Add sub-issue', group: 'Task', keys: 'Mod+Shift+O', context: 'task-target' },
   { id: 'task.addRelation', title: 'Add relation', group: 'Task', keys: 'Mod+Shift+M', context: 'task-target' },
+  { id: 'task.logTime', title: 'Log time', group: 'Task', keys: 'Shift+T', context: 'task-target' },
   { id: 'task.copyId', title: 'Copy task ID', group: 'Task', keys: 'Mod+.', context: 'task-target' },
   { id: 'task.copyLink', title: 'Copy task link', group: 'Task', keys: 'Mod+Shift+,', context: 'task-target' },
   { id: 'task.trash', title: 'Move to trash', group: 'Task', keys: 'Mod+Backspace', context: 'task-target' },
