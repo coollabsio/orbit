@@ -20,7 +20,9 @@ use super::tasks::{author_header, read_file, source_time};
 use super::{Item, OrbitImportService, Run, record_link_in};
 use crate::notion::files::sanitize_file_name;
 use crate::notion::import::clamp;
-use crate::repositories::chat::{ChannelCreate, ChatError, ConversationKind, MESSAGE_MAX_CHARS};
+use crate::repositories::chat::{
+    ChannelCreate, ChatError, ConversationKind, MESSAGE_MAX_CHARS_CEILING,
+};
 use crate::task_import::Failure;
 use crate::workspace_export::ExportMode;
 
@@ -449,7 +451,7 @@ async fn insert_message(
             )
         }
     };
-    let body: String = body.chars().take(MESSAGE_MAX_CHARS).collect();
+    let body: String = body.chars().take(MESSAGE_MAX_CHARS_CEILING).collect();
     let created_at = source_time(&message.created_at);
     let reply_to = match &message.reply_to_id {
         Some(source) => service.linked(run, "message", source).await?,

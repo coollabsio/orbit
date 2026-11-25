@@ -1705,6 +1705,8 @@ struct AuthOptions {
     /// The label of the OpenID Connect provider on the sign-in buttons ("Continue with {oidc_name}"). `null` when it
     /// is not set up.
     oidc_name: Option<String>,
+    /// The most characters a chat message can have (Admin → Limits).
+    chat_message_max_chars: u32,
     /// The Orbit release this server runs, from `[workspace.package] version` in `Cargo.toml` (for example `0.1.0`).
     version: &'static str,
 }
@@ -1726,6 +1728,9 @@ async fn auth_options(
     let providers = providers::configured(&state).await.map_err(|error| {
         ApiError::internal("/api/v1/auth/options", request_id.as_ref()).cause(error)
     })?;
+    let limits = repository.limits().await.map_err(|error| {
+        ApiError::internal("/api/v1/auth/options", request_id.as_ref()).cause(error)
+    })?;
     let oidc_name = providers
         .iter()
         .find_map(|saved| Some(saved.oidc.as_ref()?.display_name.clone()));
@@ -1739,6 +1744,7 @@ async fn auth_options(
         oidc_provision: settings.oidc_provision && oidc_name.is_some(),
         oidc_name,
         providers: providers.iter().map(|saved| saved.provider).collect(),
+        chat_message_max_chars: limits.chat_message_max_chars,
         version: env!("CARGO_PKG_VERSION"),
     }))
 }

@@ -9,7 +9,7 @@ const originalFetch = globalThis.fetch
 afterEach(() => { globalThis.fetch = originalFetch })
 
 const STORAGE = { s3: null, attachments_in_s3: false, backups_in_s3: false, backup_schedule: 'off', files_to_move: 0, move_error: null }
-const LIMITS = { max_owned_workspaces: 10, workspace_storage_quota_bytes: 5_000_000_000 }
+const LIMITS = { max_owned_workspaces: 10, workspace_storage_quota_bytes: 5_000_000_000, chat_message_max_chars: 20_000 }
 const ENVIRONMENT: EnvironmentView = { registration_open: false, oidc_provision: false, smtp: false, s3: false, attachments_in_s3: false, backups_in_s3: false, backup_schedule: false, s3_keep_deleted_days: false, sign_in_providers: [] }
 
 test('limits are saved in bytes, and an empty field is no limit', async () => {
@@ -28,7 +28,11 @@ test('limits are saved in bytes, and an empty field is no limit', async () => {
   expect((storage as HTMLInputElement).value).toBe('5')
   await userEvent.type(workspaces, '{Backspace}{Backspace}')
   await userEvent.type(storage, '{Backspace}2.5')
+  const chat = view.getByLabelText('Chat message length (characters)')
+  expect((chat as HTMLInputElement).value).toBe('20000')
+  await userEvent.clear(chat)
+  await userEvent.type(chat, '5000')
   await userEvent.click(view.getByRole('button', { name: 'Save limits' }))
   await waitFor(() => expect(bodies).toHaveLength(1))
-  expect(bodies[0]).toEqual({ url: '/api/v1/admin/settings/limits', body: { max_owned_workspaces: null, workspace_storage_quota_bytes: 2_500_000_000 } })
+  expect(bodies[0]).toEqual({ url: '/api/v1/admin/settings/limits', body: { max_owned_workspaces: null, workspace_storage_quota_bytes: 2_500_000_000, chat_message_max_chars: 5000 } })
 })

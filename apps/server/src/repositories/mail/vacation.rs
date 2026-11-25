@@ -29,6 +29,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::{Any, Transaction};
 
 use super::domains::parse_id;
+use super::limits::{paused, route_limited};
 use super::outbound::{enqueue, send_job};
 use super::search::people;
 use super::{MailError, MailRepository, SendReadiness};
@@ -571,13 +572,9 @@ impl MailRepository {
         })?;
 
         let mut transaction = self.database.immediate_transaction().await?;
-        let paused: Option<i64> =
-            sqlx::query_scalar("SELECT paused_at FROM mail_send_policies WHERE workspace_id = $1")
-                .bind(workspace_id.to_string())
-                .fetch_optional(&mut *transaction)
-                .await?
-                .flatten();
-        if paused.is_some() {
+        let route = route_id.as_deref().map(parse_id).transpose()?;
+        let limited = route_limited(&mut transaction, route).await?;
+        if limited && paused(&mut transaction, workspace_id).await? {
             return Ok(false);
         }
         let last: Option<i64> = sqlx::query_scalar(
@@ -601,17 +598,18 @@ impl MailRepository {
             return Ok(false);
         }
         // Over a window of the limits: no reply, rather than one held for room.
-        if self
-            .window_allows(
-                &mut transaction,
-                workspace_id,
-                Some(membership_id),
-                1,
-                now,
-                None,
-            )
-            .await?
-            .is_some()
+        if limited
+            && self
+                .window_allows(
+                    &mut transaction,
+                    workspace_id,
+                    Some(membership_id),
+                    1,
+                    now,
+                    None,
+                )
+                .await?
+                .is_some()
         {
             return Ok(false);
         }

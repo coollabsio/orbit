@@ -52,8 +52,8 @@ function SendLimitsCard() {
       title="Limits"
       description={
         cloud
-          ? 'Recipients are counted, not messages. A new workspace starts on New and moves to Standard after two weeks of good sending.'
-          : 'Recipients are counted, not messages. Your server admin sets the limits of each workspace.'
+          ? 'Limits apply only to mail sent through a shared route: the server’s default route or Direct. Your own relay or email API has no Orbit limits. Recipients are counted, not messages.'
+          : 'Limits apply only to mail sent through a shared route: the server’s default route or Direct. Your own relay or email API has no Orbit limits. A workspace has no limits until your server admin sets them.'
       }
       flush
     >

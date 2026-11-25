@@ -33124,7 +33124,7 @@
             }
           },
           "422": {
-            "description": "validation_failed, hostname_required, private_host_refused, plain_smtp_refused",
+            "description": "validation_failed, hostname_required, direct_not_available, private_host_refused, plain_smtp_refused",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -33943,7 +33943,7 @@
             }
           },
           "422": {
-            "description": "validation_failed, hostname_required, private_host_refused, plain_smtp_refused",
+            "description": "validation_failed, hostname_required, direct_not_available, private_host_refused, plain_smtp_refused",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -34203,7 +34203,7 @@
             }
           },
           "422": {
-            "description": "validation_failed, hostname_required, private_host_refused, plain_smtp_refused",
+            "description": "validation_failed, hostname_required, direct_not_available, private_host_refused, plain_smtp_refused",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -34930,7 +34930,7 @@
         "tags": [
           "crate::workspace_routes"
         ],
-        "summary": "Saves the limits of a shared installation; `null` or 0 is unlimited. A lower limit refuses new workspaces and\nuploads only: nothing that exists is removed.",
+        "summary": "Saves the limits of a shared installation; `null` or 0 is unlimited. A lower limit refuses new workspaces,\nuploads and chat messages only: nothing that exists is removed or cut.",
         "operationId": "save_limits",
         "parameters": [
           {
@@ -34947,7 +34947,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/LimitsView"
+                "$ref": "#/components/schemas/LimitsBody"
               }
             }
           },
@@ -77578,7 +77578,7 @@
             }
           },
           "422": {
-            "description": "validation_failed, hostname_required, private_host_refused, plain_smtp_refused",
+            "description": "validation_failed, hostname_required, direct_not_available, private_host_refused, plain_smtp_refused",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -78345,7 +78345,7 @@
             }
           },
           "422": {
-            "description": "validation_failed, hostname_required, private_host_refused, plain_smtp_refused",
+            "description": "validation_failed, hostname_required, direct_not_available, private_host_refused, plain_smtp_refused",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -78620,7 +78620,7 @@
             }
           },
           "422": {
-            "description": "validation_failed, hostname_required, private_host_refused, plain_smtp_refused",
+            "description": "validation_failed, hostname_required, direct_not_available, private_host_refused, plain_smtp_refused",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -80243,6 +80243,129 @@
           },
           "401": {
             "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "crate::mail_routes::suppressions"
+        ],
+        "summary": "Puts an address on the suppression list by hand (owners and admins); Orbit skips it when it\nsends. A 409 `suppression_exists` when it is on the list already.",
+        "operationId": "add_mail_suppression",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddMailSuppressionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MailSuppression"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -104099,6 +104222,26 @@
           }
         }
       },
+      "AddMailSuppressionRequest": {
+        "type": "object",
+        "required": [
+          "address"
+        ],
+        "properties": {
+          "address": {
+            "type": "string",
+            "description": "The address that Orbit must not send to."
+          },
+          "detail": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why it is on the list (up to 500 characters)."
+          }
+        },
+        "additionalProperties": false
+      },
       "AdminEmailBody": {
         "type": "object",
         "required": [
@@ -105008,12 +105151,19 @@
           "providers",
           "provider_registration_open",
           "oidc_provision",
+          "chat_message_max_chars",
           "version"
         ],
         "properties": {
           "billing_enabled": {
             "type": "boolean",
             "description": "Orbit Cloud: workspaces need a subscription (Settings → Billing) to be writable."
+          },
+          "chat_message_max_chars": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The most characters a chat message can have (Admin → Limits).",
+            "minimum": 0
           },
           "email_enabled": {
             "type": "boolean",
@@ -106577,7 +106727,7 @@
           },
           "body": {
             "type": "string",
-            "description": "Markdown source, at most 4000 characters. Mentions are tokens: `<@user_id>`,\n`<#conversation_id>`, `<!channel>`, `<!here>`."
+            "description": "Markdown source, at most the message limit (Admin → Limits, 20,000 characters by\ndefault; 422 `chat_message_too_long`). Mentions are tokens: `<@user_id>`,\n`<#conversation_id>`, `<!channel>`, `<!here>`."
           },
           "file_ids": {
             "type": "array",
@@ -111769,7 +111919,7 @@
               "string",
               "null"
             ],
-            "description": "Slack mrkdwn or Markdown; mentions are tokens: `<@user_id>`, `<#channel_id>`,\n`<!channel>`, `<!here>`. Longer than 4000 characters, it is cut. With `blocks` or\n`attachments` it is the plain text for notifications and search, and may be left out."
+            "description": "Slack mrkdwn or Markdown; mentions are tokens: `<@user_id>`, `<#channel_id>`,\n`<!channel>`, `<!here>`. Longer than the message limit (Admin → Limits, 20,000 characters\nby default), it is cut. With `blocks` or `attachments` it is the plain text for\nnotifications and search, and may be left out."
           },
           "thread_ts": {
             "type": [
@@ -112214,10 +112364,53 @@
         },
         "additionalProperties": false
       },
+      "LimitsBody": {
+        "type": "object",
+        "description": "New limits for a shared installation. `null` or 0 is unlimited.",
+        "properties": {
+          "chat_message_max_chars": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The most characters a new or edited chat message can have: 100–40000. Omitted: unchanged.\nA lower limit does not change existing messages; it applies when one is edited.",
+            "minimum": 0
+          },
+          "max_owned_workspaces": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Workspaces (not in the trash) one account may own. Instance admins are not limited.",
+            "minimum": 0
+          },
+          "workspace_storage_quota_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Bytes of files one workspace may store.",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
       "LimitsView": {
         "type": "object",
         "description": "Limits for a shared installation. `null` is unlimited.",
+        "required": [
+          "chat_message_max_chars"
+        ],
         "properties": {
+          "chat_message_max_chars": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The most characters a new or edited chat message can have. Existing messages keep their text.",
+            "minimum": 0
+          },
           "max_owned_workspaces": {
             "type": [
               "integer",
@@ -117457,8 +117650,15 @@
             "description": "Percent of them that bounced hard."
           },
           "limits": {
-            "$ref": "#/components/schemas/Limits",
-            "description": "The numbers that apply now (the tier's, or the custom ones)."
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Limits",
+                "description": "The numbers that apply now (the tier's, or the custom ones); `null` on the `unlimited` tier."
+              }
+            ]
           },
           "pause_reason": {
             "type": [
@@ -117530,7 +117730,7 @@
           },
           "direct_available": {
             "type": "boolean",
-            "description": "`ORBIT_MAIL_HOSTNAME` is set, so the `direct` kind can be created."
+            "description": "`ORBIT_MAIL_HOSTNAME` is set and this is not Orbit Cloud, so the `direct` kind can be\ncreated."
           },
           "events_base_url": {
             "type": "string",
@@ -129988,7 +130188,8 @@
         "enum": [
           "new",
           "standard",
-          "custom"
+          "custom",
+          "unlimited"
         ]
       },
       "SessionRecord": {

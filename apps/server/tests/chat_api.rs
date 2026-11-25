@@ -1173,7 +1173,7 @@ async fn edits_reactions_and_limits() {
             &fixture.owner,
             "PATCH",
             &format!("/messages/{message}"),
-            edit("x".repeat(4001)),
+            edit("x".repeat(20_001)),
         )
         .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
@@ -1191,6 +1191,66 @@ async fn edits_reactions_and_limits() {
     let removed = fixture.ok(&ada, "DELETE", &path, None).await;
     assert_eq!(removed["result"]["reactions"], json!([]));
     fixture.assert_counters_exact("edits").await;
+}
+
+#[tokio::test]
+async fn a_lower_message_limit_applies_to_new_sends_and_edits_only() {
+    let fixture = Fixture::new().await;
+    let general = fixture.general().await;
+    let long = fixture
+        .send(&fixture.owner, &general, &"a".repeat(300))
+        .await;
+    sqlx::query("UPDATE instance_settings SET chat_message_max_chars = 100 WHERE id = 1")
+        .execute(fixture.database.pool())
+        .await
+        .unwrap();
+
+    let (status, problem) = fixture
+        .call(
+            &fixture.owner,
+            "POST",
+            &format!("/conversations/{general}/messages"),
+            Some(json!({ "body": "b".repeat(101), "nonce": "over" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(problem["code"], "chat_message_too_long");
+    assert_eq!(
+        problem["detail"],
+        "A message can have at most 100 characters."
+    );
+    fixture
+        .send(&fixture.owner, &general, &"b".repeat(100))
+        .await;
+
+    // The older, longer message keeps its text; an edit must fit the new limit.
+    let page = fixture
+        .ok(
+            &fixture.owner,
+            "GET",
+            &format!("/conversations/{general}/messages"),
+            None,
+        )
+        .await;
+    assert!(page.to_string().contains(&"a".repeat(300)));
+    let edit = |body: String| Some(json!({ "body": body }));
+    let (status, _) = fixture
+        .call(
+            &fixture.owner,
+            "PATCH",
+            &format!("/messages/{long}"),
+            edit("a".repeat(299)),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    fixture
+        .ok(
+            &fixture.owner,
+            "PATCH",
+            &format!("/messages/{long}"),
+            edit("short".to_owned()),
+        )
+        .await;
 }
 
 #[tokio::test]

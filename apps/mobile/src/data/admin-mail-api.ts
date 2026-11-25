@@ -207,6 +207,9 @@ const MAX_LIMIT = 10_000_000
 
 export type LimitTexts = Record<keyof Limits, string>
 
+/** The numbers a custom policy starts from when the workspace has no limits (the Standard defaults). */
+export const STANDARD_LIMITS: Limits = { per_user_hour: 500, per_user_day: 2_000, per_ws_hour: 2_000, per_ws_day: 10_000, max_recipients: 100 }
+
 export const limitTexts = (limits: Limits): LimitTexts => ({
   per_user_hour: String(limits.per_user_hour),
   per_user_day: String(limits.per_user_day),

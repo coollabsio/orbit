@@ -90,6 +90,15 @@ export function useSuppressions(q: string) {
   })
 }
 
+export function useAddSuppression() {
+  const { client, workspaceId } = useOrbit()
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: { address: string; detail?: string }) => api.addSuppression(client, workspaceId, body),
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: keys.suppressions(workspaceId) }),
+  })
+}
+
 export function useRemoveSuppression() {
   const { client, workspaceId } = useOrbit()
   const queryClient = useQueryClient()

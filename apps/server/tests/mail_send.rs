@@ -741,6 +741,28 @@ async fn refused_when_paused() {
 }
 
 #[tokio::test]
+async fn own_route_skips_pause_and_cap() {
+    let f = Fixture::new().await;
+    f.sql(&format!(
+        "INSERT INTO mail_send_policies (workspace_id, tier, paused_at, pause_reason, created_at, updated_at) \
+         VALUES ('{}', 'new', 1, 'bounces', 1, 1)",
+        f.workspace
+    ))
+    .await;
+    f.sql(&format!(
+        "UPDATE mail_send_routes SET workspace_id = '{}'",
+        f.workspace
+    ))
+    .await;
+    // the workspace's own relay: no pause, and more than the 50 recipients of the new tier
+    let many: Vec<String> = (0..51).map(|i| format!("o{i}@out.test")).collect();
+    let many: Vec<&str> = many.iter().map(String::as_str).collect();
+    let draft = f.draft(&many).await;
+    let (status, body) = f.send(&draft, json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+}
+
+#[tokio::test]
 async fn recipient_cap_new_tier_50() {
     let f = Fixture::new().await;
     f.sql(&format!(
@@ -749,7 +771,7 @@ async fn recipient_cap_new_tier_50() {
         f.workspace
     ))
     .await;
-    let limits = f.mail.limits_for(f.workspace).await.unwrap();
+    let limits = f.mail.limits_for(f.workspace).await.unwrap().unwrap();
     assert_eq!((limits.per_user_hour, limits.max_recipients), (30, 50));
     let many: Vec<String> = (0..51).map(|i| format!("r{i}@out.test")).collect();
     let many: Vec<&str> = many.iter().map(String::as_str).collect();
@@ -760,12 +782,14 @@ async fn recipient_cap_new_tier_50() {
     let draft = f.draft(&many[..50]).await;
     let (status, body) = f.send(&draft, json!({})).await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    // Without a policy row a workspace is standard.
+    // Without a policy row a self-hosted workspace has no send limits.
     f.sql("DELETE FROM mail_send_policies").await;
-    assert_eq!(
-        f.mail.limits_for(f.workspace).await.unwrap().max_recipients,
-        100
-    );
+    assert_eq!(f.mail.limits_for(f.workspace).await.unwrap(), None);
+    let many: Vec<String> = (0..100).map(|i| format!("u{i}@out.test")).collect();
+    let many: Vec<&str> = many.iter().map(String::as_str).collect();
+    let draft = f.draft(&many).await;
+    let (status, body) = f.send(&draft, json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
 }
 
 #[tokio::test]
@@ -1051,28 +1075,26 @@ async fn a_held_draft_cannot_be_changed() {
 #[tokio::test]
 async fn malformed_tiers_fail_closed_to_new() {
     let f = Fixture::new().await;
-    f.sql("UPDATE instance_settings SET mail_send_tiers = '{\"new\": 1}'")
-        .await;
-    assert_eq!(
-        f.mail.limits_for(f.workspace).await.unwrap().max_recipients,
-        50
-    );
-    f.sql("UPDATE instance_settings SET mail_send_tiers = '[]'")
-        .await;
-    assert_eq!(
-        f.mail.limits_for(f.workspace).await.unwrap().per_user_hour,
-        30
-    );
     f.sql(&format!(
-        "INSERT INTO mail_send_policies (workspace_id, tier, custom_limits, created_at, updated_at) \
-         VALUES ('{}', 'custom', '{{\"x\": 1}}', 1, 1)",
+        "INSERT INTO mail_send_policies (workspace_id, tier, created_at, updated_at) \
+         VALUES ('{}', 'standard', 1, 1)",
         f.workspace
     ))
     .await;
-    assert_eq!(
-        f.mail.limits_for(f.workspace).await.unwrap().max_recipients,
-        50
-    );
+    let limits = || async { f.mail.limits_for(f.workspace).await.unwrap().unwrap() };
+    f.sql("UPDATE instance_settings SET mail_send_tiers = '{\"new\": 1}'")
+        .await;
+    assert_eq!(limits().await.max_recipients, 50);
+    f.sql("UPDATE instance_settings SET mail_send_tiers = '[]'")
+        .await;
+    assert_eq!(limits().await.per_user_hour, 30);
+    f.sql(&format!(
+        "UPDATE mail_send_policies SET tier = 'custom', custom_limits = '{{\"x\": 1}}' \
+         WHERE workspace_id = '{}'",
+        f.workspace
+    ))
+    .await;
+    assert_eq!(limits().await.max_recipients, 50);
 }
 
 fn multipart(name: &str, bytes: &[u8]) -> (String, Vec<u8>) {

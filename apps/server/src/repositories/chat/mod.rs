@@ -38,7 +38,9 @@ use super::membership;
 use crate::live::NewEvent;
 pub use crate::live::Recipients;
 
-pub use blocks::{BlocksError, MessageBlock, check_message_blocks, parse_blocks};
+pub use blocks::{
+    BlocksError, MARKDOWN_MAX_CHARS, MessageBlock, check_message_blocks, parse_blocks,
+};
 pub use conversations::{
     ChannelCreate, ChannelUpdate, MAX_GUEST_CHANNELS, join_invited_channels, require_guest_channels,
 };
@@ -59,8 +61,11 @@ pub use webhooks::{
     WebhookWithSecret,
 };
 
-/// Characters in one message body.
-pub const MESSAGE_MAX_CHARS: usize = 4000;
+/// The highest message limit an admin can set (Admin → Limits), as in Slack. Imported messages
+/// are cut to this, not to the instance limit, so that history stays whole.
+pub const MESSAGE_MAX_CHARS_CEILING: usize = 40_000;
+/// The lowest message limit an admin can set.
+pub const MESSAGE_MAX_CHARS_FLOOR: usize = 100;
 
 #[derive(Debug, Error)]
 pub enum ChatError {
@@ -72,8 +77,8 @@ pub enum ChatError {
     Conflict(&'static str),
     #[error("chat input is invalid: {field}")]
     Invalid { field: &'static str },
-    #[error("the message is too long")]
-    TooLong,
+    #[error("the message is longer than {max} characters")]
+    TooLong { max: usize },
     #[error("an emoji with this name exists")]
     EmojiNameTaken,
     #[error("the workspace has its full number of emoji")]
@@ -707,6 +712,15 @@ impl ChatRepository {
     #[must_use]
     pub fn new(database: Database, uploads: UploadService) -> Self {
         Self { database, uploads }
+    }
+
+    /// The most characters a new or edited message can have, from Admin → Limits.
+    pub async fn message_max_chars(&self) -> Result<usize, ChatError> {
+        Ok(
+            super::instance_settings::InstanceSettingsRepository::new(self.database.clone())
+                .chat_message_max_chars()
+                .await?,
+        )
     }
 
     #[must_use]

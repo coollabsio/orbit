@@ -205,6 +205,7 @@ test('tier limits and rates read plainly', () => {
     { label: 'Recipients of one message', value: '50' },
   ])
   expect(limitRows({ per_user_hour: 500, per_user_day: 2000, per_ws_hour: 2000, per_ws_day: 10_000, max_recipients: 100 })[1]!.value).toBe('2,000 an hour, 10,000 a day')
+  expect(limitRows(null)).toEqual([{ label: 'Limits', value: 'None' }])
   expect(percent(0)).toBe('0 %')
   expect(percent(5.25)).toBe('5.3 %')
   expect(percent(0.25)).toBe('0.25 %')
