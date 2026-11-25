@@ -86,7 +86,7 @@ function DomainsCard({ admin, hasProviders, refreshing, onRefresh }: { admin: Ma
 
   return (
     <SettingsCard
-      title="Mail (Beta)"
+      title="Mail"
       description="Orbit receives and sends mail for the verified domains of each workspace, through its own SMTP listener or through a mail provider. Enabled: every workspace gets the Mail app and its settings. Disabled: Mail is hidden for everyone and the workspace mail API refuses. Mail for domains added before still arrives and shows again when you enable it."
       actions={
         <>
