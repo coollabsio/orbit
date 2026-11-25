@@ -1,5 +1,5 @@
 import { recurrenceChangeText } from '@orbit/api/recurrence'
-import type { Cycle, Milestone, StatusCategory, Task, TaskActivity, TaskChange, TaskComment, TaskPriority, TaskStatusDef, TaskViewState } from '@/features/tasks/api/models'
+import type { Cycle, Milestone, StatusCategory, Task, TaskActivity, TaskChange, TaskComment, TaskPriority, TaskStatusDef, TaskViewState, TimeEntry } from '@/features/tasks/api/models'
 import { relativeTime, shortDate } from '@/lib/format'
 import { cycleName, estimateLabel } from './planningLib'
 import { defaultStatusOf, PRIORITY_LABEL, sortStatuses, statusKeyOf } from './taskMeta'
@@ -60,21 +60,33 @@ export function agoLabel(iso: string): string {
   return /^\d+[mhd]$/.test(label) ? `${label} ago` : label
 }
 
-export type FeedEntry = { kind: 'activity'; at: string; items: TaskActivity[] } | { kind: 'thread'; at: string; thread: CommentThread }
+export type FeedEntry =
+  | { kind: 'activity'; at: string; items: TaskActivity[] }
+  | { kind: 'thread'; at: string; thread: CommentThread }
+  | { kind: 'time'; at: string; entry: TimeEntry }
 
-/** Activity events and comment threads in one chronological list; consecutive events share a timeline block. */
-export function buildFeed(task: Task): FeedEntry[] {
+/**
+ * Activity events, comment threads and time entries in one chronological list (time entries by when they were
+ * logged, not by their work day); consecutive events share a timeline block.
+ */
+export function buildFeed(task: Task, timeEntries: TimeEntry[] = []): FeedEntry[] {
   const events = [...task.activity].sort((a, b) => a.createdAt.localeCompare(b.createdAt))
   const threads = commentThreads(task)
-  const mixed: Array<{ at: string; event?: TaskActivity; thread?: CommentThread }> = [
+  // time logged with a comment (`/spend`) shows on that comment
+  const commentIds = new Set(task.comments.map((comment) => comment.id))
+  timeEntries = timeEntries.filter((entry) => !entry.comment_id || !commentIds.has(entry.comment_id))
+  const mixed: Array<{ at: string; event?: TaskActivity; thread?: CommentThread; entry?: TimeEntry }> = [
     ...events.map((event) => ({ at: event.createdAt, event })),
     ...threads.map((thread) => ({ at: thread.root.createdAt, thread })),
+    ...timeEntries.map((entry) => ({ at: entry.created_at, entry })),
   ].sort((a, b) => a.at.localeCompare(b.at))
 
   const feed: FeedEntry[] = []
   for (const item of mixed) {
     if (item.thread) {
       feed.push({ kind: 'thread', at: item.at, thread: item.thread })
+    } else if (item.entry) {
+      feed.push({ kind: 'time', at: item.at, entry: item.entry })
     } else if (item.event) {
       const last = feed[feed.length - 1]
       if (last && last.kind === 'activity') last.items.push(item.event)

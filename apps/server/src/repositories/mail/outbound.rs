@@ -15,7 +15,7 @@ use utoipa::ToSchema;
 
 use super::domains::parse_id;
 use super::drafts::{Draft, load_draft};
-use super::limits::load_limits;
+use super::limits::{load_limits, paused as limits_paused, route_limited};
 use super::routes::{RouteSettings, SendRouteKind};
 use super::search::people;
 use super::signatures::check_sendable;
@@ -248,12 +248,6 @@ impl MailRepository {
                 return Err(MailError::Forbidden("send_as_denied"));
             }
         }
-        let paused: Option<i64> =
-            sqlx::query_scalar("SELECT paused_at FROM mail_send_policies WHERE workspace_id = $1")
-                .bind(workspace_id.to_string())
-                .fetch_optional(&mut *read)
-                .await?
-                .flatten();
         let route: Option<(String, String, String)> = {
             let row = sqlx::query(ROUTE_SETTINGS_SQL)
                 .bind(domain_id.to_string())
@@ -268,6 +262,9 @@ impl MailRepository {
             })
             .transpose()?
         };
+        let route_id = route.as_ref().map(|(id, _, _)| parse_id(id)).transpose()?;
+        let limited = route_limited(&mut read, route_id).await?;
+        let paused = limited && limits_paused(&mut read, workspace_id).await?;
         read.commit().await?;
 
         if let SendReadiness::NotReady(reason) =
@@ -275,11 +272,10 @@ impl MailRepository {
         {
             return Err(MailError::NotReady(reason));
         }
-        if paused.is_some() {
+        if paused {
             return Err(MailError::Conflict("sending_paused"));
         }
         let all = recipients(&draft)?;
-        let route_id = route.as_ref().map(|(id, _, _)| parse_id(id)).transpose()?;
         let max_bytes = route
             .map(|(_, kind, settings)| route_max_bytes(&kind, &settings))
             .transpose()?
@@ -294,8 +290,12 @@ impl MailRepository {
 
         between.await;
         let mut transaction = self.database.immediate_transaction().await?;
-        let limits = load_limits(&mut transaction, workspace_id, self.cloud).await?;
-        if all.len() as i64 > limits.max_recipients {
+        let limits = if limited {
+            load_limits(&mut transaction, workspace_id, self.cloud).await?
+        } else {
+            None
+        };
+        if limits.is_some_and(|limits| all.len() as i64 > limits.max_recipients) {
             return Err(MailError::Unprocessable("too_many_recipients"));
         }
         // The draft must be the one that was checked. File changes do not bump the version, so the
@@ -333,16 +333,17 @@ impl MailRepository {
         let mut release_at = scheduled_at.map_or(held_until, |at| at.as_millis().max(held_until));
         // A message over a window is not refused: it waits in the Outbox for room.
         let mut hold_reason = None;
-        if let Some(room) = self
-            .window_allows(
-                &mut transaction,
-                workspace_id,
-                Some(membership_id),
-                all.len() as i64,
-                now,
-                None,
-            )
-            .await?
+        if limited
+            && let Some(room) = self
+                .window_allows(
+                    &mut transaction,
+                    workspace_id,
+                    Some(membership_id),
+                    all.len() as i64,
+                    now,
+                    None,
+                )
+                .await?
             && room.as_millis() > release_at
         {
             release_at = room.as_millis();
@@ -1059,7 +1060,7 @@ impl MailRepository {
     ) -> Result<Claim, MailError> {
         let mut transaction = self.database.immediate_transaction().await?;
         let Some(row) = sqlx::query(
-            "SELECT workspace_id, membership_id, hold_reason FROM mail_outbound \
+            "SELECT workspace_id, membership_id, hold_reason, route_id FROM mail_outbound \
              WHERE id = $1 AND status = 'released'",
         )
         .bind(outbound_id.to_string())
@@ -1075,13 +1076,12 @@ impl MailRepository {
             .map(|id| parse_id(&id))
             .transpose()?;
         let hold: Option<String> = row.try_get("hold_reason")?;
-        let paused: Option<i64> =
-            sqlx::query_scalar("SELECT paused_at FROM mail_send_policies WHERE workspace_id = $1")
-                .bind(workspace_id.to_string())
-                .fetch_optional(&mut *transaction)
-                .await?
-                .flatten();
-        if paused.is_some() {
+        let route_id = row
+            .try_get::<Option<String>, _>("route_id")?
+            .map(|id| parse_id(&id))
+            .transpose()?;
+        let limited = route_limited(&mut transaction, route_id).await?;
+        if limited && limits_paused(&mut transaction, workspace_id).await? {
             sqlx::query(
                 "UPDATE mail_outbound SET hold_reason = 'paused', updated_at = $1 WHERE id = $2",
             )
@@ -1114,6 +1114,7 @@ impl MailRepository {
         .fetch_one(&mut *transaction)
         .await?;
         if fresh > 0
+            && limited
             && let Some(room) = self
                 .window_allows(
                     &mut transaction,

@@ -77,6 +77,9 @@ export const queryKeys = {
     [...workspace(workspaceId), 'projects', projectId, 'cycles'] as const,
   comments: (workspaceId: string, taskId: string) =>
     [...workspace(workspaceId), 'tasks', 'detail', taskId, 'comments'] as const,
+  /** Under the workspace prefix, so the realtime refresh reaches it like comments. */
+  timeEntries: (workspaceId: string, taskId: string) =>
+    [...workspace(workspaceId), 'tasks', 'detail', taskId, 'time-entries'] as const,
   taskActivity: (workspaceId: string, taskId: string) =>
     [...workspace(workspaceId), 'tasks', 'detail', taskId, 'activity'] as const,
   attachments: (workspaceId: string, taskId: string) =>

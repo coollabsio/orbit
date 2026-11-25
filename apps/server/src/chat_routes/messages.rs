@@ -56,7 +56,8 @@ impl ChatMessageQuery {
 #[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ChatSendBody {
-    /// Markdown source, at most 4000 characters. Mentions are tokens: `<@user_id>`,
+    /// Markdown source, at most the message limit (Admin → Limits, 20,000 characters by
+    /// default; 422 `chat_message_too_long`). Mentions are tokens: `<@user_id>`,
     /// `<#conversation_id>`, `<!channel>`, `<!here>`.
     body: String,
     /// The root message, for a thread reply.

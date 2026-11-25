@@ -99,6 +99,8 @@ pub struct InstanceLimits {
     pub max_owned_workspaces: Option<u32>,
     /// Bytes of files one workspace may store.
     pub workspace_storage_quota_bytes: Option<u64>,
+    /// The most characters a new or edited chat message can have. Never unlimited.
+    pub chat_message_max_chars: u32,
 }
 
 /// What a save does with the stored SMTP password.
@@ -488,7 +490,8 @@ impl InstanceSettingsRepository {
 
     pub async fn limits(&self) -> Result<InstanceLimits, sqlx::Error> {
         let row = sqlx::query(
-            "SELECT max_owned_workspaces, workspace_storage_quota_bytes FROM instance_settings WHERE id = 1",
+            "SELECT max_owned_workspaces, workspace_storage_quota_bytes, chat_message_max_chars \
+             FROM instance_settings WHERE id = 1",
         )
         .fetch_one(self.database.pool())
         .await?;
@@ -501,7 +504,17 @@ impl InstanceSettingsRepository {
             )
             .ok()
             .filter(|limit| *limit > 0),
+            chat_message_max_chars: u32::try_from(row.get::<i64, _>("chat_message_max_chars"))
+                .unwrap_or(u32::MAX),
         })
+    }
+
+    /// The most characters a new or edited chat message can have (Admin → Limits).
+    pub async fn chat_message_max_chars(&self) -> Result<usize, sqlx::Error> {
+        let row = sqlx::query("SELECT chat_message_max_chars FROM instance_settings WHERE id = 1")
+            .fetch_one(self.database.pool())
+            .await?;
+        Ok(usize::try_from(row.get::<i64, _>("chat_message_max_chars")).unwrap_or(0))
     }
 
     pub async fn save_limits(
@@ -518,10 +531,11 @@ impl InstanceSettingsRepository {
         let mut transaction = self.database.immediate_transaction().await?;
         sqlx::query(
             "UPDATE instance_settings SET max_owned_workspaces = $1, workspace_storage_quota_bytes = $2, \
-             updated_at = $3 WHERE id = 1",
+             chat_message_max_chars = $3, updated_at = $4 WHERE id = 1",
         )
         .bind(max_owned_workspaces)
         .bind(storage_quota)
+        .bind(i64::from(limits.chat_message_max_chars))
         .bind(now.as_millis())
         .execute(&mut *transaction)
         .await?;
@@ -536,6 +550,7 @@ impl InstanceSettingsRepository {
             serde_json::json!({
                 "max_owned_workspaces": max_owned_workspaces,
                 "workspace_storage_quota_bytes": storage_quota,
+                "chat_message_max_chars": limits.chat_message_max_chars,
             }),
             now,
         )

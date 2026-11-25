@@ -37,6 +37,7 @@ const PERMISSION_LABELS: Record<GrantablePermission, string> = {
   'projects.manage': 'Manage project settings, members, statuses and labels',
   'views.manage_shared': 'Manage shared views',
   'comments.moderate': 'Moderate comments',
+  'time.manage': 'Manage time entries',
   'chat.manage': 'Manage chat',
   'mail.manage': 'Manage mail',
   'storage.manage': 'Manage file storage',

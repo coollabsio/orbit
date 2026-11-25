@@ -45,6 +45,10 @@ impl Fixture {
     }
 
     async fn with_hostname(hostname: Option<&str>) -> Self {
+        Self::build(hostname, false).await
+    }
+
+    async fn build(hostname: Option<&str>, cloud: bool) -> Self {
         let database = TestDatabase::new().await.unwrap();
         let identity = Arc::new(IdentityRepository::new((*database).clone()));
         let now = TimestampMillis::now();
@@ -82,7 +86,8 @@ impl Fixture {
             AttachmentMutationCoordinator::default(),
             UploadLimits::default(),
         );
-        let mail = Arc::new(MailRepository::new((*database).clone(), uploads, APP_KEY));
+        let mail =
+            Arc::new(MailRepository::new((*database).clone(), uploads, APP_KEY).with_cloud(cloud));
         let app = mail_router(
             MailState::new(
                 Arc::clone(&identity),
@@ -337,6 +342,24 @@ async fn direct_needs_hostname() {
     assert_eq!(status, StatusCode::CREATED, "{value}");
     assert_eq!(value["kind"], "direct");
     assert_eq!(value["secrets_set"], json!([]));
+}
+
+#[tokio::test]
+async fn cloud_refuses_direct() {
+    let cloud = Fixture::build(Some(HOSTNAME), true).await;
+    let (status, value) = cloud
+        .admin(
+            "POST",
+            "/send-routes",
+            Some(json!({ "kind": "direct", "name": "Direct" })),
+        )
+        .await;
+    assert_eq!(
+        (status, code(&value)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "direct_not_available")
+    );
+    let (_, list) = cloud.admin("GET", "/send-routes", None).await;
+    assert_eq!(list["direct_available"], false);
 }
 
 #[tokio::test]
@@ -1389,9 +1412,13 @@ async fn admin_tier_defaults() {
     .await
     .unwrap();
     assert_eq!(audited, 1);
-    // A saved number reaches the limits a workspace has (its tier is standard here).
+    // A saved number reaches the limits of a workspace on the standard tier.
     let (_, policy) = fixture
-        .admin("GET", &format!("/send-policies/{}", fixture.first), None)
+        .admin(
+            "PUT",
+            &format!("/send-policies/{}", fixture.first),
+            Some(json!({"tier": "standard"})),
+        )
         .await;
     assert_eq!(policy["limits"]["per_ws_day"], 20_000, "{policy}");
     // Root only: an authenticated workspace admin gets nothing, for GET and PUT.

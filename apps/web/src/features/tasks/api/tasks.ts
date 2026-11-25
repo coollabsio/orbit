@@ -48,6 +48,10 @@ import { isTaskVersionConflict } from './conflicts'
 import { findCachedTask, patchWorkspaceTask, reconcileWorkspaceTask, restoreWorkspaceTasks, snapshotTasks, type WorkspaceTaskSnapshot } from './optimistic'
 import { isTaskUuid, normalizeTaskParam, taskSlug } from '@/lib/taskLinks'
 import { loadFailed } from '@/lib/connection'
+import { toast } from 'sonner'
+import { isEmptyRichText } from '@/features/tasks/lib/richText'
+import { takeSpend, todayLocalDate } from '@/features/tasks/timeLib'
+import { invalidateTimeEntries, postTimeEntry } from './timeEntries'
 
 type ApiClient = ReturnType<typeof createApiClient>
 export type TaskFilters = NonNullable<ListTasksData['query']>
@@ -569,19 +573,40 @@ export function useEmptyTaskTrash(workspaceId: string) {
 }
 
 /** Sends a comment (or a reply with `parentId`); files are already in it as inline attachments. */
+/**
+ * Sends a comment. A `/spend 1h 30m` line in it also logs the caller's time, in the same write, with the comment as
+ * the note; a comment of only that line logs the time without a comment (null).
+ */
 export function useCreateTaskComment(workspaceId: string, taskId: string) {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: async ({ bodyJson, parentId }: { bodyJson: unknown[]; parentId?: string }) => {
+      let taken: ReturnType<typeof takeSpend>
+      try {
+        taken = takeSpend(bodyJson)
+      } catch (failure) {
+        toast.error((failure as Error).message)
+        throw failure
+      }
+      const { blocks, spend } = taken
+      // the local day, as the Log time dialog sends: the server's default is the profile's timezone
+      const time = spend ? { minutes: spend.minutes, worked_on: spend.workedOn ?? todayLocalDate() } : undefined
+      if (time && isEmptyRichText(blocks)) {
+        await postTimeEntry(workspaceId, taskId, time)
+        return null
+      }
       const response = await createComment({
         client: apiClient,
         path: { workspace_id: workspaceId, task_id: taskId },
-        body: { body_json: bodyJson as Array<Record<string, unknown>>, parent_id: parentId },
+        body: { body_json: blocks as Array<Record<string, unknown>>, parent_id: parentId, time },
         throwOnError: true,
       })
       return required(response.data, 'Create comment response was empty.')
     },
-    onSettled: () => void queryClient.invalidateQueries({ queryKey: queryKeys.comments(workspaceId, taskId) }),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.comments(workspaceId, taskId) })
+      invalidateTimeEntries(queryClient, workspaceId)
+    },
   })
 }
 

@@ -49,9 +49,12 @@ workspace.json
 tasks/<KEY>-<number>.json
     One file per task, also tasks in the trash (\"deleted\": true) and tasks of deleted
     projects: title, Markdown description, status, priority, dates, milestone, cycle,
-    estimate, creator, assignees, labels, relations, comments, attachments and activity (the task's audit events). A
+    estimate, creator, assignees, labels, relations, comments, time entries, attachments and activity (the task's audit events). A
     comment written with a service account's API token has \"author_service_account\"
     {\"id\", \"name\"} (else null); its \"author\" is the member the write was checked as.
+    Each of \"time_entries\" has id, user (who worked), minutes, worked_on (a YYYY-MM-DD
+    day), note (Markdown), billable, created_by (who logged it), comment_id (the comment it
+    was logged with, else null), created_at and updated_at.
 
 pages/<Teamspace>/<Page>.md, pages/Private/<Page>.md
     Every live page as Markdown, with its sub-pages in the folder <Page>/ next to it and its
@@ -307,6 +310,8 @@ async fn contents(source: &Source<'_>, zip: &ZipSink) -> Result<(), ExportError>
              SELECT user_id FROM memberships WHERE workspace_id = $1 \
              UNION SELECT creator_id FROM tasks WHERE workspace_id = $1 \
              UNION SELECT author_id FROM task_comments WHERE workspace_id = $1 \
+             UNION SELECT user_id FROM task_time_entries WHERE workspace_id = $1 \
+             UNION SELECT created_by FROM task_time_entries WHERE workspace_id = $1 \
              UNION SELECT author_id FROM page_comments WHERE workspace_id = $1 \
              UNION SELECT chat_messages.author_id FROM chat_messages JOIN chat_conversations \
              ON chat_conversations.id = chat_messages.conversation_id \
@@ -675,6 +680,30 @@ async fn tasks(
             }),
         );
     }
+    let mut time_entries = HashMap::new();
+    for row in fetch(
+        "SELECT id, task_id, user_id, minutes, worked_on, note, billable, created_by, comment_id, created_at, updated_at \
+         FROM task_time_entries WHERE workspace_id = $1 ORDER BY worked_on, created_at, id",
+    )
+    .await?
+    {
+        push(
+            &mut time_entries,
+            row.get("task_id"),
+            json!({
+                "id": row.get::<String, _>("id"),
+                "user": people.of(row.get("user_id")),
+                "minutes": row.get::<i64, _>("minutes"),
+                "worked_on": row.get::<String, _>("worked_on"),
+                "note": row.get::<String, _>("note"),
+                "billable": row.get::<i64, _>("billable") != 0,
+                "created_by": people.of(row.get("created_by")),
+                "comment_id": row.get::<Option<String>, _>("comment_id"),
+                "created_at": time(row.get("created_at")),
+                "updated_at": time(row.get("updated_at")),
+            }),
+        );
+    }
     let mut activity = HashMap::new();
     for row in fetch(
         "SELECT resource_id, action, actor_id, metadata_json, occurred_at FROM audit_events \
@@ -755,6 +784,7 @@ async fn tasks(
             "relations": relations.remove(&id).unwrap_or_default(),
             "attachments": task_files.remove(&id).unwrap_or_default(),
             "comments": comments.remove(&id).unwrap_or_default(),
+            "time_entries": time_entries.remove(&id).unwrap_or_default(),
             "activity": activity.remove(&id).unwrap_or_default(),
         });
         zip.json(format!("tasks/{file}.json"), &task).await?;

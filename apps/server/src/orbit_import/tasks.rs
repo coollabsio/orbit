@@ -1,14 +1,14 @@
 //! The task side of an import: teamspaces (matched by name, else created), projects with their
-//! statuses, labels, milestones and cycles, then the tasks (parents first) with their attachments, comments and
-//! relations. Only in a full import.
+//! statuses, labels, milestones and cycles, then the tasks (parents first) with their attachments, comments,
+//! time entries and relations. Only in a full import.
 
 use std::collections::HashMap;
 
-use orbit_platform::{Flag, Id, TimestampMillis};
+use orbit_platform::{Flag, Id, SqlBuilder, TimestampMillis};
 
 use super::archive::{self, Archive};
 use super::model::{self, Task};
-use super::{Item, OrbitImportService, Run};
+use super::{Item, OrbitImportService, Run, record_link_in};
 use crate::notion::files::sanitize_file_name;
 use crate::notion::import::clamp;
 use crate::repositories::task_relations::NewTaskRelationType;
@@ -16,12 +16,16 @@ use crate::repositories::tasks::{
     CommentContent, CreateTask, ImportedTask, TaskChanges, TaskError, TaskUpdate,
 };
 use crate::repositories::teamspaces::TeamspaceError;
+use crate::repositories::time_entries::{MAX_MINUTES, MAX_NOTE_CHARS, parse_worked_on};
 use crate::task_import::{
     Attached, Failure, LABEL_COLORS, NewProject, PROJECT_COLORS, attach_once, attachment_url,
     category_color, display_instant, ensure_project, escape_markdown, find_or_create_label,
     find_or_create_milestone, mentions_any, parse_instant_millis, project_key_base,
     project_statuses, rewrite_links, with_source_details,
 };
+
+/// Time entries per write transaction and INSERT (12 binds each).
+const TIME_ENTRY_BATCH: usize = 200;
 
 /// Sub-task levels kept below a root; a deeper task (or a parent cycle) starts a new tree.
 const MAX_DEPTH: usize = 50;
@@ -763,7 +767,7 @@ fn description(
     with_source_details(body, "Imported from Orbit", &fields, &[])
 }
 
-/// Files, comments and relations of one task. Each step skips what an earlier import or attempt
+/// Files, comments, time entries and relations of one task. Each step skips what an earlier import or attempt
 /// already did.
 async fn fill_task(
     service: &OrbitImportService,
@@ -934,6 +938,8 @@ async fn fill_task(
             .await?;
     }
 
+    import_time_entries(service, run, task_id, &task.time_entries).await?;
+
     for relation in &task.relations {
         if relation.task_id != task.id {
             continue;
@@ -945,6 +951,154 @@ async fn fill_task(
             continue;
         };
         link_tasks(service, run, task_id, target, &relation.kind).await?;
+    }
+    Ok(())
+}
+
+/// A time entry ready to insert.
+struct NewEntry {
+    source_id: String,
+    user_id: Id,
+    minutes: i64,
+    worked_on: String,
+    note: String,
+    billable: i64,
+    created_by: Id,
+    /// The imported comment it was logged with.
+    comment_id: Option<Id>,
+    created_at: i64,
+    updated_at: i64,
+}
+
+/// The task's time entries that no earlier import or attempt created. Each batch is written
+/// with its links in one transaction, so a retry never logs an entry twice. Time of a person
+/// without an account here is logged on the importer, with their name above the note; an
+/// entry Orbit cannot hold (bad minutes or day) is left out.
+async fn import_time_entries(
+    service: &OrbitImportService,
+    run: &mut Run,
+    task_id: Id,
+    entries: &[model::TimeEntry],
+) -> Result<(), Failure> {
+    let mut pending: Vec<NewEntry> = Vec::new();
+    for entry in entries {
+        let minutes = match u32::try_from(entry.minutes) {
+            Ok(minutes) if (1..=MAX_MINUTES).contains(&minutes) => i64::from(minutes),
+            _ => continue,
+        };
+        let Ok(worked_on) = parse_worked_on(&entry.worked_on) else {
+            continue;
+        };
+        if service
+            .linked(run, "time_entry", &entry.id)
+            .await?
+            .is_some()
+        {
+            continue;
+        }
+        let user = entry
+            .user
+            .as_ref()
+            .and_then(|person| run.member(&person.id, person.name.as_deref()));
+        let note = entry.note.trim();
+        let note = match (user, &entry.user) {
+            (Some(_), _) => note.to_owned(),
+            (None, person) => {
+                let name = person.as_ref().map_or_else(
+                    || "Unknown member".to_owned(),
+                    |person| run.name_of(&person.id, person.name.as_deref()),
+                );
+                let header = author_header(&name, "");
+                if note.is_empty() {
+                    header
+                } else {
+                    format!("{header}\n\n{note}")
+                }
+            }
+        };
+        let note: String = note.chars().take(MAX_NOTE_CHARS).collect();
+        let created_by = entry
+            .created_by
+            .as_ref()
+            .and_then(|person| run.member(&person.id, person.name.as_deref()))
+            .unwrap_or(run.user_id);
+        let created_at = source_time(&entry.created_at).as_millis();
+        let updated_at = parse_instant_millis(&entry.updated_at)
+            .unwrap_or(created_at)
+            .max(created_at);
+        // The comments are imported first, so the link names the new comment.
+        let comment_id = match entry.comment_id.as_deref() {
+            Some(comment) => service.linked(run, "comment", comment).await?,
+            None => None,
+        };
+        pending.push(NewEntry {
+            source_id: entry.id.clone(),
+            user_id: user.unwrap_or(run.user_id),
+            minutes,
+            worked_on,
+            note,
+            billable: i64::from(entry.billable),
+            created_by,
+            comment_id,
+            created_at,
+            updated_at,
+        });
+    }
+    for batch in pending.chunks(TIME_ENTRY_BATCH) {
+        let ids: Vec<Id> = batch.iter().map(|_| Id::new_v7()).collect();
+        let mut query = SqlBuilder::new(
+            "INSERT INTO task_time_entries (id, workspace_id, task_id, user_id, minutes, worked_on, \
+             note, billable, created_by, comment_id, version, created_at, updated_at) VALUES ",
+        );
+        for (offset, (id, entry)) in ids.iter().zip(batch).enumerate() {
+            if offset > 0 {
+                query.push(", ");
+            }
+            query
+                .push("(")
+                .push_bind(id.to_string())
+                .push(", ")
+                .push_bind(run.workspace_id.to_string())
+                .push(", ")
+                .push_bind(task_id.to_string())
+                .push(", ")
+                .push_bind(entry.user_id.to_string())
+                .push(", ")
+                .push_bind(entry.minutes)
+                .push(", ")
+                .push_bind(entry.worked_on.clone())
+                .push(", ")
+                .push_bind(entry.note.clone())
+                .push(", ")
+                .push_bind(entry.billable)
+                .push(", ")
+                .push_bind(entry.created_by.to_string())
+                .push(", ")
+                .push_bind(entry.comment_id.map(|id| id.to_string()))
+                .push(", 0, ")
+                .push_bind(entry.created_at)
+                .push(", ")
+                .push_bind(entry.updated_at)
+                .push(")");
+        }
+        let mut tx = service
+            .database()
+            .workspace_transaction(run.workspace_id)
+            .await?;
+        query.build().execute(&mut *tx).await?;
+        for (id, entry) in ids.iter().zip(batch) {
+            record_link_in(
+                &mut *tx,
+                run.workspace_id,
+                &run.source_workspace_id,
+                &run.link_scope,
+                "time_entry",
+                &entry.source_id,
+                *id,
+            )
+            .await?;
+        }
+        tx.commit().await?;
     }
     Ok(())
 }
