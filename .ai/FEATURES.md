@@ -245,6 +245,8 @@ Core files: server `repositories/time_entries.rs`, the time_tracking kind in `re
 - The Asana import adds the field (created as "Time tracking" or the existing one) to each project that gets entries;
   the Orbit import maps a source time_tracking field to this workspace's one, whatever its name. The dev seed turns it
   on in its project.
+- Migration `20261125131647_time_tracking_backfill` gives each workspace with logged time the field ("Logged time"
+  when the name is taken) and shows it in each project with logged time, for time logged before the field existed.
 
 ### Project workflows
 
