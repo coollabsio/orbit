@@ -77,6 +77,17 @@ export type ActiveUserCounts = {
     weekly: number;
 };
 
+export type AddMailSuppressionRequest = {
+    /**
+     * The address that Orbit must not send to.
+     */
+    address: string;
+    /**
+     * Why it is on the list (up to 500 characters).
+     */
+    detail?: string | null;
+};
+
 export type AdminEmailBody = {
     /**
      * The new address.
@@ -48035,6 +48046,60 @@ export type ListMailSuppressionsResponses = {
 };
 
 export type ListMailSuppressionsResponse = ListMailSuppressionsResponses[keyof ListMailSuppressionsResponses];
+
+export type AddMailSuppressionData = {
+    body: AddMailSuppressionRequest;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/mail/suppressions';
+};
+
+export type AddMailSuppressionErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type AddMailSuppressionError = AddMailSuppressionErrors[keyof AddMailSuppressionErrors];
+
+export type AddMailSuppressionResponses = {
+    201: MailSuppression;
+};
+
+export type AddMailSuppressionResponse = AddMailSuppressionResponses[keyof AddMailSuppressionResponses];
 
 export type DeleteMailSuppressionData = {
     body?: never;

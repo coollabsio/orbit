@@ -371,7 +371,8 @@ pub fn mail_router(state: MailState) -> Router {
         )
         .route(
             "/api/v1/workspaces/{workspace_id}/mail/suppressions",
-            get(suppressions::list_mail_suppressions),
+            get(suppressions::list_mail_suppressions)
+                .post(suppressions::add_mail_suppression),
         )
         .route(
             "/api/v1/workspaces/{workspace_id}/mail/suppressions/{address}",
@@ -643,6 +644,8 @@ pub(crate) fn detail(code: &'static str) -> &'static str {
         }
         "draft_conflict" => "The draft changed after it was read. Refresh and try again.",
         "draft_files_limit" => "A draft can have up to 50 files.",
+        "suppression_exists" => "This address is on the suppression list already.",
+        "suppression_invalid_address" => "This is not a valid email address.",
         "sending_paused" => {
             "Sending is paused for this workspace because of bounces or complaints. The root user can resume it."
         }
