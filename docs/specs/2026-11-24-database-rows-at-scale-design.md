@@ -454,4 +454,15 @@ Follow-up fixes (same day):
 - **`docs.row_positions` job** (daily, first at startup): gives the rows of each database numbered `0..n`
   positions with gaps, a database per transaction (`spread_dense_rows`). A request then never spreads a large
   old database. On the dev env the job spread a 4-row `0..n` database within 24 s of being due.
-- Creating a row at 50k still takes 287 ms (not profiled; `ensure_row_capacity` counts every row). Open.
+- Creating a row at 50k took 287 ms. Profile on Postgres (2026-11-25, timers per step):
+
+  | Step | Time | Cause | Fix |
+  |---|---|---|---|
+  | Return the row (`single_row`) | 194 ms | Each rollup read and computed every row of the target database (50k) | `rollups::fill` reads only the linked rows (`rows_among`, batches of 500); above 2,000 links it reads the whole database in one pass |
+  | Row position (`Siblings::edge`) | 20 ms | Postgres cannot estimate `IS NOT DISTINCT FROM`, so it sorted every row in place of reading the index `pages_workspace_parent_position` | `=` and `IS NULL` per space: 0.5 ms |
+  | Row cap (`ensure_row_capacity`) | 11 ms | `COUNT(*)` over the rows | Kept; the cap changes in Phase 2 |
+
+  After the fixes, at 50k rows on Postgres: create a row at the top 24 ms, move the last row to the middle 25 ms
+  (the benchmark now seeds gap positions, as the job leaves old rows; with `0..n` rows a move spreads all rows,
+  2.4 s), full GET 2.6 s (no change). The same rollup fix speeds up every row write that returns the row
+  (value updates too).

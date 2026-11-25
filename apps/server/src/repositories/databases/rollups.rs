@@ -15,6 +15,7 @@ use serde_json::{Value, json};
 use sqlx::{Any, Transaction};
 
 use super::computed::{ComputeScope, Computed, fill_nested};
+use super::rows::rows_among;
 use super::{
     CellValue, DatabaseError, DatabaseRow, Property, PropertyKind, display_text, parse_value,
     properties_in_tx, rows_in_tx,
@@ -184,6 +185,9 @@ fn number_text(number: f64) -> String {
 }
 
 /// The target database of a rollup: its properties and rows (with their computed values).
+/// Above this many linked pages, a rollup reads the whole target database in one pass.
+const LINKED_LOAD: usize = 2_000;
+
 struct Target {
     properties: Vec<Property>,
     rows: HashMap<String, DatabaseRow>,
@@ -199,33 +203,64 @@ pub(super) async fn fill(
     rows: &mut [DatabaseRow],
     depth: u8,
 ) -> Result<(), DatabaseError> {
+    let rollups: Vec<(&Property, &RollupConfig, Id)> = properties
+        .iter()
+        .filter_map(|property| {
+            let PropertyKind::Rollup(config) = &property.kind else {
+                return None;
+            };
+            let relation = properties
+                .iter()
+                .find(|candidate| candidate.id == config.relation_property_id)?;
+            let PropertyKind::Relation(relation) = &relation.kind else {
+                return None;
+            };
+            Some((property, config, relation.database_id))
+        })
+        .collect();
+    // Only the pages that `rows` link to are read and computed, so one row's write does not
+    // compute the whole target database.
+    let mut linked: HashMap<Id, HashSet<String>> = HashMap::new();
+    for (_, config, database_id) in &rollups {
+        let key = config.relation_property_id.to_string();
+        let ids = linked.entry(*database_id).or_default();
+        for row in rows.iter() {
+            let links = row.values.get(&key).and_then(Value::as_array);
+            ids.extend(
+                links
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .map(str::to_owned),
+            );
+        }
+    }
     let mut targets: HashMap<Id, Target> = HashMap::new();
     let mut members: Option<HashMap<String, String>> = None;
-    for property in properties {
-        let PropertyKind::Rollup(config) = &property.kind else {
-            continue;
-        };
-        let Some(PropertyKind::Relation(relation)) = properties
-            .iter()
-            .find(|candidate| candidate.id == config.relation_property_id)
-            .map(|candidate| &candidate.kind)
-        else {
-            continue;
-        };
-        if !targets.contains_key(&relation.database_id) {
-            let target_properties = properties_in_tx(tx, relation.database_id).await?;
-            let mut target_rows = rows_in_tx(tx, relation.database_id, None).await?;
+    for (property, config, database_id) in rollups {
+        if !targets.contains_key(&database_id) {
+            let target_properties = properties_in_tx(tx, database_id).await?;
+            let ids: Vec<String> = linked
+                .remove(&database_id)
+                .unwrap_or_default()
+                .into_iter()
+                .collect();
+            let mut target_rows = if ids.len() > LINKED_LOAD {
+                rows_in_tx(tx, database_id, None).await?
+            } else {
+                rows_among(tx, database_id, &ids).await?
+            };
             let computed = fill_nested(
                 tx,
                 scope,
-                relation.database_id,
+                database_id,
                 &target_properties,
                 &mut target_rows,
                 depth,
             )
             .await?;
             targets.insert(
-                relation.database_id,
+                database_id,
                 Target {
                     properties: target_properties,
                     rows: target_rows
@@ -236,7 +271,7 @@ pub(super) async fn fill(
                 },
             );
         }
-        let target = &targets[&relation.database_id];
+        let target = &targets[&database_id];
         let Some(target_property) = target
             .properties
             .iter()

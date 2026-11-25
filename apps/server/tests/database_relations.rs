@@ -611,7 +611,12 @@ async fn rollups_compute_numbers_dates_checkboxes_and_lists_and_empty_cells() {
         )
         .await;
     let list = fixture.add_row(&lists, "Both orders").await;
-    link(&fixture, &lists, &list, &to_orders, &[&full, &empty]).await;
+    let (status, written) = fixture
+        .set_values(&lists, &list, json!({ &to_orders: [&full, &empty] }))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{written}");
+    // The write computes only the linked rows, and returns the same value as the full read.
+    assert_eq!(written["values"][id_of(&nested)], json!(6.0), "{written}");
     assert_eq!(
         value(&fixture.database(&lists).await, &list, id_of(&nested)),
         json!(6.0)

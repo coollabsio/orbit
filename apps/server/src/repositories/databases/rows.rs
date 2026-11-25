@@ -4,7 +4,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use orbit_platform::Row;
-use orbit_platform::{Database, Id, TimestampMillis};
+use orbit_platform::{Database, Id, SqlBuilder, TimestampMillis};
 use serde_json::{Value, json};
 use sqlx::{Any, Transaction};
 
@@ -591,19 +591,23 @@ impl Siblings {
         let tail = match &edge {
             Edge::First => "ORDER BY position, id LIMIT 1",
             Edge::Last => "ORDER BY position DESC, id DESC LIMIT 1",
-            Edge::Row(_) => "AND id = $6",
+            Edge::Row(_) => "AND id = $5",
             Edge::Next(..) => {
-                "AND (position > $6 OR (position = $7 AND id > $8)) ORDER BY position, id LIMIT 1"
+                "AND (position > $5 OR (position = $6 AND id > $7)) ORDER BY position, id LIMIT 1"
             }
         };
+        // `=` and `IS NULL`, not `IS NOT DISTINCT FROM`: Postgres cannot estimate the latter, and
+        // then sorts every row of the database in place of reading the first one of the index.
+        let (space, space_id) = match self.space {
+            PageSpace::Teamspace(id) => ("teamspace_id = $2 AND owner_id IS NULL", id),
+            PageSpace::Private(owner) => ("teamspace_id IS NULL AND owner_id = $2", owner),
+        };
         let query = sqlx::query(sqlx::AssertSqlSafe(format!(
-            "SELECT position, id FROM pages WHERE workspace_id = $1 \
-             AND teamspace_id IS NOT DISTINCT FROM $2 AND owner_id IS NOT DISTINCT FROM $3 \
-             AND parent_id = $4 AND deleted_at IS NULL AND id <> $5 AND {NOT_TEMPLATE} {tail}"
+            "SELECT position, id FROM pages WHERE workspace_id = $1 AND {space} \
+             AND parent_id = $3 AND deleted_at IS NULL AND id <> $4 AND {NOT_TEMPLATE} {tail}"
         )))
         .bind(self.workspace_id.to_string())
-        .bind(self.space.teamspace_column())
-        .bind(self.space.owner_column())
+        .bind(space_id.to_string())
         .bind(self.database_id.to_string())
         .bind(self.row_id.to_string());
         let query = match edge {
@@ -774,31 +778,72 @@ pub(super) async fn children_in_tx(
     children: Children,
     only: Option<Id>,
 ) -> Result<Vec<DatabaseRow>, DatabaseError> {
-    let only = only.map(|id| id.to_string());
+    let only = only.map(|id| [id.to_string()]);
+    load_children(
+        tx,
+        database_id,
+        children,
+        only.as_ref().map(<[String; 1]>::as_slice),
+    )
+    .await
+}
+
+/// Ids per query of [`rows_among`], well below the bind limits of both backends.
+const ID_BATCH: usize = 500;
+
+/// The live rows of `database_id` whose ids are in `ids` (in no set order), with their stored
+/// values. Other ids are skipped.
+pub(super) async fn rows_among(
+    tx: &mut Transaction<'_, Any>,
+    database_id: Id,
+    ids: &[String],
+) -> Result<Vec<DatabaseRow>, DatabaseError> {
+    let mut rows = Vec::with_capacity(ids.len());
+    for batch in ids.chunks(ID_BATCH) {
+        rows.extend(load_children(tx, database_id, Children::Rows, Some(batch)).await?);
+    }
+    Ok(rows)
+}
+
+/// Live rows or templates in manual order (only those in `ids` when given), with their stored
+/// values.
+async fn load_children(
+    tx: &mut Transaction<'_, Any>,
+    database_id: Id,
+    children: Children,
+    ids: Option<&[String]>,
+) -> Result<Vec<DatabaseRow>, DatabaseError> {
     let filter = children.filter();
-    let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
+    let among = |query: &mut SqlBuilder, column: &str| {
+        if let Some(ids) = ids {
+            query.push(format_args!(" AND {column} IN ("));
+            let mut list = query.separated(", ");
+            for id in ids {
+                list.push_bind(id.clone());
+            }
+            query.push(")");
+        }
+    };
+    let mut query = SqlBuilder::new(
         "SELECT id, title, icon, position, version, created_at, creator_id, updated_at, updated_by, \
-         content_text <> '' AS has_content FROM pages \
-         WHERE parent_id = $1 AND deleted_at IS NULL AND ($2 IS NULL OR id = $3) AND {filter} \
-         ORDER BY position, id"
-    )))
-    .bind(database_id.to_string())
-    .bind(&only)
-    .bind(&only)
-    .fetch_all(&mut **tx)
-    .await?;
-    let stored = sqlx::query(sqlx::AssertSqlSafe(format!(
+         content_text <> '' AS has_content FROM pages WHERE parent_id = ",
+    );
+    query
+        .push_bind(database_id.to_string())
+        .push(format_args!(" AND deleted_at IS NULL AND {filter}"));
+    among(&mut query, "id");
+    query.push(" ORDER BY position, id");
+    let rows = query.build().fetch_all(&mut **tx).await?;
+    let mut query = SqlBuilder::new(
         "SELECT page_property_values.page_id AS page_id, page_property_values.property_id AS property_id, \
          page_property_values.value_json AS value_json FROM page_property_values \
-         JOIN pages ON pages.id = page_property_values.page_id \
-         WHERE pages.parent_id = $1 AND pages.deleted_at IS NULL AND ($2 IS NULL OR pages.id = $3) \
-         AND {filter}"
-    )))
-    .bind(database_id.to_string())
-    .bind(&only)
-    .bind(&only)
-    .fetch_all(&mut **tx)
-    .await?;
+         JOIN pages ON pages.id = page_property_values.page_id WHERE pages.parent_id = ",
+    );
+    query
+        .push_bind(database_id.to_string())
+        .push(format_args!(" AND pages.deleted_at IS NULL AND {filter}"));
+    among(&mut query, "pages.id");
+    let stored = query.build().fetch_all(&mut **tx).await?;
     let mut values: HashMap<String, BTreeMap<String, Value>> = HashMap::new();
     for row in stored {
         let value: Value = serde_json::from_str(&row.get::<String, _>("value_json"))

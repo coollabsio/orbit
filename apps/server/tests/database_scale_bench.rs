@@ -116,7 +116,8 @@ impl Seeder<'_> {
                     json!(db),
                     json!(self.teamspace),
                     json!(format!("Row {at} {}", WORDS[at % WORDS.len()])),
-                    json!(at as i64),
+                    // Gaps of `POSITION_GAP`, as the `docs.row_positions` job leaves old rows.
+                    json!(at as i64 * 65_536),
                     json!(owner),
                     json!(owner),
                     json!(self.now),
