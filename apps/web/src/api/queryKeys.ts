@@ -87,6 +87,12 @@ export const queryKeys = {
   taskRelations: (workspaceId: string, taskId: string) =>
     [...workspace(workspaceId), 'tasks', 'detail', taskId, 'relations'] as const,
   labels: (workspaceId: string) => [...workspace(workspaceId), 'labels'] as const,
+  /** The workspace's custom task field gallery. */
+  taskFields: (workspaceId: string) => [...workspace(workspaceId), 'task-fields'] as const,
+  projectTaskFields: (workspaceId: string, projectId: string) =>
+    [...workspace(workspaceId), 'projects', projectId, 'fields'] as const,
+  taskFieldValues: (workspaceId: string, taskId: string) =>
+    [...workspace(workspaceId), 'tasks', 'detail', taskId, 'fields'] as const,
   commentAttachments: (workspaceId: string, taskId: string, commentId: string) =>
     [...workspace(workspaceId), 'tasks', 'detail', taskId, 'comments', commentId, 'attachments'] as const,
   taskTrash: (workspaceId: string) => [...workspace(workspaceId), 'tasks', 'trash'] as const,

@@ -43,6 +43,7 @@ mod context;
 mod database_actions;
 mod databases;
 mod doc_actions;
+mod fields;
 mod files;
 mod mail;
 mod notifications;
@@ -633,6 +634,7 @@ fn required_scope(name: &str) -> Option<ApiTokenScope> {
         .or_else(|| notifications::scope(name))
         .or_else(|| views::scope(name))
         .or_else(|| files::scope(name))
+        .or_else(|| fields::scope(name))
     {
         return Some(scope);
     }
@@ -804,7 +806,7 @@ fn tools() -> Vec<Tool> {
         ),
         write_definition::<LogTimeArgs>(
             "log_time",
-            "Log time spent on a live task in an approved project: minutes (1 to 1440), the day worked (today by default) and a Markdown note on what was done. user_id logs the time for another member and needs the time.manage permission.",
+            "Log time spent on a live task in an approved project: minutes (1 to 1440), the day worked (today by default) and a Markdown note on what was done. user_id logs the time for another member and needs the time.manage permission. The project must show the workspace's time_tracking field (list_task_fields with project_id); else add it with set_project_task_fields.",
             false,
         ),
         write_definition::<DeleteRelationArgs>(
@@ -825,6 +827,7 @@ fn tools() -> Vec<Tool> {
     tools.extend(notifications::tools());
     tools.extend(views::tools());
     tools.extend(files::tools());
+    tools.extend(fields::tools());
     tools
 }
 
@@ -983,7 +986,10 @@ impl TaskTools {
             Some(result) => Some(result),
             None => match views::call(&api, &request).await {
                 Some(result) => Some(result),
-                None => files::call(&api, &request).await,
+                None => match files::call(&api, &request).await {
+                    Some(result) => Some(result),
+                    None => fields::call(&api, &request).await,
+                },
             },
         };
         if let Some(result) = inbox_views_files {

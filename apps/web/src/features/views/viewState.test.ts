@@ -207,3 +207,27 @@ test('a lone layout migrates, invalid values are dropped, and nothing stored mea
   expect(legacyPreferencesToViewState('broken', null)).toBeNull()
   expect(legacyPreferencesToViewState([], null)).toBeNull()
 })
+
+test('normalizeDisplay keeps custom fields once in order, drops an empty list, and ties order_field_id to its ordering', () => {
+  expect(normalizeDisplay({ ...DEFAULT_DISPLAY, custom_fields: ['b', 'a', 'b'] }).custom_fields).toEqual(['b', 'a'])
+  expect(normalizeDisplay({ ...DEFAULT_DISPLAY, custom_fields: [] })).not.toHaveProperty('custom_fields')
+  expect(normalizeDisplay({ ...DEFAULT_DISPLAY, order_by: 'priority', order_field_id: 'f' })).not.toHaveProperty('order_field_id')
+  expect(normalizeDisplay({ ...DEFAULT_DISPLAY, order_by: 'custom_field', order_field_id: 'f' })).toMatchObject({ order_by: 'custom_field', order_field_id: 'f' })
+  // the server needs a field for this ordering: without one it reads as manual
+  expect(normalizeDisplay({ ...DEFAULT_DISPLAY, order_by: 'custom_field', order_field_id: null }).order_by).toBe('manual')
+})
+
+test('a missing custom field list equals an empty one, and their order counts', () => {
+  const base = defaultViewState()
+  expect(viewStatesEqual(base, { ...base, display: { ...base.display, custom_fields: [] } })).toBe(true)
+  const shown = { ...base, display: { ...base.display, custom_fields: ['a', 'b'] } }
+  expect(viewStatesEqual(base, shown)).toBe(false)
+  expect(viewStatesEqual(shown, { ...base, display: { ...base.display, custom_fields: ['b', 'a'] } })).toBe(false)
+  expect(normalizeViewState({ filter: emptyFilter(), display: shown.display }).display.custom_fields).toEqual(['a', 'b'])
+})
+
+test('custom field conditions on different fields are different filters', () => {
+  const on = (fieldId: string): ViewState => ({ filter: { op: 'and', children: [{ field: 'custom_field', field_id: fieldId, operator: 'is_empty' }] }, display: DEFAULT_DISPLAY })
+  expect(viewStatesEqual(on('a'), on('a'))).toBe(true)
+  expect(viewStatesEqual(on('a'), on('b'))).toBe(false)
+})

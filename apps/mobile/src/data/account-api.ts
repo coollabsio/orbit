@@ -46,12 +46,14 @@ import {
   revokeInvitation as revokeInvitationRequest,
   revokeSession as revokeSessionRequest,
   saveWorkspaceBucket,
+  setTaskProperties,
   setupTotp,
   transferOwnership as transferOwnershipRequest,
   uploadAvatar,
 } from '@orbit/api/generated/sdk.gen'
 import type {
   AuthOptions,
+  OptionalTaskProperty,
   AuthProblem,
   FcmDeviceRecord,
   OwnedWorkspace,
@@ -347,6 +349,11 @@ export const NOTIFICATION_CHOICES: readonly { field: keyof NotificationPrefs; la
 
 export async function renameWorkspace(client: OrbitClient, workspace: Pick<WorkspaceRecord, 'id' | 'version'>, name: string): Promise<WorkspaceRecord> {
   return (await renameWorkspaceRequest({ client, path: { workspace_id: workspace.id }, body: { name, expected_version: workspace.version }, throwOnError: true })).data
+}
+
+/** Replaces the built-in task properties the workspace hides (Settings, Task fields). */
+export async function setHiddenTaskProperties(client: OrbitClient, workspaceId: string, hidden: OptionalTaskProperty[]): Promise<WorkspaceRecord> {
+  return (await setTaskProperties({ client, path: { workspace_id: workspaceId }, body: { hidden }, throwOnError: true })).data
 }
 
 /** Moves the workspace to the trash (the owner can restore it for 30 days). */

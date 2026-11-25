@@ -19,6 +19,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Switch } from '@/components/ui/switch'
 import { clipboardFiles } from '@/lib/attachmentLib'
 import type { CreateTaskBody, TaskRecord } from '@orbit/api/generated/types.gen'
+import { showsTaskProperty } from '@orbit/api/taskProperties'
 import { ColorDot } from '@/components/common/ColorDot'
 import { ProjectMark } from '@/components/common/ProjectMark'
 import { DatePicker } from '@/components/common/DatePicker'
@@ -474,7 +475,7 @@ export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescrip
                 </Button>
               }
             />
-            {milestones.length > 0 ? (
+            {milestones.length > 0 && showsTaskProperty(workspace, 'milestone') ? (
               <MilestonePicker
                 milestones={milestones}
                 value={milestone?.id ?? null}
@@ -487,7 +488,7 @@ export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescrip
                 }
               />
             ) : null}
-            {cycles.length > 0 ? (
+            {cycles.length > 0 && showsTaskProperty(workspace, 'cycle') ? (
               <CyclePicker
                 cycles={cycles}
                 value={cycle?.id ?? null}
@@ -500,16 +501,18 @@ export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescrip
                 }
               />
             ) : null}
-            <EstimatePicker
-              value={draft.estimate}
-              onChange={(estimate) => setDraft((current) => ({ ...current, estimate }))}
-              trigger={
-                <Button type="button" variant="outline" size="sm" className="font-normal" aria-label={`Estimate: ${draft.estimate === null ? 'none' : estimateLabel(draft.estimate)}`}>
-                  <Triangle aria-hidden="true" className="text-muted-foreground" />
-                  {draft.estimate === null ? 'Estimate' : estimateLabel(draft.estimate)}
-                </Button>
-              }
-            />
+            {showsTaskProperty(workspace, 'estimate') ? (
+              <EstimatePicker
+                value={draft.estimate}
+                onChange={(estimate) => setDraft((current) => ({ ...current, estimate }))}
+                trigger={
+                  <Button type="button" variant="outline" size="sm" className="font-normal" aria-label={`Estimate: ${draft.estimate === null ? 'none' : estimateLabel(draft.estimate)}`}>
+                    <Triangle aria-hidden="true" className="text-muted-foreground" />
+                    {draft.estimate === null ? 'Estimate' : estimateLabel(draft.estimate)}
+                  </Button>
+                }
+              />
+            ) : null}
             <Popover open={dueDateOpen} onOpenChange={setDueDateOpen}>
               <PopoverTrigger
                 render={

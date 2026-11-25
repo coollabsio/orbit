@@ -6,6 +6,8 @@ import { useScrollMemory } from '@/lib/useScrollMemory'
 import { EmptyState } from '@/components/common/EmptyState'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import { Button } from '@/components/ui/button'
+import type { TaskField } from '@orbit/api/generated/types.gen'
+import { useTaskFields } from '@/features/tasks/api/fields'
 import { TaskSearchBox } from '@/features/tasks/components/TaskSearchBox'
 import type { User } from '@/features/workspaces/models'
 import { useTeamMembers } from '@/features/workspaces/api'
@@ -16,12 +18,14 @@ import { SaveViewDialog } from './components/SaveViewDialog'
 import { ViewActionsMenu } from './components/ViewActionsMenu'
 import { ViewIcon } from './components/ViewIcon'
 import { GROUP_LABEL, LAYOUTS } from './displayMeta'
-import { FIELD_META } from './filterFields'
+import { fieldMeta } from './filterFields'
 import { rebaseViewSessionEdit } from './useViewState'
 import { viewPath } from './viewActions'
-import { defaultViewState, isGroup, normalizeViewState, type FilterField, type FilterGroup } from './viewState'
+import { defaultViewState, isGroup, normalizeViewState, type FilterGroup } from './viewState'
 import { loadFailed } from '@/lib/connection'
 import { LoadingText } from '@/components/ui/spinner'
+
+const NO_FIELDS: TaskField[] = []
 
 type RowDialog = { mode: 'edit' | 'duplicate'; view: SavedView }
 type Section = { key: string; label: string; icon: IconComponent; views: SavedView[]; reorderable?: boolean }
@@ -32,6 +36,7 @@ export function ViewsPage() {
   const navigate = useNavigate()
   const viewsQuery = useSavedViews(workspace.id)
   const members = useTeamMembers(workspace.id).data ?? []
+  const taskFields = useTaskFields(workspace.id).data ?? NO_FIELDS
   const [search, setSearch] = useState('')
   const [dialog, setDialog] = useState<RowDialog | null>(null)
   const scroller = useRef<HTMLDivElement>(null)
@@ -53,6 +58,7 @@ export function ViewsPage() {
   const newView = () => navigate('/tasks?save_view=1')
   const rowActions: RowActions = {
     members,
+    taskFields,
     workspaceId: workspace.id,
     onEdit: (item) => setDialog({ mode: 'edit', view: item }),
     onDuplicate: (item) => setDialog({ mode: 'duplicate', view: item }),
@@ -126,6 +132,8 @@ export function ViewsPage() {
 
 interface RowActions {
   members: User[]
+  /** Names custom fields in the filter summary. */
+  taskFields: readonly TaskField[]
   workspaceId: string
   onEdit: (view: SavedView) => void
   onDuplicate: (view: SavedView) => void
@@ -216,18 +224,21 @@ interface RowDrag {
   onKeyDown: (event: KeyboardEvent<HTMLAnchorElement>) => void
 }
 
-/** The fields a filter tree tests, in the order they first appear. */
-function filterFieldsOf(group: FilterGroup, fields: FilterField[] = []): FilterField[] {
+/** The names of the fields a filter tree tests, in the order they first appear. */
+function filterFieldsOf(group: FilterGroup, taskFields: readonly TaskField[], labels: string[] = []): string[] {
   for (const child of group.children) {
-    if (isGroup(child)) filterFieldsOf(child, fields)
-    else if (!fields.includes(child.field)) fields.push(child.field)
+    if (isGroup(child)) filterFieldsOf(child, taskFields, labels)
+    else {
+      const { label } = fieldMeta(child, { taskFields })
+      if (!labels.includes(label)) labels.push(label)
+    }
   }
-  return fields
+  return labels
 }
 
 /** "Priority, Assignee +2": what the view narrows by, without loading every value's name. */
-function filterSummary(group: FilterGroup): string {
-  const labels = filterFieldsOf(group).map((field) => FIELD_META[field].label)
+function filterSummary(group: FilterGroup, taskFields: readonly TaskField[]): string {
+  const labels = filterFieldsOf(group, taskFields)
   if (labels.length === 0) return 'All tasks'
   return labels.slice(0, 2).join(', ') + (labels.length > 2 ? ` +${labels.length - 2}` : '')
 }
@@ -236,7 +247,7 @@ function filterSummary(group: FilterGroup): string {
  * One 44px row: a tinted icon tile, the name, then what the view shows (its filter and layout) in aligned columns.
  * The name's stretched `after:` overlay makes the whole row the link.
  */
-function ViewRow({ view, members, workspaceId, onEdit, onDuplicate, drag }: RowActions & { view: SavedView; drag?: RowDrag }) {
+function ViewRow({ view, members, taskFields, workspaceId, onEdit, onDuplicate, drag }: RowActions & { view: SavedView; drag?: RowDrag }) {
   const owner = members.find((person) => person.id === view.owner.user_id)
   const { filter, display } = normalizeViewState(view.state ?? defaultViewState())
   const layout = LAYOUTS.find((item) => item.value === display.layout) ?? LAYOUTS[0]
@@ -279,7 +290,7 @@ function ViewRow({ view, members, workspaceId, onEdit, onDuplicate, drag }: RowA
       </div>
       <span className="flex w-44 shrink-0 items-center gap-1.5 text-xs text-muted-foreground max-[899px]:hidden" title="Filters">
         <Filter className="size-3.5 shrink-0 opacity-70" aria-hidden="true" />
-        <span className="truncate">{filterSummary(filter)}</span>
+        <span className="truncate">{filterSummary(filter, taskFields)}</span>
       </span>
       <span className="flex w-36 shrink-0 items-center gap-1.5 text-xs text-muted-foreground max-[1099px]:hidden" title="Layout">
         <LayoutIcon className="size-3.5 shrink-0 opacity-70" aria-hidden="true" />

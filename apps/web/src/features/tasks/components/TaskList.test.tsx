@@ -8,7 +8,9 @@ import type { ReactNode } from 'react'
 import { MemoryRouter } from 'react-router'
 import { toast } from 'sonner'
 import type { Project, Task, TaskStatusDef } from '@/features/tasks/api/models'
+import type { TaskField } from '@orbit/api/generated/types.gen'
 import type { GroupContext } from '@/features/views/grouping'
+import { taskField } from '@/features/views/testFixtures'
 import type { GroupValues } from '@/features/views/layoutGroups'
 import { DEFAULT_DISPLAY, type DisplayOptions } from '@/features/views/viewState'
 import type { User } from '@/features/workspaces/models'
@@ -61,6 +63,7 @@ type ListOptions = {
   statuses?: TaskStatusDef[]
   display?: Partial<DisplayOptions>
   scope?: string
+  taskFields?: TaskField[]
 }
 
 function renderList(tasks: Task[], options: ListOptions = {}) {
@@ -70,7 +73,7 @@ function renderList(tasks: Task[], options: ListOptions = {}) {
   }
   return render(
     <TaskList
-      tasks={tasks} users={options.users ?? []} labels={[]} statuses={statuses} projects={[launch, docs]}
+      tasks={tasks} users={options.users ?? []} labels={[]} statuses={statuses} projects={[launch, docs]} taskFields={options.taskFields ?? []}
       display={{ ...DEFAULT_DISPLAY, ...options.display }} groupContext={groupContext} collapseScope={options.scope ?? 'all'}
       onOpen={options.onOpen ?? (() => {})} onAdd={options.onAdd ?? (() => {})}
     />,
@@ -823,4 +826,32 @@ test('a drop into another group with no insertion line keeps the group outline',
   overAt(zoneOf(view, 'Doing'), 0)
   expect(view.container.querySelectorAll('[data-drop-edge]')).toHaveLength(0)
   expect(zoneOf(view, 'Doing').hasAttribute('data-drop-over')).toBe(true)
+})
+
+test('a row shows the chosen custom fields: option chips, numbers, a checked box and URL hosts', () => {
+  const customer = taskField('field-customer', 'Customer', 'select', [{ id: 'opt-acme', name: 'Acme', color: '#eb5757' }])
+  const budget = taskField('field-budget', 'Budget', 'number')
+  const signed = taskField('field-signed', 'Signed off', 'checkbox')
+  const site = taskField('field-site', 'Site', 'url')
+  const valued: Task = {
+    ...task(1),
+    fieldValues: [
+      { field_id: 'field-customer', value: 'opt-acme' },
+      { field_id: 'field-budget', value: 1500 },
+      { field_id: 'field-signed', value: true },
+      { field_id: 'field-site', value: 'https://www.example.com/brief' },
+    ],
+  }
+  const view = renderList([valued, task(2)], {
+    taskFields: [customer, budget, signed, site],
+    display: { custom_fields: ['field-budget', 'field-customer', 'field-signed', 'field-site', 'field-gone'] },
+  })
+  const chips = [...view.container.querySelectorAll('[data-property="custom_field"]')]
+  // in the display's order; the deleted field and the task without values show nothing
+  expect(chips.map((chip) => [chip.getAttribute('title'), chip.textContent])).toEqual([
+    [`Budget: ${(1500).toLocaleString()}`, (1500).toLocaleString()],
+    ['Customer: Acme', 'Acme'],
+    ['Signed off: Yes', 'Signed off'],
+    ['Site: https://www.example.com/brief', 'example.com'],
+  ])
 })

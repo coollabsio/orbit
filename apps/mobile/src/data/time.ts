@@ -1,11 +1,10 @@
 /**
- * Time tracking on tasks: the duration text the form reads, the labels, and the time entry calls. The web's
- * `features/tasks/timeLib.ts` has the same functions with the same rules.
+ * Time tracking on tasks: the labels, `/spend`, and the time entry calls. The web's `features/tasks/timeLib.ts` has
+ * the same functions with the same rules; durations come from `@orbit/api/duration`.
  */
-import type { OrbitClient } from './orbit'
+import { formatDuration, parseDuration } from '@orbit/api/duration'
 
-/** The most one entry may hold: a whole day. */
-export const MAX_ENTRY_MINUTES = 1440
+import type { OrbitClient } from './orbit'
 
 export interface TimeEntry {
   id: string
@@ -41,33 +40,6 @@ export interface TimeEntryDraft {
   note: string
   billable: boolean
   user_id?: string
-}
-
-const HOURS_MINUTES = /^(?:(\d+(?:\.\d+)?|\.\d+)\s*h)?\s*(?:(\d+)\s*m)?$/
-
-/**
- * Minutes from `1h 30m`, `1h30m`, `90m`, `1.5h`, `2h` or `45` (a bare number is minutes). Case and spaces do not
- * matter. Null for anything else, for zero, and for more than a day.
- */
-export function parseDuration(text: string): number | null {
-  const input = text.trim().toLowerCase()
-  let minutes: number
-  if (/^\d+$/.test(input)) {
-    minutes = Number(input)
-  } else {
-    const match = HOURS_MINUTES.exec(input)
-    if (!match || (match[1] === undefined && match[2] === undefined)) return null
-    minutes = Math.round(Number(match[1] ?? 0) * 60) + Number(match[2] ?? 0)
-  }
-  return minutes > 0 && minutes <= MAX_ENTRY_MINUTES ? minutes : null
-}
-
-/** `1h 30m`, `45m`, `2h`. */
-export function formatDuration(minutes: number): string {
-  const hours = Math.floor(minutes / 60)
-  const rest = minutes % 60
-  if (hours === 0) return `${rest}m`
-  return rest === 0 ? `${hours}h` : `${hours}h ${rest}m`
 }
 
 const pad2 = (value: number) => String(value).padStart(2, '0')

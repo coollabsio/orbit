@@ -36,6 +36,7 @@ export function drawerAreaOf(pathname: string, areas: Record<SettingsArea, reado
 const SECTIONS: Record<SettingsArea, { label: string; hrefs?: readonly string[] }[]> = {
   workspace: [
     { label: 'Workspace' },
+    { label: 'Tasks', hrefs: ['/settings/task-fields'] },
     { label: 'Chat', hrefs: ['/settings/emoji', '/settings/stickers', '/settings/reports'] },
     {
       label: 'Mail',

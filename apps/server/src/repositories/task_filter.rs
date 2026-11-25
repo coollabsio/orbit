@@ -1,11 +1,11 @@
 //! The task view contract (`ViewState`): filter trees, display options, validation that reports
 //! the JSON path of the first bad node, and the built-in preset trees.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::fmt;
 
 use orbit_platform::SqlBuilder;
-use orbit_platform::{Id, TimestampMillis};
+use orbit_platform::{Backend, Id, TimestampMillis};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
@@ -13,6 +13,7 @@ use utoipa::ToSchema;
 
 use super::project_access::ProjectScope;
 use super::sub_issues;
+use super::tasks::TaskFieldKind;
 
 /// Groups may nest this many levels below the root group (the root is level 0).
 pub const MAX_NESTING: usize = 3;
@@ -38,7 +39,9 @@ const STATUS_CATEGORIES: [&str; 5] = [
 const DONE_CATEGORIES: [&str; 3] = ["completed", "cancelled", "duplicate"];
 const RELATIVE_CYCLES: [&str; 3] = ["current", "next", "previous"];
 const PRIORITIES: [&str; 5] = ["none", "low", "medium", "high", "urgent"];
-const DISPLAY_KEYS: [&str; 9] = [
+/// Custom fields a view shows on rows and cards.
+pub const MAX_DISPLAY_FIELDS: usize = 50;
+const DISPLAY_KEYS: [&str; 11] = [
     "layout",
     "group_by",
     "sub_group_by",
@@ -48,6 +51,8 @@ const DISPLAY_KEYS: [&str; 9] = [
     "show_completed",
     "show_empty_groups",
     "sub_issues",
+    "custom_fields",
+    "order_field_id",
 ];
 
 /// Filter and display options shared by saved views and per-page preferences.
@@ -87,6 +92,10 @@ pub enum FilterNode {
 #[serde(deny_unknown_fields)]
 pub struct Condition {
     pub field: FilterField,
+    /// The task field (`/task-fields`) of a `custom_field` condition; omitted for other fields.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>)]
+    pub field_id: Option<Id>,
     pub operator: FilterOperator,
     /// An array of strings, a date value, a pair of date values, or a string, depending on
     /// `field` and `operator`. Omitted for `is_empty` and `is_not_empty`.
@@ -116,6 +125,14 @@ pub enum FilterField {
     /// now, the first that starts after now, and the last that ended before now.
     Cycle,
     Estimate,
+    /// A task field named by `field_id`. Operators and values by the field's kind: text and url
+    /// `contains` (string); number `is`, `less_than`, `greater_than` (number) and `between`
+    /// (`[min, max]`, inclusive); date `before`, `after`, `between` (date values); select `is` and
+    /// `is_not` (option ids); multi_select `includes_any`, `includes_all`, `excludes` (option
+    /// ids); checkbox `is` (boolean); every kind but checkbox `is_empty` and `is_not_empty`. The
+    /// stored value counts, also when the task's project does not show the field. A deleted
+    /// field has no values.
+    CustomField,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, ToSchema)]
@@ -132,6 +149,10 @@ pub enum FilterOperator {
     After,
     Between,
     Contains,
+    /// Custom number fields only.
+    LessThan,
+    /// Custom number fields only.
+    GreaterThan,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, ToSchema)]
@@ -148,6 +169,14 @@ pub struct DisplayOptions {
     /// Optional in stored and received states (default `nested`).
     #[serde(default)]
     pub sub_issues: SubIssuesDisplay,
+    /// Task fields shown on rows and cards after `properties`, in order (optional, default none).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schema(value_type = Vec<String>)]
+    pub custom_fields: Vec<Id>,
+    /// The task field of `order_by: custom_field`; omitted for every other ordering.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>)]
+    pub order_field_id: Option<Id>,
 }
 
 impl Default for DisplayOptions {
@@ -171,6 +200,8 @@ impl Default for DisplayOptions {
             show_completed: ShowCompleted::All,
             show_empty_groups: false,
             sub_issues: SubIssuesDisplay::Nested,
+            custom_fields: Vec::new(),
+            order_field_id: None,
         }
     }
 }
@@ -207,6 +238,9 @@ pub enum OrderBy {
     DueDate,
     /// Unestimated tasks last in both directions.
     Estimate,
+    /// The value of the task field `order_field_id`; tasks without a value last in both
+    /// directions. Select options sort in the field's option order; checkboxes unchecked first.
+    CustomField,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, ToSchema)]
@@ -382,12 +416,21 @@ fn parse_condition(value: &Value, path: &str) -> Result<Condition, FilterError> 
     };
     if let Some(key) = object
         .keys()
-        .find(|key| !matches!(key.as_str(), "field" | "operator" | "value"))
+        .find(|key| !matches!(key.as_str(), "field" | "field_id" | "operator" | "value"))
     {
         return Err(invalid(format!("{path}.{key}"), "is not a condition field"));
     }
+    let field_id = match object.get("field_id") {
+        None | Some(Value::Null) => None,
+        Some(id) => Some(
+            id.as_str()
+                .and_then(|id| id.parse::<Id>().ok())
+                .ok_or_else(|| invalid(format!("{path}.field_id"), "must be a task field id"))?,
+        ),
+    };
     Ok(Condition {
         field: required(object, path, "field", "is not a known filter field")?,
+        field_id,
         operator: required(object, path, "operator", "is not a known filter operator")?,
         value: object.get("value").cloned().unwrap_or(Value::Null),
     })
@@ -432,6 +475,18 @@ fn parse_display(value: &Value) -> Result<DisplayOptions, FilterError> {
             "display",
             "sub_issues",
             "must be nested, flat or hidden",
+        )?,
+        custom_fields: optional(
+            object,
+            "display",
+            "custom_fields",
+            "must be a list of task field ids",
+        )?,
+        order_field_id: optional(
+            object,
+            "display",
+            "order_field_id",
+            "must be a task field id",
         )?,
     })
 }
@@ -528,10 +583,37 @@ fn allowed_operators(field: FilterField) -> &'static [FilterOperator] {
         FilterField::CreatedAt | FilterField::UpdatedAt => &[O::Before, O::After],
         FilterField::Text => &[O::Contains],
         FilterField::SubIssues => &[O::Is],
+        FilterField::CustomField => &[
+            O::Is,
+            O::IsNot,
+            O::IsEmpty,
+            O::IsNotEmpty,
+            O::IncludesAny,
+            O::IncludesAll,
+            O::Excludes,
+            O::Before,
+            O::After,
+            O::Between,
+            O::Contains,
+            O::LessThan,
+            O::GreaterThan,
+        ],
     }
 }
 
 fn validate_condition(condition: &Condition, path: &str) -> Result<(), FilterError> {
+    if condition.field == FilterField::CustomField {
+        if condition.field_id.is_none() {
+            return Err(invalid(format!("{path}.field_id"), "is required"));
+        }
+        return validate_custom_any_kind(condition, path);
+    }
+    if condition.field_id.is_some() {
+        return Err(invalid(
+            format!("{path}.field_id"),
+            "is only for custom_field conditions",
+        ));
+    }
     if !allowed_operators(condition.field).contains(&condition.operator) {
         return Err(invalid(
             format!("{path}.operator"),
@@ -558,7 +640,195 @@ fn validate_condition(condition: &Condition, path: &str) -> Result<(), FilterErr
         | FilterOperator::IncludesAny
         | FilterOperator::IncludesAll
         | FilterOperator::Excludes => validate_values(condition.field, value, &value_path),
+        FilterOperator::LessThan | FilterOperator::GreaterThan => Err(invalid(
+            format!("{path}.operator"),
+            "is not supported for this field",
+        )),
     }
+}
+
+const CUSTOM_KINDS: [TaskFieldKind; 7] = [
+    TaskFieldKind::Text,
+    TaskFieldKind::Number,
+    TaskFieldKind::Date,
+    TaskFieldKind::Select,
+    TaskFieldKind::MultiSelect,
+    TaskFieldKind::Checkbox,
+    TaskFieldKind::Url,
+];
+
+/// The operators of a `custom_field` condition on a field of `kind`.
+pub fn custom_operators(kind: TaskFieldKind) -> &'static [FilterOperator] {
+    use FilterOperator as O;
+    match kind {
+        TaskFieldKind::Text | TaskFieldKind::Url => &[O::Contains, O::IsEmpty, O::IsNotEmpty],
+        TaskFieldKind::Number => &[
+            O::Is,
+            O::LessThan,
+            O::GreaterThan,
+            O::Between,
+            O::IsEmpty,
+            O::IsNotEmpty,
+        ],
+        TaskFieldKind::Date => &[O::Before, O::After, O::Between, O::IsEmpty, O::IsNotEmpty],
+        TaskFieldKind::Select => &[O::Is, O::IsNot, O::IsEmpty, O::IsNotEmpty],
+        TaskFieldKind::MultiSelect => &[
+            O::IncludesAny,
+            O::IncludesAll,
+            O::Excludes,
+            O::IsEmpty,
+            O::IsNotEmpty,
+        ],
+        TaskFieldKind::Checkbox => &[O::Is],
+        // `custom_field_specs` leaves it out: it has no stored value.
+        TaskFieldKind::TimeTracking => &[],
+    }
+}
+
+/// Without the field's kind (a view is saved without reading its fields): the condition must
+/// fit at least one kind. [`validate_custom_fields`] checks the real kind at query time.
+fn validate_custom_any_kind(condition: &Condition, path: &str) -> Result<(), FilterError> {
+    let mut first_error = None;
+    for kind in CUSTOM_KINDS {
+        if !custom_operators(kind).contains(&condition.operator) {
+            continue;
+        }
+        match validate_custom_condition(kind, condition, path) {
+            Ok(()) => return Ok(()),
+            Err(error) => {
+                first_error.get_or_insert(error);
+            }
+        }
+    }
+    Err(first_error.unwrap_or_else(|| {
+        invalid(
+            format!("{path}.operator"),
+            "is not supported for this field",
+        )
+    }))
+}
+
+fn validate_custom_condition(
+    kind: TaskFieldKind,
+    condition: &Condition,
+    path: &str,
+) -> Result<(), FilterError> {
+    use FilterOperator as O;
+    if !custom_operators(kind).contains(&condition.operator) {
+        return Err(invalid(
+            format!("{path}.operator"),
+            "is not supported for this field",
+        ));
+    }
+    let value_path = format!("{path}.value");
+    let value = &condition.value;
+    match (kind, condition.operator) {
+        (_, O::IsEmpty | O::IsNotEmpty) => {
+            if value.is_null() {
+                Ok(())
+            } else {
+                Err(invalid(value_path, "must be omitted for this operator"))
+            }
+        }
+        (TaskFieldKind::Text | TaskFieldKind::Url, _) => validate_text(value, &value_path),
+        (TaskFieldKind::Number, O::Between) => match value.as_array().map(Vec::as_slice) {
+            Some([low, high]) if low.is_number() && high.is_number() => Ok(()),
+            _ => Err(invalid(value_path, "must be a pair of numbers")),
+        },
+        (TaskFieldKind::Number, _) => {
+            if value.is_number() {
+                Ok(())
+            } else {
+                Err(invalid(value_path, "must be a number"))
+            }
+        }
+        (TaskFieldKind::Date, O::Between) => parse_date_range(value, &value_path).map(|_| ()),
+        (TaskFieldKind::Date, _) => parse_date_value(value, &value_path).map(|_| ()),
+        (TaskFieldKind::Select | TaskFieldKind::MultiSelect, _) => {
+            validate_option_ids(value, &value_path)
+        }
+        (TaskFieldKind::Checkbox, _) => {
+            if value.is_boolean() {
+                Ok(())
+            } else {
+                Err(invalid(value_path, "must be true or false"))
+            }
+        }
+        (TaskFieldKind::TimeTracking, _) => Err(invalid(
+            format!("{path}.operator"),
+            "is not supported for this field",
+        )),
+    }
+}
+
+fn validate_option_ids(value: &Value, path: &str) -> Result<(), FilterError> {
+    let Some(items) = value.as_array() else {
+        return Err(invalid(path, "must be an array of option ids"));
+    };
+    if items.is_empty() {
+        return Err(invalid(path, "must contain at least one value"));
+    }
+    if items.len() > MAX_VALUES {
+        return Err(invalid(path, "must contain at most 100 values"));
+    }
+    for (index, item) in items.iter().enumerate() {
+        if !item.as_str().is_some_and(is_id) {
+            return Err(invalid(format!("{path}[{index}]"), "must be an option id"));
+        }
+    }
+    Ok(())
+}
+
+/// A task field as filters and sorting read it: its kind and its options' ids, in order.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CustomFieldSpec {
+    pub kind: TaskFieldKind,
+    pub option_ids: Vec<String>,
+}
+
+/// The workspace's task fields that a query names, by id. A missing id is a deleted field.
+pub type CustomFields = HashMap<Id, CustomFieldSpec>;
+
+/// The task fields that `custom_field` conditions of the tree name.
+pub fn custom_field_ids(group: &FilterGroup) -> BTreeSet<Id> {
+    fn walk(group: &FilterGroup, ids: &mut BTreeSet<Id>) {
+        for child in &group.children {
+            match child {
+                FilterNode::Group(inner) => walk(inner, ids),
+                FilterNode::Condition(condition) => {
+                    if let Some(id) = condition.field_id {
+                        ids.insert(id);
+                    }
+                }
+            }
+        }
+    }
+    let mut ids = BTreeSet::new();
+    walk(group, &mut ids);
+    ids
+}
+
+/// Checks each `custom_field` condition against its field's real kind. Conditions on deleted
+/// fields pass (they match as if no task had a value).
+pub fn validate_custom_fields(
+    group: &FilterGroup,
+    fields: &CustomFields,
+) -> Result<(), FilterError> {
+    fn walk(group: &FilterGroup, path: &str, fields: &CustomFields) -> Result<(), FilterError> {
+        for (index, child) in group.children.iter().enumerate() {
+            let child_path = format!("{path}.children[{index}]");
+            match child {
+                FilterNode::Group(inner) => walk(inner, &child_path, fields)?,
+                FilterNode::Condition(condition) => {
+                    if let Some(spec) = condition.field_id.and_then(|id| fields.get(&id)) {
+                        validate_custom_condition(spec.kind, condition, &child_path)?;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+    walk(group, "filter", fields)
 }
 
 fn validate_text(value: &Value, path: &str) -> Result<(), FilterError> {
@@ -601,7 +871,8 @@ fn validate_values(field: FilterField, value: &Value, path: &str) -> Result<(), 
             | FilterField::CreatedAt
             | FilterField::UpdatedAt
             | FilterField::Text
-            | FilterField::Estimate => false,
+            | FilterField::Estimate
+            | FilterField::CustomField => false,
             FilterField::Parent => text == "none" || is_id(text),
             FilterField::SubIssues => matches!(text, "has" | "none"),
         };
@@ -645,7 +916,31 @@ fn validate_display(display: &DisplayOptions) -> Result<(), FilterError> {
             ));
         }
     }
-    Ok(())
+    if display.custom_fields.len() > MAX_DISPLAY_FIELDS {
+        return Err(invalid(
+            "display.custom_fields",
+            "must contain at most 50 fields",
+        ));
+    }
+    for (index, field) in display.custom_fields.iter().enumerate() {
+        if display.custom_fields[..index].contains(field) {
+            return Err(invalid(
+                format!("display.custom_fields[{index}]"),
+                "is listed more than once",
+            ));
+        }
+    }
+    match (display.order_by, display.order_field_id) {
+        (OrderBy::CustomField, None) => Err(invalid(
+            "display.order_field_id",
+            "is required when order_by is custom_field",
+        )),
+        (OrderBy::CustomField, Some(_)) | (_, None) => Ok(()),
+        (_, Some(_)) => Err(invalid(
+            "display.order_field_id",
+            "must be omitted unless order_by is custom_field",
+        )),
+    }
 }
 
 /// Parses `{ "absolute": "YYYY-MM-DD" }`, `{ "instant": epoch_ms }` or
@@ -858,6 +1153,7 @@ pub fn and_groups(groups: Vec<FilterGroup>) -> FilterGroup {
 fn condition(field: FilterField, operator: FilterOperator, value: Value) -> FilterNode {
     FilterNode::Condition(Condition {
         field,
+        field_id: None,
         operator,
         value,
     })
@@ -866,11 +1162,15 @@ fn condition(field: FilterField, operator: FilterOperator, value: Value) -> Filt
 /// Request context for compiling a filter: `me` is `actor_id`, and relative dates and the
 /// `show_completed` window resolve against `now` (UTC).
 #[derive(Clone, Copy, Debug)]
-pub struct FilterContext {
+pub struct FilterContext<'a> {
     /// The projects the reader sees: parents and sub-issues outside it do not count.
     pub(crate) scope: ProjectScope,
     pub actor_id: Id,
     pub now: TimestampMillis,
+    /// Text fields are JSON in `task_field_values.value_json`; reading the text differs.
+    pub backend: Backend,
+    /// The fields that `custom_field` conditions name ([`custom_field_ids`]).
+    pub custom_fields: &'a CustomFields,
 }
 
 /// An assignee that is still an active (member, not suspended) user, as in `unassigned`.
@@ -1045,6 +1345,7 @@ fn push_condition(query: &mut SqlBuilder, condition: &Condition, ctx: &FilterCon
         (F::Estimate, O::IsNotEmpty) => {
             query.push("tasks.estimate IS NOT NULL");
         }
+        (F::CustomField, _) => push_custom(query, condition, ctx),
         _ => {
             query.push("0 = 1");
         }
@@ -1412,6 +1713,338 @@ fn push_text(query: &mut SqlBuilder, value: &Value) {
     }
 }
 
+/// `task_field_values` row of the outer task for one field (the field id is bound next).
+const FIELD_VALUE: &str = "SELECT 1 FROM task_field_values AS field_value \
+     WHERE field_value.task_id = tasks.id AND field_value.field_id = ";
+/// A number value: its JSON text is a plain number, so both databases cast it.
+const FIELD_NUMBER: &str = "CAST(field_value.value_json AS DOUBLE PRECISION)";
+
+/// The text of a JSON string value (`text`, `url`) in `column`.
+fn json_text_sql(backend: Backend, column: &str) -> String {
+    match backend {
+        Backend::Sqlite => format!("json_extract({column}, '$')"),
+        Backend::Postgres => format!("(CAST({column} AS jsonb) #>> '{{}}')"),
+    }
+}
+
+/// A value as `value_json` stores it (serde_json's canonical form, as `set_task_field_value`
+/// writes it).
+fn json_string(text: &str) -> String {
+    Value::String(text.to_owned()).to_string()
+}
+
+/// `[NOT] EXISTS (value row of the field AND (predicate))`.
+fn push_field_value_exists(
+    query: &mut SqlBuilder,
+    field_id: Id,
+    negated: bool,
+    predicate: impl FnOnce(&mut SqlBuilder),
+) {
+    query
+        .push(if negated { "NOT EXISTS (" } else { "EXISTS (" })
+        .push(FIELD_VALUE)
+        .push_bind(field_id.to_string())
+        .push(" AND (");
+    predicate(query);
+    query.push("))");
+}
+
+/// The value in `column` holds the option: a select value is the option id, a multi-select value
+/// an array of ids (ids never contain `"`, so the quoted id is a safe substring).
+fn push_option_match(query: &mut SqlBuilder, kind: TaskFieldKind, column: &str, option_id: &str) {
+    if kind == TaskFieldKind::Select {
+        query
+            .push(column)
+            .push(" = ")
+            .push_bind(json_string(option_id));
+    } else {
+        query
+            .push(column)
+            .push(" LIKE ")
+            .push_bind(format!("%{}%", escape_like(&json_string(option_id))))
+            .push(" ESCAPE '\\'");
+    }
+}
+
+/// Any (or with `all`, every) one of `option_ids`; no ids matches nothing.
+fn push_options(
+    query: &mut SqlBuilder,
+    kind: TaskFieldKind,
+    column: &str,
+    option_ids: &[String],
+    all: bool,
+) {
+    if option_ids.is_empty() {
+        query.push("0 = 1");
+        return;
+    }
+    query.push("(");
+    for (index, id) in option_ids.iter().enumerate() {
+        if index > 0 {
+            query.push(if all { " AND " } else { " OR " });
+        }
+        push_option_match(query, kind, column, id);
+    }
+    query.push(")");
+}
+
+/// `YYYY-MM-DD` of a day counted from 1970-01-01.
+fn ymd(day: i64) -> Option<String> {
+    let days_from_ce = i32::try_from(day.checked_add(719_163)?).ok()?;
+    chrono::NaiveDate::from_num_days_from_ce_opt(days_from_ce)
+        .map(|date| date.format("%Y-%m-%d").to_string())
+}
+
+/// A `custom_field` condition. Values of options removed from the field do not count (as they
+/// do not show). Dates compare as their quoted `"YYYY-MM-DD"` JSON text, which sorts by day.
+fn push_custom(query: &mut SqlBuilder, condition: &Condition, ctx: &FilterContext) {
+    use FilterOperator as O;
+    use TaskFieldKind as K;
+    let operator = condition.operator;
+    let value = &condition.value;
+    let Some(field_id) = condition.field_id else {
+        query.push("0 = 1");
+        return;
+    };
+    let Some(spec) = ctx.custom_fields.get(&field_id) else {
+        // A deleted field: no task has a value.
+        let matches_empty = matches!(operator, O::IsEmpty | O::IsNot | O::Excludes)
+            || (operator == O::Is && value == &Value::Bool(false));
+        query.push(if matches_empty { "1 = 1" } else { "0 = 1" });
+        return;
+    };
+    let column = "field_value.value_json";
+    let live = |requested: &Value| -> Vec<String> {
+        let wanted: BTreeSet<&str> = requested
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .collect();
+        spec.option_ids
+            .iter()
+            .filter(|id| wanted.contains(id.as_str()))
+            .cloned()
+            .collect()
+    };
+    match (spec.kind, operator) {
+        (kind, O::IsEmpty | O::IsNotEmpty) => {
+            push_field_value_exists(query, field_id, operator == O::IsEmpty, |query| {
+                if matches!(kind, K::Select | K::MultiSelect) {
+                    push_options(query, kind, column, &spec.option_ids, false);
+                } else {
+                    query.push("1 = 1");
+                }
+            });
+        }
+        (K::Text | K::Url, O::Contains) => {
+            let Some(text) = value.as_str().filter(|text| !text.is_empty()) else {
+                query.push("0 = 1");
+                return;
+            };
+            let pattern = format!("%{}%", escape_like(&text.to_lowercase()));
+            let text_sql = json_text_sql(ctx.backend, column);
+            push_field_value_exists(query, field_id, false, |query| {
+                query
+                    .push("lower(")
+                    .push(&text_sql)
+                    .push(") LIKE ")
+                    .push_bind(pattern)
+                    .push(" ESCAPE '\\'");
+            });
+        }
+        (K::Number, O::Is | O::LessThan | O::GreaterThan) => {
+            let Some(number) = value.as_f64() else {
+                query.push("0 = 1");
+                return;
+            };
+            let comparison = match operator {
+                O::LessThan => " < ",
+                O::GreaterThan => " > ",
+                _ => " = ",
+            };
+            push_field_value_exists(query, field_id, false, |query| {
+                query.push(FIELD_NUMBER).push(comparison).push_bind(number);
+            });
+        }
+        (K::Number, O::Between) => {
+            let bounds = value.as_array().and_then(|pair| match pair.as_slice() {
+                [low, high] => Some((low.as_f64()?, high.as_f64()?)),
+                _ => None,
+            });
+            let Some((low, high)) = bounds else {
+                query.push("0 = 1");
+                return;
+            };
+            push_field_value_exists(query, field_id, false, |query| {
+                query
+                    .push(FIELD_NUMBER)
+                    .push(" >= ")
+                    .push_bind(low)
+                    .push(" AND ")
+                    .push(FIELD_NUMBER)
+                    .push(" <= ")
+                    .push_bind(high);
+            });
+        }
+        (K::Date, O::Before | O::After | O::Between) => {
+            let day =
+                |date: DateValue| ymd(resolve_day(date, ctx.now)).map(|day| json_string(&day));
+            // (lower bound inclusive, upper bound inclusive) or strict bounds for before/after
+            let bounds = match operator {
+                O::Before => parse_date_value(value, "value")
+                    .ok()
+                    .and_then(day)
+                    .map(|until| vec![(" < ", until)]),
+                O::After => parse_date_value(value, "value")
+                    .ok()
+                    .and_then(day)
+                    .map(|from| vec![(" > ", from)]),
+                _ => parse_date_range(value, "value")
+                    .ok()
+                    .and_then(|(start, end)| {
+                        Some(vec![(" >= ", day(start)?), (" <= ", day(end)?)])
+                    }),
+            };
+            let Some(bounds) = bounds else {
+                query.push("0 = 1");
+                return;
+            };
+            push_field_value_exists(query, field_id, false, |query| {
+                for (index, (comparison, bound)) in bounds.into_iter().enumerate() {
+                    if index > 0 {
+                        query.push(" AND ");
+                    }
+                    query.push(column).push(comparison).push_bind(bound);
+                }
+            });
+        }
+        (K::Select, O::Is | O::IsNot) | (K::MultiSelect, O::IncludesAny | O::Excludes) => {
+            let negated = matches!(operator, O::IsNot | O::Excludes);
+            let ids = live(value);
+            if ids.is_empty() {
+                query.push(if negated { "1 = 1" } else { "0 = 1" });
+                return;
+            }
+            push_field_value_exists(query, field_id, negated, |query| {
+                push_options(query, spec.kind, column, &ids, false);
+            });
+        }
+        (K::MultiSelect, O::IncludesAll) => {
+            let ids = live(value);
+            let requested = values(value, ctx, false);
+            if ids.is_empty() || ids.len() != requested.len() {
+                // a removed option is on no task
+                query.push("0 = 1");
+                return;
+            }
+            push_field_value_exists(query, field_id, false, |query| {
+                push_options(query, spec.kind, column, &ids, true);
+            });
+        }
+        (K::Checkbox, O::Is) => {
+            let checked = value.as_bool().unwrap_or(false);
+            push_field_value_exists(query, field_id, !checked, |query| {
+                query.push("1 = 1");
+            });
+        }
+        _ => {
+            query.push("0 = 1");
+        }
+    }
+}
+
+/// The SQL type of a custom field's sort key ([`push_custom_sort_key`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SortKeyType {
+    Real,
+    Integer,
+    Text,
+}
+
+pub fn custom_sort_key_type(spec: Option<&CustomFieldSpec>) -> SortKeyType {
+    match spec.map(|spec| spec.kind) {
+        Some(TaskFieldKind::Number) => SortKeyType::Real,
+        Some(TaskFieldKind::Date | TaskFieldKind::Text | TaskFieldKind::Url) => SortKeyType::Text,
+        Some(
+            TaskFieldKind::Select
+            | TaskFieldKind::MultiSelect
+            | TaskFieldKind::Checkbox
+            | TaskFieldKind::TimeTracking,
+        )
+        | None => SortKeyType::Integer,
+    }
+}
+
+/// The outer task's sort key for a field, NULL without a value: the number; the quoted
+/// `"YYYY-MM-DD"` date; the lower-cased text; the position of the first (in the field's order)
+/// live option; 1 checked / 0 unchecked. A deleted field (`spec` None) is NULL for every task.
+pub fn push_custom_sort_key(
+    query: &mut SqlBuilder,
+    field_id: Id,
+    spec: Option<&CustomFieldSpec>,
+    backend: Backend,
+) {
+    let Some(spec) = spec else {
+        query.push("CAST(NULL AS BIGINT)");
+        return;
+    };
+    let from = "FROM task_field_values AS sort_value \
+         WHERE sort_value.task_id = tasks.id AND sort_value.field_id = ";
+    let column = "sort_value.value_json";
+    match spec.kind {
+        TaskFieldKind::Checkbox => {
+            query
+                .push("CAST(CASE WHEN EXISTS (SELECT 1 ")
+                .push(from)
+                .push_bind(field_id.to_string())
+                .push(") THEN 1 ELSE 0 END AS BIGINT)");
+        }
+        TaskFieldKind::TimeTracking => {
+            query.push("CAST(NULL AS BIGINT)");
+        }
+        TaskFieldKind::Select | TaskFieldKind::MultiSelect if spec.option_ids.is_empty() => {
+            query.push("CAST(NULL AS BIGINT)");
+        }
+        TaskFieldKind::Select | TaskFieldKind::MultiSelect => {
+            query.push("(SELECT CAST(CASE");
+            for (position, option_id) in spec.option_ids.iter().enumerate() {
+                query.push(" WHEN ");
+                push_option_match(query, spec.kind, column, option_id);
+                query.push(" THEN ").push(&position.to_string());
+            }
+            query
+                .push(" END AS BIGINT) ")
+                .push(from)
+                .push_bind(field_id.to_string())
+                .push(")");
+        }
+        TaskFieldKind::Number => {
+            query
+                .push("(SELECT CAST(sort_value.value_json AS DOUBLE PRECISION) ")
+                .push(from)
+                .push_bind(field_id.to_string())
+                .push(")");
+        }
+        TaskFieldKind::Date => {
+            query
+                .push("(SELECT sort_value.value_json ")
+                .push(from)
+                .push_bind(field_id.to_string())
+                .push(")");
+        }
+        TaskFieldKind::Text | TaskFieldKind::Url => {
+            query
+                .push("(SELECT lower(")
+                .push(&json_text_sql(backend, column))
+                .push(") ")
+                .push(from)
+                .push_bind(field_id.to_string())
+                .push(")");
+        }
+    }
+}
+
 pub(crate) fn escape_like(value: &str) -> String {
     value
         .replace('\\', "\\\\")
@@ -1457,6 +2090,7 @@ mod tests {
             group.children[1],
             FilterNode::Condition(Condition {
                 field: FilterField::Priority,
+                field_id: None,
                 operator: FilterOperator::Is,
                 value: json!(["high"]),
             })
@@ -1465,6 +2099,7 @@ mod tests {
             group.children[2],
             FilterNode::Condition(Condition {
                 field: FilterField::Assignee,
+                field_id: None,
                 operator: FilterOperator::IsEmpty,
                 value: Value::Null,
             })
@@ -1939,6 +2574,7 @@ mod tests {
         let leaf = |priority: &str| {
             FilterNode::Condition(Condition {
                 field: FilterField::Priority,
+                field_id: None,
                 operator: FilterOperator::Is,
                 value: json!([priority]),
             })
@@ -2024,6 +2660,109 @@ mod tests {
 }
 
 #[cfg(test)]
+mod custom_field_tests {
+    use serde_json::json;
+
+    use super::*;
+
+    const FIELD: &str = "0190f5b4-7c1e-7a3b-8c4d-5e6f7a8b9c0d";
+
+    fn display(extra: Value) -> Value {
+        let mut display = serde_json::to_value(DisplayOptions::default()).unwrap();
+        for (key, value) in extra.as_object().unwrap() {
+            display[key] = value.clone();
+        }
+        json!({ "filter": { "op": "and", "children": [] }, "display": display })
+    }
+
+    #[test]
+    fn views_remember_shown_fields_and_the_field_sort() {
+        let state = display(json!({
+            "custom_fields": [FIELD], "order_by": "custom_field", "order_field_id": FIELD
+        }));
+        let parsed = parse_view_state_value(&state).unwrap();
+        assert_eq!(
+            parsed.display.custom_fields,
+            vec![FIELD.parse::<Id>().unwrap()]
+        );
+        assert_eq!(serde_json::to_value(&parsed).unwrap(), state);
+        // older states without the keys still parse, and serialize without them
+        let plain = parse_view_state_value(&display(json!({}))).unwrap();
+        assert!(
+            !serde_json::to_string(&plain)
+                .unwrap()
+                .contains("custom_fields")
+        );
+        let error = |extra: Value| parse_view_state_value(&display(extra)).unwrap_err().path;
+        assert_eq!(
+            error(json!({ "order_by": "custom_field" })),
+            "display.order_field_id"
+        );
+        assert_eq!(
+            error(json!({ "order_field_id": FIELD })),
+            "display.order_field_id"
+        );
+        assert_eq!(
+            error(json!({ "custom_fields": [FIELD, FIELD] })),
+            "display.custom_fields[1]"
+        );
+        assert_eq!(
+            error(json!({ "custom_fields": ["x"] })),
+            "display.custom_fields"
+        );
+    }
+
+    #[test]
+    fn custom_conditions_need_a_shape_of_some_kind_until_the_kind_is_known() {
+        let condition = |operator: &str, value: Value| {
+            json!({ "op": "and", "children": [
+                { "field": "custom_field", "field_id": FIELD, "operator": operator, "value": value }
+            ] })
+        };
+        assert!(parse_filter(&condition("is", json!(true))).is_ok());
+        assert!(parse_filter(&condition("is", json!(3))).is_ok());
+        assert!(parse_filter(&condition("is", json!([FIELD]))).is_ok());
+        assert!(parse_filter(&condition("between", json!([1, 2]))).is_ok());
+        assert!(
+            parse_filter(&condition(
+                "between",
+                json!([{ "absolute": "2026-01-01" }, { "relative": "today" }])
+            ))
+            .is_ok()
+        );
+        assert!(parse_filter(&condition("is", json!("x"))).is_err());
+        assert!(parse_filter(&condition("less_than", json!("3"))).is_err());
+        let group = parse_filter(&condition("is", json!(3))).unwrap();
+        let id: Id = FIELD.parse().unwrap();
+        assert_eq!(
+            custom_field_ids(&group).into_iter().collect::<Vec<_>>(),
+            vec![id]
+        );
+        let fields = CustomFields::from([(
+            id,
+            CustomFieldSpec {
+                kind: TaskFieldKind::Checkbox,
+                option_ids: Vec::new(),
+            },
+        )]);
+        assert_eq!(
+            validate_custom_fields(&group, &fields).unwrap_err().path,
+            "filter.children[0].value"
+        );
+        assert!(validate_custom_fields(&group, &CustomFields::new()).is_ok());
+    }
+
+    #[test]
+    fn days_format_as_iso_dates() {
+        assert_eq!(ymd(0).as_deref(), Some("1970-01-01"));
+        assert_eq!(
+            parse_ymd("2026-02-28").and_then(ymd).as_deref(),
+            Some("2026-02-28")
+        );
+    }
+}
+
+#[cfg(test)]
 mod sql_tests {
     use orbit_platform::SqlBuilder;
     use serde_json::json;
@@ -2040,6 +2779,8 @@ mod sql_tests {
                 scope: ProjectScope::All,
                 actor_id: Id::new_v7(),
                 now: TimestampMillis::from_millis(0),
+                backend: Backend::Sqlite,
+                custom_fields: &CustomFields::new(),
             },
         );
         query.sql().as_str().to_owned()

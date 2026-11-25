@@ -6,8 +6,11 @@ import { TextInput } from '../../../ui/scaled'
 
 import { NewTaskDialog, type NewTaskDefaults } from '../../../components/NewTaskDialog'
 import { TaskRow } from '../../../components/TaskRow'
+import { DisplaySheet } from '../../../components/tasks/DisplaySheet'
 import { FilterBar } from '../../../components/tasks/FilterBar'
+import { useProjectTaskFields } from '../../../components/tasks/TaskFields'
 import { keys } from '../../../data/keys'
+import { displayFields, shownCustomFields, taskFieldChips } from '../../../data/task-display'
 import { groupTasksByStatus, type StatusGroup } from '../../../data/tasks'
 import {
   countConditions,
@@ -19,12 +22,15 @@ import {
   PRESET_LABEL,
   queryAllTasks,
   saveViewPreference,
+  shownViewState,
   taskQueryBody,
   viewPreference,
+  type DisplayOptions,
   type FilterGroup,
   type FilterOptions,
   type ViewState,
 } from '../../../data/tasks-filter'
+import { useTaskFieldGallery } from '../../../hooks/task-fields'
 import { useOrbit } from '../../../orbit-context'
 import { useCycles, useLabels, useMilestones, usePeople, useProjects, useStatuses } from '../../../queries'
 import { useTheme } from '../../../theme'
@@ -37,7 +43,7 @@ type Grouping = 'status' | 'none'
 export default function TasksScreen() {
   const { view: viewParam, search: searchParam, project: projectParam } = useLocalSearchParams<{ view?: string; search?: string; project?: string }>()
   const preset = isTaskPreset(viewParam) ? viewParam : undefined
-  const { client, workspaceId, user } = useOrbit()
+  const { client, workspace, workspaceId, user } = useOrbit()
   const { colors } = useTheme()
   const { width: windowWidth } = useWindowDimensions()
   const queryClient = useQueryClient()
@@ -50,16 +56,25 @@ export default function TasksScreen() {
   const setProjectId = (id: string | null) => router.setParams({ project: id ?? undefined })
   const milestones = useMilestones(projectId)
   const cycles = useCycles(projectId)
+  // custom fields to filter by: the project's on its page, else the workspace's gallery; rows read the shown ones from
+  // the gallery on every page
+  const projectFields = useProjectTaskFields(projectId)
+  const galleryFields = useTaskFieldGallery()
   // the filter and display are stored per page on the server, as the web stores them, so both apps show the same filter
   const pageKey = pageKeyFor(preset, projectId)
   const preferenceKey = ['view-preference', workspaceId, pageKey] as const
   const preference = useQuery({ queryKey: preferenceKey, queryFn: () => viewPreference(client, workspaceId, pageKey) })
-  const state: ViewState = preference.data ?? { filter: emptyFilter(), display: DEFAULT_DISPLAY }
+  // a built-in property the workspace hides (Settings, Task fields): its saved conditions and ordering read as unset
+  const state: ViewState = shownViewState(preference.data ?? { filter: emptyFilter(), display: DEFAULT_DISPLAY }, workspace)
   const saveState = (next: ViewState) => {
     queryClient.setQueryData(preferenceKey, next)
     saveViewPreference(client, workspaceId, pageKey, next).catch(() => void queryClient.invalidateQueries({ queryKey: preferenceKey }))
   }
   const setFilter = (filter: FilterGroup) => saveState({ ...state, filter })
+  const setDisplay = (patch: Partial<DisplayOptions>) => saveState({ ...state, display: { ...state.display, ...patch } })
+  const gallery = galleryFields.data ?? []
+  const shownFields = shownCustomFields(gallery, state.display.custom_fields)
+  const sheetFields = displayFields(gallery, projectId ? (projectFields.data ?? []) : null, state.display)
   const body = taskQueryBody(effectiveFilter(state.filter, preset, projectId), state.display)
   const tasks = useQuery({
     queryKey: [...keys.tasks(workspaceId), 'query', body],
@@ -83,16 +98,20 @@ export default function TasksScreen() {
     projects: projectId ? (projects.data ?? []).filter((item) => item.id === projectId) : (projects.data ?? []),
     milestones: projectId ? (milestones.data ?? []) : [],
     cycles: projectId ? (cycles.data ?? []) : [],
+    customFields: (projectId ? projectFields.data : galleryFields.data) ?? [],
     currentUserId: user.id,
+    workspace,
   }
 
   const sections = useMemo(() => {
     if (!tasks.data || !statuses.data) return []
     const needle = search.trim().toLowerCase()
     const visible = needle ? tasks.data.filter((task) => task.title.toLowerCase().includes(needle)) : tasks.data
-    const groups: StatusGroup[] = grouping === 'status' ? groupTasksByStatus(visible, statuses.data) : [{ key: 'all', name: 'All', status: undefined, tasks: visible }]
+    // a chosen ordering is the server's; manual keeps the app's priority order inside each status
+    const keepOrder = state.display.order_by !== 'manual'
+    const groups: StatusGroup[] = grouping === 'status' ? groupTasksByStatus(visible, statuses.data, { keepOrder }) : [{ key: 'all', name: 'All', status: undefined, tasks: visible }]
     return groups.filter((group) => group.tasks.length > 0).map((group) => ({ ...group, data: collapsed.has(group.key) ? [] : group.tasks }))
-  }, [collapsed, grouping, search, statuses.data, tasks.data])
+  }, [collapsed, grouping, search, state.display.order_by, statuses.data, tasks.data])
 
   const refresh = () => Promise.all([preference.refetch(), tasks.refetch(), statuses.refetch(), projects.refetch()])
   const toggle = (key: string) =>
@@ -197,6 +216,7 @@ export default function TasksScreen() {
               task={item}
               status={statuses.data.find((status) => status.id === item.status_id)}
               assignee={people.find((person) => person.id === item.assignee_ids[0])}
+              fieldChips={taskFieldChips(item, shownFields)}
               onPress={() => router.push(`/tasks/${item.id}`)}
             />
           )}
@@ -213,19 +233,7 @@ export default function TasksScreen() {
         }}
         onClose={() => setSheet(null)}
       />
-      <PickerSheet
-        visible={sheet === 'display'}
-        title="Grouping"
-        options={[
-          { key: 'status', label: 'Status', selected: grouping === 'status' },
-          { key: 'none', label: 'No grouping', selected: grouping === 'none' },
-        ]}
-        onSelect={(key) => {
-          setSheet(null)
-          saveState({ ...state, display: { ...state.display, group_by: key === 'none' ? 'none' : 'status' } })
-        }}
-        onClose={() => setSheet(null)}
-      />
+      <DisplaySheet visible={sheet === 'display'} display={state.display} fields={sheetFields} onChange={setDisplay} onClose={() => setSheet(null)} />
     </SafeAreaView>
   )
 }

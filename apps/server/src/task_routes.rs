@@ -267,6 +267,7 @@ pub fn task_router(state: TaskState) -> Router {
             "/api/v1/workspaces/{workspace_id}/notifications/{notification_id}/read",
             post(read_notification),
         )
+        .merge(crate::task_field_routes::routes())
         .with_state(state)
 }
 
@@ -1521,6 +1522,8 @@ struct TaskQueryBody {
     order_by: OrderBy,
     /// Ignored when `order_by` is `manual`.
     order_direction: OrderDirection,
+    /// The task field of `order_by: custom_field` (required then, ignored otherwise).
+    order_field_id: Option<String>,
     show_completed: ShowCompleted,
     cursor: Option<String>,
     /// Page size, 1–100 (default 50).
@@ -1794,6 +1797,7 @@ async fn list_tasks(
 fn legacy_condition(field: FilterField, operator: FilterOperator, value: Value) -> FilterNode {
     FilterNode::Condition(Condition {
         field,
+        field_id: None,
         operator,
         value,
     })
@@ -1812,7 +1816,9 @@ async fn query_tasks(
         scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
     let tree = task_filter::parse_filter(&body.filter)
         .map_err(|error| task_problem(error.into(), instance.clone(), request_id.as_ref()))?;
-    let (sort, order) = task_order(body.order_by, body.order_direction);
+    let order_field_id = optional_id(body.order_field_id, &instance, request_id.as_ref())?;
+    let (sort, order) = task_order_by_field(body.order_by, body.order_direction, order_field_id)
+        .ok_or_else(|| validation("order_field_id", &instance, request_id.as_ref()))?;
     let parent_task_id = optional_id(body.parent_task_id, &instance, request_id.as_ref())?;
     let filter = TaskFilter {
         tree,
@@ -1839,7 +1845,12 @@ async fn query_tasks(
 
 /// Maps display ordering onto the list sort. Manual order has no direction; priority
 /// ascending means urgent first, like `GET /tasks?sort=priority&order=asc`.
-pub(crate) fn task_order(order_by: OrderBy, direction: OrderDirection) -> (TaskSort, SortOrder) {
+/// `None` when `order_by` is `custom_field` without a field.
+pub(crate) fn task_order_by_field(
+    order_by: OrderBy,
+    direction: OrderDirection,
+    field_id: Option<Id>,
+) -> Option<(TaskSort, SortOrder)> {
     let sort = match order_by {
         OrderBy::Manual => TaskSort::Position,
         OrderBy::Priority => TaskSort::Priority,
@@ -1848,12 +1859,13 @@ pub(crate) fn task_order(order_by: OrderBy, direction: OrderDirection) -> (TaskS
         OrderBy::Title => TaskSort::Title,
         OrderBy::DueDate => TaskSort::DueDate,
         OrderBy::Estimate => TaskSort::Estimate,
+        OrderBy::CustomField => TaskSort::CustomField(field_id?),
     };
     let order = match (order_by, direction) {
         (OrderBy::Manual, _) | (_, OrderDirection::Asc) => SortOrder::Asc,
         (_, OrderDirection::Desc) => SortOrder::Desc,
     };
-    (sort, order)
+    Some((sort, order))
 }
 
 /// The description's co-editing socket (see [`crate::collab::socket`]).
@@ -2597,7 +2609,8 @@ struct CommentBody {
     #[serde(default)]
     mentioned_user_ids: Vec<String>,
     /// Also log the caller's time on the task (`/spend` in the composer), in the same write. The
-    /// entry's note is a copy of the comment.
+    /// entry's note is a copy of the comment. Refused, with the comment, when the task's project
+    /// does not show the time tracking field.
     time: Option<CommentTimeBody>,
 }
 
@@ -3286,7 +3299,9 @@ pub(crate) fn task_problem(
             instance,
             request_id,
         ),
-        TaskError::Invalid { field } => validation(field, &instance, request_id),
+        TaskError::Invalid { field } | TaskError::Refused(field) => {
+            validation(field, &instance, request_id)
+        }
         TaskError::Conflict | TaskError::IntegrationConflict => ApiError::new(
             StatusCode::CONFLICT,
             "task_conflict",

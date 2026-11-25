@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { recurrenceLabel } from '@orbit/api/recurrence'
+import { showsTaskProperty } from '@orbit/api/taskProperties'
 import { openURL } from 'expo-linking'
 import { router, useLocalSearchParams } from 'expo-router'
 import { type ReactNode, useMemo, useState } from 'react'
@@ -26,15 +27,18 @@ import {
 } from '../../../components/tasks/pickers'
 import { DuplicateBanner, RelationsSection, SubIssuesSection } from '../../../components/tasks/sections'
 import { Sheet, useSheet } from '../../../components/tasks/Sheet'
+import { TaskFieldSheet, useProjectTaskFields, useSetTaskFieldValue, useTaskFieldValues } from '../../../components/tasks/TaskFields'
 import { TaskPulls } from '../../../components/tasks/TaskPulls'
 import { TimeEntryCard, TimeEntryForm } from '../../../components/tasks/TimeTracking'
+import { formatDuration } from '@orbit/api/duration'
+import { fieldValueText, timeTrackingField } from '@orbit/api/taskFields'
 import { activityRows, buildFeed, type ActivityRow, type CommentThread, foldRun } from '../../../data/activity'
 import { relativeAgo } from '../../../data/format'
 import { keys } from '../../../data/keys'
 import { markdownToText } from '../../../data/markdown'
 import { mentionedUserIds } from '../../../data/mentions'
 import { canInProject } from '../../../data/permissions'
-import { createTimeEntry, formatDuration, takeSpend, timeTotalLabel, todayLocal, type TimeEntry } from '../../../data/time'
+import { createTimeEntry, takeSpend, timeTotalLabel, todayLocal, type TimeEntry } from '../../../data/time'
 import { linkTaskIdsInMarkdown } from '../../../data/taskIds'
 import * as api from '../../../data/orbit'
 import * as taskApi from '../../../data/task-api'
@@ -73,6 +77,7 @@ type TaskSheet =
   | { kind: 'pick-task'; purpose: 'parent' | 'sub-issue' | RelationKind }
   | { kind: 'log-time' }
   | { kind: 'time-menu' | 'edit-time'; entry: TimeEntry }
+  | { kind: 'field'; fieldId: string; title: string }
 
 function sheetTitle(sheet: TaskSheet | null, subject: string): string {
   if (!sheet) return ''
@@ -95,6 +100,8 @@ function sheetTitle(sheet: TaskSheet | null, subject: string): string {
       return 'Cycle'
     case 'estimate':
       return 'Estimate'
+    case 'field':
+      return sheet.title
     case 'source':
       return 'Source'
     case 'parent-menu':
@@ -163,10 +170,10 @@ export default function TaskScreen() {
 
   const mentionable = useMentionPeople()
   const sendComment = useMutation({
-    // a typed task ID goes as a link to the task, as the web's "#" inserts it; a `/spend 1h` line also logs the time,
-    // and a comment of only that line logs the time without a comment
+    // a typed task ID goes as a link to the task, as the web's "#" inserts it; a `/spend 1h` line also logs the time
+    // while the project tracks time, and a comment of only that line logs the time without a comment
     mutationFn: async (text: string) => {
-      const { body, spend } = takeSpend(text)
+      const { body, spend } = tracksTime ? takeSpend(text) : { body: text, spend: null }
       // the local day, as the Log time form sends: the server's default is the profile's timezone
       const time = spend ? { minutes: spend.minutes, worked_on: spend.workedOn ?? todayLocal() } : undefined
       if (time && !body) {
@@ -199,6 +206,10 @@ export default function TaskScreen() {
   const current = task.data
   const project = projects.data?.find((item) => item.id === current?.project_id)
   const milestones = useMilestones(current?.project_id ?? null)
+  const fields = useProjectTaskFields(current?.project_id ?? null).data ?? []
+  const tracksTime = timeTrackingField(fields) !== undefined
+  const fieldValues = useTaskFieldValues(id).data ?? []
+  const setFieldValue = useSetTaskFieldValue(id)
   const cycles = useCycles(current?.project_id ?? null)
 
   const feed = useMemo(() => {
@@ -476,39 +487,67 @@ export default function TaskScreen() {
                 </Chip>
               </View>
             </PropertyGroup>
-            <PropertyGroup title="Milestone">
-              <View className="-ml-2 flex-row max-w-full">
-                <Chip label={milestone ? `Milestone: ${milestone.name}` : 'Set milestone'} onPress={() => sheets.open({ kind: 'milestone' })}>
-                  <Icon name="target" size={14} color={milestone ? colors.foreground : colors.mutedForeground} />
-                  <ChipText muted={!current.milestone_id}>{milestone?.name ?? (current.milestone_id ? 'Milestone' : 'Set milestone')}</ChipText>
-                </Chip>
-              </View>
-            </PropertyGroup>
-            <PropertyGroup title="Cycle">
-              <View className="-ml-2 flex-row max-w-full">
-                <Chip label={cycle ? `Cycle: ${cycleText}` : 'Add to cycle'} onPress={() => sheets.open({ kind: 'cycle' })}>
-                  <Icon name="refresh" size={14} color={cycle ? colors.foreground : colors.mutedForeground} />
-                  <ChipText muted={!current.cycle_id}>{cycleText}</ChipText>
-                </Chip>
-              </View>
-            </PropertyGroup>
-            <PropertyGroup title="Time">
-              <View className="-ml-2 flex-row flex-wrap items-center max-w-full">
-                <Chip label={timeTotal ? `Time: ${timeTotal.own}. Log time` : 'Log time'} onPress={() => sheets.open({ kind: 'log-time' })}>
-                  <Icon name="timer" size={14} color={time.data?.total_minutes ? colors.foreground : colors.mutedForeground} />
-                  <ChipText muted={!time.data?.total_minutes}>{time.data?.total_minutes ? timeTotal!.own : 'Log time'}</ChipText>
-                </Chip>
-                {timeTotal?.subIssues ? <ChipText muted>{timeTotal.subIssues}</ChipText> : null}
-              </View>
-            </PropertyGroup>
-            <PropertyGroup title="Estimate">
-              <View className="-ml-2 flex-row">
-                <Chip label={current.estimate === null ? 'Set estimate' : `Estimate: ${estimateLabel(current.estimate)}`} onPress={() => sheets.open({ kind: 'estimate' })}>
-                  <Icon name="chart" size={14} color={current.estimate === null ? colors.mutedForeground : colors.foreground} />
-                  <ChipText muted={current.estimate === null}>{current.estimate === null ? 'Set estimate' : estimateLabel(current.estimate)}</ChipText>
-                </Chip>
-              </View>
-            </PropertyGroup>
+            {showsTaskProperty(workspace, 'milestone') ? (
+              <PropertyGroup title="Milestone">
+                <View className="-ml-2 flex-row max-w-full">
+                  <Chip label={milestone ? `Milestone: ${milestone.name}` : 'Set milestone'} onPress={() => sheets.open({ kind: 'milestone' })}>
+                    <Icon name="target" size={14} color={milestone ? colors.foreground : colors.mutedForeground} />
+                    <ChipText muted={!current.milestone_id}>{milestone?.name ?? (current.milestone_id ? 'Milestone' : 'Set milestone')}</ChipText>
+                  </Chip>
+                </View>
+              </PropertyGroup>
+            ) : null}
+            {showsTaskProperty(workspace, 'cycle') ? (
+              <PropertyGroup title="Cycle">
+                <View className="-ml-2 flex-row max-w-full">
+                  <Chip label={cycle ? `Cycle: ${cycleText}` : 'Add to cycle'} onPress={() => sheets.open({ kind: 'cycle' })}>
+                    <Icon name="refresh" size={14} color={cycle ? colors.foreground : colors.mutedForeground} />
+                    <ChipText muted={!current.cycle_id}>{cycleText}</ChipText>
+                  </Chip>
+                </View>
+              </PropertyGroup>
+            ) : null}
+            {showsTaskProperty(workspace, 'estimate') ? (
+              <PropertyGroup title="Estimate">
+                <View className="-ml-2 flex-row">
+                  <Chip label={current.estimate === null ? 'Set estimate' : `Estimate: ${estimateLabel(current.estimate)}`} onPress={() => sheets.open({ kind: 'estimate' })}>
+                    <Icon name="chart" size={14} color={current.estimate === null ? colors.mutedForeground : colors.foreground} />
+                    <ChipText muted={current.estimate === null}>{current.estimate === null ? 'Set estimate' : estimateLabel(current.estimate)}</ChipText>
+                  </Chip>
+                </View>
+              </PropertyGroup>
+            ) : null}
+            {fields.map((field) => {
+              if (field.kind === 'time_tracking') {
+                return (
+                  <PropertyGroup key={field.id} title={field.name}>
+                    <View className="-ml-2 flex-row flex-wrap items-center max-w-full">
+                      <Chip label={timeTotal ? `${field.name}: ${timeTotal.own}. Log time` : 'Log time'} onPress={() => sheets.open({ kind: 'log-time' })}>
+                        <Icon name="timer" size={14} color={time.data?.total_minutes ? colors.foreground : colors.mutedForeground} />
+                        <ChipText muted={!time.data?.total_minutes}>{time.data?.total_minutes ? timeTotal!.own : 'Log time'}</ChipText>
+                      </Chip>
+                      {timeTotal?.subIssues ? <ChipText muted>{timeTotal.subIssues}</ChipText> : null}
+                    </View>
+                  </PropertyGroup>
+                )
+              }
+              const value = fieldValues.find((item) => item.field_id === field.id)?.value ?? null
+              const text = fieldValueText(field, value)
+              const checkbox = field.kind === 'checkbox'
+              return (
+                <PropertyGroup key={field.id} title={field.name}>
+                  <View className="-ml-2 flex-row max-w-full">
+                    <Chip
+                      label={`${field.name}: ${text || 'none'}`}
+                      onPress={() => checkbox ? setFieldValue.mutate({ fieldId: field.id, value: value !== true }) : sheets.open({ kind: 'field', fieldId: field.id, title: field.name })}
+                    >
+                      {checkbox ? <Icon name={value === true ? 'check' : 'square'} size={14} color={value === true ? colors.primary : colors.mutedForeground} /> : null}
+                      <ChipText muted={!text}>{checkbox ? (value === true ? 'Yes' : 'No') : text || `Set ${field.name}`}</ChipText>
+                    </Chip>
+                  </View>
+                </PropertyGroup>
+              )
+            })}
           </View>
 
           <TaskPulls taskId={current.id} />
@@ -621,6 +660,18 @@ export default function TaskScreen() {
             }}
           />
         ) : null}
+        {sheet?.kind === 'field' ? (() => {
+          const field = fields.find((item) => item.id === sheet.fieldId)
+          if (!field) return null
+          return (
+            <TaskFieldSheet
+              field={field}
+              value={fieldValues.find((item) => item.field_id === field.id)?.value ?? null}
+              onClose={sheets.close}
+              onSave={(value) => setFieldValue.mutate({ fieldId: field.id, value })}
+            />
+          )
+        })() : null}
         {sheet?.kind === 'estimate' ? (
           <EstimateChoices
             value={current.estimate}

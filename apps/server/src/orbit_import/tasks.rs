@@ -1,12 +1,14 @@
 //! The task side of an import: teamspaces (matched by name, else created), projects with their
-//! statuses, labels, milestones and cycles, then the tasks (parents first) with their attachments, comments,
-//! time entries and relations. Only in a full import.
+//! statuses, labels, milestones, cycles and fields (the task field gallery comes first, see
+//! [`super::fields`]), then the tasks (parents first) with their attachments, comments, time
+//! entries, relations and field values. Only in a full import.
 
 use std::collections::HashMap;
 
 use orbit_platform::{Flag, Id, SqlBuilder, TimestampMillis};
 
 use super::archive::{self, Archive};
+use super::fields::{self, FieldMap};
 use super::model::{self, Task};
 use super::{Item, OrbitImportService, Run, record_link_in};
 use crate::notion::files::sanitize_file_name;
@@ -140,6 +142,8 @@ pub(super) async fn import_structure(
     run: &mut Run,
     workspace: &model::Workspace,
 ) -> Result<(), Failure> {
+    fields::import_fields(service, run, workspace).await?;
+    let fields = fields::field_map(service, run, workspace).await?;
     for mut item in service.load_items(run.import_id, "teamspace").await? {
         if item.state == "filled" || item.state == "failed" {
             continue;
@@ -177,7 +181,7 @@ pub(super) async fn import_structure(
                 let project = project.as_ref().ok_or_else(|| {
                     Failure::Item("The project is not in the archive.".to_owned())
                 })?;
-                ensure_project_structure(service, run, item, project, index).await
+                ensure_project_structure(service, run, item, project, index, &fields).await
             })
             .await?;
     }
@@ -257,13 +261,15 @@ async fn ensure_teamspace(
 }
 
 /// The project under its recorded id, then a status for each source status (same name reused)
-/// and a label, milestone (same name reused) and cycle (same number and dates reused) for each source one.
+/// and a label, milestone (same name reused) and cycle (same number and dates reused) for each source one,
+/// then the source project's fields after the ones it shows.
 async fn ensure_project_structure(
     service: &OrbitImportService,
     run: &mut Run,
     item: &mut Item,
     project: &model::Project,
     index: usize,
+    fields: &FieldMap,
 ) -> Result<(), Failure> {
     let (project_id, existing) = service.item_id(run, item).await?;
     if !existing {
@@ -460,6 +466,7 @@ async fn ensure_project_structure(
             .record_link(run, "cycle", &cycle.id, cycle_id)
             .await?;
     }
+    fields::import_project_fields(service, run, project, project_id, fields).await?;
     service.set_item_state(run, item, "filled").await
 }
 
@@ -539,6 +546,7 @@ pub(super) async fn import_tasks(
     workspace: &model::Workspace,
 ) -> Result<(), Failure> {
     let projects = project_contexts(service, run, workspace).await?;
+    let fields = fields::field_map(service, run, workspace).await?;
     let mut items = service.load_items(run.import_id, "task").await?;
     for index in 0..items.len() {
         if items[index].state != "pending" {
@@ -565,7 +573,7 @@ pub(super) async fn import_tasks(
         }
         let filled = service
             .step(run, item, async |service, run, item| {
-                fill_task(service, run, item).await?;
+                fill_task(service, run, item, &fields).await?;
                 service.set_item_state(run, item, "filled").await
             })
             .await?;
@@ -767,17 +775,19 @@ fn description(
     with_source_details(body, "Imported from Orbit", &fields, &[])
 }
 
-/// Files, comments, time entries and relations of one task. Each step skips what an earlier import or attempt
-/// already did.
+/// Field values, files, comments, time entries and relations of one task. Each step skips what
+/// an earlier import or attempt already did.
 async fn fill_task(
     service: &OrbitImportService,
     run: &mut Run,
     item: &Item,
+    fields: &FieldMap,
 ) -> Result<(), Failure> {
     let task_id = item
         .orbit_id
         .ok_or_else(|| Failure::Item("The task was not created.".to_owned()))?;
     let task = read_task(run, &item.path).await?;
+    fields::import_values(service, run, task_id, &task, fields).await?;
     let source_task: Option<Id> = task.id.parse().ok();
     let mut attached = service
         .inner

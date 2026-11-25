@@ -12,7 +12,8 @@ import { renderMarkdownBlocks } from '@/lib/markdown'
 import type { Task, TaskViewState, TimeEntry } from '@/features/tasks/api/models'
 import { useDeleteTimeEntry } from '@/features/tasks/api/timeEntries'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
-import { formatDuration, workedOnLabel } from '@/features/tasks/timeLib'
+import { formatDuration } from '@orbit/api/duration'
+import { workedOnLabel } from '@/features/tasks/timeLib'
 import { TimeEntryDialog } from './TimeEntryDialog'
 
 /** A time entry in the activity feed: who logged how long for which day, and the note. */

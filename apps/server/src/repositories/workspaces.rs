@@ -10,7 +10,7 @@ use orbit_platform::{
     WORKSPACE_STORAGE_USED, Worker, WorkerConfig, WorkerError, generate_opaque_token,
     normalize_email,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use sqlx::{Any, AnyConnection, Transaction};
@@ -62,6 +62,32 @@ pub struct WorkspaceRecord {
     pub version: u64,
     #[schema(value_type = Option<String>, format = DateTime)]
     pub deleted_at: Option<TimestampMillis>,
+    /// The built-in task properties the workspace hides in its task UI. Absent: none. Tasks keep
+    /// their values, and the API still reads and writes them.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[schema(required = false)]
+    pub hidden_task_properties: Vec<OptionalTaskProperty>,
+}
+
+/// A built-in task property a workspace may hide (Settings, Task fields).
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum OptionalTaskProperty {
+    Milestone,
+    Cycle,
+    Estimate,
+}
+
+/// The stored `hidden_task_properties`; an unknown key is skipped.
+fn parse_hidden_task_properties(json: &str) -> Vec<OptionalTaskProperty> {
+    let keys: Vec<serde_json::Value> = serde_json::from_str(json).unwrap_or_default();
+    let mut hidden: Vec<OptionalTaskProperty> = keys
+        .into_iter()
+        .filter_map(|key| serde_json::from_value(key).ok())
+        .collect();
+    hidden.sort();
+    hidden.dedup();
+    hidden
 }
 
 /// The project-scoped permissions a member holds in one project.
@@ -389,7 +415,7 @@ impl WorkspaceRepository {
 
     pub async fn list_for_user(&self, user_id: Id) -> Result<Vec<WorkspaceRecord>, WorkspaceError> {
         let rows = sqlx::query(
-            "SELECT workspaces.id, workspaces.name, workspaces.version, workspaces.deleted_at, \
+            "SELECT workspaces.id, workspaces.name, workspaces.version, workspaces.deleted_at, workspaces.hidden_task_properties, \
              memberships.role, workspace_roles.permissions AS role_permissions \
              FROM workspaces JOIN memberships ON memberships.workspace_id = workspaces.id \
              LEFT JOIN workspace_roles ON workspace_roles.id = memberships.custom_role_id \
@@ -465,7 +491,7 @@ impl WorkspaceRepository {
 
     pub async fn list_trash(&self, user_id: Id) -> Result<Vec<WorkspaceRecord>, WorkspaceError> {
         let rows = sqlx::query(
-            "SELECT workspaces.id, workspaces.name, workspaces.version, workspaces.deleted_at, \
+            "SELECT workspaces.id, workspaces.name, workspaces.version, workspaces.deleted_at, workspaces.hidden_task_properties, \
              memberships.role, NULL AS role_permissions \
              FROM workspaces JOIN memberships ON memberships.workspace_id = workspaces.id \
              WHERE memberships.user_id = $1 AND memberships.role = 'owner' AND workspaces.deleted_at IS NOT NULL \
@@ -556,6 +582,7 @@ impl WorkspaceRepository {
             project_permissions: Vec::new(),
             version: 0,
             deleted_at: None,
+            hidden_task_properties: Vec::new(),
         })
     }
 
@@ -565,7 +592,7 @@ impl WorkspaceRepository {
         actor_id: Id,
     ) -> Result<WorkspaceRecord, WorkspaceError> {
         let row = sqlx::query(
-            "SELECT workspaces.id, workspaces.name, workspaces.version, workspaces.deleted_at, memberships.role, \
+            "SELECT workspaces.id, workspaces.name, workspaces.version, workspaces.deleted_at, workspaces.hidden_task_properties, memberships.role, \
              workspace_roles.permissions AS role_permissions \
              FROM workspaces JOIN memberships ON memberships.workspace_id = workspaces.id \
              LEFT JOIN workspace_roles ON workspace_roles.id = memberships.custom_role_id \
@@ -748,14 +775,14 @@ impl WorkspaceRepository {
             transaction.commit().await?;
             return Err(WorkspaceError::Forbidden);
         }
-        let current_version = sqlx::query_scalar::<_, i64>(
-            "SELECT version FROM workspaces WHERE id = $1 AND deleted_at IS NULL",
+        let current = sqlx::query(
+            "SELECT version, hidden_task_properties FROM workspaces WHERE id = $1 AND deleted_at IS NULL",
         )
         .bind(workspace_id.to_string())
         .fetch_one(&mut *transaction)
         .await?;
-        let current_version =
-            u64::try_from(current_version).map_err(|_| WorkspaceError::Conflict)?;
+        let current_version = u64::try_from(current.get::<i64, _>("version"))
+            .map_err(|_| WorkspaceError::Conflict)?;
         if current_version != expected_version {
             return Err(WorkspaceError::VersionConflict { current_version });
         }
@@ -792,7 +819,52 @@ impl WorkspaceRepository {
             project_permissions: project_permissions(actor.project_permissions()),
             version,
             deleted_at: None,
+            hidden_task_properties: parse_hidden_task_properties(
+                &current.get::<String, _>("hidden_task_properties"),
+            ),
         })
+    }
+
+    /// Replaces the built-in task properties the workspace hides. Owners and admins may.
+    pub async fn set_hidden_task_properties(
+        &self,
+        workspace_id: Id,
+        actor_id: Id,
+        mut hidden: Vec<OptionalTaskProperty>,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<WorkspaceRecord, WorkspaceError> {
+        hidden.sort();
+        hidden.dedup();
+        let mut transaction = self.database.workspace_transaction(workspace_id).await?;
+        let actor = require_actor(&mut *transaction, workspace_id, actor_id).await?;
+        if !actor.can(Permission::WorkspaceUpdate) {
+            return Err(WorkspaceError::Forbidden);
+        }
+        sqlx::query(
+            "UPDATE workspaces SET hidden_task_properties = $1, updated_at = $2 \
+             WHERE id = $3 AND deleted_at IS NULL",
+        )
+        .bind(serde_json::to_string(&hidden).unwrap_or_else(|_| "[]".to_owned()))
+        .bind(now.as_millis())
+        .bind(workspace_id.to_string())
+        .execute(&mut *transaction)
+        .await?;
+        audit::record(
+            &mut transaction,
+            workspace_id,
+            Some(actor_id),
+            "workspace.task_properties_updated",
+            AuditOutcome::Success,
+            "workspace",
+            Some(workspace_id),
+            request_id,
+            json!({ "hidden": hidden }),
+            now,
+        )
+        .await?;
+        transaction.commit().await?;
+        self.get(workspace_id, actor_id).await
     }
 
     /// The workspace's members. A guest gets itself and the people it shares a conversation
@@ -2817,6 +2889,9 @@ fn workspace_from_row(row: sqlx::any::AnyRow) -> Result<WorkspaceRecord, Workspa
         deleted_at: row
             .get::<Option<i64>, _>("deleted_at")
             .map(TimestampMillis::from_millis),
+        hidden_task_properties: parse_hidden_task_properties(
+            &row.get::<String, _>("hidden_task_properties"),
+        ),
     })
 }
 

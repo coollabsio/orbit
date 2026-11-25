@@ -233,6 +233,10 @@ fn example(document: &Value, schema: &Value, field: &str, path: &str, records: &
             return example(document, variant, field, path, records);
         }
     }
+    // a task's value of the fixture's text field
+    if field == "value" && path.contains("/fields/") {
+        return Value::String("guest sweep".to_owned());
+    }
     if let Some(values) = schema["enum"].as_array() {
         return values[0].clone();
     }
@@ -420,6 +424,11 @@ fn body_for(operation: &str, records: &Records) -> Option<Value> {
     }]);
     Some(match operation {
         "create_comment" => json!({"body": "guest sweep"}),
+        "create_time_entry" => json!({"minutes": 30}),
+        "set_project_task_fields" => {
+            json!({"field_ids": [id("field_id"), id("time_tracking_field_id")]})
+        }
+        "update_time_entry" => json!({"minutes": 45, "expected_version": 0}),
         "update_comment" => json!({"body": "guest sweep", "expected_version": 0}),
         "create_page_thread" | "create_page_comment" | "update_page_comment" => {
             json!({"body": rich})
@@ -945,6 +954,44 @@ async fn a_guest_reaches_only_chat() {
             )
             .await,
     );
+    let field = id_of(
+        &server
+            .ok(
+                &owner,
+                "POST",
+                &format!("{base}/task-fields"),
+                json!({"name": "Secret field", "kind": "text"}),
+            )
+            .await,
+    );
+    let time_tracking = id_of(
+        &server
+            .ok(
+                &owner,
+                "POST",
+                &format!("{base}/task-fields"),
+                json!({"name": "Time tracking", "kind": "time_tracking"}),
+            )
+            .await,
+    );
+    server
+        .ok(
+            &owner,
+            "PUT",
+            &format!("{base}/projects/{project}/fields"),
+            json!({"field_ids": [field, time_tracking]}),
+        )
+        .await;
+    let time_entry = id_of(
+        &server
+            .ok(
+                &owner,
+                "POST",
+                &format!("{base}/tasks/{task}/time-entries"),
+                json!({"minutes": 30}),
+            )
+            .await,
+    );
     let cycle = id_of(
         &server
             .ok(
@@ -1052,6 +1099,9 @@ async fn a_guest_reaches_only_chat() {
             ("link_id", link),
             ("workspace_webhook_id", workspace_webhook),
             ("milestone_id", milestone),
+            ("field_id", field.clone()),
+            ("field_ids", field),
+            ("time_tracking_field_id", time_tracking),
             ("cycle_id", cycle),
             ("role_id", role),
             ("report_id", report),
@@ -1070,6 +1120,7 @@ async fn a_guest_reaches_only_chat() {
             ("token_id", token),
             ("parent_task_id", Id::new_v7().to_string()),
             ("comment_id", comment),
+            ("entry_id", time_entry),
             ("label_id", label.clone()),
             ("label_ids", label),
             ("teamspace_id", teamspace),

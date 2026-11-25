@@ -13,7 +13,7 @@ import { ColorDot } from '@/components/common/ColorDot'
 import { PriorityIcon } from '@/features/tasks/components/PriorityIcon'
 import { TaskStatusIcon } from '@/features/tasks/components/TaskStatusIcon'
 import { useTaskCandidates } from '@/features/tasks/useTaskCandidates'
-import { FIELD_META, MAX_FILTER_VALUES, NO_PARENT, chosenValues, isDateValue, listValue, taskValueLabel, unlistedOptions, valueOptions, type FilterOptions, type Glyph } from '../filterFields'
+import { MAX_FILTER_VALUES, NO_PARENT, chosenValues, fieldMeta, isDateValue, isFilterNumber, listValue, taskValueLabel, targetOf, unlistedOptions, valueOptions, type FilterOptions, type Glyph } from '../filterFields'
 import type { Condition, DateValue } from '../viewState'
 
 export interface FilterValuePickerProps {
@@ -26,11 +26,22 @@ export interface FilterValuePickerProps {
 }
 
 export function FilterValuePicker(props: FilterValuePickerProps) {
-  const kind = FIELD_META[props.condition.field].kind
-  if (kind === 'text') return <TextValue {...props} />
-  if (kind === 'date') return <DateValuePicker {...props} />
-  if (kind === 'task') return <TaskValue {...props} />
-  return <ListValue {...props} />
+  switch (fieldMeta(props.condition, props.options).kind) {
+    case 'text':
+      return <TextValue {...props} />
+    case 'date':
+      return <DateValuePicker {...props} />
+    case 'task':
+      return <TaskValue {...props} />
+    case 'number':
+      return <NumberValue {...props} />
+    case 'boolean':
+      return <BooleanValue {...props} />
+    case 'missing':
+      return <p className="w-60 p-3 text-xs text-muted-foreground">This field was deleted. Remove the filter.</p>
+    case 'list':
+      return <ListValue {...props} />
+  }
 }
 
 /** The value's own mark: status ring, priority bars, label/project dot, avatar, or a plain icon. */
@@ -55,14 +66,14 @@ const VALUES_FULL_TITLE = `Up to ${MAX_FILTER_VALUES} values per filter`
 
 function ListValue({ condition, options, onChange }: FilterValuePickerProps) {
   const selected = chosenValues(condition, options)
-  const meta = FIELD_META[condition.field]
+  const meta = fieldMeta(condition, options)
   const full = selected.length >= MAX_FILTER_VALUES
   const toggle = (value: string) => {
     if (selected.includes(value)) onChange({ ...condition, value: selected.filter((item) => item !== value) })
     else if (!full) onChange({ ...condition, value: [...selected, value] })
   }
   // chosen values the list lacks (a member picked by ID, a deleted label) come first, so they can be unchecked
-  const rows = [...unlistedOptions(condition, options), ...valueOptions(condition.field, options)]
+  const rows = [...unlistedOptions(condition, options), ...valueOptions(condition, options)]
   return (
     <Command label={`Search ${meta.plural}`} className="w-64">
       <CommandInput autoFocus aria-label={`Search ${meta.plural}`} placeholder={`Search ${meta.plural}…`} />
@@ -164,6 +175,7 @@ function PresetButton({ className, ...props }: ComponentProps<typeof Button>) {
 }
 
 function DateValuePicker({ condition, onChange, onDone }: FilterValuePickerProps) {
+  const target = targetOf(condition)
   const range = condition.operator === 'between'
   const [draftRange, setDraftRange] = useState<DateRange | undefined>(undefined)
   const commit = (next: Condition) => {
@@ -179,16 +191,16 @@ function DateValuePicker({ condition, onChange, onDone }: FilterValuePickerProps
           <PresetButton
             key={preset.label}
             aria-pressed={sameValue(preset.value, condition.value)}
-            onClick={() => commit({ field: condition.field, operator: condition.operator, value: preset.value })}
+            onClick={() => commit({ ...target, operator: condition.operator, value: preset.value })}
           >
             {preset.label}
           </PresetButton>
         ))}
-        {condition.field === 'due_date' ? (
+        {condition.field === 'due_date' || condition.field === 'custom_field' ? (
           <>
             <Separator className="my-1" />
-            <PresetButton onClick={() => commit({ field: 'due_date', operator: 'is_empty' })}>No due date</PresetButton>
-            <PresetButton onClick={() => commit({ field: 'due_date', operator: 'is_not_empty' })}>Has a due date</PresetButton>
+            <PresetButton onClick={() => commit({ ...target, operator: 'is_empty' })}>{condition.field === 'due_date' ? 'No due date' : 'No date'}</PresetButton>
+            <PresetButton onClick={() => commit({ ...target, operator: 'is_not_empty' })}>{condition.field === 'due_date' ? 'Has a due date' : 'Has a date'}</PresetButton>
           </>
         ) : null}
       </div>
@@ -200,7 +212,7 @@ function DateValuePicker({ condition, onChange, onDone }: FilterValuePickerProps
             onSelect={(next) => {
               setDraftRange(next)
               if (next?.from && next.to && next.from.getTime() !== next.to.getTime()) {
-                commit({ field: condition.field, operator: 'between', value: [toAbsolute(next.from), toAbsolute(next.to)] })
+                commit({ ...target, operator: 'between', value: [toAbsolute(next.from), toAbsolute(next.to)] })
               }
             }}
           />
@@ -210,7 +222,7 @@ function DateValuePicker({ condition, onChange, onDone }: FilterValuePickerProps
             selected={selectedDay}
             defaultMonth={selectedDay}
             onSelect={(day) => {
-              if (day) commit({ field: condition.field, operator: condition.operator, value: toAbsolute(day) })
+              if (day) commit({ ...target, operator: condition.operator, value: toAbsolute(day) })
             }}
           />
         )}
@@ -219,23 +231,24 @@ function DateValuePicker({ condition, onChange, onDone }: FilterValuePickerProps
   )
 }
 
-function TextValue({ condition, onChange, onDone }: FilterValuePickerProps) {
+function TextValue({ condition, options, onChange, onDone }: FilterValuePickerProps) {
   const [text, setText] = useState(typeof condition.value === 'string' ? condition.value : '')
   const trimmed = text.trim()
+  const prompt = condition.field === 'custom_field' ? `${fieldMeta(condition, options).label} contains` : 'Title or description contains'
   return (
     <form
       className="flex w-72 items-center gap-2 p-2"
       onSubmit={(event) => {
         event.preventDefault()
         if (!trimmed) return
-        onChange({ field: condition.field, operator: 'contains', value: trimmed })
+        onChange({ ...targetOf(condition), operator: 'contains', value: trimmed })
         onDone()
       }}
     >
       <Input
         autoFocus
-        aria-label="Title or description contains"
-        placeholder="Title or description contains…"
+        aria-label={prompt}
+        placeholder={`${prompt}…`}
         maxLength={200}
         value={text}
         onChange={(event) => setText(event.target.value)}
@@ -243,5 +256,70 @@ function TextValue({ condition, onChange, onDone }: FilterValuePickerProps) {
       />
       <Button type="submit" size="sm" disabled={!trimmed}>Apply</Button>
     </form>
+  )
+}
+
+const numberText = (value: unknown) => (isFilterNumber(value) ? String(value) : '')
+
+/** The number of a number input; null while it is blank or not a number. */
+function parseNumber(text: string): number | null {
+  const trimmed = text.trim()
+  if (!trimmed) return null
+  const number = Number(trimmed.replace(/,/g, ''))
+  return Number.isFinite(number) ? number : null
+}
+
+/** A number field: one number, or the two inclusive bounds of `between`. Enter applies. */
+function NumberValue({ condition, options, onChange, onDone }: FilterValuePickerProps) {
+  const range = condition.operator === 'between'
+  const bounds = Array.isArray(condition.value) ? condition.value : []
+  const [first, setFirst] = useState(numberText(range ? bounds[0] : condition.value))
+  const [second, setSecond] = useState(numberText(bounds[1]))
+  const label = fieldMeta(condition, options).label
+  const low = parseNumber(first)
+  const high = parseNumber(second)
+  const valid = low !== null && (!range || high !== null)
+  return (
+    <form
+      className="flex w-72 items-center gap-2 p-2"
+      onSubmit={(event) => {
+        event.preventDefault()
+        if (low === null) return
+        if (!range) onChange({ ...targetOf(condition), operator: condition.operator, value: low })
+        else if (high !== null) onChange({ ...targetOf(condition), operator: 'between', value: [Math.min(low, high), Math.max(low, high)] })
+        else return
+        onDone()
+      }}
+    >
+      <Input autoFocus inputMode="decimal" aria-label={range ? `${label} from` : label} placeholder={range ? 'From' : 'Number'} value={first} onChange={(event) => setFirst(event.target.value)} className="h-8 min-w-0 flex-1" />
+      {range ? (
+        <>
+          <span aria-hidden className="text-xs text-muted-foreground">–</span>
+          <Input inputMode="decimal" aria-label={`${label} to`} placeholder="To" value={second} onChange={(event) => setSecond(event.target.value)} className="h-8 min-w-0 flex-1" />
+        </>
+      ) : null}
+      <Button type="submit" size="sm" disabled={!valid}>Apply</Button>
+    </form>
+  )
+}
+
+/** A checkbox field: checked or not checked. */
+function BooleanValue({ condition, onChange, onDone }: FilterValuePickerProps) {
+  const choices = [{ label: 'Checked', value: true }, { label: 'Not checked', value: false }]
+  return (
+    <div role="group" aria-label="Checkbox value" className="flex w-44 flex-col gap-px p-1">
+      {choices.map((choice) => (
+        <PresetButton
+          key={choice.label}
+          aria-pressed={condition.value === choice.value}
+          onClick={() => {
+            onChange({ ...targetOf(condition), operator: 'is', value: choice.value })
+            onDone()
+          }}
+        >
+          {choice.label}
+        </PresetButton>
+      ))}
+    </div>
   )
 }

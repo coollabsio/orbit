@@ -1,11 +1,14 @@
+import { useQueryClient } from '@tanstack/react-query'
 import { router, useLocalSearchParams } from 'expo-router'
 import { useEffect, useState } from 'react'
 import { Alert, Pressable, ScrollView, View } from 'react-native'
+import { showsTaskProperty } from '@orbit/api/taskProperties'
 
 import { ActionSheet, ConfirmDialog, type ConfirmRequest, Dialog, type SheetAction } from '../../../../components/settings/Dialog'
 import { Badge, Note, RowText, SettingsCard, SettingsRow, SmallOutlineButton } from '../../../../components/settings/Shell'
 import { DayPicker } from '../../../../components/tasks/DayPicker'
 import { ProjectDocsCard } from '../../../../components/tasks/ProjectDocsCard'
+import { ProjectFieldsCard } from '../../../../components/tasks/ProjectFieldsCard'
 import type { TaskCycle, TaskMilestone } from '../../../../data/task-api'
 import {
   cycleDates,
@@ -25,7 +28,9 @@ import {
   targetValue,
 } from '../../../../data/tasks'
 import { pickImage } from '../../../../hooks/account'
+import { fieldKeys } from '../../../../hooks/task-fields'
 import { useCycleWrites, useMilestoneWrites, useSetProjectIcon } from '../../../../hooks/tasks'
+import { useOrbit } from '../../../../orbit-context'
 import type { ProjectRecord } from '../../../../data/orbit'
 import { errorMessage } from '../../../../session-context'
 import { useCycles, useMilestones, useProjects } from '../../../../queries'
@@ -42,12 +47,14 @@ type Form = { kind: 'milestone'; milestone: TaskMilestone | null } | { kind: 'cy
 
 /**
  * A project's settings on the phone: its milestones (progress, target date, order) and its cycles (dates, the current
- * one, moving unfinished tasks on) and its docs teamspace. Opened from the project's task list. Statuses and labels stay
- * on the web.
+ * one, moving unfinished tasks on), its custom fields and its docs teamspace. Opened from the project's task list.
+ * Statuses and labels stay on the web. Milestones and cycles go when the workspace hides them (Settings, Task fields).
  */
 export default function ProjectSettingsScreen() {
   const { projectId } = useLocalSearchParams<{ projectId: string }>()
   const { colors } = useTheme()
+  const { workspace, workspaceId } = useOrbit()
+  const queryClient = useQueryClient()
   const projects = useProjects()
   const milestones = useMilestones(projectId)
   const cycles = useCycles(projectId)
@@ -155,55 +162,72 @@ export default function ProjectSettingsScreen() {
         <ScrollView
           contentContainerClassName="px-5 pt-5 pb-8 gap-6"
           keyboardShouldPersistTaps="handled"
-          refreshControl={<PullRefresh onRefresh={() => Promise.all([milestones.refetch(), cycles.refetch()])} />}
+          refreshControl={
+            <PullRefresh
+              onRefresh={() =>
+                Promise.all([
+                  milestones.refetch(),
+                  cycles.refetch(),
+                  queryClient.refetchQueries({ queryKey: fieldKeys.project(workspaceId, projectId) }),
+                  queryClient.refetchQueries({ queryKey: fieldKeys.gallery(workspaceId) }),
+                ])
+              }
+            />
+          }
         >
           {project ? <ProjectIconCard project={project} /> : null}
-          <SettingsCard
-            title="Milestones"
-            description="Steps toward the project's goal, in order. Progress counts the done tasks of each."
-            flush={orderedMilestones.length > 0}
-            actions={<SmallOutlineButton label="New milestone" icon="plus" onPress={() => setForm({ kind: 'milestone', milestone: null })} />}
-          >
-            {milestones.isPending ? <Note loading>Loading milestones…</Note> : null}
-            {milestones.isError ? <Note error>Could not load the milestones. Pull to retry.</Note> : null}
-            {milestones.isSuccess && orderedMilestones.length === 0 ? <Note>No milestones yet.</Note> : null}
-            {orderedMilestones.map((milestone, index) => (
-              <SettingsRow key={milestone.id} first={index === 0} label={`${milestone.name}, ${progressLabel(milestone)} done${isMilestoneLate(milestone, now) ? ', late' : ''}`} onPress={() => setMenu({ kind: 'milestone', milestone })}>
-                <Icon name="target" size={16} color={colors.mutedForeground} />
-                <RowText
-                  title={milestone.name}
-                  badges={isMilestoneLate(milestone, now) ? <Text className="text-[12px] text-destructive">Late</Text> : null}
-                  subtitle={[milestone.target_at ? `Target ${longDate(targetDay(milestone.target_at))}` : null, milestone.description].filter(Boolean).join(' · ') || undefined}
-                />
-                <Text className="font-noto-medium text-[12px] text-muted-foreground">{progressLabel(milestone)}</Text>
-              </SettingsRow>
-            ))}
-          </SettingsCard>
-
-          <SettingsCard
-            title="Cycles"
-            description="Time boxes for the project's work. Tasks that are not done can move on to the next cycle."
-            flush={orderedCycles.length > 0}
-            actions={<SmallOutlineButton label="New cycle" icon="plus" onPress={() => setForm({ kind: 'cycle', cycle: null })} />}
-          >
-            {cycles.isPending ? <Note loading>Loading cycles…</Note> : null}
-            {cycles.isError ? <Note error>Could not load the cycles. Pull to retry.</Note> : null}
-            {cycles.isSuccess && orderedCycles.length === 0 ? <Note>No cycles yet.</Note> : null}
-            {orderedCycles.map((cycle, index) => {
-              const timing = cycleTiming(cycle, now)
-              return (
-                <SettingsRow key={cycle.id} first={index === 0} label={`${cycleLabel(cycle)}, ${cycleDates(cycle)}${timing === 'current' ? ', current' : ''}`} onPress={() => setMenu({ kind: 'cycle', cycle })}>
-                  <Icon name="refresh" size={16} color={timing === 'current' ? colors.primary : colors.mutedForeground} />
+          {showsTaskProperty(workspace, 'milestone') ? (
+            <SettingsCard
+              title="Milestones"
+              description="Steps toward the project's goal, in order. Progress counts the done tasks of each."
+              flush={orderedMilestones.length > 0}
+              actions={<SmallOutlineButton label="New milestone" icon="plus" onPress={() => setForm({ kind: 'milestone', milestone: null })} />}
+            >
+              {milestones.isPending ? <Note loading>Loading milestones…</Note> : null}
+              {milestones.isError ? <Note error>Could not load the milestones. Pull to retry.</Note> : null}
+              {milestones.isSuccess && orderedMilestones.length === 0 ? <Note>No milestones yet.</Note> : null}
+              {orderedMilestones.map((milestone, index) => (
+                <SettingsRow key={milestone.id} first={index === 0} label={`${milestone.name}, ${progressLabel(milestone)} done${isMilestoneLate(milestone, now) ? ', late' : ''}`} onPress={() => setMenu({ kind: 'milestone', milestone })}>
+                  <Icon name="target" size={16} color={colors.mutedForeground} />
                   <RowText
-                    title={cycleLabel(cycle)}
-                    subtitle={cycleDates(cycle)}
-                    badges={timing === 'current' ? <Badge label="Current" /> : timing === 'past' ? <Badge label="Ended" tone="outline" /> : null}
+                    title={milestone.name}
+                    badges={isMilestoneLate(milestone, now) ? <Text className="text-[12px] text-destructive">Late</Text> : null}
+                    subtitle={[milestone.target_at ? `Target ${longDate(targetDay(milestone.target_at))}` : null, milestone.description].filter(Boolean).join(' · ') || undefined}
                   />
-                  <Text className="font-noto-medium text-[12px] text-muted-foreground">{progressLabel(cycle)}</Text>
+                  <Text className="font-noto-medium text-[12px] text-muted-foreground">{progressLabel(milestone)}</Text>
                 </SettingsRow>
-              )
-            })}
-          </SettingsCard>
+              ))}
+            </SettingsCard>
+          ) : null}
+
+          {showsTaskProperty(workspace, 'cycle') ? (
+            <SettingsCard
+              title="Cycles"
+              description="Time boxes for the project's work. Tasks that are not done can move on to the next cycle."
+              flush={orderedCycles.length > 0}
+              actions={<SmallOutlineButton label="New cycle" icon="plus" onPress={() => setForm({ kind: 'cycle', cycle: null })} />}
+            >
+              {cycles.isPending ? <Note loading>Loading cycles…</Note> : null}
+              {cycles.isError ? <Note error>Could not load the cycles. Pull to retry.</Note> : null}
+              {cycles.isSuccess && orderedCycles.length === 0 ? <Note>No cycles yet.</Note> : null}
+              {orderedCycles.map((cycle, index) => {
+                const timing = cycleTiming(cycle, now)
+                return (
+                  <SettingsRow key={cycle.id} first={index === 0} label={`${cycleLabel(cycle)}, ${cycleDates(cycle)}${timing === 'current' ? ', current' : ''}`} onPress={() => setMenu({ kind: 'cycle', cycle })}>
+                    <Icon name="refresh" size={16} color={timing === 'current' ? colors.primary : colors.mutedForeground} />
+                    <RowText
+                      title={cycleLabel(cycle)}
+                      subtitle={cycleDates(cycle)}
+                      badges={timing === 'current' ? <Badge label="Current" /> : timing === 'past' ? <Badge label="Ended" tone="outline" /> : null}
+                    />
+                    <Text className="font-noto-medium text-[12px] text-muted-foreground">{progressLabel(cycle)}</Text>
+                  </SettingsRow>
+                )
+              })}
+            </SettingsCard>
+          ) : null}
+
+          <ProjectFieldsCard projectId={projectId} />
 
           {project ? <ProjectDocsCard project={project} /> : null}
         </ScrollView>

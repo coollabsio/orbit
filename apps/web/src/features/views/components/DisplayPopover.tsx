@@ -7,6 +7,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@/components/ui/switch'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { Tip } from '@/components/common/Tip'
+import type { TaskField } from '@orbit/api/generated/types.gen'
+import { hidesTaskKey } from '@orbit/api/taskProperties'
+import { useWorkspace } from '@/features/workspaces/workspaceContext'
+import { storesValues } from '@/features/tasks/fieldsLib'
 import { emptyFilter, PROJECT_GROUPS, TASK_PROPERTIES, viewStatesEqual, type DisplayOptions, type GroupBy, type Layout, type OrderBy, type ShowCompleted, type SubIssuesMode, type TaskProperty } from '../viewState'
 import { GROUP_LABEL, LAYOUTS, TIMELINE_PROPERTIES } from '../displayMeta'
 
@@ -17,7 +21,15 @@ export interface DisplayPopoverProps {
   onChange: (patch: Partial<DisplayOptions>) => void
   /** A single project's page: it also groups by milestone and cycle. */
   projectPage?: boolean
+  /** Custom task fields offered as properties and orderings (`displayFields`). */
+  fields?: readonly TaskField[]
 }
+
+const NO_FIELDS: readonly TaskField[] = []
+
+/** Toggle and select values of a custom field, apart from the built-in property and ordering names. */
+const fieldKey = (id: string) => `field:${id}`
+const fieldIdOf = (key: string) => (key.startsWith('field:') ? key.slice('field:'.length) : null)
 
 const GROUP_ORDER: GroupBy[] = ['status', 'assignee', 'priority', 'project', 'label', 'milestone', 'cycle', 'none']
 
@@ -29,6 +41,7 @@ const ORDER_LABEL: Record<OrderBy, string> = {
   title: 'Title',
   due_date: 'Due date',
   estimate: 'Estimate',
+  custom_field: 'Custom field',
 }
 const ORDER_OPTIONS: OrderBy[] = ['manual', 'priority', 'created', 'updated', 'title', 'due_date', 'estimate']
 
@@ -92,7 +105,7 @@ function OptionSelect<T extends string>({ label, value, items, onChange, describ
 }
 
 /** Header "Display" button. `Shift+V` opens it (never while typing); keyboard opens skip the entrance animation. */
-export function DisplayPopover({ display, defaultDisplay, onChange, projectPage = false }: DisplayPopoverProps) {
+export function DisplayPopover({ display, defaultDisplay, onChange, projectPage = false, fields = NO_FIELDS }: DisplayPopoverProps) {
   const [open, setOpen] = useState(false)
   const [instant, setInstant] = useState(false)
   useCommand('view.display', () => {
@@ -108,7 +121,10 @@ export function DisplayPopover({ display, defaultDisplay, onChange, projectPage 
   })
   const setGroup = (group_by: GroupBy) =>
     onChange(group_by === 'none' || group_by === display.sub_group_by ? { group_by, sub_group_by: 'none' } : { group_by })
-  const groups = projectPage ? GROUP_ORDER : GROUP_ORDER.filter((group) => !PROJECT_GROUPS.includes(group))
+  const { workspace } = useWorkspace()
+  // the built-in properties the workspace hides (Settings, Task fields) are not offered
+  const offered = <T extends string>(key: T) => !hidesTaskKey(workspace, key)
+  const groups = GROUP_ORDER.filter((group) => (projectPage || !PROJECT_GROUPS.includes(group)) && offered(group))
   const groupItems = groups.filter((group) => display.layout !== 'board' || group !== 'none').map((group) => ({ value: group, label: GROUP_LABEL[group] }))
   const subItems = groups.filter((group) => group !== display.group_by).map((group) => ({
     value: group,
@@ -120,7 +136,29 @@ export function DisplayPopover({ display, defaultDisplay, onChange, projectPage 
   const flatOnly = display.layout !== 'list' && display.sub_issues === 'nested'
   const manual = display.order_by === 'manual'
   const ascending = display.order_direction === 'asc'
-  const shownProperties = timeline ? TASK_PROPERTIES.filter((property) => TIMELINE_PROPERTIES.includes(property)) : TASK_PROPERTIES
+  const shownProperties = TASK_PROPERTIES.filter((property) => (!timeline || TIMELINE_PROPERTIES.includes(property)) && offered(property))
+  // a timeline row has no room for custom fields; their choice stays for list and board
+  const shownFields = timeline ? NO_FIELDS : fields
+  const customFields = display.custom_fields ?? []
+  const orderKey = display.order_by === 'custom_field' && display.order_field_id ? fieldKey(display.order_field_id) : display.order_by
+  const orderItems = [
+    ...ORDER_OPTIONS.filter(offered).map((order) => ({ value: order as string, label: ORDER_LABEL[order] })),
+    ...fields.filter((field) => storesValues(field.kind)).map((field) => ({ value: fieldKey(field.id), label: field.name })),
+  ]
+  if (!orderItems.some((item) => item.value === orderKey)) orderItems.push({ value: orderKey, label: 'Unknown field' })
+  const setOrder = (key: string) => {
+    const fieldId = fieldIdOf(key)
+    onChange(fieldId ? { order_by: 'custom_field', order_field_id: fieldId } : { order_by: key as OrderBy, order_field_id: undefined })
+  }
+  const setProperties = (value: string[]) => {
+    // a chip hidden on this layout keeps its value
+    const properties = TASK_PROPERTIES.filter((property) => (shownProperties.includes(property) ? value.includes(property) : display.properties.includes(property)))
+    if (timeline) return onChange({ properties })
+    const chosen = value.flatMap((key) => fieldIdOf(key) ?? [])
+    // fields keep the order they were turned on in; a deleted field drops out
+    const kept = customFields.filter((id) => chosen.includes(id) && fields.some((field) => field.id === id))
+    onChange({ properties, custom_fields: [...kept, ...chosen.filter((id) => !kept.includes(id))] })
+  }
 
   return (
     <Popover
@@ -158,7 +196,7 @@ export function DisplayPopover({ display, defaultDisplay, onChange, projectPage 
               </ToggleGroupItem>
             ))}
           </ToggleGroup>
-          {projectPage && !milestoneTimeline ? (
+          {projectPage && !milestoneTimeline && offered('milestone') ? (
             <Button
               type="button"
               variant="ghost"
@@ -184,12 +222,7 @@ export function DisplayPopover({ display, defaultDisplay, onChange, projectPage 
           {timeline ? null : (
             <Row label="Ordering">
               <div className="flex items-center gap-1">
-                <OptionSelect
-                  label="Ordering"
-                  value={display.order_by}
-                  items={ORDER_OPTIONS.map((order) => ({ value: order, label: ORDER_LABEL[order] }))}
-                  onChange={(order_by) => onChange({ order_by })}
-                />
+                <OptionSelect label="Ordering" value={orderKey} items={orderItems} onChange={setOrder} />
                 <Tip label={manual ? 'Manual order has no direction' : ascending ? 'Ascending' : 'Descending'}>
                   <Button
                     type="button"
@@ -247,20 +280,23 @@ export function DisplayPopover({ display, defaultDisplay, onChange, projectPage 
             size="sm"
             spacing={1}
             className="flex-wrap justify-start"
-            value={display.properties}
-            // a chip hidden on this layout keeps its value
-            onValueChange={(value: string[]) =>
-              onChange({ properties: TASK_PROPERTIES.filter((property) => (shownProperties.includes(property) ? value.includes(property) : display.properties.includes(property))) })}
+            value={[...display.properties, ...customFields.map(fieldKey)]}
+            onValueChange={setProperties}
           >
             {shownProperties.map((property) => (
               <ToggleGroupItem key={property} value={property} className="h-6 min-w-0 px-2 text-xs font-normal text-muted-foreground aria-pressed:text-foreground">
                 {PROPERTY_LABEL[property]}
               </ToggleGroupItem>
             ))}
+            {shownFields.map((field) => (
+              <ToggleGroupItem key={field.id} value={fieldKey(field.id)} title={field.name} className="h-6 max-w-40 min-w-0 px-2 text-xs font-normal text-muted-foreground aria-pressed:text-foreground">
+                <span className="truncate">{field.name}</span>
+              </ToggleGroupItem>
+            ))}
           </ToggleGroup>
         </div>
         <div className="flex justify-end border-t p-2">
-          <Button type="button" variant="ghost" size="sm" disabled={sameDisplay(display, defaultDisplay)} onClick={() => onChange(defaultDisplay)}>
+          <Button type="button" variant="ghost" size="sm" disabled={sameDisplay(display, defaultDisplay)} onClick={() => onChange({ custom_fields: undefined, order_field_id: undefined, ...defaultDisplay })}>
             Reset to default
           </Button>
         </div>

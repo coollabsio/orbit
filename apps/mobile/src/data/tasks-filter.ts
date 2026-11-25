@@ -4,8 +4,10 @@
  * No React, so the screen and the chip row share it.
  */
 import { getViewPreference, putViewPreference, queryTasks } from '@orbit/api/generated/sdk.gen'
-import type { TaskCycle, TaskMilestone, TaskQueryBody, ViewState as ApiViewState } from '@orbit/api/generated/types.gen'
+import type { TaskCycle, TaskField, TaskFieldKind, TaskMilestone, TaskQueryBody, ViewState as ApiViewState, WorkspaceRecord } from '@orbit/api/generated/types.gen'
+import { hidesTaskKey } from '@orbit/api/taskProperties'
 import { ApiProblem } from '@orbit/api/problem'
+import { storesValues } from '@orbit/api/taskFields'
 
 import type { IconName } from '../ui/Icon'
 import type { LabelRecord, OrbitClient, ProjectRecord, StatusRecord, TaskRecord } from './orbit'
@@ -28,9 +30,24 @@ export type FilterField =
   | 'created_at'
   | 'updated_at'
   | 'text'
-export type FilterOperator = 'is' | 'is_not' | 'is_empty' | 'is_not_empty' | 'includes_any' | 'includes_all' | 'excludes' | 'before' | 'after' | 'between' | 'contains'
+  | 'custom_field'
+export type FilterOperator =
+  | 'is'
+  | 'is_not'
+  | 'is_empty'
+  | 'is_not_empty'
+  | 'includes_any'
+  | 'includes_all'
+  | 'excludes'
+  | 'before'
+  | 'after'
+  | 'between'
+  | 'contains'
+  | 'less_than'
+  | 'greater_than'
 export type DateValue = { absolute: string } | { relative: 'today' | 'start_of_week' | 'end_of_week'; offset_days?: number }
-export type Condition = { field: FilterField; operator: FilterOperator; value?: unknown }
+/** `field_id` names the task field of a `custom_field` condition, and only of one. */
+export type Condition = { field: FilterField; field_id?: string; operator: FilterOperator; value?: unknown }
 export type FilterGroup = { op: 'and' | 'or'; children: FilterNode[] }
 export type FilterNode = FilterGroup | Condition
 export type GroupBy = 'status' | 'assignee' | 'priority' | 'project' | 'label' | 'none'
@@ -38,9 +55,13 @@ export type DisplayOptions = {
   layout: 'list' | 'board' | 'timeline'
   group_by: GroupBy
   sub_group_by: GroupBy
-  order_by: 'manual' | 'priority' | 'created' | 'updated' | 'title' | 'due_date'
+  order_by: 'manual' | 'priority' | 'created' | 'updated' | 'title' | 'due_date' | 'estimate' | 'custom_field'
+  /** The task field of `order_by: 'custom_field'`, set on the web; absent for every other ordering. */
+  order_field_id?: string | null
   order_direction: 'asc' | 'desc'
   properties: string[]
+  /** Task fields the web shows after `properties`; the app keeps them when it saves the state. */
+  custom_fields?: string[]
   show_completed: 'all' | 'past_week' | 'past_month' | 'none'
   show_empty_groups: boolean
   sub_issues: 'nested' | 'flat' | 'hidden'
@@ -95,6 +116,26 @@ export function pageKeyFor(preset: TaskPreset | undefined, projectId: string | n
 
 const isGroup = (node: FilterNode): node is FilterGroup => 'op' in node && Array.isArray((node as FilterGroup).children)
 
+type TaskPropertyScope = Pick<WorkspaceRecord, 'hidden_task_properties'>
+
+/** The filter without conditions on a built-in property the workspace hides (Settings, Task fields); a group left empty goes too. */
+export function shownFilter(group: FilterGroup, workspace: TaskPropertyScope): FilterGroup {
+  if (!workspace.hidden_task_properties?.length) return group
+  const children = group.children.flatMap((child): FilterNode[] => {
+    if (!isGroup(child)) return hidesTaskKey(workspace, child.field) ? [] : [child]
+    const shown = shownFilter(child, workspace)
+    return shown.children.length > 0 ? [shown] : []
+  })
+  return children.length === group.children.length && children.every((child, index) => child === group.children[index]) ? group : { ...group, children }
+}
+
+/** The state as the page reads it: a hidden built-in property's conditions go, and its ordering reads as manual. */
+export function shownViewState(state: ViewState, workspace: TaskPropertyScope): ViewState {
+  if (!workspace.hidden_task_properties?.length) return state
+  const display = hidesTaskKey(workspace, state.display.order_by) ? { ...state.display, order_by: 'manual' as const } : state.display
+  return { filter: shownFilter(state.filter, workspace), display }
+}
+
 export const countConditions = (group: FilterGroup): number => group.children.reduce((total, child) => total + (isGroup(child) ? countConditions(child) : 1), 0)
 
 /** True when the chip row can show the tree: a root AND of plain conditions. */
@@ -121,7 +162,12 @@ export function appendCondition(filter: FilterGroup, condition: Condition): Filt
 
 // ---- fields
 
-type FieldKind = 'list' | 'date' | 'text' | 'task'
+/**
+ * How the app edits a field: `list` and `date` pick values, `check` picks checked or not, `presence` picks "has a
+ * value" or "no value" (estimates, and custom text, number and URL fields, whose typed values the app has no input
+ * for). `text` and `task` chips (made on the web) can only be removed.
+ */
+type FieldKind = 'list' | 'date' | 'text' | 'task' | 'presence' | 'check'
 
 export type FieldMeta = { label: string; plural: string; icon: IconName; kind: FieldKind; operators: FilterOperator[]; defaultOperator: FilterOperator }
 
@@ -137,12 +183,44 @@ export const FIELD_META: Record<FilterField, FieldMeta> = {
   sub_issues: { label: 'Sub-issues', plural: 'options', icon: 'subIssue', kind: 'list', operators: ['is'], defaultOperator: 'is' },
   milestone: { label: 'Milestone', plural: 'milestones', icon: 'target', kind: 'list', operators: ['is', 'is_not', 'is_empty', 'is_not_empty'], defaultOperator: 'is' },
   cycle: { label: 'Cycle', plural: 'cycles', icon: 'refresh', kind: 'list', operators: ['is', 'is_not', 'is_empty', 'is_not_empty'], defaultOperator: 'is' },
-  // the server filters estimates only by presence; the value sheet offers the two choices
-  estimate: { label: 'Estimate', plural: 'estimates', icon: 'chart', kind: 'list', operators: ['is_not_empty', 'is_empty'], defaultOperator: 'is_not_empty' },
+  // the server filters estimates only by presence
+  estimate: { label: 'Estimate', plural: 'estimates', icon: 'chart', kind: 'presence', operators: ['is_not_empty', 'is_empty'], defaultOperator: 'is_not_empty' },
   due_date: { label: 'Due date', plural: 'dates', icon: 'calendar', kind: 'date', operators: ['before', 'after', 'between', 'is_empty', 'is_not_empty'], defaultOperator: 'before' },
   created_at: { label: 'Created', plural: 'dates', icon: 'calendarTick', kind: 'date', operators: ['before', 'after'], defaultOperator: 'after' },
   updated_at: { label: 'Updated', plural: 'dates', icon: 'clock', kind: 'date', operators: ['before', 'after'], defaultOperator: 'after' },
   text: { label: 'Text', plural: 'text', icon: 'text', kind: 'text', operators: ['contains'], defaultOperator: 'contains' },
+  // a custom field the page has not loaded (or one deleted since): its chip shows and can be removed
+  custom_field: { label: 'Field', plural: 'values', icon: 'text', kind: 'text', operators: [], defaultOperator: 'is_not_empty' },
+}
+
+const PRESENCE: FilterOperator[] = ['is_not_empty', 'is_empty']
+
+/** A custom field's meta by kind (issue #87); `operators` are the ones the app can set. */
+const CUSTOM_META: Record<TaskFieldKind, Omit<FieldMeta, 'label'>> = {
+  text: { plural: 'values', icon: 'text', kind: 'presence', operators: PRESENCE, defaultOperator: 'is_not_empty' },
+  url: { plural: 'values', icon: 'link', kind: 'presence', operators: PRESENCE, defaultOperator: 'is_not_empty' },
+  number: { plural: 'values', icon: 'hashtag', kind: 'presence', operators: PRESENCE, defaultOperator: 'is_not_empty' },
+  date: { plural: 'dates', icon: 'calendarDate', kind: 'date', operators: ['before', 'after', 'between', 'is_empty', 'is_not_empty'], defaultOperator: 'before' },
+  select: { plural: 'options', icon: 'checkCircle', kind: 'list', operators: ['is', 'is_not', 'is_empty', 'is_not_empty'], defaultOperator: 'is' },
+  multi_select: { plural: 'options', icon: 'list', kind: 'list', operators: ['includes_any', 'includes_all', 'excludes', 'is_empty', 'is_not_empty'], defaultOperator: 'includes_any' },
+  checkbox: { plural: 'values', icon: 'checkSquare', kind: 'check', operators: ['is'], defaultOperator: 'is' },
+  // never offered (`filterTargets`): it stores no values to filter
+  time_tracking: { plural: 'values', icon: 'timer', kind: 'text', operators: [], defaultOperator: 'is_not_empty' },
+}
+
+/** What a condition filters on: a built-in field, or a custom field with its `field_id`. */
+export type FilterTarget = Pick<Condition, 'field' | 'field_id'>
+
+/** The target alone, without `field_id` for a built-in field (the server refuses it there). */
+export const targetOf = (condition: FilterTarget): FilterTarget =>
+  condition.field === 'custom_field' ? { field: 'custom_field', field_id: condition.field_id } : { field: condition.field }
+
+export const customFieldOf = (target: FilterTarget, options: Pick<FilterOptions, 'customFields'>): TaskField | undefined =>
+  target.field === 'custom_field' ? options.customFields.find((field) => field.id === target.field_id) : undefined
+
+export function conditionMeta(target: FilterTarget, options: Pick<FilterOptions, 'customFields'>): FieldMeta {
+  const custom = customFieldOf(target, options)
+  return custom ? { label: custom.name, ...CUSTOM_META[custom.kind] } : FIELD_META[target.field]
 }
 
 /**
@@ -156,10 +234,32 @@ const PROJECT_FIELDS: readonly FilterField[] = ['milestone', 'cycle', 'estimate'
 
 export const fieldsFor = (projectId: string | null): FilterField[] => (projectId ? FIELD_ORDER : FIELD_ORDER.filter((field) => !PROJECT_FIELDS.includes(field)))
 
-/** The estimate filter's two choices, shown as values though they are operators. */
-export const ESTIMATE_PRESENCE: readonly { operator: FilterOperator; label: string }[] = [
-  { operator: 'is_not_empty', label: 'Has an estimate' },
-  { operator: 'is_empty', label: 'No estimate' },
+/** The "Filter by" list: the built-in fields, then the page's custom fields that store values. */
+export function filterTargets(options: Pick<FilterOptions, 'projectId' | 'customFields' | 'workspace'>): FilterTarget[] {
+  return [...fieldsFor(options.projectId).filter((field) => !hidesTaskKey(options.workspace, field)).map((field): FilterTarget => ({ field })), ...options.customFields.filter((field) => storesValues(field.kind)).map((field): FilterTarget => ({ field: 'custom_field', field_id: field.id }))]
+}
+
+/** A sheet row key for a target, and back. */
+export const targetKey = (target: FilterTarget) => (target.field === 'custom_field' ? `custom:${target.field_id}` : target.field)
+export const parseTargetKey = (key: string): FilterTarget => (key.startsWith('custom:') ? { field: 'custom_field', field_id: key.slice('custom:'.length) } : { field: key as FilterField })
+
+/** A presence field's two choices, shown as values though they are operators. */
+export function presenceChoices(target: FilterTarget): readonly { operator: FilterOperator; label: string }[] {
+  return target.field === 'estimate'
+    ? [
+        { operator: 'is_not_empty', label: 'Has an estimate' },
+        { operator: 'is_empty', label: 'No estimate' },
+      ]
+    : [
+        { operator: 'is_not_empty', label: 'Has a value' },
+        { operator: 'is_empty', label: 'No value' },
+      ]
+}
+
+/** A checkbox field's two values. */
+export const CHECK_CHOICES: readonly { value: boolean; label: string }[] = [
+  { value: true, label: 'Checked' },
+  { value: false, label: 'Not checked' },
 ]
 
 /** User conditions per tree: the server allows 50 on the effective tree, and a scope adds up to 4. */
@@ -183,6 +283,10 @@ export function operatorLabel(operator: FilterOperator, count: number): string {
       return 'includes all of'
     case 'excludes':
       return 'excludes'
+    case 'less_than':
+      return 'less than'
+    case 'greater_than':
+      return 'greater than'
     case 'before':
     case 'after':
     case 'between':
@@ -191,11 +295,11 @@ export function operatorLabel(operator: FilterOperator, count: number): string {
   }
 }
 
-export function defaultValue(field: FilterField, operator: FilterOperator): unknown {
+export function defaultValue(meta: FieldMeta, operator: FilterOperator): unknown {
   if (!operatorNeedsValue(operator)) return undefined
-  const kind = FIELD_META[field].kind
-  if (kind === 'text') return ''
-  if (kind === 'date') return operator === 'between' ? [{ relative: 'start_of_week' }, { relative: 'end_of_week' }] : { relative: 'today' }
+  if (meta.kind === 'text') return ''
+  if (meta.kind === 'check') return true
+  if (meta.kind === 'date') return operator === 'between' ? [{ relative: 'start_of_week' }, { relative: 'end_of_week' }] : { relative: 'today' }
   return []
 }
 
@@ -209,29 +313,54 @@ export const listValue = (condition: Condition): string[] =>
   Array.isArray(condition.value) ? condition.value.filter((value): value is string => typeof value === 'string') : []
 
 /** Changes the operator, converting the value where it can (date ↔ range) and clearing it where it must. */
-export function withOperator(condition: Condition, operator: FilterOperator): Condition {
-  const { field } = condition
-  if (!operatorNeedsValue(operator)) return { field, operator }
-  if (!operatorNeedsValue(condition.operator)) return { field, operator, value: defaultValue(field, operator) }
-  if (FIELD_META[field].kind === 'date') {
+export function withOperator(condition: Condition, operator: FilterOperator, meta: FieldMeta): Condition {
+  const target = targetOf(condition)
+  if (!operatorNeedsValue(operator)) return { ...target, operator }
+  if (!operatorNeedsValue(condition.operator)) return { ...target, operator, value: defaultValue(meta, operator) }
+  if (meta.kind === 'date') {
     const wasRange = condition.operator === 'between'
-    if (operator === 'between' && !wasRange) return { field, operator, value: isDateValue(condition.value) ? [condition.value, condition.value] : defaultValue(field, operator) }
+    if (operator === 'between' && !wasRange) return { ...target, operator, value: isDateValue(condition.value) ? [condition.value, condition.value] : defaultValue(meta, operator) }
     if (operator !== 'between' && wasRange) {
       const first = Array.isArray(condition.value) ? condition.value[0] : undefined
-      return { field, operator, value: isDateValue(first) ? first : defaultValue(field, operator) }
+      return { ...target, operator, value: isDateValue(first) ? first : defaultValue(meta, operator) }
     }
   }
   return { ...condition, operator }
 }
 
-/** True when the server can evaluate it: list values present, text not blank, dates well-formed. */
+const isNumberPair = (value: unknown) => Array.isArray(value) && value.length === 2 && value.every((item) => typeof item === 'number')
+
+/**
+ * True when the server can evaluate it: list values present, text not blank, dates well-formed. A custom field's
+ * value is checked by its operator, as the web may have set any of the kind's operators.
+ */
 export function isCompleteCondition(condition: Condition): boolean {
+  if (condition.field === 'custom_field' && !condition.field_id) return false
   if (!operatorNeedsValue(condition.operator)) return true
+  const { operator, value } = condition
+  if (condition.field === 'custom_field') {
+    switch (operator) {
+      case 'before':
+      case 'after':
+        return isDateValue(value)
+      case 'between':
+        return isNumberPair(value) || (Array.isArray(value) && value.length === 2 && value.every(isDateValue))
+      case 'less_than':
+      case 'greater_than':
+        return typeof value === 'number'
+      case 'contains':
+        return typeof value === 'string' && value.trim().length > 0
+      case 'is':
+        return typeof value === 'boolean' || typeof value === 'number' || listValue(condition).length > 0
+      default:
+        return listValue(condition).length > 0
+    }
+  }
   const kind = FIELD_META[condition.field].kind
-  if (kind === 'text') return typeof condition.value === 'string' && condition.value.trim().length > 0
+  if (kind === 'text') return typeof value === 'string' && value.trim().length > 0
   if (kind === 'date') {
-    if (condition.operator !== 'between') return isDateValue(condition.value)
-    return Array.isArray(condition.value) && condition.value.length === 2 && condition.value.every(isDateValue)
+    if (operator !== 'between') return isDateValue(value)
+    return Array.isArray(value) && value.length === 2 && value.every(isDateValue)
   }
   return listValue(condition).length > 0
 }
@@ -249,7 +378,11 @@ export type FilterOptions = {
   /** The project page's milestones and cycles; empty on other pages. */
   milestones: readonly TaskMilestone[]
   cycles: readonly TaskCycle[]
+  /** The custom task fields the page filters by: the project's on a project page, else the workspace's gallery. */
+  customFields: readonly TaskField[]
   currentUserId: string
+  /** The workspace: a built-in property it hides (Settings, Task fields) is not offered. */
+  workspace?: TaskPropertyScope
 }
 
 export type Glyph =
@@ -264,8 +397,10 @@ export type ValueOption = { value: string; label: string; glyph: Glyph }
 const CATEGORY_LABEL: Record<string, string> = { unstarted: 'Unstarted', started: 'Started', completed: 'Completed', cancelled: 'Cancelled', duplicate: 'Duplicate' }
 const PRIORITY_ORDER: Priority[] = ['urgent', 'high', 'medium', 'low', 'none']
 
-export function valueOptions(field: FilterField, options: FilterOptions, mutedColor: string): ValueOption[] {
-  switch (field) {
+export function valueOptions(target: FilterTarget, options: FilterOptions, mutedColor: string): ValueOption[] {
+  switch (target.field) {
+    case 'custom_field':
+      return (customFieldOf(target, options)?.options ?? []).map((option) => ({ value: option.id, label: option.name, glyph: { kind: 'dot', color: option.color } }))
     case 'status': {
       const seen = new Set<string>()
       return sortStatuses(options.statuses).flatMap((status): ValueOption[] => {
@@ -327,8 +462,8 @@ export function chosenValues(condition: Condition, options: FilterOptions): stri
 
 /** The chosen list values as options, in the order they were picked. Unknown IDs are dropped. */
 export function selectedOptions(condition: Condition, options: FilterOptions, mutedColor: string): ValueOption[] {
-  if (FIELD_META[condition.field].kind !== 'list') return []
-  const known = new Map(valueOptions(condition.field, options, mutedColor).map((option) => [option.value, option]))
+  if (conditionMeta(condition, options).kind !== 'list') return []
+  const known = new Map(valueOptions(condition, options, mutedColor).map((option) => [option.value, option]))
   return chosenValues(condition, options).flatMap((value): ValueOption[] => {
     const option = known.get(value)
     if (option) return [option]
@@ -373,11 +508,23 @@ export function dateValueLabel(value: DateValue): string {
   return offset === 0 ? base : `${base} ${offset > 0 ? '+' : '-'} ${Math.abs(offset)} days`
 }
 
+/** A value the app has no picker for (set on the web, or of a field the page has not loaded). */
+function typedValueSummary(value: unknown): string {
+  if (typeof value === 'string') return value ? `“${value}”` : ''
+  if (typeof value === 'number') return value.toLocaleString()
+  if (isNumberPair(value)) return (value as number[]).map((item) => item.toLocaleString()).join(' – ')
+  if (isDateValue(value)) return dateValueLabel(value)
+  if (Array.isArray(value) && value.length === 2 && value.every(isDateValue)) return `${dateValueLabel(value[0])} – ${dateValueLabel(value[1])}`
+  if (Array.isArray(value) && value.length > 0) return value.length === 1 ? '1 value' : `${value.length} values`
+  return ''
+}
+
 /** Chip value text: up to two names, then a count ("3 labels"). Empty for is_empty / is_not_empty. */
 export function valueSummary(condition: Condition, options: FilterOptions, mutedColor: string): string {
   if (!operatorNeedsValue(condition.operator)) return ''
-  const meta = FIELD_META[condition.field]
-  if (meta.kind === 'text') return typeof condition.value === 'string' && condition.value ? `“${condition.value}”` : ''
+  const meta = conditionMeta(condition, options)
+  if (meta.kind === 'check') return condition.value === true ? 'Checked' : 'Not checked'
+  if (meta.kind === 'text' || meta.kind === 'presence') return typedValueSummary(condition.value)
   if (meta.kind === 'date') {
     if (condition.operator === 'between') {
       const range = Array.isArray(condition.value) ? condition.value : []
@@ -401,8 +548,10 @@ export function valueSummary(condition: Condition, options: FilterOptions, muted
 export function taskQueryBody(filter: FilterGroup, display: DisplayOptions): TaskQueryBody {
   return {
     filter: filter as unknown as TaskQueryBody['filter'],
-    order_by: display.order_by,
+    order_by: display.order_by === 'custom_field' && !display.order_field_id ? 'manual' : display.order_by,
     order_direction: display.order_direction,
+    // the web may sort by a custom field; the server needs the field with that ordering, and refuses it without
+    ...(display.order_by === 'custom_field' && display.order_field_id ? { order_field_id: display.order_field_id } : {}),
     show_completed: display.show_completed,
     ...(display.sub_issues === 'hidden' ? { sub_issues: 'hidden' as const } : {}),
   }

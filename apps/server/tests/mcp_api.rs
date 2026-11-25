@@ -749,7 +749,9 @@ async fn tools_list_includes_required_cache_fields_for_current_protocol() {
         assert_eq!(result["result"]["cacheScope"], "private", "{result}");
         let tools = result["result"]["tools"].as_array().unwrap();
         let names = tool_names(&result);
-        assert!(names.contains(&"list_tasks".to_owned()), "{names:?}");
+        for name in ["list_tasks", "list_task_fields", "get_task_field_values"] {
+            assert!(names.contains(&name.to_owned()), "{names:?}");
+        }
         for tool in tools {
             assert_eq!(tool["annotations"]["readOnlyHint"], true, "{tool}");
         }

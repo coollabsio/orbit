@@ -6,7 +6,7 @@ import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, Di
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
-import { FIELD_META, availableFields, defaultValue, listValue, operatorLabel, operatorNeedsValue, valueSummary, withOperator, type FilterOptions } from '../filterFields'
+import { availableFields, fieldMeta, listValue, newCondition, operatorLabel, operatorNeedsValue, targetKey, valueSummary, withOperator, type FilterOptions } from '../filterFields'
 import {
   MAX_FILTER_CONDITIONS,
   MAX_FILTER_DEPTH,
@@ -20,7 +20,7 @@ import {
   type NodePath,
 } from '../filterTree'
 import { useOpenKey } from '../useOpenKey'
-import { countConditions, emptyFilter, isGroup, type Condition, type FilterField, type FilterGroup, type FilterNode, type FilterOperator } from '../viewState'
+import { countConditions, emptyFilter, isGroup, type Condition, type FilterGroup, type FilterNode, type FilterOperator } from '../viewState'
 import { FilterValuePicker } from './FilterValuePicker'
 
 
@@ -245,24 +245,24 @@ function GroupEditor({ group, path, root, options, issue, issueNode, onChange }:
 function ConditionRow({ condition, path, root, options, issue, issueNode, onChange }: NodeEditorProps & { condition: Condition }) {
   const [picking, setPicking] = useState(false)
   const errorId = useId()
-  const meta = FIELD_META[condition.field]
+  const meta = fieldMeta(condition, options)
+  const missing = meta.kind === 'missing'
   const label = `Condition ${nodeNumber(path)}`
   const error = issue && samePath(issueNode, path) ? issue.message : null
   const count = meta.kind === 'list' || meta.kind === 'task' ? listValue(condition).length : 1
   const replace = (next: Condition) => onChange(updateNode(root, path, () => next))
-  const fieldItems = availableFields(options, condition.field).map((field) => ({ value: field, label: FIELD_META[field].label }))
+  const choices = availableFields(options, condition)
+  const fieldItems = choices.map((choice) => ({ value: choice.key, label: choice.meta.label }))
   const operatorItems = meta.operators.map((operator) => ({ value: operator, label: operatorLabel(operator, count) }))
   return (
     <div role="group" aria-label={label} className="flex flex-col gap-1">
       <div className="flex flex-wrap items-center gap-1.5">
         <Select
           items={fieldItems}
-          value={condition.field}
+          value={targetKey(condition)}
           onValueChange={(value) => {
-            if (typeof value !== 'string') return
-            const field = value as FilterField
-            const operator = FIELD_META[field].defaultOperator
-            replace({ field, operator, value: defaultValue(field, operator) })
+            const choice = choices.find((item) => item.key === value)
+            if (choice) replace(newCondition(choice.target, choice.meta))
           }}
         >
           <SelectTrigger size="sm" className="w-36" aria-label={`${label} field`}>
@@ -276,11 +276,12 @@ function ConditionRow({ condition, path, root, options, issue, issueNode, onChan
             ))}
           </SelectContent>
         </Select>
+        {missing ? null : (
         <Select
           items={operatorItems}
           value={condition.operator}
           onValueChange={(value) => {
-            if (typeof value === 'string') replace(withOperator(condition, value as FilterOperator))
+            if (typeof value === 'string') replace(withOperator(condition, value as FilterOperator, options))
           }}
         >
           <SelectTrigger size="sm" className="w-36" aria-label={`${label} operator`}>
@@ -294,7 +295,8 @@ function ConditionRow({ condition, path, root, options, issue, issueNode, onChan
             ))}
           </SelectContent>
         </Select>
-        {operatorNeedsValue(condition.operator) ? (
+        )}
+        {operatorNeedsValue(condition.operator) && !missing ? (
           <Popover open={picking} onOpenChange={setPicking} modal={false}>
             <PopoverTrigger
               render={

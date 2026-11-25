@@ -1,9 +1,10 @@
+import { formatDuration, parseDuration } from '@orbit/api/duration'
 import { useState } from 'react'
 import { Pressable, View } from 'react-native'
 
 import type { Person } from '../../data/chat'
 import { markdownToText } from '../../data/markdown'
-import { dayDate, dayValue, formatDuration, parseDuration, type TimeEntry, type TimeEntryDraft, todayLocal, workedOnLabel } from '../../data/time'
+import { dayDate, dayValue, type TimeEntry, type TimeEntryDraft, todayLocal, workedOnLabel } from '../../data/time'
 import { useTheme } from '../../theme'
 import { Avatar, Button, Icon, IconButton, Input, LabelTip, Text } from '../../ui'
 import { Toggle } from '../settings/Shell'

@@ -6,7 +6,7 @@ import { queryKeys } from '@/api/queryKeys'
 import { ConfirmationModalHost } from '@/components/common/ConfirmationModal'
 import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
 import type { SavedView } from './api/views'
-import { member } from './testFixtures'
+import { member, TASK_FIELDS } from './testFixtures'
 import { DEFAULT_DISPLAY } from './viewState'
 import type { WorkspaceRole } from '@orbit/api/generated/types.gen'
 import { testWorkspace } from '@/test/workspace'
@@ -57,6 +57,7 @@ export function renderWithProviders(ui: ReactElement, { route = '/', views = [],
   client.setQueryData(queryKeys.currentUser, { id: 'user-1', display_name: 'Ada', email: 'ada@orbit.test', installation_admin: false })
   client.setQueryData(queryKeys.views(workspace.id), views)
   client.setQueryData(queryKeys.members(workspace.id), [member('user-1', 'Ada'), member('user-2', 'Grace')])
+  client.setQueryData(queryKeys.taskFields(workspace.id), TASK_FIELDS)
   const view = render(
     <QueryClientProvider client={client}>
       <WorkspaceContext.Provider value={{ workspace, workspaces: [workspace], selectWorkspace: () => {} }}>

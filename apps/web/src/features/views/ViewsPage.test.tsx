@@ -38,6 +38,14 @@ const SHARED_PLAIN = savedView({
     display: { ...DEFAULT_DISPLAY, layout: 'board', group_by: 'assignee' },
   },
 })
+const BY_CUSTOMER = savedView({
+  id: 'view-customer',
+  name: 'Acme work',
+  state: {
+    filter: { op: 'and', children: [{ field: 'custom_field', field_id: 'field-customer', operator: 'is', value: ['opt-acme'] }, { field: 'custom_field', field_id: 'field-deleted', operator: 'is_empty' }] },
+    display: DEFAULT_DISPLAY,
+  },
+})
 const section = (view: ReturnType<typeof renderWithProviders>['view'], name: string) => view.getByRole('list', { name })
 
 test('one list in sections: favorites first, then your views, then workspace views, each view once', () => {
@@ -59,6 +67,11 @@ test('a row says what the view shows: its filter fields and its layout', () => {
   const bugs = within(section(view, 'Your views')).getByRole('listitem')
   expect(within(bugs).getByText('All tasks')).toBeTruthy()
   expect(within(bugs).getByText('List · Status')).toBeTruthy()
+})
+
+test('a custom field filter reads as the field name; a deleted field as Unknown field', () => {
+  const { view } = renderWithProviders(<ViewsPage />, { views: [BY_CUSTOMER] })
+  expect(within(section(view, 'Your views')).getByText('Customer, Unknown field')).toBeTruthy()
 })
 
 test('search narrows every section by name and description', async () => {

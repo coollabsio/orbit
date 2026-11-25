@@ -53,7 +53,7 @@ function renderBoard(tasks: Task[], options: { statuses?: TaskStatusDef[]; displ
   )
   return render(
     <TaskBoard
-      tasks={tasks} users={[]} labels={[]} statuses={statuses} projects={[launch, docs]}
+      tasks={tasks} users={[]} labels={[]} statuses={statuses} projects={[launch, docs]} taskFields={[]}
       display={{ ...DEFAULT_DISPLAY, layout: 'board', ...options.display }} groupContext={groupContext}
       collapseScope={options.scope ?? 'all'} activeTaskId={null} onOpen={options.onOpen ?? (() => {})}
     />,

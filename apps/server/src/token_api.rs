@@ -47,6 +47,7 @@ mod context;
 mod database_actions;
 mod databases;
 mod doc_actions;
+mod fields;
 mod files;
 mod mail;
 mod notifications;
@@ -135,7 +136,10 @@ impl From<PageError> for TokenApiError {
 
 impl From<TaskError> for TokenApiError {
     fn from(error: TaskError) -> Self {
-        Self::Task(error)
+        match error {
+            TaskError::Refused(detail) => Self::Invalid(detail),
+            error => Self::Task(error),
+        }
     }
 }
 
@@ -1078,10 +1082,13 @@ impl Authorized<'_> {
             .clone()
             .or_else(|| {
                 view.as_ref().map(|view| {
-                    crate::task_routes::task_order(
+                    crate::task_routes::task_order_by_field(
                         view.display.order_by,
                         view.display.order_direction,
+                        view.display.order_field_id,
                     )
+                    // a view parses only with its field id when it sorts by a field
+                    .unwrap_or((TaskSort::Position, SortOrder::Asc))
                 })
             })
             .unwrap_or((TaskSort::CreatedAt, SortOrder::Desc));
@@ -1115,6 +1122,7 @@ impl Authorized<'_> {
         let condition = |field, operator, value| {
             FilterNode::Condition(Condition {
                 field,
+                field_id: None,
                 operator,
                 value,
             })

@@ -29,7 +29,7 @@ import {
 
 const label = (id: string, name: string, project_id = 'p1', color = '#5e6ad2'): LabelRecord => ({ id, name, project_id, color, version: 1, workspace_id: 'w' })
 const task = (id: string, fields: Partial<TaskRecord> = {}): TaskRecord =>
-  ({ id, title: id, description: '', number: 1, project_id: 'p1', status_id: 'todo', priority: 'none', assignee_ids: [], label_ids: [], duplicate_of: null, ...fields }) as TaskRecord
+  ({ id, title: id, description: '', number: 1, project_id: 'p1', status_id: 'todo', priority: 'none', assignee_ids: [], label_ids: [], duplicate_of: null, field_values: [], ...fields }) as TaskRecord
 const relation = (id: string, type: TaskRelationRecord['type'], direction: TaskRelationRecord['direction'], other: string, created_at = '2026-10-01T00:00:00Z'): TaskRelationRecord => ({
   id,
   type,

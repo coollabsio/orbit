@@ -241,6 +241,7 @@ pub fn router(state: PublicApiState) -> Router {
         .merge(database_actions::routes())
         .merge(notifications::routes())
         .merge(views::routes())
+        .merge(fields::routes())
         .merge(files::routes(&state));
     // Exports belong to the token's only workspace, which the token already names.
     let routes = Router::new()
@@ -498,6 +499,14 @@ impl Responder {
                     &self.request_id,
                     &self.instance,
                     [(field, "The value is invalid for this workspace or project.")],
+                );
+            }
+            TaskError::Refused(detail) => {
+                return self.problem(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_request",
+                    "Invalid request",
+                    detail,
                 );
             }
             // `current` is a full task record with relations; it can name unapproved projects.
@@ -1307,6 +1316,7 @@ pub(crate) mod database_actions;
 pub(crate) mod database_views;
 pub(crate) mod databases;
 pub(crate) mod doc_actions;
+pub(crate) mod fields;
 pub(crate) mod files;
 mod idempotency;
 pub(crate) mod mail;

@@ -152,3 +152,24 @@ test('closing keeps the value picker through the exit, and the next open starts 
   fireEvent.click(trigger)
   expect(await view.findByRole('combobox', { name: 'Filter by' })).toBeTruthy()
 })
+
+test('custom fields join the field list: a select field filters by its colored options, a number by a typed value', async () => {
+  const view = render(<Harness initial={EMPTY} />)
+  fireEvent.click(view.getByRole('button', { name: 'Filter tasks' }))
+  await userEvent.click(await view.findByRole('option', { name: 'Customer' }))
+  await userEvent.click(await view.findByRole('option', { name: 'Acme' }))
+  expect(readFilter(view)).toEqual({ op: 'and', children: [{ field: 'custom_field', field_id: 'field-customer', operator: 'is', value: ['opt-acme'] }] })
+  fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' })
+  fireEvent.click(view.getByRole('button', { name: 'Add filter' }))
+  await userEvent.click(await view.findByRole('option', { name: 'Budget' }))
+  await userEvent.type(await view.findByRole('textbox', { name: 'Budget' }), '1500{Enter}')
+  expect(readFilter(view).children[1]).toEqual({ field: 'custom_field', field_id: 'field-budget', operator: 'is', value: 1500 })
+})
+
+test('a condition on a deleted field reads "Unknown field" and can be removed', async () => {
+  const view = render(<Harness initial={{ op: 'and', children: [{ field: 'custom_field', field_id: 'field-gone', operator: 'is', value: ['x'] }] }} />)
+  const chip = view.container.querySelector('[data-filter-chip="custom_field"]')
+  expect(chip?.textContent).toBe('Unknown field')
+  await userEvent.click(view.getByRole('button', { name: 'Remove unknown field filter' }))
+  expect(readFilter(view)).toEqual(EMPTY)
+})

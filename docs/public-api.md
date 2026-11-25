@@ -72,8 +72,8 @@ scopes, which MCP does not use.
 
 | Scope | Access in **Settings → API tokens** | Public API endpoints |
 | --- | --- | --- |
-| `tasks:read` | Tasks: **Read** | `GET` projects, statuses, labels, milestones, cycles, members, tasks, comments, relations, time entries, task activity and the task trash |
-| `tasks:write` | Tasks: **Write** | Create, update and delete tasks, restore them from the trash, add, edit and delete comments, log, edit and delete time, link tasks, create and change projects, create, change and delete statuses, labels, milestones and cycles, `POST /integrations/discord/events` |
+| `tasks:read` | Tasks: **Read** | `GET` projects, statuses, labels, milestones, cycles, members, tasks, comments, relations, time entries, task activity, the task trash, custom task fields and their values |
+| `tasks:write` | Tasks: **Write** | Create, update and delete tasks, restore them from the trash, add, edit and delete comments, log, edit and delete time, link tasks, create and change projects, create, change and delete statuses, labels, milestones and cycles, add, change and delete custom task fields, set a project's fields and a task's values, `POST /integrations/discord/events` |
 | `tasks:import` | Tasks: **Write** with **Import mode** | With `tasks:write`: the import fields of new tasks and comments. See [Import from another tool](#import-from-another-tool). |
 | `docs:read` | Docs: **Read** | `GET /docs`, `GET /docs/trash`, `GET /teamspaces`, `GET /docs/{page_id}`, `GET /docs/{page_id}/comments`, `GET /docs/{page_id}/versions`, `GET /docs/{page_id}/versions/{version_id}`, `GET /docs/{page_id}/database`, `POST /docs/{page_id}/database/query`, `GET /docs/{page_id}/database/views` and `…/views/{view_id}` |
 | `docs:write` | Docs: **Write** | `POST /docs`, `PATCH /docs/{page_id}`, `POST /docs/{page_id}/move`, `DELETE /docs/{page_id}`, `POST /docs/{page_id}/restore`, `POST /docs/{page_id}/comments`, `POST /docs/{page_id}/rows`, `PATCH /docs/{page_id}/rows/{row_id}`, `POST /docs/{page_id}/rows/trash`, `POST /databases`, the schema, view and linked view endpoints under `/docs/{page_id}/database` |
@@ -475,6 +475,77 @@ Stored files are deleted at the next daily maintenance run. Response: `204`.
 ```bash
 curl -sS -X DELETE "$ORBIT_WS/tasks/ENG-12?expected_version=4503599627370495&permanent=true" \
   -H "Authorization: Bearer $ORBIT_TOKEN"
+```
+
+### Custom task fields
+
+The workspace has one gallery of custom task fields (web app: **Settings → Task fields**). Each
+project shows some of them, in its order, and a task can have a value of each field that its project
+shows. Kinds: `text`, `number`, `date`, `select`, `multi_select`, `checkbox` and `url`. A field
+never changes its kind.
+
+A token limited to some projects lists the whole gallery, as every member but a guest sees it in
+Settings. Its `project_count` counts only the token's approved projects. The fields of a project and
+the values of a task follow the grant: another project and its tasks answer 404.
+
+`GET /workspaces/{workspace_id}/task-fields`. Scope: `tasks:read`. Every field, by name, on one
+page (`next_cursor` is `null`). Item: `{id, workspace_id, name, kind, options, created_by,
+project_count, can_manage, version, created_at, updated_at}`. `options` lists the `{id, name,
+color}` choices of a `select` or `multi_select` field; it is empty for other kinds. `can_manage`
+tells if the token's creator may change or delete the field (its creator, or an owner or admin).
+
+`POST /workspaces/{workspace_id}/task-fields`. Scope: `tasks:write`. Body: `{name, kind,
+options?}`: a name of 1 to 100 characters, unique in the workspace without case (409 otherwise),
+and for `select` and `multi_select` up to 100 options of `{name, color}` (`#rrggbb`). Answers 201
+with the field. No project shows it yet. A workspace has at most 200 fields (409). Not for guests.
+
+`PATCH /workspaces/{workspace_id}/task-fields/{field_id}`. Scope: `tasks:write`. Body:
+`{expected_version, name?, options?}`. `options` replaces every option: send an option's `id` to
+keep it and the values that use it; an option without an `id` is new. Values of a removed option
+stop showing it. Answers 200, or 409 after a change.
+
+`DELETE /workspaces/{workspace_id}/task-fields/{field_id}?expected_version=…`. Scope:
+`tasks:write`. Answers 204. It removes the field from every project and deletes every task's value
+of it.
+
+A change or a delete reaches every project that shows the field, so both need a token for all
+projects (403 `workspace_action_forbidden` otherwise). The token's creator must also be the field's
+creator, or an owner or admin (403).
+
+`GET /workspaces/{workspace_id}/projects/{project_id}/fields`. Scope: `tasks:read`. The fields that
+the project shows, in its order, on one page, as the gallery shows them.
+
+`PUT /workspaces/{workspace_id}/projects/{project_id}/fields`. Scope: `tasks:write`. Body:
+`{field_ids}`: every gallery field that the project shows, in order (at most 200, each once; 400
+otherwise). A field that you leave out leaves the project, and its tasks keep their values. Answers
+200 with the project's fields. The token's creator must be allowed to manage the project (403).
+
+`GET /workspaces/{workspace_id}/tasks/{task}/fields`. Scope: `tasks:read`. `{task}` is the task's
+UUID or identifier (`ENG-12`). The task's values, on one page: `{field_id, value}` for each field
+with a value, also of a field that the project no longer shows.
+
+`PUT /workspaces/{workspace_id}/tasks/{task}/fields/{field_id}`. Scope: `tasks:write`. Body:
+`{value}`. The field must be one that the task's project shows (400 otherwise). Answers 200 with all
+the task's values. The value by kind:
+
+| Kind | Value |
+| --- | --- |
+| `text` | A string, up to 2,000 characters after trimming |
+| `number` | A JSON number, up to 1e15 either way |
+| `date` | `YYYY-MM-DD` |
+| `select` | The `id` of one of the field's options |
+| `multi_select` | A list of option ids |
+| `checkbox` | `true` |
+| `url` | An `http` or `https` URL, up to 2,048 bytes |
+
+`null` clears the value, and so do `""`, `false` and `[]`. A value that does not fit the kind
+answers 400. Each change shows in the task's activity ("changed Points"). For a service-account
+token, the audit log names the service account.
+
+```bash
+curl -sS -X PUT "$ORBIT_WS/tasks/ENG-12/fields/$FIELD_ID" \
+  -H "Authorization: Bearer $ORBIT_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"value":"2026-12-01"}'
 ```
 
 ### Task trash and activity

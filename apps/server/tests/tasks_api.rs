@@ -7421,3 +7421,485 @@ async fn task_lists_leave_out_description_json() {
         "Hi"
     );
 }
+
+#[tokio::test]
+async fn custom_fields_are_shared_by_the_workspace_shown_per_project_and_checked_by_kind() {
+    let fixture = Fixture::new().await;
+    let workspace = fixture.workspace_id.clone();
+    let send = |method: &'static str, uri: String, cookie: String, body: Option<Value>| {
+        let app = fixture.app.clone();
+        async move {
+            let request = match body {
+                Some(body) => json_request(method, &uri, &cookie, body),
+                None => cookie_request(method, &uri, &cookie),
+            };
+            let response = app.oneshot(request).await.unwrap();
+            let status = response.status();
+            let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+            (status, serde_json::from_slice::<Value>(&bytes).unwrap_or(Value::Null))
+        }
+    };
+    let owner = fixture.owner_cookie.clone();
+    let (_, member) = add_member(&fixture, "fields-member@example.com").await;
+    let fields = format!("/api/v1/workspaces/{workspace}/task-fields");
+
+    let (status, customer) = send("POST", fields.clone(), owner.clone(), Some(json!({
+        "name": " Customer ", "kind": "select",
+        "options": [{"name": "Acme", "color": "#FF0000"}, {"name": "Globex", "color": "#00ff00"}]
+    }))).await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(customer["name"], "Customer");
+    assert_eq!(customer["can_manage"], true);
+    let field_id = customer["id"].as_str().unwrap().to_owned();
+    let acme = customer["options"][0]["id"].as_str().unwrap().to_owned();
+    let globex = customer["options"][1]["id"].as_str().unwrap().to_owned();
+    // names are unique without case; options belong to select kinds only
+    let (status, _) = send("POST", fields.clone(), member.clone(), Some(json!({"name": "customer", "kind": "text"}))).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    let (status, _) = send("POST", fields.clone(), member.clone(), Some(json!({
+        "name": "Budget", "kind": "number", "options": [{"name": "x", "color": "#000000"}]
+    }))).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let (status, budget) = send("POST", fields.clone(), member.clone(), Some(json!({"name": "Budget", "kind": "number"}))).await;
+    assert_eq!(status, StatusCode::CREATED);
+    let budget_id = budget["id"].as_str().unwrap().to_owned();
+
+    // a member manages only the fields they created
+    let (status, _) = send("PATCH", format!("{fields}/{field_id}"), member.clone(), Some(json!({"name": "Client", "expected_version": 0}))).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (_, gallery) = send("GET", fields.clone(), member.clone(), None).await;
+    let names: Vec<(&str, bool)> = gallery["items"].as_array().unwrap().iter()
+        .map(|field| (field["name"].as_str().unwrap(), field["can_manage"].as_bool().unwrap())).collect();
+    assert_eq!(names, [("Budget", true), ("Customer", false)]);
+
+    let task = fixture.create_task("Fielded").await;
+    let task_id = task["id"].as_str().unwrap();
+    let value_uri = |field: &str| format!("/api/v1/workspaces/{workspace}/tasks/{task_id}/fields/{field}");
+    // a field the project does not show takes no value
+    let (status, _) = send("PUT", value_uri(&field_id), owner.clone(), Some(json!({"value": acme}))).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    let project_fields = format!("/api/v1/workspaces/{workspace}/projects/{}/fields", fixture.project_id);
+    let (status, _) = send("PUT", project_fields.clone(), owner.clone(), Some(json!({"field_ids": [Id::new_v7().to_string()]}))).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let (status, shown) = send("PUT", project_fields.clone(), owner.clone(), Some(json!({"field_ids": [budget_id, field_id]}))).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(shown["items"][0]["name"], "Budget");
+    assert_eq!(shown["items"][1]["project_count"], 1);
+
+    let (status, _) = send("PUT", value_uri(&budget_id), member.clone(), Some(json!({"value": "12"}))).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let (status, _) = send("PUT", value_uri(&budget_id), member.clone(), Some(json!({"value": 1250.5}))).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = send("PUT", value_uri(&field_id), member.clone(), Some(json!({"value": Id::new_v7().to_string()}))).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let (status, values) = send("PUT", value_uri(&field_id), member.clone(), Some(json!({"value": globex}))).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(values["items"].as_array().unwrap().len(), 2);
+
+    // removing an option drops the values that point at it; kept options keep their ids
+    let (status, changed) = send("PATCH", format!("{fields}/{field_id}"), owner.clone(), Some(json!({
+        "options": [{"id": acme, "name": "Acme Inc", "color": "#ff0000"}], "expected_version": 0
+    }))).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(changed["options"][0]["id"], acme.as_str());
+    let values_uri = format!("/api/v1/workspaces/{workspace}/tasks/{task_id}/fields");
+    let (_, values) = send("GET", values_uri.clone(), owner.clone(), None).await;
+    assert_eq!(values["items"], json!([{"field_id": budget_id, "value": 1250.5}]));
+
+    let (_, activity) = send("GET", format!("/api/v1/workspaces/{workspace}/tasks/{task_id}/activity"), owner.clone(), None).await;
+    assert!(activity["items"].as_array().unwrap().iter().any(|event| event["action"] == "task.field_changed" && event["metadata"]["field_name"] == "Budget"));
+
+    // null clears; deleting a field removes it from projects and tasks
+    let (_, values) = send("PUT", value_uri(&budget_id), member.clone(), Some(json!({"value": null}))).await;
+    assert_eq!(values["items"], json!([]));
+    let (status, _) = send("DELETE", format!("{fields}/{budget_id}?expected_version=0"), member.clone(), None).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (_, shown) = send("GET", project_fields, member.clone(), None).await;
+    assert_eq!(shown["items"].as_array().unwrap().len(), 1);
+
+    // another workspace's member sees nothing of this workspace's fields
+    let other = create_workspace(&fixture, "Elsewhere").await;
+    let (status, other_gallery) = send("GET", format!("/api/v1/workspaces/{other}/task-fields"), owner, None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(other_gallery["items"], json!([]));
+}
+
+/// Fields for the custom-field list tests: one of each kind, all shown by `project_id`.
+struct FieldSet {
+    customer: String,
+    customer_options: [String; 3],
+    budget: String,
+    deadline: String,
+    notes: String,
+    link: String,
+    signed: String,
+    tags: String,
+    tag_options: [String; 2],
+}
+
+async fn create_field_set(fixture: &Fixture, project_ids: &[&str]) -> FieldSet {
+    let fields = format!("/api/v1/workspaces/{}/task-fields", fixture.workspace_id);
+    let create = |body: Value| {
+        let fields = fields.clone();
+        async move {
+            let (status, field) = call(fixture, "POST", &fields, Some(body)).await;
+            assert_eq!(status, StatusCode::CREATED, "{field}");
+            field
+        }
+    };
+    let option = |name: &str| json!({"name": name, "color": "#112233"});
+    let customer = create(json!({"name": "Customer", "kind": "select",
+        "options": [option("Acme"), option("Beta"), option("Cobalt")]}))
+    .await;
+    let tags = create(json!({"name": "Tags", "kind": "multi_select",
+        "options": [option("x"), option("y")]}))
+    .await;
+    let id = |field: &Value| field["id"].as_str().unwrap().to_owned();
+    let option_id = |field: &Value, index: usize| field["options"][index]["id"].as_str().unwrap().to_owned();
+    let set = FieldSet {
+        customer: id(&customer),
+        customer_options: [option_id(&customer, 0), option_id(&customer, 1), option_id(&customer, 2)],
+        budget: id(&create(json!({"name": "Budget", "kind": "number"})).await),
+        deadline: id(&create(json!({"name": "Deadline", "kind": "date"})).await),
+        notes: id(&create(json!({"name": "Notes", "kind": "text"})).await),
+        link: id(&create(json!({"name": "Link", "kind": "url"})).await),
+        signed: id(&create(json!({"name": "Signed", "kind": "checkbox"})).await),
+        tags: id(&tags),
+        tag_options: [option_id(&tags, 0), option_id(&tags, 1)],
+    };
+    let all = [&set.customer, &set.budget, &set.deadline, &set.notes, &set.link, &set.signed, &set.tags];
+    for project_id in project_ids {
+        let (status, body) = call(
+            fixture,
+            "PUT",
+            &format!("/api/v1/workspaces/{}/projects/{project_id}/fields", fixture.workspace_id),
+            Some(json!({ "field_ids": all })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+    }
+    set
+}
+
+async fn set_field_value(fixture: &Fixture, task_id: &str, field_id: &str, value: Value) {
+    let (status, body) = call(
+        fixture,
+        "PUT",
+        &format!("{}/fields/{field_id}", task_uri(fixture, task_id)),
+        Some(json!({ "value": value })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+}
+
+/// Every page of `POST /tasks/query` as `cookie`, `limit` tasks a page; the titles in order.
+async fn query_all_titles(
+    fixture: &Fixture,
+    cookie: &str,
+    filter: Value,
+    order: Value,
+    limit: usize,
+) -> Result<Vec<String>, (StatusCode, Value)> {
+    let mut titles = Vec::new();
+    let mut cursor: Option<String> = None;
+    loop {
+        let mut body = json!({
+            "filter": filter,
+            "order_by": "manual",
+            "order_direction": "asc",
+            "show_completed": "all",
+            "limit": limit,
+            "cursor": cursor,
+        });
+        for (key, value) in order.as_object().unwrap() {
+            body[key] = value.clone();
+        }
+        let response = fixture
+            .app
+            .clone()
+            .oneshot(json_request(
+                "POST",
+                &format!("/api/v1/workspaces/{}/tasks/query", fixture.workspace_id),
+                cookie,
+                body,
+            ))
+            .await
+            .unwrap();
+        let status = response.status();
+        let page = response_json(response).await;
+        if status != StatusCode::OK {
+            return Err((status, page));
+        }
+        titles.extend(
+            page["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|task| task["title"].as_str().unwrap().to_owned()),
+        );
+        match page["next_cursor"].as_str() {
+            Some(next) => cursor = Some(next.to_owned()),
+            None => return Ok(titles),
+        }
+        assert!(titles.len() < 100, "pagination does not end");
+    }
+}
+
+/// t1..t5 in the fixture project with values (t4 has none).
+async fn tasks_with_field_values(fixture: &Fixture, set: &FieldSet) -> Vec<String> {
+    let mut ids = Vec::new();
+    for title in ["t1", "t2", "t3", "t4", "t5"] {
+        ids.push(id_of(&fixture.create_task(title).await).to_owned());
+    }
+    let [acme, beta, cobalt] = &set.customer_options;
+    let [x, y] = &set.tag_options;
+    for (task, field, value) in [
+        (0, &set.customer, json!(acme)),
+        (0, &set.budget, json!(10)),
+        (0, &set.deadline, json!("2026-01-10")),
+        (0, &set.notes, json!("Hello World")),
+        (0, &set.link, json!("https://example.com/a")),
+        (0, &set.signed, json!(true)),
+        (0, &set.tags, json!([x, y])),
+        (1, &set.customer, json!(beta)),
+        (1, &set.budget, json!(2.5)),
+        (1, &set.deadline, json!("2026-02-01")),
+        (1, &set.notes, json!("other")),
+        (1, &set.tags, json!([y])),
+        (2, &set.customer, json!(cobalt)),
+        (2, &set.budget, json!(100)),
+        (2, &set.deadline, json!("2026-01-31")),
+        (4, &set.customer, json!(acme)),
+        (4, &set.budget, json!(-1)),
+    ] {
+        set_field_value(fixture, &ids[task], field, value).await;
+    }
+    ids
+}
+
+fn custom(field_id: &str, operator: &str, value: Option<Value>) -> Value {
+    let mut condition = json!({"field": "custom_field", "field_id": field_id, "operator": operator});
+    if let Some(value) = value {
+        condition["value"] = value;
+    }
+    json!({"op": "and", "children": [condition]})
+}
+
+#[tokio::test]
+async fn task_lists_filter_by_every_custom_field_kind() {
+    let fixture = Fixture::new().await;
+    let set = create_field_set(&fixture, &[&fixture.project_id]).await;
+    tasks_with_field_values(&fixture, &set).await;
+    let cookie = fixture.owner_cookie.clone();
+    let titles = |filter: Value| {
+        let cookie = cookie.clone();
+        let fixture = &fixture;
+        async move {
+            let mut titles = query_all_titles(fixture, &cookie, filter, json!({}), 100).await.unwrap();
+            titles.sort();
+            titles.join(",")
+        }
+    };
+    let [acme, beta, _] = set.customer_options.clone();
+    let [x, y] = set.tag_options.clone();
+    let date = |day: &str| json!({ "absolute": day });
+    for (filter, expected) in [
+        (custom(&set.customer, "is", Some(json!([acme]))), "t1,t5"),
+        (custom(&set.customer, "is", Some(json!([acme, beta]))), "t1,t2,t5"),
+        (custom(&set.customer, "is_not", Some(json!([acme]))), "t2,t3,t4"),
+        (custom(&set.customer, "is_empty", None), "t4"),
+        (custom(&set.customer, "is_not_empty", None), "t1,t2,t3,t5"),
+        (custom(&set.budget, "less_than", Some(json!(10))), "t2,t5"),
+        (custom(&set.budget, "greater_than", Some(json!(5))), "t1,t3"),
+        (custom(&set.budget, "is", Some(json!(10))), "t1"),
+        (custom(&set.budget, "is", Some(json!(2.5))), "t2"),
+        (custom(&set.budget, "between", Some(json!([0, 10]))), "t1,t2"),
+        (custom(&set.budget, "is_empty", None), "t4"),
+        (custom(&set.deadline, "before", Some(date("2026-01-31"))), "t1"),
+        (custom(&set.deadline, "after", Some(date("2026-01-10"))), "t2,t3"),
+        (custom(&set.deadline, "between", Some(json!([date("2026-01-10"), date("2026-01-31")]))), "t1,t3"),
+        (custom(&set.deadline, "is_empty", None), "t4,t5"),
+        (custom(&set.notes, "contains", Some(json!("WORLD"))), "t1"),
+        (custom(&set.notes, "contains", Some(json!("o"))), "t1,t2"),
+        (custom(&set.notes, "is_not_empty", None), "t1,t2"),
+        (custom(&set.link, "contains", Some(json!("example.com/"))), "t1"),
+        (custom(&set.signed, "is", Some(json!(true))), "t1"),
+        (custom(&set.signed, "is", Some(json!(false))), "t2,t3,t4,t5"),
+        (custom(&set.tags, "includes_any", Some(json!([x]))), "t1"),
+        (custom(&set.tags, "includes_any", Some(json!([y]))), "t1,t2"),
+        (custom(&set.tags, "includes_all", Some(json!([x, y]))), "t1"),
+        (custom(&set.tags, "excludes", Some(json!([x]))), "t2,t3,t4,t5"),
+        (custom(&set.tags, "is_empty", None), "t3,t4,t5"),
+        // a deleted (or unknown) field has no values
+        (custom(&Id::new_v7().to_string(), "is_empty", None), "t1,t2,t3,t4,t5"),
+        (custom(&Id::new_v7().to_string(), "is", Some(json!([acme]))), ""),
+    ] {
+        assert_eq!(titles(filter.clone()).await, expected, "{filter}");
+    }
+
+    // list records carry the values
+    let (_, page) = call(
+        &fixture,
+        "POST",
+        &format!("/api/v1/workspaces/{}/tasks/query", fixture.workspace_id),
+        Some(json!({"filter": custom(&set.signed, "is", Some(json!(true))), "order_by": "manual",
+            "order_direction": "asc", "show_completed": "all"})),
+    )
+    .await;
+    let values = page["items"][0]["field_values"].as_array().unwrap();
+    assert_eq!(values.len(), 7, "{page}");
+    assert!(values.contains(&json!({"field_id": set.budget, "value": 10})), "{page}");
+
+    // an option removed from its field no longer counts
+    let (_, customer) = call(
+        &fixture,
+        "GET",
+        &format!("/api/v1/workspaces/{}/task-fields", fixture.workspace_id),
+        None,
+    )
+    .await;
+    let field = customer["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|field| field["id"] == set.customer.as_str())
+        .unwrap()
+        .clone();
+    let (status, body) = call(
+        &fixture,
+        "PATCH",
+        &format!("/api/v1/workspaces/{}/task-fields/{}", fixture.workspace_id, set.customer),
+        Some(json!({"options": [field["options"][0], field["options"][1]], "expected_version": field["version"]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(titles(custom(&set.customer, "is_empty", None)).await, "t3,t4");
+    assert_eq!(
+        titles(custom(&set.customer, "is_not", Some(json!([set.customer_options[2]])))).await,
+        "t1,t2,t3,t4,t5"
+    );
+
+    // operators and values follow the field's kind
+    for (filter, path) in [
+        (custom(&set.budget, "contains", Some(json!("1"))), "filter.children[0].operator"),
+        (custom(&set.customer, "includes_any", Some(json!([acme]))), "filter.children[0].operator"),
+        (custom(&set.deadline, "before", Some(json!(3))), "filter.children[0].value"),
+        (custom(&set.signed, "is", Some(json!([acme]))), "filter.children[0].value"),
+        (
+            json!({"op": "and", "children": [{"field": "custom_field", "operator": "is_empty"}]}),
+            "filter.children[0].field_id",
+        ),
+        (
+            json!({"op": "and", "children": [{"field": "estimate", "field_id": set.budget, "operator": "is_empty"}]}),
+            "filter.children[0].field_id",
+        ),
+        (
+            json!({"op": "and", "children": [{"field": "estimate", "operator": "less_than", "value": 3}]}),
+            "filter.children[0].operator",
+        ),
+    ] {
+        let (status, body) = query_all_titles(&fixture, &cookie, filter.clone(), json!({}), 100)
+            .await
+            .unwrap_err();
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{filter}");
+        assert!(body.to_string().contains(path), "{filter}: {body}");
+    }
+}
+
+#[tokio::test]
+async fn task_lists_sort_by_custom_fields_across_pages_with_empty_values_last() {
+    let fixture = Fixture::new().await;
+    let set = create_field_set(&fixture, &[&fixture.project_id]).await;
+    tasks_with_field_values(&fixture, &set).await;
+    let none = json!({"op": "and", "children": []});
+    let sorted = |field: &str, direction: &str, limit: usize| {
+        let order = json!({"order_by": "custom_field", "order_field_id": field, "order_direction": direction});
+        let fixture = &fixture;
+        let none = none.clone();
+        async move {
+            query_all_titles(fixture, &fixture.owner_cookie, none, order, limit)
+                .await
+                .unwrap()
+                .join(",")
+        }
+    };
+    for limit in [1, 2, 100] {
+        assert_eq!(sorted(&set.budget, "asc", limit).await, "t5,t2,t1,t3,t4", "limit {limit}");
+        assert_eq!(sorted(&set.budget, "desc", limit).await, "t3,t1,t2,t5,t4", "limit {limit}");
+        // option order, ties by id
+        assert_eq!(sorted(&set.customer, "asc", limit).await, "t1,t5,t2,t3,t4", "limit {limit}");
+        assert_eq!(sorted(&set.customer, "desc", limit).await, "t3,t2,t5,t1,t4", "limit {limit}");
+        assert_eq!(sorted(&set.deadline, "asc", limit).await, "t1,t3,t2,t4,t5", "limit {limit}");
+        assert_eq!(sorted(&set.deadline, "desc", limit).await, "t2,t3,t1,t5,t4", "limit {limit}");
+        assert_eq!(sorted(&set.notes, "asc", limit).await, "t1,t2,t3,t4,t5", "limit {limit}");
+        assert_eq!(sorted(&set.notes, "desc", limit).await, "t2,t1,t5,t4,t3", "limit {limit}");
+        // unchecked first ascending, checked first descending
+        assert_eq!(sorted(&set.signed, "asc", limit).await, "t2,t3,t4,t5,t1", "limit {limit}");
+        assert_eq!(sorted(&set.signed, "desc", limit).await, "t1,t5,t4,t3,t2", "limit {limit}");
+        // the first chosen option in the field's order
+        assert_eq!(sorted(&set.tags, "asc", limit).await, "t1,t2,t3,t4,t5", "limit {limit}");
+        // a deleted field: every task is empty, so the id order
+        assert_eq!(
+            sorted(&Id::new_v7().to_string(), "asc", limit).await,
+            "t1,t2,t3,t4,t5",
+            "limit {limit}"
+        );
+    }
+    // a custom sort needs its field, and a cursor of another sort does not fit
+    let (status, _) = query_all_titles(&fixture, &fixture.owner_cookie, none.clone(),
+        json!({"order_by": "custom_field"}), 100).await.unwrap_err();
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let (_, first) = call(
+        &fixture,
+        "POST",
+        &format!("/api/v1/workspaces/{}/tasks/query", fixture.workspace_id),
+        Some(json!({"filter": none, "order_by": "custom_field", "order_field_id": set.budget,
+            "order_direction": "asc", "show_completed": "all", "limit": 1})),
+    )
+    .await;
+    let (status, _) = call(
+        &fixture,
+        "POST",
+        &format!("/api/v1/workspaces/{}/tasks/query", fixture.workspace_id),
+        Some(json!({"filter": none, "order_by": "custom_field", "order_field_id": set.notes,
+            "order_direction": "asc", "show_completed": "all", "limit": 1,
+            "cursor": first["next_cursor"]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn custom_field_filters_and_sorting_skip_private_projects_the_reader_does_not_see() {
+    let fixture = Fixture::new().await;
+    let (status, secret) = call(
+        &fixture,
+        "POST",
+        &format!("/api/v1/workspaces/{}/projects", fixture.workspace_id),
+        Some(json!({"name": "Secret", "key": "SEC", "color": "#336699", "private": true})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{secret}");
+    let secret_id = id_of(&secret).to_owned();
+    let set = create_field_set(&fixture, &[&fixture.project_id, &secret_id]).await;
+    tasks_with_field_values(&fixture, &set).await;
+    let secret_status = status_id_by_category(&fixture, &secret_id, "unstarted").await;
+    let (status, hidden) = call(
+        &fixture,
+        "POST",
+        &format!("/api/v1/workspaces/{}/tasks", fixture.workspace_id),
+        Some(json!({"project_id": secret_id, "status_id": secret_status, "title": "hidden"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    set_field_value(&fixture, id_of(&hidden), &set.customer, json!(set.customer_options[0])).await;
+    set_field_value(&fixture, id_of(&hidden), &set.budget, json!(-5)).await;
+    let (_, member) = add_member(&fixture, "fields-reader@example.com").await;
+    let filter = custom(&set.customer, "is", Some(json!([set.customer_options[0]])));
+    let order = json!({"order_by": "custom_field", "order_field_id": set.budget, "order_direction": "asc"});
+    let owner_titles = query_all_titles(&fixture, &fixture.owner_cookie, filter.clone(), order.clone(), 1).await.unwrap();
+    assert_eq!(owner_titles.join(","), "hidden,t5,t1");
+    let member_titles = query_all_titles(&fixture, &member, filter, order, 1).await.unwrap();
+    assert_eq!(member_titles.join(","), "t5,t1");
+}

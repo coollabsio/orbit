@@ -1,15 +1,18 @@
 import type { ComponentType } from 'react'
-import { Calendar, Category, Danger, DocumentText, Flag, Hierarchy, Link2, Lock, Setting2 as Settings, Tag } from 'reicon-react'
+import type { OptionalTaskProperty, WorkspaceRecord } from '@orbit/api/generated/types.gen'
+import { showsTaskProperty } from '@orbit/api/taskProperties'
+import { Calendar, Category, Danger, DocumentText, Flag, Hierarchy, Link2, Lock, Setting2 as Settings, Tag, TaskSquare } from 'reicon-react'
 
-export type ProjectSettingsSection = 'general' | 'access' | 'statuses' | 'labels' | 'sub-issues' | 'milestones' | 'cycles' | 'docs' | 'github' | 'danger-zone'
+export type ProjectSettingsSection = 'general' | 'access' | 'statuses' | 'labels' | 'fields' | 'sub-issues' | 'milestones' | 'cycles' | 'docs' | 'github' | 'danger-zone'
 
 export interface ProjectSettingsGroup {
   label: string
-  items: { section: ProjectSettingsSection; label: string; icon: ComponentType<{ className?: string }> }[]
+  /** `property`: the built-in task property the page sets up; the page goes when the workspace hides it. */
+  items: { section: ProjectSettingsSection; label: string; icon: ComponentType<{ className?: string }>; property?: OptionalTaskProperty }[]
 }
 
 /** The project settings pages, grouped as the sidebar shows them. */
-export const PROJECT_SETTINGS_GROUPS: ProjectSettingsGroup[] = [
+const PROJECT_SETTINGS_GROUPS: ProjectSettingsGroup[] = [
   {
     label: 'Project',
     items: [
@@ -22,14 +25,15 @@ export const PROJECT_SETTINGS_GROUPS: ProjectSettingsGroup[] = [
     items: [
       { section: 'statuses', label: 'Statuses', icon: Category },
       { section: 'labels', label: 'Labels', icon: Tag },
+      { section: 'fields', label: 'Fields', icon: TaskSquare },
       { section: 'sub-issues', label: 'Sub-issues', icon: Hierarchy },
     ],
   },
   {
     label: 'Planning',
     items: [
-      { section: 'milestones', label: 'Milestones', icon: Flag },
-      { section: 'cycles', label: 'Cycles', icon: Calendar },
+      { section: 'milestones', label: 'Milestones', icon: Flag, property: 'milestone' },
+      { section: 'cycles', label: 'Cycles', icon: Calendar, property: 'cycle' },
     ],
   },
   {
@@ -45,11 +49,18 @@ export const PROJECT_SETTINGS_GROUPS: ProjectSettingsGroup[] = [
   },
 ]
 
-const ITEMS = PROJECT_SETTINGS_GROUPS.flatMap((group) => group.items)
+type TaskPropertyScope = Pick<WorkspaceRecord, 'hidden_task_properties'> | null | undefined
 
-/** The page of a `:section` route segment; an unknown one is `null`. */
-export function projectSettingsItem(section: string) {
-  return ITEMS.find((item) => item.section === section) ?? null
+/** The settings pages the workspace shows: without those of a built-in property it hides (Settings, Task fields). */
+export function projectSettingsGroups(workspace: TaskPropertyScope): ProjectSettingsGroup[] {
+  return PROJECT_SETTINGS_GROUPS
+    .map((group) => ({ ...group, items: group.items.filter((item) => !item.property || showsTaskProperty(workspace, item.property)) }))
+    .filter((group) => group.items.length > 0)
+}
+
+/** The page of a `:section` route segment; an unknown or hidden one is `null`. */
+export function projectSettingsItem(section: string, workspace: TaskPropertyScope) {
+  return projectSettingsGroups(workspace).flatMap((group) => group.items).find((item) => item.section === section) ?? null
 }
 
 export function projectSettingsPath(projectId: string, section: ProjectSettingsSection): string {

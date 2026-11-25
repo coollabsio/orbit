@@ -6,13 +6,14 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { BlockedIndicator } from './BlockedIndicator'
 import { refIdentifier, type Cycle, type Milestone, type Project, type Task, type TaskStatusDef } from '@/features/tasks/api/models'
 import type { User } from '@/features/workspaces/models'
-import type { LabelRecord } from '@orbit/api/generated/types.gen'
+import type { LabelRecord, TaskField } from '@orbit/api/generated/types.gen'
 import type { TaskProperty } from '@/features/views/viewState'
 import { PriorityPicker } from './PriorityPicker'
 import { StatusPicker } from './StatusPicker'
 import { AssigneePicker } from './AssigneePicker'
 import { LinkifiedText } from './LinkifiedText'
-import { CycleChip, DateStamp, EstimateChip, MilestoneChip, ProjectChip } from './TaskPropertyChips'
+import { CustomFieldChip, CycleChip, DateStamp, EstimateChip, MilestoneChip, ProjectChip } from './TaskPropertyChips'
+import { taskFieldValue } from '@/features/tasks/fieldsLib'
 import { DueDatePicker } from './DueDatePicker'
 import { SubIssueProgress, completedStatusColor } from './SubIssueProgress'
 import { TreeGutter } from './TreeGutter'
@@ -39,6 +40,8 @@ interface TaskRowProps {
   cycle: Cycle | undefined
   /** Only these properties render (`display.properties`). */
   properties: TaskProperty[]
+  /** Custom fields shown after the labels (`display.custom_fields`, resolved against the gallery). */
+  customFields: readonly TaskField[]
   selected: boolean
   dragging: boolean
   /** False when no drop could change anything (e.g. grouped by project with a non-manual order). */
@@ -59,8 +62,8 @@ interface TaskRowProps {
   nest?: NestRowProps
 }
 
-/** List row: [checkbox] priority · id · [tree gutter] status · [parent ›] title … labels · progress · project · milestone · cycle · estimate · due · assignee · created · updated. */
-export function TaskRow({ task, statuses, labels, users, assignees, project, milestone, cycle, properties, selected, dragging, draggable, dropEdge, onOpen, onToggleSelect, onDragStart, onDragEnd, onRequestDuplicate, tree, showParent, nest }: TaskRowProps) {
+/** List row: [checkbox] priority · id · [tree gutter] status · [parent ›] title … labels · custom fields · progress · project · milestone · cycle · estimate · due · assignee · created · updated. */
+export function TaskRow({ task, statuses, labels, users, assignees, project, milestone, cycle, properties, customFields, selected, dragging, draggable, dropEdge, onOpen, onToggleSelect, onDragStart, onDragEnd, onRequestDuplicate, tree, showParent, nest }: TaskRowProps) {
   const status = statuses.find((s) => s.id === task.statusId)
   const has = (property: TaskProperty) => properties.includes(property)
   return (
@@ -150,6 +153,11 @@ export function TaskRow({ task, statuses, labels, users, assignees, project, mil
             const label = labels.find((item) => item.id === labelId)
             return label ? <LabelPill key={label.id} label={label} /> : null
           })}
+        </span>
+      ) : null}
+      {customFields.length > 0 ? (
+        <span className="flex shrink-0 items-center gap-2 text-xs max-[1099px]:hidden">
+          {customFields.map((field) => <CustomFieldChip key={field.id} field={field} value={taskFieldValue(task, field.id)} />)}
         </span>
       ) : null}
       {/* fixed-width progress, project, due date and assignee slots keep the columns aligned across rows;

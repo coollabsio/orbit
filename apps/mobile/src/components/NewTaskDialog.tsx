@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { router } from 'expo-router'
 import { type ReactNode, useState } from 'react'
 import { Alert, Modal, Pressable, ScrollView, useWindowDimensions, View } from 'react-native'
+import { showsTaskProperty } from '@orbit/api/taskProperties'
 import { TextInput } from '../ui/scaled'
 
 import { keys } from '../data/keys'
@@ -88,7 +89,7 @@ export interface NewTaskDefaults {
  * exists; the files go into the description, after its text, as on the web.
  */
 export function NewTaskDialog({ defaults, onClose }: { defaults: NewTaskDefaults; onClose: () => void }) {
-  const { client, workspaceId } = useOrbit()
+  const { client, workspace, workspaceId } = useOrbit()
   const queryClient = useQueryClient()
   const { colors, scheme } = useTheme()
   const { height } = useWindowDimensions()
@@ -290,18 +291,24 @@ export function NewTaskDialog({ defaults, onClose }: { defaults: NewTaskDefaults
                 <Icon name="calendar" size={14} color={colors.foreground} />
                 <ChipText>{due ? dueDateLabel(due.end, due.start) : 'Due date'}</ChipText>
               </Chip>
-              <Chip label={milestone ? `Milestone: ${milestone.name}` : 'Milestone'} onPress={project ? () => sheets.open({ kind: 'milestone' }) : undefined}>
-                <Icon name="target" size={14} color={colors.mutedForeground} />
-                <ChipText>{milestone?.name ?? 'Milestone'}</ChipText>
-              </Chip>
-              <Chip label={cycle ? `Cycle: ${cycleLabel(cycle)}` : 'Cycle'} onPress={project ? () => sheets.open({ kind: 'cycle' }) : undefined}>
-                <Icon name="refresh" size={14} color={cycle && cycleTiming(cycle, new Date()) === 'current' ? colors.primary : colors.mutedForeground} />
-                <ChipText>{cycle ? cycleLabel(cycle) : 'Cycle'}</ChipText>
-              </Chip>
-              <Chip label={estimate === null ? 'Estimate' : `Estimate: ${estimateLabel(estimate)}`} onPress={() => sheets.open({ kind: 'estimate' })}>
-                <Icon name="chart" size={14} color={colors.mutedForeground} />
-                <ChipText>{estimate === null ? 'Estimate' : estimateLabel(estimate)}</ChipText>
-              </Chip>
+              {showsTaskProperty(workspace, 'milestone') ? (
+                <Chip label={milestone ? `Milestone: ${milestone.name}` : 'Milestone'} onPress={project ? () => sheets.open({ kind: 'milestone' }) : undefined}>
+                  <Icon name="target" size={14} color={colors.mutedForeground} />
+                  <ChipText>{milestone?.name ?? 'Milestone'}</ChipText>
+                </Chip>
+              ) : null}
+              {showsTaskProperty(workspace, 'cycle') ? (
+                <Chip label={cycle ? `Cycle: ${cycleLabel(cycle)}` : 'Cycle'} onPress={project ? () => sheets.open({ kind: 'cycle' }) : undefined}>
+                  <Icon name="refresh" size={14} color={cycle && cycleTiming(cycle, new Date()) === 'current' ? colors.primary : colors.mutedForeground} />
+                  <ChipText>{cycle ? cycleLabel(cycle) : 'Cycle'}</ChipText>
+                </Chip>
+              ) : null}
+              {showsTaskProperty(workspace, 'estimate') ? (
+                <Chip label={estimate === null ? 'Estimate' : `Estimate: ${estimateLabel(estimate)}`} onPress={() => sheets.open({ kind: 'estimate' })}>
+                  <Icon name="chart" size={14} color={colors.mutedForeground} />
+                  <ChipText>{estimate === null ? 'Estimate' : estimateLabel(estimate)}</ChipText>
+                </Chip>
+              ) : null}
               <Chip
                 label={parent ? `Parent: ${identifier(parent, projects.data ?? [])} ${parent.title}` : 'Parent'}
                 onPress={() => sheets.open(parent ? { kind: 'parent-menu' } : { kind: 'pick-task', purpose: 'parent' })}

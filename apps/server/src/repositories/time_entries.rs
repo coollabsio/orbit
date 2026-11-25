@@ -9,8 +9,8 @@ use utoipa::ToSchema;
 
 use super::project_access::ProjectScope;
 use super::tasks::{
-    CommentContent, CommentRecord, ImportedComment, TaskError, TaskRepository, check_version,
-    parse_id, require_access, require_task_tx, validate_member,
+    CommentContent, CommentRecord, ImportedComment, TIME_TRACKING_OFF, TaskError, TaskRepository,
+    check_version, parse_id, require_access, require_task_tx, time_tracking_on, validate_member,
 };
 
 /// The longest single entry: one day.
@@ -296,7 +296,8 @@ impl TaskRepository {
         Ok((comment, entry))
     }
 
-    /// Checks that the actor may log `entry` on the live task, then writes it with its audit event.
+    /// Checks that the actor may log `entry` on the live task of a project with time tracking on,
+    /// then writes it with its audit event. Imports write their entries without this check.
     #[allow(clippy::too_many_arguments)]
     async fn insert_entry_in_tx(
         &self,
@@ -319,6 +320,9 @@ impl TaskRepository {
             .await?,
         )?;
         self.require_granted_project(project_id)?;
+        if !time_tracking_on(tx, project_id).await? {
+            return Err(TaskError::Refused(TIME_TRACKING_OFF));
+        }
         let user_id = entry.user_id;
         if !actor.can_manage_time_of(project_id, user_id) {
             return Err(TaskError::Forbidden);

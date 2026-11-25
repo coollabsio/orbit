@@ -23,6 +23,7 @@ export function taskQueryBody(filter: FilterGroup, display: DisplayOptions): Tas
     filter: filter as unknown as TaskQueryBody['filter'],
     order_by: display.order_by,
     order_direction: display.order_direction,
+    ...(display.order_by === 'custom_field' && display.order_field_id ? { order_field_id: display.order_field_id } : {}),
     show_completed: display.show_completed,
     ...(display.sub_issues === 'hidden' ? { sub_issues: 'hidden' as const } : {}),
   }

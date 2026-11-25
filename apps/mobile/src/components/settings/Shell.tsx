@@ -29,6 +29,7 @@ export const WORKSPACE_NAV: readonly SettingsNavItem[] = [
   { href: '/settings/members', label: 'Members', icon: 'people' },
   { href: '/settings/roles', label: 'Roles', icon: 'shieldUser', permission: 'roles.manage' },
   { href: '/settings/billing', label: 'Billing', icon: 'card', cloud: true },
+  { href: '/settings/task-fields', label: 'Task fields', icon: 'tasks' },
   { href: '/settings/emoji', label: 'Emoji', icon: 'smile', permission: 'chat.manage' },
   { href: '/settings/stickers', label: 'Stickers', icon: 'sticker', permission: 'chat.manage' },
   { href: '/settings/reports', label: 'Reports', icon: 'flag', permission: 'chat.manage' },

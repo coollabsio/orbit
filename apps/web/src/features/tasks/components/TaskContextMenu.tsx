@@ -2,6 +2,7 @@ import { useRef, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
 import { ArrowUpRightSquare, Calendar, Clipboard, Copy, Diamonds, Flag, Folder, Hierarchy2, LinkBroken, RecordCircle, RefreshCircle, Tag, Trash, Triangle, User as UserIcon, UserAdd } from 'reicon-react'
 import type { BulkItem, LabelRecord } from '@orbit/api/generated/types.gen'
+import { showsTaskProperty } from '@orbit/api/taskProperties'
 import { ProjectLock } from '@/features/tasks/components/ProjectLock'
 import { ProjectMark } from '@/components/common/ProjectMark'
 import { UserAvatar } from '@/components/common/UserAvatar'
@@ -206,7 +207,7 @@ export function TaskContextMenu({ tasks, users, labels, statuses, groupContext, 
               {targets.some((task) => task.dueAt) ? <ContextMenuItem onClick={() => setDue(null, null)}>Remove due date</ContextMenuItem> : null}
             </ContextMenuSubContent>
           </ContextMenuSub>
-          {projectId && milestones.length > 0 ? (
+          {projectId && milestones.length > 0 && showsTaskProperty(workspace, 'milestone') ? (
             <ContextMenuSub>
               <ContextMenuSubTrigger>
                 <Diamonds aria-hidden />
@@ -223,7 +224,7 @@ export function TaskContextMenu({ tasks, users, labels, statuses, groupContext, 
               </ContextMenuSubContent>
             </ContextMenuSub>
           ) : null}
-          {projectId && (cycleGroups.open.length > 0 || targets.some((task) => task.cycleId)) ? (
+          {projectId && showsTaskProperty(workspace, 'cycle') && (cycleGroups.open.length > 0 || targets.some((task) => task.cycleId)) ? (
             <ContextMenuSub>
               <ContextMenuSubTrigger>
                 <RefreshCircle aria-hidden />
@@ -241,21 +242,23 @@ export function TaskContextMenu({ tasks, users, labels, statuses, groupContext, 
               </ContextMenuSubContent>
             </ContextMenuSub>
           ) : null}
-          <ContextMenuSub>
-            <ContextMenuSubTrigger>
-              <Triangle aria-hidden />
-              <span className="flex-1">Estimate</span>
-              <ContextMenuShortcut><Shortcut id="task.setEstimate" /></ContextMenuShortcut>
-            </ContextMenuSubTrigger>
-            <ContextMenuSubContent className="min-w-45">
-              <ContextMenuCheckboxItem checked={targets.every((task) => task.estimate == null)} closeOnClick onCheckedChange={() => mutate(estimateUpdates(targets, null))}>No estimate</ContextMenuCheckboxItem>
-              {ESTIMATE_OPTIONS.map((points) => (
-                <ContextMenuCheckboxItem key={points} checked={targets.every((task) => task.estimate === points)} closeOnClick onCheckedChange={() => mutate(estimateUpdates(targets, points))}>
-                  {estimateLabel(points)}
-                </ContextMenuCheckboxItem>
-              ))}
-            </ContextMenuSubContent>
-          </ContextMenuSub>
+          {showsTaskProperty(workspace, 'estimate') ? (
+            <ContextMenuSub>
+              <ContextMenuSubTrigger>
+                <Triangle aria-hidden />
+                <span className="flex-1">Estimate</span>
+                <ContextMenuShortcut><Shortcut id="task.setEstimate" /></ContextMenuShortcut>
+              </ContextMenuSubTrigger>
+              <ContextMenuSubContent className="min-w-45">
+                <ContextMenuCheckboxItem checked={targets.every((task) => task.estimate == null)} closeOnClick onCheckedChange={() => mutate(estimateUpdates(targets, null))}>No estimate</ContextMenuCheckboxItem>
+                {ESTIMATE_OPTIONS.map((points) => (
+                  <ContextMenuCheckboxItem key={points} checked={targets.every((task) => task.estimate === points)} closeOnClick onCheckedChange={() => mutate(estimateUpdates(targets, points))}>
+                    {estimateLabel(points)}
+                  </ContextMenuCheckboxItem>
+                ))}
+              </ContextMenuSubContent>
+            </ContextMenuSub>
+          ) : null}
           {labelOptions.length > 0 ? (
             <ContextMenuSub>
               <ContextMenuSubTrigger>

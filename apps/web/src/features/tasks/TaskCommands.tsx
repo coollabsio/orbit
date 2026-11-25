@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
 import type { BulkItem, LabelRecord } from '@orbit/api/generated/types.gen'
+import { showsTaskProperty } from '@orbit/api/taskProperties'
 import { ProjectLock } from '@/features/tasks/components/ProjectLock'
 import { ProjectMark } from '@/components/common/ProjectMark'
 import { UserAvatar } from '@/components/common/UserAvatar'
@@ -89,9 +90,10 @@ export function TaskCommands({ tasks, users, labels, statuses, groupContext, cur
   useCommand('task.setAssignee', open('assignee'), { available })
   useCommand('task.setLabels', open('labels'), { available })
   useCommand('task.setDueDate', open('dueDate'), { available })
-  useCommand('task.setMilestone', open('milestone'), { available: oneProject })
-  useCommand('task.setCycle', open('cycle'), { available: oneProject })
-  useCommand('task.setEstimate', open('estimate'), { available })
+  // a built-in property the workspace hides (Settings, Task fields) has no command
+  useCommand('task.setMilestone', showsTaskProperty(workspace, 'milestone') ? open('milestone') : null, { available: oneProject })
+  useCommand('task.setCycle', showsTaskProperty(workspace, 'cycle') ? open('cycle') : null, { available: oneProject })
+  useCommand('task.setEstimate', showsTaskProperty(workspace, 'estimate') ? open('estimate') : null, { available })
   useCommand('task.moveToProject', open('project'), { available: () => available() && projects.length > 1 })
   useCommand('task.assignMe', () => mutate(assignUpdates(targets(), currentUserId)), { available })
   useCommand('task.copyId', () => copy(targets()[0].identifier, 'Copied task ID'), { available: single })

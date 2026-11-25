@@ -1472,6 +1472,10 @@ export type CompressionStatus = CompressSummary & {
 
 export type Condition = {
     field: FilterField;
+    /**
+     * The task field (`/task-fields`) of a `custom_field` condition; omitted for other fields.
+     */
+    field_id?: string | null;
     operator: FilterOperator;
     /**
      * An array of strings, a date value, a pair of date values, or a string, depending on
@@ -2744,10 +2748,18 @@ export type DiscordEventResponse = {
 };
 
 export type DisplayOptions = {
+    /**
+     * Task fields shown on rows and cards after `properties`, in order (optional, default none).
+     */
+    custom_fields?: Array<string>;
     group_by: GroupBy;
     layout: Layout;
     order_by: OrderBy;
     order_direction: OrderDirection;
+    /**
+     * The task field of `order_by: custom_field`; omitted for every other ordering.
+     */
+    order_field_id?: string | null;
     properties: Array<TaskProperty>;
     show_completed: ShowCompleted;
     show_empty_groups: boolean;
@@ -2875,7 +2887,7 @@ export type FcmDeviceRecord = {
     label: string;
 };
 
-export type FilterField = 'status' | 'status_category' | 'assignee' | 'creator' | 'label' | 'priority' | 'project' | 'due_date' | 'created_at' | 'updated_at' | 'text' | 'parent' | 'sub_issues' | 'milestone' | 'cycle' | 'estimate';
+export type FilterField = 'status' | 'status_category' | 'assignee' | 'creator' | 'label' | 'priority' | 'project' | 'due_date' | 'created_at' | 'updated_at' | 'text' | 'parent' | 'sub_issues' | 'milestone' | 'cycle' | 'estimate' | 'custom_field';
 
 /**
  * An AND/OR group. An empty group matches every task.
@@ -2890,7 +2902,7 @@ export type FilterGroup = {
  */
 export type FilterNode = FilterGroup | Condition;
 
-export type FilterOperator = 'is' | 'is_not' | 'is_empty' | 'is_not_empty' | 'includes_any' | 'includes_all' | 'excludes' | 'before' | 'after' | 'between' | 'contains';
+export type FilterOperator = 'is' | 'is_not' | 'is_empty' | 'is_not_empty' | 'includes_any' | 'includes_all' | 'excludes' | 'before' | 'after' | 'between' | 'contains' | 'less_than' | 'greater_than';
 
 export type FinishAppPasskeyBody = {
     /**
@@ -4766,6 +4778,46 @@ export type ListRecentPage = {
          * When the caller last opened the page.
          */
         visited_at: string;
+    }>;
+    /**
+     * Send it as `cursor` for the next page; `null` on the last page.
+     */
+    next_cursor: string | null;
+};
+
+export type ListTaskField = {
+    items: Array<{
+        /**
+         * The caller may rename, change or delete the field (its creator, or an owner or admin).
+         */
+        can_manage: boolean;
+        created_at: string;
+        created_by: string | null;
+        id: string;
+        kind: TaskFieldKind;
+        name: string;
+        /**
+         * The choices of a `select` or `multi_select` field; empty for other kinds.
+         */
+        options: Array<TaskFieldOption>;
+        /**
+         * Projects that show the field.
+         */
+        project_count: number;
+        updated_at: string;
+        version: number;
+        workspace_id: string;
+    }>;
+    /**
+     * Send it as `cursor` for the next page; `null` on the last page.
+     */
+    next_cursor: string | null;
+};
+
+export type ListTaskFieldValue = {
+    items: Array<{
+        field_id: string;
+        value: unknown;
     }>;
     /**
      * Send it as `cursor` for the next page; `null` on the last page.
@@ -6869,6 +6921,11 @@ export type OidcProvisionBody = {
 };
 
 /**
+ * A built-in task property a workspace may hide (Settings, Task fields).
+ */
+export type OptionalTaskProperty = 'milestone' | 'cycle' | 'estimate';
+
+/**
  * An Orbit import. Never contains the token.
  */
 export type OrbitImport = {
@@ -7036,7 +7093,7 @@ export type OrbitImportUploadBody = {
     file: Blob | File;
 };
 
-export type OrderBy = 'manual' | 'priority' | 'created' | 'updated' | 'title' | 'due_date' | 'estimate';
+export type OrderBy = 'manual' | 'priority' | 'created' | 'updated' | 'title' | 'due_date' | 'estimate' | 'custom_field';
 
 export type OrderDirection = 'asc' | 'desc';
 
@@ -7733,6 +7790,40 @@ export type PageTaskCycle = {
     next_cursor?: string | null;
 };
 
+export type PageTaskField = {
+    items: Array<{
+        /**
+         * The caller may rename, change or delete the field (its creator, or an owner or admin).
+         */
+        can_manage: boolean;
+        created_at: string;
+        created_by: string | null;
+        id: string;
+        kind: TaskFieldKind;
+        name: string;
+        /**
+         * The choices of a `select` or `multi_select` field; empty for other kinds.
+         */
+        options: Array<TaskFieldOption>;
+        /**
+         * Projects that show the field.
+         */
+        project_count: number;
+        updated_at: string;
+        version: number;
+        workspace_id: string;
+    }>;
+    next_cursor?: string | null;
+};
+
+export type PageTaskFieldValue = {
+    items: Array<{
+        field_id: string;
+        value: unknown;
+    }>;
+    next_cursor?: string | null;
+};
+
 export type PageTaskMilestone = {
     items: Array<{
         /**
@@ -7807,6 +7898,11 @@ export type PageTaskRecord = {
          * Points, 0 to 1000; null when not estimated.
          */
         estimate: number | null;
+        /**
+         * The task's custom field values (by field id), also of fields its project does not show;
+         * options removed from a field are left out.
+         */
+        field_values: Array<TaskFieldValue>;
         id: string;
         label_ids: Array<string>;
         /**
@@ -8096,6 +8192,13 @@ export type ProjectRecord = {
     updated_at: string;
     version: number;
     workspace_id: string;
+};
+
+export type ProjectTaskFieldsBody = {
+    /**
+     * Every field the project shows, in order; a field that is not listed is removed.
+     */
+    field_ids: Array<string>;
 };
 
 export type ProjectUpdateBody = {
@@ -8704,6 +8807,22 @@ export type PublicCreateTaskBody = {
      * `tasks:import`: the original update time; needs `created_at` and is not before it.
      */
     updated_at?: string | null;
+};
+
+export type PublicCreateTaskFieldBody = {
+    /**
+     * It never changes after creation.
+     */
+    kind: TaskFieldKind;
+    /**
+     * 1 to 100 characters, unique in the workspace (case-insensitive).
+     */
+    name: string;
+    /**
+     * The choices of a `select` or `multi_select` field (up to 100, each with a unique name and
+     * a `#rrggbb` color); leave it out for other kinds. Each option gets an `id`.
+     */
+    options?: Array<TaskFieldOptionInput>;
 };
 
 export type PublicCreateTeamspaceBody = {
@@ -9640,6 +9759,14 @@ export type PublicProjectMember = {
     user_id: string;
 };
 
+export type PublicProjectTaskFieldsBody = {
+    /**
+     * Every gallery field that the project shows, in order; a field left out is removed from
+     * the project (its values stay). `[]` removes all.
+     */
+    field_ids: Array<string>;
+};
+
 export type PublicPutMailSettingsBody = {
     /**
      * 0, 5, 10, 20 or 30.
@@ -9884,6 +10011,15 @@ export type PublicTaskActivity = {
         [key: string]: unknown;
     };
     occurred_at: string;
+};
+
+export type PublicTaskFieldValueBody = {
+    /**
+     * By the field's kind: a string for `text` and `url`, a number for `number`, `YYYY-MM-DD`
+     * for `date`, an option `id` for `select`, a list of option ids for `multi_select`, `true`
+     * for `checkbox`. `null`, `""`, `false` and `[]` clear the value.
+     */
+    value: unknown;
 };
 
 /**
@@ -10339,6 +10475,25 @@ export type PublicUpdateTaskBody = {
      * 1 to 500 characters.
      */
     title?: string | null;
+};
+
+/**
+ * A missing field keeps its value.
+ */
+export type PublicUpdateTaskFieldBody = {
+    /**
+     * The `version` that you read.
+     */
+    expected_version: number;
+    /**
+     * 1 to 100 characters, unique in the workspace (case-insensitive).
+     */
+    name?: string | null;
+    /**
+     * Replaces every option. Send an option's `id` to keep it and the values that use it; an
+     * option without an `id` is new. Values of a removed option stop showing it.
+     */
+    options?: Array<TaskFieldOptionInput> | null;
 };
 
 /**
@@ -11515,6 +11670,87 @@ export type TaskCycleUpdateBody = {
     starts_at?: string | null;
 };
 
+export type TaskField = {
+    /**
+     * The caller may rename, change or delete the field (its creator, or an owner or admin).
+     */
+    can_manage: boolean;
+    created_at: string;
+    created_by: string | null;
+    id: string;
+    kind: TaskFieldKind;
+    name: string;
+    /**
+     * The choices of a `select` or `multi_select` field; empty for other kinds.
+     */
+    options: Array<TaskFieldOption>;
+    /**
+     * Projects that show the field.
+     */
+    project_count: number;
+    updated_at: string;
+    version: number;
+    workspace_id: string;
+};
+
+export type TaskFieldBody = {
+    kind: TaskFieldKind;
+    name: string;
+    /**
+     * The choices of a `select` or `multi_select` field. Absent: none.
+     */
+    options?: Array<TaskFieldOptionInput>;
+};
+
+export type TaskFieldKind = 'text' | 'number' | 'date' | 'select' | 'multi_select' | 'checkbox' | 'url' | 'time_tracking';
+
+export type TaskFieldOption = {
+    /**
+     * `#rrggbb`.
+     */
+    color: string;
+    id: string;
+    name: string;
+};
+
+/**
+ * An option of a create or update body: an `id` of the field's option keeps that option (and the
+ * values that point at it); no `id` adds a new option.
+ */
+export type TaskFieldOptionInput = {
+    color: string;
+    id?: string | null;
+    name: string;
+};
+
+export type TaskFieldUpdateBody = {
+    expected_version: number;
+    /**
+     * Absent: unchanged.
+     */
+    name?: string | null;
+    /**
+     * Absent: unchanged. Replaces every option: send the `id` of an option to keep it.
+     */
+    options?: Array<TaskFieldOptionInput> | null;
+};
+
+/**
+ * A task's value of one field. `value` is a string (`text`, `url`, `YYYY-MM-DD` for `date`, the
+ * option id for `select`), a number, `true` (`checkbox`) or option ids (`multi_select`).
+ */
+export type TaskFieldValue = {
+    field_id: string;
+    value: unknown;
+};
+
+export type TaskFieldValueBody = {
+    /**
+     * The new value (see `TaskFieldValue`); `null` clears it.
+     */
+    value: unknown;
+};
+
 export type TaskMilestone = {
     /**
      * Of `task_count`, the tasks in a completed status.
@@ -11594,6 +11830,13 @@ export type TaskProblem = {
     type: string;
 };
 
+export type TaskPropertiesBody = {
+    /**
+     * Every built-in task property the workspace hides; the others show.
+     */
+    hidden: Array<OptionalTaskProperty>;
+};
+
 export type TaskProperty = 'id' | 'status' | 'assignee' | 'priority' | 'project' | 'due_date' | 'labels' | 'created' | 'updated' | 'sub_issue_progress' | 'milestone' | 'cycle' | 'estimate';
 
 export type TaskQueryBody = {
@@ -11611,6 +11854,10 @@ export type TaskQueryBody = {
      * Ignored when `order_by` is `manual`.
      */
     order_direction: OrderDirection;
+    /**
+     * The task field of `order_by: custom_field` (required then, ignored otherwise).
+     */
+    order_field_id?: string | null;
     /**
      * Only direct children of this task.
      */
@@ -11663,6 +11910,11 @@ export type TaskRecord = {
      * Points, 0 to 1000; null when not estimated.
      */
     estimate: number | null;
+    /**
+     * The task's custom field values (by field id), also of fields its project does not show;
+     * options removed from a field are left out.
+     */
+    field_values: Array<TaskFieldValue>;
     id: string;
     label_ids: Array<string>;
     /**
@@ -12795,6 +13047,11 @@ export type WorkspaceProblem = {
 
 export type WorkspaceRecord = {
     deleted_at?: string | null;
+    /**
+     * The built-in task properties the workspace hides in its task UI. Absent: none. Tasks keep
+     * their values, and the API still reads and writes them.
+     */
+    hidden_task_properties?: Array<OptionalTaskProperty>;
     id: string;
     name: string;
     /**
@@ -21363,6 +21620,144 @@ export type PublicMoveUnfinishedCycleTasksResponses = {
 
 export type PublicMoveUnfinishedCycleTasksResponse = PublicMoveUnfinishedCycleTasksResponses[keyof PublicMoveUnfinishedCycleTasksResponses];
 
+export type PublicListProjectTaskFieldsData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        /**
+         * The token's workspace, from `GET /me`.
+         */
+        workspace_id: string;
+        project_id: string;
+    };
+    query?: never;
+    url: '/api/public/v1/workspaces/{workspace_id}/projects/{project_id}/fields';
+};
+
+export type PublicListProjectTaskFieldsErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: Problem;
+    /**
+     * unauthorized
+     */
+    401: Problem;
+    /**
+     * insufficient_scope
+     */
+    403: Problem;
+    /**
+     * not_found
+     */
+    404: Problem;
+    /**
+     * contract_mismatch
+     */
+    409: Problem;
+    /**
+     * request_too_large
+     */
+    413: Problem;
+    /**
+     * rate_limit_exceeded
+     */
+    429: Problem;
+    /**
+     * internal_error
+     */
+    500: Problem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: Problem;
+};
+
+export type PublicListProjectTaskFieldsError = PublicListProjectTaskFieldsErrors[keyof PublicListProjectTaskFieldsErrors];
+
+export type PublicListProjectTaskFieldsResponses = {
+    /**
+     * Every field of the project; `next_cursor` is `null`
+     */
+    200: ListTaskField;
+};
+
+export type PublicListProjectTaskFieldsResponse = PublicListProjectTaskFieldsResponses[keyof PublicListProjectTaskFieldsResponses];
+
+export type PublicSetProjectTaskFieldsData = {
+    body: PublicProjectTaskFieldsBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        /**
+         * The token's workspace, from `GET /me`.
+         */
+        workspace_id: string;
+        project_id: string;
+    };
+    query?: never;
+    url: '/api/public/v1/workspaces/{workspace_id}/projects/{project_id}/fields';
+};
+
+export type PublicSetProjectTaskFieldsErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: Problem;
+    /**
+     * unauthorized
+     */
+    401: Problem;
+    /**
+     * insufficient_scope
+     */
+    403: Problem;
+    /**
+     * not_found
+     */
+    404: Problem;
+    /**
+     * contract_mismatch
+     */
+    409: Problem;
+    /**
+     * request_too_large
+     */
+    413: Problem;
+    /**
+     * rate_limit_exceeded
+     */
+    429: Problem;
+    /**
+     * internal_error
+     */
+    500: Problem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: Problem;
+};
+
+export type PublicSetProjectTaskFieldsError = PublicSetProjectTaskFieldsErrors[keyof PublicSetProjectTaskFieldsErrors];
+
+export type PublicSetProjectTaskFieldsResponses = {
+    /**
+     * The project's fields, in order; `next_cursor` is `null`
+     */
+    200: ListTaskField;
+};
+
+export type PublicSetProjectTaskFieldsResponse = PublicSetProjectTaskFieldsResponses[keyof PublicSetProjectTaskFieldsResponses];
+
 export type PublicListLabelsData = {
     body?: never;
     headers?: {
@@ -22849,6 +23244,285 @@ export type PublicUpdateStatusResponses = {
 };
 
 export type PublicUpdateStatusResponse = PublicUpdateStatusResponses[keyof PublicUpdateStatusResponses];
+
+export type PublicListTaskFieldsData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        /**
+         * The token's workspace, from `GET /me`.
+         */
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/public/v1/workspaces/{workspace_id}/task-fields';
+};
+
+export type PublicListTaskFieldsErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: Problem;
+    /**
+     * unauthorized
+     */
+    401: Problem;
+    /**
+     * insufficient_scope
+     */
+    403: Problem;
+    /**
+     * not_found
+     */
+    404: Problem;
+    /**
+     * contract_mismatch
+     */
+    409: Problem;
+    /**
+     * request_too_large
+     */
+    413: Problem;
+    /**
+     * rate_limit_exceeded
+     */
+    429: Problem;
+    /**
+     * internal_error
+     */
+    500: Problem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: Problem;
+};
+
+export type PublicListTaskFieldsError = PublicListTaskFieldsErrors[keyof PublicListTaskFieldsErrors];
+
+export type PublicListTaskFieldsResponses = {
+    /**
+     * Every field; `next_cursor` is `null`
+     */
+    200: ListTaskField;
+};
+
+export type PublicListTaskFieldsResponse = PublicListTaskFieldsResponses[keyof PublicListTaskFieldsResponses];
+
+export type PublicCreateTaskFieldData = {
+    body: PublicCreateTaskFieldBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        /**
+         * The token's workspace, from `GET /me`.
+         */
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/public/v1/workspaces/{workspace_id}/task-fields';
+};
+
+export type PublicCreateTaskFieldErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: Problem;
+    /**
+     * unauthorized
+     */
+    401: Problem;
+    /**
+     * insufficient_scope
+     */
+    403: Problem;
+    /**
+     * not_found
+     */
+    404: Problem;
+    /**
+     * contract_mismatch
+     */
+    409: Problem;
+    /**
+     * request_too_large
+     */
+    413: Problem;
+    /**
+     * rate_limit_exceeded
+     */
+    429: Problem;
+    /**
+     * internal_error
+     */
+    500: Problem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: Problem;
+};
+
+export type PublicCreateTaskFieldError = PublicCreateTaskFieldErrors[keyof PublicCreateTaskFieldErrors];
+
+export type PublicCreateTaskFieldResponses = {
+    /**
+     * The new field
+     */
+    201: TaskField;
+};
+
+export type PublicCreateTaskFieldResponse = PublicCreateTaskFieldResponses[keyof PublicCreateTaskFieldResponses];
+
+export type PublicDeleteTaskFieldData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        /**
+         * The token's workspace, from `GET /me`.
+         */
+        workspace_id: string;
+        field_id: string;
+    };
+    query: {
+        /**
+         * The `version` that you read: an opaque number below 2^53. Compare it for equality only.
+         */
+        expected_version: number;
+    };
+    url: '/api/public/v1/workspaces/{workspace_id}/task-fields/{field_id}';
+};
+
+export type PublicDeleteTaskFieldErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: Problem;
+    /**
+     * unauthorized
+     */
+    401: Problem;
+    /**
+     * insufficient_scope
+     */
+    403: Problem;
+    /**
+     * not_found
+     */
+    404: Problem;
+    /**
+     * contract_mismatch
+     */
+    409: Problem;
+    /**
+     * request_too_large
+     */
+    413: Problem;
+    /**
+     * rate_limit_exceeded
+     */
+    429: Problem;
+    /**
+     * internal_error
+     */
+    500: Problem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: Problem;
+};
+
+export type PublicDeleteTaskFieldError = PublicDeleteTaskFieldErrors[keyof PublicDeleteTaskFieldErrors];
+
+export type PublicDeleteTaskFieldResponses = {
+    /**
+     * The field is deleted
+     */
+    204: void;
+};
+
+export type PublicDeleteTaskFieldResponse = PublicDeleteTaskFieldResponses[keyof PublicDeleteTaskFieldResponses];
+
+export type PublicUpdateTaskFieldData = {
+    body: PublicUpdateTaskFieldBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        /**
+         * The token's workspace, from `GET /me`.
+         */
+        workspace_id: string;
+        field_id: string;
+    };
+    query?: never;
+    url: '/api/public/v1/workspaces/{workspace_id}/task-fields/{field_id}';
+};
+
+export type PublicUpdateTaskFieldErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: Problem;
+    /**
+     * unauthorized
+     */
+    401: Problem;
+    /**
+     * insufficient_scope
+     */
+    403: Problem;
+    /**
+     * not_found
+     */
+    404: Problem;
+    /**
+     * contract_mismatch
+     */
+    409: Problem;
+    /**
+     * request_too_large
+     */
+    413: Problem;
+    /**
+     * rate_limit_exceeded
+     */
+    429: Problem;
+    /**
+     * internal_error
+     */
+    500: Problem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: Problem;
+};
+
+export type PublicUpdateTaskFieldError = PublicUpdateTaskFieldErrors[keyof PublicUpdateTaskFieldErrors];
+
+export type PublicUpdateTaskFieldResponses = {
+    /**
+     * The field
+     */
+    200: TaskField;
+};
+
+export type PublicUpdateTaskFieldResponse = PublicUpdateTaskFieldResponses[keyof PublicUpdateTaskFieldResponses];
 
 export type PublicListTasksData = {
     body?: never;
@@ -24759,6 +25433,151 @@ export type PublicDownloadCommentAttachmentResponses = {
 };
 
 export type PublicDownloadCommentAttachmentResponse = PublicDownloadCommentAttachmentResponses[keyof PublicDownloadCommentAttachmentResponses];
+
+export type PublicListTaskFieldValuesData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        /**
+         * The token's workspace, from `GET /me`.
+         */
+        workspace_id: string;
+        /**
+         * The task's UUID or identifier, such as `ENG-12`.
+         */
+        task: string;
+    };
+    query?: never;
+    url: '/api/public/v1/workspaces/{workspace_id}/tasks/{task}/fields';
+};
+
+export type PublicListTaskFieldValuesErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: Problem;
+    /**
+     * unauthorized
+     */
+    401: Problem;
+    /**
+     * insufficient_scope
+     */
+    403: Problem;
+    /**
+     * not_found
+     */
+    404: Problem;
+    /**
+     * contract_mismatch
+     */
+    409: Problem;
+    /**
+     * request_too_large
+     */
+    413: Problem;
+    /**
+     * rate_limit_exceeded
+     */
+    429: Problem;
+    /**
+     * internal_error
+     */
+    500: Problem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: Problem;
+};
+
+export type PublicListTaskFieldValuesError = PublicListTaskFieldValuesErrors[keyof PublicListTaskFieldValuesErrors];
+
+export type PublicListTaskFieldValuesResponses = {
+    /**
+     * The values; `next_cursor` is `null`
+     */
+    200: ListTaskFieldValue;
+};
+
+export type PublicListTaskFieldValuesResponse = PublicListTaskFieldValuesResponses[keyof PublicListTaskFieldValuesResponses];
+
+export type PublicSetTaskFieldValueData = {
+    body: PublicTaskFieldValueBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        /**
+         * The token's workspace, from `GET /me`.
+         */
+        workspace_id: string;
+        /**
+         * The task's UUID or identifier, such as `ENG-12`.
+         */
+        task: string;
+        field_id: string;
+    };
+    query?: never;
+    url: '/api/public/v1/workspaces/{workspace_id}/tasks/{task}/fields/{field_id}';
+};
+
+export type PublicSetTaskFieldValueErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: Problem;
+    /**
+     * unauthorized
+     */
+    401: Problem;
+    /**
+     * insufficient_scope
+     */
+    403: Problem;
+    /**
+     * not_found
+     */
+    404: Problem;
+    /**
+     * contract_mismatch
+     */
+    409: Problem;
+    /**
+     * request_too_large
+     */
+    413: Problem;
+    /**
+     * rate_limit_exceeded
+     */
+    429: Problem;
+    /**
+     * internal_error
+     */
+    500: Problem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: Problem;
+};
+
+export type PublicSetTaskFieldValueError = PublicSetTaskFieldValueErrors[keyof PublicSetTaskFieldValueErrors];
+
+export type PublicSetTaskFieldValueResponses = {
+    /**
+     * All the task's values; `next_cursor` is `null`
+     */
+    200: ListTaskFieldValue;
+};
+
+export type PublicSetTaskFieldValueResponse = PublicSetTaskFieldValueResponses[keyof PublicSetTaskFieldValueResponses];
 
 export type PublicListTaskGithubLinksData = {
     body?: never;
@@ -53080,6 +53899,112 @@ export type MoveUnfinishedCycleTasksResponses = {
 
 export type MoveUnfinishedCycleTasksResponse = MoveUnfinishedCycleTasksResponses[keyof MoveUnfinishedCycleTasksResponses];
 
+export type ListProjectTaskFieldsData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        project_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/projects/{project_id}/fields';
+};
+
+export type ListProjectTaskFieldsErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ListProjectTaskFieldsError = ListProjectTaskFieldsErrors[keyof ListProjectTaskFieldsErrors];
+
+export type ListProjectTaskFieldsResponses = {
+    200: PageTaskField;
+};
+
+export type ListProjectTaskFieldsResponse = ListProjectTaskFieldsResponses[keyof ListProjectTaskFieldsResponses];
+
+export type SetProjectTaskFieldsData = {
+    body: ProjectTaskFieldsBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        project_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/projects/{project_id}/fields';
+};
+
+export type SetProjectTaskFieldsErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type SetProjectTaskFieldsError = SetProjectTaskFieldsErrors[keyof SetProjectTaskFieldsErrors];
+
+export type SetProjectTaskFieldsResponses = {
+    200: PageTaskField;
+};
+
+export type SetProjectTaskFieldsResponse = SetProjectTaskFieldsResponses[keyof SetProjectTaskFieldsResponses];
+
 export type DeleteGithubProjectConnectionData = {
     body?: never;
     headers?: {
@@ -55261,6 +56186,276 @@ export type DeleteStorageFileResponses = {
 
 export type DeleteStorageFileResponse = DeleteStorageFileResponses[keyof DeleteStorageFileResponses];
 
+export type ListTaskFieldsData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/task-fields';
+};
+
+export type ListTaskFieldsErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type ListTaskFieldsError = ListTaskFieldsErrors[keyof ListTaskFieldsErrors];
+
+export type ListTaskFieldsResponses = {
+    200: PageTaskField;
+};
+
+export type ListTaskFieldsResponse = ListTaskFieldsResponses[keyof ListTaskFieldsResponses];
+
+export type CreateTaskFieldData = {
+    body: TaskFieldBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/task-fields';
+};
+
+export type CreateTaskFieldErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type CreateTaskFieldError = CreateTaskFieldErrors[keyof CreateTaskFieldErrors];
+
+export type CreateTaskFieldResponses = {
+    201: TaskField;
+};
+
+export type CreateTaskFieldResponse = CreateTaskFieldResponses[keyof CreateTaskFieldResponses];
+
+export type DeleteTaskFieldData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        field_id: string;
+    };
+    query: {
+        expected_version: number;
+    };
+    url: '/api/v1/workspaces/{workspace_id}/task-fields/{field_id}';
+};
+
+export type DeleteTaskFieldErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type DeleteTaskFieldError = DeleteTaskFieldErrors[keyof DeleteTaskFieldErrors];
+
+export type DeleteTaskFieldResponses = {
+    204: void;
+};
+
+export type DeleteTaskFieldResponse = DeleteTaskFieldResponses[keyof DeleteTaskFieldResponses];
+
+export type UpdateTaskFieldData = {
+    body: TaskFieldUpdateBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        field_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/task-fields/{field_id}';
+};
+
+export type UpdateTaskFieldErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type UpdateTaskFieldError = UpdateTaskFieldErrors[keyof UpdateTaskFieldErrors];
+
+export type UpdateTaskFieldResponses = {
+    200: TaskField;
+};
+
+export type UpdateTaskFieldResponse = UpdateTaskFieldResponses[keyof UpdateTaskFieldResponses];
+
+export type SetTaskPropertiesData = {
+    body: TaskPropertiesBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/task-properties';
+};
+
+export type SetTaskPropertiesErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type SetTaskPropertiesError = SetTaskPropertiesErrors[keyof SetTaskPropertiesErrors];
+
+export type SetTaskPropertiesResponses = {
+    200: WorkspaceRecord;
+};
+
+export type SetTaskPropertiesResponse = SetTaskPropertiesResponses[keyof SetTaskPropertiesResponses];
+
 export type ListTasksData = {
     body?: never;
     headers?: {
@@ -56783,6 +57978,113 @@ export type DownloadCommentAttachmentResponses = {
 };
 
 export type DownloadCommentAttachmentResponse = DownloadCommentAttachmentResponses[keyof DownloadCommentAttachmentResponses];
+
+export type ListTaskFieldValuesData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        task_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/tasks/{task_id}/fields';
+};
+
+export type ListTaskFieldValuesErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ListTaskFieldValuesError = ListTaskFieldValuesErrors[keyof ListTaskFieldValuesErrors];
+
+export type ListTaskFieldValuesResponses = {
+    200: PageTaskFieldValue;
+};
+
+export type ListTaskFieldValuesResponse = ListTaskFieldValuesResponses[keyof ListTaskFieldValuesResponses];
+
+export type SetTaskFieldValueData = {
+    body: TaskFieldValueBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        task_id: string;
+        field_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/tasks/{task_id}/fields/{field_id}';
+};
+
+export type SetTaskFieldValueErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type SetTaskFieldValueError = SetTaskFieldValueErrors[keyof SetTaskFieldValueErrors];
+
+export type SetTaskFieldValueResponses = {
+    200: PageTaskFieldValue;
+};
+
+export type SetTaskFieldValueResponse = SetTaskFieldValueResponses[keyof SetTaskFieldValueResponses];
 
 export type ListGithubLinksData = {
     body?: never;

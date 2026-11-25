@@ -574,16 +574,17 @@ export function useEmptyTaskTrash(workspaceId: string) {
 
 /** Sends a comment (or a reply with `parentId`); files are already in it as inline attachments. */
 /**
- * Sends a comment. A `/spend 1h 30m` line in it also logs the caller's time, in the same write, with the comment as
- * the note; a comment of only that line logs the time without a comment (null).
+ * Sends a comment. With `timeTracking` (the project shows the time tracking field), a `/spend 1h 30m` line in it also
+ * logs the caller's time, in the same write, with the comment as the note; a comment of only that line logs the time
+ * without a comment (null). Without it, the line is text like any other.
  */
-export function useCreateTaskComment(workspaceId: string, taskId: string) {
+export function useCreateTaskComment(workspaceId: string, taskId: string, timeTracking: boolean) {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: async ({ bodyJson, parentId }: { bodyJson: unknown[]; parentId?: string }) => {
       let taken: ReturnType<typeof takeSpend>
       try {
-        taken = takeSpend(bodyJson)
+        taken = timeTracking ? takeSpend(bodyJson) : { blocks: bodyJson, spend: null }
       } catch (failure) {
         toast.error((failure as Error).message)
         throw failure

@@ -111,6 +111,7 @@ mod shortcuts_api;
 mod sign_in_providers_api;
 mod storage_api;
 mod task_collab_api;
+mod task_fields_tokens;
 mod tasks_api;
 mod teamspaces_api;
 mod time_entries_api;
