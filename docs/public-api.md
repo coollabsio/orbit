@@ -72,8 +72,8 @@ scopes, which MCP does not use.
 
 | Scope | Access in **Settings → API tokens** | Public API endpoints |
 | --- | --- | --- |
-| `tasks:read` | Tasks: **Read** | `GET` projects, statuses, labels, milestones, cycles, members, tasks, comments, relations, task activity and the task trash |
-| `tasks:write` | Tasks: **Write** | Create, update and delete tasks, restore them from the trash, add, edit and delete comments, link tasks, create and change projects, create, change and delete statuses, labels, milestones and cycles, `POST /integrations/discord/events` |
+| `tasks:read` | Tasks: **Read** | `GET` projects, statuses, labels, milestones, cycles, members, tasks, comments, relations, time entries, task activity and the task trash |
+| `tasks:write` | Tasks: **Write** | Create, update and delete tasks, restore them from the trash, add, edit and delete comments, log, edit and delete time, link tasks, create and change projects, create, change and delete statuses, labels, milestones and cycles, `POST /integrations/discord/events` |
 | `tasks:import` | Tasks: **Write** with **Import mode** | With `tasks:write`: the import fields of new tasks and comments. See [Import from another tool](#import-from-another-tool). |
 | `docs:read` | Docs: **Read** | `GET /docs`, `GET /docs/trash`, `GET /teamspaces`, `GET /docs/{page_id}`, `GET /docs/{page_id}/comments`, `GET /docs/{page_id}/versions`, `GET /docs/{page_id}/versions/{version_id}`, `GET /docs/{page_id}/database`, `POST /docs/{page_id}/database/query`, `GET /docs/{page_id}/database/views` and `…/views/{view_id}` |
 | `docs:write` | Docs: **Write** | `POST /docs`, `PATCH /docs/{page_id}`, `POST /docs/{page_id}/move`, `DELETE /docs/{page_id}`, `POST /docs/{page_id}/restore`, `POST /docs/{page_id}/comments`, `POST /docs/{page_id}/rows`, `PATCH /docs/{page_id}/rows/{row_id}`, `POST /docs/{page_id}/rows/trash`, `POST /databases`, the schema, view and linked view endpoints under `/docs/{page_id}/database` |
@@ -545,6 +545,31 @@ Make duplicates with `duplicate_of_id` on `PATCH /tasks/{task}`.
 curl -sS -X POST "$ORBIT_WS/tasks/ENG-12/relations" \
   -H "Authorization: Bearer $ORBIT_TOKEN" -H 'Content-Type: application/json' \
   -d '{"type":"blocks","task_id":"ENG-14"}'
+```
+
+### Time entries
+
+`GET /workspaces/{workspace_id}/tasks/{task}/time-entries`. Scope: `tasks:read`. The time logged on
+the task, by day worked: `{items, total_minutes, sub_issues_minutes}`. Item: `{id, task_id,
+project_id, user_id, minutes, worked_on, note, billable, created_by, version, created_at,
+updated_at, can_edit}`. `worked_on` is a calendar day (`YYYY-MM-DD`) in the person's timezone, not
+a time. `note` is Markdown. `total_minutes` is the task's own time; `sub_issues_minutes` is the
+time of its live sub-issues, at every depth, in approved projects.
+
+`POST /workspaces/{workspace_id}/tasks/{task}/time-entries`. Scope: `tasks:write`. Body:
+`{minutes, worked_on?, note?, billable?, user_id?}`. `minutes` is 1 to 1440. `worked_on` is today
+in the member's profile timezone (UTC when it has none) by default. `user_id` is the token's user by
+default; logging time for another member needs the `time.manage` permission (owners and admins), and
+a service-account token must name the member. Answers 201 with the entry.
+
+`PATCH /workspaces/{workspace_id}/time-entries/{entry_id}` with any of `{minutes, worked_on, note,
+billable, user_id, expected_version}`, and `DELETE /workspaces/{workspace_id}/time-entries/{entry_id}`.
+Scope: `tasks:write`. Your own entries, or any entry with `time.manage` (404 otherwise).
+
+```bash
+curl -sS -X POST "$ORBIT_WS/tasks/ENG-12/time-entries" \
+  -H "Authorization: Bearer $ORBIT_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"minutes":90,"worked_on":"2026-11-10","note":"Fixed SMTP retry on timeouts."}'
 ```
 
 ### Comments

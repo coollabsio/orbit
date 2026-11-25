@@ -6,6 +6,7 @@ import { Alert } from 'react-native'
 import { keys } from '../data/keys'
 import * as api from '../data/orbit'
 import * as taskApi from '../data/task-api'
+import * as timeApi from '../data/time'
 import { isVersionConflict, optimisticTask, parentErrorMessage, replaceTask, type TaskPatch } from '../data/tasks'
 import { useOrbit } from '../orbit-context'
 import { errorMessage } from '../session-context'
@@ -17,6 +18,7 @@ import { errorMessage } from '../session-context'
 export const taskKeys = {
   relations: (workspaceId: string, taskId: string) => [...keys.task(workspaceId, taskId), 'relations'] as const,
   attachments: (workspaceId: string, taskId: string) => [...keys.task(workspaceId, taskId), 'attachments'] as const,
+  time: (workspaceId: string, taskId: string) => [...keys.task(workspaceId, taskId), 'time'] as const,
   commentAttachments: (workspaceId: string, taskId: string, commentId: string) => [...keys.comments(workspaceId, taskId), commentId, 'attachments'] as const,
   subIssues: (workspaceId: string, parentId: string) => [...keys.tasks(workspaceId), 'sub-issues', parentId] as const,
   search: (workspaceId: string, query: string) => [...keys.tasks(workspaceId), 'search', query] as const,
@@ -318,4 +320,37 @@ export function useProjectOrder() {
     onSettled: () => void queryClient.invalidateQueries({ queryKey: key }),
   })
   return { order: order.data ?? [], save }
+}
+
+/** The time logged on the task: its entries, its total and its sub-issues' total. */
+export function useTaskTime(taskId: string) {
+  const { client, workspaceId } = useOrbit()
+  return useQuery({ queryKey: taskKeys.time(workspaceId, taskId), queryFn: () => timeApi.taskTime(client, workspaceId, taskId) })
+}
+
+/** Log, edit and delete time entries. Each refreshes every task detail, as a parent's sub-issue total changes too. */
+export function useTimeEntryWrites(taskId: string) {
+  const { client, workspaceId } = useOrbit()
+  const queryClient = useQueryClient()
+  const refresh = () => void queryClient.invalidateQueries({ queryKey: ['task', workspaceId] })
+  return {
+    create: useMutation({
+      mutationFn: (draft: timeApi.TimeEntryDraft) => timeApi.createTimeEntry(client, workspaceId, taskId, draft),
+      onSuccess: refresh,
+      onError: (error) => Alert.alert('Couldn’t log the time', errorMessage(error)),
+    }),
+    update: useMutation({
+      mutationFn: ({ entry, draft }: { entry: timeApi.TimeEntry; draft: timeApi.TimeEntryDraft }) => timeApi.updateTimeEntry(client, workspaceId, entry, draft),
+      onSuccess: refresh,
+      onError: (error) => {
+        refresh()
+        Alert.alert('Couldn’t save the time entry', errorMessage(error))
+      },
+    }),
+    remove: useMutation({
+      mutationFn: (entryId: string) => timeApi.deleteTimeEntry(client, workspaceId, entryId),
+      onSuccess: refresh,
+      onError: (error) => Alert.alert('Couldn’t delete the time entry', errorMessage(error)),
+    }),
+  }
 }

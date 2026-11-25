@@ -75,10 +75,14 @@ pub enum Permission {
     /// statuses and labels. Per project in a custom role.
     #[serde(rename = "projects.manage")]
     ProjectsManage,
+    /// Log time for other members, and edit and delete the time they logged. Per project in a
+    /// custom role.
+    #[serde(rename = "time.manage")]
+    TimeManage,
 }
 
 impl Permission {
-    pub const ALL: [Self; 21] = [
+    pub const ALL: [Self; 22] = [
         Self::WorkspaceUpdate,
         Self::WorkspaceDelete,
         Self::WorkspaceTransfer,
@@ -100,6 +104,7 @@ impl Permission {
         Self::ProjectsViewPrivate,
         Self::TasksPurge,
         Self::ProjectsManage,
+        Self::TimeManage,
     ];
 
     /// The permission's wire name, as in the API.
@@ -127,6 +132,7 @@ impl Permission {
             Self::ProjectsViewPrivate => "projects.view_private",
             Self::TasksPurge => "tasks.purge",
             Self::ProjectsManage => "projects.manage",
+            Self::TimeManage => "time.manage",
         }
     }
 
@@ -162,6 +168,7 @@ impl Permission {
                 | Self::TasksPurge
                 | Self::ProjectsViewPrivate
                 | Self::ProjectsManage
+                | Self::TimeManage
         )
     }
 
@@ -363,6 +370,12 @@ impl Actor {
         author_id == Some(self.user_id) || self.can_in(project_id, Permission::CommentsModerate)
     }
 
+    /// Everyone logs, edits and deletes their own time; `time.manage` covers other members' time.
+    #[must_use]
+    pub fn can_manage_time_of(&self, project_id: Id, user_id: Id) -> bool {
+        user_id == self.user_id || self.can_in(project_id, Permission::TimeManage)
+    }
+
     /// `shared` is workspace visibility; a personal view is only ever its owner's.
     #[must_use]
     pub fn can_edit_view(&self, owner_id: Id, shared: bool) -> bool {
@@ -556,7 +569,8 @@ impl Policy {
             | Permission::RolesManage
             | Permission::ProjectsViewPrivate
             | Permission::TasksPurge
-            | Permission::ProjectsManage => {
+            | Permission::ProjectsManage
+            | Permission::TimeManage => {
                 matches!(role, WorkspaceRole::Owner | WorkspaceRole::Admin)
             }
             Permission::WorkspaceExportPersonal => !matches!(role, WorkspaceRole::Guest),

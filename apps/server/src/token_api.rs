@@ -54,6 +54,7 @@ mod plan;
 mod projects;
 mod relations;
 mod setup;
+mod time_entries;
 mod trash;
 mod views;
 pub use comments::{DocComment, DocThread, Person};

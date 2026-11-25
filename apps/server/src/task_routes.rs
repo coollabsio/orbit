@@ -31,6 +31,9 @@ use crate::repositories::tasks::{
     MilestoneRecord, NotificationRecord, Page, ProjectAutomationPatch, SortOrder, TaskChanges,
     TaskError, TaskFilter, TaskRecord, TaskRepository, TaskSort, TaskUpdate, normalize_project_key,
 };
+use crate::repositories::time_entries::{
+    NewTimeEntry, TaskTimeEntries, TimeEntryChanges, TimeEntryRecord,
+};
 use crate::repositories::views::ViewRepository;
 use crate::socket_ticket::SocketTickets;
 
@@ -227,6 +230,14 @@ pub fn task_router(state: TaskState) -> Router {
         .route(
             "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/relations/{relation_id}",
             delete(delete_task_relation),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/time-entries",
+            get(list_time_entries).post(create_time_entry),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/time-entries/{entry_id}",
+            patch(update_time_entry).delete(delete_time_entry),
         )
         .route(
             "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/github-links",
@@ -2044,6 +2055,156 @@ async fn delete_task_relation(
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+struct TimeEntryBody {
+    /// Whole minutes, 1 to 1440.
+    minutes: u32,
+    /// The day of the work, `YYYY-MM-DD`, in the person's timezone; today by default.
+    worked_on: Option<String>,
+    /// Markdown.
+    #[serde(default)]
+    note: String,
+    #[serde(default)]
+    billable: bool,
+    /// The member who did the work; the caller by default. Logging for someone else needs
+    /// `time.manage`.
+    user_id: Option<String>,
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+struct TimeEntryUpdateBody {
+    minutes: Option<u32>,
+    worked_on: Option<String>,
+    note: Option<String>,
+    billable: Option<bool>,
+    user_id: Option<String>,
+    /// When given, the edit fails with 409 unless the entry still has this version.
+    expected_version: Option<u64>,
+}
+
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/time-entries", params(("workspace_id" = String, Path), ("task_id" = String, Path)), responses((status = 200, body = TaskTimeEntries)))]
+async fn list_time_entries(
+    State(state): State<TaskState>,
+    Path((workspace, task)): Path<(String, String)>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<Json<TaskTimeEntries>, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace}/tasks/{task}/time-entries");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    let task_id = parse_id(&task, &instance, request_id.as_ref())?;
+    state
+        .tasks
+        .time_entries(workspace_id, task_id, actor_id)
+        .await
+        .map(Json)
+        .map_err(|error| task_problem(error, instance, request_id.as_ref()))
+}
+
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/time-entries", params(("workspace_id" = String, Path), ("task_id" = String, Path)), request_body = TimeEntryBody, responses((status = 201, body = TimeEntryRecord)))]
+async fn create_time_entry(
+    State(state): State<TaskState>,
+    Path((workspace, task)): Path<(String, String)>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<TimeEntryBody>,
+) -> Result<Response, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace}/tasks/{task}/time-entries");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    let task_id = parse_id(&task, &instance, request_id.as_ref())?;
+    let user_id = body
+        .user_id
+        .as_deref()
+        .map(|id| parse_id(id, &instance, request_id.as_ref()))
+        .transpose()?;
+    state
+        .tasks
+        .create_time_entry(
+            workspace_id,
+            task_id,
+            actor_id,
+            NewTimeEntry {
+                user_id,
+                minutes: body.minutes,
+                worked_on: body.worked_on,
+                note: body.note,
+                billable: body.billable,
+            },
+            request_id_value(request_id.as_ref()),
+            TimestampMillis::now(),
+        )
+        .await
+        .map(|record| (StatusCode::CREATED, Json(record)).into_response())
+        .map_err(|error| task_problem(error, instance, request_id.as_ref()))
+}
+
+#[utoipa::path(patch, path = "/api/v1/workspaces/{workspace_id}/time-entries/{entry_id}", params(("workspace_id" = String, Path), ("entry_id" = String, Path)), request_body = TimeEntryUpdateBody, responses((status = 200, body = TimeEntryRecord)))]
+async fn update_time_entry(
+    State(state): State<TaskState>,
+    Path((workspace, entry)): Path<(String, String)>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<TimeEntryUpdateBody>,
+) -> Result<Json<TimeEntryRecord>, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace}/time-entries/{entry}");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    let entry_id = parse_id(&entry, &instance, request_id.as_ref())?;
+    let user_id = body
+        .user_id
+        .as_deref()
+        .map(|id| parse_id(id, &instance, request_id.as_ref()))
+        .transpose()?;
+    state
+        .tasks
+        .update_time_entry(
+            workspace_id,
+            entry_id,
+            actor_id,
+            TimeEntryChanges {
+                user_id,
+                minutes: body.minutes,
+                worked_on: body.worked_on,
+                note: body.note,
+                billable: body.billable,
+            },
+            body.expected_version,
+            request_id_value(request_id.as_ref()),
+            TimestampMillis::now(),
+        )
+        .await
+        .map(Json)
+        .map_err(|error| task_problem(error, instance, request_id.as_ref()))
+}
+
+#[utoipa::path(delete, path = "/api/v1/workspaces/{workspace_id}/time-entries/{entry_id}", params(("workspace_id" = String, Path), ("entry_id" = String, Path)), responses((status = 204)))]
+async fn delete_time_entry(
+    State(state): State<TaskState>,
+    Path((workspace, entry)): Path<(String, String)>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<StatusCode, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace}/time-entries/{entry}");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    let entry_id = parse_id(&entry, &instance, request_id.as_ref())?;
+    state
+        .tasks
+        .delete_time_entry(
+            workspace_id,
+            entry_id,
+            actor_id,
+            request_id_value(request_id.as_ref()),
+            TimestampMillis::now(),
+        )
+        .await
+        .map(|()| StatusCode::NO_CONTENT)
+        .map_err(|error| task_problem(error, instance, request_id.as_ref()))
+}
+
 #[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/tasks", params(("workspace_id" = String, Path)), request_body = CreateTaskBody, responses((status = 201, body = TaskUpdateResponse)))]
 async fn create_task(
     State(state): State<TaskState>,
@@ -2435,6 +2596,18 @@ struct CommentBody {
     /// With a markdown `body`: the members to notify.
     #[serde(default)]
     mentioned_user_ids: Vec<String>,
+    /// Also log the caller's time on the task (`/spend` in the composer), in the same write. The
+    /// entry's note is a copy of the comment.
+    time: Option<CommentTimeBody>,
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+struct CommentTimeBody {
+    /// Whole minutes, 1 to 1440.
+    minutes: u32,
+    /// The day of the work, `YYYY-MM-DD`; today in the caller's timezone by default.
+    worked_on: Option<String>,
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -2495,18 +2668,38 @@ async fn create_comment(
         &instance,
         request_id.as_ref(),
     )?;
-    state
-        .tasks
-        .create_comment(
-            workspace_id,
-            task_id,
-            actor_id,
-            parent_id,
-            content,
-            request_id_value(request_id.as_ref()),
-            TimestampMillis::now(),
-        )
-        .await
+    let created = match body.time {
+        Some(time) => state
+            .tasks
+            .create_comment_with_time(
+                workspace_id,
+                task_id,
+                actor_id,
+                parent_id,
+                content,
+                time.minutes,
+                time.worked_on,
+                request_id_value(request_id.as_ref()),
+                TimestampMillis::now(),
+            )
+            .await
+            .map(|(comment, _)| comment),
+        None => {
+            state
+                .tasks
+                .create_comment(
+                    workspace_id,
+                    task_id,
+                    actor_id,
+                    parent_id,
+                    content,
+                    request_id_value(request_id.as_ref()),
+                    TimestampMillis::now(),
+                )
+                .await
+        }
+    };
+    created
         .map(|record| (StatusCode::CREATED, Json(record)).into_response())
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }

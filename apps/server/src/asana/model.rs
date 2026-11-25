@@ -134,6 +134,33 @@ impl AsanaStory {
 
 pub const STORY_FIELDS: &str = "type,resource_subtype,text,html_text,created_at,created_by.name";
 
+/// An entry of `GET /tasks/{gid}/time_tracking_entries`
+/// (<https://developers.asana.com/reference/gettimetrackingentriesfortask>).
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct AsanaTimeEntry {
+    pub gid: String,
+    #[serde(default)]
+    pub duration_minutes: Option<i64>,
+    /// The day the time is logged on, `YYYY-MM-DD`.
+    #[serde(default)]
+    pub entered_on: Option<String>,
+    /// The person the time is attributed to (newer entries); `created_by` otherwise.
+    #[serde(default)]
+    pub assignee: Option<AsanaUser>,
+    #[serde(default)]
+    pub created_by: Option<AsanaUser>,
+    #[serde(default)]
+    pub created_at: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    /// `billable`, `nonBillable` or `notApplicable`.
+    #[serde(default)]
+    pub billable_status: Option<String>,
+}
+
+pub const TIME_ENTRY_FIELDS: &str = "duration_minutes,entered_on,created_at,assignee.name,\
+assignee.email,created_by.name,created_by.email,description,billable_status";
+
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct AsanaAttachment {
     pub gid: String,

@@ -208,6 +208,36 @@ async fn handle(
             "resource_subtype": "asana", "size": PNG.len(),
             "download_url": format!("{}/files/mock.png?X-Amz-Expires=120", fake.base)}}))
         .into_response(),
+        "/tasks/400/time_tracking_entries" => {
+            assert!(
+                query
+                    .get("opt_fields")
+                    .is_some_and(|fields| fields.contains("duration_minutes")),
+                "{query:?}"
+            );
+            list(vec![
+                // Grace has no Orbit account: the importer's, with her name above the note.
+                json!({"gid": "600", "duration_minutes": 90, "entered_on": "2024-05-01",
+                       "created_at": "2024-05-01T18:00:00.000Z",
+                       "created_by": {"gid": "9", "name": "Grace"},
+                       "description": "Wireframes", "billable_status": "billable"}),
+                // Logged by Ada for Member, who has an account (matched by email).
+                json!({"gid": "601", "duration_minutes": 30, "entered_on": "2024-05-02",
+                       "created_at": "2024-05-02T08:00:00.000Z",
+                       "assignee": {"gid": "7", "name": "Member", "email": "MEMBER@example.com"},
+                       "created_by": {"gid": "1", "name": "Ada Asana"},
+                       "description": null, "billable_status": "nonBillable"}),
+                // Orbit cannot hold these.
+                json!({"gid": "602", "duration_minutes": 0, "entered_on": "2024-05-02"}),
+                json!({"gid": "603", "duration_minutes": 1441, "entered_on": "2024-05-02"}),
+                json!({"gid": "604", "duration_minutes": 10, "entered_on": "2024-13-40"}),
+            ])
+        }
+        "/tasks/410/time_tracking_entries" => error(
+            StatusCode::PAYMENT_REQUIRED,
+            "Time tracking needs a paid plan",
+        ),
+        path if path.ends_with("/time_tracking_entries") => list(Vec::new()),
         "/tasks/401/dependencies" => list(vec![json!({"gid": "400", "name": "Design homepage"})]),
         "/tasks/410/dependencies" => error(StatusCode::PAYMENT_REQUIRED, "Premium feature"),
         path if path.ends_with("/dependencies") => list(Vec::new()),
@@ -475,6 +505,31 @@ impl Harness {
         })
     }
 
+    /// The task's time entries in `worked_on` order.
+    async fn time_entries(&self, task_id: &str) -> Value {
+        let rows = sqlx::query(
+            "SELECT user_id, minutes, worked_on, note, billable, created_by, created_at \
+             FROM task_time_entries WHERE task_id = $1 ORDER BY worked_on, id",
+        )
+        .bind(task_id)
+        .fetch_all(self.database.pool())
+        .await
+        .unwrap();
+        rows.iter()
+            .map(|row| {
+                json!({
+                    "user": row.get::<String, _>("user_id"),
+                    "minutes": row.get::<i64, _>("minutes"),
+                    "worked_on": row.get::<String, _>("worked_on"),
+                    "note": row.get::<String, _>("note"),
+                    "billable": row.get::<i64, _>("billable"),
+                    "created_by": row.get::<String, _>("created_by"),
+                    "created_at": row.get::<i64, _>("created_at"),
+                })
+            })
+            .collect()
+    }
+
     async fn comments(&self, task_id: &str) -> Vec<String> {
         sqlx::query_scalar(
             "SELECT body FROM task_comments WHERE task_id = $1 ORDER BY created_at, id",
@@ -503,7 +558,13 @@ async fn imports_projects_with_full_task_data() {
     assert_eq!(
         report,
         json!({"comments_imported": 2, "files_imported": 1, "missing_files": 0, "links_added": 1,
-               "dependencies_linked": 1, "unmatched_assignees": 1, "skipped_subtasks": 0})
+               "dependencies_linked": 1, "unmatched_assignees": 1, "skipped_subtasks": 0,
+               "time_entries_imported": 2, "skipped_time_entries": 3})
+    );
+    assert_eq!(
+        h.fake.hits("/tasks/410/time_tracking_entries"),
+        1,
+        "a 402 for time tracking leaves the task without entries"
     );
     assert_eq!(import["report"]["failures"], json!([]));
     let token: Option<Vec<u8>> =
@@ -624,6 +685,19 @@ async fn imports_projects_with_full_task_data() {
         .await;
     assert_eq!(authors, 1, "comments are written by the importer");
 
+    assert_eq!(
+        h.time_entries(&design).await,
+        json!([
+            {"user": h.owner_id.to_string(), "minutes": 90, "worked_on": "2024-05-01",
+             "note": "**Grace**\n\nWireframes", "billable": 1, "created_by": h.owner_id.to_string(),
+             "created_at": 1_714_586_400_000_i64},
+            {"user": h.member_id.to_string(), "minutes": 30, "worked_on": "2024-05-02",
+             "note": "", "billable": 0, "created_by": h.owner_id.to_string(),
+             "created_at": 1_714_636_800_000_i64},
+        ])
+    );
+    assert_eq!(h.time_entries(&ops_task).await, json!([]));
+
     let relation: (String, String, String) =
         sqlx::query_as("SELECT task_id, related_task_id, type FROM task_relations")
             .fetch_one(h.database.pool())
@@ -713,6 +787,11 @@ async fn resumes_after_a_restart_without_duplicates() {
     );
     let design = h.orbit_id(&id, "task", "400").await;
     assert_eq!(h.comments(&design).await.len(), 1);
+    assert_eq!(
+        h.time_entries(&design).await.as_array().unwrap().len(),
+        2,
+        "time entries written before the restart are not copied again"
+    );
     assert_eq!(
         h.scalar(
             "SELECT COUNT(*) FROM attachment_references WHERE task_id = $1",

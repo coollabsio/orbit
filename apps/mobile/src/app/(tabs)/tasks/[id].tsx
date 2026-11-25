@@ -27,11 +27,14 @@ import {
 import { DuplicateBanner, RelationsSection, SubIssuesSection } from '../../../components/tasks/sections'
 import { Sheet, useSheet } from '../../../components/tasks/Sheet'
 import { TaskPulls } from '../../../components/tasks/TaskPulls'
+import { TimeEntryForm, TimeSection } from '../../../components/tasks/TimeTracking'
 import { activityRows, buildFeed, type ActivityRow, type CommentThread, foldRun } from '../../../data/activity'
 import { relativeAgo } from '../../../data/format'
 import { keys } from '../../../data/keys'
 import { markdownToText } from '../../../data/markdown'
 import { mentionedUserIds } from '../../../data/mentions'
+import { canInProject } from '../../../data/permissions'
+import { createTimeEntry, formatDuration, takeSpend, timeTotalLabel, todayLocal, type TimeEntry } from '../../../data/time'
 import { linkTaskIdsInMarkdown } from '../../../data/taskIds'
 import * as api from '../../../data/orbit'
 import * as taskApi from '../../../data/task-api'
@@ -56,7 +59,7 @@ import {
   splitInlineFiles,
   subIssueBody,
 } from '../../../data/tasks'
-import { useAdoptSubIssue, useCommentAttachments, useCreateTask, useRelationWrites, useSubIssues, useTaskAttachments, useTaskRelations, useTaskWrite } from '../../../hooks/tasks'
+import { useAdoptSubIssue, useCommentAttachments, useCreateTask, useRelationWrites, useSubIssues, useTaskAttachments, useTaskRelations, useTaskTime, useTaskWrite, useTimeEntryWrites } from '../../../hooks/tasks'
 import { useOrbit } from '../../../orbit-context'
 import { useCycles, useLabels, useMentionPeople, useMilestones, usePeople, useProjects, useSeesProject, useStatuses } from '../../../queries'
 import { errorMessage } from '../../../session-context'
@@ -68,6 +71,8 @@ import { ProjectMark } from '../../../ui/ProjectMark'
 type TaskSheet =
   | { kind: 'status' | 'priority' | 'assignees' | 'labels' | 'due' | 'repeat' | 'milestone' | 'cycle' | 'estimate' | 'source' | 'parent-menu' | 'relation-menu' | 'attach' }
   | { kind: 'pick-task'; purpose: 'parent' | 'sub-issue' | RelationKind }
+  | { kind: 'log-time' }
+  | { kind: 'time-menu' | 'edit-time'; entry: TimeEntry }
 
 function sheetTitle(sheet: TaskSheet | null, subject: string): string {
   if (!sheet) return ''
@@ -98,6 +103,12 @@ function sheetTitle(sheet: TaskSheet | null, subject: string): string {
       return 'Add relation'
     case 'attach':
       return 'Attach'
+    case 'log-time':
+      return 'Log time'
+    case 'time-menu':
+      return `${formatDuration(sheet.entry.minutes)} logged`
+    case 'edit-time':
+      return 'Edit time entry'
     case 'pick-task':
       if (sheet.purpose === 'parent') return `Set parent of ${subject}…`
       if (sheet.purpose === 'sub-issue') return `Add a sub-issue to ${subject}…`
@@ -112,7 +123,7 @@ let draftFileCount = 0
 
 export default function TaskScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
-  const { client, workspaceId, user, session } = useOrbit()
+  const { client, workspace, workspaceId, user, session } = useOrbit()
   const queryClient = useQueryClient()
   const { colors } = useTheme()
   const projects = useProjects()
@@ -141,6 +152,8 @@ export default function TaskScreen() {
   const relations = useTaskRelations(id)
   const subIssues = useSubIssues(id)
   const attachments = useTaskAttachments(id)
+  const time = useTaskTime(id)
+  const timeWrites = useTimeEntryWrites(id)
   const commentFiles = useCommentAttachments(id, comments.data ?? [])
   const write = useTaskWrite(id)
   const seesProject = useSeesProject(task.data?.project_id ?? null)
@@ -150,15 +163,24 @@ export default function TaskScreen() {
 
   const mentionable = useMentionPeople()
   const sendComment = useMutation({
-    // a typed task ID goes as a link to the task, as the web's "#" inserts it
-    mutationFn: (body: string) =>
-      api.addComment(client, workspaceId, id, linkTaskIdsInMarkdown(body, (projects.data ?? []).map((project) => project.key), session.server), mentionedUserIds(body, mentionable)),
+    // a typed task ID goes as a link to the task, as the web's "#" inserts it; a `/spend 1h` line also logs the time,
+    // and a comment of only that line logs the time without a comment
+    mutationFn: async (text: string) => {
+      const { body, spend } = takeSpend(text)
+      if (spend && !body) {
+        await createTimeEntry(client, workspaceId, id, { minutes: spend.minutes, worked_on: spend.workedOn ?? todayLocal(), note: '', billable: false })
+        return null
+      }
+      const time = spend ? { minutes: spend.minutes, worked_on: spend.workedOn } : undefined
+      return api.addComment(client, workspaceId, id, linkTaskIdsInMarkdown(body, (projects.data ?? []).map((project) => project.key), session.server), mentionedUserIds(body, mentionable), time)
+    },
     onSuccess: (comment) => {
       setDraft('')
       setDraftFiles([])
-      queryClient.setQueryData<api.CommentRecord[]>(keys.comments(workspaceId, id), (list) => (list ? [...list, comment] : [comment]))
+      if (comment) queryClient.setQueryData<api.CommentRecord[]>(keys.comments(workspaceId, id), (list) => (list ? [...list, comment] : [comment]))
     },
     onError: (error) => Alert.alert('Could not add the comment', errorMessage(error)),
+    onSettled: () => void time.refetch(),
   })
 
   const trash = useMutation({
@@ -300,6 +322,9 @@ export default function TaskScreen() {
   const uploading = draftFiles.some((file) => !file.path)
   const readyFiles = draftFiles.flatMap((file) => (file.path ? [{ name: file.name, path: file.path, image: file.image }] : []))
   const sheet = sheets.sheet
+  const timeTotal = time.data ? timeTotalLabel(time.data) : null
+  // the member list of the form's person picker, for someone who may log time for others
+  const timePeople = canInProject(workspace, 'time.manage', current.project_id) ? people.filter((person) => seesProject(person.id)) : null
 
   return (
     <SafeAreaView edges={['left', 'right']} className="flex-1 bg-background">
@@ -309,7 +334,7 @@ export default function TaskScreen() {
           contentContainerClassName="px-3.5 pt-4 pb-7 gap-3.5"
           keyboardShouldPersistTaps="handled"
           refreshControl={
-            <PullRefresh onRefresh={() => Promise.all([task.refetch(), comments.refetch(), activity.refetch(), relations.refetch(), subIssues.refetch(), attachments.refetch()])} />
+            <PullRefresh onRefresh={() => Promise.all([task.refetch(), comments.refetch(), activity.refetch(), relations.refetch(), subIssues.refetch(), attachments.refetch(), time.refetch()])} />
           }
         >
           <View>
@@ -465,6 +490,15 @@ export default function TaskScreen() {
                 </Chip>
               </View>
             </PropertyGroup>
+            <PropertyGroup title="Time">
+              <View className="-ml-2 flex-row flex-wrap items-center max-w-full">
+                <Chip label={timeTotal ? `Time: ${timeTotal.own}. Log time` : 'Log time'} onPress={() => sheets.open({ kind: 'log-time' })}>
+                  <Icon name="timer" size={14} color={time.data?.total_minutes ? colors.foreground : colors.mutedForeground} />
+                  <ChipText muted={!time.data?.total_minutes}>{time.data?.total_minutes ? timeTotal!.own : 'Log time'}</ChipText>
+                </Chip>
+                {timeTotal?.subIssues ? <ChipText muted>{timeTotal.subIssues}</ChipText> : null}
+              </View>
+            </PropertyGroup>
             <PropertyGroup title="Estimate">
               <View className="-ml-2 flex-row">
                 <Chip label={current.estimate === null ? 'Set estimate' : `Estimate: ${estimateLabel(current.estimate)}`} onPress={() => sheets.open({ kind: 'estimate' })}>
@@ -477,6 +511,8 @@ export default function TaskScreen() {
 
           <TaskPulls taskId={current.id} />
 
+          <TimeSection time={time.data} nameOf={nameOf} onLog={() => sheets.open({ kind: 'log-time' })} onEntryMenu={(entry) => sheets.open({ kind: 'time-menu', entry })} />
+
           <View>
             <Text className="font-noto-semibold text-[14px] leading-[20px] mb-2">Activity</Text>
             {activity.isError || comments.isError ? (
@@ -486,7 +522,7 @@ export default function TaskScreen() {
             ) : (
               feed.map((entry) =>
                 entry.kind === 'thread' ? (
-                  <Thread key={entry.thread.root.id} thread={entry.thread} nameOf={nameOf} filesOf={filesOf} />
+                  <Thread key={entry.thread.root.id} thread={entry.thread} nameOf={nameOf} filesOf={filesOf} spentOf={(commentId) => time.data?.items.find((item) => item.comment_id === commentId)} />
                 ) : (
                   <Timeline
                     key={entry.items[0]!.id}
@@ -631,6 +667,43 @@ export default function TaskScreen() {
             onSelect={(source) => void attach(source)}
           />
         ) : null}
+        {sheet?.kind === 'log-time' || sheet?.kind === 'edit-time' ? (
+          <TimeEntryForm
+            key={sheet.kind === 'edit-time' ? sheet.entry.id : 'new'}
+            entry={sheet.kind === 'edit-time' ? sheet.entry : undefined}
+            userId={user.id}
+            people={timePeople}
+            saving={timeWrites.create.isPending || timeWrites.update.isPending}
+            onSave={(draft) => {
+              const done = { onSuccess: sheets.close }
+              if (sheet.kind === 'edit-time') timeWrites.update.mutate({ entry: sheet.entry, draft }, done)
+              else timeWrites.create.mutate(draft, done)
+            }}
+          />
+        ) : null}
+        {sheet?.kind === 'time-menu' ? (
+          <MenuChoices
+            items={[
+              { key: 'edit', label: 'Edit', icon: 'edit' },
+              { key: 'delete', label: 'Delete', icon: 'trash' },
+            ]}
+            onSelect={(key) => {
+              if (key === 'edit') return sheets.open({ kind: 'edit-time', entry: sheet.entry })
+              // the alert shows over the open sheet: iOS cannot present it while the sheet slides out
+              Alert.alert('Delete this time entry?', `${formatDuration(sheet.entry.minutes)} on this task will no longer count.`, [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Delete',
+                  style: 'destructive',
+                  onPress: () => {
+                    sheets.close()
+                    timeWrites.remove.mutate(sheet.entry.id)
+                  },
+                },
+              ])
+            }}
+          />
+        ) : null}
       </Sheet>
     </SafeAreaView>
   )
@@ -758,8 +831,20 @@ function TimelineRow({ first, last, glyph, children }: { first: boolean; last: b
   )
 }
 
+/** The time logged with a comment (`/spend`). */
+function SpentBadge({ entry }: { entry: TimeEntry | undefined }) {
+  const { colors } = useTheme()
+  if (!entry) return null
+  return (
+    <View className="flex-row items-center gap-1 rounded-md bg-secondary px-1.5 py-px">
+      <Icon name="timer" size={11} color={colors.mutedForeground} />
+      <Text className="font-noto-medium text-[11px] text-secondary-foreground">{formatDuration(entry.minutes)}</Text>
+    </View>
+  )
+}
+
 /** A comment and its replies in one card. */
-function Thread({ thread, nameOf, filesOf }: { thread: CommentThread; nameOf: (userId: string) => string; filesOf: (comment: api.CommentRecord) => ShownFile[] }) {
+function Thread({ thread, nameOf, filesOf, spentOf }: { thread: CommentThread; nameOf: (userId: string) => string; filesOf: (comment: api.CommentRecord) => ShownFile[]; spentOf: (commentId: string) => TimeEntry | undefined }) {
   return (
     <View className="my-3 rounded-lg border border-border bg-card/50 overflow-hidden">
       {[thread.root, ...thread.replies].map((comment, index) => (
@@ -775,6 +860,7 @@ function Thread({ thread, nameOf, filesOf }: { thread: CommentThread; nameOf: (u
                 {relativeAgo(comment.created_at)}
                 {comment.updated_at !== comment.created_at ? ' (edited)' : ''}
               </Text>
+              <SpentBadge entry={spentOf(comment.id)} />
             </View>
             <CommentBody comment={comment} files={filesOf(comment)} />
           </View>

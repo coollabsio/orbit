@@ -15,8 +15,8 @@
 //!   listed under another project is skipped).
 //! - Phase B, per task, parents first: create the Orbit task (its id recorded first) silently,
 //!   without notifications.
-//! - Phase C, per task: comments (skipping as many as the importer already wrote on the task),
-//!   Asana-hosted files (skipping ones already attached), and "blocked by" relations.
+//! - Phase C, per task: comments and time tracking entries (each skipping as many as the
+//!   importer already wrote on the task), Asana-hosted files (skipping ones already attached), and "blocked by" relations.
 //!
 //! A task that fails is recorded and the import continues; a revoked token fails the import.
 //! What was imported before a failure or cancellation stays.
@@ -32,7 +32,7 @@ use std::time::Duration;
 use orbit_platform::Row;
 use orbit_platform::{
     Backend, Database, Id, Job, JobError, JobKind, JobKindRegistrationError, JobQueue, JobStore,
-    TimestampMillis, Worker,
+    SqlBuilder, TimestampMillis, Worker,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -53,14 +53,15 @@ use crate::repositories::task_relations::NewTaskRelationType;
 use crate::repositories::tasks::{
     CommentContent, CreateTask, ImportedTask, TaskError, TaskRepository,
 };
+use crate::repositories::time_entries::{MAX_MINUTES, MAX_NOTE_CHARS, parse_worked_on};
 use crate::secret_box::{decrypt_secret, encrypt_secret};
 pub use crate::task_import::JobRun;
 use crate::task_import::{
     Attached, Failure, ImportTables, LABEL_COLORS, NewProject, PROJECT_COLORS, attach_once,
-    column_statuses, display_instant, ensure_project, ensure_writable, find_or_create_label,
-    job_kind, member_emails, parse_date_millis, parse_instant_millis, parse_stored_id,
-    project_key_base, project_statuses, retryable, reuse_earlier_projects, reuse_earlier_tasks,
-    stopped,
+    column_statuses, display_instant, ensure_project, ensure_writable, escape_markdown,
+    find_or_create_label, job_kind, member_emails, parse_date_millis, parse_instant_millis,
+    parse_stored_id, project_key_base, project_statuses, retryable, reuse_earlier_projects,
+    reuse_earlier_tasks, stopped,
 };
 
 /// Job kind names.
@@ -86,6 +87,8 @@ const TABLES: ImportTables = ImportTables {
     project_kind: "project",
     task_kind: "task",
 };
+/// Time tracking entries per insert transaction.
+const TIME_ENTRY_BATCH: usize = 200;
 const OPEN: &str = "('scanning', 'ready', 'queued', 'importing')";
 
 /// Both job kinds: [`job_kind`], as for the Notion import.
@@ -270,6 +273,10 @@ pub struct AsanaImportReport {
     pub unmatched_assignees: u32,
     /// Subtasks deeper than five levels, not imported.
     pub skipped_subtasks: u32,
+    /// Asana time tracking entries added to the tasks.
+    pub time_entries_imported: u32,
+    /// Time tracking entries Orbit cannot hold (0 or more than 1,440 minutes, no valid day).
+    pub skipped_time_entries: u32,
     /// The first 200 failures.
     pub failures: Vec<AsanaImportFailure>,
 }
@@ -285,6 +292,8 @@ struct StoredReport {
     dependencies_linked: u32,
     unmatched_assignees: u32,
     skipped_subtasks: u32,
+    time_entries_imported: u32,
+    skipped_time_entries: u32,
 }
 
 /// An Asana import. Never contains the token.
@@ -1557,8 +1566,8 @@ impl AsanaImportService {
         Ok(id)
     }
 
-    /// Phase C for one task: comments, files and "blocked by" relations. Each step skips what
-    /// an earlier attempt already did.
+    /// Phase C for one task: comments, time entries, files and "blocked by" relations. Each
+    /// step skips what an earlier attempt already did.
     async fn fill_task(
         &self,
         run: &mut Run<'_>,
@@ -1625,6 +1634,9 @@ impl AsanaImportService {
                 .await?;
             run.report.comments_imported += 1;
         }
+
+        self.import_time_entries(run, &item.asana_gid, task_id)
+            .await?;
 
         // Asana-hosted files. The download URL lives about two minutes, so each attachment
         // is read right before its download.
@@ -1728,6 +1740,131 @@ impl AsanaImportService {
                 // A blocker deleted meanwhile, or a reverse relation someone added.
                 Err(_) => {}
             }
+        }
+        Ok(())
+    }
+
+    /// The task's Asana time tracking entries, in Asana order. As for comments, the entries
+    /// the importer already wrote on the task are the first ones, so a retry skips that many.
+    /// Each batch is one transaction. A domain without time tracking (402) has none.
+    async fn import_time_entries(
+        &self,
+        run: &mut Run<'_>,
+        asana_gid: &str,
+        task_id: Id,
+    ) -> Result<(), Failure> {
+        let entries = match run.client.time_entries(asana_gid).await {
+            Ok(entries) => entries,
+            Err(
+                AsanaError::PaymentRequired { .. }
+                | AsanaError::Forbidden { .. }
+                | AsanaError::NotFound { .. },
+            ) => return Ok(()),
+            Err(error) => return Err(Failure::from(error)),
+        };
+        let written: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM task_time_entries WHERE task_id = $1 AND created_by = $2",
+        )
+        .bind(task_id.to_string())
+        .bind(run.user_id.to_string())
+        .fetch_one(self.database().pool())
+        .await?;
+        let now = TimestampMillis::now().as_millis();
+        let mut pending: Vec<TimeEntryRow> = Vec::new();
+        let mut skipped = 0;
+        for entry in &entries {
+            let minutes = match entry.duration_minutes.map(u32::try_from) {
+                Some(Ok(minutes)) if (1..=MAX_MINUTES).contains(&minutes) => i64::from(minutes),
+                _ => {
+                    skipped += 1;
+                    continue;
+                }
+            };
+            let Some(Ok(worked_on)) = entry.entered_on.as_deref().map(parse_worked_on) else {
+                skipped += 1;
+                continue;
+            };
+            let person = entry.assignee.as_ref().or(entry.created_by.as_ref());
+            let name = person
+                .and_then(|person| person.name.clone().or_else(|| person.email.clone()))
+                .unwrap_or_else(|| "Asana user".to_owned());
+            let user = person.and_then(|person| {
+                import_people::match_assignee(
+                    &run.members,
+                    &run.mapped,
+                    person.email.as_deref(),
+                    &name,
+                )
+                .user_id()
+            });
+            let note = entry.description.as_deref().unwrap_or_default().trim();
+            let note = match user {
+                Some(_) => note.to_owned(),
+                None if note.is_empty() => format!("**{}**", escape_markdown(&name)),
+                None => format!("**{}**\n\n{note}", escape_markdown(&name)),
+            };
+            let created_at = entry
+                .created_at
+                .as_deref()
+                .and_then(parse_instant_millis)
+                .unwrap_or(now);
+            pending.push(TimeEntryRow {
+                user_id: user.unwrap_or(run.user_id),
+                minutes,
+                worked_on,
+                note: note.chars().take(MAX_NOTE_CHARS).collect(),
+                billable: i64::from(entry.billable_status.as_deref() == Some("billable")),
+                created_at,
+            });
+        }
+        // A retry would count them again once the first attempt wrote some entries.
+        if written == 0 {
+            run.report.skipped_time_entries += skipped;
+        }
+        let pending = pending
+            .get(usize::try_from(written).unwrap_or(usize::MAX)..)
+            .unwrap_or_default();
+        for batch in pending.chunks(TIME_ENTRY_BATCH) {
+            let mut query = SqlBuilder::new(
+                "INSERT INTO task_time_entries (id, workspace_id, task_id, user_id, minutes, \
+                 worked_on, note, billable, created_by, version, created_at, updated_at) VALUES ",
+            );
+            for (offset, entry) in batch.iter().enumerate() {
+                if offset > 0 {
+                    query.push(", ");
+                }
+                query
+                    .push("(")
+                    .push_bind(Id::new_v7().to_string())
+                    .push(", ")
+                    .push_bind(run.workspace_id.to_string())
+                    .push(", ")
+                    .push_bind(task_id.to_string())
+                    .push(", ")
+                    .push_bind(entry.user_id.to_string())
+                    .push(", ")
+                    .push_bind(entry.minutes)
+                    .push(", ")
+                    .push_bind(entry.worked_on.clone())
+                    .push(", ")
+                    .push_bind(entry.note.clone())
+                    .push(", ")
+                    .push_bind(entry.billable)
+                    .push(", ")
+                    .push_bind(run.user_id.to_string())
+                    .push(", 0, ")
+                    .push_bind(entry.created_at)
+                    .push(", ")
+                    .push_bind(entry.created_at)
+                    .push(")");
+            }
+            let mut tx = self
+                .database()
+                .workspace_transaction(run.workspace_id)
+                .await?;
+            query.build().execute(&mut *tx).await?;
+            tx.commit().await?;
+            run.report.time_entries_imported += u32::try_from(batch.len()).unwrap_or(u32::MAX);
         }
         Ok(())
     }
@@ -1959,6 +2096,8 @@ impl AsanaImportService {
                 dependencies_linked: stored.dependencies_linked,
                 unmatched_assignees: stored.unmatched_assignees,
                 skipped_subtasks: stored.skipped_subtasks,
+                time_entries_imported: stored.time_entries_imported,
+                skipped_time_entries: stored.skipped_time_entries,
                 failures,
             })
         } else {
@@ -2027,6 +2166,16 @@ fn priority(task: &AsanaTask) -> &'static str {
         Some("urgent" | "critical" | "highest") => "urgent",
         _ => "none",
     }
+}
+
+/// A time tracking entry ready to insert; `created_by` is always the importer.
+struct TimeEntryRow {
+    user_id: Id,
+    minutes: i64,
+    worked_on: String,
+    note: String,
+    billable: i64,
+    created_at: i64,
 }
 
 /// How the import assigns the task's assignee, with the name an unassigned one gets in the

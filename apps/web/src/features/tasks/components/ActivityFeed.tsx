@@ -8,9 +8,11 @@ import type { Cycle, Milestone, Task, TaskActivity, TaskViewState } from '@/feat
 import { useCycles } from '@/features/tasks/api/cycles'
 import { useMilestones } from '@/features/tasks/api/milestones'
 import { useCreateTaskComment } from '@/features/tasks/api/tasks'
+import { useTaskTimeEntries } from '@/features/tasks/api/timeEntries'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { activityChangeText, agoLabel, buildFeed, type CommentThread } from '@/features/tasks/tasksLib'
 import { CommentItem } from './CommentItem'
+import { TimeEntryItem } from './TimeEntryItem'
 import { TaskCommentComposer } from './TaskCommentComposer'
 import { ProfileTrigger } from '@/components/common/ProfileTrigger'
 
@@ -22,7 +24,7 @@ interface ActivityFeedProps {
 }
 
 /**
- * Chronological feed: activity events (timeline rows) and comment threads (cards) interleaved by time,
+ * Chronological feed: activity events (timeline rows), comment threads and time entries (cards) interleaved by time,
  * so a change made after a comment shows below that comment.
  */
 /** Activity sentence; the related task's identifier becomes a link when the feed can open tasks. */
@@ -61,7 +63,8 @@ export function ActivityFeed({ task, state, onOpenTask }: ActivityFeedProps) {
   const createComment = useCreateTaskComment(workspace.id, task.id)
   const planning = { milestones: useMilestones(workspace.id, task.projectId).data ?? [], cycles: useCycles(workspace.id, task.projectId).data ?? [] }
   const userById = (id: string) => state.users.find((u) => u.id === id)
-  const feed = buildFeed(task)
+  const timeEntries = useTaskTimeEntries(workspace.id, task.id).data?.items
+  const feed = buildFeed(task, timeEntries)
 
   // A run of activity rows between two comments folds on its own: its first and latest rows stay, and
   // "Show N more" takes the place of the rows between them. Comments always show.
@@ -109,11 +112,12 @@ export function ActivityFeed({ task, state, onOpenTask }: ActivityFeedProps) {
     )
   }
 
+  const spentBy = new Map((timeEntries ?? []).flatMap((entry) => (entry.comment_id ? [[entry.comment_id, entry] as const] : [])))
   const renderThread = (thread: CommentThread) => (
     <div key={thread.root.id} className="my-3 overflow-hidden rounded-[10px] border bg-card/50">
-      <CommentItem state={state} taskId={task.id} comment={thread.root} />
+      <CommentItem state={state} taskId={task.id} task={task} comment={thread.root} spent={spentBy.get(thread.root.id)} />
       {thread.replies.map((reply) => (
-        <CommentItem key={reply.id} state={state} taskId={task.id} comment={reply} reply />
+        <CommentItem key={reply.id} state={state} taskId={task.id} task={task} comment={reply} spent={spentBy.get(reply.id)} reply />
       ))}
       <div className="border-t py-1.5 pr-2 pl-3.5">
         <TaskCommentComposer compact workspaceId={workspace.id} taskId={task.id} pending={createComment.isPending} error={createComment.isError ? 'Reply failed.' : undefined} members={state.users} onSend={(bodyJson) => createComment.mutateAsync({ bodyJson, parentId: thread.root.id })} />
@@ -127,7 +131,9 @@ export function ActivityFeed({ task, state, onOpenTask }: ActivityFeedProps) {
         <h3 className="m-0 text-sm font-semibold text-foreground">Activity</h3>
       </div>
       {feed.map((entry) =>
-        entry.kind === 'activity' ? renderTimeline(entry.items) : renderThread(entry.thread),
+        entry.kind === 'activity' ? renderTimeline(entry.items)
+          : entry.kind === 'thread' ? renderThread(entry.thread)
+          : <TimeEntryItem key={entry.entry.id} task={task} state={state} entry={entry.entry} />,
       )}
     </div>
   )
