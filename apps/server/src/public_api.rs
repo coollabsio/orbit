@@ -149,11 +149,23 @@ pub fn router(state: PublicApiState) -> Router {
         .route("/tasks/{task}/restore", post(trash::restore_task))
         .route(
             "/tasks/{task}/comments",
-            get(comments).post(create_comment).route_layer(idempotent),
+            get(comments)
+                .post(create_comment)
+                .route_layer(idempotent.clone()),
         )
         .route(
             "/tasks/{task}/comments/{comment_id}",
             patch(comments::update_comment).delete(comments::delete_comment),
+        )
+        .route(
+            "/tasks/{task}/time-entries",
+            get(time_entries::time_entries)
+                .post(time_entries::log_time)
+                .route_layer(idempotent),
+        )
+        .route(
+            "/time-entries/{entry_id}",
+            patch(time_entries::update_time_entry).delete(time_entries::delete_time_entry),
         )
         .route("/tasks/{task}/activity", get(context::task_activity))
         .route(
@@ -1303,6 +1315,7 @@ pub(crate) mod plan;
 pub(crate) mod projects;
 pub(crate) mod relations;
 pub(crate) mod setup;
+pub(crate) mod time_entries;
 pub(crate) mod trash;
 pub(crate) mod views;
 

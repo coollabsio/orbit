@@ -1,6 +1,6 @@
 import { toast } from 'sonner'
 import { Suspense, useMemo, useRef, useState } from 'react'
-import { Copy, Edit as Pencil, Trash as Trash2 } from 'reicon-react'
+import { Clock, Copy, Edit as Pencil, Trash as Trash2 } from 'reicon-react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
 import { Tip } from '@/components/common/Tip'
@@ -17,7 +17,10 @@ import { buildMentionTokens } from '@/lib/mentions'
 // Type-only import: erased at build time, so the BlockNote chunk stays lazy.
 import type { PageEditorHandle } from '@/features/docs/editor/PageEditor'
 import { EditorFallback, PageEditor } from './lazyEditor'
-import type { TaskComment, TaskViewState } from '@/features/tasks/api/models'
+import type { Task, TaskComment, TaskViewState, TimeEntry } from '@/features/tasks/api/models'
+import { Badge } from '@/components/ui/badge'
+import { formatDuration, workedOnLabel } from '@/features/tasks/timeLib'
+import { TimeEntryDialog } from './TimeEntryDialog'
 import { useDeleteTaskComment, useUpdateTaskComment } from '@/features/tasks/api/tasks'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { agoLabel } from '@/features/tasks/tasksLib'
@@ -27,17 +30,22 @@ import { writeClipboard } from '@/lib/clipboard'
 interface CommentItemProps {
   state: TaskViewState
   taskId: string
+  /** With `spent`: the task, to edit the time logged with this comment. */
+  task?: Task
+  /** The time logged with this comment (`/spend`). */
+  spent?: TimeEntry
   comment: TaskComment
   reply?: boolean
 }
 
 /** A task comment with author, timestamp, body, and a compact hover action row. */
-export function CommentItem({ state, taskId, comment, reply }: CommentItemProps) {
+export function CommentItem({ state, taskId, task, comment, spent, reply }: CommentItemProps) {
   const { workspace } = useWorkspace()
   const updateComment = useUpdateTaskComment(workspace.id, taskId)
   const deleteComment = useDeleteTaskComment(workspace.id, taskId)
   const [editing, setEditing] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [editingTime, setEditingTime] = useState(false)
   const editorRef = useRef<PageEditorHandle>(null)
   /** Whether the open edit changed anything (an old markdown comment is not rewritten by a plain Save). */
   const dirty = useRef(false)
@@ -98,6 +106,19 @@ export function CommentItem({ state, taskId, comment, reply }: CommentItemProps)
               {agoLabel(comment.createdAt)}
               {comment.editedAt ? ' (edited)' : ''}
             </time>
+            {spent ? (
+              <Tip label={`Logged ${formatDuration(spent.minutes)} for ${workedOnLabel(spent.worked_on)}${spent.can_edit && task ? '. Click to edit.' : ''}`}>
+                <Badge
+                  variant="secondary"
+                  className="shrink-0 gap-1 tabular-nums"
+                  data-slot="comment-time"
+                  render={spent.can_edit && task ? <button type="button" onClick={() => setEditingTime(true)} /> : undefined}
+                >
+                  <Clock className="size-3" aria-hidden="true" />
+                  {formatDuration(spent.minutes)}
+                </Badge>
+              </Tip>
+            ) : null}
             {!editing ? (
               <div className="ml-auto flex shrink-0 items-center gap-px opacity-0 transition-opacity group-hover/comment:opacity-100 group-focus-within/comment:opacity-100 max-[899px]:opacity-100">
                 <Tip label="Copy text">
@@ -168,6 +189,7 @@ export function CommentItem({ state, taskId, comment, reply }: CommentItemProps)
         </div>
       </article>
 
+      {editingTime && spent && task ? <TimeEntryDialog task={task} users={state.users} currentUserId={state.currentUserId} entry={spent} onClose={() => setEditingTime(false)} /> : null}
       {confirmDelete ? (
         <ConfirmDeleteModal
           title="Delete comment?"

@@ -139,7 +139,7 @@ test('result: shows counts, notes, imported projects and failures', async () => 
     project_ids: ['project-1'],
     report: {
       comments_imported: 7, files_imported: 2, missing_files: 1, links_added: 1, dependencies_linked: 3,
-      unmatched_assignees: 0, skipped_subtasks: 0,
+      unmatched_assignees: 0, skipped_subtasks: 0, time_entries_imported: 0, skipped_time_entries: 0,
       failures: [{ asana_gid: '400', kind: 'task', title: 'Broken task', error: 'Orbit refused the task.' }],
     },
   })

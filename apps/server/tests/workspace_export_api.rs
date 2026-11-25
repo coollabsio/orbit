@@ -12,7 +12,7 @@ use axum::extract::ConnectInfo;
 use axum::http::{Request, StatusCode, header};
 use orbit_platform::{
     AuthenticatedUser, BillingConfig, Config, Database, EnvironmentMode, Id, PasswordService, Plan,
-    Secret, TimestampMillis,
+    Row, Secret, TimestampMillis,
 };
 use orbit_server::app::App;
 use orbit_server::repositories::identity::{IdentityRepository, SetupRequest};
@@ -875,4 +875,244 @@ async fn a_new_export_deletes_the_oldest_beyond_three_ready_ones() {
     }
     let (status, _, _) = harness.download(&harness.owner, &ids[0]).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+async fn user_id(database: &Database, email: &str) -> String {
+    sqlx::query_scalar("SELECT id FROM users WHERE email = $1")
+        .bind(email)
+        .fetch_one(database.pool())
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn time_entries_round_trip_through_the_export_and_an_orbit_import() {
+    let mut harness = Harness::new(false).await;
+    harness
+        .add_user("mia@example.com", "Mia Member", Some("member"))
+        .await;
+    let uma = harness
+        .add_user("uma@example.com", "Uma Unmatched", Some("member"))
+        .await;
+    let mia_id = user_id(&harness.database, "mia@example.com").await;
+    let owner_id = user_id(&harness.database, "owner@example.com").await;
+    let task_id = harness.create_task("Track the time").await;
+    let entries = harness.workspace(&format!("/tasks/{task_id}/time-entries"));
+    // The owner logs Mia's time; Uma logs her own.
+    harness
+        .ok(
+            &harness.owner,
+            "POST",
+            &entries,
+            Some(json!({
+                "minutes": 90, "worked_on": "2026-11-20", "note": "Fixed **it**",
+                "billable": true, "user_id": mia_id,
+            })),
+        )
+        .await;
+    harness
+        .ok(
+            &uma,
+            "POST",
+            &entries,
+            Some(json!({"minutes": 30, "worked_on": "2026-11-21", "note": "Review"})),
+        )
+        .await;
+    // Logged with a comment (`/spend`): the import links the entry to the imported comment.
+    let comment = harness
+        .ok(
+            &harness.owner,
+            "POST",
+            &harness.workspace(&format!("/tasks/{task_id}/comments")),
+            Some(json!({"body": "Wrote the docs",
+                        "time": {"minutes": 45, "worked_on": "2026-11-22"}})),
+        )
+        .await;
+
+    let export_id = harness.start_export().await;
+    harness.run_export(&export_id).await;
+    let (status, bytes, _) = harness.download(&harness.owner, &export_id).await;
+    assert_eq!(status, StatusCode::OK);
+    let mut archive = Archive::new(bytes.clone());
+    let task_file = archive
+        .names()
+        .into_iter()
+        .find(|name| name.starts_with("tasks/"))
+        .unwrap();
+    let task = archive.json(&task_file);
+    let logged = task["time_entries"].as_array().unwrap();
+    assert_eq!(logged.len(), 3, "{task}");
+    assert_eq!(logged[0]["comment_id"], Value::Null);
+    assert_eq!(logged[2]["comment_id"], comment["id"]);
+    assert_eq!(logged[0]["user"]["name"], "Mia Member");
+    assert_eq!(logged[0]["created_by"]["name"], "Owner");
+    assert_eq!(logged[0]["minutes"], 90);
+    assert_eq!(logged[0]["worked_on"], "2026-11-20");
+    assert_eq!(logged[0]["note"], "Fixed **it**");
+    assert_eq!(logged[0]["billable"], true);
+    assert!(logged[0]["created_at"].is_string() && logged[0]["updated_at"].is_string());
+    assert_eq!(logged[1]["user"]["name"], "Uma Unmatched");
+    assert_eq!(logged[1]["billable"], false);
+
+    // Import into a new workspace where only Mia (and the owner) are members.
+    let target = harness
+        .ok(
+            &harness.owner,
+            "POST",
+            "/api/v1/workspaces",
+            Some(json!({"name": "Beta"})),
+        )
+        .await["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let now = TimestampMillis::now().as_millis();
+    sqlx::query(
+        "INSERT INTO memberships (id, workspace_id, user_id, role, version, created_at, updated_at) \
+         VALUES ($1, $2, $3, 'member', 0, $4, $5)",
+    )
+    .bind(Id::new_v7().to_string())
+    .bind(&target)
+    .bind(&mia_id)
+    .bind(now)
+    .bind(now)
+    .execute(harness.database.pool())
+    .await
+    .unwrap();
+    let stop = harness.serve().await;
+    let imports = format!("/api/v1/workspaces/{target}/imports/orbit");
+    let boundary = "orbit-import-boundary";
+    let mut body = format!(
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"export.zip\"\r\n\
+         Content-Type: application/zip\r\n\r\n"
+    )
+    .into_bytes();
+    body.extend_from_slice(&bytes);
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    let request = harness
+        .request(&harness.owner, "POST", &format!("{imports}/upload"))
+        .header(
+            header::CONTENT_TYPE,
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(Body::from(body))
+        .unwrap();
+    let (status, created, _) = harness.send(request).await;
+    let created: Value = serde_json::from_slice(&created).unwrap_or(Value::Null);
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let import_id = created["id"].as_str().unwrap().to_owned();
+    let wait_for = async |wanted: &str| -> Value {
+        for _ in 0..600 {
+            let import = harness
+                .ok(
+                    &harness.owner,
+                    "GET",
+                    &format!("{imports}/{import_id}?include=tree"),
+                    None,
+                )
+                .await;
+            if import["status"] == wanted {
+                return import;
+            }
+            assert!(
+                !matches!(import["status"].as_str(), Some("failed" | "cancelled")),
+                "{import}"
+            );
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        panic!("the import never reached {wanted}");
+    };
+    let ready = wait_for("ready").await;
+    let project_ids: Vec<Value> = ready["tree"]["projects"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|project| project["id"].clone())
+        .collect();
+    harness
+        .ok(
+            &harness.owner,
+            "POST",
+            &format!("{imports}/{import_id}/start"),
+            Some(json!({"selection": {"project_ids": project_ids}})),
+        )
+        .await;
+    let done = wait_for("completed").await;
+    assert_eq!(done["report"]["failures"], json!([]), "{done}");
+    stop.await;
+
+    let rows = sqlx::query(
+        "SELECT task_time_entries.user_id, task_time_entries.created_by, task_time_entries.minutes, \
+         task_time_entries.worked_on, task_time_entries.note, task_time_entries.billable, \
+         task_time_entries.created_at FROM task_time_entries \
+         WHERE task_time_entries.workspace_id = $1 ORDER BY task_time_entries.worked_on",
+    )
+    .bind(&target)
+    .fetch_all(harness.database.pool())
+    .await
+    .unwrap();
+    let imported: Vec<(String, String, i64, String, String, i64)> = rows
+        .iter()
+        .map(|row| {
+            (
+                row.get("user_id"),
+                row.get("created_by"),
+                row.get("minutes"),
+                row.get("worked_on"),
+                row.get("note"),
+                row.get("billable"),
+            )
+        })
+        .collect();
+    assert_eq!(
+        imported,
+        vec![
+            (
+                mia_id.clone(),
+                owner_id.clone(),
+                90,
+                "2026-11-20".to_owned(),
+                "Fixed **it**".to_owned(),
+                1
+            ),
+            // Uma has no account in Beta: her time is logged on the importer, under her name.
+            (
+                owner_id.clone(),
+                owner_id.clone(),
+                30,
+                "2026-11-21".to_owned(),
+                "**Uma Unmatched**\n\nReview".to_owned(),
+                0
+            ),
+            (
+                owner_id.clone(),
+                owner_id.clone(),
+                45,
+                "2026-11-22".to_owned(),
+                "Wrote the docs".to_owned(),
+                0
+            ),
+        ]
+    );
+    let linked: Option<String> = sqlx::query_scalar(
+        "SELECT task_comments.body FROM task_time_entries \
+         JOIN task_comments ON task_comments.id = task_time_entries.comment_id \
+         WHERE task_time_entries.workspace_id = $1 AND task_time_entries.minutes = 45",
+    )
+    .bind(&target)
+    .fetch_optional(harness.database.pool())
+    .await
+    .unwrap();
+    assert!(
+        linked.is_some_and(|body| body.contains("Wrote the docs")),
+        "the imported entry names the imported comment"
+    );
+    let source_created: i64 = sqlx::query_scalar(
+        "SELECT created_at FROM task_time_entries WHERE workspace_id = $1 AND minutes = 90",
+    )
+    .bind(&harness.workspace_id)
+    .fetch_one(harness.database.pool())
+    .await
+    .unwrap();
+    assert_eq!(rows[0].get::<i64, _>("created_at"), source_created);
 }
