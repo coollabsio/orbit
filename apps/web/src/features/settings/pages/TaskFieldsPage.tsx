@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { MoreH as MoreHorizontal, Edit as Pencil, Trash as Trash2 } from 'reicon-react'
+import { MoreH as MoreHorizontal, Edit as Pencil, Plus, Trash as Trash2 } from 'reicon-react'
 import type { TaskField } from '@orbit/api/generated/types.gen'
 import { OPTIONAL_TASK_PROPERTIES, showsTaskProperty, withTaskProperty } from '@orbit/api/taskProperties'
 import { InfoTip } from '@/components/common/InfoTip'
@@ -14,7 +14,7 @@ import { Switch } from '@/components/ui/switch'
 import { LoadingText } from '@/components/ui/spinner'
 import { SettingsRow } from '@/features/settings/components/SettingsParts'
 import { useCreateTaskField, useDeleteTaskField, useTaskFields, useUpdateTaskField } from '@/features/tasks/api/fields'
-import { TaskFieldForm } from '@/features/tasks/components/TaskFieldForm'
+import { TaskFieldDialog } from '@/features/tasks/components/TaskFieldForm'
 import { fieldKindLabel } from '@/features/tasks/fieldsLib'
 import { useSetHiddenTaskProperties } from '@/features/workspaces/api'
 import { useCan } from '@/features/workspaces/permissions'
@@ -58,7 +58,9 @@ export function TaskFieldsPage() {
   const updateField = useUpdateTaskField(workspace.id)
   const deleteField = useDeleteTaskField(workspace.id)
   const [editingId, setEditingId] = useState<string>()
+  const [creating, setCreating] = useState(false)
   const list = fields.data ?? []
+  const editing = list.find((field) => field.id === editingId)
 
   const remove = async (field: TaskField) => {
     if (!await confirmAction({ title: `Delete ${field.name}?`, description: `${projectsText(field.project_count)}. Every task loses its value of this field. You cannot undo this.`, confirmLabel: 'Delete', danger: true })) return
@@ -68,29 +70,18 @@ export function TaskFieldsPage() {
   return (
     <>
       <BuiltInPropertiesCard />
-      <SettingsCard title="Task fields" description="Custom fields that any project of the workspace can add to its tasks, for example a customer, a customer group or a budget. Add a field to a project in its settings, under Fields." flush>
+      <SettingsCard
+        title="Task fields"
+        description="Custom fields that any project of the workspace can add to its tasks, for example a customer, a customer group or a budget. Add a field to a project in its settings, under Fields."
+        actions={<Button type="button" onClick={() => { createField.reset(); setCreating(true) }}><Plus className="size-3.5" />New field</Button>}
+        flush
+      >
         <div className="flex flex-col divide-y">
-          <SettingsRow>
-            <TaskFieldForm gallery={list} submitLabel="Create field" pending={createField.isPending} onSubmit={async (body) => { await createField.mutateAsync(body) }} />
-          </SettingsRow>
-          {createField.isError ? <SettingsRow className="text-xs text-destructive" role="alert">The field could not be created. Its name may already be in use.</SettingsRow> : null}
           {fields.isPending ? <SettingsRow><LoadingText>Loading fields…</LoadingText></SettingsRow> : null}
           {fields.isError ? <SettingsRow role="alert">Fields could not be loaded.</SettingsRow> : null}
           {fields.isSuccess && list.length === 0 ? <SettingsRow>No fields yet.</SettingsRow> : null}
-          {list.map((field) => editingId === field.id
-            ? <SettingsRow key={field.id}>
-                <TaskFieldForm
-                  initial={field}
-                  submitLabel="Save"
-                  pending={updateField.isPending}
-                  onCancel={() => setEditingId(undefined)}
-                  onSubmit={async ({ name, options }) => {
-                    await updateField.mutateAsync({ fieldId: field.id, body: { name, options, expected_version: field.version } })
-                    setEditingId(undefined)
-                  }}
-                />
-              </SettingsRow>
-            : <SettingsRow key={field.id} className="group/row flex-nowrap">
+          {list.map((field) => (
+              <SettingsRow key={field.id} className="group/row flex-nowrap">
                 <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                   <span className="truncate text-sm font-medium text-foreground">
                     {field.name}
@@ -127,11 +118,39 @@ export function TaskFieldsPage() {
                     </DropdownMenuContent>
                   </DropdownMenu>
                 ) : null}
-              </SettingsRow>)}
-          {updateField.isError ? <SettingsRow className="text-xs text-destructive" role="alert">The field could not be saved. Its name may be in use, or someone else changed it; try again.</SettingsRow> : null}
+              </SettingsRow>
+          ))}
           {deleteField.isError ? <SettingsRow className="text-xs text-destructive" role="alert">The field could not be deleted.</SettingsRow> : null}
         </div>
       </SettingsCard>
+      {creating ? (
+        <TaskFieldDialog
+          title="New field"
+          gallery={list}
+          submitLabel="Create field"
+          pending={createField.isPending}
+          error={createField.isError ? 'The field could not be created. Its name may already be in use.' : undefined}
+          onClose={() => setCreating(false)}
+          onSubmit={async (body) => {
+            await createField.mutateAsync(body)
+            setCreating(false)
+          }}
+        />
+      ) : null}
+      {editing ? (
+        <TaskFieldDialog
+          title={`Edit ${editing.name}`}
+          initial={editing}
+          submitLabel="Save"
+          pending={updateField.isPending}
+          error={updateField.isError ? 'The field could not be saved. Its name may be in use, or someone else changed it; try again.' : undefined}
+          onClose={() => setEditingId(undefined)}
+          onSubmit={async ({ name, options }) => {
+            await updateField.mutateAsync({ fieldId: editing.id, body: { name, options, expected_version: editing.version } })
+            setEditingId(undefined)
+          }}
+        />
+      ) : null}
     </>
   )
 }
