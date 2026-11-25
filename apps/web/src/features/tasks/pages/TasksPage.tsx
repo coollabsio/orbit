@@ -27,6 +27,7 @@ import { useTeamMembers } from '@/features/workspaces/api'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { useAllStatuses, useProjects } from '@/features/tasks/api/projects'
 import { useLabels } from '@/features/tasks/api/labels'
+import { showsTaskProperty } from '@orbit/api/taskProperties'
 import { useProjectsMilestones } from '@/features/tasks/api/milestones'
 import { useProjectsCycles } from '@/features/tasks/api/cycles'
 import { projectLabels } from '@/features/tasks/taskMeta'
@@ -78,7 +79,7 @@ import { useCommand } from '@/shortcuts/useCommand'
 import { useCreateTaskDefaults, useOpenNewTask } from '@/features/tasks/newTask'
 import { rebaseViewSessionEdit, useViewState, type ViewSource } from '@/features/views/useViewState'
 import { validateFilterOnServer } from '@/features/views/validateFilter'
-import { countConditions, DEFAULT_DISPLAY, emptyFilter, isTaskPreset, normalizeViewState, pageDisplay, pageKeyFor, type TaskPreset } from '@/features/views/viewState'
+import { countConditions, DEFAULT_DISPLAY, emptyFilter, isTaskPreset, normalizeViewState, pageDisplay, pageKeyFor, shownFilter, type TaskPreset } from '@/features/views/viewState'
 
 const EMPTY_PROJECTS: NonNullable<ReturnType<typeof useProjects>['data']> = []
 const EMPTY_LABELS: NonNullable<ReturnType<typeof useLabels>['data']> = []
@@ -149,10 +150,13 @@ function WorkspaceTasksPage() {
   // a saved view that failed to load has no state: never run the task query with defaults in its place
   const viewUnavailable = source.kind === 'view' && !viewState.isLoading && viewState.view === undefined
   // milestone and cycle groupings belong to a single project's page
-  const display = pageDisplay(viewState.state.display, projectFilter)
+  // so do the built-in properties the workspace hides: their saved groupings, orderings and conditions read as unset
+  const display = pageDisplay(viewState.state.display, projectFilter, workspace)
+  const userFilter = shownFilter(viewState.state.filter, workspace)
+  const effectiveFilter = shownFilter(viewState.effective, workspace)
   const layout = display.layout
-  const tasksQuery = useTaskQuery(workspace.id, viewState.effective, display, !viewState.isLoading && !viewUnavailable)
-  const taskRefs = useFilterTaskRefs(workspace.id, viewState.state.filter)
+  const tasksQuery = useTaskQuery(workspace.id, effectiveFilter, display, !viewState.isLoading && !viewUnavailable)
+  const taskRefs = useFilterTaskRefs(workspace.id, userFilter)
 
   // Quick search is local and never saved (spec §3); another preset or view starts with an empty box.
   const [search, setSearch] = useState('')
@@ -229,6 +233,7 @@ function WorkspaceTasksPage() {
     currentUserId: currentUser.data?.id ?? '',
     taskRefs,
     taskFields,
+    workspace,
   }
   const presetLabel = source.kind === 'page' && source.preset ? PRESET_LABEL[source.preset] : null
   const state = {
@@ -342,7 +347,7 @@ function WorkspaceTasksPage() {
   /** Starting properties of a new task; each group value wins over the filter default for its field. */
   const newTaskDefaults = (values: GroupValues) => {
     const fromGroup = groupCreateFields(values)
-    const fromFilter = createDefaultsFromFilter(viewState.effective, {
+    const fromFilter = createDefaultsFromFilter(effectiveFilter, {
       ...groupContext,
       targetProjectId: fromGroup.projectId ?? projectFilter ?? projects[0]?.id ?? null,
     })
@@ -363,7 +368,7 @@ function WorkspaceTasksPage() {
   const activeProject = projects.find((project) => project.id === projectFilter)
   // the user's own conditions (a preset page's chip is not one): only then can they be cleared or saved as a view.
   // A changed display alone is not offered as a view: the page already remembers it.
-  const filtered = countConditions(viewState.state.filter) > 0
+  const filtered = countConditions(userFilter) > 0
   // the user's conditions go; a page's preset chip stays. A page saves at once, so the toast offers the way back.
   const clearFilters = () => {
     const previous = viewState.state.filter
@@ -450,7 +455,7 @@ function WorkspaceTasksPage() {
             )}
             {layout === 'timeline' ? <TimelineControls pxPerDay={pxPerDay} onZoomChange={setPxPerDay} onToday={() => timelineRef.current?.scrollToToday()} /> : null}
             <TaskSearchBox value={search} onChange={setSearch} />
-            <FilterButton filter={viewState.state.filter} options={filterOptions} onChange={viewState.setFilter} onOpenAdvanced={() => setAdvancedOpen(true)} />
+            <FilterButton filter={userFilter} options={filterOptions} onChange={viewState.setFilter} onOpenAdvanced={() => setAdvancedOpen(true)} />
             <DisplayPopover
               display={display}
               // a view resets to its saved display (normalized like useViewState's dirty base), a page to the default
@@ -464,7 +469,7 @@ function WorkspaceTasksPage() {
           {viewState.stateError ? <ViewStateBanner /> : null}
           <FilterBar
             key={source.kind === 'view' ? source.viewId : source.pageKey}
-            filter={viewState.state.filter}
+            filter={userFilter}
             options={filterOptions}
             onChange={viewState.setFilter}
             presetLabel={presetLabel}
@@ -489,7 +494,7 @@ function WorkspaceTasksPage() {
           <AdvancedFilterDialog
             open={advancedOpen}
             onOpenChange={setAdvancedOpen}
-            filter={viewState.state.filter}
+            filter={userFilter}
             options={filterOptions}
             onApply={viewState.setFilter}
             validate={(next) => validateFilterOnServer(workspace.id, next)}
@@ -523,7 +528,7 @@ function WorkspaceTasksPage() {
             ) : (
                 <TaskContextMenu tasks={visibleTasks} users={users} labels={labels} statuses={statusesQuery.data} groupContext={groupContext} currentUserId={currentUser.data?.id ?? ''}>
                   {layout === 'timeline'
-                    ? <TaskTimeline ref={timelineRef} key={workspace.id} tasks={visibleTasks} projects={projects} statuses={statusesQuery.data} users={users} groupBy={display.group_by} properties={display.properties} groupContext={groupContext} pxPerDay={pxPerDay} onZoomChange={setPxPerDay} onOpen={openTask} planning={projectFilter ? { milestones, cycles } : null} />
+                    ? <TaskTimeline ref={timelineRef} key={workspace.id} tasks={visibleTasks} projects={projects} statuses={statusesQuery.data} users={users} groupBy={display.group_by} properties={display.properties} groupContext={groupContext} pxPerDay={pxPerDay} onZoomChange={setPxPerDay} onOpen={openTask} planning={projectFilter ? { milestones: showsTaskProperty(workspace, 'milestone') ? milestones : [], cycles: showsTaskProperty(workspace, 'cycle') ? cycles : [] } : null} />
                     : layout === 'board'
                     ? <TaskBoard key={`${workspace.id}:${collapseScope}`} tasks={visibleTasks} users={users} labels={labels} statuses={statusesQuery.data} projects={projects} taskFields={taskFields} display={display} groupContext={groupContext} collapseScope={collapseScope} activeTaskId={null} onOpen={openTask} />
                     : <TaskList key={`${workspace.id}:${collapseScope}`} tasks={visibleTasks} users={users} labels={labels} statuses={statusesQuery.data} projects={projects} taskFields={taskFields} display={display} groupContext={groupContext} collapseScope={collapseScope} onOpen={openTask} onAdd={(values) => openNewTask({ values })} />}

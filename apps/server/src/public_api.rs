@@ -501,6 +501,14 @@ impl Responder {
                     [(field, "The value is invalid for this workspace or project.")],
                 );
             }
+            TaskError::Refused(detail) => {
+                return self.problem(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_request",
+                    "Invalid request",
+                    detail,
+                );
+            }
             // `current` is a full task record with relations; it can name unapproved projects.
             TaskError::VersionConflict { current } => {
                 return Problem::conflict(

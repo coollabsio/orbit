@@ -1,5 +1,7 @@
 import { useState, type FormEvent } from 'react'
+import { Add as Plus, Clock } from 'reicon-react'
 import { cn } from 'cn'
+import { formatDuration } from '@orbit/api/duration'
 import type { TaskField } from '@orbit/api/generated/types.gen'
 import { ColorDot } from '@/components/common/ColorDot'
 import { Button } from '@/components/ui/button'
@@ -9,13 +11,14 @@ import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMe
 import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { useProjectTaskFields, useSetTaskFieldValue, useTaskFieldValues } from '@/features/tasks/api/fields'
+import { useTaskTimeEntries } from '@/features/tasks/api/timeEntries'
 import { fieldValueText, parseFieldInput, selectedOptions } from '@/features/tasks/fieldsLib'
 import { PropertyButton, PropertyGroup } from './TaskPropertyParts'
 
 type Save = (value: unknown) => void
 
 /** One property block per custom field of the task's project, in the project's order. */
-export function TaskFieldProperties({ workspaceId, taskId, projectId, readOnly }: { workspaceId: string; taskId: string; projectId: string; readOnly: boolean }) {
+export function TaskFieldProperties({ workspaceId, taskId, projectId, readOnly, onLogTime }: { workspaceId: string; taskId: string; projectId: string; readOnly: boolean; onLogTime: () => void }) {
   const fields = useProjectTaskFields(workspaceId, projectId).data ?? []
   const values = useTaskFieldValues(workspaceId, taskId).data ?? []
   const setValue = useSetTaskFieldValue(workspaceId, taskId)
@@ -23,6 +26,13 @@ export function TaskFieldProperties({ workspaceId, taskId, projectId, readOnly }
   return (
     <>
       {fields.map((field) => {
+        if (field.kind === 'time_tracking') {
+          return (
+            <PropertyGroup key={field.id} title={field.name}>
+              <TimeProperty workspaceId={workspaceId} taskId={taskId} readOnly={readOnly} onLogTime={onLogTime} />
+            </PropertyGroup>
+          )
+        }
         const value = values.find((item) => item.field_id === field.id)?.value ?? null
         const save: Save = (next) => setValue.mutate({ fieldId: field.id, value: next })
         return (
@@ -32,6 +42,26 @@ export function TaskFieldProperties({ workspaceId, taskId, projectId, readOnly }
         )
       })}
       {setValue.isError ? <p className="-mt-4 mb-6 text-xs text-destructive" role="alert">The field could not be saved.</p> : null}
+    </>
+  )
+}
+
+/** The time logged on the task and its sub-issues, and Log time. */
+function TimeProperty({ workspaceId, taskId, readOnly, onLogTime }: { workspaceId: string; taskId: string; readOnly: boolean; onLogTime: () => void }) {
+  const time = useTaskTimeEntries(workspaceId, taskId).data
+  return (
+    <>
+      {time && (time.total_minutes > 0 || time.sub_issues_minutes > 0) ? (
+        <p className="flex items-center gap-1.5 text-[0.8125rem] tabular-nums" aria-label="Time logged">
+          <Clock className="size-3.5 text-muted-foreground" aria-hidden="true" />
+          {formatDuration(time.total_minutes)}
+          {time.sub_issues_minutes > 0 ? <span className="text-xs text-muted-foreground">+{formatDuration(time.sub_issues_minutes)} sub-issues</span> : null}
+        </p>
+      ) : null}
+      <PropertyButton type="button" className="text-muted-foreground" disabled={readOnly} onClick={onLogTime}>
+        <Plus className="size-3.5" aria-hidden="true" />
+        Log time
+      </PropertyButton>
     </>
   )
 }

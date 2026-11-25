@@ -124,7 +124,7 @@ export function CustomFieldChip({ field, value, className }: { field: TaskField;
       ? shortDate(`${value}T00:00:00`)
       : field.kind === 'url' && typeof value === 'string' ? urlHost(value) : text
   return (
-    <span {...shared} className={cn('inline-flex max-w-[140px] min-w-0 shrink-0 items-center gap-1 whitespace-nowrap text-muted-foreground', field.kind === 'number' && 'tabular-nums', className)}>
+    <span {...shared} className={cn('inline-flex max-w-[140px] min-w-0 shrink-0 items-center gap-1 whitespace-nowrap text-muted-foreground', (field.kind === 'number' || field.kind === 'time_tracking') && 'tabular-nums', className)}>
       <Icon aria-hidden className="size-[1.1em] shrink-0" />
       <span className="truncate">{shown}</span>
     </span>

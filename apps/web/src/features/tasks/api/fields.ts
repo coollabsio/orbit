@@ -3,10 +3,16 @@ import { apiClient } from '@/api/client'
 import { queryKeys } from '@/api/queryKeys'
 import { createTaskField, deleteTaskField, listProjectTaskFields, listTaskFields, listTaskFieldValues, setProjectTaskFields, setTaskFieldValue, updateTaskField } from '@orbit/api/generated/sdk.gen'
 import type { TaskField, TaskFieldBody, TaskFieldUpdateBody, TaskFieldValue } from '@orbit/api/generated/types.gen'
+import { timeTrackingField } from '@orbit/api/taskFields'
 
 function required<T>(data: T | undefined, message: string): T {
   if (data === undefined) throw new Error(message)
   return data
+}
+
+/** The project's time tracking field: while the project shows it, its tasks take new time. */
+export function useTimeTrackingField(workspaceId: string, projectId: string | undefined) {
+  return timeTrackingField(useProjectTaskFields(workspaceId, projectId).data ?? [])
 }
 
 /** The workspace's field gallery, by name. */

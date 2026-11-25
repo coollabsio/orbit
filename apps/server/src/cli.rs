@@ -1134,7 +1134,12 @@ async fn install_seed_data(
         .fetch_one(database.pool())
         .await
         .map_err(operation)?;
-        TaskRepository::new(database)
+        let tasks = TaskRepository::new(database);
+        tasks
+            .turn_on_time_tracking(workspace_id, project_id, user_id, "development-seed", now)
+            .await
+            .map_err(operation)?;
+        tasks
             .create_task(
                 workspace_id,
                 user_id,

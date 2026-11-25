@@ -7,6 +7,7 @@ import { TaskStatusIcon } from './TaskStatusIcon'
 import type { Cycle, Milestone, Task, TaskActivity, TaskViewState } from '@/features/tasks/api/models'
 import { useCycles } from '@/features/tasks/api/cycles'
 import { useMilestones } from '@/features/tasks/api/milestones'
+import { useTimeTrackingField } from '@/features/tasks/api/fields'
 import { useCreateTaskComment } from '@/features/tasks/api/tasks'
 import { useTaskTimeEntries } from '@/features/tasks/api/timeEntries'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
@@ -60,7 +61,8 @@ export function ActivityFeed({ task, state, onOpenTask }: ActivityFeedProps) {
   // the unfolded runs, by the id of their first row
   const [unfolded, setUnfolded] = useState<string[]>([])
   const { workspace } = useWorkspace()
-  const createComment = useCreateTaskComment(workspace.id, task.id)
+  const timeTracking = useTimeTrackingField(workspace.id, task.projectId)
+  const createComment = useCreateTaskComment(workspace.id, task.id, Boolean(timeTracking))
   const planning = { milestones: useMilestones(workspace.id, task.projectId).data ?? [], cycles: useCycles(workspace.id, task.projectId).data ?? [] }
   const userById = (id: string) => state.users.find((u) => u.id === id)
   const timeEntries = useTaskTimeEntries(workspace.id, task.id).data?.items

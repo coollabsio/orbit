@@ -4,7 +4,8 @@ import { cn } from 'cn'
 import { useQueryClient } from '@tanstack/react-query'
 import { confirmAction } from '@/components/common/confirmAction'
 import { recurrenceLabel } from '@orbit/api/recurrence'
-import { Add as Plus, ArrowLeft, Calendar, Clock, Diamonds, Hierarchy2, Link2, RefreshCircle, Repeat, Tag, TaskSquare as SquareCheck, Triangle, User as UserIcon, Xmark as X } from 'reicon-react'
+import { showsTaskProperty } from '@orbit/api/taskProperties'
+import { Add as Plus, ArrowLeft, Calendar, Diamonds, Hierarchy2, Link2, RefreshCircle, Repeat, Tag, TaskSquare as SquareCheck, Triangle, User as UserIcon, Xmark as X } from 'reicon-react'
 import { Badge } from '@/components/ui/badge'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Tip } from '@/components/common/Tip'
@@ -58,10 +59,9 @@ import { TaskDescriptionEditor, type TaskDescriptionHandle } from './TaskDescrip
 import { TaskTextFields } from './TaskTextFields'
 import { RecurrenceEditor } from './RecurrenceEditor'
 import { TimeEntryDialog } from './TimeEntryDialog'
-import { useTaskTimeEntries } from '@/features/tasks/api/timeEntries'
-import { formatDuration } from '@/features/tasks/timeLib'
 import { PropertyButton, PropertyGroup } from './TaskPropertyParts'
 import { TaskFieldProperties } from './TaskFieldProperties'
+import { useTimeTrackingField } from '@/features/tasks/api/fields'
 
 interface TaskDetailProps {
   task: Task | undefined
@@ -80,7 +80,8 @@ export function TaskDetail({ task, project, state, onClose, onOpenTask, onOpenPr
   const { workspace } = useWorkspace()
   const updateTask = useUpdateTask(workspace.id)
   const deleteAttachment = useDeleteTaskAttachment(workspace.id, task?.id ?? '')
-  const createComment = useCreateTaskComment(workspace.id, task?.id ?? '')
+  const timeTracking = useTimeTrackingField(workspace.id, task?.projectId)
+  const createComment = useCreateTaskComment(workspace.id, task?.id ?? '', Boolean(timeTracking))
   const deleteTask = useDeleteTask(workspace.id)
   const githubLinks = useTaskGithubLinks(workspace.id, task?.id)
   const workspaceReadOnly = useWorkspaceReadOnly()
@@ -169,9 +170,8 @@ export function TaskDetail({ task, project, state, onClose, onOpenTask, onOpenPr
   useCommand('task.addSubIssue', task ? () => setComposingSubIssue(true) : null)
   const [relationMenuOpen, setRelationMenuOpen] = useState(false)
   useCommand('task.addRelation', task ? () => setRelationMenuOpen(true) : null)
-  const time = useTaskTimeEntries(workspace.id, task?.id).data
   const [loggingTime, setLoggingTime] = useState(false)
-  useCommand('task.logTime', task ? () => setLoggingTime(true) : null)
+  useCommand('task.logTime', task && timeTracking ? () => setLoggingTime(true) : null)
 
   return (
     <Pane>
@@ -350,7 +350,7 @@ export function TaskDetail({ task, project, state, onClose, onOpenTask, onOpenPr
                   </PropertyButton>
                 }
               />
-              <MilestonePicker
+              {showsTaskProperty(workspace, 'milestone') ? <MilestonePicker
                 milestones={milestones}
                 value={task.milestoneId ?? null}
                 onChange={(milestoneId) => updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, milestone_id: milestoneId } })}
@@ -360,8 +360,8 @@ export function TaskDetail({ task, project, state, onClose, onOpenTask, onOpenPr
                     <span className="truncate">{milestone?.name ?? 'Set milestone'}</span>
                   </PropertyButton>
                 }
-              />
-              <CyclePicker
+              /> : null}
+              {showsTaskProperty(workspace, 'cycle') ? <CyclePicker
                 cycles={cycles}
                 value={task.cycleId ?? null}
                 onChange={(cycleId) => updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, cycle_id: cycleId } })}
@@ -371,8 +371,8 @@ export function TaskDetail({ task, project, state, onClose, onOpenTask, onOpenPr
                     <span className="truncate">{cycle ? cycleName(cycle) : 'Set cycle'}</span>
                   </PropertyButton>
                 }
-              />
-              <EstimatePicker
+              /> : null}
+              {showsTaskProperty(workspace, 'estimate') ? <EstimatePicker
                 value={task.estimate ?? null}
                 onChange={(estimate) => updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, estimate } })}
                 trigger={
@@ -381,7 +381,7 @@ export function TaskDetail({ task, project, state, onClose, onOpenTask, onOpenPr
                     {task.estimate == null ? 'Set estimate' : estimateLabel(task.estimate)}
                   </PropertyButton>
                 }
-              />
+              /> : null}
               {task.parent ? (
                 <DropdownMenu>
                   <DropdownMenuTrigger render={
@@ -428,7 +428,7 @@ export function TaskDetail({ task, project, state, onClose, onOpenTask, onOpenPr
               />
             </PropertyGroup>
 
-            <TaskFieldProperties workspaceId={workspace.id} taskId={task.id} projectId={task.projectId} readOnly={workspaceReadOnly} />
+            <TaskFieldProperties workspaceId={workspace.id} taskId={task.id} projectId={task.projectId} readOnly={workspaceReadOnly} onLogTime={() => setLoggingTime(true)} />
 
             <PropertyGroup title="Project">
               {githubIssueLinked ? (
@@ -537,20 +537,6 @@ export function TaskDetail({ task, project, state, onClose, onOpenTask, onOpenPr
                   />
                 </PopoverContent>
               </Popover>
-            </PropertyGroup>
-
-            <PropertyGroup title="Time">
-              {time && (time.total_minutes > 0 || time.sub_issues_minutes > 0) ? (
-                <p className="flex items-center gap-1.5 text-[0.8125rem] tabular-nums" aria-label="Time logged">
-                  <Clock className="size-3.5 text-muted-foreground" aria-hidden="true" />
-                  {formatDuration(time.total_minutes)}
-                  {time.sub_issues_minutes > 0 ? <span className="text-xs text-muted-foreground">+{formatDuration(time.sub_issues_minutes)} sub-issues</span> : null}
-                </p>
-              ) : null}
-              <PropertyButton type="button" className="text-muted-foreground" onClick={() => setLoggingTime(true)}>
-                <Plus className="size-3.5" aria-hidden="true" />
-                Log time
-              </PropertyButton>
             </PropertyGroup>
           </aside>
 

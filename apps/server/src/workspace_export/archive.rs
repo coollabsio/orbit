@@ -47,7 +47,8 @@ workspace.json
     email, role, joined_at), teamspaces, and projects with their statuses (workflow),
     labels, milestones, cycles and \"fields\" (the ids of the task fields the project shows,
     in its order), and \"task_fields\": the workspace's task field gallery, each {\"id\",
-    \"name\", \"kind\" (text, number, date, select, multi_select, checkbox or url),
+    \"name\", \"kind\" (text, number, date, select, multi_select, checkbox, url or
+    time_tracking, which has no values: its tasks' time entries are the time),
     \"options\": [{\"id\", \"name\", \"color\"}] (select kinds only), \"created_at\"}.
     In a personal export, members are only the people who appear in the archive, and there
     are no projects or task fields.

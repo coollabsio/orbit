@@ -26,7 +26,7 @@ import type { User } from '@/features/workspaces/models'
 import type { BulkItem, LabelRecord, TaskField } from '@orbit/api/generated/types.gen'
 import { assigneeToggleUpdates, dueUpdates, everyTaskHasLabel, labelChoices, labelToggleUpdates, priorityUpdates, statusUpdates } from '@/features/tasks/bulkUpdates'
 import { BulkTaskLimitError, MAX_BULK_TASK_UPDATES, useBulkTasks } from '@/features/tasks/api/tasks'
-import { useWorkspace } from '@/features/workspaces/workspaceContext'
+import { useShowsTaskProperty, useWorkspace } from '@/features/workspaces/workspaceContext'
 import { DisclosureChevron, GroupIcon } from '@/features/views/components/GroupIcon'
 import { shownCustomFields } from '@/features/views/displayMeta'
 import { estimateTotal, groupTasks, type GroupContext, type TaskGroup } from '@/features/views/grouping'
@@ -143,7 +143,8 @@ export function TaskList({ tasks, users, labels, statuses, projects, taskFields,
   // a subtree stays in its root's group (spec §7.2), so only roots are grouped; counts include nested rows
   const rowCount = (zoneTasks: Task[]) => nested ? zoneTasks.reduce((total, task) => total + 1 + subtreeSize(tree, task.id), 0) : zoneTasks.length
   const taskById = new Map(tasks.map((task) => [task.id, task]))
-  const rowEstimate = (zoneTasks: Task[]) => estimateTotal(nested ? zoneTasks.flatMap((task) => [task, ...descendantIds(tree, task.id).flatMap((id) => taskById.get(id) ?? [])]) : zoneTasks)
+  const showsEstimate = useShowsTaskProperty('estimate')
+  const rowEstimate = (zoneTasks: Task[]) => !showsEstimate ? null : estimateTotal(nested ? zoneTasks.flatMap((task) => [task, ...descendantIds(tree, task.id).flatMap((id) => taskById.get(id) ?? [])]) : zoneTasks)
 
   const dragEnabled = canDrag(display)
   const sections = listSections(nested ? tree.roots : tasks, display, groupContext)

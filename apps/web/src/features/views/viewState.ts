@@ -2,6 +2,8 @@
  * The `ViewState` contract shared by saved views and per-page preferences (spec §1).
  * Pure data helpers: no React, no network.
  */
+import type { WorkspaceRecord } from '@orbit/api/generated/types.gen'
+import { hidesTaskKey } from '@orbit/api/taskProperties'
 
 export type GroupOp = 'and' | 'or'
 export type FilterField = 'status' | 'status_category' | 'assignee' | 'creator' | 'label' | 'priority' | 'project' | 'parent' | 'sub_issues' | 'due_date' | 'created_at' | 'updated_at' | 'text' | 'milestone' | 'cycle' | 'estimate' | 'custom_field'
@@ -119,11 +121,34 @@ export function normalizeDisplay(display: DisplayOptions): DisplayOptions {
 /** Milestones and cycles belong to one project: only a single project's page groups and filters by them. */
 export const PROJECT_GROUPS: readonly GroupBy[] = ['milestone', 'cycle']
 
-/** The display a page shows: off a project page, a saved milestone or cycle grouping reads as no grouping. */
-export function pageDisplay(display: DisplayOptions, projectId: string | null): DisplayOptions {
-  if (projectId) return display
-  const scoped = (group: GroupBy): GroupBy => (PROJECT_GROUPS.includes(group) ? 'none' : group)
-  return normalizeDisplay({ ...display, group_by: scoped(display.group_by), sub_group_by: scoped(display.sub_group_by) })
+type TaskPropertyScope = Pick<WorkspaceRecord, 'hidden_task_properties'>
+
+/**
+ * The display a page shows: off a project page, a saved milestone or cycle grouping reads as no grouping. A built-in
+ * property the workspace hides (Settings, Task fields) reads as not grouped, not ordered and not shown.
+ */
+export function pageDisplay(display: DisplayOptions, projectId: string | null, workspace: TaskPropertyScope): DisplayOptions {
+  const hides = (key: string) => hidesTaskKey(workspace, key)
+  if (projectId && !workspace.hidden_task_properties?.length) return display
+  const scoped = (group: GroupBy): GroupBy => ((!projectId && PROJECT_GROUPS.includes(group)) || hides(group) ? 'none' : group)
+  return normalizeDisplay({
+    ...display,
+    group_by: scoped(display.group_by),
+    sub_group_by: scoped(display.sub_group_by),
+    properties: display.properties.filter((property) => !hides(property)),
+    ...(hides(display.order_by) && { order_by: 'manual' as const }),
+  })
+}
+
+/** The filter without conditions on a built-in property the workspace hides; a group left empty goes too. */
+export function shownFilter(group: FilterGroup, workspace: TaskPropertyScope): FilterGroup {
+  if (!workspace.hidden_task_properties?.length) return group
+  const children = group.children.flatMap((child): FilterNode[] => {
+    if (!isGroup(child)) return hidesTaskKey(workspace, child.field) ? [] : [child]
+    const shown = shownFilter(child, workspace)
+    return shown.children.length > 0 ? [shown] : []
+  })
+  return children.length === group.children.length && children.every((child, index) => child === group.children[index]) ? group : { ...group, children }
 }
 
 /** Server or migrated state → a complete, normalized state (missing display keys take defaults). */

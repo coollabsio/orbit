@@ -2,8 +2,9 @@
  * The task list's display of custom fields (issue #87), as the web's `TaskPropertyChips` / `DisplayPopover` /
  * `displayMeta`: which values a row shows, which fields the display sheet offers, and the orderings. No React.
  */
-import type { TaskField, TaskFieldOption } from '@orbit/api/generated/types.gen'
-import { fieldValueText, selectedOptions } from '@orbit/api/taskFields'
+import type { TaskField, TaskFieldOption, WorkspaceRecord } from '@orbit/api/generated/types.gen'
+import { hidesTaskKey } from '@orbit/api/taskProperties'
+import { fieldValueText, selectedOptions, storesValues } from '@orbit/api/taskFields'
 
 import type { IconName } from '../ui/Icon'
 import { shortDate } from './format'
@@ -27,6 +28,7 @@ export const FIELD_KIND_ICON: Record<TaskField['kind'], IconName> = {
   multi_select: 'list',
   checkbox: 'checkSquare',
   url: 'link',
+  time_tracking: 'timer',
 }
 
 /** `example.com` for a URL value (no `www.`); the text itself when it does not parse. */
@@ -109,9 +111,12 @@ export function orderKey(display: Pick<DisplayOptions, 'order_by' | 'order_field
   return display.order_by === 'custom_field' && display.order_field_id ? `${FIELD_PREFIX}${display.order_field_id}` : display.order_by === 'custom_field' ? 'manual' : display.order_by
 }
 
-/** The orderings to choose from: the built-in ones, then each field; an ordering by a field not listed shows as "Unknown field". */
-export function orderOptions(fields: readonly TaskField[], current: string): { key: string; label: string }[] {
-  const items = [...BUILT_IN_ORDERS.map((order) => ({ key: order as string, label: ORDER_LABEL[order] })), ...fields.map((field) => ({ key: `${FIELD_PREFIX}${field.id}`, label: field.name }))]
+/**
+ * The orderings to choose from: the built-in ones (without a property the workspace hides), then each field that
+ * stores values; an ordering by a field not listed shows as "Unknown field".
+ */
+export function orderOptions(fields: readonly TaskField[], current: string, workspace?: Pick<WorkspaceRecord, 'hidden_task_properties'>): { key: string; label: string }[] {
+  const items = [...BUILT_IN_ORDERS.filter((order) => !hidesTaskKey(workspace, order)).map((order) => ({ key: order as string, label: ORDER_LABEL[order] })), ...fields.filter((field) => storesValues(field.kind)).map((field) => ({ key: `${FIELD_PREFIX}${field.id}`, label: field.name }))]
   if (!items.some((item) => item.key === current)) items.push({ key: current, label: 'Unknown field' })
   return items
 }

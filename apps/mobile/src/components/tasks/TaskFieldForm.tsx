@@ -1,4 +1,4 @@
-import { FIELD_KINDS, hasOptions } from '@orbit/api/taskFields'
+import { FIELD_KINDS, hasOptions, newFieldKinds } from '@orbit/api/taskFields'
 import { useRef, useState } from 'react'
 import { Pressable, View } from 'react-native'
 
@@ -15,9 +15,10 @@ type Option = TaskFieldOptionInput & { key: string }
 /**
  * New field or Edit field of the gallery (the web's `TaskFieldForm`): name, type and, for the select types, the
  * options with their colours. An existing field keeps its type: the stored values would not fit another one.
- * `onSave` resolves to close the dialog; a rejection shows `errorText` and keeps it open.
+ * `gallery` limits the types of a new field. `onSave` resolves to close the dialog; a rejection shows `errorText` and
+ * keeps it open.
  */
-export function TaskFieldForm({ field, submitLabel, errorText, onSave, onClose }: { field: TaskField | null; submitLabel: string; errorText: string; onSave: (body: TaskFieldBody) => Promise<unknown>; onClose: () => void }) {
+export function TaskFieldForm({ field, gallery, submitLabel, errorText, onSave, onClose }: { field: TaskField | null; gallery: readonly TaskField[]; submitLabel: string; errorText: string; onSave: (body: TaskFieldBody) => Promise<unknown>; onClose: () => void }) {
   const { colors } = useTheme()
   const nextKey = useRef(0)
   const [name, setName] = useState(field?.name ?? '')
@@ -56,7 +57,7 @@ export function TaskFieldForm({ field, submitLabel, errorText, onSave, onClose }
       <Input label="Name" value={name} onChangeText={setName} placeholder="Customer" maxLength={100} autoFocus={!field} returnKeyType="done" />
       <View className="gap-2">
         {field ? <LabelTip label="Type" text="A field keeps its type: the values tasks have would not fit another one." /> : <FieldLabel>Type</FieldLabel>}
-        <Select label="Field type" value={kind} disabled={Boolean(field)} options={FIELD_KINDS.map((item) => ({ value: item.kind, label: item.label }))} onChange={setKind} />
+        <Select label="Field type" value={kind} disabled={Boolean(field)} options={(field ? FIELD_KINDS : newFieldKinds(gallery)).map((item) => ({ value: item.kind, label: item.label }))} onChange={setKind} />
       </View>
       {hasOptions(kind) ? (
         <View className="gap-2">

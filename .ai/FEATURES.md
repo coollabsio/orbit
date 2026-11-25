@@ -184,7 +184,8 @@ Core files: server `repositories/tasks/fields.rs`, `task_field_routes.rs` (migra
 `TaskFieldProperties.tsx`, `TaskFieldForm.tsx`; mobile `components/tasks/TaskFields.tsx`.
 
 - The workspace has one field gallery (`task_fields`, Settings → Task fields, `/task-fields`). Kinds: text, number,
-  date (`YYYY-MM-DD`), select, multi_select, checkbox, url; names are unique without case; the kind never changes.
+  date (`YYYY-MM-DD`), select, multi_select, checkbox, url, time_tracking; names are unique without case; the kind
+  never changes. At most one time_tracking field per workspace (partial unique index; a second is a 422).
   Every member but a guest creates fields; the creator, owners and admins (`workspace.update`) change and delete them.
 - A project shows a list of gallery fields in order (`project_task_fields`, project settings → Fields, `PUT
   /projects/{id}/fields`, needs `projects.manage`). A value can be set only for a field that the task's project shows.
@@ -206,6 +207,15 @@ Core files: server `repositories/tasks/fields.rs`, `task_field_routes.rs` (migra
   `set_task_field_value`, `create_task_field`, `set_project_task_fields`; no field update/delete (they change values
   in every project).
 - Mobile: values in task detail, Settings → Task fields (`settings/task-fields.tsx`), project settings Fields section.
+- Built-in properties (Settings → Task fields, "Built-in properties" card): owners and admins (`workspace.update`) turn
+  off milestone, cycle and estimate for the workspace (`PUT /workspaces/{id}/task-properties` `{ hidden }`, migration
+  `20261125120237`, column `workspaces.hidden_task_properties` JSON array, audit `workspace.task_properties_updated`;
+  `WorkspaceRecord.hidden_task_properties`, absent when empty). UI only: tasks keep their values and the API still
+  reads and writes them. Shared helper `packages/api/src/taskProperties.ts`. Off hides the property in task detail, the
+  new task dialog, row chips, Display options (shown property, grouping, ordering, milestone timeline), filter pickers,
+  context menu, command palette, board/list estimate totals, the timeline planning lane and the project settings
+  pages; saved display and filter state that names it reads as unset (`pageDisplay`, `shownFilter`; mobile
+  `shownViewState`). Mobile: the same card, task detail, new task, filters, ordering, project settings cards.
 - Workspace export / Orbit import: `workspace.json` has `task_fields` (gallery with option ids) and each project's
   `fields` (ids in order); each task file has `field_values` (`{field_id, value}` as stored, removed options left
   out); no format version bump (old archives import without fields). A personal export has none (no tasks). The
@@ -214,7 +224,27 @@ Core files: server `repositories/tasks/fields.rs`, `task_field_routes.rs` (migra
   `Name (2)`… when another kind holds the name; at most 200 fields and 100 options, unknown kinds and malformed
   entries skipped. Options map by name, so values keep their choice; fields append to a project's list; values go
   through `checked_value` and are inserted per task (`ON CONFLICT DO NOTHING`, no activity rows).
-- Not yet: grouping by a field; timers (time entries are built in: `task_time_entries`, #95).
+- Not yet: grouping by a field; timers.
+
+### Time tracking (#95)
+
+Core files: server `repositories/time_entries.rs`, the time_tracking kind in `repositories/tasks/fields.rs`; shared
+`packages/api/src/duration.ts`; web `TimeEntryDialog.tsx`, `TaskFieldProperties.tsx`, `timeLib.ts`; mobile
+`components/tasks/TimeTracking.tsx`, `data/time.ts`.
+
+- Time entries (`task_time_entries`) belong to one person: minutes (1 to 1440), a work day, a note, billable. Everyone
+  logs, edits and deletes their own; `time.manage` covers other members' time.
+- Time tracking is the workspace's time_tracking field: a project takes new entries (REST, app routes, MCP `log_time`,
+  `/spend` in the comment composer) only while it shows that field, else a 422 "Time tracking is off in this
+  project…". Listing, editing and deleting existing entries stay allowed. Imports skip the check.
+- The field stores no values: `field_values` carries `{field_id, value: <own minutes>}` for each task with entries
+  (one grouped query in `values_by_task`), also where the project does not show the field. Setting a value is refused;
+  filters and sorts leave it out (`custom_field_specs`). Clients show the total, "+Xh sub-issues" and Log time at the
+  field's place among the task's properties; `task.logTime` (Shift+T) and `/spend` work only while it is on (else
+  `/spend` posts as text). Time entry cards in the feed always show.
+- The Asana import adds the field (created as "Time tracking" or the existing one) to each project that gets entries;
+  the Orbit import maps a source time_tracking field to this workspace's one, whatever its name. The dev seed turns it
+  on in its project.
 
 ### Project workflows
 

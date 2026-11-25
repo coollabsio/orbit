@@ -2609,7 +2609,8 @@ struct CommentBody {
     #[serde(default)]
     mentioned_user_ids: Vec<String>,
     /// Also log the caller's time on the task (`/spend` in the composer), in the same write. The
-    /// entry's note is a copy of the comment.
+    /// entry's note is a copy of the comment. Refused, with the comment, when the task's project
+    /// does not show the time tracking field.
     time: Option<CommentTimeBody>,
 }
 
@@ -3298,7 +3299,9 @@ pub(crate) fn task_problem(
             instance,
             request_id,
         ),
-        TaskError::Invalid { field } => validation(field, &instance, request_id),
+        TaskError::Invalid { field } | TaskError::Refused(field) => {
+            validation(field, &instance, request_id)
+        }
         TaskError::Conflict | TaskError::IntegrationConflict => ApiError::new(
             StatusCode::CONFLICT,
             "task_conflict",

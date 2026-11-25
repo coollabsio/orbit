@@ -136,7 +136,10 @@ impl From<PageError> for TokenApiError {
 
 impl From<TaskError> for TokenApiError {
     fn from(error: TaskError) -> Self {
-        Self::Task(error)
+        match error {
+            TaskError::Refused(detail) => Self::Invalid(detail),
+            error => Self::Task(error),
+        }
     }
 }
 

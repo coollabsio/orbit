@@ -27559,7 +27559,7 @@
           "public-api"
         ],
         "summary": "Log time on a task",
-        "description": "Adds a time entry. Logging time for another member needs `time.manage` (`404` otherwise).",
+        "description": "Adds a time entry. Logging time for another member needs `time.manage` (`404` otherwise). The task's project must show the workspace's `time_tracking` field (`400` otherwise); existing entries stay readable and editable without it.",
         "operationId": "public_log_time",
         "parameters": [
           {
@@ -95375,6 +95375,131 @@
         ]
       }
     },
+    "/api/v1/workspaces/{workspace_id}/task-properties": {
+      "put": {
+        "tags": [
+          "crate::workspace_routes"
+        ],
+        "summary": "Shows or hides the built-in task properties (milestone, cycle, estimate) in the workspace's\ntask UI. Owners and admins may. Hiding keeps every task's value.",
+        "operationId": "set_task_properties",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskPropertiesBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceRecord"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/workspaces/{workspace_id}/tasks": {
       "get": {
         "tags": [
@@ -107447,7 +107572,7 @@
               },
               {
                 "$ref": "#/components/schemas/CommentTimeBody",
-                "description": "Also log the caller's time on the task (`/spend` in the composer), in the same write. The\nentry's note is a copy of the comment."
+                "description": "Also log the caller's time on the task (`/spend` in the composer), in the same write. The\nentry's note is a copy of the comment. Refused, with the comment, when the task's project\ndoes not show the time tracking field."
               }
             ]
           }
@@ -120456,6 +120581,15 @@
         },
         "additionalProperties": false
       },
+      "OptionalTaskProperty": {
+        "type": "string",
+        "description": "A built-in task property a workspace may hide (Settings, Task fields).",
+        "enum": [
+          "milestone",
+          "cycle",
+          "estimate"
+        ]
+      },
       "OrbitImport": {
         "type": "object",
         "description": "An Orbit import. Never contains the token.",
@@ -131438,7 +131572,8 @@
           "select",
           "multi_select",
           "checkbox",
-          "url"
+          "url",
+          "time_tracking"
         ]
       },
       "TaskFieldOption": {
@@ -131784,6 +131919,22 @@
             "type": "string"
           }
         }
+      },
+      "TaskPropertiesBody": {
+        "type": "object",
+        "required": [
+          "hidden"
+        ],
+        "properties": {
+          "hidden": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OptionalTaskProperty"
+            },
+            "description": "Every built-in task property the workspace hides; the others show."
+          }
+        },
+        "additionalProperties": false
       },
       "TaskProperty": {
         "type": "string",
@@ -134827,6 +134978,13 @@
               "null"
             ],
             "format": "date-time"
+          },
+          "hidden_task_properties": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OptionalTaskProperty"
+            },
+            "description": "The built-in task properties the workspace hides in its task UI. Absent: none. Tasks keep\ntheir values, and the API still reads and writes them."
           },
           "id": {
             "type": "string"

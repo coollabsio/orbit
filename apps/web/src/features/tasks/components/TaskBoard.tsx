@@ -19,7 +19,7 @@ import { useNestDrop } from '@/features/views/useNestDrop'
 import { useParentActions } from '@/features/tasks/useParentActions'
 import type { DisplayOptions, TaskProperty } from '@/features/views/viewState'
 import type { User } from '@/features/workspaces/models'
-import { useWorkspace } from '@/features/workspaces/workspaceContext'
+import { useShowsTaskProperty, useWorkspace } from '@/features/workspaces/workspaceContext'
 import { AssigneePicker } from './AssigneePicker'
 import { BlockedIndicator } from './BlockedIndicator'
 import { PriorityPicker } from './PriorityPicker'
@@ -376,7 +376,7 @@ interface BoardZoneProps {
  */
 /** A column or lane header's card count, then the sum of the estimates once a card has one. */
 function GroupTotals({ tasks, className }: { tasks: Task[]; className?: string }) {
-  const points = estimateTotal(tasks)
+  const points = useShowsTaskProperty('estimate') ? estimateTotal(tasks) : null
   return (
     <span className={cn('flex items-center gap-2 font-normal whitespace-nowrap text-muted-foreground/70 tabular-nums', className)}>
       <span>{tasks.length}</span>

@@ -83,7 +83,7 @@ pub(super) async fn time_entries(
     operation_id = "public_log_time",
     tag = "public-api",
     summary = "Log time on a task",
-    description = "Adds a time entry. Logging time for another member needs `time.manage` (`404` otherwise).",
+    description = "Adds a time entry. Logging time for another member needs `time.manage` (`404` otherwise). The task's project must show the workspace's `time_tracking` field (`400` otherwise); existing entries stay readable and editable without it.",
     params(("workspace_id" = String, Path, description = "The token's workspace, from `GET /me`."), ("task" = String, Path, description = "A task UUID or identifier such as `ENG-12` (any letter case).")),
     request_body = LogTimeBody,
     responses((status = 201, description = "The new entry", body = TimeEntryRecord)),

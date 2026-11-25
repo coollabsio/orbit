@@ -90,6 +90,7 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::workspace_routes::save_workspace_bucket,
         crate::workspace_routes::remove_workspace_bucket,
         crate::workspace_routes::rename_workspace,
+        crate::workspace_routes::set_task_properties,
         crate::workspace_routes::list_members,
         crate::workspace_routes::get_member_profile,
         crate::workspace_routes::put_member_note,

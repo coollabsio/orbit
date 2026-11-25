@@ -8,6 +8,9 @@ import { Switch } from '@/components/ui/switch'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { Tip } from '@/components/common/Tip'
 import type { TaskField } from '@orbit/api/generated/types.gen'
+import { hidesTaskKey } from '@orbit/api/taskProperties'
+import { useWorkspace } from '@/features/workspaces/workspaceContext'
+import { storesValues } from '@/features/tasks/fieldsLib'
 import { emptyFilter, PROJECT_GROUPS, TASK_PROPERTIES, viewStatesEqual, type DisplayOptions, type GroupBy, type Layout, type OrderBy, type ShowCompleted, type SubIssuesMode, type TaskProperty } from '../viewState'
 import { GROUP_LABEL, LAYOUTS, TIMELINE_PROPERTIES } from '../displayMeta'
 
@@ -118,7 +121,10 @@ export function DisplayPopover({ display, defaultDisplay, onChange, projectPage 
   })
   const setGroup = (group_by: GroupBy) =>
     onChange(group_by === 'none' || group_by === display.sub_group_by ? { group_by, sub_group_by: 'none' } : { group_by })
-  const groups = projectPage ? GROUP_ORDER : GROUP_ORDER.filter((group) => !PROJECT_GROUPS.includes(group))
+  const { workspace } = useWorkspace()
+  // the built-in properties the workspace hides (Settings, Task fields) are not offered
+  const offered = <T extends string>(key: T) => !hidesTaskKey(workspace, key)
+  const groups = GROUP_ORDER.filter((group) => (projectPage || !PROJECT_GROUPS.includes(group)) && offered(group))
   const groupItems = groups.filter((group) => display.layout !== 'board' || group !== 'none').map((group) => ({ value: group, label: GROUP_LABEL[group] }))
   const subItems = groups.filter((group) => group !== display.group_by).map((group) => ({
     value: group,
@@ -130,14 +136,14 @@ export function DisplayPopover({ display, defaultDisplay, onChange, projectPage 
   const flatOnly = display.layout !== 'list' && display.sub_issues === 'nested'
   const manual = display.order_by === 'manual'
   const ascending = display.order_direction === 'asc'
-  const shownProperties = timeline ? TASK_PROPERTIES.filter((property) => TIMELINE_PROPERTIES.includes(property)) : TASK_PROPERTIES
+  const shownProperties = TASK_PROPERTIES.filter((property) => (!timeline || TIMELINE_PROPERTIES.includes(property)) && offered(property))
   // a timeline row has no room for custom fields; their choice stays for list and board
   const shownFields = timeline ? NO_FIELDS : fields
   const customFields = display.custom_fields ?? []
   const orderKey = display.order_by === 'custom_field' && display.order_field_id ? fieldKey(display.order_field_id) : display.order_by
   const orderItems = [
-    ...ORDER_OPTIONS.map((order) => ({ value: order as string, label: ORDER_LABEL[order] })),
-    ...fields.map((field) => ({ value: fieldKey(field.id), label: field.name })),
+    ...ORDER_OPTIONS.filter(offered).map((order) => ({ value: order as string, label: ORDER_LABEL[order] })),
+    ...fields.filter((field) => storesValues(field.kind)).map((field) => ({ value: fieldKey(field.id), label: field.name })),
   ]
   if (!orderItems.some((item) => item.value === orderKey)) orderItems.push({ value: orderKey, label: 'Unknown field' })
   const setOrder = (key: string) => {
@@ -190,7 +196,7 @@ export function DisplayPopover({ display, defaultDisplay, onChange, projectPage 
               </ToggleGroupItem>
             ))}
           </ToggleGroup>
-          {projectPage && !milestoneTimeline ? (
+          {projectPage && !milestoneTimeline && offered('milestone') ? (
             <Button
               type="button"
               variant="ghost"

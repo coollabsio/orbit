@@ -36,9 +36,11 @@ pub use project_icons::{ProjectIconError, project_icon_url};
 
 pub use cycles::{CycleChanges, CycleMoveOutcome, CycleRecord};
 pub use fields::{
-    ImportedOption, MAX_FIELDS, MAX_OPTIONS, TaskFieldKind, TaskFieldOption, TaskFieldOptionInput,
-    TaskFieldRecord, TaskFieldValue, checked_value, live_value,
+    ImportedOption, MAX_FIELDS, MAX_OPTIONS, TIME_TRACKING_EXISTS, TIME_TRACKING_OFF,
+    TIME_TRACKING_VALUE, TaskFieldKind, TaskFieldOption, TaskFieldOptionInput, TaskFieldRecord,
+    TaskFieldValue, checked_value, live_value,
 };
+pub(super) use fields::time_tracking_on;
 pub use github_links::GithubLink;
 pub use milestones::{MilestoneChanges, MilestoneRecord};
 
@@ -560,6 +562,10 @@ pub enum TaskError {
     NotFound,
     #[error("task input is invalid: {field}")]
     Invalid { field: &'static str },
+    /// A well-formed request that the workspace's setup refuses; the message tells the caller
+    /// what to do instead.
+    #[error("{0}")]
+    Refused(&'static str),
     #[error("task operation conflicts with current state")]
     Conflict,
     #[error("GitHub controls this task's title and description")]

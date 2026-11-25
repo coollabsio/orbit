@@ -1,15 +1,47 @@
 import { fieldKindLabel } from '@orbit/api/taskFields'
+import { OPTIONAL_TASK_PROPERTIES, showsTaskProperty, withTaskProperty } from '@orbit/api/taskProperties'
 import { useState } from 'react'
 import { View } from 'react-native'
 
 import { ActionSheet, ConfirmDialog, type ConfirmRequest } from '../../../components/settings/Dialog'
-import { Note, SettingsCard, SettingsRow, SettingsShell, SmallOutlineButton, WORKSPACE_NAV } from '../../../components/settings/Shell'
+import { Note, SettingsCard, SettingsRow, SettingsShell, SmallOutlineButton, Toggle, WORKSPACE_NAV } from '../../../components/settings/Shell'
 import { Dot } from '../../../components/tasks/pickers'
 import { TaskFieldForm } from '../../../components/tasks/TaskFieldForm'
 import type { TaskField } from '../../../data/task-api'
 import { projectsText } from '../../../data/task-fields'
+import { useSetHiddenTaskProperties } from '../../../hooks/account'
 import { useTaskFieldGallery, useTaskFieldWrites } from '../../../hooks/task-fields'
-import { Text } from '../../../ui'
+import { useOrbit } from '../../../orbit-context'
+import { LabelTip, Text } from '../../../ui'
+
+/** Milestone, cycle and estimate: owners and admins turn them off for the whole workspace. */
+function BuiltInPropertiesCard() {
+  const { workspace } = useOrbit()
+  const save = useSetHiddenTaskProperties()
+  const canChange = workspace.permissions.includes('workspace.update')
+  return (
+    <SettingsCard
+      title="Built-in properties"
+      description="Turn off a property the workspace does not use: tasks, filters and display options stop showing it. Tasks keep their values, and they show again when you turn it back on. Owners and admins change this."
+      flush
+    >
+      {OPTIONAL_TASK_PROPERTIES.map(({ property, label, help }, index) => (
+        <SettingsRow key={property} first={index === 0}>
+          <View className="min-w-0 flex-1">
+            <LabelTip label={label} text={help} className="font-noto-medium text-[13px] text-foreground" />
+          </View>
+          <Toggle
+            label={label}
+            value={showsTaskProperty(workspace, property)}
+            disabled={!canChange || save.isPending}
+            onChange={(shown) => save.mutate(withTaskProperty(workspace, property, shown))}
+          />
+        </SettingsRow>
+      ))}
+      {save.isError ? <SettingsRow><Note error>Could not save your choice. Try again.</Note></SettingsRow> : null}
+    </SettingsCard>
+  )
+}
 
 /**
  * The web's Task fields page: the workspace's field gallery. Every member creates fields; the creator, owners and
@@ -35,6 +67,7 @@ export default function TaskFieldsScreen() {
 
   return (
     <SettingsShell title="Settings" nav={WORKSPACE_NAV} onRefresh={() => fields.refetch()}>
+      <BuiltInPropertiesCard />
       <SettingsCard
         title="Task fields"
         description="Custom fields that any project of the workspace can add to its tasks, for example a customer, a customer group or a budget. Add a field to a project in its settings, under Fields."
@@ -85,6 +118,7 @@ export default function TaskFieldsScreen() {
       {form ? (
         <TaskFieldForm
           field={form.field}
+          gallery={list}
           submitLabel={form.field ? 'Save' : 'Create field'}
           errorText={form.field ? 'The field could not be saved. Its name may be in use, or someone else changed it; try again.' : 'The field could not be created. Its name may already be in use.'}
           onClose={() => setForm(null)}

@@ -22,6 +22,7 @@ import {
   PRESET_LABEL,
   queryAllTasks,
   saveViewPreference,
+  shownViewState,
   taskQueryBody,
   viewPreference,
   type DisplayOptions,
@@ -42,7 +43,7 @@ type Grouping = 'status' | 'none'
 export default function TasksScreen() {
   const { view: viewParam, search: searchParam, project: projectParam } = useLocalSearchParams<{ view?: string; search?: string; project?: string }>()
   const preset = isTaskPreset(viewParam) ? viewParam : undefined
-  const { client, workspaceId, user } = useOrbit()
+  const { client, workspace, workspaceId, user } = useOrbit()
   const { colors } = useTheme()
   const { width: windowWidth } = useWindowDimensions()
   const queryClient = useQueryClient()
@@ -63,7 +64,8 @@ export default function TasksScreen() {
   const pageKey = pageKeyFor(preset, projectId)
   const preferenceKey = ['view-preference', workspaceId, pageKey] as const
   const preference = useQuery({ queryKey: preferenceKey, queryFn: () => viewPreference(client, workspaceId, pageKey) })
-  const state: ViewState = preference.data ?? { filter: emptyFilter(), display: DEFAULT_DISPLAY }
+  // a built-in property the workspace hides (Settings, Task fields): its saved conditions and ordering read as unset
+  const state: ViewState = shownViewState(preference.data ?? { filter: emptyFilter(), display: DEFAULT_DISPLAY }, workspace)
   const saveState = (next: ViewState) => {
     queryClient.setQueryData(preferenceKey, next)
     saveViewPreference(client, workspaceId, pageKey, next).catch(() => void queryClient.invalidateQueries({ queryKey: preferenceKey }))
@@ -98,6 +100,7 @@ export default function TasksScreen() {
     cycles: projectId ? (cycles.data ?? []) : [],
     customFields: (projectId ? projectFields.data : galleryFields.data) ?? [],
     currentUserId: user.id,
+    workspace,
   }
 
   const sections = useMemo(() => {

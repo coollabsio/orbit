@@ -5,13 +5,14 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { LabelColorPicker } from '@/features/tasks/components/TaskLabels'
-import { FIELD_KINDS, hasOptions, nextOptionColor } from '@/features/tasks/fieldsLib'
+import { FIELD_KINDS, hasOptions, newFieldKinds, nextOptionColor } from '@/features/tasks/fieldsLib'
 
 /**
  * Name, kind and (for select kinds) options of a gallery field. An existing field keeps its kind: the stored values
- * would not fit another one.
+ * would not fit another one. A new field cannot be a second time tracking field of the `gallery`.
  */
-export function TaskFieldForm({ initial, submitLabel, pending, onSubmit, onCancel }: { initial?: TaskField; submitLabel: string; pending: boolean; onSubmit: (body: TaskFieldBody) => Promise<void>; onCancel?: () => void }) {
+export function TaskFieldForm({ initial, gallery = [], submitLabel, pending, onSubmit, onCancel }: { initial?: TaskField; gallery?: readonly TaskField[]; submitLabel: string; pending: boolean; onSubmit: (body: TaskFieldBody) => Promise<void>; onCancel?: () => void }) {
+  const kinds = initial ? FIELD_KINDS : newFieldKinds(gallery)
   const [name, setName] = useState(initial?.name ?? '')
   const [kind, setKind] = useState<TaskFieldKind>(initial?.kind ?? 'text')
   const [options, setOptions] = useState<TaskFieldOptionInput[]>(initial?.options ?? [])
@@ -40,12 +41,12 @@ export function TaskFieldForm({ initial, submitLabel, pending, onSubmit, onCance
     <form className="flex w-full flex-col gap-3" onSubmit={(event) => void submit(event)} onKeyDown={(event) => { if (event.key === 'Escape') onCancel?.() }}>
       <div className="flex flex-wrap items-center gap-3">
         <Input className="w-full max-w-[240px]" aria-label="Field name" placeholder="Field name, e.g. Customer" maxLength={100} value={name} onChange={(event) => setName(event.target.value)} autoFocus={Boolean(initial)} />
-        <Select items={FIELD_KINDS.map((item) => ({ value: item.kind, label: item.label }))} value={kind} disabled={Boolean(initial)} onValueChange={(value) => value && setKind(value as TaskFieldKind)}>
+        <Select items={kinds.map((item) => ({ value: item.kind, label: item.label }))} value={kind} disabled={Boolean(initial)} onValueChange={(value) => value && setKind(value as TaskFieldKind)}>
           <SelectTrigger aria-label="Field type" className="w-40">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {FIELD_KINDS.map((item) => <SelectItem key={item.kind} value={item.kind}>{item.label}</SelectItem>)}
+            {kinds.map((item) => <SelectItem key={item.kind} value={item.kind}>{item.label}</SelectItem>)}
           </SelectContent>
         </Select>
         <div className="flex gap-2">

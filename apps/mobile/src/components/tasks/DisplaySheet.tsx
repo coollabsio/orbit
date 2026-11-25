@@ -4,6 +4,7 @@ import { Pressable, View } from 'react-native'
 
 import { FIELD_KIND_ICON, orderKey, orderOptions, orderPatch, toggleCustomField } from '../../data/task-display'
 import type { DisplayOptions } from '../../data/tasks-filter'
+import { useOrbit } from '../../orbit-context'
 import { useTheme } from '../../theme'
 import { Icon, Text } from '../../ui'
 import { Segmented } from '../settings/Shell'
@@ -30,12 +31,13 @@ export function DisplaySheet({
   onClose: () => void
 }) {
   const { colors } = useTheme()
+  const { workspace } = useOrbit()
   const [page, setPage] = useState<Page>('main')
   useEffect(() => {
     if (visible) setPage('main')
   }, [visible])
   const currentOrder = orderKey(display)
-  const orders = orderOptions(fields, currentOrder)
+  const orders = orderOptions(fields, currentOrder, workspace)
   const manual = currentOrder === 'manual'
   const shown = display.custom_fields ?? []
 

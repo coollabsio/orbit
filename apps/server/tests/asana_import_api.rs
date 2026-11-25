@@ -530,6 +530,19 @@ impl Harness {
             .collect()
     }
 
+    /// The names of the time tracking fields the project shows.
+    async fn time_tracking(&self, project_id: &str) -> Vec<String> {
+        sqlx::query_scalar(
+            "SELECT task_fields.name FROM project_task_fields \
+             JOIN task_fields ON task_fields.id = project_task_fields.field_id \
+             WHERE project_task_fields.project_id = $1 AND task_fields.kind = 'time_tracking'",
+        )
+        .bind(project_id)
+        .fetch_all(self.database.pool())
+        .await
+        .unwrap()
+    }
+
     async fn comments(&self, task_id: &str) -> Vec<String> {
         sqlx::query_scalar(
             "SELECT body FROM task_comments WHERE task_id = $1 ORDER BY created_at, id",
@@ -697,6 +710,11 @@ async fn imports_projects_with_full_task_data() {
         ])
     );
     assert_eq!(h.time_entries(&ops_task).await, json!([]));
+    assert_eq!(
+        (h.time_tracking(&website).await, h.time_tracking(&ops).await),
+        (vec!["Time tracking".to_owned()], vec![]),
+        "the project that got time entries shows the time tracking field"
+    );
 
     let relation: (String, String, String) =
         sqlx::query_as("SELECT task_id, related_task_id, type FROM task_relations")
@@ -788,6 +806,11 @@ async fn resumes_after_a_restart_without_duplicates() {
     .execute(h.database.pool())
     .await
     .unwrap();
+    // A member renamed the time tracking field meanwhile: the retry keeps using it.
+    sqlx::query("UPDATE task_fields SET name = 'Hours' WHERE kind = 'time_tracking'")
+        .execute(h.database.pool())
+        .await
+        .unwrap();
     h.run(&id, &JobRun::default()).await;
 
     let import = h.view(&id).await;
@@ -818,6 +841,12 @@ async fn resumes_after_a_restart_without_duplicates() {
         minutes,
         [90, 30, 15],
         "both Asana entries are imported once, next to the importer's own entry"
+    );
+    assert_eq!(
+        h.time_tracking(&h.orbit_id(&id, "project", "200").await)
+            .await,
+        ["Hours"],
+        "a retry reuses the time tracking field"
     );
     assert_eq!(
         h.scalar(

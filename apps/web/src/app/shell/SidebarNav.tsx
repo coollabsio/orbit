@@ -25,7 +25,7 @@ import { isAdminLimitsPath, phonePath, settingsAreaOf, useAdminLimitsItems, useS
 import { useIsPhone } from '@/features/chat/pages/useChatViewport'
 import { chatEnabled, docsHidden } from './productNavigation'
 import { hostsPageList } from './sidebarSlot'
-import { PROJECT_SETTINGS_GROUPS, projectSettingsPath, projectSettingsProjectOf } from '@/features/tasks/projectSettingsNav'
+import { projectSettingsGroups, projectSettingsPath, projectSettingsProjectOf } from '@/features/tasks/projectSettingsNav'
 
 const WORKSPACE_LINKS = [
   { to: '/', label: 'Home', icon: Home, enabled: true },
@@ -438,12 +438,13 @@ function BackToApp({ label, fallback = '/', onNavigate, onBack }: { label: strin
 function ProjectSettingsAreaNav({ onNavigate, onBack }: { onNavigate?: () => void; onBack?: () => void }) {
   const collapsed = useContext(SidebarNavCollapsed)
   const projectId = projectSettingsProjectOf(useLocation().pathname) ?? ''
-  const workspaceId = useContext(WorkspaceContext)?.workspace.id ?? ''
+  const workspace = useContext(WorkspaceContext)?.workspace
+  const workspaceId = workspace?.id ?? ''
   const project = useProjects(workspaceId, workspaceId !== '').data?.find((item) => item.id === projectId)
   return (
     <>
       <BackToApp label={project?.name ?? 'Project settings'} fallback={`/tasks?project=${projectId}`} onNavigate={onNavigate} onBack={onBack} />
-      {PROJECT_SETTINGS_GROUPS.map((group) => (
+      {projectSettingsGroups(workspace).map((group) => (
         <Fragment key={group.label}>
           <SidebarSection label={group.label} collapsed={collapsed} />
           {group.items.map((item) => (

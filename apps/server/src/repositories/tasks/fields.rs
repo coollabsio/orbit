@@ -24,6 +24,11 @@ pub const MAX_TEXT_CHARS: usize = 2_000;
 const MAX_URL_BYTES: usize = 2_048;
 /// Larger numbers lose precision in browser JSON numbers.
 const MAX_NUMBER: f64 = 1e15;
+pub const TIME_TRACKING_EXISTS: &str = "The workspace already has a Time tracking field.";
+pub const TIME_TRACKING_VALUE: &str =
+    "A Time tracking field shows the time logged on the task. Log time instead of setting a value.";
+pub const TIME_TRACKING_OFF: &str =
+    "Time tracking is off in this project. Add the Time tracking field to the project.";
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
@@ -37,6 +42,9 @@ pub enum TaskFieldKind {
     MultiSelect,
     Checkbox,
     Url,
+    /// The time logged on the task, in minutes. A workspace has at most one; it stores no
+    /// values, and a project that shows it lets its tasks take new time entries.
+    TimeTracking,
 }
 
 impl TaskFieldKind {
@@ -49,6 +57,7 @@ impl TaskFieldKind {
             Self::MultiSelect => "multi_select",
             Self::Checkbox => "checkbox",
             Self::Url => "url",
+            Self::TimeTracking => "time_tracking",
         }
     }
 
@@ -169,6 +178,9 @@ impl TaskRepository {
             .await?;
         if count >= MAX_FIELDS {
             return Err(TaskError::Invalid { field: "fields" });
+        }
+        if kind == TaskFieldKind::TimeTracking && time_tracking_field(&mut tx, workspace_id).await?.is_some() {
+            return Err(TaskError::Refused(TIME_TRACKING_EXISTS));
         }
         let inserted = sqlx::query(
             "INSERT INTO task_fields (id, workspace_id, name, kind, options_json, created_by, version, created_at, updated_at) \
@@ -480,20 +492,25 @@ impl TaskRepository {
                 .map(|row| (row.get("id"), row.get("name"), row.get("kind")))
                 .collect();
         let same_kind = |(_, _, field_kind): &&(String, String, String)| field_kind == kind.as_str();
-        let existing = linked
-            .and_then(|linked| {
-                gallery
-                    .iter()
-                    .filter(same_kind)
-                    .find(|(id, _, _)| *id == linked.to_string())
-            })
-            .or_else(|| {
-                gallery
-                    .iter()
-                    .filter(same_kind)
-                    .find(|(_, field_name, _)| field_name.to_lowercase() == name.to_lowercase())
-            })
-            .map(|(id, _, _)| id.clone());
+        let existing = if kind == TaskFieldKind::TimeTracking {
+            // The workspace's only one, whatever its name.
+            gallery.iter().find(same_kind)
+        } else {
+            linked
+                .and_then(|linked| {
+                    gallery
+                        .iter()
+                        .filter(same_kind)
+                        .find(|(id, _, _)| *id == linked.to_string())
+                })
+                .or_else(|| {
+                    gallery
+                        .iter()
+                        .filter(same_kind)
+                        .find(|(_, field_name, _)| field_name.to_lowercase() == name.to_lowercase())
+                })
+        }
+        .map(|(id, _, _)| id.clone());
         let field_id = match existing {
             Some(id) => {
                 let field_id = parse_id(id)?;
@@ -575,6 +592,26 @@ impl TaskRepository {
         let record = field_in_tx(&mut tx, workspace_id, field_id, &actor).await?;
         tx.commit().await?;
         Ok(Some(record))
+    }
+
+    /// Turns time tracking on in the project (for imported time entries and the development
+    /// seed): adds the workspace's time tracking field to it, after creating the field when the
+    /// workspace has none. Does nothing more when it is on already, or when the gallery is full.
+    pub async fn turn_on_time_tracking(
+        &self,
+        workspace_id: Id,
+        project_id: Id,
+        actor_id: Id,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<(), TaskError> {
+        let field = self
+            .import_task_field(workspace_id, actor_id, None, "Time tracking", TaskFieldKind::TimeTracking, &[], request_id, now)
+            .await?;
+        if let Some(field) = field {
+            self.import_project_task_fields(workspace_id, project_id, &[field.id]).await?;
+        }
+        Ok(())
     }
 
     /// Appends the gallery fields among `field_ids` that the project does not show yet, in
@@ -709,8 +746,37 @@ async fn values_in_tx(
         .unwrap_or_default())
 }
 
+/// The workspace's time tracking field.
+async fn time_tracking_field(
+    tx: &mut Transaction<'_, Any>,
+    workspace_id: Id,
+) -> Result<Option<String>, TaskError> {
+    Ok(sqlx::query_scalar("SELECT id FROM task_fields WHERE workspace_id = $1 AND kind = 'time_tracking'")
+        .bind(workspace_id.to_string())
+        .fetch_optional(&mut **tx)
+        .await?)
+}
+
+/// Whether the project shows the time tracking field, so its tasks take new time entries.
+pub(in crate::repositories) async fn time_tracking_on(
+    tx: &mut Transaction<'_, Any>,
+    project_id: Id,
+) -> Result<bool, TaskError> {
+    let count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM project_task_fields \
+         JOIN task_fields ON task_fields.id = project_task_fields.field_id \
+         WHERE project_task_fields.project_id = $1 AND task_fields.kind = 'time_tracking'",
+    )
+    .bind(project_id.to_string())
+    .fetch_one(&mut **tx)
+    .await?;
+    Ok(count > 0)
+}
+
 /// The values of each of `task_ids` (at most a page of tasks) in one query, by field id;
-/// options removed from their field are dropped. Tasks without values are missing.
+/// options removed from their field are dropped. Tasks without values are missing. The time
+/// tracking field's value is the task's own logged minutes, also when its project does not
+/// show the field (as a stored value stays when its task moves).
 pub(in crate::repositories) async fn values_by_task<'e, E>(
     executor: E,
     task_ids: &[Id],
@@ -723,8 +789,8 @@ where
         return Ok(by_task);
     }
     let mut query = SqlBuilder::new(
-        "SELECT task_field_values.task_id, task_field_values.field_id, task_field_values.value_json, \
-         task_fields.kind, task_fields.options_json \
+        "SELECT task_field_values.task_id AS task_id, task_field_values.field_id AS field_id, \
+         task_field_values.value_json AS value_json, task_fields.kind AS kind, task_fields.options_json AS options_json \
          FROM task_field_values JOIN task_fields ON task_fields.id = task_field_values.field_id \
          WHERE task_field_values.task_id IN (",
     );
@@ -732,7 +798,20 @@ where
     for id in task_ids {
         ids.push_bind(id.to_string());
     }
-    query.push(") ORDER BY task_field_values.task_id, task_field_values.field_id");
+    query.push(
+        ") UNION ALL SELECT task_time_entries.task_id, task_fields.id, \
+         CAST(CAST(SUM(task_time_entries.minutes) AS BIGINT) AS TEXT), task_fields.kind, task_fields.options_json \
+         FROM task_time_entries JOIN task_fields ON task_fields.workspace_id = task_time_entries.workspace_id \
+         AND task_fields.kind = 'time_tracking' WHERE task_time_entries.task_id IN (",
+    );
+    let mut ids = query.separated(", ");
+    for id in task_ids {
+        ids.push_bind(id.to_string());
+    }
+    query.push(
+        ") GROUP BY task_time_entries.task_id, task_fields.id, task_fields.kind, task_fields.options_json \
+         ORDER BY task_id, field_id",
+    );
     let rows = query.build().fetch_all(executor).await?;
     let mut options_by_field: HashMap<String, Vec<TaskFieldOption>> = HashMap::new();
     for row in rows {
@@ -759,7 +838,8 @@ where
 }
 
 /// The kind and option order of the workspace's fields among `field_ids`, for filters and
-/// sorting. Ids that are not (or no longer) fields of the workspace are left out.
+/// sorting. Ids that are not (or no longer) fields of the workspace are left out, and so is the
+/// time tracking field: it has no stored value to filter or sort by.
 pub(in crate::repositories) async fn custom_field_specs(
     pool: &sqlx::AnyPool,
     workspace_id: Id,
@@ -773,7 +853,7 @@ pub(in crate::repositories) async fn custom_field_specs(
         SqlBuilder::new("SELECT id, kind, options_json FROM task_fields WHERE workspace_id = ");
     query
         .push_bind(workspace_id.to_string())
-        .push(" AND id IN (");
+        .push(" AND kind <> 'time_tracking' AND id IN (");
     let mut ids = query.separated(", ");
     for id in field_ids {
         ids.push_bind(id.to_string());
@@ -872,6 +952,7 @@ pub fn checked_value(
     let invalid = TaskError::Invalid { field: "value" };
     let known = |id: &str| options.iter().any(|option| option.id == id);
     match (kind, value) {
+        (TaskFieldKind::TimeTracking, _) => Err(TaskError::Refused(TIME_TRACKING_VALUE)),
         (_, Value::Null) => Ok(None),
         (TaskFieldKind::Text, Value::String(text)) => {
             let text = text.trim();
@@ -970,6 +1051,8 @@ mod tests {
         assert_eq!(check(TaskFieldKind::Url, json!("https://x.io/a")).unwrap(), Some(json!("https://x.io/a")));
         assert!(check(TaskFieldKind::Url, json!("javascript:alert(1)")).is_err());
         assert_eq!(check(TaskFieldKind::Url, Value::Null).unwrap(), None);
+        assert!(matches!(check(TaskFieldKind::TimeTracking, json!(30)), Err(TaskError::Refused(_))));
+        assert!(matches!(check(TaskFieldKind::TimeTracking, Value::Null), Err(TaskError::Refused(_))));
     }
 
     #[test]

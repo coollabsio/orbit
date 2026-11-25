@@ -43,7 +43,7 @@ import { ProjectGithubCard, type PendingProjectSave } from '@/features/tasks/com
 import { useSlowPending } from '@/lib/useDebouncedValue'
 import { loadFailed } from '@/lib/connection'
 import { useIsPhone } from '@/features/chat/pages/useChatViewport'
-import { PROJECT_SETTINGS_GROUPS, projectSettingsItem, projectSettingsPath, type ProjectSettingsSection } from '@/features/tasks/projectSettingsNav'
+import { projectSettingsGroups, projectSettingsItem, projectSettingsPath, type ProjectSettingsSection } from '@/features/tasks/projectSettingsNav'
 
 /** The sections the server changes only for holders of `projects.manage`; milestones, cycles, docs and GitHub stay open. */
 const MANAGED_SECTIONS: ReadonlySet<ProjectSettingsSection> = new Set(['general', 'access', 'statuses', 'labels', 'fields', 'sub-issues', 'danger-zone'])
@@ -59,8 +59,8 @@ export function ProjectSettingsPage() {
   const { projectId, section } = useParams()
   const navigate = useNavigate()
   const phone = useIsPhone()
-  const page = section ? projectSettingsItem(section) : null
   const { workspace } = useWorkspace()
+  const page = section ? projectSettingsItem(section, workspace) : null
   const projectsQuery = useProjects(workspace.id)
   const statusQuery = useProjectStatuses(workspace.id, projectId)
   const tasksQuery = useTasks(workspace.id, { project_id: projectId, limit: 100 })
@@ -363,7 +363,8 @@ export function ProjectSettingsPage() {
 
 /** A phone's project settings menu: the section groups as cards of links, like the workspace settings menu. */
 function ProjectSettingsMenu({ projectId }: { projectId: string }) {
-  return PROJECT_SETTINGS_GROUPS.map((group) => (
+  const { workspace } = useWorkspace()
+  return projectSettingsGroups(workspace).map((group) => (
     <nav key={group.label} aria-label={group.label} className="flex flex-col gap-2">
       <h2 className="px-1 text-xs font-medium text-muted-foreground">{group.label}</h2>
       <ul className="overflow-hidden rounded-lg bg-card shadow-[0_0_0_1px_var(--border)]">

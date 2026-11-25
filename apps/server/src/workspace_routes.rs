@@ -191,6 +191,10 @@ pub fn workspace_router(state: WorkspaceState) -> Router {
                 .delete(delete_workspace),
         )
         .route(
+            "/api/v1/workspaces/{workspace_id}/task-properties",
+            put(set_task_properties),
+        )
+        .route(
             "/api/v1/workspaces/{workspace_id}/storage",
             get(get_workspace_storage),
         )
@@ -543,6 +547,40 @@ async fn rename_workspace(
             session.user.id,
             name,
             body.expected_version,
+            request_id_value(request_id.as_ref()),
+            TimestampMillis::now(),
+        )
+        .await
+        .map(Json)
+        .map_err(|error| workspace_problem(error, instance, request_id.as_ref()))
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+struct TaskPropertiesBody {
+    /// Every built-in task property the workspace hides; the others show.
+    hidden: Vec<crate::repositories::workspaces::OptionalTaskProperty>,
+}
+
+/// Shows or hides the built-in task properties (milestone, cycle, estimate) in the workspace's
+/// task UI. Owners and admins may. Hiding keeps every task's value.
+#[utoipa::path(put, path = "/api/v1/workspaces/{workspace_id}/task-properties", params(("workspace_id" = String, Path)), request_body = TaskPropertiesBody, responses((status = 200, body = crate::repositories::workspaces::WorkspaceRecord)))]
+async fn set_task_properties(
+    State(state): State<WorkspaceState>,
+    Path(workspace_id): Path<String>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<TaskPropertiesBody>,
+) -> Result<Json<crate::repositories::workspaces::WorkspaceRecord>, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace_id}/task-properties");
+    let session = authenticate(&state, &headers, &instance, request_id.as_ref()).await?;
+    let workspace_id = parse_id(&workspace_id, &instance, request_id.as_ref())?;
+    state
+        .workspaces
+        .set_hidden_task_properties(
+            workspace_id,
+            session.user.id,
+            body.hidden,
             request_id_value(request_id.as_ref()),
             TimestampMillis::now(),
         )

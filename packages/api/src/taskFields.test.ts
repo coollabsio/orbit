@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { fieldActivityText, fieldValueText, parseFieldInput, selectedOptions } from './taskFields'
+import { fieldActivityText, fieldValueText, newFieldKinds, parseFieldInput, selectedOptions, timeTrackingField } from './taskFields'
 
 const options = [{ id: 'a', name: 'Acme', color: '#ff0000' }, { id: 'b', name: 'Globex', color: '#00ff00' }]
 
@@ -21,6 +21,20 @@ describe('custom field values', () => {
     expect(fieldValueText({ kind: 'select', options }, 'gone')).toBe('')
     expect(fieldValueText({ kind: 'checkbox', options: [] }, true)).toBe('Yes')
     expect(fieldValueText({ kind: 'date', options: [] }, '2026-03-04')).toContain('2026')
+  })
+
+  test('shows logged minutes as a duration', () => {
+    expect(fieldValueText({ kind: 'time_tracking', options: [] }, 90)).toBe('1h 30m')
+    expect(fieldValueText({ kind: 'time_tracking', options: [] }, 0)).toBe('')
+  })
+
+  test('offers time tracking once per workspace and finds it in a project', () => {
+    const text = { id: 't', kind: 'text' as const }
+    const time = { id: 'h', kind: 'time_tracking' as const }
+    expect(newFieldKinds([text]).map((item) => item.kind)).toContain('time_tracking')
+    expect(newFieldKinds([text, time]).map((item) => item.kind)).not.toContain('time_tracking')
+    expect(timeTrackingField([text, time])).toBe(time)
+    expect(timeTrackingField([text])).toBeUndefined()
   })
 
   test('names the changed field in the activity', () => {

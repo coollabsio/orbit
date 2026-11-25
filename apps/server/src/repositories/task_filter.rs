@@ -680,6 +680,8 @@ pub fn custom_operators(kind: TaskFieldKind) -> &'static [FilterOperator] {
             O::IsNotEmpty,
         ],
         TaskFieldKind::Checkbox => &[O::Is],
+        // `custom_field_specs` leaves it out: it has no stored value.
+        TaskFieldKind::TimeTracking => &[],
     }
 }
 
@@ -752,6 +754,10 @@ fn validate_custom_condition(
                 Err(invalid(value_path, "must be true or false"))
             }
         }
+        (TaskFieldKind::TimeTracking, _) => Err(invalid(
+            format!("{path}.operator"),
+            "is not supported for this field",
+        )),
     }
 }
 
@@ -1960,7 +1966,12 @@ pub fn custom_sort_key_type(spec: Option<&CustomFieldSpec>) -> SortKeyType {
     match spec.map(|spec| spec.kind) {
         Some(TaskFieldKind::Number) => SortKeyType::Real,
         Some(TaskFieldKind::Date | TaskFieldKind::Text | TaskFieldKind::Url) => SortKeyType::Text,
-        Some(TaskFieldKind::Select | TaskFieldKind::MultiSelect | TaskFieldKind::Checkbox)
+        Some(
+            TaskFieldKind::Select
+            | TaskFieldKind::MultiSelect
+            | TaskFieldKind::Checkbox
+            | TaskFieldKind::TimeTracking,
+        )
         | None => SortKeyType::Integer,
     }
 }
@@ -1988,6 +1999,9 @@ pub fn push_custom_sort_key(
                 .push(from)
                 .push_bind(field_id.to_string())
                 .push(") THEN 1 ELSE 0 END AS BIGINT)");
+        }
+        TaskFieldKind::TimeTracking => {
+            query.push("CAST(NULL AS BIGINT)");
         }
         TaskFieldKind::Select | TaskFieldKind::MultiSelect if spec.option_ids.is_empty() => {
             query.push("CAST(NULL AS BIGINT)");

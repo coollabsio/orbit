@@ -1,30 +1,7 @@
 import { createOrbitClient } from '@orbit/api/client'
 import { describe, expect, test } from 'bun:test'
 
-import { createTimeEntry, dayDate, deleteTimeEntry, formatDuration, parseDuration, takeSpend, timeTotalLabel, todayLocal, updateTimeEntry, workedOnLabel } from './time'
-
-test('a duration reads hours, minutes, both, decimals and bare minutes, in any case and spacing', () => {
-  expect(parseDuration('1h 30m')).toBe(90)
-  expect(parseDuration('1h30m')).toBe(90)
-  expect(parseDuration('90m')).toBe(90)
-  expect(parseDuration('1.5h')).toBe(90)
-  expect(parseDuration('2h')).toBe(120)
-  expect(parseDuration('45')).toBe(45)
-  expect(parseDuration(' 1 H  30 M ')).toBe(90)
-  expect(parseDuration('24h')).toBe(1440)
-  expect(parseDuration('.5h')).toBe(30)
-})
-
-test('a duration refuses days, weeks, zero, negatives, more than a day and garbage', () => {
-  for (const text of ['1d', '1w', '2h 1d', '0', '0h', '0m', '-30', '-1h', '24h 1m', '1441', '', '   ', 'h', 'm', 'abc', '1h30', '30m 1h', '1.5m', '1 30', '1 5', '2 4h']) {
-    expect([text, parseDuration(text)]).toEqual([text, null])
-  }
-})
-
-test('a duration prints as hours and minutes', () => {
-  expect([formatDuration(90), formatDuration(45), formatDuration(120), formatDuration(1440)]).toEqual(['1h 30m', '45m', '2h', '24h'])
-  expect(formatDuration(parseDuration('1h 30m')!)).toBe('1h 30m')
-})
+import { createTimeEntry, dayDate, deleteTimeEntry, takeSpend, timeTotalLabel, todayLocal, updateTimeEntry, workedOnLabel } from './time'
 
 test('today and a worked-on day are local days', () => {
   expect(todayLocal(new Date(2026, 0, 5, 23, 59))).toBe('2026-01-05')

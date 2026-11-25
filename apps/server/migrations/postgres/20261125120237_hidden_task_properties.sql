@@ -1,0 +1,4 @@
+-- Postgres: the same change as apps/server/migrations/20261125120237_hidden_task_properties.sql
+-- The built-in task properties the workspace hides in its task UI, a JSON array of
+-- "milestone", "cycle" and "estimate". Empty: all show. Hiding keeps the tasks' values.
+ALTER TABLE workspaces ADD COLUMN hidden_task_properties TEXT NOT NULL DEFAULT '[]';

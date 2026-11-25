@@ -768,6 +768,7 @@ async fn tools_list_includes_required_cache_fields_for_current_protocol() {
                 "list_tasks",
                 "get_task",
                 "list_task_relations",
+                "list_time_entries",
                 "list_task_trash",
                 "get_trashed_task",
                 "list_task_activity",

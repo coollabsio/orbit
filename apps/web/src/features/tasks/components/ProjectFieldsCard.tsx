@@ -60,6 +60,7 @@ export function ProjectFieldsCard({ projectId, readOnly }: { projectId: string; 
         {creating ? (
           <SettingsRow>
             <TaskFieldForm
+              gallery={gallery.data}
               submitLabel="Create and add"
               pending={createField.isPending || setFields.isPending}
               onCancel={() => setCreating(false)}

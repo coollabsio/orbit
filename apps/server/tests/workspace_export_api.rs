@@ -897,6 +897,25 @@ async fn time_entries_round_trip_through_the_export_and_an_orbit_import() {
     let mia_id = user_id(&harness.database, "mia@example.com").await;
     let owner_id = user_id(&harness.database, "owner@example.com").await;
     let task_id = harness.create_task("Track the time").await;
+    let project = harness
+        .scalar("SELECT id FROM projects WHERE workspace_id = $1")
+        .await;
+    let field = harness
+        .ok(
+            &harness.owner,
+            "POST",
+            &harness.workspace("/task-fields"),
+            Some(json!({"name": "Time tracking", "kind": "time_tracking"})),
+        )
+        .await;
+    harness
+        .ok(
+            &harness.owner,
+            "PUT",
+            &harness.workspace(&format!("/projects/{project}/fields")),
+            Some(json!({"field_ids": [field["id"]]})),
+        )
+        .await;
     let entries = harness.workspace(&format!("/tasks/{task_id}/time-entries"));
     // The owner logs Mia's time; Uma logs her own.
     harness
@@ -979,6 +998,15 @@ async fn time_entries_round_trip_through_the_export_and_an_orbit_import() {
     .execute(harness.database.pool())
     .await
     .unwrap();
+    // Beta has its own time tracking field: the import uses it, whatever its name.
+    harness
+        .ok(
+            &harness.owner,
+            "POST",
+            &format!("/api/v1/workspaces/{target}/task-fields"),
+            Some(json!({"name": "Hours", "kind": "time_tracking"})),
+        )
+        .await;
     let stop = harness.serve().await;
     let imports = format!("/api/v1/workspaces/{target}/imports/orbit");
     let boundary = "orbit-import-boundary";
@@ -1115,6 +1143,20 @@ async fn time_entries_round_trip_through_the_export_and_an_orbit_import() {
     .await
     .unwrap();
     assert_eq!(rows[0].get::<i64, _>("created_at"), source_created);
+    let shown: Vec<String> = sqlx::query_scalar(
+        "SELECT task_fields.name FROM task_fields \
+         JOIN project_task_fields ON project_task_fields.field_id = task_fields.id \
+         WHERE task_fields.workspace_id = $1 AND task_fields.kind = 'time_tracking'",
+    )
+    .bind(&target)
+    .fetch_all(harness.database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        shown,
+        ["Hours"],
+        "the imported project shows Beta's time tracking field"
+    );
 }
 
 /// Runs an Orbit import of `archive` into `workspace_id` as the owner, selecting every project

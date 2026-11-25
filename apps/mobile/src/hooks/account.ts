@@ -1,5 +1,5 @@
 /** The account and workspace settings queries and writes, over `data/account-api.ts`. */
-import type { ProjectGrantBody } from '@orbit/api/generated/types.gen'
+import type { OptionalTaskProperty, ProjectGrantBody } from '@orbit/api/generated/types.gen'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import * as ImagePicker from 'expo-image-picker'
 import { useEffect, useState } from 'react'
@@ -7,7 +7,7 @@ import { Alert } from 'react-native'
 
 import * as account from '../data/account-api'
 import { keys } from '../data/keys'
-import type { MemberRecord, User } from '../data/orbit'
+import type { MemberRecord, User, WorkspaceRecord } from '../data/orbit'
 import * as providers from '../data/sign-in-provider'
 import { currentStatus, type OwnStatus, type UserStatus } from '../data/status'
 import { useOrbit } from '../orbit-context'
@@ -301,6 +301,16 @@ export function useRenameWorkspace() {
   return useMutation({
     mutationFn: (name: string) => account.renameWorkspace(client, workspace, name),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: keys.workspaces }),
+  })
+}
+
+/** Turns a built-in task property (milestone, cycle, estimate) on or off for the whole workspace. */
+export function useSetHiddenTaskProperties() {
+  const { client, workspaceId } = useOrbit()
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (hidden: OptionalTaskProperty[]) => account.setHiddenTaskProperties(client, workspaceId, hidden),
+    onSuccess: (workspace) => queryClient.setQueryData<WorkspaceRecord[]>(keys.workspaces, (items) => items?.map((item) => (item.id === workspace.id ? workspace : item))),
   })
 }
 

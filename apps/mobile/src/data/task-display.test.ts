@@ -27,6 +27,7 @@ const BUDGET = field('f-budget', 'Budget', 'number')
 const SIGNED = field('f-signed', 'Signed off', 'checkbox')
 const SITE = field('f-site', 'Site', 'url')
 const DUE = field('f-due', 'Launch', 'date')
+const TIME = field('f-time', 'Time tracking', 'time_tracking')
 const GALLERY = [BUDGET, CUSTOMER, DUE, SIGNED, SITE]
 
 const task = (values: Record<string, unknown>) => ({ field_values: Object.entries(values).map(([field_id, value]) => ({ field_id, value })) })
@@ -52,6 +53,11 @@ test('a checked box shows the field name, a URL its host, a date a short local d
   expect(urlHost('not a url')).toBe('not a url')
 })
 
+test('time tracking shows the logged minutes as a duration', () => {
+  expect(taskFieldChips(task({ 'f-time': 90 }), [TIME])).toEqual([{ fieldId: 'f-time', label: 'Time tracking: 1h 30m', kind: 'text', icon: 'timer', text: '1h 30m' }])
+  expect(taskFieldChips(task({}), [TIME])).toEqual([])
+})
+
 test('a project page offers its fields, plus gallery fields the display still uses', () => {
   expect(displayFields(GALLERY, null, DEFAULT_DISPLAY)).toEqual(GALLERY)
   expect(displayFields(GALLERY, [CUSTOMER], { custom_fields: ['f-signed'], order_field_id: 'f-budget' }).map((item) => item.name)).toEqual(['Customer', 'Budget', 'Signed off'])
@@ -64,7 +70,7 @@ test('turning fields on appends them; off removes them; deleted ones drop out', 
 })
 
 test('orderings: built-ins, then each field; choosing a field sends it to the server', () => {
-  expect(orderOptions([BUDGET], 'manual').map((item) => item.key)).toEqual(['manual', 'priority', 'created', 'updated', 'title', 'due_date', 'estimate', 'field:f-budget'])
+  expect(orderOptions([BUDGET, TIME], 'manual').map((item) => item.key)).toEqual(['manual', 'priority', 'created', 'updated', 'title', 'due_date', 'estimate', 'field:f-budget'])
   expect(orderOptions([], 'field:f-gone').at(-1)).toEqual({ key: 'field:f-gone', label: 'Unknown field' })
 
   const byBudget = { ...DEFAULT_DISPLAY, ...orderPatch('field:f-budget'), order_direction: 'desc' as const }

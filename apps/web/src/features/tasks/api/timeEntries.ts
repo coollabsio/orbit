@@ -7,11 +7,15 @@ const JSON_HEADERS = { 'Content-Type': 'application/json' }
 
 /** Every task's time, not only this task's: a parent's sub-issue total changes too. */
 export function invalidateTimeEntries(queryClient: QueryClient, workspaceId: string) {
-  const prefix = queryKeys.timeEntries(workspaceId, '')
-  return queryClient.invalidateQueries({
-    predicate: ({ queryKey }) => queryKey.length === prefix.length && queryKey.at(-1) === prefix.at(-1)
-      && prefix.slice(0, -2).every((part, index) => queryKey[index] === part),
-  })
+  // a task's time tracking value is its logged time, in its field values and in the task lists
+  const prefixes = [queryKeys.timeEntries(workspaceId, ''), queryKeys.taskFieldValues(workspaceId, '')]
+  return Promise.all([
+    queryClient.invalidateQueries({
+      predicate: ({ queryKey }) => prefixes.some((prefix) => queryKey.length === prefix.length && queryKey.at(-1) === prefix.at(-1)
+        && prefix.slice(0, -2).every((part, index) => queryKey[index] === part)),
+    }),
+    queryClient.invalidateQueries({ queryKey: [...queryKeys.tasks.all(workspaceId), 'list'] }),
+  ])
 }
 
 export function useTaskTimeEntries(workspaceId: string, taskId: string | undefined) {

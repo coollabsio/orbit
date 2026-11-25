@@ -19,8 +19,9 @@ import {
   UserEdit,
   type IconComponent,
 } from 'reicon-react'
-import type { LabelRecord, ProjectRecord, TaskField, TaskFieldKind } from '@orbit/api/generated/types.gen'
-import { FIELD_KIND_ICON } from '@/features/tasks/fieldsLib'
+import type { LabelRecord, ProjectRecord, TaskField, TaskFieldKind, WorkspaceRecord } from '@orbit/api/generated/types.gen'
+import { hidesTaskKey } from '@orbit/api/taskProperties'
+import { FIELD_KIND_ICON, storesValues } from '@/features/tasks/fieldsLib'
 import type { Cycle, Milestone, TaskPriority, TaskStatusDef } from '@/features/tasks/api/models'
 import { cycleName } from '@/features/tasks/planningLib'
 import { CATEGORY_LABEL, CATEGORY_ORDER, labelKeyOf, labelRepresentatives, PRIORITY_LABEL, projectLabels, PRIORITY_ORDER, sortStatuses, statusKeyOf } from '@/features/tasks/taskMeta'
@@ -46,6 +47,8 @@ export type FilterOptions = {
   taskRefs?: Readonly<Record<string, TaskFilterRef | null>>
   /** The workspace's custom task field gallery: each field is one more filter field. */
   taskFields: readonly TaskField[]
+  /** The workspace: a built-in property it hides (Settings, Task fields) is not offered. */
+  workspace?: Pick<WorkspaceRecord, 'hidden_task_properties'>
 }
 
 /** How a field's values are picked. `missing`: a custom field that was deleted (the condition can only be removed). */
@@ -99,11 +102,13 @@ const CUSTOM_OPERATORS: Record<TaskFieldKind, { kind: FieldKind; operators: Filt
   select: { kind: 'list', operators: ['is', 'is_not', 'is_empty', 'is_not_empty'] },
   multi_select: { kind: 'list', operators: ['includes_any', 'includes_all', 'excludes', 'is_empty', 'is_not_empty'] },
   checkbox: { kind: 'boolean', operators: ['is'] },
+  // not offered (`storesValues`): the server neither filters nor sorts by logged time
+  time_tracking: { kind: 'missing', operators: [] },
 }
 
 export function customFieldMeta(field: Pick<TaskField, 'name' | 'kind'>): FieldMeta {
   const { kind, operators } = CUSTOM_OPERATORS[field.kind]
-  return { label: field.name, plural: kind === 'list' ? 'options' : 'values', icon: FIELD_KIND_ICON[field.kind], kind, operators, defaultOperator: operators[0]! }
+  return { label: field.name, plural: kind === 'list' ? 'options' : 'values', icon: FIELD_KIND_ICON[field.kind], kind, operators, defaultOperator: operators[0] ?? 'is_empty' }
 }
 
 /** A condition on a deleted custom field: it reads as "no value" on the server, and the chip only offers removal. */
@@ -138,9 +143,9 @@ const PROJECT_FIELDS: readonly FilterField[] = ['milestone', 'cycle']
  */
 export function availableFields(options: FilterOptions, keep?: FilterTarget): FieldChoice[] {
   const builtin = FIELD_ORDER
-    .filter((field) => options.projectId || field === keep?.field || !PROJECT_FIELDS.includes(field))
+    .filter((field) => field === keep?.field || ((options.projectId || !PROJECT_FIELDS.includes(field)) && !hidesTaskKey(options.workspace, field)))
     .map((field): FieldChoice => ({ key: field, target: { field }, meta: FIELD_META[field] }))
-  const custom = options.taskFields.map((field): FieldChoice => {
+  const custom = options.taskFields.filter((field) => storesValues(field.kind)).map((field): FieldChoice => {
     const target: FilterTarget = { field: 'custom_field', field_id: field.id }
     return { key: targetKey(target), target, meta: customFieldMeta(field) }
   })

@@ -806,7 +806,7 @@ fn tools() -> Vec<Tool> {
         ),
         write_definition::<LogTimeArgs>(
             "log_time",
-            "Log time spent on a live task in an approved project: minutes (1 to 1440), the day worked (today by default) and a Markdown note on what was done. user_id logs the time for another member and needs the time.manage permission.",
+            "Log time spent on a live task in an approved project: minutes (1 to 1440), the day worked (today by default) and a Markdown note on what was done. user_id logs the time for another member and needs the time.manage permission. The project must show the workspace's time_tracking field (list_task_fields with project_id); else add it with set_project_task_fields.",
             false,
         ),
         write_definition::<DeleteRelationArgs>(

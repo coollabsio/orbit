@@ -4,8 +4,10 @@
  * No React, so the screen and the chip row share it.
  */
 import { getViewPreference, putViewPreference, queryTasks } from '@orbit/api/generated/sdk.gen'
-import type { TaskCycle, TaskField, TaskFieldKind, TaskMilestone, TaskQueryBody, ViewState as ApiViewState } from '@orbit/api/generated/types.gen'
+import type { TaskCycle, TaskField, TaskFieldKind, TaskMilestone, TaskQueryBody, ViewState as ApiViewState, WorkspaceRecord } from '@orbit/api/generated/types.gen'
+import { hidesTaskKey } from '@orbit/api/taskProperties'
 import { ApiProblem } from '@orbit/api/problem'
+import { storesValues } from '@orbit/api/taskFields'
 
 import type { IconName } from '../ui/Icon'
 import type { LabelRecord, OrbitClient, ProjectRecord, StatusRecord, TaskRecord } from './orbit'
@@ -114,6 +116,26 @@ export function pageKeyFor(preset: TaskPreset | undefined, projectId: string | n
 
 const isGroup = (node: FilterNode): node is FilterGroup => 'op' in node && Array.isArray((node as FilterGroup).children)
 
+type TaskPropertyScope = Pick<WorkspaceRecord, 'hidden_task_properties'>
+
+/** The filter without conditions on a built-in property the workspace hides (Settings, Task fields); a group left empty goes too. */
+export function shownFilter(group: FilterGroup, workspace: TaskPropertyScope): FilterGroup {
+  if (!workspace.hidden_task_properties?.length) return group
+  const children = group.children.flatMap((child): FilterNode[] => {
+    if (!isGroup(child)) return hidesTaskKey(workspace, child.field) ? [] : [child]
+    const shown = shownFilter(child, workspace)
+    return shown.children.length > 0 ? [shown] : []
+  })
+  return children.length === group.children.length && children.every((child, index) => child === group.children[index]) ? group : { ...group, children }
+}
+
+/** The state as the page reads it: a hidden built-in property's conditions go, and its ordering reads as manual. */
+export function shownViewState(state: ViewState, workspace: TaskPropertyScope): ViewState {
+  if (!workspace.hidden_task_properties?.length) return state
+  const display = hidesTaskKey(workspace, state.display.order_by) ? { ...state.display, order_by: 'manual' as const } : state.display
+  return { filter: shownFilter(state.filter, workspace), display }
+}
+
 export const countConditions = (group: FilterGroup): number => group.children.reduce((total, child) => total + (isGroup(child) ? countConditions(child) : 1), 0)
 
 /** True when the chip row can show the tree: a root AND of plain conditions. */
@@ -182,6 +204,8 @@ const CUSTOM_META: Record<TaskFieldKind, Omit<FieldMeta, 'label'>> = {
   select: { plural: 'options', icon: 'checkCircle', kind: 'list', operators: ['is', 'is_not', 'is_empty', 'is_not_empty'], defaultOperator: 'is' },
   multi_select: { plural: 'options', icon: 'list', kind: 'list', operators: ['includes_any', 'includes_all', 'excludes', 'is_empty', 'is_not_empty'], defaultOperator: 'includes_any' },
   checkbox: { plural: 'values', icon: 'checkSquare', kind: 'check', operators: ['is'], defaultOperator: 'is' },
+  // never offered (`filterTargets`): it stores no values to filter
+  time_tracking: { plural: 'values', icon: 'timer', kind: 'text', operators: [], defaultOperator: 'is_not_empty' },
 }
 
 /** What a condition filters on: a built-in field, or a custom field with its `field_id`. */
@@ -210,9 +234,9 @@ const PROJECT_FIELDS: readonly FilterField[] = ['milestone', 'cycle', 'estimate'
 
 export const fieldsFor = (projectId: string | null): FilterField[] => (projectId ? FIELD_ORDER : FIELD_ORDER.filter((field) => !PROJECT_FIELDS.includes(field)))
 
-/** The "Filter by" list: the built-in fields, then the page's custom fields. */
-export function filterTargets(options: Pick<FilterOptions, 'projectId' | 'customFields'>): FilterTarget[] {
-  return [...fieldsFor(options.projectId).map((field): FilterTarget => ({ field })), ...options.customFields.map((field): FilterTarget => ({ field: 'custom_field', field_id: field.id }))]
+/** The "Filter by" list: the built-in fields, then the page's custom fields that store values. */
+export function filterTargets(options: Pick<FilterOptions, 'projectId' | 'customFields' | 'workspace'>): FilterTarget[] {
+  return [...fieldsFor(options.projectId).filter((field) => !hidesTaskKey(options.workspace, field)).map((field): FilterTarget => ({ field })), ...options.customFields.filter((field) => storesValues(field.kind)).map((field): FilterTarget => ({ field: 'custom_field', field_id: field.id }))]
 }
 
 /** A sheet row key for a target, and back. */
@@ -357,6 +381,8 @@ export type FilterOptions = {
   /** The custom task fields the page filters by: the project's on a project page, else the workspace's gallery. */
   customFields: readonly TaskField[]
   currentUserId: string
+  /** The workspace: a built-in property it hides (Settings, Task fields) is not offered. */
+  workspace?: TaskPropertyScope
 }
 
 export type Glyph =

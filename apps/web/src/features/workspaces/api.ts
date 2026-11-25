@@ -28,11 +28,12 @@ import {
   revokeProjectGrant,
   setMemberCustomRole,
   setProjectGrant,
+  setTaskProperties,
   transferOwnership,
   updateRole,
 } from '@orbit/api/generated/sdk.gen'
 import { STORAGE_FILES_PAGE } from '@orbit/api/storage'
-import type { AcceptBody, InvitationBody, MemberRecord, ProjectGrantBody, RoleBody, RoleCreateBody, RoleUpdateBody, S3Body, WorkspaceBucketView, WorkspaceRecord } from '@orbit/api/generated/types.gen'
+import type { AcceptBody, OptionalTaskProperty, InvitationBody, MemberRecord, ProjectGrantBody, RoleBody, RoleCreateBody, RoleUpdateBody, S3Body, WorkspaceBucketView, WorkspaceRecord } from '@orbit/api/generated/types.gen'
 import type { User } from './models'
 
 type ApiClient = ReturnType<typeof createApiClient>
@@ -397,6 +398,19 @@ export function useRenameWorkspace(workspaceId: string) {
         throwOnError: true,
       })
       return required(data, 'Rename workspace response was empty.')
+    },
+    onSuccess: (workspace) => queryClient.setQueryData(queryKeys.workspaces, (items: unknown) =>
+      Array.isArray(items) ? items.map((item) => typeof item === 'object' && item && 'id' in item && item.id === workspaceId ? workspace : item) : items),
+  })
+}
+
+/** Replaces the built-in task properties the workspace hides (Settings, Task fields). */
+export function useSetHiddenTaskProperties(workspaceId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (hidden: OptionalTaskProperty[]) => {
+      const { data } = await setTaskProperties({ client: apiClient, path: { workspace_id: workspaceId }, body: { hidden }, throwOnError: true })
+      return required(data, 'Task properties response was empty.')
     },
     onSuccess: (workspace) => queryClient.setQueryData(queryKeys.workspaces, (items: unknown) =>
       Array.isArray(items) ? items.map((item) => typeof item === 'object' && item && 'id' in item && item.id === workspaceId ? workspace : item) : items),

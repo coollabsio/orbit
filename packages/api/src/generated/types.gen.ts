@@ -6802,6 +6802,11 @@ export type OidcProvisionBody = {
 };
 
 /**
+ * A built-in task property a workspace may hide (Settings, Task fields).
+ */
+export type OptionalTaskProperty = 'milestone' | 'cycle' | 'estimate';
+
+/**
  * An Orbit import. Never contains the token.
  */
 export type OrbitImport = {
@@ -11569,7 +11574,7 @@ export type TaskFieldBody = {
     options?: Array<TaskFieldOptionInput>;
 };
 
-export type TaskFieldKind = 'text' | 'number' | 'date' | 'select' | 'multi_select' | 'checkbox' | 'url';
+export type TaskFieldKind = 'text' | 'number' | 'date' | 'select' | 'multi_select' | 'checkbox' | 'url' | 'time_tracking';
 
 export type TaskFieldOption = {
     /**
@@ -11695,6 +11700,13 @@ export type TaskProblem = {
     status: number;
     title: string;
     type: string;
+};
+
+export type TaskPropertiesBody = {
+    /**
+     * Every built-in task property the workspace hides; the others show.
+     */
+    hidden: Array<OptionalTaskProperty>;
 };
 
 export type TaskProperty = 'id' | 'status' | 'assignee' | 'priority' | 'project' | 'due_date' | 'labels' | 'created' | 'updated' | 'sub_issue_progress' | 'milestone' | 'cycle' | 'estimate';
@@ -12907,6 +12919,11 @@ export type WorkspaceProblem = {
 
 export type WorkspaceRecord = {
     deleted_at?: string | null;
+    /**
+     * The built-in task properties the workspace hides in its task UI. Absent: none. Tasks keep
+     * their values, and the API still reads and writes them.
+     */
+    hidden_task_properties?: Array<OptionalTaskProperty>;
     id: string;
     name: string;
     /**
@@ -55903,6 +55920,60 @@ export type UpdateTaskFieldResponses = {
 };
 
 export type UpdateTaskFieldResponse = UpdateTaskFieldResponses[keyof UpdateTaskFieldResponses];
+
+export type SetTaskPropertiesData = {
+    body: TaskPropertiesBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/task-properties';
+};
+
+export type SetTaskPropertiesErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type SetTaskPropertiesError = SetTaskPropertiesErrors[keyof SetTaskPropertiesErrors];
+
+export type SetTaskPropertiesResponses = {
+    200: WorkspaceRecord;
+};
+
+export type SetTaskPropertiesResponse = SetTaskPropertiesResponses[keyof SetTaskPropertiesResponses];
 
 export type ListTasksData = {
     body?: never;

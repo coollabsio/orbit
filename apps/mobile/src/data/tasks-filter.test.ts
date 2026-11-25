@@ -35,6 +35,7 @@ const SIZE = field('f-size', 'Size', 'select', [
 ])
 const POINTS = field('f-points', 'Points', 'number')
 const DONE = field('f-done', 'Reviewed', 'checkbox')
+const TIME = field('f-time', 'Time tracking', 'time_tracking')
 
 const options: FilterOptions = {
   statuses: [],
@@ -44,7 +45,7 @@ const options: FilterOptions = {
   projects: [],
   milestones: [],
   cycles: [],
-  customFields: [SIZE, POINTS, DONE],
+  customFields: [SIZE, POINTS, TIME, DONE],
   currentUserId: 'me',
 }
 
@@ -56,7 +57,7 @@ test('a custom sort sends its field; a sort without one falls back to manual', (
   expect('order_field_id' in taskQueryBody({ op: 'and', children: [] }, { ...DEFAULT_DISPLAY, order_field_id: 'f-points' })).toBe(false)
 })
 
-test('the filter list offers the page custom fields after the built-in ones', () => {
+test('the filter list offers the page custom fields after the built-in ones, without time tracking', () => {
   const keys = filterTargets(options).map(targetKey)
   expect(keys.slice(-3)).toEqual(['custom:f-size', 'custom:f-points', 'custom:f-done'])
   expect(parseTargetKey('custom:f-size')).toEqual({ field: 'custom_field', field_id: 'f-size' })

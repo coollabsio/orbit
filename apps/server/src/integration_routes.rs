@@ -1840,6 +1840,7 @@ fn task_problem(error: TaskError, request_id: Option<&RequestId>) -> ApiError {
         | TaskError::ParentInvalid
         | TaskError::CycleOverlap
         | TaskError::NoNextCycle
+        | TaskError::Refused(_)
         | TaskError::ProjectNotTrashed
         | TaskError::TaskNotTrashed) => ApiError::internal(request_id).cause(error),
     }

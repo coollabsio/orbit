@@ -16,7 +16,8 @@ import { useProjectAudience, useProjects } from '@/features/tasks/api/projects'
 import { useCanIn } from '@/features/workspaces/permissions'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { useCreateTimeEntry, useUpdateTimeEntry } from '@/features/tasks/api/timeEntries'
-import { formatDuration, parseDuration, todayLocalDate } from '@/features/tasks/timeLib'
+import { formatDuration, parseDuration } from '@orbit/api/duration'
+import { todayLocalDate } from '@/features/tasks/timeLib'
 import { personOption } from './pickerOptions'
 
 interface TimeEntryDialogProps {

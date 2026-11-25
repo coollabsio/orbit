@@ -1,9 +1,9 @@
-import { AngleDownCircle, Calendar, CheckSquare, Hashtag, Link, ListCheck, TextalignLeft, type IconComponent } from 'reicon-react'
+import { AngleDownCircle, Calendar, CheckSquare, Clock, Hashtag, Link, ListCheck, TextalignLeft, type IconComponent } from 'reicon-react'
 import type { TaskFieldKind, TaskFieldOption } from '@orbit/api/generated/types.gen'
 import type { Task } from '@/features/tasks/api/models'
 import { LABEL_COLORS } from '@/features/tasks/components/TaskLabels'
 
-export { FIELD_KINDS, fieldKindLabel, fieldValueText, hasOptions, parseFieldInput, selectedOptions } from '@orbit/api/taskFields'
+export { FIELD_KINDS, fieldKindLabel, fieldValueText, hasOptions, newFieldKinds, parseFieldInput, selectedOptions, storesValues, timeTrackingField } from '@orbit/api/taskFields'
 
 /** The next option's colour: the palette in turn. */
 export function nextOptionColor(options: readonly Pick<TaskFieldOption, 'color'>[]): string {
@@ -19,6 +19,7 @@ export const FIELD_KIND_ICON: Record<TaskFieldKind, IconComponent> = {
   multi_select: ListCheck,
   checkbox: CheckSquare,
   url: Link,
+  time_tracking: Clock,
 }
 
 /** The stored value of one custom field on a task; undefined when it has none. */

@@ -1,6 +1,7 @@
 //! Time tracking on tasks (#95): members log their own time, `time.manage` (owners and admins)
-//! covers other members' time, and the task shows its own and its sub-issues' totals. Everything
-//! goes through HTTP, as a client sees it.
+//! covers other members' time, and the task shows its own and its sub-issues' totals. A project
+//! takes new time only while it shows the workspace's time tracking field. Everything goes
+//! through HTTP, as a client sees it.
 
 use orbit_platform::{
     AuthenticatedUser, Config, EnvironmentMode, Id, PasswordService, TimestampMillis,
@@ -139,11 +140,32 @@ impl Server {
             .unwrap();
         (id, session.token)
     }
+
+    /// Adds a time tracking field to the gallery and shows it in `project`; returns its id.
+    async fn turn_on_time_tracking(&self, session: &str, base: &str, project: &str) -> String {
+        let field = self
+            .ok(
+                session,
+                "POST",
+                &format!("{base}/task-fields"),
+                json!({"name": "Time tracking", "kind": "time_tracking"}),
+            )
+            .await;
+        let id = field["id"].as_str().unwrap().to_owned();
+        self.ok(
+            session,
+            "PUT",
+            &format!("{base}/projects/{project}/fields"),
+            json!({"field_ids": [id]}),
+        )
+        .await;
+        id
+    }
 }
 
-#[tokio::test]
-async fn members_log_their_own_time_and_admins_manage_everyones() {
-    let server = Server::start().await;
+/// A server with a set-up workspace and its admin: (workspace id, API base, the General
+/// project, its first status, the admin's session).
+async fn workspace(server: &Server) -> (String, String, String, String, String) {
     let identity = IdentityRepository::new(server.database.clone());
     let now = TimestampMillis::now();
     identity
@@ -172,11 +194,8 @@ async fn members_log_their_own_time_and_admins_manage_everyones() {
     let workspace = setup.workspace_id.to_string();
     let base = format!("/api/v1/workspaces/{workspace}");
     let (_, admin) = server.person(&workspace, "admin", Some("admin")).await;
-    let (alice_id, alice) = server.person(&workspace, "alice", Some("member")).await;
-    let (bob_id, bob) = server.person(&workspace, "bob", Some("member")).await;
-    let (guest_id, _) = server.person(&workspace, "guest", Some("guest")).await;
     let projects = server
-        .ok(&alice, "GET", &format!("{base}/projects"), Value::Null)
+        .ok(&admin, "GET", &format!("{base}/projects"), Value::Null)
         .await;
     let project = projects["items"].get(0).unwrap_or(&projects[0])["id"]
         .as_str()
@@ -184,7 +203,7 @@ async fn members_log_their_own_time_and_admins_manage_everyones() {
         .to_owned();
     let statuses = server
         .ok(
-            &alice,
+            &admin,
             "GET",
             &format!("{base}/projects/{project}/statuses"),
             Value::Null,
@@ -194,6 +213,17 @@ async fn members_log_their_own_time_and_admins_manage_everyones() {
         .as_str()
         .unwrap()
         .to_owned();
+    (workspace, base, project, status, admin)
+}
+
+#[tokio::test]
+async fn members_log_their_own_time_and_admins_manage_everyones() {
+    let server = Server::start().await;
+    let (workspace, base, project, status, admin) = workspace(&server).await;
+    let (alice_id, alice) = server.person(&workspace, "alice", Some("member")).await;
+    let (bob_id, bob) = server.person(&workspace, "bob", Some("member")).await;
+    let (guest_id, _) = server.person(&workspace, "guest", Some("guest")).await;
+    server.turn_on_time_tracking(&admin, &base, &project).await;
     let task = |parent: Option<String>| json!({"project_id": project, "status_id": status, "title": "Work", "parent_task_id": parent});
     let parent = server
         .ok(&alice, "POST", &format!("{base}/tasks"), task(None))
@@ -415,5 +445,158 @@ async fn members_log_their_own_time_and_admins_manage_everyones() {
         .unwrap();
     assert_eq!(kept["comment_id"], Value::Null);
     assert_eq!(kept["note"], "Paired on the retry");
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn time_tracking_is_a_field_the_project_shows() {
+    let server = Server::start().await;
+    let (_, base, project, status, admin) = workspace(&server).await;
+    let task = server
+        .ok(
+            &admin,
+            "POST",
+            &format!("{base}/tasks"),
+            json!({"project_id": project, "status_id": status, "title": "Work"}),
+        )
+        .await["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let entries = format!("{base}/tasks/{task}/time-entries");
+    let comments = format!("{base}/tasks/{task}/comments");
+    let off = "Time tracking is off in this project. Add the Time tracking field to the project.";
+
+    // Off: no new time, and `/spend` writes no comment either.
+    let (status_code, body) = server
+        .call(&admin, "POST", &entries, Some(&json!({"minutes": 30})))
+        .await;
+    assert_eq!((status_code, body["detail"].as_str()), (422, Some(off)));
+    let (status_code, body) = server
+        .call(
+            &admin,
+            "POST",
+            &comments,
+            Some(&json!({"body": "Spent", "time": {"minutes": 30}})),
+        )
+        .await;
+    assert_eq!((status_code, body["detail"].as_str()), (422, Some(off)));
+    let written: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM task_comments")
+        .fetch_one(server.database.pool())
+        .await
+        .unwrap();
+    assert_eq!(written, 0);
+
+    // On: a workspace has one time tracking field, whatever its name.
+    let field = server.turn_on_time_tracking(&admin, &base, &project).await;
+    let (status_code, body) = server
+        .call(
+            &admin,
+            "POST",
+            &format!("{base}/task-fields"),
+            Some(&json!({"name": "Hours", "kind": "time_tracking"})),
+        )
+        .await;
+    assert_eq!(
+        (status_code, body["detail"].as_str()),
+        (
+            422,
+            Some("The workspace already has a Time tracking field.")
+        )
+    );
+    server
+        .ok(
+            &admin,
+            "POST",
+            &entries,
+            json!({"minutes": 90, "worked_on": "2026-11-10"}),
+        )
+        .await;
+    server
+        .ok(
+            &admin,
+            "POST",
+            &comments,
+            json!({"body": "Spent", "time": {"minutes": 30}}),
+        )
+        .await;
+
+    // The task's value is its logged minutes, in the detail and in the list; nobody sets it.
+    let detail = server
+        .ok(&admin, "GET", &format!("{base}/tasks/{task}"), Value::Null)
+        .await;
+    assert_eq!(
+        detail["field_values"],
+        json!([{"field_id": field, "value": 120}])
+    );
+    let list = server
+        .ok(
+            &admin,
+            "GET",
+            &format!("{base}/tasks?project_id={project}"),
+            Value::Null,
+        )
+        .await;
+    let listed = list["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["id"] == task.as_str())
+        .unwrap();
+    assert_eq!(
+        listed["field_values"],
+        json!([{"field_id": field, "value": 120}])
+    );
+    let (status_code, body) = server
+        .call(
+            &admin,
+            "PUT",
+            &format!("{base}/tasks/{task}/fields/{field}"),
+            Some(&json!({"value": 5})),
+        )
+        .await;
+    assert_eq!(
+        (status_code, body["detail"].as_str()),
+        (
+            422,
+            Some(
+                "A Time tracking field shows the time logged on the task. Log time instead of setting a value."
+            )
+        )
+    );
+
+    // Off again: logged time stays readable and editable, and the task still shows it.
+    server
+        .ok(
+            &admin,
+            "PUT",
+            &format!("{base}/projects/{project}/fields"),
+            json!({"field_ids": []}),
+        )
+        .await;
+    assert_eq!(
+        server
+            .call(&admin, "POST", &entries, Some(&json!({"minutes": 30})))
+            .await
+            .0,
+        422
+    );
+    let logged = server.ok(&admin, "GET", &entries, Value::Null).await;
+    let first = logged["items"][0]["id"].as_str().unwrap();
+    server
+        .ok(
+            &admin,
+            "PATCH",
+            &format!("{base}/time-entries/{first}"),
+            json!({"minutes": 60}),
+        )
+        .await;
+    let detail = server
+        .ok(&admin, "GET", &format!("{base}/tasks/{task}"), Value::Null)
+        .await;
+    assert_eq!(
+        detail["field_values"],
+        json!([{"field_id": field, "value": 90}])
+    );
     server.stop().await;
 }

@@ -16,7 +16,7 @@ use crate::repositories::tasks::{
 use crate::token_api::{Authorized, TokenApiError};
 
 /// What `set_task_field_value` takes per kind.
-const SET_VALUE: &str = "Set or clear a task's value of a custom field that the task's project shows (see list_task_fields with project_id). Value by the field's kind: text and url take a string (url: http or https); number takes a JSON number; date takes \"YYYY-MM-DD\"; select takes one option id of the field (from list_task_fields, not the option name); multi_select takes a list of option ids; checkbox takes true. null clears any value (so do \"\", false and []). Returns the task's values as get_task_field_values does.";
+const SET_VALUE: &str = "Set or clear a task's value of a custom field that the task's project shows (see list_task_fields with project_id). Value by the field's kind: text and url take a string (url: http or https); number takes a JSON number; date takes \"YYYY-MM-DD\"; select takes one option id of the field (from list_task_fields, not the option name); multi_select takes a list of option ids; checkbox takes true. null clears any value (so do \"\", false and []). A time_tracking field takes no value: use log_time. Returns the task's values as get_task_field_values does.";
 
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -55,6 +55,7 @@ enum FieldKind {
     MultiSelect,
     Checkbox,
     Url,
+    TimeTracking,
 }
 
 impl From<FieldKind> for TaskFieldKind {
@@ -67,6 +68,7 @@ impl From<FieldKind> for TaskFieldKind {
             FieldKind::MultiSelect => Self::MultiSelect,
             FieldKind::Checkbox => Self::Checkbox,
             FieldKind::Url => Self::Url,
+            FieldKind::TimeTracking => Self::TimeTracking,
         }
     }
 }
@@ -115,7 +117,7 @@ pub(super) fn tools() -> Vec<Tool> {
     vec![
         definition::<ListFieldsArgs>(
             "list_task_fields",
-            "List custom task fields: with project_id, the fields that approved project shows, in order (only these take values on its tasks); without it, the workspace's whole gallery by name. Each field has id, name, kind (text, number, date, select, multi_select, checkbox, url), options (id, name, color; for select and multi_select) and version.",
+            "List custom task fields: with project_id, the fields that approved project shows, in order (only these take values on its tasks); without it, the workspace's whole gallery by name. Each field has id, name, kind (text, number, date, select, multi_select, checkbox, url, time_tracking), options (id, name, color; for select and multi_select) and version. A project that shows the time_tracking field takes log_time; its value on a task is the task's logged minutes.",
         ),
         definition::<TaskValuesArgs>(
             "get_task_field_values",
@@ -124,7 +126,7 @@ pub(super) fn tools() -> Vec<Tool> {
         write_definition::<SetValueArgs>("set_task_field_value", SET_VALUE, false),
         write_definition::<CreateFieldArgs>(
             "create_task_field",
-            "Add a custom field to the workspace's gallery. No project shows it until set_project_task_fields adds it. Check list_task_fields first: names are unique in the workspace. Returns the field.",
+            "Add a custom field to the workspace's gallery. No project shows it until set_project_task_fields adds it. Check list_task_fields first: names are unique in the workspace, and a workspace has at most one time_tracking field. Returns the field.",
             false,
         ),
         write_definition::<ProjectFieldsArgs>(

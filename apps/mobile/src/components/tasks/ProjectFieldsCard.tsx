@@ -110,6 +110,7 @@ export function ProjectFieldsCard({ projectId }: { projectId: string }) {
       {creating ? (
         <TaskFieldForm
           field={null}
+          gallery={gallery.data ?? []}
           submitLabel="Create and add"
           errorText="The field could not be created. Its name may already be in use."
           onClose={() => setCreating(false)}

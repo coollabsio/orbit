@@ -62,12 +62,29 @@ test('a comment is sent as BlockNote blocks with its parent', async () => {
       can_edit: true, can_delete: true, created_at: '2026-09-05T10:00:00Z', updated_at: '2026-09-05T10:00:00Z', version: 0,
     }, { status: 201 })
   }) as unknown as typeof fetch
-  const view = renderHook(() => useCreateTaskComment('workspace-1', 'task-1'), { wrapper })
+  const view = renderHook(() => useCreateTaskComment('workspace-1', 'task-1', true), { wrapper })
   const bodyJson = [{ type: 'paragraph', content: [{ type: 'text', text: 'Hi', styles: {} }] }]
 
   await act(async () => { await view.result.current.mutateAsync({ bodyJson, parentId: 'comment-0' }) })
 
   expect(bodies).toEqual([{ body_json: bodyJson, parent_id: 'comment-0' }])
+})
+
+test('a /spend line stays text while the project has time tracking off', async () => {
+  const bodies: unknown[] = []
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    bodies.push(await (input as Request).json())
+    return Response.json({
+      id: 'comment-1', workspace_id: 'workspace-1', task_id: 'task-1', author_id: 'user-1', body: '/spend 1h\n', body_json: [],
+      can_edit: true, can_delete: true, created_at: '2026-09-05T10:00:00Z', updated_at: '2026-09-05T10:00:00Z', version: 0,
+    }, { status: 201 })
+  }) as unknown as typeof fetch
+  const view = renderHook(() => useCreateTaskComment('workspace-1', 'task-1', false), { wrapper })
+  const bodyJson = [{ type: 'paragraph', content: [{ type: 'text', text: '/spend 1h', styles: {} }] }]
+
+  await act(async () => { await view.result.current.mutateAsync({ bodyJson }) })
+
+  expect(bodies).toEqual([{ body_json: bodyJson }])
 })
 
 test('oversized bulk operation makes zero requests and leaves every cache unchanged', async () => {

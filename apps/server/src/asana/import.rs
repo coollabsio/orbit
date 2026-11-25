@@ -1816,6 +1816,29 @@ impl AsanaImportService {
                 created_at,
             });
         }
+        if !pending.is_empty() {
+            // Before the entries, so an attempt that stops between the two still turns it on.
+            let project_id: String = sqlx::query_scalar(
+                "SELECT project_id FROM tasks WHERE id = $1 AND workspace_id = $2",
+            )
+            .bind(task_id.to_string())
+            .bind(run.workspace_id.to_string())
+            .fetch_one(self.database().pool())
+            .await?;
+            let project_id: Id = project_id
+                .parse()
+                .map_err(|_| Failure::Item("The task's project is invalid.".to_owned()))?;
+            self.inner
+                .tasks
+                .turn_on_time_tracking(
+                    run.workspace_id,
+                    project_id,
+                    run.user_id,
+                    &run.request_id,
+                    TimestampMillis::now(),
+                )
+                .await?;
+        }
         for batch in pending.chunks(TIME_ENTRY_BATCH) {
             let mut query = SqlBuilder::new(
                 "INSERT INTO task_time_entries (id, workspace_id, task_id, user_id, minutes, \

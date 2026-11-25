@@ -10,7 +10,7 @@ CREATE TABLE task_fields (
     id TEXT PRIMARY KEY,
     workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
     name TEXT NOT NULL,
-    kind TEXT NOT NULL CHECK (kind IN ('text', 'number', 'date', 'select', 'multi_select', 'checkbox', 'url')),
+    kind TEXT NOT NULL CHECK (kind IN ('text', 'number', 'date', 'select', 'multi_select', 'checkbox', 'url', 'time_tracking')),
     -- select and multi_select: [{"id", "name", "color"}]; other kinds: []
     options_json TEXT NOT NULL DEFAULT '[]',
     created_by TEXT REFERENCES users(id) ON DELETE SET NULL,
@@ -20,6 +20,10 @@ CREATE TABLE task_fields (
 );
 
 CREATE UNIQUE INDEX task_fields_workspace_name ON task_fields (workspace_id, lower(name));
+
+-- A workspace has at most one time_tracking field. It stores no values: a task's value is the sum
+-- of its time entries.
+CREATE UNIQUE INDEX task_fields_one_time_tracking ON task_fields (workspace_id) WHERE kind = 'time_tracking';
 
 CREATE TABLE project_task_fields (
     project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
