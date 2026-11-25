@@ -402,6 +402,16 @@ export function limitsBody(draft: LimitsDraft): LimitsBody | null {
   return { max_owned_workspaces: workspaces, workspace_storage_quota_bytes: storage, chat_message_max_chars: chat }
 }
 
+/**
+ * What the outside image card saves: `fetches` (a whole number from 1 to 256) with the other limits unchanged, as a
+ * save sets all of them. `null` when the field is not such a number.
+ */
+export function imageFetchesBody(limits: LimitsView, fetches: string): LimitsBody | null {
+  const value = Number(fetches.trim())
+  if (!fetches.trim() || !Number.isInteger(value) || value < 1 || value > 256) return null
+  return { max_owned_workspaces: limits.max_owned_workspaces, workspace_storage_quota_bytes: limits.workspace_storage_quota_bytes, image_proxy_fetches: value }
+}
+
 export interface S3Draft {
   endpoint: string
   region: string

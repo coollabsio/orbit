@@ -112,6 +112,8 @@ pub struct App {
     mail_listener: Option<MailListener>,
     mail_status: Arc<MailListenerStatus>,
     mail_certificates: Arc<MailCertificates>,
+    /// Shared by mail and content images; its limit follows Admin → Limits.
+    image_proxy: Arc<crate::mail_image_proxy::ImageProxy>,
 }
 
 struct ProductionServices {
@@ -575,6 +577,8 @@ impl App {
             cookie_mode,
             &config.http.public_origin,
         );
+        // One image proxy for mail and content images, so its limit on fetches at once is global.
+        let image_proxy = Arc::new(crate::mail_image_proxy::ImageProxy::new());
         let router = metrics.instrument(production_router(
             ApiRoutes {
                 billing: billing.clone(),
@@ -725,6 +729,7 @@ impl App {
                     cookie_mode,
                 )
                 .with_public_origin(&config.http.public_origin)
+                .with_image_proxy(Arc::clone(&image_proxy))
                 .with_mailer(chat_mailer)
                 .with_interactivity(
                     app_key,
@@ -746,7 +751,8 @@ impl App {
                 )
                 .with_health(Arc::clone(&mail_status), mail_dns)
                 .with_certificates(Arc::clone(&mail_certificates))
-                .with_inbound_opt(provider_intake),
+                .with_inbound_opt(provider_intake)
+                .with_image_proxy(Arc::clone(&image_proxy)),
                 webhooks: crate::webhooks::routes::WebhookState::new(
                     Arc::clone(&identity),
                     cookie_mode,
@@ -790,6 +796,7 @@ impl App {
             mail_listener,
             mail_status,
             mail_certificates,
+            image_proxy,
         })
     }
 
@@ -909,6 +916,14 @@ impl App {
             &mut services,
             "database ownership watch",
             watch_database_ownership(database, token),
+        );
+        let database = self.database.clone();
+        let image_proxy = Arc::clone(&self.image_proxy);
+        let token = service_shutdown.clone();
+        spawn_service(
+            &mut services,
+            "image proxy limit",
+            follow_image_proxy_limit(database, image_proxy, token),
         );
         let database = self.database.clone();
         let scheduler = production.scheduler;
@@ -1710,6 +1725,27 @@ async fn watch_database_ownership(
             .verify_ownership()
             .await
             .map_err(|error| error.to_string())?;
+    }
+}
+
+/// Applies the saved image proxy limit (Admin → Limits or `ORBIT_IMAGE_PROXY_FETCHES`) now and every minute, so
+/// a change reaches every server without a restart. A failed read keeps the current limit until the next round.
+async fn follow_image_proxy_limit(
+    database: Database,
+    proxy: Arc<crate::mail_image_proxy::ImageProxy>,
+    shutdown: CancellationToken,
+) -> Result<(), String> {
+    let settings =
+        crate::repositories::instance_settings::InstanceSettingsRepository::new(database);
+    loop {
+        match settings.limits().await {
+            Ok(limits) => proxy.set_max_fetches(limits.image_proxy_fetches as usize),
+            Err(error) => tracing::warn!(%error, "the image proxy limit could not be read"),
+        }
+        tokio::select! {
+            () = shutdown.cancelled() => return Ok(()),
+            () = tokio::time::sleep(Duration::from_secs(60)) => {}
+        }
     }
 }
 

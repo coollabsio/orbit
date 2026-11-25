@@ -17,6 +17,9 @@ let stylesBlocked: boolean | undefined
 function inlineStylesBlocked() {
   if (stylesBlocked === undefined) {
     const probe = document.createElement('style')
+    // A rule, not an empty sheet: the production CSP allows an empty `<style>` (the empty string's hash, for
+    // BlockNote), so an empty probe would pass while Mermaid's own `<style>` is blocked.
+    probe.textContent = '.mermaid-csp-probe{}'
     document.head.appendChild(probe)
     stylesBlocked = probe.sheet === null
     probe.remove()
@@ -71,6 +74,10 @@ async function renderDiagram(code: string, dark: boolean): Promise<Drawing> {
     securityLevel: 'strict',
     // an error is the message below the diagram, not Mermaid's own picture in the page
     suppressErrorRendering: true,
+    // SVG text labels, not HTML: DOMPurify keeps an `<img src="https://…">` in an HTML label, and that image would load
+    // from the outside server (a tracking pixel). Mermaid 12 reads the root key; a few shapes still read the flowchart key.
+    htmlLabels: false,
+    flowchart: { htmlLabels: false },
     theme: dark ? 'dark' : 'default',
     fontFamily: getComputedStyle(document.body).fontFamily,
   })
@@ -145,7 +152,8 @@ export function MermaidDiagram({ code }: { code: string }) {
   return (
     <div data-slot="mermaid-diagram" className="max-w-full overflow-x-auto">
       {svg ? (
-        // Mermaid's own output; with `securityLevel: 'strict'` it is sanitized (DOMPurify) and has no scripts or click handlers.
+        // Mermaid's own output; with `securityLevel: 'strict'` it is sanitized (DOMPurify) and has no scripts or click
+        // handlers, and with `htmlLabels: false` it has no HTML labels (no outside images).
         <div role="img" aria-label="Diagram" className="[&>svg]:mx-auto [&>svg]:block [&>svg]:h-auto" dangerouslySetInnerHTML={{ __html: svg }} />
       ) : !error ? (
         <p className="text-xs text-muted-foreground">{source ? 'Drawing the diagram…' : 'The diagram is empty.'}</p>

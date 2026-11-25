@@ -1,12 +1,14 @@
 import { ApiProblem } from '@orbit/api/problem'
+import { proxiedImageUrl } from '@orbit/editor/outsideUrl'
 import { type Href, router, useLocalSearchParams } from 'expo-router'
 import { useCallback, useState } from 'react'
 import { Image, Pressable, ScrollView, View } from 'react-native'
 
 import { EditorView } from '../../../../components/docs/EditorView'
 import { ConfirmDialog, type ConfirmRequest } from '../../../../components/settings/Dialog'
-import { absoluteUrl, daysUntilPurge, pageTitle } from '../../../../data/docs'
+import { daysUntilPurge, pageTitle } from '../../../../data/docs'
 import type { PageSummary } from '../../../../data/orbit'
+import { useServerImage } from '../../../../hooks/chat'
 import { useTrashedPage, useTrashWrites } from '../../../../hooks/docs'
 import { useOrbit } from '../../../../orbit-context'
 import { useMembers } from '../../../../queries'
@@ -46,6 +48,7 @@ function BannerButton({ label, disabled, onPress }: { label: string; disabled: b
 export default function TrashedPageScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
   const { session } = useOrbit()
+  const serverImage = useServerImage()
   const { colors } = useTheme()
   const detail = useTrashedPage(id)
   const members = useMembers()
@@ -124,7 +127,8 @@ export default function TrashedPageScreen() {
         {page.cover_url ? (
           <Image
             accessibilityLabel="Cover"
-            source={{ uri: absoluteUrl(session.server, page.cover_url), headers: page.cover_url.startsWith('/') ? { Authorization: `Bearer ${session.token}` } : undefined }}
+            // a cover on another server loads through Orbit, which hides the reader from it
+            source={serverImage(proxiedImageUrl(page.cover_url, new URL(session.server).origin))}
             className="h-35 w-full bg-muted"
             resizeMode="cover"
           />

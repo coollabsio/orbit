@@ -30,6 +30,7 @@ const S3_PATH_STYLE: &str = "ORBIT_S3_PATH_STYLE";
 const S3_ATTACHMENTS: &str = "ORBIT_S3_ATTACHMENTS";
 const S3_BACKUPS: &str = "ORBIT_S3_BACKUPS";
 const S3_KEEP_DELETED_DAYS: &str = "ORBIT_S3_KEEP_DELETED_DAYS";
+const IMAGE_PROXY_FETCHES: &str = "ORBIT_IMAGE_PROXY_FETCHES";
 const GOOGLE_CLIENT_ID: &str = "ORBIT_GOOGLE_CLIENT_ID";
 const GOOGLE_CLIENT_SECRET: &str = "ORBIT_GOOGLE_CLIENT_SECRET";
 const GITHUB_CLIENT_ID: &str = "ORBIT_GITHUB_CLIENT_ID";
@@ -66,12 +67,13 @@ const S3_KEYS: [&str; 7] = [
     S3_SECRET_ACCESS_KEY,
     S3_PATH_STYLE,
 ];
-const OTHER_KEYS: [&str; 15] = [
+const OTHER_KEYS: [&str; 16] = [
     OPEN_REGISTRATION,
     AUTOMATIC_BACKUPS,
     S3_ATTACHMENTS,
     S3_BACKUPS,
     S3_KEEP_DELETED_DAYS,
+    IMAGE_PROXY_FETCHES,
     GOOGLE_CLIENT_ID,
     GOOGLE_CLIENT_SECRET,
     GITHUB_CLIENT_ID,
@@ -203,6 +205,8 @@ pub struct InstanceConfig {
     pub backups_in_s3: Option<bool>,
     /// Days (1–365) a deleted or replaced attachment file stays in S3.
     pub s3_keep_deleted_days: Option<u32>,
+    /// Outside images (1–256) that one server loads at once for the image proxy.
+    pub image_proxy_fetches: Option<u32>,
     pub google: Option<OAuthClientConfig>,
     pub github: Option<OAuthClientConfig>,
     pub oidc: Option<OidcConfig>,
@@ -265,6 +269,18 @@ impl InstanceConfig {
                                 S3_KEEP_DELETED_DAYS,
                                 "must be a number of days from 1 to 365",
                             )
+                        })
+                })
+                .transpose()?,
+            image_proxy_fetches: values
+                .policy(IMAGE_PROXY_FETCHES)
+                .map(|value| {
+                    value
+                        .parse::<u32>()
+                        .ok()
+                        .filter(|fetches| (1..=256).contains(fetches))
+                        .ok_or_else(|| {
+                            invalid(IMAGE_PROXY_FETCHES, "must be a number from 1 to 256")
                         })
                 })
                 .transpose()?,
@@ -343,6 +359,9 @@ impl InstanceConfig {
         }
         if let Some(days) = self.s3_keep_deleted_days {
             push(S3_KEEP_DELETED_DAYS, &days.to_string());
+        }
+        if let Some(fetches) = self.image_proxy_fetches {
+            push(IMAGE_PROXY_FETCHES, &fetches.to_string());
         }
         for (client, id_key, secret_key) in [
             (&self.google, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET),
@@ -748,6 +767,16 @@ mod tests {
         assert_eq!(days("365").unwrap().s3_keep_deleted_days, Some(365));
         for value in ["0", "366", "-1", "40d"] {
             assert_eq!(invalid_key(days(value)), S3_KEEP_DELETED_DAYS);
+        }
+    }
+
+    #[test]
+    fn image_proxy_fetches_is_1_to_256() {
+        let fetches = |value| parse(&[(IMAGE_PROXY_FETCHES, value)]);
+        assert_eq!(fetches(" 8 ").unwrap().image_proxy_fetches, Some(8));
+        assert_eq!(fetches("256").unwrap().image_proxy_fetches, Some(256));
+        for value in ["0", "257", "-1", "ten", " "] {
+            assert_eq!(invalid_key(fetches(value)), IMAGE_PROXY_FETCHES);
         }
     }
 

@@ -15,7 +15,10 @@
 //!   ([`Fetching::Provider`]);
 //! - no proxy from the environment (it would resolve the host itself), no cookie store (reqwest's
 //!   `cookies` feature is off), no `Referer`;
-//! - [`FETCH_TIMEOUT`] for all hops together, the body is read in chunks and dropped past
+//! - [`FETCH_TIMEOUT`] for the wait for a free fetch and all hops together; a user's content
+//!   images ([`ImageProxy::fetch_for`]) take at most [`MAX_USER_FETCHES`] of the shared fetches,
+//!   so one user cannot hold them all;
+//! - the body is read in chunks and dropped past
 //!   [`MAX_IMAGE_BYTES`], and the bytes must sniff as PNG, JPEG, GIF, WebP or AVIF (never SVG).
 //!
 //! reqwest 0.12 `dns::Resolve` (<https://docs.rs/reqwest/0.12.28/reqwest/dns/trait.Resolve.html>):
@@ -24,15 +27,16 @@
 use std::collections::HashMap;
 use std::error::Error as _;
 use std::net::{IpAddr, SocketAddr};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use reqwest::dns::{Addrs, Name, Resolve, Resolving};
 use reqwest::header::{ACCEPT, LOCATION};
 use thiserror::Error;
-use tokio::sync::Semaphore;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use url::{Host, Url};
 
+use orbit_platform::Id;
 use orbit_platform::is_public_ip as is_public;
 
 /// Largest image the proxy passes on.
@@ -43,8 +47,12 @@ pub const MAX_REDIRECTS: usize = 3;
 pub const FETCH_TIMEOUT: Duration = Duration::from_secs(10);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_URL_BYTES: usize = 4096;
-/// Fetches at once on this server; more wait.
-const MAX_FETCHES: usize = 32;
+/// Fetches at once on this server until [`ImageProxy::set_max_fetches`] (Admin → Limits); more wait.
+pub const DEFAULT_FETCHES: u32 = 32;
+/// The highest limit that Admin or `ORBIT_IMAGE_PROXY_FETCHES` can set.
+pub const MAX_FETCHES_LIMIT: u32 = 256;
+/// Fetches at once for one user's content images; more wait (about what a browser sends to one host).
+pub const MAX_USER_FETCHES: usize = 6;
 const USER_AGENT: &str = "Mozilla/5.0 (compatible; OrbitImageProxy/1.0)";
 const IMAGE_ACCEPT: &str = "image/avif,image/webp,image/png,image/jpeg,image/gif";
 
@@ -105,6 +113,7 @@ pub struct ProxiedImage {
 /// Remote images of a mail, fetched with [`SafeFetch`] and sniffed.
 pub struct ImageProxy {
     fetch: SafeFetch,
+    users: UserTurns,
 }
 
 impl Default for ImageProxy {
@@ -118,6 +127,7 @@ impl ImageProxy {
     pub fn new() -> Self {
         Self {
             fetch: SafeFetch::new(),
+            users: UserTurns::default(),
         }
     }
 
@@ -127,7 +137,32 @@ impl ImageProxy {
     pub fn with_test_hosts(hosts: HashMap<String, SocketAddr>) -> Self {
         Self {
             fetch: SafeFetch::with_test_hosts(hosts),
+            users: UserTurns::default(),
         }
+    }
+
+    /// Lets `limit` fetches of this proxy run at once (Admin → Limits, `ORBIT_IMAGE_PROXY_FETCHES`). Fetches in
+    /// progress or waiting keep the old limit until they end.
+    pub fn set_max_fetches(&self, limit: usize) {
+        let mut fetches = self
+            .fetch
+            .fetches
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if fetches.0 != limit {
+            *fetches = (limit, Arc::new(Semaphore::new(limit)));
+        }
+    }
+
+    /// Fetches the image at `raw` for `user`, with at most [`MAX_USER_FETCHES`] of their fetches at
+    /// once. The wait for a turn counts in [`FETCH_TIMEOUT`].
+    pub async fn fetch_for(&self, user: Id, raw: &str) -> Result<ProxiedImage, ImageProxyError> {
+        tokio::time::timeout(FETCH_TIMEOUT, async {
+            let _turn = self.users.wait(user).await;
+            self.fetch(raw).await
+        })
+        .await
+        .map_err(|_| ImageProxyError::Fetch("timed out".to_owned()))?
     }
 
     /// Fetches the image at `raw` (see the module docs for the rules).
@@ -151,6 +186,54 @@ impl ImageProxy {
     }
 }
 
+/// The fetches each user has in progress. A user's entry goes when their last turn ends.
+#[derive(Default)]
+struct UserTurns {
+    users: Arc<Mutex<HashMap<Id, Arc<Semaphore>>>>,
+}
+
+/// One fetch of a user; dropping it frees the turn.
+struct UserTurn {
+    permit: Option<OwnedSemaphorePermit>,
+    user: Id,
+    users: Arc<Mutex<HashMap<Id, Arc<Semaphore>>>>,
+}
+
+impl UserTurns {
+    async fn wait(&self, user: Id) -> UserTurn {
+        let gate = Arc::clone(
+            self.users
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .entry(user)
+                .or_insert_with(|| Arc::new(Semaphore::new(MAX_USER_FETCHES))),
+        );
+        let permit = gate
+            .acquire_owned()
+            .await
+            .expect("a user's fetch gate is never closed");
+        UserTurn {
+            permit: Some(permit),
+            user,
+            users: Arc::clone(&self.users),
+        }
+    }
+}
+
+impl Drop for UserTurn {
+    fn drop(&mut self) {
+        let mut users = self.users.lock().unwrap_or_else(PoisonError::into_inner);
+        drop(self.permit.take());
+        // Only the map holds the gate: nobody has a turn or waits for one.
+        if users
+            .get(&self.user)
+            .is_some_and(|gate| Arc::strong_count(gate) == 1)
+        {
+            users.remove(&self.user);
+        }
+    }
+}
+
 /// The rules of one [`SafeFetch::get`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Fetching {
@@ -165,7 +248,8 @@ pub enum Fetching {
 /// module docs, with a size cap and a time limit for each fetch.
 pub struct SafeFetch {
     client: reqwest::Client,
-    fetches: Semaphore,
+    /// Replaced by a new one when the limit changes: fetches in progress end on the old one.
+    fetches: Mutex<(usize, Arc<Semaphore>)>,
     test_hosts: Arc<HashMap<String, SocketAddr>>,
 }
 
@@ -209,7 +293,10 @@ impl SafeFetch {
             .expect("the safe fetch client builds");
         Self {
             client,
-            fetches: Semaphore::new(MAX_FETCHES),
+            fetches: Mutex::new((
+                DEFAULT_FETCHES as usize,
+                Arc::new(Semaphore::new(DEFAULT_FETCHES as usize)),
+            )),
             test_hosts,
         }
     }
@@ -226,14 +313,23 @@ impl SafeFetch {
         rules: Fetching,
     ) -> Result<Vec<u8>, FetchError> {
         let url = target(raw, rules == Fetching::Provider)?;
-        let _permit = self
-            .fetches
-            .acquire()
-            .await
-            .map_err(|_| FetchError::Fetch("the client is closed".to_owned()))?;
-        tokio::time::timeout(timeout, self.follow(url, max_bytes, accept, bearer, rules))
-            .await
-            .map_err(|_| FetchError::Fetch("timed out".to_owned()))?
+        // The wait for a free fetch counts in `timeout`: a request never waits without end.
+        let fetches = Arc::clone(
+            &self
+                .fetches
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .1,
+        );
+        tokio::time::timeout(timeout, async {
+            let _permit = fetches
+                .acquire()
+                .await
+                .map_err(|_| FetchError::Fetch("the client is closed".to_owned()))?;
+            self.follow(url, max_bytes, accept, bearer, rules).await
+        })
+        .await
+        .map_err(|_| FetchError::Fetch("timed out".to_owned()))?
     }
 
     async fn follow(

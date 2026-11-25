@@ -1,4 +1,5 @@
 import type { CollabProblem } from '@orbit/editor/collab/session'
+import { proxiedImageUrl } from '@orbit/editor/outsideUrl'
 import { useQuery } from '@tanstack/react-query'
 import { Redirect, router, useLocalSearchParams } from 'expo-router'
 import { useEffect, useRef, useState } from 'react'
@@ -14,12 +15,13 @@ import { DatabaseView } from '../../../components/database/DatabaseView'
 import { PropertyList } from '../../../components/database/PropertyList'
 import type { PageEditorRef } from '../../../components/docs/PageEditor.dom'
 import { ActionSheet, ConfirmDialog, type ConfirmRequest, PromptDialog, type PromptRequest, type SheetAction } from '../../../components/settings/Dialog'
-import { absoluteUrl, pageTitle, subPagesOf, trashPrompt, validCoverUrl, visibleThreads } from '../../../data/docs'
+import { pageTitle, subPagesOf, trashPrompt, validCoverUrl, visibleThreads } from '../../../data/docs'
 import { descendants } from '../../../data/docs-api'
 import { keys } from '../../../data/keys'
 import * as api from '../../../data/orbit'
 import { BLOCK_KINDS, type BlockKind, type EditorCommand, type FormatState, IDLE_FORMAT, PROBLEM_RESPONSES, type ProblemResponse } from '../../../data/page-editor'
 import { pickImage } from '../../../hooks/account'
+import { useServerImage } from '../../../hooks/chat'
 import { useIsTemplate } from '../../../hooks/database'
 import { isFavorite, useFavorites, usePageThreads, useSavePage, useToggleFavorite, useTrashPage, useTrashedPage, useUploadPageImage } from '../../../hooks/docs'
 import { useOrbit } from '../../../orbit-context'
@@ -39,6 +41,7 @@ export default function DocScreen() {
   // `link`, `host` and `view`: a database opened from a page's database card (its linked view, that page, the view the card showed)
   const { id, link, host, view } = useLocalSearchParams<{ id: string; link?: string; host?: string; view?: string }>()
   const { client, workspaceId, session } = useOrbit()
+  const serverImage = useServerImage()
   const { colors } = useTheme()
   const page = useQuery({ queryKey: keys.page(workspaceId, id), queryFn: () => api.page(client, workspaceId, id) })
   // a link to a page in the trash opens its trash preview
@@ -190,7 +193,8 @@ export default function DocScreen() {
         <View>
           <Image
             accessibilityLabel="Cover"
-            source={{ uri: absoluteUrl(session.server, page.data.cover_url), headers: page.data.cover_url.startsWith('/') ? { Authorization: `Bearer ${session.token}` } : undefined }}
+            // a cover on another server loads through Orbit, which hides the reader from it
+            source={serverImage(proxiedImageUrl(page.data.cover_url, new URL(session.server).origin))}
             className="h-35 w-full bg-muted"
             resizeMode="cover"
           />

@@ -1,6 +1,7 @@
 import { useState, type DragEvent } from 'react'
 import { Add, Gallery as GalleryIcon, Image } from 'reicon-react'
 import { cn } from 'cn'
+import { proxiedImageUrl } from '@orbit/editor/outsideUrl'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenuCheckboxItem,
@@ -192,7 +193,7 @@ function CardPreviewBox({ face, fitImage }: { face: CardFace; fitImage: boolean 
     <div className="relative w-full overflow-hidden border-b border-border bg-muted/40" style={{ paddingTop: `${PREVIEW_RATIO * 100}%` }}>
       {face.kind === 'image' ? (
         <img
-          src={face.url}
+          src={proxiedImageUrl(face.url, window.location.origin)}
           alt=""
           loading="lazy"
           draggable={false}

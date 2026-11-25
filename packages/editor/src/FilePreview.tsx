@@ -2,6 +2,7 @@ import { FileBlockWrapper } from '@blocknote/react'
 import type { ReactCustomBlockRenderProps } from '@blocknote/react'
 import { useEffect, useState } from 'react'
 import { filePreviewKind, isPdfBytes, showsFilePreview, type FilePreviewKind } from './mediaFiles'
+import { mediaPreload } from './outsideUrl'
 
 /** Text shown in the page. A longer file keeps the file row instead of a cut-off preview. */
 const TEXT_LIMIT = 200_000
@@ -67,11 +68,11 @@ function Preview({ kind, name, url }: { kind: FilePreviewKind } & FileFields) {
 }
 
 function Video({ url }: { url: string }) {
-  return <video controls preload="metadata" src={url} className="max-h-96 w-full rounded-md bg-black" style={{ display: 'block', width: '100%', maxHeight: 360, borderRadius: 8, background: '#000' }} />
+  return <video controls preload={mediaPreload(url, window.location.origin)} src={url} className="max-h-96 w-full rounded-md bg-black" style={{ display: 'block', width: '100%', maxHeight: 360, borderRadius: 8, background: '#000' }} />
 }
 
 function Audio({ url }: { url: string }) {
-  return <audio controls preload="metadata" src={url} className="w-full" style={{ display: 'block', width: '100%' }} />
+  return <audio controls preload={mediaPreload(url, window.location.origin)} src={url} className="w-full" style={{ display: 'block', width: '100%' }} />
 }
 
 function FileLink({ name, url }: FileFields) {
