@@ -33,7 +33,7 @@ pub struct EnvironmentSettings {
     /// `ORBIT_OIDC_PROVISION`.
     pub oidc_provision: Option<bool>,
     /// `ORBIT_FRAME_ORIGINS`.
-    pub frame_origins: Option<Vec<String>>,
+    pub frame_policy: Option<orbit_platform::FramePolicy>,
 }
 
 impl EnvironmentSettings {
@@ -119,7 +119,7 @@ impl EnvironmentSettings {
             s3_keep_deleted_days: config.s3_keep_deleted_days,
             sign_in_providers,
             oidc_provision: config.oidc_provision,
-            frame_origins: config.frame_origins.clone(),
+            frame_policy: config.frame_policy.clone(),
         })
     }
 

@@ -1,8 +1,8 @@
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/api/client'
 import { queryKeys } from '@/api/queryKeys'
-import { changeUserEmail, getAdminUserSummary, createBackup, createRecoveryLink, deleteBackup, getInstanceSettings, getJobLimits, saveJobLimits, listAdminUsers, listBackupItems, listBackups, listBackupWorkspaces, restoreBackupItem, listGlobalAudit, removeS3, removeSignInProvider, removeSmtp, resetTwoFactor, saveLimits, saveS3, saveSignInProvider, saveStorageOptions, setInstanceAdmin, startImageCompression, saveSmtp, sendTestEmail, setAccountSuspension, setOidcProvision, setFrameOrigins, setRegistration } from '@orbit/api/generated/sdk.gen'
-import type { BackupItemKind, InstanceSettingsView, JobLimitsBody, LimitsView, Provider, S3Body, SignInProviderBody, SmtpBody, StorageOptionsBody } from '@orbit/api/generated/types.gen'
+import { changeUserEmail, getAdminUserSummary, createBackup, createRecoveryLink, deleteBackup, getInstanceSettings, getJobLimits, saveJobLimits, listAdminUsers, listBackupItems, listBackups, listBackupWorkspaces, restoreBackupItem, listGlobalAudit, removeS3, removeSignInProvider, removeSmtp, resetTwoFactor, saveLimits, saveS3, saveSignInProvider, saveStorageOptions, setInstanceAdmin, startImageCompression, saveSmtp, sendTestEmail, setAccountSuspension, setOidcProvision, setCustomPagePolicy, setRegistration } from '@orbit/api/generated/sdk.gen'
+import type { BackupItemKind, CustomPagePolicyBody, InstanceSettingsView, JobLimitsBody, LimitsView, Provider, S3Body, SignInProviderBody, SmtpBody, StorageOptionsBody } from '@orbit/api/generated/types.gen'
 
 /** How many results the user search shows; more matches ask for a longer search. */
 export const ADMIN_USER_RESULTS = 20
@@ -214,9 +214,9 @@ export function useSetRegistration() {
   })
 }
 
-export function useSetFrameOrigins() {
-  return useSettingsWrite(async (origins: string[]) => {
-    const { data } = await setFrameOrigins({ client: apiClient, throwOnError: true, body: { origins } })
+export function useSetCustomPagePolicy() {
+  return useSettingsWrite(async (body: CustomPagePolicyBody) => {
+    const { data } = await setCustomPagePolicy({ client: apiClient, throwOnError: true, body })
     return data
   })
 }

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useLocation, useParams } from 'react-router'
 import { ArrowUpRightSquare } from 'reicon-react'
-import { canFrame, customPageUrl } from '@orbit/api/customPages'
+import { customPageUrl } from '@orbit/api/customPages'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { LoadingText } from '@/components/ui/spinner'
 import { Pane, PaneHeader, PaneTitle } from '@/components/common/Pane'
@@ -21,8 +21,8 @@ export function CustomPageView() {
   const pages = useCustomPages(workspace.id)
   const page = pages.data?.items.find((item) => item.slug === slug)
   const url = page ? customPageUrl(page.url, rest, search) : null
-  const framed = url !== null && canFrame(url, pages.data?.frame_origins ?? [])
-  // The tab's CSP is the one Orbit sent when the tab loaded: an origin added since then is still blocked here.
+  const framed = url !== null && page !== undefined && !pages.data?.blocked.includes(page.id)
+  // The tab's CSP has the page origins the user saw when the tab loaded: a page added since then is still blocked here.
   const [blockedUrl, setBlockedUrl] = useState<string>()
   useEffect(() => {
     if (!url) return
@@ -45,6 +45,8 @@ export function CustomPageView() {
       <PaneHeader>
         {page.icon ? <span aria-hidden="true" className="text-base leading-none">{page.icon}</span> : null}
         <PaneTitle render={<h1 />} className="m-0">{page.name}</PaneTitle>
+        {/* The site's host stays visible, so a framed page cannot pass for Orbit itself (for example a fake sign-in). */}
+        <span className="truncate text-xs text-muted-foreground" title={url}>{new URL(url).host}</span>
         {framed ? <InfoTip text="Empty page? The site does not let Orbit frame it. Its frame-ancestors must allow this Orbit, or open it in a new tab." /> : null}
         <a href={url} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer" className={buttonVariants({ variant: 'ghost', size: 'sm', className: 'ml-auto' })}>
           <ArrowUpRightSquare className="size-4" /> Open in new tab
@@ -53,7 +55,7 @@ export function CustomPageView() {
       {framed && blockedUrl === url ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-2 p-6 text-center text-muted-foreground" role="status">
           <p className="m-0 font-medium text-foreground">Reload Orbit to show this page.</p>
-          <p className="m-0">Its site was allowed after this tab opened.</p>
+          <p className="m-0">The page was added after this tab opened.</p>
           <Button type="button" variant="outline" onClick={() => window.location.reload()}>Reload</Button>
         </div>
       ) : framed ? (

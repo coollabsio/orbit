@@ -18,15 +18,6 @@ export function customPageUrl(base: string, rest = '', search = ''): string | nu
   return url.origin === origin && url.protocol === 'https:' ? url.toString() : null
 }
 
-/** Whether the server still lets the app frame the page: its origin is in `ORBIT_FRAME_ORIGINS`. */
-export function canFrame(url: string, frameOrigins: readonly string[]): boolean {
-  try {
-    return frameOrigins.includes(new URL(url).origin)
-  } catch {
-    return false
-  }
-}
-
 /** A page address from a name: lowercase letters, digits and single hyphens, at most 48 characters. */
 export function slugOf(name: string): string {
   return name

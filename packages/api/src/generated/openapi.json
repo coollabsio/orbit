@@ -33733,13 +33733,13 @@
         ]
       }
     },
-    "/api/v1/admin/settings/frame-origins": {
+    "/api/v1/admin/settings/custom-pages": {
       "put": {
         "tags": [
           "crate::workspace_routes"
         ],
-        "summary": "Saves the custom page origins. Every server uses them at once: the app may frame them, and custom page URLs\nmust be on one of them. 422 `invalid_frame_origin` names an entry that is not an https origin.",
-        "operationId": "set_frame_origins",
+        "summary": "Saves which URLs workspace admins may use for custom pages. Every server uses it at once. A page that the new\npolicy does not allow stays, but the app does not frame it. 422 `invalid_frame_origin` names an entry that is not\nan https origin.",
+        "operationId": "set_custom_page_policy",
         "parameters": [
           {
             "name": "X-Orbit-Contract",
@@ -33755,7 +33755,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/FrameOriginsBody"
+                "$ref": "#/components/schemas/CustomPagePolicyBody"
               }
             }
           },
@@ -55749,7 +55749,7 @@
             }
           },
           "409": {
-            "description": "contract_mismatch, custom_page_slug_taken",
+            "description": "contract_mismatch, custom_page_slug_taken, custom_page_limit",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -106346,7 +106346,7 @@
           },
           "url": {
             "type": "string",
-            "description": "An https URL on one of `frame_origins`."
+            "description": "An https URL that `policy` allows, not on Orbit's own origin."
           }
         },
         "additionalProperties": false
@@ -107261,27 +107261,80 @@
         "required": [
           "items",
           "can_manage",
-          "frame_origins"
+          "policy",
+          "blocked"
         ],
         "properties": {
-          "can_manage": {
-            "type": "boolean",
-            "description": "Whether the caller may add, change and remove pages."
-          },
-          "frame_origins": {
+          "blocked": {
             "type": "array",
             "items": {
               "type": "string"
             },
-            "description": "The origins a page URL may use (Admin, or `ORBIT_FRAME_ORIGINS`). A page whose origin left the list is not framed."
+            "description": "The ids of the pages that the policy does not frame (their origin left the list): the app links to them."
+          },
+          "can_manage": {
+            "type": "boolean",
+            "description": "Whether the caller may add, change and remove pages."
           },
           "items": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/CustomPage"
             }
+          },
+          "policy": {
+            "$ref": "#/components/schemas/CustomPagePolicy",
+            "description": "Which URLs a page may use (Admin, or `ORBIT_FRAME_ORIGINS`). `origins` is empty for callers who cannot manage\npages. In the `off` mode, `items` is empty."
           }
         }
+      },
+      "CustomPageMode": {
+        "type": "string",
+        "description": "Which URLs workspace admins may use for custom pages.",
+        "enum": [
+          "any",
+          "listed",
+          "off"
+        ]
+      },
+      "CustomPagePolicy": {
+        "type": "object",
+        "description": "The policy as the API shows it.",
+        "required": [
+          "mode",
+          "origins"
+        ],
+        "properties": {
+          "mode": {
+            "$ref": "#/components/schemas/CustomPageMode"
+          },
+          "origins": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The listed origins: the ones the `listed` mode allows. Admin keeps them in the other modes too."
+          }
+        }
+      },
+      "CustomPagePolicyBody": {
+        "type": "object",
+        "required": [
+          "mode"
+        ],
+        "properties": {
+          "mode": {
+            "$ref": "#/components/schemas/CustomPageMode"
+          },
+          "origins": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "https origins without a path, such as `https://grafana.example.com`, for the `listed` mode. Kept in the other\nmodes. Not Orbit's own origin."
+          }
+        },
+        "additionalProperties": false
       },
       "CustomPageUpdateBody": {
         "type": "object",
@@ -109218,22 +109271,6 @@
           }
         }
       },
-      "FrameOriginsBody": {
-        "type": "object",
-        "required": [
-          "origins"
-        ],
-        "properties": {
-          "origins": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "https origins without a path, such as `https://grafana.example.com`; at most 20. Not Orbit's own origin."
-          }
-        },
-        "additionalProperties": false
-      },
       "GithubActor": {
         "type": "object",
         "required": [
@@ -110473,20 +110510,17 @@
           "limits",
           "mail",
           "sign_in_providers",
-          "frame_origins",
+          "custom_pages",
           "environment"
         ],
         "properties": {
+          "custom_pages": {
+            "$ref": "#/components/schemas/CustomPagePolicy",
+            "description": "Which URLs workspace admins may use for custom pages: `ORBIT_FRAME_ORIGINS`, or else the saved policy."
+          },
           "environment": {
             "$ref": "#/components/schemas/EnvironmentView",
             "description": "The settings that `ORBIT_*` environment variables set. They replace the saved values, and changing them\nhere gives 409 `set_by_environment`."
-          },
-          "frame_origins": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "The https origins whose pages workspaces may show as custom pages; the app may frame them."
           },
           "limits": {
             "$ref": "#/components/schemas/LimitsView"

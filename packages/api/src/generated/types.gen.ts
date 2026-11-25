@@ -1582,7 +1582,7 @@ export type CreateCustomPageBody = {
      */
     slug: string;
     /**
-     * An https URL on one of `frame_origins`.
+     * An https URL that `policy` allows, not on Orbit's own origin.
      */
     url: string;
 };
@@ -2033,14 +2033,44 @@ export type CustomPage = {
 
 export type CustomPageList = {
     /**
+     * The ids of the pages that the policy does not frame (their origin left the list): the app links to them.
+     */
+    blocked: Array<string>;
+    /**
      * Whether the caller may add, change and remove pages.
      */
     can_manage: boolean;
-    /**
-     * The origins a page URL may use (Admin, or `ORBIT_FRAME_ORIGINS`). A page whose origin left the list is not framed.
-     */
-    frame_origins: Array<string>;
     items: Array<CustomPage>;
+    /**
+     * Which URLs a page may use (Admin, or `ORBIT_FRAME_ORIGINS`). `origins` is empty for callers who cannot manage
+     * pages. In the `off` mode, `items` is empty.
+     */
+    policy: CustomPagePolicy;
+};
+
+/**
+ * Which URLs workspace admins may use for custom pages.
+ */
+export type CustomPageMode = 'any' | 'listed' | 'off';
+
+/**
+ * The policy as the API shows it.
+ */
+export type CustomPagePolicy = {
+    mode: CustomPageMode;
+    /**
+     * The listed origins: the ones the `listed` mode allows. Admin keeps them in the other modes too.
+     */
+    origins: Array<string>;
+};
+
+export type CustomPagePolicyBody = {
+    mode: CustomPageMode;
+    /**
+     * https origins without a path, such as `https://grafana.example.com`, for the `listed` mode. Kept in the other
+     * modes. Not Orbit's own origin.
+     */
+    origins?: Array<string>;
 };
 
 export type CustomPageUpdateBody = {
@@ -2910,13 +2940,6 @@ export type ForwardedRecord = {
     message_id: string;
 };
 
-export type FrameOriginsBody = {
-    /**
-     * https origins without a path, such as `https://grafana.example.com`; at most 20. Not Orbit's own origin.
-     */
-    origins: Array<string>;
-};
-
 export type GithubActor = {
     avatar_url: string;
     login: string;
@@ -3453,14 +3476,14 @@ export type InstanceMailView = {
 
 export type InstanceSettingsView = {
     /**
+     * Which URLs workspace admins may use for custom pages: `ORBIT_FRAME_ORIGINS`, or else the saved policy.
+     */
+    custom_pages: CustomPagePolicy;
+    /**
      * The settings that `ORBIT_*` environment variables set. They replace the saved values, and changing them
      * here gives 409 `set_by_environment`.
      */
     environment: EnvironmentView;
-    /**
-     * The https origins whose pages workspaces may show as custom pages; the app may frame them.
-     */
-    frame_origins: Array<string>;
     limits: LimitsView;
     mail: InstanceMailView;
     /**
@@ -28555,8 +28578,8 @@ export type GetInstanceSettingsResponses = {
 
 export type GetInstanceSettingsResponse = GetInstanceSettingsResponses[keyof GetInstanceSettingsResponses];
 
-export type SetFrameOriginsData = {
-    body: FrameOriginsBody;
+export type SetCustomPagePolicyData = {
+    body: CustomPagePolicyBody;
     headers?: {
         /**
          * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
@@ -28565,10 +28588,10 @@ export type SetFrameOriginsData = {
     };
     path?: never;
     query?: never;
-    url: '/api/v1/admin/settings/frame-origins';
+    url: '/api/v1/admin/settings/custom-pages';
 };
 
-export type SetFrameOriginsErrors = {
+export type SetCustomPagePolicyErrors = {
     /**
      * invalid_proxy_headers, invalid_request
      */
@@ -28603,13 +28626,13 @@ export type SetFrameOriginsErrors = {
     default: WorkspaceProblem;
 };
 
-export type SetFrameOriginsError = SetFrameOriginsErrors[keyof SetFrameOriginsErrors];
+export type SetCustomPagePolicyError = SetCustomPagePolicyErrors[keyof SetCustomPagePolicyErrors];
 
-export type SetFrameOriginsResponses = {
+export type SetCustomPagePolicyResponses = {
     200: InstanceSettingsView;
 };
 
-export type SetFrameOriginsResponse = SetFrameOriginsResponses[keyof SetFrameOriginsResponses];
+export type SetCustomPagePolicyResponse = SetCustomPagePolicyResponses[keyof SetCustomPagePolicyResponses];
 
 export type SaveLimitsData = {
     body: LimitsView;
@@ -38494,7 +38517,7 @@ export type CreateCustomPageErrors = {
      */
     404: WorkspaceProblem;
     /**
-     * contract_mismatch, custom_page_slug_taken
+     * contract_mismatch, custom_page_slug_taken, custom_page_limit
      */
     409: WorkspaceProblem;
     /**

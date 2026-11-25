@@ -80,7 +80,7 @@ pub fn production_router(
     let mail_content_origin = api.mail.content_origin.clone();
     let session_cookie = api.auth.cookie_mode().session_cookie_name();
     let database = api.auth.database().clone();
-    let frame_origins = crate::frame_origins::of(&database);
+    let custom_pages = api.custom_pages.clone();
     let realtime = crate::realtime::router(api.tasks.clone());
     let views = view_router(api.tasks.clone());
     let identity = std::sync::Arc::clone(&api.tasks.identity);
@@ -124,7 +124,10 @@ pub fn production_router(
                 .route("/health/ready", get(readiness))
                 .with_state(health),
         )
-        .merge(assets.router())
+        .merge(assets.router().layer(axum::middleware::from_fn_with_state(
+            custom_pages,
+            crate::frame_origins::document_frame_sources,
+        )))
         .method_not_allowed_fallback(method_not_allowed);
     let router = match api.billing {
         Some(billing) => crate::billing::guard::layer(
@@ -150,8 +153,7 @@ pub fn production_router(
         let layer = match mail_content_origin {
             Some(origin) => layer.with_csp_frame_source(origin),
             None => layer,
-        }
-        .with_frame_origins(frame_origins);
+        };
         if require_secure_transport {
             layer.require_secure_transport()
         } else {

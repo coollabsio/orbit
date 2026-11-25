@@ -5,7 +5,7 @@ import { createCustomPage, deleteCustomPage, listCustomPages, updateCustomPage }
 import type { CreateCustomPageBody, CustomPage, CustomPageUpdateBody } from '@orbit/api/generated/types.gen'
 import { ApiProblem } from '@orbit/api/problem'
 
-/** The workspace's custom pages that the user sees, whether they may manage them, and the origins Orbit may frame. */
+/** The workspace's custom pages that the user sees, whether they may manage them, the policy, and the pages it does not frame. */
 export function useCustomPages(workspaceId: string, enabled = true) {
   return useQuery({
     queryKey: queryKeys.customPages(workspaceId),
@@ -44,7 +44,8 @@ export function useDeleteCustomPage(workspaceId: string) {
 /** A user-facing sentence for a failed save. */
 export function customPageError(error: unknown): string {
   if (error instanceof ApiProblem) {
-    if (error.code === 'custom_page_origin_not_allowed') return 'This site is not on the list of allowed origins. Ask the administrator of this Orbit to add it in Admin → General.'
+    if (error.code === 'custom_page_origin_not_allowed') return error.detail
+    if (error.code === 'custom_page_limit') return 'A workspace can have at most 50 custom pages.'
     if (error.code === 'custom_page_slug_taken') return 'Another page already uses this address.'
     if (error.code === 'validation_failed') return error.detail === 'url' ? 'Enter an https URL.' : error.detail === 'slug' ? 'Use lowercase letters, digits and single hyphens for the address.' : 'Check the fields.'
     if (error.status === 403) return 'Only workspace owners and admins can manage custom pages.'

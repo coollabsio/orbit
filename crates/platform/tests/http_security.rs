@@ -11,10 +11,11 @@ use axum::extract::ConnectInfo;
 use axum::http::header::{CONTENT_LENGTH, CONTENT_SECURITY_POLICY, CONTENT_TYPE};
 use axum::http::{HeaderMap, HeaderValue, Request, StatusCode};
 use axum::routing::{get, post};
+use axum::response::IntoResponse;
 use axum::{Extension, Json, Router};
 use ipnet::IpNet;
 use orbit_platform::{
-    ClientIp, FrameOrigins, HealthCheck, HealthRegistry, HttpLimits, HttpPlatformLayer, Id, OriginPolicy,
+    ClientIp, CspFrameSources, HealthCheck, HealthRegistry, HttpLimits, HttpPlatformLayer, Id, OriginPolicy,
     RateLimitConfig, RequestId, RequestTransport,
 };
 use serde_json::Value;
@@ -845,35 +846,62 @@ async fn csp_allows_only_the_verified_bootstrap_hash_and_local_image_variants() 
     );
 }
 
-/// The app frames the sandboxed mail view document (from its own origin, or from `ORBIT_MAIL_CONTENT_ORIGIN`) and the
-/// custom page origins, which the root user can change while the server runs.
+/// The app frames the sandboxed mail view document (from its own origin, or from `ORBIT_MAIL_CONTENT_ORIGIN`), and a
+/// document also frames the custom page origins that its handler sets: only valid origins, and at most 2 KB of them.
 #[tokio::test]
-async fn csp_frames_the_mail_content_origin_and_the_current_custom_page_origins() {
-    let origins = FrameOrigins::default();
+async fn csp_frames_the_mail_content_origin_and_the_document_custom_page_origins() {
+    let many: Vec<String> = (0..200).map(|n| format!("https://page-{n:03}.example.com")).collect();
     let app = Router::new()
         .route("/", get(|| async { StatusCode::OK }))
+        .route(
+            "/document",
+            get(|| async {
+                let mut response = StatusCode::OK.into_response();
+                response.extensions_mut().insert(CspFrameSources(vec![
+                    "https://grafana.example.com".to_owned(),
+                    "https://bad.example.com; script-src *".to_owned(),
+                ]));
+                response
+            }),
+        )
+        .route(
+            "/many",
+            get(move || {
+                let many = many.clone();
+                async move {
+                    let mut response = StatusCode::OK.into_response();
+                    response.extensions_mut().insert(CspFrameSources(many));
+                    response
+                }
+            }),
+        )
         .layer(
             HttpPlatformLayer::new(OriginPolicy::new("https://orbit.test"))
-                .with_csp_frame_source("https://mail.orbit-content.test")
-                .with_frame_origins(origins.clone()),
+                .with_csp_frame_source("https://mail.orbit-content.test"),
         );
-    let frame_src = |app: Router| async move {
-        let response = app
-            .oneshot(Request::get("/").body(Body::empty()).unwrap())
-            .await
-            .unwrap();
-        let csp = response.headers()[CONTENT_SECURITY_POLICY].to_str().unwrap().to_owned();
-        csp.split("; ").find(|part| part.starts_with("frame-src")).unwrap().to_owned()
+    let frame_src = |path: &'static str| {
+        let app = app.clone();
+        async move {
+            let response = app
+                .oneshot(Request::get(path).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            let csp = response.headers()[CONTENT_SECURITY_POLICY].to_str().unwrap().to_owned();
+            csp.split("; ").find(|part| part.starts_with("frame-src")).unwrap().to_owned()
+        }
     };
     assert_eq!(
-        frame_src(app.clone()).await,
+        frame_src("/").await,
         "frame-src 'self' https://mail.orbit-content.test blob: https://www.youtube-nocookie.com https://player.vimeo.com"
     );
-    origins.set(vec!["https://grafana.example.com".to_owned()]);
     assert_eq!(
-        frame_src(app).await,
+        frame_src("/document").await,
         "frame-src 'self' https://mail.orbit-content.test https://grafana.example.com blob: https://www.youtube-nocookie.com https://player.vimeo.com"
     );
+    // Each origin is 28 bytes and a space: 70 fit in 2048 bytes.
+    let many = frame_src("/many").await;
+    assert!(many.contains("https://page-069.example.com blob:"), "{many}");
+    assert!(!many.contains("page-070"), "{many}");
 }
 
 #[tokio::test]

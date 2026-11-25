@@ -67,6 +67,8 @@ pub enum CustomPageError {
     Forbidden,
     #[error("another custom page has this slug")]
     SlugTaken,
+    #[error("the workspace has the most custom pages it can have")]
+    Limit,
     #[error("stale version")]
     VersionConflict { current: Box<Value> },
     #[error("stored custom page data is invalid")]
@@ -84,8 +86,8 @@ impl From<TaskError> for CustomPageError {
     }
 }
 
-/// At most this many pages come in from one import archive.
-pub const MAX_IMPORTED_PAGES: usize = 200;
+/// Most pages in one workspace. Each origin goes into the `frame-src` of every member, so a workspace cannot fill it.
+pub const MAX_PAGES: i64 = 50;
 
 /// 1 to 48 lowercase letters, digits and single hyphens: the page opens at `/pages/{slug}`.
 #[must_use]
@@ -177,6 +179,35 @@ impl CustomPageRepository {
         Ok((pages, can_manage))
     }
 
+    /// The URLs of the pages `user_id` sees in all their workspaces: the oldest membership first, then each
+    /// workspace's oldest page first. A workspace that the user joins later cannot push out the pages of the others.
+    pub async fn visible_urls(&self, user_id: Id) -> Result<Vec<String>, CustomPageError> {
+        let workspaces: Vec<String> = sqlx::query_scalar(
+            "SELECT memberships.workspace_id FROM memberships \
+             JOIN workspaces ON workspaces.id = memberships.workspace_id \
+             WHERE memberships.user_id = $1 AND workspaces.deleted_at IS NULL \
+             AND EXISTS (SELECT 1 FROM custom_pages WHERE custom_pages.workspace_id = memberships.workspace_id) \
+             ORDER BY memberships.created_at, memberships.id",
+        )
+        .bind(user_id.to_string())
+        .fetch_all(self.database.pool())
+        .await?;
+        let mut urls = Vec::new();
+        for workspace in workspaces {
+            let workspace_id = workspace.parse().map_err(|_| CustomPageError::Corrupt)?;
+            match self.pages(workspace_id, user_id).await {
+                Ok((mut pages, _)) => {
+                    pages.sort_by_key(|page| (page.created_at, page.id));
+                    urls.extend(pages.into_iter().map(|page| page.url));
+                }
+                // A guest sees no pages.
+                Err(CustomPageError::NotFound) => {}
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(urls)
+    }
+
     pub async fn create_page(
         &self,
         workspace_id: Id,
@@ -189,6 +220,9 @@ impl CustomPageRepository {
         let mut tx = self.database.workspace_transaction(workspace_id).await?;
         require_manager(&mut tx, workspace_id, actor_id).await?;
         require_free_slug(&mut tx, workspace_id, &page.slug, None).await?;
+        if page_count(&mut tx, workspace_id).await? >= MAX_PAGES {
+            return Err(CustomPageError::Limit);
+        }
         sqlx::query(
             "INSERT INTO custom_pages (id, workspace_id, slug, name, icon, url, admins_only, version, created_by, \
              created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, 0, $8, $9, $10)",
@@ -231,7 +265,7 @@ impl CustomPageRepository {
         })
     }
 
-    /// Adds imported pages (at most [`MAX_IMPORTED_PAGES`]); a page whose address the workspace already uses is
+    /// Adds imported pages, up to [`MAX_PAGES`] in the workspace; a page whose address the workspace already uses is
     /// skipped, so a second import of the same archive adds nothing. Returns how many were added.
     pub async fn import_pages(
         &self,
@@ -240,7 +274,9 @@ impl CustomPageRepository {
         pages: &[NewCustomPage],
         now: TimestampMillis,
     ) -> Result<u64, CustomPageError> {
-        let pages = &pages[..pages.len().min(MAX_IMPORTED_PAGES)];
+        let mut tx = self.database.workspace_transaction(workspace_id).await?;
+        let room = usize::try_from(MAX_PAGES - page_count(&mut tx, workspace_id).await?).unwrap_or(0);
+        let pages = &pages[..pages.len().min(room)];
         if pages.is_empty() {
             return Ok(0);
         }
@@ -276,7 +312,6 @@ impl CustomPageRepository {
                 .push(")");
         }
         query.push(" ON CONFLICT DO NOTHING");
-        let mut tx = self.database.workspace_transaction(workspace_id).await?;
         let created = query.build().execute(&mut *tx).await?.rows_affected();
         tx.commit().await?;
         Ok(created)
@@ -385,6 +420,13 @@ async fn require_manager(
     } else {
         Err(CustomPageError::Forbidden)
     }
+}
+
+async fn page_count(tx: &mut Transaction<'_, Any>, workspace_id: Id) -> Result<i64, CustomPageError> {
+    Ok(sqlx::query_scalar("SELECT COUNT(*) FROM custom_pages WHERE workspace_id = $1")
+        .bind(workspace_id.to_string())
+        .fetch_one(&mut **tx)
+        .await?)
 }
 
 async fn require_free_slug(

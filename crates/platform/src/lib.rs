@@ -53,7 +53,7 @@ pub use files::{
     UploadFinalization, UploadLimitError, UploadLimits, UploadService, WORKSPACE_STORAGE_USED,
     WorkspaceBucket, shrink_image, sigv4_authorization,
 };
-pub use frame_origins::{FrameOrigins, MAX_FRAME_ORIGINS, frame_origin, frame_origin_list};
+pub use frame_origins::{CspFrameSources, FramePolicy, frame_origin, frame_origin_list};
 pub use health::{HealthCheck, HealthCheckResult, HealthRegistry, ReadinessReport};
 pub use http::{
     ClientIp, ErrorCause, HttpLimits, HttpPlatformLayer, LargeUpload, OriginPolicy, RequestId,

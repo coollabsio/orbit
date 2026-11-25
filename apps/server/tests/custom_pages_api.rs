@@ -2,7 +2,10 @@ use std::sync::Arc;
 
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode, header};
-use orbit_platform::{AuthenticatedUser, Id, PasswordService, TestDatabase, TimestampMillis};
+use orbit_platform::{
+    AuthenticatedUser, HttpPlatformLayer, Id, OriginPolicy, PasswordService, TestDatabase,
+    TimestampMillis,
+};
 use orbit_server::auth_routes::CookieMode;
 use orbit_server::custom_page_routes::{CustomPageState, custom_page_router};
 use orbit_server::repositories::identity::{IdentityRepository, SetupRequest};
@@ -17,6 +20,7 @@ struct Fixture {
     database: TestDatabase,
     identity: Arc<IdentityRepository>,
     app: axum::Router,
+    state: CustomPageState,
     workspace_id: String,
     owner_cookie: String,
     owner_id: Id,
@@ -50,11 +54,8 @@ impl Fixture {
             )
             .await
             .unwrap();
-        let app = custom_page_router(CustomPageState::new(
-            Arc::clone(&identity),
-            CookieMode::secure(),
-        ))
-        .merge(workspace_router(WorkspaceState::new(
+        let state = CustomPageState::new(Arc::clone(&identity), ORIGIN, CookieMode::secure());
+        let app = custom_page_router(state.clone()).merge(workspace_router(WorkspaceState::new(
             Arc::clone(&identity),
             ORIGIN.to_owned(),
             CookieMode::secure(),
@@ -63,14 +64,16 @@ impl Fixture {
             database,
             identity,
             app,
+            state,
             workspace_id: setup.workspace_id.to_string(),
             owner_cookie: format!("__Host-orbit_session={}", setup.session.token),
             owner_id: setup.user_id,
         };
-        // the owner of the first workspace is the root user, who saves the origins in Admin
+        // the owner of the first workspace is the root user, who sets the policy in Admin
         let (status, settings) = fixture
-            .set_origins(
+            .set_policy(
                 &fixture.owner_cookie,
+                "listed",
                 json!([
                     "https://grafana.example.com",
                     "https://BOARD.example.com:443/"
@@ -81,14 +84,53 @@ impl Fixture {
         fixture
     }
 
-    async fn set_origins(&self, cookie: &str, origins: Value) -> (StatusCode, Value) {
+    async fn set_policy(&self, cookie: &str, mode: &str, origins: Value) -> (StatusCode, Value) {
         self.call(
             cookie,
             "PUT",
-            "/api/v1/admin/settings/frame-origins",
-            Some(json!({ "origins": origins })),
+            "/api/v1/admin/settings/custom-pages",
+            Some(json!({ "mode": mode, "origins": origins })),
         )
         .await
+    }
+
+    /// The `frame-src` of the app's HTML document for `cookie` (none: signed out).
+    async fn document_frame_src(&self, cookie: Option<&str>) -> String {
+        let app = axum::Router::new()
+            .route(
+                "/",
+                axum::routing::get(|| async {
+                    (
+                        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+                        "<html>",
+                    )
+                }),
+            )
+            .layer(axum::middleware::from_fn_with_state(
+                self.state.clone(),
+                orbit_server::frame_origins::document_frame_sources,
+            ))
+            .layer(HttpPlatformLayer::new(OriginPolicy::new(ORIGIN)));
+        let mut request = Request::get("/");
+        if let Some(cookie) = cookie {
+            request = request.header(header::COOKIE, cookie);
+        }
+        let response = app
+            .oneshot(request.body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let csp = response.headers()[header::CONTENT_SECURITY_POLICY]
+            .to_str()
+            .unwrap();
+        let frame_src = csp
+            .split("; ")
+            .find(|part| part.starts_with("frame-src"))
+            .unwrap();
+        frame_src
+            .trim_start_matches("frame-src 'self'")
+            .trim_end_matches(" blob: https://www.youtube-nocookie.com https://player.vimeo.com")
+            .trim()
+            .to_owned()
     }
 
     fn uri(&self) -> String {
@@ -203,8 +245,8 @@ async fn admins_add_change_and_remove_pages_on_the_allowed_origins() {
     assert_eq!(list["items"], json!([]));
     assert_eq!(list["can_manage"], true);
     assert_eq!(
-        list["frame_origins"],
-        json!(["https://grafana.example.com", "https://board.example.com"]),
+        list["policy"],
+        json!({"mode": "listed", "origins": ["https://grafana.example.com", "https://board.example.com"]}),
         "origins are normalized as the browser writes them"
     );
 
@@ -278,7 +320,7 @@ async fn admins_add_change_and_remove_pages_on_the_allowed_origins() {
 }
 
 #[tokio::test]
-async fn page_urls_must_be_https_on_an_operator_origin() {
+async fn page_urls_must_be_https_on_a_listed_origin() {
     let fixture = Fixture::new().await;
     for (url, code) in [
         (
@@ -359,6 +401,11 @@ async fn members_see_shared_pages_only_and_cannot_manage_them() {
     let list = fixture.list(&member).await;
     assert_eq!(slugs(&list), ["kpis"]);
     assert_eq!(list["can_manage"], false);
+    assert_eq!(
+        list["policy"],
+        json!({"mode": "listed", "origins": []}),
+        "only managers see the listed origins"
+    );
     assert_eq!(slugs(&fixture.list(&admin).await), ["kpis", "oncall"]);
 
     for (method, uri, body) in [
@@ -436,54 +483,103 @@ async fn pages_are_isolated_between_workspaces() {
 }
 
 #[tokio::test]
-async fn the_root_user_changes_the_origins_while_the_server_runs() {
+async fn the_root_user_changes_the_policy_while_the_server_runs() {
     let fixture = Fixture::new().await;
-    let page = json!({"slug": "status", "name": "Status", "url": "https://status.example.com/"});
+    let kpis = fixture
+        .create(json!({"slug": "kpis", "name": "KPIs", "url": "https://grafana.example.com/"}))
+        .await;
+    let status_page =
+        json!({"slug": "status", "name": "Status", "url": "https://status.example.com/"});
     let (status, problem) = fixture
         .call(
             &fixture.owner_cookie,
             "POST",
             &fixture.uri(),
-            Some(page.clone()),
+            Some(status_page.clone()),
         )
         .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{problem}");
     assert_eq!(problem["code"], "custom_page_origin_not_allowed");
 
+    // Only these origins: a page whose origin left the list stays, but the app does not frame it.
     let (status, settings) = fixture
-        .set_origins(&fixture.owner_cookie, json!(["https://status.example.com"]))
+        .set_policy(
+            &fixture.owner_cookie,
+            "listed",
+            json!(["https://status.example.com"]),
+        )
         .await;
     assert_eq!(status, StatusCode::OK, "{settings}");
     assert_eq!(
-        settings["frame_origins"],
-        json!(["https://status.example.com"])
+        settings["custom_pages"],
+        json!({"mode": "listed", "origins": ["https://status.example.com"]})
     );
     assert_eq!(settings["environment"]["frame_origins"], false);
+    fixture.create(status_page).await;
+    let list = fixture.list(&fixture.owner_cookie).await;
+    assert_eq!(slugs(&list), ["kpis", "status"]);
+    assert_eq!(list["blocked"], json!([kpis["id"]]));
+
+    // Any https site: also one no list names, but never Orbit itself.
+    let (status, _) = fixture
+        .set_policy(
+            &fixture.owner_cookie,
+            "any",
+            json!(["https://status.example.com"]),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    fixture
+        .create(json!({"slug": "docs", "name": "Docs", "url": "https://docs.other.test/"}))
+        .await;
     assert_eq!(
-        orbit_server::frame_origins::saved(&fixture.database)
-            .await
-            .unwrap(),
-        ["https://status.example.com"]
+        fixture.list(&fixture.owner_cookie).await["blocked"],
+        json!([])
     );
-    // the CSP and the page checks share the list: the new origin works at once, the removed one does not
+    for own in [
+        format!("{ORIGIN}/settings"),
+        "https://ORBIT.test:443/".to_owned(),
+    ] {
+        let (status, problem) = fixture
+            .call(
+                &fixture.owner_cookie,
+                "POST",
+                &fixture.uri(),
+                Some(json!({"slug": "self", "name": "Self", "url": own})),
+            )
+            .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{own}: {problem}");
+        assert_eq!(problem["code"], "custom_page_origin_not_allowed");
+    }
+
+    // Off: no pages show, and none can be added; the saved list stays for later.
+    let (status, settings) = fixture
+        .set_policy(
+            &fixture.owner_cookie,
+            "off",
+            json!(["https://status.example.com"]),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{settings}");
     assert_eq!(
-        &*orbit_server::frame_origins::of(&fixture.database).get(),
-        ["https://status.example.com".to_owned()]
+        fixture.list(&fixture.owner_cookie).await["items"],
+        json!([])
     );
-    assert_eq!(
-        fixture.list(&fixture.owner_cookie).await["frame_origins"],
-        json!(["https://status.example.com"])
-    );
-    fixture.create(page).await;
-    let (status, problem) = fixture
+    let (status, _) = fixture
         .call(
             &fixture.owner_cookie,
             "POST",
             &fixture.uri(),
-            Some(json!({"slug": "kpis", "name": "KPIs", "url": "https://grafana.example.com/"})),
+            Some(json!({"slug": "more", "name": "More", "url": "https://status.example.com/"})),
         )
         .await;
-    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{problem}");
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        fixture
+            .document_frame_src(Some(&fixture.owner_cookie))
+            .await,
+        ""
+    );
 
     for bad in [
         json!(["http://status.example.com"]),
@@ -492,57 +588,163 @@ async fn the_root_user_changes_the_origins_while_the_server_runs() {
         json!([ORIGIN]),
     ] {
         let (status, problem) = fixture
-            .set_origins(&fixture.owner_cookie, bad.clone())
+            .set_policy(&fixture.owner_cookie, "listed", bad.clone())
             .await;
         assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{bad}: {problem}");
         assert_eq!(problem["code"], "invalid_frame_origin");
     }
+    let (status, _) = fixture
+        .set_policy(&fixture.owner_cookie, "some", json!([]))
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
 
     // a workspace admin is not the installation's administrator
     let workspace_id = fixture.workspace_id.clone();
     let admin = fixture
         .add_member(&workspace_id, "admin@example.com", "admin")
         .await;
-    let (status, problem) = fixture.set_origins(&admin, json!([])).await;
+    let (status, problem) = fixture.set_policy(&admin, "any", json!([])).await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{problem}");
     assert_eq!(
-        &*orbit_server::frame_origins::of(&fixture.database).get(),
-        ["https://status.example.com".to_owned()]
+        fixture.list(&fixture.owner_cookie).await["policy"]["mode"],
+        "off"
     );
 }
 
+/// The app's document frames only the origins of the pages that the signed-in user sees, so a user never learns
+/// another workspace's hosts and an injected iframe can load nothing else.
 #[tokio::test]
-async fn orbit_frame_origins_replaces_the_saved_list_and_locks_it() {
+async fn the_app_document_frames_the_origins_of_the_pages_the_user_sees() {
+    let fixture = Fixture::new().await;
+    fixture
+        .set_policy(&fixture.owner_cookie, "any", json!([]))
+        .await;
+    fixture
+        .create(json!({"slug": "kpis", "name": "KPIs", "url": "https://grafana.example.com/kpi"}))
+        .await;
+    fixture
+        .create(
+            json!({"slug": "kpis-2", "name": "KPIs 2", "url": "https://grafana.example.com/other"}),
+        )
+        .await;
+    fixture
+        .create(json!({
+            "slug": "oncall",
+            "name": "On-call",
+            "url": "https://oncall.example.com/",
+            "admins_only": true,
+        }))
+        .await;
+    let workspace_id = fixture.workspace_id.clone();
+    let member = fixture
+        .add_member(&workspace_id, "member@example.com", "member")
+        .await;
+    let guest = fixture
+        .add_member(&workspace_id, "guest@example.com", "guest")
+        .await;
+    let foreign = WorkspaceRepository::new((*fixture.database).clone())
+        .create(
+            fixture.owner_id,
+            "Foreign".to_owned(),
+            "custom-pages-test",
+            TimestampMillis::now(),
+        )
+        .await
+        .unwrap()
+        .id
+        .to_string();
+    let outsider = fixture
+        .add_member(&foreign, "outsider@example.com", "admin")
+        .await;
+
+    assert_eq!(
+        fixture
+            .document_frame_src(Some(&fixture.owner_cookie))
+            .await,
+        "https://grafana.example.com https://oncall.example.com"
+    );
+    assert_eq!(
+        fixture.document_frame_src(Some(&member)).await,
+        "https://grafana.example.com",
+        "a member does not get the origin of an admins-only page"
+    );
+    assert_eq!(fixture.document_frame_src(Some(&guest)).await, "");
+    assert_eq!(fixture.document_frame_src(Some(&outsider)).await, "");
+    assert_eq!(fixture.document_frame_src(None).await, "");
+
+    // Only these origins: a page whose origin left the list is not framed.
+    fixture
+        .set_policy(
+            &fixture.owner_cookie,
+            "listed",
+            json!(["https://oncall.example.com"]),
+        )
+        .await;
+    assert_eq!(
+        fixture
+            .document_frame_src(Some(&fixture.owner_cookie))
+            .await,
+        "https://oncall.example.com"
+    );
+}
+
+/// Each page origin goes into the `frame-src` of every member, so a workspace has a limit.
+#[tokio::test]
+async fn a_workspace_has_at_most_fifty_pages() {
+    let fixture = Fixture::new().await;
+    for n in 0..50 {
+        fixture
+            .create(json!({"slug": format!("p{n}"), "name": "P", "url": "https://grafana.example.com/"}))
+            .await;
+    }
+    let (status, problem) = fixture
+        .call(
+            &fixture.owner_cookie,
+            "POST",
+            &fixture.uri(),
+            Some(json!({"slug": "p50", "name": "P", "url": "https://grafana.example.com/"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{problem}");
+    assert_eq!(problem["code"], "custom_page_limit");
+}
+
+#[tokio::test]
+async fn orbit_frame_origins_replaces_the_saved_policy_and_locks_it() {
     let fixture = Fixture::new().await;
     orbit_server::repositories::environment_settings::EnvironmentSettings::from_config(
         &orbit_platform::InstanceConfig {
-            frame_origins: Some(vec!["https://env.example.com".to_owned()]),
+            frame_policy: Some(orbit_platform::FramePolicy::Listed(vec![
+                "https://env.example.com".to_owned(),
+            ])),
             ..orbit_platform::InstanceConfig::default()
         },
         &[7; 32],
     )
     .unwrap()
     .install(&fixture.database);
-    orbit_server::frame_origins::reload(&fixture.database)
-        .await
-        .unwrap();
     assert_eq!(
-        fixture.list(&fixture.owner_cookie).await["frame_origins"],
-        json!(["https://env.example.com"])
+        fixture.list(&fixture.owner_cookie).await["policy"],
+        json!({"mode": "listed", "origins": ["https://env.example.com"]})
     );
+    fixture
+        .create(json!({"slug": "env", "name": "Env", "url": "https://env.example.com/"}))
+        .await;
     let (status, problem) = fixture
-        .set_origins(
-            &fixture.owner_cookie,
-            json!(["https://grafana.example.com"]),
-        )
+        .set_policy(&fixture.owner_cookie, "any", json!([]))
         .await;
     assert_eq!(status, StatusCode::CONFLICT, "{problem}");
     assert_eq!(problem["code"], "set_by_environment");
-    // the saved list stays for the day the variable is removed
+    // the saved policy stays for the day the variable is removed
+    let saved = orbit_server::frame_origins::saved(&fixture.database)
+        .await
+        .unwrap();
     assert_eq!(
-        orbit_server::frame_origins::saved(&fixture.database)
-            .await
-            .unwrap(),
+        saved.mode,
+        orbit_server::frame_origins::CustomPageMode::Listed
+    );
+    assert_eq!(
+        saved.origins,
         ["https://grafana.example.com", "https://board.example.com"]
     );
 }

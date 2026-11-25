@@ -31,7 +31,7 @@ import {
   setAccountSuspension,
   setInstanceAdmin,
   setOidcProvision as setOidcProvisionRequest,
-  setFrameOrigins as setFrameOriginsRequest,
+  setCustomPagePolicy as setCustomPagePolicyRequest,
   setRegistration as setRegistrationRequest,
   startImageCompression as startImageCompressionRequest,
 } from '@orbit/api/generated/sdk.gen'
@@ -47,6 +47,7 @@ import type {
   BackupSummary,
   CompressionStatus,
   EnvironmentView,
+  CustomPagePolicyBody,
   InstanceSettingsView,
   JobLimitsBody,
   JobLimitView,
@@ -189,9 +190,9 @@ export async function setRegistration(client: OrbitClient, open: boolean): Promi
   return (await setRegistrationRequest({ client, body: { open }, throwOnError: true })).data
 }
 
-/** The custom page origins (Admin → General): https origins that workspaces may show as pages. */
-export async function setFrameOrigins(client: OrbitClient, origins: string[]): Promise<InstanceSettingsView> {
-  return (await setFrameOriginsRequest({ client, body: { origins }, throwOnError: true })).data
+/** Which sites workspaces may show as custom pages (Admin → General): any https site, listed origins, or none. */
+export async function setCustomPagePolicy(client: OrbitClient, body: CustomPagePolicyBody): Promise<InstanceSettingsView> {
+  return (await setCustomPagePolicyRequest({ client, body, throwOnError: true })).data
 }
 
 export async function setOidcProvision(client: OrbitClient, on: boolean): Promise<InstanceSettingsView> {

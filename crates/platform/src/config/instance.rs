@@ -208,8 +208,9 @@ pub struct InstanceConfig {
     pub oidc: Option<OidcConfig>,
     /// A first OpenID Connect sign-in creates an account, also when registration is closed.
     pub oidc_provision: Option<bool>,
-    /// The custom page origins (`ORBIT_FRAME_ORIGINS`, comma-separated), in place of the list saved in Admin.
-    pub frame_origins: Option<Vec<String>>,
+    /// The custom page policy (`ORBIT_FRAME_ORIGINS`: `any`, `off` or comma-separated origins), in place of the
+    /// one saved in Admin.
+    pub frame_policy: Option<crate::FramePolicy>,
 }
 
 impl InstanceConfig {
@@ -271,15 +272,14 @@ impl InstanceConfig {
             github: oauth_client(&values, GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET)?,
             oidc: oidc(&values)?,
             oidc_provision: values.flag(OIDC_PROVISION)?,
-            frame_origins: values
+            frame_policy: values
                 .text(FRAME_ORIGINS)
                 .map(|value| {
-                    crate::frame_origin_list(value.split(','), "").map_err(|entry| {
+                    crate::FramePolicy::from_env(&value, "").map_err(|entry| {
                         invalid(
                             FRAME_ORIGINS,
                             &format!(
-                                "{entry:?} must be an https origin without a path, query or wildcard, and at most {} origins",
-                                crate::MAX_FRAME_ORIGINS
+                                "{entry:?} must be `any`, `off`, or an https origin without a path, query or wildcard"
                             ),
                         )
                     })
@@ -362,8 +362,11 @@ impl InstanceConfig {
         if let Some(provision) = self.oidc_provision {
             push(OIDC_PROVISION, &provision.to_string());
         }
-        if let Some(origins) = &self.frame_origins {
-            push(FRAME_ORIGINS, &origins.join(","));
+        if let Some(policy) = &self.frame_policy {
+            match policy {
+                crate::FramePolicy::Listed(origins) => push(FRAME_ORIGINS, &origins.join(",")),
+                policy => push(FRAME_ORIGINS, policy.mode()),
+            }
         }
         lines
     }

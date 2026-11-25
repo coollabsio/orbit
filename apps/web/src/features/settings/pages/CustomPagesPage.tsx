@@ -2,7 +2,7 @@ import { toast } from 'sonner'
 import { useState, type FormEvent } from 'react'
 import { Link } from 'react-router'
 import { Global } from 'reicon-react'
-import { canFrame, isSlug, slugOf } from '@orbit/api/customPages'
+import { isSlug, slugOf } from '@orbit/api/customPages'
 import type { CustomPage } from '@orbit/api/generated/types.gen'
 import { confirmAction } from '@/components/common/confirmAction'
 import { InfoTip } from '@/components/common/InfoTip'
@@ -26,7 +26,7 @@ export function CustomPagesPage() {
   const pages = useCustomPages(workspace.id, canManage)
   const deletePage = useDeleteCustomPage(workspace.id)
   const [editing, setEditing] = useState<CustomPage | 'new'>()
-  const origins = pages.data?.frame_origins ?? []
+  const policy = pages.data?.policy
 
   if (!canManage) return <SettingsCard title="Custom pages"><p className="m-0 text-muted-foreground">Only workspace owners and administrators can manage custom pages.</p></SettingsCard>
 
@@ -34,12 +34,16 @@ export function CustomPagesPage() {
     <SettingsCard
       title="Custom pages"
       description="Show your own dashboards and internal tools in the sidebar. Each page opens in a sandboxed frame. The site must allow Orbit in its frame-ancestors."
-      actions={<Button type="button" disabled={origins.length === 0} onClick={() => setEditing('new')}>Add page</Button>}
+      actions={<Button type="button" disabled={!policy || policy.mode === 'off' || (policy.mode === 'listed' && policy.origins.length === 0)} onClick={() => setEditing('new')}>Add page</Button>}
     >
-      {pages.isPending ? <LoadingText>Loading…</LoadingText> : origins.length === 0 ? (
-        <p className="m-0 text-muted-foreground">No site is allowed yet. The administrator of this Orbit adds sites in Admin → General → Custom page origins, for example <code>https://grafana.example.com</code>.</p>
+      {pages.isPending ? <LoadingText>Loading…</LoadingText> : policy?.mode === 'off' ? (
+        <p className="m-0 text-muted-foreground">Custom pages are off on this Orbit. Its administrator turns them on in Admin → General.</p>
+      ) : policy?.mode === 'listed' && policy.origins.length === 0 ? (
+        <p className="m-0 text-muted-foreground">No site is allowed yet. The administrator of this Orbit adds sites in Admin → General → Custom pages, for example <code>https://grafana.example.com</code>.</p>
+      ) : policy?.mode === 'listed' ? (
+        <p className="m-0 text-muted-foreground">Allowed origins: {policy.origins.map((origin, index) => <span key={origin}>{index ? ', ' : null}<code>{origin}</code></span>)}</p>
       ) : (
-        <p className="m-0 text-muted-foreground">Allowed origins: {origins.map((origin, index) => <span key={origin}>{index ? ', ' : null}<code>{origin}</code></span>)}</p>
+        <p className="m-0 text-muted-foreground">Any https site can be a page.</p>
       )}
     </SettingsCard>
     <SettingsCard title="Pages" flush>
@@ -52,7 +56,7 @@ export function CustomPagesPage() {
             <span className="flex items-center gap-2 text-[13px] font-medium text-foreground">
               <Link to={`/pages/${page.slug}`} className="hover:underline">{page.name}</Link>
               {page.admins_only ? <Badge variant="secondary">Admins only</Badge> : null}
-              {canFrame(page.url, origins) ? null : <Badge variant="destructive">Origin not allowed</Badge>}
+              {pages.data?.blocked.includes(page.id) ? <Badge variant="destructive">Origin not allowed</Badge> : null}
             </span>
             <span className="truncate text-xs text-muted-foreground/70">/pages/{page.slug} · {page.url}</span>
           </div>
@@ -104,7 +108,7 @@ function CustomPageDialog({ workspaceId, page, onClose }: { workspaceId: string;
           <Field><FieldLabel htmlFor="custom-page-icon">Icon</FieldLabel><Input id="custom-page-icon" value={icon} maxLength={8} onChange={(event) => setIcon(event.target.value)} placeholder="🚀" /></Field>
         </div>
         <Field>
-          <FieldLabel htmlFor="custom-page-url">URL <RequiredMark /> <InfoTip text="An https URL on one of the allowed origins. A path or query after the page's address in Orbit is added to it." /></FieldLabel>
+          <FieldLabel htmlFor="custom-page-url">URL <RequiredMark /> <InfoTip text="An https URL that this Orbit allows. A path or query after the page's address in Orbit is added to it." /></FieldLabel>
           <Input id="custom-page-url" type="url" value={url} maxLength={2048} onChange={(event) => setUrl(event.target.value)} placeholder="https://grafana.example.com/d/deploys" />
         </Field>
         <Field>

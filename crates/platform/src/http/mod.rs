@@ -80,13 +80,6 @@ impl HttpPlatformLayer {
         self
     }
 
-    /// Lets the app frame the custom page origins: each response reads the current list.
-    #[must_use]
-    pub fn with_frame_origins(mut self, origins: crate::FrameOrigins) -> Self {
-        self.csp.frame_origins = origins;
-        self
-    }
-
     #[must_use]
     pub fn with_rate_limits(mut self, config: RateLimitConfig) -> Self {
         self.rate_limiter = self.rate_limiter.with_config(config);
@@ -532,7 +525,13 @@ fn finish_response(
     response
         .headers_mut()
         .insert(HeaderName::from_static("x-request-id"), request_id);
-    add_security_headers(response.headers_mut(), secure, csp);
+    let custom = response.extensions_mut().remove::<crate::CspFrameSources>();
+    add_security_headers(
+        response.headers_mut(),
+        secure,
+        csp,
+        custom.as_ref().map_or(&[], |sources| sources.0.as_slice()),
+    );
     response
 }
 

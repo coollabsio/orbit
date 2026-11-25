@@ -23,7 +23,7 @@ test('a page whose origin left the list can still be renamed: its unchanged URL 
       if ('url' in body) return Response.json({ code: 'custom_page_origin_not_allowed', status: 422, title: 'Origin not allowed', detail: '' }, { status: 422, headers: { 'content-type': 'application/problem+json' } })
       return Response.json({ ...page, ...body, version: 4 })
     }
-    return Response.json({ items: [page], can_manage: true, frame_origins: ['https://grafana.example.com'] })
+    return Response.json({ items: [page], can_manage: true, policy: { mode: 'listed', origins: ['https://grafana.example.com'] }, blocked: [] })
   }) as typeof fetch
   renderWithWorkspace(<CustomPagesPage />, { role: 'owner' })
   fireEvent.click(await screen.findByRole('button', { name: 'Edit' }))

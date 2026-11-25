@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { canFrame, customPageUrl, isSlug, slugOf } from './customPages'
+import { customPageUrl, isSlug, slugOf } from './customPages'
 
 test('a path and query after the page address go to the page URL, never to another origin', () => {
   const base = 'https://grafana.example.com/d/abc?orgId=1'
@@ -11,14 +11,6 @@ test('a path and query after the page address go to the page URL, never to anoth
   expect(customPageUrl(base, '../../..')?.startsWith('https://grafana.example.com/')).toBeTrue()
   expect(customPageUrl('http://grafana.example.com/')).toBeNull()
   expect(customPageUrl('not a url')).toBeNull()
-})
-
-test('a page is framed only while its origin is allowed', () => {
-  const origins = ['https://grafana.example.com']
-  expect(canFrame('https://grafana.example.com/d/1', origins)).toBeTrue()
-  expect(canFrame('https://grafana.example.com:8443/', origins)).toBeFalse()
-  expect(canFrame('https://other.example.com/', origins)).toBeFalse()
-  expect(canFrame('nope', origins)).toBeFalse()
 })
 
 test('page addresses come from names', () => {

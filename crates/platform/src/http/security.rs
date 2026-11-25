@@ -290,15 +290,23 @@ fn forwarded_transport(headers: &HeaderMap) -> Result<Option<RequestTransport>, 
 }
 
 /// The sources the app's own policy adds for this server: its script hash, and the origins it may frame (the mail
-/// view documents' origin when it differs from the app's, and the custom page origins, read on every response).
+/// view documents' origin when it differs from the app's).
 #[derive(Clone, Debug, Default)]
 pub(crate) struct CspSources {
     pub(crate) script_hash: Option<String>,
     pub(crate) frame_sources: Vec<String>,
-    pub(crate) frame_origins: crate::FrameOrigins,
 }
 
-pub(crate) fn add_security_headers(headers: &mut HeaderMap, secure: bool, csp: &CspSources) {
+/// Most bytes that custom page origins ([`crate::CspFrameSources`]) add to `frame-src`. A workspace admin chooses
+/// them, so the limit keeps the header small enough for every proxy; the origins after it are not framed.
+const MAX_CUSTOM_FRAME_SOURCE_BYTES: usize = 2048;
+
+pub(crate) fn add_security_headers(
+    headers: &mut HeaderMap,
+    secure: bool,
+    csp: &CspSources,
+    custom: &[String],
+) {
     let script_source = csp
         .script_hash
         .as_deref()
@@ -307,14 +315,21 @@ pub(crate) fn add_security_headers(headers: &mut HeaderMap, secure: bool, csp: &
     // The style-src hash is the empty string's: it allows only an empty `<style>`, which BlockNote's placeholder
     // plugin creates and then fills through the CSSOM (`insertRule`), which CSP does not restrict.
     // `frame-src` `'self'` (or the mail content origin) is the sandboxed mail view document; `blob:` is the PDF
-    // preview (the file URL itself cannot be framed). Vimeo joins YouTube. The other sources are custom pages.
-    let frame_origins = csp.frame_origins.get();
-    let frame_source: String = csp
+    // preview (the file URL itself cannot be framed). Vimeo joins YouTube. The custom page origins come last.
+    let mut frame_source: String = csp
         .frame_sources
         .iter()
-        .chain(frame_origins.iter())
         .map(|origin| format!(" {origin}"))
         .collect();
+    let mut custom_bytes = 0;
+    for origin in custom.iter().filter_map(|origin| crate::frame_origin(origin)) {
+        custom_bytes += origin.len() + 1;
+        if custom_bytes > MAX_CUSTOM_FRAME_SOURCE_BYTES {
+            break;
+        }
+        frame_source.push(' ');
+        frame_source.push_str(&origin);
+    }
     // `media-src` `https:` lets a document play an audio or video file the page links to.
     let policy = format!(
         "default-src 'self'; {script_source}style-src 'self' 'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='; style-src-attr 'unsafe-inline'; img-src 'self' data: blob: https:; frame-src 'self'{frame_source} blob: https://www.youtube-nocookie.com https://player.vimeo.com; media-src 'self' https:; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'self' https://github.com"
@@ -385,7 +400,7 @@ mod tests {
     #[test]
     fn responses_refuse_framing_and_isolate_the_opener() {
         let mut headers = HeaderMap::new();
-        add_security_headers(&mut headers, true, &CspSources::default());
+        add_security_headers(&mut headers, true, &CspSources::default(), &[]);
         assert_eq!(headers["x-frame-options"], "DENY");
         assert_eq!(headers["cross-origin-opener-policy"], "same-origin");
     }

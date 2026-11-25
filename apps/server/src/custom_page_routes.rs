@@ -1,5 +1,5 @@
-//! Custom pages in the sidebar (#94). The web app frames each page's URL in a sandboxed iframe; the URL must be on
-//! one of the custom page origins ([`crate::frame_origins`]), which the app's `frame-src` allows.
+//! Custom pages in the sidebar (#94). The web app frames each page's URL in a sandboxed iframe; the URL must be one
+//! that the custom page policy allows ([`crate::frame_origins`]).
 
 use std::sync::Arc;
 
@@ -8,11 +8,12 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, patch};
 use axum::{Json, Router};
-use orbit_platform::{FrameOrigins, Id, RequestId, TimestampMillis};
+use orbit_platform::{FramePolicy, Id, RequestId, TimestampMillis};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-use crate::auth_routes::CookieMode;
+use crate::auth_routes::{CookieMode, request_session};
+use crate::frame_origins::{CustomPagePolicy, framed_origin};
 use crate::repositories::custom_pages::{
     CustomPageChanges, CustomPageError, CustomPageRecord, CustomPageRepository, NewCustomPage,
     https_url, is_slug,
@@ -28,19 +29,50 @@ pub struct CustomPageState {
     identity: Arc<IdentityRepository>,
     pages: Arc<CustomPageRepository>,
     cookie_mode: CookieMode,
-    /// The current custom page origins ([`crate::frame_origins`]).
-    frame_origins: FrameOrigins,
+    /// Orbit's own origin, which no page may use.
+    public_origin: Arc<str>,
 }
 
 impl CustomPageState {
     #[must_use]
-    pub fn new(identity: Arc<IdentityRepository>, cookie_mode: CookieMode) -> Self {
+    pub fn new(
+        identity: Arc<IdentityRepository>,
+        public_origin: impl Into<Arc<str>>,
+        cookie_mode: CookieMode,
+    ) -> Self {
         Self {
             pages: Arc::new(CustomPageRepository::new(identity.database().clone())),
-            frame_origins: crate::frame_origins::of(identity.database()),
             identity,
             cookie_mode,
+            public_origin: public_origin.into(),
         }
+    }
+
+    async fn policy(&self) -> Result<FramePolicy, sqlx::Error> {
+        crate::frame_origins::policy(self.identity.database()).await
+    }
+
+    /// The origins of the pages the session's user sees and the policy frames, each once; none without a session.
+    pub(crate) async fn frame_sources(
+        &self,
+        headers: &HeaderMap,
+    ) -> Result<Vec<String>, CustomPageError> {
+        let Some(session) = request_session(&self.identity, self.cookie_mode, headers).await else {
+            return Ok(Vec::new());
+        };
+        let policy = self.policy().await?;
+        if policy == FramePolicy::Off {
+            return Ok(Vec::new());
+        }
+        let mut origins: Vec<String> = Vec::new();
+        for url in self.pages.visible_urls(session.user.id).await? {
+            if let Some(origin) = framed_origin(&policy, &url, &self.public_origin)
+                && !origins.contains(&origin)
+            {
+                origins.push(origin);
+            }
+        }
+        Ok(origins)
     }
 }
 
@@ -62,8 +94,12 @@ pub struct CustomPageList {
     pub items: Vec<CustomPageRecord>,
     /// Whether the caller may add, change and remove pages.
     pub can_manage: bool,
-    /// The origins a page URL may use (Admin, or `ORBIT_FRAME_ORIGINS`). A page whose origin left the list is not framed.
-    pub frame_origins: Vec<String>,
+    /// Which URLs a page may use (Admin, or `ORBIT_FRAME_ORIGINS`). `origins` is empty for callers who cannot manage
+    /// pages. In the `off` mode, `items` is empty.
+    pub policy: CustomPagePolicy,
+    /// The ids of the pages that the policy does not frame (their origin left the list): the app links to them.
+    #[schema(value_type = Vec<String>)]
+    pub blocked: Vec<Id>,
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -74,7 +110,7 @@ struct CreateCustomPageBody {
     /// 1 to 60 characters after trimming.
     name: String,
     icon: Option<String>,
-    /// An https URL on one of `frame_origins`.
+    /// An https URL that `policy` allows, not on Orbit's own origin.
     url: String,
     #[serde(default)]
     admins_only: bool,
@@ -105,15 +141,32 @@ async fn list_custom_pages(
     let instance = format!("/api/v1/workspaces/{workspace}/custom-pages");
     let request = request_id.as_ref();
     let (workspace_id, actor_id) = scope(&state, &headers, &workspace, &instance, request).await?;
-    let (items, can_manage) = state
+    let (mut items, can_manage) = state
         .pages
         .pages(workspace_id, actor_id)
         .await
-        .map_err(|error| page_problem(error, instance, request))?;
+        .map_err(|error| page_problem(error, instance.clone(), request))?;
+    let policy = state
+        .policy()
+        .await
+        .map_err(|error| page_problem(error.into(), instance, request))?;
+    if policy == FramePolicy::Off {
+        items.clear();
+    }
+    let blocked = items
+        .iter()
+        .filter(|page| framed_origin(&policy, &page.url, &state.public_origin).is_none())
+        .map(|page| page.id)
+        .collect();
+    let mut policy = crate::frame_origins::view(&policy);
+    if !can_manage {
+        policy.origins.clear();
+    }
     Ok(Json(CustomPageList {
         items,
         can_manage,
-        frame_origins: state.frame_origins.get().to_vec(),
+        policy,
+        blocked,
     }))
 }
 
@@ -135,7 +188,7 @@ async fn create_custom_page(
             .icon
             .map(|value| icon(value, &instance, request))
             .transpose()?,
-        url: page_url(&state, &body.url, &instance, request)?,
+        url: page_url(&state, &body.url, &instance, request).await?,
         admins_only: body.admins_only,
     };
     state
@@ -181,10 +234,10 @@ async fn update_custom_page(
                     .transpose()
             })
             .transpose()?,
-        url: body
-            .url
-            .map(|value| page_url(&state, &value, &instance, request))
-            .transpose()?,
+        url: match body.url {
+            Some(value) => Some(page_url(&state, &value, &instance, request).await?),
+            None => None,
+        },
         admins_only: body.admins_only,
     };
     state
@@ -277,21 +330,30 @@ fn icon(value: String, instance: &str, request: Request<'_>) -> Result<String, A
     bounded(value, 64, 256, "icon", instance, request)
 }
 
-/// An https URL without credentials ([`https_url`]) on one of the operator's frame origins.
-fn page_url(
+/// An https URL without credentials ([`https_url`]) that the custom page policy allows.
+async fn page_url(
     state: &CustomPageState,
     value: &str,
     instance: &str,
     request: Request<'_>,
 ) -> Result<String, ApiError> {
     let url = https_url(value).ok_or_else(|| validation("url", instance, request))?;
-    let origin = url.origin().ascii_serialization();
-    if !state.frame_origins.get().contains(&origin) {
+    let policy = state
+        .policy()
+        .await
+        .map_err(|error| page_problem(error.into(), instance.to_owned(), request))?;
+    if framed_origin(&policy, url.as_str(), &state.public_origin).is_none() {
         return Err(ApiError::new(
             StatusCode::UNPROCESSABLE_ENTITY,
             "custom_page_origin_not_allowed",
             "Origin not allowed",
-            "The URL's origin is not an allowed custom page origin. Ask the server administrator to add it in Admin.",
+            match policy {
+                FramePolicy::Off => "Custom pages are off on this server.",
+                FramePolicy::Listed(_) => {
+                    "The URL's origin is not an allowed custom page origin. Ask the server administrator to add it in Admin."
+                }
+                FramePolicy::Any => "A custom page cannot show Orbit itself.",
+            },
             instance.to_owned(),
             request,
         ));
@@ -326,6 +388,14 @@ fn page_problem(error: CustomPageError, instance: String, request: Request<'_>) 
             "custom_page_slug_taken",
             "Address taken",
             "Another custom page already uses this address.",
+            instance,
+            request,
+        ),
+        CustomPageError::Limit => ApiError::new(
+            StatusCode::CONFLICT,
+            "custom_page_limit",
+            "Too many custom pages",
+            "A workspace can have at most 50 custom pages.",
             instance,
             request,
         ),

@@ -58,10 +58,15 @@ pages**. A page opens at `/pages/<address>` in a sandboxed iframe, without `allo
 referrer. A path or query after `/pages/<address>/` is added to the page URL, so a link to one report works in chat;
 the origin never changes.
 
-1. As the root user, open **Admin → General → Custom page origins** and enter the `https://` origins of the sites,
-   one per line (at most 20). Orbit refuses `http://`, paths, wildcards and its own origin. Every server uses the
-   new list at once (other servers of a Postgres database within a few seconds); no restart is needed.
-   `ORBIT_FRAME_ORIGINS` sets the list instead, and Admin then shows it read-only.
+1. As the root user, choose which sites pages may use in **Admin → General → Custom pages**:
+   - **Any https site** (the default, for example on a hosted Orbit): each workspace admin adds the sites they need.
+   - **Only these sites**: pages must be on one of the `https://` origins that you list, one per line. Orbit refuses
+     `http://`, paths and wildcards. The list has no size limit.
+   - **Off**: no custom pages show, and none can be added. The pages stay for later.
+
+   No mode allows Orbit's own origin. Every server uses a change at once; no restart is needed.
+   `ORBIT_FRAME_ORIGINS` sets the choice instead (`any`, `off`, or a comma-separated list of origins), and Admin then
+   shows it read-only.
 2. Make each site allow Orbit as a parent: `Content-Security-Policy: frame-ancestors https://orbit.example.com`, and
    no `X-Frame-Options: DENY` or `SAMEORIGIN`. When the site refuses, the page stays empty; the page header has
    **Open in new tab**.
@@ -69,7 +74,12 @@ the origin never changes.
    site on a subdomain of Orbit's domain (the same site, for example `grafana.orbit.example.com`), or use a page that
    needs no sign-in.
 
-A page whose origin you later remove stays in the workspace's list, but Orbit does not frame it.
+A page whose origin you later remove from the list stays in the workspace's list, but Orbit does not frame it.
+
+The app's HTML document allows in its `frame-src` only the origins of the pages that the signed-in user sees, in all
+their workspaces (at most 2 KB of origins: the oldest membership first). Thus the policy never goes into a header, a
+user does not learn the sites of other workspaces, and a workspace cannot make the header too large for a proxy. A
+workspace has at most 50 pages. A tab that was open before a page was added asks for a reload to show it.
 Backups keep the pages with the rest of the database. A full workspace export has them in `workspace.json`, and an
 Orbit import adds them (**Custom pages** in its list) unless the workspace already uses the same address.
 The mobile app opens custom pages in the in-app browser.
@@ -103,7 +113,7 @@ The variables of one group are set together. For example, `ORBIT_SMTP_HOST` need
 | `ORBIT_OPEN_REGISTRATION` | saved value | `true` or `false`. `true` requires `ORBIT_SMTP_*` or a provider variable below. On Orbit Cloud, it requires `ORBIT_SMTP_*`. |
 | `ORBIT_GOOGLE_CLIENT_ID`, `ORBIT_GOOGLE_CLIENT_SECRET`, `ORBIT_GOOGLE_CLIENT_SECRET_FILE` | none | The Google OAuth client. Set the ID and the secret together. See [Sign in with Google and GitHub](#sign-in-with-google-and-github). |
 | `ORBIT_GITHUB_CLIENT_ID`, `ORBIT_GITHUB_CLIENT_SECRET`, `ORBIT_GITHUB_CLIENT_SECRET_FILE` | none | The GitHub OAuth client. Set the ID and the secret together. |
-| `ORBIT_FRAME_ORIGINS` | saved value (none) | Comma-separated `https://` origins for custom pages, for example `https://grafana.example.com,https://deploys.example.com`. Replaces **Admin → General → Custom page origins**. No path, wildcard or Orbit's own origin; at most 20. See [Custom pages](#custom-pages). |
+| `ORBIT_FRAME_ORIGINS` | saved value (`any`) | Which sites custom pages may use: `any` (any https site), `off`, or comma-separated `https://` origins, for example `https://grafana.example.com,https://deploys.example.com`. Replaces **Admin → General → Custom pages**. No path, wildcard or Orbit's own origin. See [Custom pages](#custom-pages). |
 | `ORBIT_OIDC_ISSUER` | saved provider | The issuer URL of an OpenID Connect provider, for example `https://auth.example.com/application/o/orbit/`. Requires `ORBIT_OIDC_CLIENT_ID` and `ORBIT_OIDC_CLIENT_SECRET`. See [Sign in with OpenID Connect](#sign-in-with-openid-connect). |
 | `ORBIT_OIDC_CLIENT_ID`, `ORBIT_OIDC_CLIENT_SECRET`, `ORBIT_OIDC_CLIENT_SECRET_FILE` | none | The client that the provider issued to Orbit. |
 | `ORBIT_OIDC_DISPLAY_NAME` | `SSO` | The name on the sign-in button ("Continue with SSO"), at most 50 characters. |

@@ -1,28 +1,65 @@
-//! The https origins whose pages a workspace may show as custom pages (#94). The app's `frame-src` allows them,
-//! and custom page URLs must be on one of them. The root user saves them in Admin, or `ORBIT_FRAME_ORIGINS` sets
-//! them; either can change while the server runs, so every response reads the current list.
-
-use std::sync::{Arc, PoisonError, RwLock};
+//! Which sites a workspace may show as custom pages (#94). The root user picks a [`FramePolicy`] in Admin, or
+//! `ORBIT_FRAME_ORIGINS` sets it. The app's `frame-src` allows only the origins of the pages that the signed-in user
+//! sees ([`CspFrameSources`]), so the policy itself never goes into a header.
 
 use axum::http::Uri;
 
-/// The current list, shared by the CSP layer and the routes that check page URLs.
-#[derive(Clone, Debug, Default)]
-pub struct FrameOrigins(Arc<RwLock<Arc<[String]>>>);
+/// Which https URLs a custom page may use. No mode allows Orbit's own origin.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub enum FramePolicy {
+    /// Any https site.
+    #[default]
+    Any,
+    /// Only these origins (as [`frame_origin`] writes them).
+    Listed(Vec<String>),
+    /// No custom pages.
+    Off,
+}
 
-impl FrameOrigins {
+impl FramePolicy {
+    /// `any`, `listed` or `off`.
     #[must_use]
-    pub fn get(&self) -> Arc<[String]> {
-        Arc::clone(&self.0.read().unwrap_or_else(PoisonError::into_inner))
+    pub fn mode(&self) -> &'static str {
+        match self {
+            Self::Any => "any",
+            Self::Listed(_) => "listed",
+            Self::Off => "off",
+        }
     }
 
-    pub fn set(&self, origins: Vec<String>) {
-        *self.0.write().unwrap_or_else(PoisonError::into_inner) = origins.into();
+    /// The listed origins; empty for the other modes.
+    #[must_use]
+    pub fn origins(&self) -> &[String] {
+        match self {
+            Self::Listed(origins) => origins,
+            Self::Any | Self::Off => &[],
+        }
+    }
+
+    /// Whether a page may frame `origin` (as [`frame_origin`] writes it).
+    #[must_use]
+    pub fn allows(&self, origin: &str) -> bool {
+        match self {
+            Self::Any => true,
+            Self::Listed(origins) => origins.iter().any(|listed| listed == origin),
+            Self::Off => false,
+        }
+    }
+
+    /// `ORBIT_FRAME_ORIGINS`: `any`, `off`, or a comma-separated list of origins. `Err` names the bad entry.
+    pub fn from_env(value: &str, public_origin: &str) -> Result<Self, String> {
+        match value.trim() {
+            "any" => Ok(Self::Any),
+            "off" => Ok(Self::Off),
+            list => frame_origin_list(list.split(','), public_origin).map(Self::Listed),
+        }
     }
 }
 
-/// Most origins in the list: each one is a `frame-src` source on every response.
-pub const MAX_FRAME_ORIGINS: usize = 20;
+/// A response extension: the custom page origins that this document's `frame-src` also allows. The server sets it on
+/// the app's HTML document for the signed-in user; the platform layer writes only entries that are origins.
+#[derive(Clone, Debug, Default)]
+pub struct CspFrameSources(pub Vec<String>);
 
 /// `value` as the browser writes the origin (`https://grafana.example.com`, with a port only when it is not 443),
 /// or `None` when it is not an https origin without a path, query, credentials or wildcard.
@@ -47,8 +84,7 @@ pub fn frame_origin(value: &str) -> Option<String> {
     })
 }
 
-/// Parses a list (comma- or line-separated); `Err` names the first entry that is not an origin, is `public_origin`
-/// or is one too many.
+/// Parses a list (comma- or line-separated); `Err` names the first entry that is not an origin or is `public_origin`.
 pub fn frame_origin_list<'a>(
     entries: impl IntoIterator<Item = &'a str>,
     public_origin: &str,
@@ -64,9 +100,6 @@ pub fn frame_origin_list<'a>(
             .filter(|origin| Some(origin) != own.as_ref())
             .ok_or_else(|| entry.to_owned())?;
         if !origins.contains(&origin) {
-            if origins.len() == MAX_FRAME_ORIGINS {
-                return Err(entry.to_owned());
-            }
             origins.push(origin);
         }
     }
@@ -119,20 +152,34 @@ mod tests {
             frame_origin_list(["https://orbit.example.com/"], "https://orbit.example.com"),
             Err("https://orbit.example.com/".to_owned())
         );
-        let many: Vec<String> = (0..=MAX_FRAME_ORIGINS)
+        let many: Vec<String> = (0..500)
             .map(|n| format!("https://{n}.example.com"))
             .collect();
-        assert!(
-            frame_origin_list(many.iter().map(String::as_str), "https://orbit.example.com")
-                .is_err()
+        assert_eq!(
+            frame_origin_list(many.iter().map(String::as_str), "https://orbit.example.com"),
+            Ok(many.clone())
         );
     }
 
     #[test]
-    fn every_clone_sees_a_new_list() {
-        let origins = FrameOrigins::default();
-        let reader = origins.clone();
-        origins.set(vec!["https://a.example.com".to_owned()]);
-        assert_eq!(&*reader.get(), ["https://a.example.com".to_owned()]);
+    fn the_environment_names_a_mode_or_a_list() {
+        let orbit = "https://orbit.example.com";
+        assert_eq!(FramePolicy::from_env(" any ", orbit), Ok(FramePolicy::Any));
+        assert_eq!(FramePolicy::from_env("off", orbit), Ok(FramePolicy::Off));
+        let listed =
+            FramePolicy::from_env("https://A.example.com/,https://b.example.com", orbit).unwrap();
+        assert_eq!(
+            listed.origins(),
+            ["https://a.example.com", "https://b.example.com"]
+        );
+        assert!(listed.allows("https://a.example.com") && !listed.allows("https://c.example.com"));
+        assert!(
+            FramePolicy::Any.allows("https://c.example.com")
+                && !FramePolicy::Off.allows("https://c.example.com")
+        );
+        assert_eq!(
+            FramePolicy::from_env("anything", orbit),
+            Err("anything".to_owned())
+        );
     }
 }

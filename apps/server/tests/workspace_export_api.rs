@@ -884,8 +884,8 @@ async fn custom_pages_go_into_a_full_export_and_an_orbit_import_brings_them_back
         .ok(
             &harness.owner,
             "PUT",
-            "/api/v1/admin/settings/frame-origins",
-            Some(json!({"origins": ["https://grafana.example.com"]})),
+            "/api/v1/admin/settings/custom-pages",
+            Some(json!({"mode": "listed", "origins": ["https://grafana.example.com"]})),
         )
         .await;
     for page in [

@@ -49,6 +49,8 @@ export default function HomeScreen() {
   const weekTasks = week.data?.items ?? []
   const weekCount = `${weekTasks.length}${week.data?.more ? '+' : ''}`
   const unreadItems = unread.data ?? []
+  // a page whose origin left the operator's list is not shown, as on the web
+  const shownPages = customPages.data?.items.filter((page) => !customPages.data.blocked.includes(page.id)) ?? []
   const recentDocs = [...(pages.data ?? [])].sort((a, b) => b.updated_at.localeCompare(a.updated_at)).slice(0, CARD_LIMIT)
   const statusOf = (task: api.TaskRecord) => statuses.data?.find((status) => status.id === task.status_id)
   const taskRow = (task: api.TaskRecord, index: number, list: readonly api.TaskRecord[]) => {
@@ -118,9 +120,9 @@ export default function HomeScreen() {
           </HomeCard>
 
           {/* the workspace's own dashboards and tools: the web frames them, the app opens them in the in-app browser */}
-          {customPages.data && customPages.data.items.length > 0 ? (
+          {shownPages.length > 0 ? (
             <HomeCard title="Pages">
-              {customPages.data.items.map((page, index, list) => (
+              {shownPages.map((page, index, list) => (
                 <CardRow key={page.id} onPress={() => void WebBrowser.openBrowserAsync(page.url).catch(() => undefined)} last={index === list.length - 1}>
                   {page.icon ? <Text className="text-[16px]">{page.icon}</Text> : <Icon name="monitor" size={16} color={alpha(colors.mutedForeground, 0.7)} />}
                   <Text numberOfLines={1} className="text-[13px] flex-1">

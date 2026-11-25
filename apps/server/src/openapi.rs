@@ -121,7 +121,7 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::workspace_routes::get_instance_settings,
         crate::workspace_routes::set_registration,
         crate::workspace_routes::set_oidc_provision,
-        crate::workspace_routes::set_frame_origins,
+        crate::workspace_routes::set_custom_page_policy,
         crate::workspace_routes::save_smtp,
         crate::workspace_routes::remove_smtp,
         crate::workspace_routes::send_test_email,
@@ -1786,7 +1786,7 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             add_code(&mut responses, "403", "installation_admin_required");
             add_code(&mut responses, "409", "email_not_configured");
         }
-        "set_frame_origins" => {
+        "set_custom_page_policy" => {
             add_code(&mut responses, "403", "installation_admin_required");
             add_code(&mut responses, "409", "set_by_environment");
             add_code(&mut responses, "422", "invalid_frame_origin");
@@ -1989,6 +1989,9 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             }
             if matches!(operation_id, "create_custom_page" | "update_custom_page") {
                 add_code(&mut responses, "409", "custom_page_slug_taken");
+                if operation_id == "create_custom_page" {
+                    add_code(&mut responses, "409", "custom_page_limit");
+                }
                 add_code(&mut responses, "422", "validation_failed");
                 add_code(&mut responses, "422", "custom_page_origin_not_allowed");
             }
@@ -2077,7 +2080,7 @@ fn invalid_request_operation(operation_id: &str) -> bool {
             | "registration_complete"
             | "set_registration"
             | "set_oidc_provision"
-            | "set_frame_origins"
+            | "set_custom_page_policy"
             | "save_smtp"
             | "save_s3"
             | "save_sign_in_provider"
