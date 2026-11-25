@@ -288,7 +288,7 @@ Administration tools (also mail domains, routes and mailbox members) are not exp
 | `upload_task_attachment` | Required `task_id`, `filename`, `content_base64`; optional `comment_id` | The file. At most 1 MiB. |
 | `delete_task_attachment` | Required `task_id`, `attachment_id`; optional `comment_id` | `{"deleted": true}`. |
 | `download_task_attachment` | Required `task_id`, `attachment_id`; optional `comment_id` | `{content_type, size_bytes, content_base64, download_path, deleted}`. |
-| `upload_doc_file` | Required `page_id`, `filename`, `content_base64` | The file, with the `url` to put in the doc's Markdown. At most 1 MiB. |
+| `upload_doc_file` | Required `page_id`, `filename`, `content_base64` | The file, with the `url` to put in the doc's Markdown. At most 1 MiB. Refused on a locked doc. |
 | `download_doc_file` | Required `page_id`, `file_id` | As `download_task_attachment`. |
 
 These tools act as the connection's user: a service-account token gets an error from the

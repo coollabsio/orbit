@@ -499,7 +499,7 @@ export const publicAddFavoriteDoc = <ThrowOnError extends boolean = false>(optio
 /**
  * Upload a file to a doc
  *
- * `multipart/form-data` with one `file` field. Put the answer's `url` in the doc's Markdown (`![name](url)` for an image) with `PATCH /docs/{page_id}`, or use it as the cover. The upload limit and the storage quota apply (`413`). Not for service-account tokens (`404`).
+ * `multipart/form-data` with one `file` field. Put the answer's `url` in the doc's Markdown (`![name](url)` for an image) with `PATCH /docs/{page_id}`, or use it as the cover. The upload limit and the storage quota apply (`413`). Not for service-account tokens (`404`). A locked doc answers `423`.
  */
 export const publicUploadDocFile = <ThrowOnError extends boolean = false>(options: Options<PublicUploadDocFileData, ThrowOnError>): RequestResult<PublicUploadDocFileResponses, PublicUploadDocFileErrors, ThrowOnError> => (options.client ?? client).post<PublicUploadDocFileResponses, PublicUploadDocFileErrors, ThrowOnError>({
     ...formDataBodySerializer,

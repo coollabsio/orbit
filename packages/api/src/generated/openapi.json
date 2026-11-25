@@ -6952,7 +6952,7 @@
           "public-api"
         ],
         "summary": "Upload a file to a doc",
-        "description": "`multipart/form-data` with one `file` field. Put the answer's `url` in the doc's Markdown (`![name](url)` for an image) with `PATCH /docs/{page_id}`, or use it as the cover. The upload limit and the storage quota apply (`413`). Not for service-account tokens (`404`).",
+        "description": "`multipart/form-data` with one `file` field. Put the answer's `url` in the doc's Markdown (`![name](url)` for an image) with `PATCH /docs/{page_id}`, or use it as the cover. The upload limit and the storage quota apply (`413`). Not for service-account tokens (`404`). A locked doc answers `423`.",
         "operationId": "public_upload_doc_file",
         "parameters": [
           {

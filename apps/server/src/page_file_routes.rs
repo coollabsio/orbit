@@ -261,6 +261,14 @@ fn problem(
 ) -> ApiError {
     match error {
         PageFileError::NotFound => not_found(instance, request_id),
+        PageFileError::Locked => ApiError::new(
+            StatusCode::LOCKED,
+            "page_locked",
+            "Page locked",
+            "The page is locked. Unlock it to add files.",
+            instance,
+            request_id,
+        ),
         PageFileError::Upload(error) => upload_problem(error, instance, request_id),
         PageFileError::Database(error) => internal(instance, request_id).cause(error),
     }

@@ -18,6 +18,7 @@ use crate::repositories::attachments::{
     AttachmentCaller, AttachmentRepository, AttachmentRepositoryError, CreatedAttachment,
 };
 use crate::repositories::page_files::{PageFile, PageFileError, PageFileRepository};
+use crate::repositories::pages::PageError;
 use crate::repositories::tasks::Page;
 
 /// The largest file that a download tool returns inline (as base64); larger files give only
@@ -455,6 +456,7 @@ fn attachment_error(error: AttachmentRepositoryError) -> TokenApiError {
 fn page_file_error(error: PageFileError) -> TokenApiError {
     match error {
         PageFileError::NotFound => TokenApiError::NotAvailable,
+        PageFileError::Locked => TokenApiError::Page(PageError::Locked),
         PageFileError::Upload(error) => upload_error(error),
         PageFileError::Database(error) => TokenApiError::Internal(error.to_string()),
     }
