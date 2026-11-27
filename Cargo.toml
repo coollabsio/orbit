@@ -4,7 +4,7 @@ resolver = "3"
 
 [workspace.package]
 edition = "2024"
-version = "0.4.1"
+version = "0.5.0"
 license = "Apache-2.0"
 
 # Dev and test builds: line numbers only for our crates, no debug info for dependencies.
