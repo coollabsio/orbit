@@ -13,7 +13,7 @@ import { ThemedBlockNoteView } from '@/features/docs/editor/ThemedBlockNoteView'
 import { TabCompletesSuggestion } from '@/features/docs/editor/TabCompletesSuggestion'
 import { mentionTriggerAllowed } from '@/features/docs/editor/mentionItems'
 import { signatureStart } from './composeLib'
-import { blockText, htmlToMailBlocks, isBlankDocument, mailEditorSchema, mailText, type MailBlock, type MailEditorInstance } from './mailEditorSchema'
+import { blockText, htmlToMailBlocks, isBlankDocument, mailBlocksToHtml, mailEditorSchema, mailText, type MailBlock, type MailEditorInstance } from './mailEditorSchema'
 
 export interface MailEditorHandle {
   /** The body as HTML; `''` while it is blank. */
@@ -76,7 +76,7 @@ function initialBlocks(html: string, signatureHtml: string | null): MailBlock[] 
 }
 
 /** The body as HTML; `''` while it is blank. */
-const exportHtml = (editor: MailEditorInstance) => (isBlankDocument(editor.document) ? '' : editor.blocksToHTMLLossy(editor.document))
+const exportHtml = (editor: MailEditorInstance) => (isBlankDocument(editor.document) ? '' : mailBlocksToHtml(editor, editor.document))
 
 const snippetPreview = new Map<string, string>()
 /** The first line of a snippet, for the menu (cached by id and change time). */

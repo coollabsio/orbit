@@ -19,11 +19,21 @@ export type MailBlock = MailEditorInstance['document'][number]
 
 let parser: MailEditorInstance | null = null
 
+// BlockNote writes an empty block as `<p>\u{FFFC}</p>` so that it can parse it back. Mail apps show that character as a
+// box, so the mail HTML has `<p><br></p>` (a blank line) in its place, and the parser gets the placeholder back.
+const EMPTY_BLOCK_PLACEHOLDER = '\uFFFC'
+const EMPTY_PARAGRAPH = /<p><br\s*\/?><\/p>/g
+
+/** The mail HTML of blocks: empty lines are `<p><br></p>`. */
+export function mailBlocksToHtml(editor: MailEditorInstance, blocks: MailBlock[]): string {
+  return editor.blocksToHTMLLossy(blocks).replaceAll(EMPTY_BLOCK_PLACEHOLDER, '<br>')
+}
+
 /** Blocks of stored HTML (a draft body, a signature, a snippet), without an editor on screen. */
 export function htmlToMailBlocks(html: string): MailBlock[] {
   if (html.trim() === '') return []
   parser ??= BlockNoteEditor.create({ schema: mailEditorSchema, _tiptapOptions: { injectCSS: false } }) as unknown as MailEditorInstance
-  return parser.tryParseHTMLToBlocks(html)
+  return parser.tryParseHTMLToBlocks(html.replace(EMPTY_PARAGRAPH, `<p>${EMPTY_BLOCK_PLACEHOLDER}</p>`))
 }
 
 type InlineItem = { type: string; text?: string; content?: unknown }
