@@ -13,7 +13,7 @@ import { useSetAdminMail } from '@/features/mail/api/mutations'
 import { useAdminMail, useMailProviders } from '@/features/mail/api/queries'
 import { SettingsRow } from '@/features/settings/components/SettingsParts'
 import { dateTime, mailProblem } from '@/features/settings/pages/mail/mailSettingsLib'
-import { MailCertificateCard } from '@/features/admin/components/MailCertificateCard'
+import { GetCertificateButton, MailCertificateCard } from '@/features/admin/components/MailCertificateCard'
 import { MailTestCard } from '@/features/admin/components/MailTestCard'
 import { MailConnections } from '@/features/settings/pages/mail/MailProvidersPage'
 
@@ -25,6 +25,8 @@ interface HealthItem {
   detail: ReactNode
   /** What to do about it; shown when the item is not OK. */
   fix?: ReactNode
+  /** A button that fixes it from the dialog; shown when the item is not OK. */
+  action?: ReactNode
 }
 
 const STATE_ICONS: Record<HealthState, typeof TickCircle> = { ok: TickCircle, warning: Warning, error: CloseCircle, info: InfoCircle }
@@ -177,12 +179,12 @@ function healthItems(admin: MailAdmin, hasProviders: boolean): HealthItem[] {
   const cert = listener.cert
   if (!cert) {
     items.push(admin.mode === 'direct'
-      ? { label: 'Certificate', state: 'error', detail: 'No certificate is loaded.', fix: 'Click Get certificate in the Certificate card, or set ORBIT_MAIL_TLS_CERT and ORBIT_MAIL_TLS_KEY to PEM files that UID 65532 can read.' }
-      : { label: 'Certificate', state: 'info', detail: 'None: Orbit offers no STARTTLS. That is fine when the relay is on a private network.', fix: 'Optional in relay mode: get one in the Certificate card, or set ORBIT_MAIL_TLS_CERT and ORBIT_MAIL_TLS_KEY.' })
+      ? { label: 'Certificate', state: 'error', detail: 'No certificate is loaded.', fix: 'Get one here or in the Certificate card, or set ORBIT_MAIL_TLS_CERT and ORBIT_MAIL_TLS_KEY to PEM files that UID 65532 can read.', action: <GetCertificateButton /> }
+      : { label: 'Certificate', state: 'info', detail: 'None: Orbit offers no STARTTLS. That is fine when the relay is on a private network.', fix: 'Optional in relay mode: get one here or in the Certificate card, or set ORBIT_MAIL_TLS_CERT and ORBIT_MAIL_TLS_KEY.', action: <GetCertificateButton /> })
   } else if (!cert.covers_hostname) {
-    items.push({ label: 'Certificate', state: 'error', detail: `Names ${cert.names.join(', ')}, not ${admin.hostname}.`, fix: `Get a certificate for ${admin.hostname} in the Certificate card, or with certbot for the files. Orbit loads a new certificate within a minute.` })
+    items.push({ label: 'Certificate', state: 'error', detail: `Names ${cert.names.join(', ')}, not ${admin.hostname}.`, fix: `Get a certificate for ${admin.hostname} here or in the Certificate card, or with certbot for the files. Orbit loads a new certificate within a minute.`, action: <GetCertificateButton /> })
   } else if (cert.expires_soon) {
-    items.push({ label: 'Certificate', state: 'warning', detail: `Expires ${dateTime(cert.expires_at)}.`, fix: 'Renew it in the Certificate card, or renew the files. Orbit loads the new certificate within a minute, without a restart.' })
+    items.push({ label: 'Certificate', state: 'warning', detail: `Expires ${dateTime(cert.expires_at)}.`, fix: 'Renew it here or in the Certificate card, or renew the files. Orbit loads the new certificate within a minute, without a restart.', action: <GetCertificateButton /> })
   } else {
     items.push({ label: 'Certificate', state: 'ok', detail: `Covers ${admin.hostname}, expires ${dateTime(cert.expires_at)}.` })
   }
@@ -234,6 +236,7 @@ function HealthButton({ admin, hasProviders, refreshing, onRefresh }: { admin: M
                   </span>
                   <span className="text-xs break-words text-muted-foreground">{item.detail}</span>
                   {item.fix && item.state !== 'ok' ? <span className="text-xs text-foreground">{item.fix}</span> : null}
+                  {item.action && item.state !== 'ok' ? <div className="mt-1.5">{item.action}</div> : null}
                 </div>
               </li>
             )

@@ -45,6 +45,31 @@ export function MailCertificateCard() {
   return <CertificateBody certificate={certificate.data} description={description} />
 }
 
+const requestCallbacks = {
+  onSuccess: (next: MailCertificate) => {
+    if (next.last_error) toast.error('No certificate. See the error in the Certificate card.')
+    else if (next.pending?.method === 'dns') toast('Add the TXT record, then verify it')
+    else toast('Certificate loaded')
+  },
+  onError: (error: unknown) => toast.error(mailProblem(error, 'The certificate could not be requested.')),
+}
+
+/**
+ * The Health dialog's shortcut to the card's HTTP request. Hidden when the files from the environment win, when
+ * there is no hostname, or while a DNS request waits for its TXT record (the card shows that step).
+ */
+export function GetCertificateButton() {
+  const certificate = useMailCertificate()
+  const start = useStartMailCertificate()
+  const data = certificate.data
+  if (!data || data.source === 'environment' || !data.hostname || data.pending?.method === 'dns') return null
+  return (
+    <Button type="button" size="sm" variant="outline" disabled={start.isPending} onClick={() => start.mutate('http', requestCallbacks)}>
+      {start.isPending ? <><Spinner /> Getting a certificate…</> : data.active ? 'Renew now' : 'Get certificate'}
+    </Button>
+  )
+}
+
 function CertificateBody({ certificate, description }: { certificate: MailCertificate; description: string }) {
   const start = useStartMailCertificate()
   const verify = useVerifyMailCertificate()
@@ -52,14 +77,7 @@ function CertificateBody({ certificate, description }: { certificate: MailCertif
   const busy = start.isPending || verify.isPending || cancel.isPending
   const { active, pending, hostname } = certificate
   const fromEnvironment = certificate.source === 'environment'
-  const request = (method: MailCertificateMethod) => start.mutate(method, {
-    onSuccess: (next) => {
-      if (next.last_error) toast.error('No certificate. See the error in the card.')
-      else if (next.pending?.method === 'dns') toast('Add the TXT record, then verify it')
-      else toast('Certificate loaded')
-    },
-    onError: (error) => toast.error(mailProblem(error, 'The certificate could not be requested.')),
-  })
+  const request = (method: MailCertificateMethod) => start.mutate(method, requestCallbacks)
   const actions = fromEnvironment || !hostname || pending?.method === 'dns' ? null : (
     <>
       <Button type="button" variant="outline" disabled={busy} onClick={() => request('dns')}>Use a DNS record</Button>

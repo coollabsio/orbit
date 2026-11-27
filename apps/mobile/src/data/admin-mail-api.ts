@@ -114,6 +114,8 @@ export interface HealthItem {
   detail: string
   /** What to do about it; shown when the item is not OK. */
   fix?: string
+  /** The dialog shows the Get certificate button under the fix. */
+  getsCertificate?: boolean
 }
 
 export const STATE_WORDS: Record<HealthState, string> = { ok: 'OK', warning: 'Warning', error: 'Problem', info: 'Note' }
@@ -163,12 +165,12 @@ export function healthItems(admin: MailAdmin, hasProviders: boolean): HealthItem
   const cert = listener.cert
   if (!cert) {
     items.push(admin.mode === 'direct'
-      ? { label: 'Certificate', state: 'error', detail: 'No certificate is loaded.', fix: 'Click Get certificate in the Certificate card, or set ORBIT_MAIL_TLS_CERT and ORBIT_MAIL_TLS_KEY to PEM files that UID 65532 can read.' }
-      : { label: 'Certificate', state: 'info', detail: 'None: Orbit offers no STARTTLS. That is fine when the relay is on a private network.', fix: 'Optional in relay mode: get one in the Certificate card, or set ORBIT_MAIL_TLS_CERT and ORBIT_MAIL_TLS_KEY.' })
+      ? { label: 'Certificate', state: 'error', detail: 'No certificate is loaded.', fix: 'Get one here or in the Certificate card, or set ORBIT_MAIL_TLS_CERT and ORBIT_MAIL_TLS_KEY to PEM files that UID 65532 can read.', getsCertificate: true }
+      : { label: 'Certificate', state: 'info', detail: 'None: Orbit offers no STARTTLS. That is fine when the relay is on a private network.', fix: 'Optional in relay mode: get one here or in the Certificate card, or set ORBIT_MAIL_TLS_CERT and ORBIT_MAIL_TLS_KEY.', getsCertificate: true })
   } else if (!cert.covers_hostname) {
-    items.push({ label: 'Certificate', state: 'error', detail: `Names ${cert.names.join(', ')}, not ${admin.hostname}.`, fix: `Get a certificate for ${admin.hostname} in the Certificate card, or with certbot for the files. Orbit loads a new certificate within a minute.` })
+    items.push({ label: 'Certificate', state: 'error', detail: `Names ${cert.names.join(', ')}, not ${admin.hostname}.`, fix: `Get a certificate for ${admin.hostname} here or in the Certificate card, or with certbot for the files. Orbit loads a new certificate within a minute.`, getsCertificate: true })
   } else if (cert.expires_soon) {
-    items.push({ label: 'Certificate', state: 'warning', detail: `Expires ${dateTime(cert.expires_at)}.`, fix: 'Renew it in the Certificate card, or renew the files. Orbit loads the new certificate within a minute, without a restart.' })
+    items.push({ label: 'Certificate', state: 'warning', detail: `Expires ${dateTime(cert.expires_at)}.`, fix: 'Renew it here or in the Certificate card, or renew the files. Orbit loads the new certificate within a minute, without a restart.', getsCertificate: true })
   } else {
     items.push({ label: 'Certificate', state: 'ok', detail: `Covers ${admin.hostname}, expires ${dateTime(cert.expires_at)}.` })
   }

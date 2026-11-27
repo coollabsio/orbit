@@ -165,12 +165,45 @@ function HealthButton({ admin, hasProviders, refreshing, onRefresh }: { admin: M
                 <Text className="font-noto-medium text-[13px]">{item.label}</Text>
                 <Text className="text-[12px] leading-[17px] text-muted-foreground">{item.detail}</Text>
                 {item.fix && item.state !== 'ok' ? <Text className="text-[12px] leading-[17px] text-foreground">{item.fix}</Text> : null}
+                {item.getsCertificate && item.state !== 'ok' ? <GetCertificateButton /> : null}
               </View>
             </View>
           ))}
         </View>
       </Dialog>
     </>
+  )
+}
+
+/**
+ * The Health dialog's shortcut to the card's HTTP request. Hidden when the files from the environment win, when there
+ * is no hostname, or while a DNS request waits for its TXT record (the card shows that step).
+ */
+function GetCertificateButton() {
+  const certificate = useMailCertificate()
+  const { start } = useCertificateWrites()
+  const [notice, setNotice] = useState<Notice>(null)
+  const data = certificate.data
+  if (!data || data.source === 'environment' || !data.hostname || data.pending?.method === 'dns') return null
+  const request = () => {
+    setNotice(null)
+    start.mutate('http', {
+      onSuccess: (next) => setNotice(next.last_error ? { text: 'No certificate. See the error in the Certificate card.', error: true } : { text: 'Certificate loaded' }),
+      onError: (error) => setNotice({ text: mailProblem(error, 'The certificate could not be requested.'), error: true }),
+    })
+  }
+  return (
+    <View className="mt-1.5 items-start gap-1.5">
+      <Button
+        label={start.isPending ? 'Getting a certificate…' : data.active ? 'Renew now' : 'Get certificate'}
+        size="sm"
+        variant="outline"
+        loading={start.isPending}
+        disabled={start.isPending}
+        onPress={request}
+      />
+      {notice ? <Note error={notice.error}>{notice.text}</Note> : null}
+    </View>
   )
 }
 
