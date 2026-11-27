@@ -639,6 +639,12 @@ impl App {
                     backups.clone(),
                 )
                 .with_mailer(mailer)
+                // Orbit Cloud runs the newest build: only a self-hosted server asks for updates
+                .with_update_check(
+                    (!config.no_update_check && billing.is_none()).then(|| {
+                        crate::update_check::UpdateCheck::new(crate::update_check::VERSION_URL)
+                    }),
+                )
                 .with_rate_limits(config.rate_limits)
                 .with_object_storage(object_storage.clone(), blob_store.clone())
                 .with_uploads(attachment_state.uploads.clone())

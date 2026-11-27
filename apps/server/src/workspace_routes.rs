@@ -67,6 +67,8 @@ pub struct WorkspaceState {
     image_compressor: Option<ImageCompressor>,
     /// Deletes stored files for workspace admins; `None` refuses to.
     uploads: Option<UploadService>,
+    /// Asks the CDN for the latest Orbit release; `None` when the check is off.
+    update_check: Option<Arc<crate::update_check::UpdateCheck>>,
 }
 
 /// Open registration is throttled like sign-in, on every server of the database.
@@ -100,6 +102,7 @@ impl WorkspaceState {
             object_storage: None,
             image_compressor: None,
             uploads: None,
+            update_check: None,
         }
     }
 
@@ -127,6 +130,7 @@ impl WorkspaceState {
             object_storage: None,
             image_compressor: None,
             uploads: None,
+            update_check: None,
         }
     }
 
@@ -151,6 +155,12 @@ impl WorkspaceState {
     #[must_use]
     pub fn with_uploads(mut self, uploads: UploadService) -> Self {
         self.uploads = Some(uploads);
+        self
+    }
+
+    #[must_use]
+    pub fn with_update_check(mut self, check: Option<crate::update_check::UpdateCheck>) -> Self {
+        self.update_check = check.map(Arc::new);
         self
     }
 
@@ -301,6 +311,7 @@ pub fn workspace_router(state: WorkspaceState) -> Router {
         )
         .route("/api/v1/admin/users", get(list_admin_users))
         .route("/api/v1/admin/users/summary", get(get_admin_user_summary))
+        .route("/api/v1/admin/update", get(get_update_status))
         .route(
             "/api/v1/admin/users/{user_id}/suspension",
             post(set_account_suspension),
@@ -1855,6 +1866,41 @@ async fn get_admin_user_summary(
         users,
         active,
         trials,
+    }))
+}
+
+/// Whether a newer Orbit release is out, for installation admins.
+#[derive(Serialize, ToSchema)]
+struct UpdateStatus {
+    /// The version this server runs.
+    current_version: &'static str,
+    /// The newer release; `null` when the server runs the latest one, the check is off
+    /// (`ORBIT_UPDATE_CHECK=false`, Orbit Cloud) or the CDN did not answer.
+    latest_version: Option<String>,
+    /// The GitHub release page of `latest_version`.
+    release_url: Option<String>,
+}
+
+/// Whether a newer Orbit release is out. The server asks the coolLabs CDN at most once a day (once an hour after a failure).
+#[utoipa::path(get, path = "/api/v1/admin/update", responses((status = 200, body = UpdateStatus)))]
+async fn get_update_status(
+    State(state): State<WorkspaceState>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<Json<UpdateStatus>, ApiError> {
+    let instance = "/api/v1/admin/update";
+    let session = authenticate(&state, &headers, instance, request_id.as_ref()).await?;
+    require_installation_admin(&state, session.user.id, instance, request_id.as_ref()).await?;
+    let latest_version = match &state.update_check {
+        Some(check) => check.newer_version().await,
+        None => None,
+    };
+    Ok(Json(UpdateStatus {
+        current_version: env!("CARGO_PKG_VERSION"),
+        release_url: latest_version
+            .as_ref()
+            .map(|version| format!("https://github.com/coollabsio/orbit/releases/tag/v{version}")),
+        latest_version,
     }))
 }
 

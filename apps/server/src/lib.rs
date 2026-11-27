@@ -66,6 +66,7 @@ pub mod frame_origins;
 pub mod token_api;
 pub mod trello;
 pub mod trello_import_routes;
+pub mod update_check;
 pub mod view_routes;
 pub mod webhooks;
 pub mod workspace_export;

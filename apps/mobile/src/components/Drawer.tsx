@@ -19,6 +19,8 @@ import { Button, CountBadge, Icon, type IconName, useReduceMotion } from '../ui'
 import { NewProjectSheet } from './NewProjectSheet'
 import { ActionSheet } from './settings/Dialog'
 import { useProjectOrder } from '../hooks/tasks'
+import { useUpdateStatus } from '../hooks/admin'
+import * as WebBrowser from 'expo-web-browser'
 import { moveProject, orderProjects } from '@orbit/api/projectOrder'
 import { DRAWER_AREA_TITLES, type DrawerArea, drawerAreaOf, drawerSections, TASK_PRESETS, tasksHref } from './drawerAreas'
 import { ACCOUNT_NAV, ADMIN_NAV, allowedNav, WORKSPACE_NAV } from './settings/Shell'
@@ -276,6 +278,7 @@ function DrawerPanel({ mounted, width, onClose }: { mounted: boolean; width: num
                 <>
                   <View className="flex-1" />
                   <NavRow link={{ label: 'Admin', icon: 'admin', href: '/settings/admin', active: onAdmin }} tone="neutral" onPress={() => go('/settings/admin')} />
+                  <UpdateRow />
                 </>
               ) : null}
             </>
@@ -294,6 +297,7 @@ function DrawerPanel({ mounted, width, onClose }: { mounted: boolean; width: num
                   {/* the installation, not the workspace: it sits apart at the bottom */}
                   <View className="flex-1" />
                   <NavRow link={{ label: 'Admin', icon: 'admin', href: '/settings/admin', active: onAdmin }} tone="neutral" onPress={() => setOpenedArea('admin')} />
+                  <UpdateRow />
                 </>
               ) : null}
             </>
@@ -470,10 +474,21 @@ function BackRow({ label, onPress }: { label: string; onPress: () => void }) {
  * The web `SidebarNavItem`: a 36px row with a 30px icon tile; the current row's tile turns pink. The Flat style has no
  * tile: an 18px icon on a 32px row, and the current row is filled.
  */
-function NavRow({ link, onPress, onLongPress, tone = 'brand' }: { link: NavLink; onPress?: () => void; onLongPress?: () => void; tone?: TileTone }) {
+/** Installation admins only: a newer Orbit release is out. Opens its GitHub release page. */
+function UpdateRow() {
+  const update = useUpdateStatus(true).data
+  if (!update?.latest_version || !update.release_url) return null
+  const url = update.release_url
+  return <NavRow accent link={{ label: `Update to v${update.latest_version}`, icon: 'download', href: url as Href, active: false }} onPress={() => void WebBrowser.openBrowserAsync(url).catch(() => undefined)} />
+}
+
+/** `accent`: a pink row with the pink tile, for something the user must notice (an Orbit update). */
+function NavRow({ link, onPress, onLongPress, tone = 'brand', accent = false }: { link: NavLink; onPress?: () => void; onLongPress?: () => void; tone?: TileTone; accent?: boolean }) {
   const { colors } = useTheme()
   const flat = useButtonStyle() === 'flat'
-  const shape = flat ? `h-8 rounded-md pl-2.5 ${link.active ? 'bg-black/5 dark:bg-white/6' : 'active:bg-black/4 dark:active:bg-white/5'}` : 'h-9 pl-1'
+  const shape = accent
+    ? `${flat ? 'h-8' : 'h-9'} mt-1 rounded-md border border-primary/30 bg-primary/10 pl-1 active:bg-primary/16`
+    : flat ? `h-8 rounded-md pl-2.5 ${link.active ? 'bg-black/5 dark:bg-white/6' : 'active:bg-black/4 dark:active:bg-white/5'}` : 'h-9 pl-1'
   return (
     <Pressable
       accessibilityRole="button"
@@ -496,16 +511,16 @@ function NavRow({ link, onPress, onLongPress, tone = 'brand' }: { link: NavLink;
             <View className={`items-center justify-center ${flat ? 'w-[18px]' : 'w-[30px]'}`}>
               <ProjectMark project={link.project} className="size-2.5 rounded-[3px]" />
             </View>
-          ) : flat ? (
+          ) : flat && !accent ? (
             <Icon name={link.icon} size={18} color={alpha(link.active || pressed ? colors.sidebarNavActive : colors.sidebarNav, 0.9)} />
           ) : (
-            <Tile icon={link.icon} active={link.active} pressed={pressed} tone={tone} />
+            <Tile icon={link.icon} active={link.active || accent} pressed={pressed} tone={tone} />
           )}
-          <RNText numberOfLines={1} className={`flex-1 font-noto-medium text-[13px] ${link.active || pressed ? 'text-sidebar-nav-active' : 'text-sidebar-nav'}`}>
+          <RNText numberOfLines={1} className={`flex-1 font-noto-medium text-[13px] ${accent ? 'text-primary' : link.active || pressed ? 'text-sidebar-nav-active' : 'text-sidebar-nav'}`}>
             {link.label}
           </RNText>
           {link.locked ? <Icon name="lock" size={12} color={alpha(colors.sidebarNav, 0.7)} /> : null}
-          {link.badge ? <CountBadge count={link.badge} /> : link.dot ? <View className="mr-1 size-2 rounded-full bg-primary" /> : null}
+          {link.badge ? <CountBadge count={link.badge} /> : link.dot || accent ? <View className="mr-1 size-2 rounded-full bg-primary" /> : null}
         </>
       )}
     </Pressable>

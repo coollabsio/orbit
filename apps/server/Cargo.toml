@@ -31,6 +31,7 @@ multer = "3"
 jiff = { version = "0.2", features = ["tzdb-bundle-always"] }
 mime_guess = "2"
 oxide-auth = "=0.6.1"
+semver = "1"
 url = "2"
 unicode-normalization = "0.1"
 orbit-domain = { path = "../../crates/orbit" }

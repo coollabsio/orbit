@@ -12741,6 +12741,25 @@ export type UpdateMeBody = {
     title?: string | null;
 };
 
+/**
+ * Whether a newer Orbit release is out, for installation admins.
+ */
+export type UpdateStatus = {
+    /**
+     * The version this server runs.
+     */
+    current_version: string;
+    /**
+     * The newer release; `null` when the server runs the latest one, the check is off
+     * (`ORBIT_UPDATE_CHECK=false`, Orbit Cloud) or the CDN did not answer.
+     */
+    latest_version?: string | null;
+    /**
+     * The GitHub release page of `latest_version`.
+     */
+    release_url?: string | null;
+};
+
 export type Usage = {
     limit: number;
     used: number;
@@ -30132,6 +30151,58 @@ export type SaveStorageOptionsResponses = {
 };
 
 export type SaveStorageOptionsResponse = SaveStorageOptionsResponses[keyof SaveStorageOptionsResponses];
+
+export type GetUpdateStatusData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/admin/update';
+};
+
+export type GetUpdateStatusErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * installation_admin_required
+     */
+    403: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type GetUpdateStatusError = GetUpdateStatusErrors[keyof GetUpdateStatusErrors];
+
+export type GetUpdateStatusResponses = {
+    200: UpdateStatus;
+};
+
+export type GetUpdateStatusResponse = GetUpdateStatusResponses[keyof GetUpdateStatusResponses];
 
 export type ListAdminUsersData = {
     body?: never;

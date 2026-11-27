@@ -1456,6 +1456,7 @@ pub fn redacted_config(config: &Config) -> String {
         Some(listen) => lines.push(format!("ORBIT_METRICS_LISTEN={listen}")),
         None => lines.push("# ORBIT_METRICS_LISTEN is not set: metrics are disabled".to_owned()),
     }
+    lines.push(format!("ORBIT_UPDATE_CHECK={}", !config.no_update_check));
     lines.extend(redacted_mail_config(&config.mail));
     if config.app_key.is_some() {
         lines.push("ORBIT_APP_KEY=[REDACTED]".to_owned());

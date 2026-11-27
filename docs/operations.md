@@ -26,6 +26,7 @@ Orbit reads its configuration only from environment variables that start with `O
 | `ORBIT_JOBS_CONCURRENCY` | `4` | |
 | `ORBIT_UPLOAD_MAX_FILE_BYTES` | `26214400` (25 MiB) | |
 | `ORBIT_UPLOAD_MAX_REQUEST_BYTES` | `104857600` (100 MiB) | |
+| `ORBIT_UPDATE_CHECK` | `true` | Once a day at most (once an hour after a failed check), while an installation admin uses Orbit, the server reads the latest release from `https://cdn.coollabs.io/orbit/version.json` and shows **Update available** in the sidebar. The request sends only the Orbit version (`User-Agent`). `false` turns it off. Orbit Cloud never checks. |
 | `ORBIT_METRICS_LISTEN` | none (metrics off) | A private listener, for example `127.0.0.1:9090`. `/metrics` has no authentication: never send it through the public site. Orbit logs a warning at startup when the address is not loopback; then only the monitoring network may reach it. |
 | `ORBIT_RATE_LIMIT_*` | see notes | Request limits and email caps. See [Request limits and email caps](#request-limits-and-email-caps). |
 | `ORBIT_MAIL_*` | mail off | The SMTP listener that receives mail. See [Mail](#mail). |

@@ -9,6 +9,7 @@ import {
   createRecoveryLink,
   deleteBackup as deleteBackupRequest,
   getAdminUserSummary,
+  getUpdateStatus,
   getInstanceSettings,
   getJobLimits,
   listAdminUsers,
@@ -38,6 +39,7 @@ import {
 import type {
   AdminUser,
   AdminUserSummary,
+  UpdateStatus,
   AuthOptions,
   BackupCreated,
   BackupItem,
@@ -83,6 +85,7 @@ export interface Page<T> {
 export const adminKeys = {
   users: (search: string) => ['admin', 'users', search] as const,
   userSummary: ['admin', 'users-summary'] as const,
+  update: ['admin', 'update'] as const,
   audit: ['admin', 'audit'] as const,
   backups: ['admin', 'backups'] as const,
   backupWorkspaces: (backupId: string) => ['admin', 'backups', backupId, 'workspaces'] as const,
@@ -102,6 +105,11 @@ export async function adminUsers(client: OrbitClient, search: string, cursor?: s
 /** The number of accounts and, on Orbit Cloud, of ongoing and expired trials (the web's Overview card). */
 export async function adminUserSummary(client: OrbitClient): Promise<AdminUserSummary> {
   return (await getAdminUserSummary({ client, throwOnError: true })).data
+}
+
+/** A newer Orbit release (`latest_version`, `release_url`), when the server found one. */
+export async function updateStatus(client: OrbitClient): Promise<UpdateStatus> {
+  return (await getUpdateStatus({ client, throwOnError: true })).data
 }
 
 export async function auditEvents(client: OrbitClient, cursor?: string): Promise<Page<AuditEvent>> {

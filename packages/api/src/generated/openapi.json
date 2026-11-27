@@ -36421,6 +36421,113 @@
         ]
       }
     },
+    "/api/v1/admin/update": {
+      "get": {
+        "tags": [
+          "crate::workspace_routes"
+        ],
+        "summary": "Whether a newer Orbit release is out. The server asks the coolLabs CDN at most once a day (once an hour after a failure).",
+        "operationId": "get_update_status",
+        "parameters": [
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "installation_admin_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/users": {
       "get": {
         "tags": [
@@ -135206,6 +135313,33 @@
           }
         },
         "additionalProperties": false
+      },
+      "UpdateStatus": {
+        "type": "object",
+        "description": "Whether a newer Orbit release is out, for installation admins.",
+        "required": [
+          "current_version"
+        ],
+        "properties": {
+          "current_version": {
+            "type": "string",
+            "description": "The version this server runs."
+          },
+          "latest_version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The newer release; `null` when the server runs the latest one, the check is off\n(`ORBIT_UPDATE_CHECK=false`, Orbit Cloud) or the CDN did not answer."
+          },
+          "release_url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The GitHub release page of `latest_version`."
+          }
+        }
       },
       "Usage": {
         "type": "object",

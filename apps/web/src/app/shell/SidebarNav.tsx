@@ -4,7 +4,7 @@ import { useBindings } from '@/shortcuts/useCommand'
 import { createContext, Fragment, useContext, useEffect, useState, type ComponentType, type ReactNode } from 'react'
 import { Link, useLocation, useMatch, useNavigate, useResolvedPath, type LinkProps } from 'react-router'
 import { cva, type VariantProps } from 'class-variance-authority'
-import { Calendar, ChevronDown, CalendarTick, Danger, SecurityUser, Home2 as Home, Layer, Message as MessageSquare, DocumentText as FileText, Search4 as Search, Setting2 as Settings, Sms as Mail, Star, TaskSquare as SquareCheck, Timer, Folder, Add as Plus, Trash, Monitor } from 'reicon-react'
+import { Calendar, ChevronDown, CalendarTick, Danger, SecurityUser, Home2 as Home, Layer, Message as MessageSquare, DocumentText as FileText, Search4 as Search, Setting2 as Settings, Sms as Mail, Star, TaskSquare as SquareCheck, Timer, Folder, Add as Plus, Trash, Monitor, Download } from 'reicon-react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
@@ -22,6 +22,7 @@ import { savedViewsQueryOptions } from '@/features/views/api/views'
 import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
 import { useCustomPages } from '@/features/pages/api'
 import { useIsGuest } from '@/features/workspaces/permissions'
+import { useUpdateStatus } from '@/features/admin/api'
 import { isAdminLimitsPath, phonePath, settingsAreaOf, useAdminLimitsItems, useSettingsArea, type SettingsAreaName } from '@/features/settings/settingsNav'
 import { useIsPhone } from '@/features/chat/pages/useChatViewport'
 import { chatEnabled, docsHidden } from './productNavigation'
@@ -71,6 +72,34 @@ export function SidebarNavTile({ icon: Icon, tone, children }: { icon?: SidebarN
 }
 
 const SidebarNavCollapsed = createContext(false)
+
+/** Installation admins only: a newer Orbit release is out. Opens its GitHub release page. */
+function UpdateAvailableItem() {
+  const collapsed = useContext(SidebarNavCollapsed)
+  const update = useUpdateStatus(true).data
+  if (!update?.latest_version || !update.release_url) return null
+  const label = `Update to v${update.latest_version}`
+  return (
+    <Tip label={collapsed ? label : undefined} side="right">
+      {/* pink like the current page's tile, on a pink row, so an admin notices it */}
+      <a
+        data-slot="sidebar-nav-item"
+        data-active="true"
+        className={cn(sidebarNavItemClass, 'mt-1 rounded-md bg-primary/10! pl-1 text-primary! inset-ring inset-ring-primary/30 hover:bg-primary/16! flat:pl-1 group-data-[collapsed=true]/sidebar-nav:bg-transparent! group-data-[collapsed=true]/sidebar-nav:inset-ring-0')}
+        href={update.release_url}
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        <SidebarNavTile icon={Download} />
+        <SidebarNavLabel>{label}</SidebarNavLabel>
+        <span aria-hidden="true" className="relative flex size-2 shrink-0 group-data-[collapsed=true]/sidebar-nav:absolute group-data-[collapsed=true]/sidebar-nav:top-0.5 group-data-[collapsed=true]/sidebar-nav:right-0.5 group-data-[collapsed=true]/sidebar-nav:size-2.5">
+          <span className="absolute inline-flex size-full animate-ping rounded-full bg-primary opacity-75 motion-reduce:hidden" />
+          <span className="relative inline-flex size-full rounded-full bg-primary group-data-[collapsed=true]/sidebar-nav:ring-2 group-data-[collapsed=true]/sidebar-nav:ring-sidebar" />
+        </span>
+      </a>
+    </Tip>
+  )
+}
 
 type SidebarNavIcon = ComponentType<{ className?: string }>
 
@@ -650,6 +679,7 @@ export function SidebarNav({
                     <>
                       <div className="flex-1" aria-hidden="true" />
                       <SidebarNavItem to="/admin" icon={SecurityUser} tone="neutral" label="Admin" onClick={onNavigate} />
+                      <UpdateAvailableItem />
                     </>
                   ) : null}
                 </>
@@ -678,6 +708,7 @@ export function SidebarNav({
                       {/* the installation, not the workspace: it sits apart at the bottom */}
                       <div className="flex-1" aria-hidden="true" />
                       <SidebarNavItem to="/admin" icon={SecurityUser} tone="neutral" label="Admin" onClick={onNavigate} />
+                      <UpdateAvailableItem />
                     </>
                   ) : null}
                 </>

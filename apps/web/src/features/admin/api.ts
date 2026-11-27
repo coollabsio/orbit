@@ -1,7 +1,7 @@
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/api/client'
 import { queryKeys } from '@/api/queryKeys'
-import { changeUserEmail, getAdminUserSummary, createBackup, createRecoveryLink, deleteBackup, getInstanceSettings, getJobLimits, saveJobLimits, listAdminUsers, listBackupItems, listBackups, listBackupWorkspaces, restoreBackupItem, listGlobalAudit, removeS3, removeSignInProvider, removeSmtp, resetTwoFactor, saveLimits, saveS3, saveSignInProvider, saveStorageOptions, setInstanceAdmin, startImageCompression, saveSmtp, sendTestEmail, setAccountSuspension, setOidcProvision, setCustomPagePolicy, setRegistration } from '@orbit/api/generated/sdk.gen'
+import { changeUserEmail, getAdminUserSummary, getUpdateStatus, createBackup, createRecoveryLink, deleteBackup, getInstanceSettings, getJobLimits, saveJobLimits, listAdminUsers, listBackupItems, listBackups, listBackupWorkspaces, restoreBackupItem, listGlobalAudit, removeS3, removeSignInProvider, removeSmtp, resetTwoFactor, saveLimits, saveS3, saveSignInProvider, saveStorageOptions, setInstanceAdmin, startImageCompression, saveSmtp, sendTestEmail, setAccountSuspension, setOidcProvision, setCustomPagePolicy, setRegistration } from '@orbit/api/generated/sdk.gen'
 import type { BackupItemKind, CustomPagePolicyBody, InstanceSettingsView, JobLimitsBody, LimitsBody, Provider, S3Body, SignInProviderBody, SmtpBody, StorageOptionsBody } from '@orbit/api/generated/types.gen'
 
 /** How many results the user search shows; more matches ask for a longer search. */
@@ -25,6 +25,18 @@ export function useAdminUserSummary() {
   return useQuery({
     queryKey: queryKeys.adminUserSummary,
     queryFn: async () => (await getAdminUserSummary({ client: apiClient, throwOnError: true })).data,
+  })
+}
+
+/** A newer Orbit release (`latest_version`, `release_url`), when the server found one. Admins only: pass `enabled` false for other users. */
+export function useUpdateStatus(enabled: boolean) {
+  return useQuery({
+    queryKey: queryKeys.adminUpdate,
+    queryFn: async () => (await getUpdateStatus({ client: apiClient, throwOnError: true })).data,
+    enabled,
+    // the server asks the CDN at most once a day; an hour here keeps the requests few
+    staleTime: 60 * 60 * 1000,
+    retry: false,
   })
 }
 

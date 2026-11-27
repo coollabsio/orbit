@@ -35,6 +35,7 @@ const JOBS_CONCURRENCY_ENV: &str = "ORBIT_JOBS_CONCURRENCY";
 const UPLOADS_MAX_FILE_BYTES_ENV: &str = "ORBIT_UPLOAD_MAX_FILE_BYTES";
 const UPLOADS_MAX_REQUEST_BYTES_ENV: &str = "ORBIT_UPLOAD_MAX_REQUEST_BYTES";
 const METRICS_LISTEN_ENV: &str = "ORBIT_METRICS_LISTEN";
+const UPDATE_CHECK_ENV: &str = "ORBIT_UPDATE_CHECK";
 const RATE_LIMITS_ENV_PREFIX: &str = "ORBIT_RATE_LIMIT_";
 const APP_KEY_ENV: &str = "ORBIT_APP_KEY";
 const APP_KEY_FILE_ENV: &str = "ORBIT_APP_KEY_FILE";
@@ -104,6 +105,8 @@ pub struct Config {
     /// Instance settings from the environment (`ORBIT_SMTP_*`, `ORBIT_S3_*`, …): each one replaces the value
     /// saved in Admin.
     pub instance: InstanceConfig,
+    /// `ORBIT_UPDATE_CHECK=false`: the server does not ask the coolLabs CDN for the latest Orbit version.
+    pub no_update_check: bool,
 }
 
 /// The server's identity towards APNs: a token signing key (`.p8`) of the Apple developer team.
@@ -1142,6 +1145,8 @@ fn apply_environment(
             config.uploads.max_request_bytes = parse_environment(key, value)?;
         } else if key == METRICS_LISTEN_ENV {
             config.metrics.listen = Some(parse_environment(key, value)?);
+        } else if key == UPDATE_CHECK_ENV {
+            config.no_update_check = !parse_environment::<bool>(key, value)?;
         } else if let Some(setting) = key
             .strip_prefix(RATE_LIMITS_ENV_PREFIX)
             .and_then(|name| config.rate_limits.setting_mut(&name.to_ascii_lowercase()))

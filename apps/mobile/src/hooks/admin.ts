@@ -26,6 +26,13 @@ export function useAdminUserSummary() {
   return useQuery({ queryKey: admin.adminKeys.userSummary, queryFn: () => admin.adminUserSummary(client) })
 }
 
+/** The drawer's "Update available" row. Admins only: pass `enabled` false for other users. */
+export function useUpdateStatus(enabled: boolean) {
+  const { client } = useOrbit()
+  // the server asks the CDN at most once a day; an hour here keeps the requests few
+  return useQuery({ queryKey: admin.adminKeys.update, queryFn: () => admin.updateStatus(client), enabled, staleTime: 60 * 60 * 1000, retry: false })
+}
+
 export function useAuditEvents() {
   const { client } = useOrbit()
   return useInfiniteQuery({
