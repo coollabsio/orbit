@@ -25,9 +25,10 @@ services:
       # ORBIT_MAIL_TLS_CERT: /etc/orbit/mail-tls/fullchain.pem # optional: files win over Admin → Mail
       # ORBIT_MAIL_TLS_KEY: /etc/orbit/mail-tls/privkey.pem
     # The container runs without capabilities, so the listener uses port 2525 and the host maps port 25 to it.
-    # Docker must keep the client IP: set "userland-proxy": false in /etc/docker/daemon.json, or run this
-    # service with network_mode: host. Otherwise every client looks like the Docker gateway, and relay mode
-    # and SPF fail.
+    # Orbit must see the client IP. Docker keeps it for IPv4, but IPv6 clients go through docker-proxy and
+    # look like the Docker gateway, so relay mode and SPF fail for them. If the mail hostname has an AAAA
+    # record, turn on IPv6 on the backend network (enable_ipv6: true and an IPv6 subnet; recreate the
+    # network). Do not set "userland-proxy": false: it breaks IPv6 for every container on the host.
     # ports: ['25:2525']
     volumes:
       - orbit-data:/var/lib/orbit

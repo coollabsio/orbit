@@ -697,10 +697,15 @@ On the domain page, managers click **Rotate key**. Orbit makes a new key with th
 
 The container runs without capabilities, so the listener uses port 2525. The Compose file maps host port 25 to it (`ports: ['25:2525']`, commented out in [`deploy/compose.yaml`](../deploy/compose.yaml)).
 
-Orbit must see the real client address: relay mode, SPF and the connection limits use it. With the default Docker port proxy, clients can arrive from the Docker gateway address. Do one of these:
+Orbit must see the real client address: relay mode, SPF and the connection limits use it. Docker keeps the address of IPv4 clients. An IPv6 client of a container that has no IPv6 address goes through `docker-proxy`, and Orbit sees the Docker gateway address. Connections from the host itself to a published port also come from the gateway; you can ignore those.
 
-- Set `"userland-proxy": false` in `/etc/docker/daemon.json` and restart Docker.
-- Run the Orbit service with `network_mode: host`.
+If the mail hostname has an AAAA record, do one of these:
+
+- **Turn on IPv6 on Orbit's Docker network** (recommended). In Compose, give the network `enable_ipv6: true` and an IPv6 subnet (for example a ULA `/64`), then recreate the network. Docker 27 and later turn on `ip6tables` by default; on an older Docker, also set `"ip6tables": true` in `/etc/docker/daemon.json`. On Coolify, recreate the `coolify` network with IPv6: see [Applications See the Docker Gateway IP Instead of the Client IP](https://coolify.io/docs/troubleshoot/applications/wrong-client-ip). With IPv6 on, Docker opens published ports for IPv6 past UFW, as it does for IPv4.
+- **Run the Orbit service with `network_mode: host`.** Docker then ignores `ports:`, so Orbit listens on host port 2525: redirect port 25 to it on the host (an nftables or iptables `REDIRECT` for IPv4 and IPv6 keeps the client address). The HTTP port 8080 is then open on every host interface, so firewall it, and point the reverse proxy at the host (`host.docker.internal:8080`), with its address in `ORBIT_TRUSTED_PROXIES`.
+- **Remove the AAAA record** of the mail hostname. Senders then use IPv4.
+
+Do not set `"userland-proxy": false` in `/etc/docker/daemon.json`: without `docker-proxy`, IPv6 clients cannot reach a container that has no IPv6 address, for every container on the host.
 
 Orbit logs a warning and the health card shows an error when clients connect from a Docker bridge address. Behind a TCP load balancer, turn on PROXY protocol v2 on the balancer and set `ORBIT_MAIL_PROXY_CIDRS` to its addresses.
 

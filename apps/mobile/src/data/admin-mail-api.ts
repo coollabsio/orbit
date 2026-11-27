@@ -179,7 +179,7 @@ export function healthItems(admin: MailAdmin, hasProviders: boolean): HealthItem
       label: 'Client address',
       state: 'error',
       detail: `${listener.bridge_peers} ${listener.bridge_peers === 1 ? 'connection' : 'connections'} came from a Docker bridge address, so the real client address is lost.`,
-      fix: 'Set "userland-proxy": false in /etc/docker/daemon.json, or run Orbit with network_mode: host. Behind a load balancer, use PROXY protocol v2 and ORBIT_MAIL_PROXY_CIDRS.',
+      fix: 'IPv6 clients reach a container without an IPv6 address through docker-proxy, which hides their address. Turn on IPv6 on Orbit\'s Docker network (enable_ipv6: true), or run Orbit with network_mode: host. Behind a load balancer, use PROXY protocol v2 and ORBIT_MAIL_PROXY_CIDRS. Connections from this host itself always show the gateway.',
     })
   } else if (listener.last_peer_ip) {
     items.push({ label: 'Client address', state: 'ok', detail: `The last client was ${listener.last_peer_ip}.` })

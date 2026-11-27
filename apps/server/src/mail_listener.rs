@@ -301,7 +301,7 @@ impl MailListener {
             tracing::warn!(
                 %ip,
                 "mail client connected from a Docker bridge gateway: client addresses are lost; \
-                 use network_mode: host or userland-proxy: false"
+                 turn on IPv6 on the Docker network or use network_mode: host"
             );
         }
         if self.config.mode == MailMode::Relay
