@@ -135,6 +135,34 @@ replies from these addresses land in Mailpit. Without Mailpit, sending fails. A 
 container runs but `docker port orbit-mailpit` prints nothing, it lost its network (seen on 2026-11-04): run
 `docker network connect bridge orbit-mailpit && docker restart orbit-mailpit`.
 
+## Change files
+
+Each change that users of Orbit can see gets a file in `.changes/`, in the same commit as the change.
+`scripts/release.sh` writes the files into `CHANGELOG.md`, and the release notes come from there (see
+[`RELEASE.md`](RELEASE.md)). Write a file with `scripts/change.sh`:
+
+```bash
+scripts/change.sh --type fixed --summary 'Lost unsaved comment when a task closed' --detail 'The draft stays until the comment is sent'
+scripts/change.sh --type changed --breaking --summary 'Required `ORBIT_APP_KEY` at startup'
+scripts/change.sh --notes   # the entries of the next release
+```
+
+- Write one file for each change. When a commit changes something that an unreleased change file describes, edit that
+  file instead of adding a second one.
+- Tests, documentation, refactors, and CI, scripts or release tooling that users do not see need no file. Use
+  `maintenance` only for a change that matters to people who build, host or release Orbit.
+- Types: `added` (something new), `changed` (works differently), `deprecated`, `removed` (next release: minor);
+  `fixed` (a bug users can see), `security`, `maintenance` (next release: patch). Add `--breaking` when users must act
+  after the upgrade (next release: minor before 1.0, major after).
+- The summary reads as one sentence after the heading of its section, never in the imperative of a commit subject:
+  `Added` / `Changed` / `Deprecated` / `Removed` + what it acts on (`Update notifications for the admins of
+  self-hosted servers`); `Fixed` + the bug, not the fix (`Lost unsaved comment when a task closed`); `Security`,
+  `Maintenance` and breaking changes start with a verb in the past tense. A `--detail` says how it works now, in the
+  present tense.
+- Start with a capital letter or a code span and end without a period. Name the page, setting or API field, not the
+  file. Put UI names and settings in code spans, do not use bold, and link fixed issues at the end of the summary.
+  No exploit details in a change file.
+
 ## Release video
 
 To make the product update video or release-note screenshots of a release, follow

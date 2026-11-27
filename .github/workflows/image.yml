@@ -3,37 +3,52 @@ name: Container image
 on:
   push:
     branches: [main]
-  # A published GitHub release also publishes the image as `<version>`, `<major>.<minor>` and `latest`.
-  release:
-    types: [published]
+  # Releases the version in Cargo.toml when it has no tag yet, for example after a failed release run.
+  workflow_dispatch:
 
+# A later push cancels the run of an older one, but never a release run: `scripts/release.sh` pushes
+# `chore(release): <version>`, and that run gets a group of its own.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: "${{ github.workflow }}-${{ (github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'chore(release): ')) && github.run_id || github.ref }}"
   cancel-in-progress: ${{ github.event_name == 'push' }}
 
 permissions:
   contents: read
 
 jobs:
-  # `[workspace.package] version` in Cargo.toml is the Orbit version. A release tag must be `v<version>`.
+  # `[workspace.package] version` in Cargo.toml is the Orbit version. A push to main that changes it releases it
+  # (see RELEASE.md): the image gets `<version>`, `<major>.<minor>` and `latest`, GitHub gets the release `v<version>`
+  # with the notes of CHANGELOG.md, and the CDN gets the version for the update check of self-hosted servers.
   version:
     runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.version.outputs.version }}
+      release: ${{ steps.version.outputs.release }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Read version from Cargo.toml
         id: version
         env:
           EVENT: ${{ github.event_name }}
-          TAG: ${{ github.event.release.tag_name }}
+          REF: ${{ github.ref }}
+          BEFORE: ${{ github.event.before }}
         run: |
           version=$(bash scripts/version.sh)
           echo "Orbit version: $version"
-          if [ "$EVENT" = release ] && [ "$TAG" != "v$version" ]; then
-            echo "::error::Release tag '$TAG' does not match Cargo.toml version '$version'. Use tag 'v$version', or change the version with 'just version <new>' first."
-            exit 1
+          release=false
+          if [ "$REF" != refs/heads/main ]; then
+            echo "only main releases"
+          elif git ls-remote --exit-code --tags origin "refs/tags/v$version" > /dev/null; then
+            echo "v$version is released already"
+          elif [ "$EVENT" = workflow_dispatch ]; then
+            release=true
+          elif git cat-file -e "$BEFORE:Cargo.toml" 2> /dev/null \
+            && [ "$(git show "$BEFORE:Cargo.toml" | bash scripts/version.sh --stdin)" != "$version" ]; then
+            release=true
           fi
+          echo "release=$release" | tee -a "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
   image:
@@ -102,7 +117,7 @@ jobs:
           docker push "$image"
       # A release also gets the smoke-tested executable, so people can run Orbit without Docker.
       - name: Extract release binary
-        if: github.event_name == 'release'
+        if: needs.version.outputs.release == 'true'
         env:
           ARCHITECTURE: ${{ matrix.architecture }}
           UNAME: ${{ matrix.uname }}
@@ -120,34 +135,13 @@ jobs:
           mv "$binary" package/orbit
           XZ_OPT=-9 tar -C package -cJf "$binary.tar.xz" orbit
       - name: Keep release binary for the release job
-        if: github.event_name == 'release'
+        if: needs.version.outputs.release == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: orbit-linux-${{ matrix.uname }}
           path: orbit-linux-${{ matrix.uname }}.tar.xz
           if-no-files-found: error
           retention-days: 1
-
-  release-binaries:
-    if: github.event_name == 'release'
-    needs: [version, image]
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@v8
-        with:
-          pattern: orbit-linux-*
-          merge-multiple: true
-      - name: Attach binaries and checksums to the release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.event.release.tag_name }}
-        run: |
-          files=(orbit-linux-x86_64.tar.xz orbit-linux-aarch64.tar.xz)
-          sha256sum "${files[@]}" | tee SHA256SUMS
-          # --clobber replaces the files when the workflow runs again for the same release.
-          gh release upload "$TAG" "${files[@]}" SHA256SUMS --clobber --repo "$GITHUB_REPOSITORY"
 
   publish:
     needs: [version, image]
@@ -164,17 +158,16 @@ jobs:
       - uses: docker/setup-buildx-action@v3
       - name: Publish multi-platform manifest
         env:
-          EVENT: ${{ github.event_name }}
-          PRERELEASE: ${{ github.event.release.prerelease }}
+          RELEASE: ${{ needs.version.outputs.release }}
           VERSION: ${{ needs.version.outputs.version }}
         run: |
           image="ghcr.io/${GITHUB_REPOSITORY,,}"
           tag=${GITHUB_SHA::7}
-          if [ "$EVENT" = release ]; then
+          if [ "$RELEASE" = true ]; then
             published="$image:$VERSION"
             tags=(--tag "$image:$VERSION")
             # a pre-release (for example 0.2.0-rc.1) gets only its exact tag
-            if [ "$PRERELEASE" != true ]; then
+            if [[ "$VERSION" != *-* ]]; then
               tags+=(--tag "$image:${VERSION%.*}" --tag "$image:latest")
             fi
           else
@@ -197,3 +190,54 @@ jobs:
             --request POST \
             --header "Authorization: Bearer $COOLIFY_TOKEN" \
             "$COOLIFY_WEBHOOK"
+
+  # The GitHub release comes after the image tags, so its tag never points at a version without an image.
+  release:
+    if: needs.version.outputs.release == 'true'
+    needs: [version, image, publish]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: orbit-linux-*
+          merge-multiple: true
+      - name: Create the GitHub release with binaries and checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          tag="v$VERSION"
+          files=(orbit-linux-x86_64.tar.xz orbit-linux-aarch64.tar.xz)
+          sha256sum "${files[@]}" | tee SHA256SUMS
+          # the section `## [v<version>]` that scripts/release.sh wrote, its `###` headings as `##`
+          awk -v heading="## [$tag]" 'index($0, heading) == 1 { inside = 1; next } /^## / { inside = 0 } inside { sub(/^### /, "## "); print }' CHANGELOG.md > notes.md
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            # --clobber replaces the files when the workflow runs again for the same release
+            gh release upload "$tag" "${files[@]}" SHA256SUMS --clobber --repo "$GITHUB_REPOSITORY"
+            exit 0
+          fi
+          args=(--title "$tag" --target "$GITHUB_SHA")
+          if grep -q '[^[:space:]]' notes.md; then args+=(--notes-file notes.md); else args+=(--generate-notes); fi
+          [[ "$VERSION" != *-* ]] || args+=(--prerelease)
+          gh release create "$tag" "${files[@]}" SHA256SUMS "${args[@]}" --repo "$GITHUB_REPOSITORY"
+
+  # Self-hosted servers read the latest stable version from https://cdn.coollabs.io/orbit/version.json.
+  cdn:
+    if: needs.version.outputs.release == 'true' && !contains(needs.version.outputs.version, '-')
+    needs: [version, release]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set the latest version on the CDN
+        env:
+          # a fine-grained token for coollabsio/coollabs-cdn alone, with read and write access to contents
+          GH_TOKEN: ${{ secrets.CDN_TOKEN }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          gh auth setup-git
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          bash scripts/sync-cdn.sh "$VERSION"
