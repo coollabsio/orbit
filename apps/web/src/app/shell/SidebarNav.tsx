@@ -23,6 +23,7 @@ import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
 import { useCustomPages } from '@/features/pages/api'
 import { useIsGuest } from '@/features/workspaces/permissions'
 import { useUpdateStatus } from '@/features/admin/api'
+import { useAuthOptions } from '@/features/auth/api'
 import { isAdminLimitsPath, phonePath, settingsAreaOf, useAdminLimitsItems, useSettingsArea, type SettingsAreaName } from '@/features/settings/settingsNav'
 import { useIsPhone } from '@/features/chat/pages/useChatViewport'
 import { chatEnabled, docsHidden } from './productNavigation'
@@ -73,10 +74,12 @@ export function SidebarNavTile({ icon: Icon, tone, children }: { icon?: SidebarN
 
 const SidebarNavCollapsed = createContext(false)
 
-/** Installation admins only: a newer Orbit release is out. Opens its GitHub release page. */
+/** Installation admins of a self-hosted server only: a newer Orbit release is out. Opens its GitHub release page. */
 function UpdateAvailableItem() {
   const collapsed = useContext(SidebarNavCollapsed)
-  const update = useUpdateStatus(true).data
+  // Orbit Cloud does not check for updates: ask only a self-hosted server
+  const options = useAuthOptions().data
+  const update = useUpdateStatus(options !== undefined && !options.billing_enabled).data
   if (!update?.latest_version || !update.release_url) return null
   const label = `Update to v${update.latest_version}`
   return (

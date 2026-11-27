@@ -474,9 +474,11 @@ function BackRow({ label, onPress }: { label: string; onPress: () => void }) {
  * The web `SidebarNavItem`: a 36px row with a 30px icon tile; the current row's tile turns pink. The Flat style has no
  * tile: an 18px icon on a 32px row, and the current row is filled.
  */
-/** Installation admins only: a newer Orbit release is out. Opens its GitHub release page. */
+/** Installation admins of a self-hosted server only: a newer Orbit release is out. Opens its GitHub release page. */
 function UpdateRow() {
-  const update = useUpdateStatus(true).data
+  // Orbit Cloud does not check for updates: ask only a self-hosted server
+  const options = useAuthOptions().data
+  const update = useUpdateStatus(options !== undefined && !options.billing_enabled).data
   if (!update?.latest_version || !update.release_url) return null
   const url = update.release_url
   return <NavRow accent link={{ label: `Update to v${update.latest_version}`, icon: 'download', href: url as Href, active: false }} onPress={() => void WebBrowser.openBrowserAsync(url).catch(() => undefined)} />
