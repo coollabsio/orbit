@@ -31,7 +31,7 @@ function MobileDockItem({ to, label, icon: Icon, enabled, badge = 0, unread = fa
     props: {
       'data-slot': 'mobile-dock-item',
       className: cn(
-        'relative flex flex-1 flex-col items-center justify-center gap-0.5 text-[0.625rem] font-medium text-muted-foreground',
+        'relative flex min-h-11 flex-1 flex-col items-center justify-center gap-0.5 text-[0.625rem] font-medium text-muted-foreground',
         enabled
           ? 'aria-[current=page]:text-primary'
           : 'h-auto rounded-none p-0 hover:bg-transparent dark:hover:bg-transparent disabled:pointer-events-auto disabled:cursor-not-allowed disabled:text-muted-foreground/50 disabled:opacity-100',
@@ -71,7 +71,7 @@ export function MobileDock({ chatEnabled: chat = chatEnabled, chatBadge = 0, cha
   const paths = guest ? GUEST_DOCK_LINKS.map((link) => link.to) : mobileDockPathsFor(chat)
   return (
     <nav
-      className="hidden h-auto min-h-14 shrink-0 items-stretch bg-background pt-3 [@media(display-mode:standalone)]:pb-[env(safe-area-inset-bottom,0px)] max-[899px]:not-in-data-keyboard:flex"
+      className="hidden h-auto min-h-14 shrink-0 items-stretch bg-background pt-3 pb-[env(safe-area-inset-bottom,0px)] max-[899px]:not-in-data-keyboard:flex"
       aria-label="Mobile navigation"
     >
       {links.map((link) => (
