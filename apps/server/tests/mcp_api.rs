@@ -694,7 +694,9 @@ async fn mcp_route_is_mounted_in_the_application_and_rejects_oversized_bodies() 
     config.data.database = root.path().join("orbit.sqlite");
     config.data.attachments = root.path().join("attachments");
     config.data.backups = root.path().join("backups");
-    let app = orbit_server::app::App::build(config).await.unwrap();
+    let app = orbit_server::app::App::build(config, &crate::FRONTEND)
+        .await
+        .unwrap();
     let response = app
         .router()
         .oneshot(request(None, "tools/list", json!({})))

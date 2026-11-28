@@ -792,7 +792,7 @@ async fn a_test_message_over_smtp_reaches_the_health_card() {
     config.mail.relay_authserv_id = Some("relay.test".to_owned());
     // Nothing listens there: the PTR lookups fail at once.
     config.mail.dns_resolver = Some("127.0.0.1:9".parse().unwrap());
-    let app = App::build(config).await.unwrap();
+    let app = App::build(config, &crate::FRONTEND).await.unwrap();
     let database = app.database().clone();
     let status = app.mail_listener_status();
     let router = app.router();

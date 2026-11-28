@@ -87,7 +87,7 @@ impl Server {
                 config.mail.proxy_cidrs = proxy.map(|p| p.parse().unwrap()).into_iter().collect();
             }
         }
-        let mut app = App::build(config).await.unwrap();
+        let mut app = App::build(config, &crate::FRONTEND).await.unwrap();
         if let Some(dns) = dns {
             app = app.with_mail_authenticator(Authenticator::with_static_dns(dns).unwrap());
         }

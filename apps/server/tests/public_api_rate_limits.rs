@@ -55,7 +55,7 @@ impl Server {
             config.data.database_url = Some(postgres.url.clone());
         }
         config.app_key = Some(shared_postgres::APP_KEY.parse().unwrap());
-        let app = App::build(config).await.unwrap();
+        let app = App::build(config, &crate::FRONTEND).await.unwrap();
 
         let identity = IdentityRepository::new(app.database().clone());
         let now = TimestampMillis::now();

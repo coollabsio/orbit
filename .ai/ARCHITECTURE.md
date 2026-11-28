@@ -51,7 +51,7 @@ Chat is the exception to the query-key rule: its keys begin with `['chat', works
 
 ## Embedded build contract
 
-Vite emits `dist/orbit-build.json` from the committed OpenAPI contract ID and `ORBIT_BUILD_REVISION`. Rust embeds the complete `dist` directory and the same compile-time revision. `StaticAssets::verified` refuses to build the application router if either value differs. Hashed assets use a one-year immutable cache policy; HTML and the manifest use `no-cache`.
+Vite emits `dist/orbit-build.json` with the committed OpenAPI contract ID and a revision: a hash of the bundle, which it also writes into `index.html` as the `orbit-revision` meta tag (`NewVersionNotice` compares the two). The same source gives the same revision, so the image build stays cached when only docs or mobile change. The `orbit` binary embeds the complete `dist` directory and passes it to `App::build`; the library does not embed it, so a web-only change compiles only the binary again. `StaticAssets::verified` refuses to build the application router if the contract ID differs. Hashed assets use a one-year immutable cache policy; HTML and the manifest use `no-cache`.
 
 CI regenerates OpenAPI and TypeScript output twice for determinism, compares it with committed output, rebuilds the frontend, and checks committed embedded assets for drift.
 

@@ -35,7 +35,7 @@ impl Server {
         config.data.attachments = root.path().join("data/attachments");
         config.data.backups = root.path().join("backups");
         config.rate_limits.general_per_minute = 100_000;
-        let app = App::build(config).await.unwrap();
+        let app = App::build(config, &crate::FRONTEND).await.unwrap();
         let database = app.database().clone();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base = format!("http://{}", listener.local_addr().unwrap());

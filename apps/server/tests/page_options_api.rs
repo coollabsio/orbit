@@ -68,7 +68,9 @@ struct Server {
 
 impl Server {
     async fn start(root: &TempDir, collab: CollabConfig) -> Self {
-        let app = App::build(app_config(root)).await.unwrap();
+        let app = App::build(app_config(root), &crate::FRONTEND)
+            .await
+            .unwrap();
         CollabHub::install(app.database(), collab);
         let database = app.database().clone();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

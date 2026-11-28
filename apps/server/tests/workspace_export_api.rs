@@ -62,7 +62,7 @@ impl Harness {
                 }],
             ));
         }
-        let app = App::build(config).await.unwrap();
+        let app = App::build(config, &crate::FRONTEND).await.unwrap();
         let database = app.database().clone();
         let identity = IdentityRepository::new(database.clone());
         let now = TimestampMillis::now();

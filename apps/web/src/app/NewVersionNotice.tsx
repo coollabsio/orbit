@@ -2,9 +2,6 @@ import { useEffect } from 'react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 
-/** Set by `vite.config.ts` from `ORBIT_BUILD_REVISION`; `'development'` for local builds. */
-declare const __ORBIT_BUILD_REVISION__: string
-
 const CHECK_INTERVAL_MS = 5 * 60_000
 
 function showNewVersionToast() {
@@ -22,12 +19,13 @@ function showNewVersionToast() {
 
 /**
  * Compares the running build with the deployed one (`/orbit-build.json`, served with `no-store`) every few minutes
- * and when the tab becomes visible again, and asks the user to reload once they differ.
+ * and when the tab becomes visible again, and asks the user to reload once they differ. The running build is the
+ * `orbit-revision` meta tag that `vite build` adds to `index.html`; the dev server has none.
  */
 export function NewVersionNotice() {
   useEffect(() => {
-    const revision = typeof __ORBIT_BUILD_REVISION__ === 'string' ? __ORBIT_BUILD_REVISION__ : 'development'
-    if (revision === 'development') return
+    const revision = document.querySelector<HTMLMetaElement>('meta[name="orbit-revision"]')?.content
+    if (!revision) return
 
     let found = false
     const check = async () => {

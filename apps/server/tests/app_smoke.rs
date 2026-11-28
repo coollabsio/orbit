@@ -7,7 +7,7 @@ use base64::Engine;
 use http_body_util::BodyExt;
 use orbit_platform::{Config, EnvironmentMode};
 use orbit_server::app::App;
-use orbit_server::static_assets::{FRONTEND_REVISION, StaticAssetError, StaticAssets};
+use orbit_server::static_assets::{StaticAssetError, StaticAssets};
 use sha2::{Digest, Sha256};
 use tempfile::TempDir;
 use tokio_util::sync::CancellationToken;
@@ -45,7 +45,9 @@ fn login_request(origin: Option<&str>) -> Request<Body> {
 #[tokio::test]
 async fn development_app_accepts_distinct_http_origins_but_still_requires_one() {
     let root = TempDir::new().unwrap();
-    let app = App::build(app_config(&root)).await.unwrap();
+    let app = App::build(app_config(&root), &crate::FRONTEND)
+        .await
+        .unwrap();
 
     for origin in [
         "http://localhost:18888",
@@ -78,10 +80,10 @@ async fn development_app_accepts_distinct_http_origins_but_still_requires_one() 
 #[tokio::test]
 async fn embedded_spa_uses_safe_cache_policies_and_never_masks_api_404s() {
     let assets =
-        StaticAssets::verified(orbit_server::openapi::CONTRACT_ID, FRONTEND_REVISION).unwrap();
+        StaticAssets::verified(&crate::FRONTEND, orbit_server::openapi::CONTRACT_ID).unwrap();
     assert!(matches!(
-        StaticAssets::verified(orbit_server::openapi::CONTRACT_ID, "other-revision"),
-        Err(StaticAssetError::RevisionMismatch { .. })
+        StaticAssets::verified(&crate::FRONTEND, "other-contract"),
+        Err(StaticAssetError::ContractMismatch { .. })
     ));
     let router = assets.router();
 
@@ -160,7 +162,9 @@ async fn embedded_spa_uses_safe_cache_policies_and_never_masks_api_404s() {
 #[tokio::test]
 async fn production_csp_hashes_the_exact_embedded_bootstrap_text() {
     let root = TempDir::new().unwrap();
-    let app = App::build(app_config(&root)).await.unwrap();
+    let app = App::build(app_config(&root), &crate::FRONTEND)
+        .await
+        .unwrap();
     let response = app
         .router()
         .oneshot(Request::get("/").body(Body::empty()).unwrap())
@@ -195,7 +199,9 @@ async fn production_csp_hashes_the_exact_embedded_bootstrap_text() {
 #[tokio::test]
 async fn app_build_migrates_checks_readiness_and_returns_first_run_setup_url() {
     let root = TempDir::new().unwrap();
-    let app = App::build(app_config(&root)).await.unwrap();
+    let app = App::build(app_config(&root), &crate::FRONTEND)
+        .await
+        .unwrap();
 
     assert!(app.setup_url().is_some_and(|url| {
         url.starts_with("http://127.0.0.1:8080/setup?token=") && !url.ends_with("token=")
@@ -249,7 +255,9 @@ async fn app_build_migrates_checks_readiness_and_returns_first_run_setup_url() {
 #[tokio::test]
 async fn stays_ready_when_a_newer_release_migrates_the_database() {
     let root = TempDir::new().unwrap();
-    let app = App::build(app_config(&root)).await.unwrap();
+    let app = App::build(app_config(&root), &crate::FRONTEND)
+        .await
+        .unwrap();
     // During a rolling upgrade the first new server applies its migrations under the old ones.
     app.database()
         .execute(
@@ -271,7 +279,9 @@ async fn stays_ready_when_a_newer_release_migrates_the_database() {
 #[tokio::test]
 async fn metrics_are_counted_without_exposing_them_on_the_public_listener() {
     let root = TempDir::new().unwrap();
-    let app = App::build(app_config(&root)).await.unwrap();
+    let app = App::build(app_config(&root), &crate::FRONTEND)
+        .await
+        .unwrap();
 
     let public = app
         .router()
@@ -314,7 +324,7 @@ async fn app_build_fails_closed_before_listening_when_storage_is_not_writable() 
     std::fs::create_dir_all(config.data.attachments.parent().unwrap()).unwrap();
     std::fs::write(&config.data.attachments, b"not a directory").unwrap();
 
-    let error = App::build(config).await.unwrap_err();
+    let error = App::build(config, &crate::FRONTEND).await.unwrap_err();
 
     assert!(error.to_string().contains("writable storage"));
 }
@@ -325,7 +335,7 @@ async fn app_build_rejects_backups_inside_live_attachment_storage() {
     let mut config = app_config(&root);
     config.data.backups = config.data.attachments.join("backups");
 
-    let error = App::build(config).await.unwrap_err();
+    let error = App::build(config, &crate::FRONTEND).await.unwrap_err();
 
     assert!(error.to_string().contains("backup directory"));
 }
@@ -336,7 +346,7 @@ async fn app_build_rejects_a_database_inside_live_attachment_storage() {
     let mut config = app_config(&root);
     config.data.database = config.data.attachments.join("orbit.sqlite");
 
-    let error = App::build(config).await.unwrap_err();
+    let error = App::build(config, &crate::FRONTEND).await.unwrap_err();
 
     assert!(error.to_string().contains("database file must be outside"));
 }
@@ -348,7 +358,7 @@ async fn trusted_https_proxy_produces_a_secure_host_only_session_cookie() {
     config.environment = EnvironmentMode::Production;
     config.http.public_origin = "https://orbit.example".to_owned();
     config.http.trusted_proxies = vec!["127.0.0.1/32".parse().unwrap()];
-    let app = App::build(config).await.unwrap();
+    let app = App::build(config, &crate::FRONTEND).await.unwrap();
     let token = app.setup_url().unwrap().split_once("token=").unwrap().1;
     let request = Request::post("/api/v1/setup/complete")
         .header(header::CONTENT_TYPE, "application/json")
@@ -390,7 +400,9 @@ async fn trusted_https_proxy_produces_a_secure_host_only_session_cookie() {
 #[tokio::test]
 async fn api_method_mismatches_are_problem_details() {
     let root = TempDir::new().unwrap();
-    let app = App::build(app_config(&root)).await.unwrap();
+    let app = App::build(app_config(&root), &crate::FRONTEND)
+        .await
+        .unwrap();
 
     let response = app
         .router()
@@ -421,7 +433,9 @@ async fn api_method_mismatches_are_problem_details() {
 #[tokio::test]
 async fn installation_admin_can_create_an_online_backup() {
     let root = TempDir::new().unwrap();
-    let app = App::build(app_config(&root)).await.unwrap();
+    let app = App::build(app_config(&root), &crate::FRONTEND)
+        .await
+        .unwrap();
     let token = app.setup_url().unwrap().split_once("token=").unwrap().1;
     let setup = app
         .router()
@@ -558,7 +572,9 @@ async fn installation_admin_can_create_an_online_backup() {
 #[tokio::test]
 async fn critical_durable_schedules_exist_before_serve() {
     let root = TempDir::new().unwrap();
-    let app = App::build(app_config(&root)).await.unwrap();
+    let app = App::build(app_config(&root), &crate::FRONTEND)
+        .await
+        .unwrap();
 
     let kinds: Vec<String> = sqlx::query_scalar("SELECT job_kind FROM schedules ORDER BY job_kind")
         .fetch_all(app.database().pool())
@@ -587,7 +603,7 @@ async fn critical_durable_schedules_exist_before_serve() {
 async fn startup_disables_legacy_automatic_backup_work() {
     let root = TempDir::new().unwrap();
     let config = app_config(&root);
-    let first = App::build(config.clone()).await.unwrap();
+    let first = App::build(config.clone(), &crate::FRONTEND).await.unwrap();
     sqlx::query(
         "INSERT INTO schedules (id, job_kind, payload_json, schedule, next_run_at, enabled, updated_at) \
          VALUES ('legacy-backup', 'backup.daily', '{}', '@every 86400000ms', 1, 1, 1)",
@@ -604,7 +620,7 @@ async fn startup_disables_legacy_automatic_backup_work() {
     .unwrap();
     drop(first);
 
-    let app = App::build(config).await.unwrap();
+    let app = App::build(config, &crate::FRONTEND).await.unwrap();
     let enabled: i64 =
         sqlx::query_scalar("SELECT enabled FROM schedules WHERE job_kind = 'backup.daily'")
             .fetch_one(app.database().pool())
@@ -622,7 +638,7 @@ async fn startup_disables_legacy_automatic_backup_work() {
 async fn malformed_critical_schedule_fails_before_serve() {
     let root = TempDir::new().unwrap();
     let config = app_config(&root);
-    let first = App::build(config.clone()).await.unwrap();
+    let first = App::build(config.clone(), &crate::FRONTEND).await.unwrap();
     sqlx::query(
         "UPDATE schedules SET schedule = 'not-a-schedule', next_run_at = 4102444800000 \
          WHERE job_kind = 'integrity.weekly'",
@@ -632,7 +648,7 @@ async fn malformed_critical_schedule_fails_before_serve() {
     .unwrap();
     drop(first);
 
-    let error = App::build(config).await.unwrap_err();
+    let error = App::build(config, &crate::FRONTEND).await.unwrap_err();
     assert!(error.to_string().contains("invalid stored schedule"));
 }
 
@@ -643,7 +659,7 @@ async fn weekly_foreign_key_failure_stops_serving() {
     }
     let root = TempDir::new().unwrap();
     let config = app_config(&root);
-    let app = App::build(config.clone()).await.unwrap();
+    let app = App::build(config.clone(), &crate::FRONTEND).await.unwrap();
     let mut connection = app.database().pool().acquire().await.unwrap();
     sqlx::query("PRAGMA foreign_keys = OFF")
         .execute(&mut *connection)
@@ -672,7 +688,7 @@ async fn weekly_foreign_key_failure_stops_serving() {
     .unwrap_err();
 
     assert!(result.to_string().contains("integrity"));
-    let restart = App::build(config).await.unwrap_err();
+    let restart = App::build(config, &crate::FRONTEND).await.unwrap_err();
     assert!(
         restart.to_string().contains("integrity"),
         "a durable full-check failure must remain fail-closed across restart"
@@ -682,7 +698,9 @@ async fn weekly_foreign_key_failure_stops_serving() {
 #[tokio::test]
 async fn graceful_shutdown_stops_http_then_drains_production_services() {
     let root = TempDir::new().unwrap();
-    let app = App::build(app_config(&root)).await.unwrap();
+    let app = App::build(app_config(&root), &crate::FRONTEND)
+        .await
+        .unwrap();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let shutdown = CancellationToken::new();
     let trigger = shutdown.clone();
@@ -703,7 +721,7 @@ async fn a_stopping_server_fails_readiness_and_serves_during_the_delay() {
     let root = TempDir::new().unwrap();
     let mut config = app_config(&root);
     config.http.shutdown_delay_seconds = 1;
-    let app = App::build(config).await.unwrap();
+    let app = App::build(config, &crate::FRONTEND).await.unwrap();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
     let shutdown = CancellationToken::new();
@@ -734,7 +752,9 @@ async fn a_writer_that_outlasts_the_busy_timeout_does_not_stop_the_server() {
         return; // Postgres writers wait for the write lock without a timeout.
     }
     let root = TempDir::new().unwrap();
-    let app = App::build(app_config(&root)).await.unwrap();
+    let app = App::build(app_config(&root), &crate::FRONTEND)
+        .await
+        .unwrap();
     let database = app.database().clone();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());

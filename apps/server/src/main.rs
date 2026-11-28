@@ -6,6 +6,10 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use clap::Parser;
+use include_dir::{Dir, include_dir};
+
+/// Embedded here, not in the library: a web-only change then compiles only this binary again.
+static FRONTEND: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/../web/dist");
 
 fn main() -> ExitCode {
     run_with_bounded_runtime(run())

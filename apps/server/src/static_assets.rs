@@ -4,20 +4,19 @@ use axum::extract::Request;
 use axum::http::{Method, Response, StatusCode, header};
 use axum::routing::get;
 use base64::Engine;
-use include_dir::{Dir, include_dir};
+use include_dir::Dir;
 use orbit_platform::{Problem, RequestId};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-static FRONTEND: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/../web/dist");
-pub const FRONTEND_REVISION: &str = match option_env!("ORBIT_BUILD_REVISION") {
-    Some(revision) => revision,
-    None => "development",
-};
+/// `apps/web/dist`, embedded by the `orbit` binary (`include_dir!`). The library does not embed it, so a web-only
+/// change does not compile the library again.
+pub type Frontend = &'static Dir<'static>;
 
 #[derive(Clone)]
 pub struct StaticAssets {
+    frontend: Frontend,
     csp_script_hash: String,
 }
 
@@ -29,8 +28,6 @@ pub enum StaticAssetError {
     InvalidManifest,
     #[error("embedded frontend expects API contract {actual}, but server provides {expected}")]
     ContractMismatch { expected: String, actual: String },
-    #[error("embedded frontend revision {actual} does not match server revision {expected}")]
-    RevisionMismatch { expected: String, actual: String },
     #[error("embedded frontend index is missing")]
     MissingIndex,
     #[error("embedded frontend bootstrap CSP hash does not match index.html")]
@@ -40,16 +37,12 @@ pub enum StaticAssetError {
 #[derive(Deserialize)]
 struct BuildManifest {
     contract: String,
-    revision: String,
     csp_script_hash: String,
 }
 
 impl StaticAssets {
-    pub fn verified(
-        expected_contract: &str,
-        expected_revision: &str,
-    ) -> Result<Self, StaticAssetError> {
-        let manifest = FRONTEND
+    pub fn verified(frontend: Frontend, expected_contract: &str) -> Result<Self, StaticAssetError> {
+        let manifest = frontend
             .get_file("orbit-build.json")
             .ok_or(StaticAssetError::MissingManifest)?;
         let manifest: BuildManifest = serde_json::from_slice(manifest.contents())
@@ -60,13 +53,7 @@ impl StaticAssets {
                 actual: manifest.contract,
             });
         }
-        if manifest.revision != expected_revision {
-            return Err(StaticAssetError::RevisionMismatch {
-                expected: expected_revision.to_owned(),
-                actual: manifest.revision,
-            });
-        }
-        let index = FRONTEND
+        let index = frontend
             .get_file("index.html")
             .ok_or(StaticAssetError::MissingIndex)?;
         let actual_hash =
@@ -75,18 +62,20 @@ impl StaticAssets {
             return Err(StaticAssetError::CspHashMismatch);
         }
         Ok(Self {
+            frontend,
             csp_script_hash: actual_hash,
         })
     }
 
     pub fn router(&self) -> Router {
+        let frontend = self.frontend;
         Router::new()
-            .route("/", get(serve_index))
-            .fallback(serve_fallback)
+            .route("/", get(move || serve_index(frontend)))
+            .fallback(move |request| serve_fallback(frontend, request))
     }
 
     pub fn immutable_asset_path(&self) -> Option<String> {
-        FRONTEND
+        self.frontend
             .get_dir("assets")?
             .files()
             .next()
@@ -112,11 +101,11 @@ fn inline_script_hash(index: &[u8]) -> Option<String> {
     ))
 }
 
-async fn serve_index() -> Response<Body> {
-    asset_response("index.html", false).expect("verified frontend contains index.html")
+async fn serve_index(frontend: Frontend) -> Response<Body> {
+    asset_response(frontend, "index.html", false).expect("verified frontend contains index.html")
 }
 
-async fn serve_fallback(request: Request) -> Response<Body> {
+async fn serve_fallback(frontend: Frontend, request: Request) -> Response<Body> {
     let path = request.uri().path().to_owned();
     let request_id = request.extensions().get::<RequestId>().cloned();
     if path == "/api" || path.starts_with("/api/") {
@@ -128,7 +117,8 @@ async fn serve_fallback(request: Request) -> Response<Body> {
 
     let asset_path = path.trim_start_matches('/');
     if !asset_path.is_empty()
-        && let Some(response) = asset_response(asset_path, asset_path.starts_with("assets/"))
+        && let Some(response) =
+            asset_response(frontend, asset_path, asset_path.starts_with("assets/"))
     {
         return response;
     }
@@ -139,11 +129,11 @@ async fn serve_fallback(request: Request) -> Response<Body> {
     {
         return not_found_problem(&path, request_id.as_ref());
     }
-    serve_index().await
+    serve_index(frontend).await
 }
 
-fn asset_response(path: &str, immutable: bool) -> Option<Response<Body>> {
-    let file = FRONTEND.get_file(path)?;
+fn asset_response(frontend: Frontend, path: &str, immutable: bool) -> Option<Response<Body>> {
+    let file = frontend.get_file(path)?;
     let content_type = if path.ends_with(".html") {
         "text/html; charset=utf-8".to_owned()
     } else if path.ends_with(".css") {

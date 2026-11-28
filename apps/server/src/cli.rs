@@ -275,7 +275,9 @@ async fn serve(
     }
     config.validate().map_err(operation)?;
 
-    let app = App::build(config).await.map_err(operation)?;
+    let app = App::build(config, &crate::FRONTEND)
+        .await
+        .map_err(operation)?;
     if let Some(url) = app.setup_url() {
         eprintln!("Initial setup URL: {url}");
     }

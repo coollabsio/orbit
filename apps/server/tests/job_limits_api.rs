@@ -208,12 +208,18 @@ async fn a_limit_saved_on_one_server_applies_to_the_worker_of_another() {
     };
     let (root_one, root_two) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
     // Server one only answers HTTP (its worker never starts); server two only runs jobs.
-    let one = App::build(server_config(&shared.url, root_one.path()))
-        .await
-        .unwrap();
-    let two = App::build(server_config(&shared.url, root_two.path()))
-        .await
-        .unwrap();
+    let one = App::build(
+        server_config(&shared.url, root_one.path()),
+        &crate::FRONTEND,
+    )
+    .await
+    .unwrap();
+    let two = App::build(
+        server_config(&shared.url, root_two.path()),
+        &crate::FRONTEND,
+    )
+    .await
+    .unwrap();
     let database = one.database().clone();
     let cookie = format!("orbit_session_dev={}", root_session(&database).await);
     let router = one.router();

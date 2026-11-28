@@ -86,7 +86,7 @@ On a fresh database, the server prints one `Initial setup URL` to stderr. Open i
 ## OCI image
 
 ```bash
-docker build --build-arg ORBIT_BUILD_REVISION="$(git rev-parse HEAD)" -t orbit:milestone-1 .
+docker build -t orbit:milestone-1 .
 docker run --rm orbit:milestone-1 --help
 docker run --name orbit --restart unless-stopped \
   -p 127.0.0.1:8080:8080 \

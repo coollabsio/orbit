@@ -9,7 +9,6 @@ import { createRequire } from 'node:module'
 import { basename, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const buildRevision = process.env.ORBIT_BUILD_REVISION ?? 'development'
 const sourceHtml = readFileSync(new URL('./index.html', import.meta.url), 'utf8')
 const bootstrapScript = sourceHtml.match(/<script>([\s\S]*?)<\/script>/)?.[1]
 if (!bootstrapScript) throw new Error('theme bootstrap script is missing')
@@ -38,9 +37,6 @@ const emojiAssets = [
 
 // https://vite.dev/config/
 export default defineConfig({
-  define: {
-    __ORBIT_BUILD_REVISION__: JSON.stringify(buildRevision),
-  },
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
@@ -88,13 +84,30 @@ export default defineConfig({
       },
     },
     {
+      // The revision is a hash of the bundle, not the git commit: the same source gives the same `dist`, so the image
+      // build reuses its cached web and server layers, and open tabs see a new version only when the app changed.
+      // `NewVersionNotice` reads it from the `orbit-revision` meta tag and compares it with `/orbit-build.json`.
       name: 'orbit-build-manifest',
-      generateBundle() {
-        this.emitFile({
-          type: 'asset',
-          fileName: 'orbit-build.json',
-          source: `${JSON.stringify({ contract: openapi.info.version, revision: buildRevision, csp_script_hash: cspScriptHash }, null, 2)}\n`,
-        })
+      apply: 'build',
+      generateBundle: {
+        order: 'post',
+        handler(_options, bundle) {
+          const index = bundle['index.html']
+          if (index?.type !== 'asset') throw new Error('orbit-build-manifest: index.html is not in the bundle')
+          const hash = createHash('sha256')
+          for (const file of Object.values(bundle).sort((a, b) => a.fileName.localeCompare(b.fileName))) {
+            hash.update(file.fileName).update(file.type === 'chunk' ? file.code : file.source)
+          }
+          const revision = hash.digest('hex').slice(0, 16)
+          const html = String(index.source)
+          if (!html.includes('</head>')) throw new Error('orbit-build-manifest: index.html has no </head>')
+          index.source = html.replace('</head>', `  <meta name="orbit-revision" content="${revision}" />\n  </head>`)
+          this.emitFile({
+            type: 'asset',
+            fileName: 'orbit-build.json',
+            source: `${JSON.stringify({ contract: openapi.info.version, revision, csp_script_hash: cspScriptHash }, null, 2)}\n`,
+          })
+        },
       },
     },
   ],

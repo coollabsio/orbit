@@ -152,14 +152,13 @@ e2e:
 build:
     #!/usr/bin/env bash
     set -euo pipefail
-    revision=$(git rev-parse HEAD)
-    (cd apps/web && ORBIT_BUILD_REVISION="$revision" bun run build)
-    ORBIT_BUILD_REVISION="$revision" cargo build --release --workspace
+    (cd apps/web && bun run build)
+    cargo build --release --workspace
 
 # Print the Orbit version, or set a new one: `just version 0.2.0`.
 version *new:
     bash scripts/version.sh {{ new }}
 
 release-image tag=("orbit:" + `bash scripts/version.sh`):
-    docker build --build-arg ORBIT_BUILD_REVISION="$(git rev-parse HEAD)" -t "{{ tag }}" .
+    docker build -t "{{ tag }}" .
     docker run --rm "{{ tag }}" --help

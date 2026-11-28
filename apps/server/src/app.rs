@@ -67,7 +67,7 @@ use crate::repositories::tasks::TaskRepository;
 use crate::repositories::workspaces::WorkspaceRepository;
 use crate::router::{ApiRoutes, production_router};
 use crate::socket_ticket::SocketTickets;
-use crate::static_assets::{FRONTEND_REVISION, StaticAssetError, StaticAssets};
+use crate::static_assets::{Frontend, StaticAssetError, StaticAssets};
 use crate::task_routes::TaskState;
 use crate::teamspace_routes::TeamspaceState;
 use crate::custom_page_routes::CustomPageState;
@@ -173,7 +173,7 @@ pub enum AppError {
 }
 
 impl App {
-    pub async fn build(config: Config) -> Result<Self, AppError> {
+    pub async fn build(config: Config, frontend: Frontend) -> Result<Self, AppError> {
         config
             .validate()
             .map_err(|error| AppError::Config(error.to_string()))?;
@@ -553,7 +553,7 @@ impl App {
             return Err(AppError::Readiness);
         }
 
-        let assets = StaticAssets::verified(crate::openapi::CONTRACT_ID, FRONTEND_REVISION)?;
+        let assets = StaticAssets::verified(frontend, crate::openapi::CONTRACT_ID)?;
         let mut origin_policy = OriginPolicy::new(&config.http.public_origin);
         if config.environment == orbit_platform::EnvironmentMode::Development {
             origin_policy = origin_policy.allow_any_http_origin();
@@ -1797,6 +1797,9 @@ mod tests {
     use tempfile::TempDir;
     use tokio::io::AsyncWriteExt;
 
+    static FRONTEND: include_dir::Dir<'static> =
+        include_dir::include_dir!("$CARGO_MANIFEST_DIR/../web/dist");
+
     #[tokio::test]
     async fn a_client_that_does_not_finish_its_headers_is_disconnected() {
         use tokio::io::AsyncReadExt;
@@ -1862,7 +1865,7 @@ mod tests {
     #[tokio::test]
     async fn composed_backup_waits_for_a_live_upload_mutation() {
         let root = TempDir::new().unwrap();
-        let app = App::build(test_config(&root)).await.unwrap();
+        let app = App::build(test_config(&root), &FRONTEND).await.unwrap();
         let uploads = app.attachments.uploads.clone();
         let (mut writer, reader) = tokio::io::duplex(64);
         writer.write_all(b"in progress").await.unwrap();
@@ -1905,7 +1908,7 @@ mod tests {
     #[tokio::test]
     async fn composed_backup_waits_for_retention_attachment_mutation() {
         let root = TempDir::new().unwrap();
-        let app = App::build(test_config(&root)).await.unwrap();
+        let app = App::build(test_config(&root), &FRONTEND).await.unwrap();
         let transaction = app.database.immediate_transaction().await.unwrap();
         let workspaces = Arc::clone(&app.workspaces);
         let retention = tokio::spawn(async move { workspaces.run_retention_maintenance().await });

@@ -1258,7 +1258,9 @@ async fn the_application_mounts_the_router_without_origin_or_contract_checks() {
     config.data.database = root.path().join("orbit.sqlite");
     config.data.attachments = root.path().join("attachments");
     config.data.backups = root.path().join("backups");
-    let app = orbit_server::app::App::build(config).await.unwrap();
+    let app = orbit_server::app::App::build(config, &crate::FRONTEND)
+        .await
+        .unwrap();
     // A write with a bearer token and no Origin or contract header reaches authentication.
     let response = app
         .router()

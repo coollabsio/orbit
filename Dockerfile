@@ -1,5 +1,4 @@
 # syntax=docker/dockerfile:1.7
-ARG ORBIT_BUILD_REVISION=container
 FROM oven/bun:1.4.4-alpine AS web
 WORKDIR /src
 COPY package.json bun.lock bunfig.toml ./
@@ -14,8 +13,7 @@ COPY packages/editor/ packages/editor/
 COPY packages/database/ packages/database/
 COPY apps/web/ apps/web/
 WORKDIR /src/apps/web
-ARG ORBIT_BUILD_REVISION
-RUN ORBIT_BUILD_REVISION=${ORBIT_BUILD_REVISION} bun run build
+RUN bun run build
 
 # cargo-chef builds the Rust dependencies in their own layer. That layer changes only when
 # Cargo.toml or Cargo.lock change, so the GitHub Actions layer cache keeps it between builds.
@@ -35,10 +33,11 @@ RUN cargo chef cook --locked --release -p orbit-server --recipe-path recipe.json
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY crates/ crates/
 COPY apps/server/ apps/server/
+# The library does not embed the web build (only the `orbit` binary does), so it is built before `dist` is copied:
+# a web-only change reuses this layer and compiles only the small binary again.
+RUN cargo build --locked --release -p orbit-server --lib
 COPY --from=web /src/apps/web/dist/ apps/web/dist/
-ARG ORBIT_BUILD_REVISION
-RUN ORBIT_BUILD_REVISION=${ORBIT_BUILD_REVISION} \
-    cargo build --locked --release -p orbit-server \
+RUN cargo build --locked --release -p orbit-server \
     && cp target/release/orbit /orbit
 
 FROM alpine:3.23

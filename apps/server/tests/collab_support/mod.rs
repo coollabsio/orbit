@@ -85,7 +85,7 @@ impl Server {
     }
 
     pub async fn start_with(config: Config, collab: CollabConfig) -> Self {
-        let app = App::build(config).await.unwrap();
+        let app = App::build(config, &crate::FRONTEND).await.unwrap();
         CollabHub::install(app.database(), collab);
         let database = app.database().clone();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

@@ -3,6 +3,10 @@
 
 #![recursion_limit = "256"]
 
+/// `apps/web/dist`, as the `orbit` binary embeds it.
+pub static FRONTEND: include_dir::Dir<'static> =
+    include_dir::include_dir!("$CARGO_MANIFEST_DIR/../web/dist");
+
 mod collab_support;
 mod database_fixture;
 mod db_fixture;

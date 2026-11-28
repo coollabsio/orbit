@@ -93,7 +93,6 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          build-args: ORBIT_BUILD_REVISION=${{ github.sha }}
           labels: |
             org.opencontainers.image.version=${{ needs.version.outputs.version }}
             org.opencontainers.image.revision=${{ github.sha }}
