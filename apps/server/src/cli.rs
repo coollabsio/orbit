@@ -1,9 +1,11 @@
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::fs::{self, OpenOptions};
+use std::future::Future;
 use std::io::{Read, Write};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpStream};
 use std::path::{Component, Path, PathBuf};
+use std::process::ExitCode;
 use std::time::Duration;
 
 use clap::{Parser, Subcommand};
@@ -14,12 +16,14 @@ use orbit_platform::{
     DatabaseError, EnvironmentMode, LocalBlobStore, MigrationRunner, ObjectStorage,
     TimestampMillis, UploadLimits, UploadService, lock_database_ownership, run_guarded_migrations,
 };
-use orbit_server::app::App;
-use orbit_server::repositories::identity::{IdentityRepository, SetupRequest};
-use orbit_server::repositories::tasks::{CreateTask, TaskRepository};
-use orbit_server::repositories::workspaces::WorkspaceRepository;
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
+
+use crate::app::App;
+use crate::repositories::identity::{IdentityRepository, SetupRequest};
+use crate::repositories::tasks::{CreateTask, TaskRepository};
+use crate::repositories::workspaces::WorkspaceRepository;
+use crate::static_assets::Frontend;
 
 #[derive(Debug, Parser)]
 #[command(name = "orbit", about = "Orbit server and operations CLI")]
@@ -179,10 +183,77 @@ pub enum CliError {
     Operation(String),
 }
 
-pub async fn run(cli: Cli, env: BTreeMap<String, String>) -> Result<String, CliError> {
+/// The `orbit` process: parses the arguments and runs the command on its own Tokio runtime.
+pub fn main(frontend: Frontend) -> ExitCode {
+    run_with_bounded_runtime(run_process(frontend))
+}
+
+fn run_with_bounded_runtime<F, T>(future: F) -> T
+where
+    F: Future<Output = T>,
+{
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("Tokio runtime initializes");
+    let output = runtime.block_on(future);
+    // App::serve already gives cooperative drains their full deadline. Never let a blocked
+    // syscall in an abandoned task extend process shutdown beyond that deadline.
+    runtime.shutdown_timeout(Duration::ZERO);
+    output
+}
+
+async fn run_process(frontend: Frontend) -> ExitCode {
+    let format = if std::env::var("ORBIT_ENV").as_deref() == Ok("development") {
+        orbit_platform::TracingFormat::Compact
+    } else {
+        orbit_platform::TracingFormat::Json
+    };
+    let _ = orbit_platform::init_tracing(format);
+    match run(Cli::parse(), std::env::vars().collect(), frontend).await {
+        Ok(output) => {
+            if !output.is_empty() {
+                println!("{output}");
+            }
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("{}", failure_message(&error.to_string()));
+            ExitCode::FAILURE
+        }
+    }
+}
+
+#[cfg(test)]
+mod runtime_tests {
+    use super::*;
+
+    #[test]
+    fn process_runtime_teardown_does_not_join_blocked_work() {
+        let started = std::time::Instant::now();
+        run_with_bounded_runtime(async {
+            let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+            tokio::task::spawn_blocking(move || {
+                let _ = started_tx.send(());
+                std::thread::sleep(Duration::from_millis(500));
+            });
+            started_rx.await.unwrap();
+        });
+
+        assert!(started.elapsed() < Duration::from_millis(250));
+    }
+}
+
+pub async fn run(
+    cli: Cli,
+    env: BTreeMap<String, String>,
+    frontend: Frontend,
+) -> Result<String, CliError> {
     let config = || effective_config(&cli, env.clone());
     match &cli.command {
-        Command::Serve { listen, origin } => serve(config()?, *listen, origin.as_deref()).await,
+        Command::Serve { listen, origin } => {
+            serve(config()?, *listen, origin.as_deref(), frontend).await
+        }
         Command::Healthcheck => healthcheck(healthcheck_address(&config()?)),
         Command::Config { command } => Ok(config_command(&config()?, command)),
         Command::Migrate { command } => migrate(config()?, command).await,
@@ -238,11 +309,7 @@ fn healthcheck(address: SocketAddr) -> Result<String, CliError> {
 
 fn write_openapi(output: &Path) -> Result<String, CliError> {
     fs::create_dir_all(parent_directory(output)).map_err(operation)?;
-    fs::write(
-        output,
-        orbit_server::openapi::openapi_json().map_err(operation)?,
-    )
-    .map_err(operation)?;
+    fs::write(output, crate::openapi::openapi_json().map_err(operation)?).map_err(operation)?;
     Ok(format!("wrote {}", output.display()))
 }
 
@@ -265,6 +332,7 @@ async fn serve(
     mut config: Config,
     listen: Option<std::net::SocketAddr>,
     origin: Option<&str>,
+    frontend: Frontend,
 ) -> Result<String, CliError> {
     if let Some(listen) = listen {
         config.http.bind = listen.ip();
@@ -275,9 +343,7 @@ async fn serve(
     }
     config.validate().map_err(operation)?;
 
-    let app = App::build(config, &crate::FRONTEND)
-        .await
-        .map_err(operation)?;
+    let app = App::build(config, frontend).await.map_err(operation)?;
     if let Some(url) = app.setup_url() {
         eprintln!("Initial setup URL: {url}");
     }
@@ -578,7 +644,7 @@ async fn attachments(config: Config, command: &AttachmentsCommand) -> Result<Str
     match command {
         AttachmentsCommand::ForgetBucket { .. } => {
             let forgotten =
-                orbit_server::repositories::instance_settings::InstanceSettingsRepository::new(
+                crate::repositories::instance_settings::InstanceSettingsRepository::new(
                     database.clone(),
                 )
                 .forget_files_bucket("cli", orbit_platform::TimestampMillis::now())
@@ -591,12 +657,14 @@ async fn attachments(config: Config, command: &AttachmentsCommand) -> Result<Str
                 None => "no bucket of attachment files is recorded".to_owned(),
             })
         }
-        AttachmentsCommand::Compress { dry_run } => Ok(
-            orbit_server::image_compression::compress_images(&database, &uploads, *dry_run, |_| {})
-                .await
-                .map_err(operation)?
-                .report(*dry_run),
-        ),
+        AttachmentsCommand::Compress { dry_run } => {
+            Ok(
+                crate::image_compression::compress_images(&database, &uploads, *dry_run, |_| {})
+                    .await
+                    .map_err(operation)?
+                    .report(*dry_run),
+            )
+        }
     }
 }
 
@@ -767,9 +835,7 @@ async fn seed_chat(
     developer: orbit_platform::Id,
     member: orbit_platform::Id,
 ) -> Result<(), CliError> {
-    use orbit_server::repositories::chat::{
-        ChannelCreate, ChatRepository, ConversationKind, SendInput,
-    };
+    use crate::repositories::chat::{ChannelCreate, ChatRepository, ConversationKind, SendInput};
 
     let general: Option<String> = sqlx::query_scalar(
         "SELECT id FROM chat_conversations WHERE workspace_id = $1 AND is_default = 1 \
@@ -1081,7 +1147,7 @@ async fn install_seed_data(
     .execute(database.pool())
     .await
     .map_err(operation)?;
-    orbit_server::repositories::chat::join_public_channels(
+    crate::repositories::chat::join_public_channels(
         &mut *database.pool().acquire().await.map_err(operation)?,
         workspace_id,
         member_id,
@@ -1178,9 +1244,9 @@ async fn install_seed_data(
         ),
         None => "\nmailboxes: skipped, they need ORBIT_APP_KEY".to_owned(),
     });
-    if orbit_server::github::demo::enabled() {
+    if crate::github::demo::enabled() {
         output.push_str(&match app_key {
-            Some(key) => match orbit_server::github::demo::seed_demo(
+            Some(key) => match crate::github::demo::seed_demo(
                 &demo_database,
                 &key,
                 workspace_id,
@@ -1231,7 +1297,7 @@ async fn backup_storage(
     config: &Config,
     database: Option<&Database>,
 ) -> Result<ObjectStorage, CliError> {
-    let storage = orbit_server::object_storage::from_env().map_err(CliError::Operation)?;
+    let storage = crate::object_storage::from_env().map_err(CliError::Operation)?;
     let Some(database) = database else {
         return Ok(storage);
     };
@@ -1240,14 +1306,14 @@ async fn backup_storage(
     }
     let app_key = config.app_key.as_ref().map(|key| *key.bytes());
     if let Some(key) = &app_key {
-        orbit_server::repositories::environment_settings::EnvironmentSettings::from_config(
+        crate::repositories::environment_settings::EnvironmentSettings::from_config(
             &config.instance,
             key,
         )
         .map_err(CliError::Operation)?
         .install(database);
     }
-    match orbit_server::object_storage::saved_storage(database, app_key.as_ref()).await {
+    match crate::object_storage::saved_storage(database, app_key.as_ref()).await {
         Ok(saved) => Ok(saved),
         Err(error) => {
             eprintln!(
@@ -1583,7 +1649,6 @@ mod tests {
         BackupService, Config, Database, DatabaseConfig, EnvironmentMode, Id, Migration,
         MigrationRunner, TimestampMillis,
     };
-    use orbit_server::repositories::identity::{IdentityRepository, SetupRequest};
 
     use orbit_platform::DataConfig;
 
@@ -1592,6 +1657,8 @@ mod tests {
         config_command, database_shell_command, failure_message, healthcheck, parent_directory,
         redacted_config, remove_sidecars, run, validate_reset_paths,
     };
+    use crate::repositories::identity::{IdentityRepository, SetupRequest};
+    use crate::static_assets::TEST_FRONTEND;
 
     fn environment(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
         pairs
@@ -1797,9 +1864,15 @@ mod tests {
             .unwrap()
         };
 
-        let initial = run(parse("init"), development()).await.unwrap();
-        let repeated = run(parse("init"), development()).await.unwrap();
-        let rotated = run(parse("rotate"), development()).await.unwrap();
+        let initial = run(parse("init"), development(), &TEST_FRONTEND)
+            .await
+            .unwrap();
+        let repeated = run(parse("init"), development(), &TEST_FRONTEND)
+            .await
+            .unwrap();
+        let rotated = run(parse("rotate"), development(), &TEST_FRONTEND)
+            .await
+            .unwrap();
 
         assert!(initial.starts_with("https://orbit.test/setup?token="));
         assert_eq!(repeated, "setup token already exists or setup is complete");
@@ -1862,13 +1935,16 @@ mod tests {
             Cli::try_parse_from(argv).unwrap()
         };
         assert_eq!(
-            run(command(&["show"]), development()).await.unwrap(),
+            run(command(&["show"]), development(), &TEST_FRONTEND)
+                .await
+                .unwrap(),
             "owner@example.com"
         );
         assert!(
             run(
                 command(&["set", "--email", "nobody@example.com"]),
-                development()
+                development(),
+                &TEST_FRONTEND
             )
             .await
             .is_err()
@@ -1876,14 +1952,17 @@ mod tests {
         assert_eq!(
             run(
                 command(&["set", "--email", "next@example.com"]),
-                development()
+                development(),
+                &TEST_FRONTEND
             )
             .await
             .unwrap(),
             "next@example.com is now the root user; owner@example.com stays an instance admin"
         );
         assert_eq!(
-            run(command(&["show"]), development()).await.unwrap(),
+            run(command(&["show"]), development(), &TEST_FRONTEND)
+                .await
+                .unwrap(),
             "Next@Example.com"
         );
 
@@ -1966,7 +2045,7 @@ mod tests {
             "https://orbit.test",
         ])
         .unwrap();
-        let url = run(cli, development()).await.unwrap();
+        let url = run(cli, development(), &TEST_FRONTEND).await.unwrap();
         let token = url
             .strip_prefix("https://orbit.test/recovery?token=")
             .unwrap();
@@ -2162,13 +2241,17 @@ mod tests {
             ])
         };
         let cli = |args: &[&str]| Cli::try_parse_from([&["orbit"], args].concat()).unwrap();
-        run(cli(&["migrate", "run"]), with_key(APP_KEY))
+        run(cli(&["migrate", "run"]), with_key(APP_KEY), &TEST_FRONTEND)
             .await
             .unwrap();
 
-        let id = run(cli(&["backup", "create"]), with_key(APP_KEY))
-            .await
-            .unwrap();
+        let id = run(
+            cli(&["backup", "create"]),
+            with_key(APP_KEY),
+            &TEST_FRONTEND,
+        )
+        .await
+        .unwrap();
         let manifest = fs::read_to_string(
             root.path()
                 .join("backups/snapshots")
@@ -2179,13 +2262,21 @@ mod tests {
         assert!(manifest.contains("key_sealed"));
 
         let other_key = "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=";
-        let error = run(cli(&["backup", "restore", &id]), with_key(other_key))
-            .await
-            .unwrap_err();
+        let error = run(
+            cli(&["backup", "restore", &id]),
+            with_key(other_key),
+            &TEST_FRONTEND,
+        )
+        .await
+        .unwrap_err();
         assert!(error.to_string().contains("different app key"), "{error}");
-        let restored = run(cli(&["backup", "restore", &id]), with_key(APP_KEY))
-            .await
-            .unwrap();
+        let restored = run(
+            cli(&["backup", "restore", &id]),
+            with_key(APP_KEY),
+            &TEST_FRONTEND,
+        )
+        .await
+        .unwrap();
         assert!(
             restored.starts_with(&format!("backup {id} restored")),
             "{restored}"
@@ -2226,7 +2317,7 @@ mod tests {
             .unwrap();
         drop(prepared);
 
-        let first = run(args(), development()).await.unwrap();
+        let first = run(args(), development(), &TEST_FRONTEND).await.unwrap();
         assert!(first.contains("test@example.com"));
         assert!(first.contains("password"));
 
@@ -2260,7 +2351,7 @@ mod tests {
             .unwrap();
         drop(prepared);
 
-        let second = run(args(), development()).await.unwrap();
+        let second = run(args(), development(), &TEST_FRONTEND).await.unwrap();
         assert_eq!(first, second);
 
         let database = Database::open(&DatabaseConfig::new(database))
@@ -2427,7 +2518,7 @@ mod tests {
         ])
         .unwrap();
 
-        run(cli, development()).await.unwrap();
+        run(cli, development(), &TEST_FRONTEND).await.unwrap();
 
         let database = Database::open(&DatabaseConfig::new(database_path))
             .await
@@ -2487,7 +2578,9 @@ mod tests {
         ])
         .unwrap();
 
-        let error = run(without_yes, development()).await.unwrap_err();
+        let error = run(without_yes, development(), &TEST_FRONTEND)
+            .await
+            .unwrap_err();
         assert!(error.to_string().contains("requires --yes"));
         assert_eq!(fs::read(&database).unwrap(), b"keep-me");
 
@@ -2502,7 +2595,7 @@ mod tests {
                 "--yes",
             ])
             .unwrap();
-            let error = run(cli, production()).await.unwrap_err();
+            let error = run(cli, production(), &TEST_FRONTEND).await.unwrap_err();
             assert!(error.to_string().contains("development mode"));
             assert_eq!(fs::read(&database).unwrap(), b"keep-me");
         }
@@ -2533,7 +2626,7 @@ mod tests {
         ])
         .unwrap();
 
-        let output = run(cli, development()).await.unwrap();
+        let output = run(cli, development(), &TEST_FRONTEND).await.unwrap();
 
         assert!(output.contains("applied"));
         assert!(output.contains("test@example.com"));
@@ -2602,7 +2695,7 @@ mod tests {
             ])
             .unwrap();
 
-            let error = run(cli, development()).await.unwrap_err();
+            let error = run(cli, development(), &TEST_FRONTEND).await.unwrap_err();
 
             assert!(error.to_string().contains("unsafe attachment path"));
             assert_eq!(fs::read(&database).unwrap(), b"keep database");
@@ -2754,6 +2847,7 @@ mod tests {
         let message = run(
             Cli::try_parse_from(["orbit", "backup", "restore", id]).unwrap(),
             env.clone(),
+            &TEST_FRONTEND,
         )
         .await
         .unwrap();
@@ -2768,6 +2862,7 @@ mod tests {
             Cli::try_parse_from(["orbit", "backup", "restore", &safety, "--no-safety-backup"])
                 .unwrap(),
             env.clone(),
+            &TEST_FRONTEND,
         )
         .await
         .unwrap();
@@ -2789,7 +2884,7 @@ mod tests {
         ])
         .unwrap();
 
-        let error = run(cli, production()).await.unwrap_err();
+        let error = run(cli, production(), &TEST_FRONTEND).await.unwrap_err();
 
         assert!(error.to_string().contains("development mode"));
         assert_eq!(fs::read(database).unwrap(), b"keep-me");

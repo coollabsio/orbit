@@ -1797,8 +1797,7 @@ mod tests {
     use tempfile::TempDir;
     use tokio::io::AsyncWriteExt;
 
-    static FRONTEND: include_dir::Dir<'static> =
-        include_dir::include_dir!("$CARGO_MANIFEST_DIR/../web/dist");
+    use crate::static_assets::TEST_FRONTEND;
 
     #[tokio::test]
     async fn a_client_that_does_not_finish_its_headers_is_disconnected() {
@@ -1865,7 +1864,9 @@ mod tests {
     #[tokio::test]
     async fn composed_backup_waits_for_a_live_upload_mutation() {
         let root = TempDir::new().unwrap();
-        let app = App::build(test_config(&root), &FRONTEND).await.unwrap();
+        let app = App::build(test_config(&root), &TEST_FRONTEND)
+            .await
+            .unwrap();
         let uploads = app.attachments.uploads.clone();
         let (mut writer, reader) = tokio::io::duplex(64);
         writer.write_all(b"in progress").await.unwrap();
@@ -1908,7 +1909,9 @@ mod tests {
     #[tokio::test]
     async fn composed_backup_waits_for_retention_attachment_mutation() {
         let root = TempDir::new().unwrap();
-        let app = App::build(test_config(&root), &FRONTEND).await.unwrap();
+        let app = App::build(test_config(&root), &TEST_FRONTEND)
+            .await
+            .unwrap();
         let transaction = app.database.immediate_transaction().await.unwrap();
         let workspaces = Arc::clone(&app.workspaces);
         let retention = tokio::spawn(async move { workspaces.run_retention_maintenance().await });

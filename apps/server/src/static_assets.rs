@@ -14,6 +14,10 @@ use thiserror::Error;
 /// change does not compile the library again.
 pub type Frontend = &'static Dir<'static>;
 
+#[cfg(test)]
+pub(crate) static TEST_FRONTEND: Dir<'static> =
+    include_dir::include_dir!("$CARGO_MANIFEST_DIR/../web/dist");
+
 #[derive(Clone)]
 pub struct StaticAssets {
     frontend: Frontend,

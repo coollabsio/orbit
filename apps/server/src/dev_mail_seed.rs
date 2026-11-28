@@ -13,9 +13,10 @@ use orbit_platform::{
     AttachmentMutationCoordinator, Database, Id, LocalBlobStore, TimestampMillis, UploadLimits,
     UploadService,
 };
-use orbit_server::mail_intake::{InboundMessage, MailIntake, Recipient, Source};
-use orbit_server::repositories::instance_settings::InstanceSettingsRepository;
-use orbit_server::repositories::mail::{
+
+use crate::mail_intake::{InboundMessage, MailIntake, Recipient, Source};
+use crate::repositories::instance_settings::InstanceSettingsRepository;
+use crate::repositories::mail::{
     DnsReport, MailRepository, MailboxKind, NewMailbox, NewRoute, ProviderScope, RecordStatus,
     RouteSecrets, RouteSettings, SendRouteKind, SmtpSecurity,
 };
